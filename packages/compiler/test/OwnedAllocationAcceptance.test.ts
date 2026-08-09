@@ -56,7 +56,7 @@ it.effect('keeps one owned allocation in parity across all three engines', () =>
 
     const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
     const wasmInstance = new WebAssembly.Instance(
-      new WebAssembly.Module(wasmArtifact.bitcode.slice()),
+      new WebAssembly.Module(wasmArtifact.bytes.slice()),
       {},
     )
     assert.strictEqual((wasmInstance.exports.silk_main as () => number)(), 42)
@@ -69,7 +69,7 @@ it.effect('keeps one owned allocation in parity across all three engines', () =>
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 42, run.stderr)
   }),
 )
@@ -178,6 +178,6 @@ it.effect('produces byte-identical artifacts across repeated analyses', () =>
     )
     const firstWasm = yield* Analysis.codegenWasm(first, { mode: 'release' })
     const secondWasm = yield* Analysis.codegenWasm(second, { mode: 'release' })
-    assert.deepEqual(Array.from(firstWasm.bitcode), Array.from(secondWasm.bitcode))
+    assert.deepEqual(Array.from(firstWasm.bytes), Array.from(secondWasm.bytes))
   }),
 )

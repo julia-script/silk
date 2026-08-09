@@ -99,6 +99,32 @@ export const shimCommand = (
     ]),
   })
 
+/** Plans standalone LLVM-bitcode to WebAssembly finalization through pinned Clang. */
+export const wasmCommand = (
+  clang: string,
+  target: Target.Target,
+  profile: OptimizationProfile,
+  bitcodePath: string,
+  destination: string,
+): PlannedCommand =>
+  Object.freeze({
+    _tag: 'PlannedCommand',
+    target,
+    command: clang,
+    arguments: Object.freeze([
+      `--target=${target.triple}`,
+      '-nostdlib',
+      '-x',
+      'ir',
+      bitcodePath,
+      ...profileArguments(profile),
+      '-Wl,--no-entry',
+      '-Wl,--export=silk_main',
+      '-o',
+      destination,
+    ]),
+  })
+
 /**
  * The minimal C runtime shim: a private, compiler-versioned scalar ABI reaching a closed native
  * entry. The shim's `main` returns `silk_main`'s `I32` result as the process exit status. Not

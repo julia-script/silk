@@ -44,6 +44,10 @@
       "types": "./dist/BuildCommand.d.ts",
       "import": "./dist/BuildCommand.js"
     },
+    "./BuildBatch": {
+      "types": "./dist/BuildBatch.d.ts",
+      "import": "./dist/BuildBatch.js"
+    },
     "./BuildExeCommand": {
       "types": "./dist/BuildExeCommand.d.ts",
       "import": "./dist/BuildExeCommand.js"
@@ -68,6 +72,10 @@
       "types": "./dist/FormatWorkflow.d.ts",
       "import": "./dist/FormatWorkflow.js"
     },
+    "./InitCommand": {
+      "types": "./dist/InitCommand.d.ts",
+      "import": "./dist/InitCommand.js"
+    },
     "./Program": {
       "types": "./dist/Program.d.ts",
       "import": "./dist/Program.js"
@@ -80,6 +88,10 @@
       "types": "./dist/ProjectOptions.d.ts",
       "import": "./dist/ProjectOptions.js"
     },
+    "./ProjectInitializer": {
+      "types": "./dist/ProjectInitializer.d.ts",
+      "import": "./dist/ProjectInitializer.js"
+    },
     "./Report": {
       "types": "./dist/Report.d.ts",
       "import": "./dist/Report.js"
@@ -91,6 +103,10 @@
     "./SourceEntry": {
       "types": "./dist/SourceEntry.d.ts",
       "import": "./dist/SourceEntry.js"
+    },
+    "./TargetSelector": {
+      "types": "./dist/TargetSelector.d.ts",
+      "import": "./dist/TargetSelector.js"
     },
     "./Workflow": {
       "types": "./dist/Workflow.d.ts",

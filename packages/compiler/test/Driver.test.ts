@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -11,9 +11,16 @@ import * as Driver from '../src/Driver.js'
 import type * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as WasmBackend from '../src/WasmBackend.js'
 import { corpus, invalidGenericCorpus } from './support/corpus.js'
 
-const clang = '/usr/bin/clang'
+const clang =
+  process.env.SILK_TEST_CLANG ??
+  (existsSync('/opt/homebrew/opt/llvm/bin/clang')
+    ? '/opt/homebrew/opt/llvm/bin/clang'
+    : existsSync('/usr/local/opt/llvm/bin/clang')
+      ? '/usr/local/opt/llvm/bin/clang'
+      : 'clang')
 const toolchain: NativeToolchain.Toolchain = Object.freeze({ _tag: 'Toolchain', clang })
 
 const ascii = (value: string): Uint8Array =>
@@ -65,8 +72,8 @@ it.effect('compiles the nested program to a running executable matching the inte
     assert.strictEqual(outcome._tag, 'Compiled')
     if (outcome._tag !== 'Compiled') return
     assert.strictEqual(outcome.target.kind, 'Native')
-    assert.strictEqual(existsSync(outcome.executable), true)
-    const run = spawnSync(outcome.executable, [], { encoding: 'utf8' })
+    assert.strictEqual(existsSync(outcome.path), true)
+    const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
     const interpreted = Analysis.evaluate(
       yield* Analysis.ofSource('memory/driver', ascii(nested.source)),
     )
@@ -105,7 +112,7 @@ it.effect('compiles a three-module call chain to native execution matching the i
     assert.strictEqual(outcome._tag, 'Compiled')
     assert.strictEqual(interpreted._tag, 'Completed')
     if (outcome._tag !== 'Compiled' || interpreted._tag !== 'Completed') return
-    const run = spawnSync(outcome.executable, [], { encoding: 'utf8' })
+    const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, interpreted.result.value)
   }),
 )
@@ -172,6 +179,7 @@ it.effect('routes emission through an injected backend service', () =>
     let emissions = 0
     const spy: Backend.Backend = {
       _tag: 'Backend',
+      id: 'llvm',
       name: 'Spy LLVM',
       targets: Backend.LlvmBackend.targets,
       emit: (program, request) => {
@@ -193,6 +201,7 @@ it.effect('gates source rejection and operational resolution failure before back
     let emissions = 0
     const spy: Backend.Backend = {
       _tag: 'Backend',
+      id: 'llvm',
       name: 'Gate Spy',
       targets: Backend.LlvmBackend.targets,
       emit: (program, request) => {
@@ -274,6 +283,8 @@ it.effect('names the failing native stage with command provenance', () =>
     assert.strictEqual(outcome._tag, 'Failed')
     if (outcome._tag !== 'Failed') return
     assert.strictEqual(outcome.stage, 'object')
+    if (outcome.failure._tag !== 'ToolchainFailure')
+      return assert.fail('expected toolchain failure')
     assert.strictEqual(outcome.failure.planned.command, '/nonexistent/clang')
   }),
 )
@@ -323,7 +334,7 @@ it.effect(
 
         if (program.expected._tag === 'Completes') {
           assert.strictEqual(interpreted._tag, 'Completed', program.name)
-          const run = spawnSync(outcome.executable, [], { encoding: 'utf8' })
+          const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
           assert.strictEqual(
             run.status,
             interpreted._tag === 'Completed' ? interpreted.result.value : -1,
@@ -335,7 +346,7 @@ it.effect(
         }
 
         if (program.expected._tag === 'Trap') {
-          const run = spawnSync(outcome.executable, [], { encoding: 'utf8' })
+          const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
           assert.strictEqual(
             run.signal !== null || (run.status !== null && run.status !== 0),
             true,
@@ -349,9 +360,9 @@ it.effect(
   60000,
 )
 
-it.effect('stops unsupported and WebAssembly targets before MIR or native tools', () =>
+it.effect('stops unsupported targets before MIR or native tools', () =>
   Effect.gen(function* () {
-    for (const target of ['mips-unknown-none', 'wasm32-unknown-unknown']) {
+    for (const target of ['mips-unknown-none']) {
       const outcome = yield* compileSource(
         `target-${target}`,
         'pub fn main() -> I32 { return 42 }',
@@ -374,4 +385,105 @@ it.effect('stops unsupported and WebAssembly targets before MIR or native tools'
       )
     }
   }),
+)
+
+it.effect('rejects an incompatible backend-target pair before MIR and finalization', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource(
+      'incompatible-backend',
+      'pub fn main() -> I32 { return 42 }',
+      {
+        backend: WasmBackend.WasmBackend,
+      },
+    )
+    assert.strictEqual(outcome._tag, 'BackendFailed')
+    assert.strictEqual(
+      outcome.report.some((entry) => entry.phase === 'mir-lowering'),
+      false,
+    )
+    assert.strictEqual(
+      outcome.report.some((entry) => entry.phase === 'backend'),
+      false,
+    )
+    assert.strictEqual(
+      outcome.report.some((entry) => entry.phase === 'artifact-commit'),
+      false,
+    )
+  }),
+)
+
+it.effect(
+  'commits instantiable LLVM and direct WebAssembly modules with parity',
+  () =>
+    Effect.gen(function* () {
+      const source = 'pub fn main() -> I32 { return 42 }'
+      const backends = [Backend.LlvmBackend, WasmBackend.WasmBackend] as const
+      for (const backend of backends) {
+        const outcome = yield* compileSource(`${backend.id}.wasm`, source, {
+          compilation: {
+            root: SourceFile.make('memory/driver', ascii(source)),
+            target: 'wasm32-unknown-unknown',
+          },
+          backend,
+          toolchain: Object.freeze({
+            _tag: 'Toolchain',
+            clang: backend.id === 'llvm' ? clang : '/nonexistent/direct-wasm-must-not-run-clang',
+          }),
+        })
+        assert.strictEqual(outcome._tag, 'Compiled', backend.id)
+        if (outcome._tag !== 'Compiled') continue
+        assert.strictEqual(outcome.backend, backend.id)
+        assert.strictEqual(outcome.artifactKind, 'WebAssemblyModule')
+        const instance = new WebAssembly.Instance(
+          new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path))),
+          {},
+        )
+        const main = instance.exports.silk_main
+        assert.isFunction(main)
+        if (typeof main === 'function') assert.strictEqual(main(), 42)
+        assert.strictEqual(
+          outcome.report.some((entry) => entry.phase === 'wasm-finalize'),
+          backend.id === 'llvm',
+        )
+        assert.strictEqual(
+          outcome.report.some((entry) => entry.phase === 'artifact-commit'),
+          backend.id === 'wasm',
+        )
+      }
+    }),
+  30_000,
+)
+
+it.effect(
+  'keeps evaluator, LLVM Wasm, and direct Wasm trap parity',
+  () =>
+    Effect.gen(function* () {
+      const source = 'pub fn main() -> I32 { return I32.divide(1, 0) }'
+      const snapshot = yield* Analysis.ofSource(
+        'memory/driver',
+        ascii(source),
+        'wasm32-unknown-unknown',
+      )
+      assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Blocked')
+      for (const backend of [Backend.LlvmBackend, WasmBackend.WasmBackend] as const) {
+        const outcome = yield* compileSource(`trap-${backend.id}.wasm`, source, {
+          compilation: {
+            root: SourceFile.make('memory/driver', ascii(source)),
+            target: 'wasm32-unknown-unknown',
+          },
+          backend,
+          toolchain: Object.freeze({ _tag: 'Toolchain', clang }),
+        })
+        assert.strictEqual(outcome._tag, 'Compiled', backend.id)
+        if (outcome._tag !== 'Compiled') continue
+        const instance = new WebAssembly.Instance(
+          new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path))),
+          {},
+        )
+        const main = instance.exports.silk_main
+        assert.isFunction(main)
+        if (typeof main === 'function') assert.throws(() => main(), WebAssembly.RuntimeError)
+      }
+    }),
+  30_000,
 )

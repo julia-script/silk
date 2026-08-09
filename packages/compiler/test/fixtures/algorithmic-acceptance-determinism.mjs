@@ -78,8 +78,8 @@ process.stdout.write(
     nativeSymbols: nativeArtifact.symbols,
     wasmSymbols: wasmArtifact.symbols,
     nativeText: hash(nativeArtifact.ir),
-    wasmText: hash(wasmArtifact.ir),
+    wasmText: hash(wasmArtifact.wat),
     nativeBytes: hash(nativeArtifact.bitcode),
-    wasmBytes: hash(wasmArtifact.bitcode),
+    wasmBytes: hash(wasmArtifact.bytes),
   }),
 )

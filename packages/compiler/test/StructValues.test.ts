@@ -149,7 +149,7 @@ it.effect('keeps LLVM, WebAssembly, and evaluation in aggregate parity', () =>
     const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
     const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
     const instance = new WebAssembly.Instance(
-      new WebAssembly.Module(wasmArtifact.bitcode.slice()),
+      new WebAssembly.Module(wasmArtifact.bytes.slice()),
       {},
     )
     const main = instance.exports.silk_main as () => number
@@ -158,7 +158,7 @@ it.effect('keeps LLVM, WebAssembly, and evaluation in aggregate parity', () =>
     assert.strictEqual(main(), 3)
     assert.include(nativeArtifact.ir, 'define i32 @silk_main')
     assert.include(nativeArtifact.ir, 'extractvalue')
-    assert.include(wasmArtifact.ir, '(result i32 i32)')
+    assert.include(wasmArtifact.wat, '(result i32 i32)')
   }),
 )
 
@@ -185,7 +185,7 @@ pub fn main() -> I32 { return consume(end()) }`
     assert.strictEqual(Analysis.evaluate(self)._tag, 'Completed')
 
     const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main as () => number
     assert.strictEqual(main(), 7)
   }),

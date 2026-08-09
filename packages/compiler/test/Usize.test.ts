@@ -162,7 +162,7 @@ it.effect('executes an exact native i64 call and rejects the same source on Wasm
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(native._tag, 'Compiled')
     if (native._tag !== 'Compiled') return
-    const executed = spawnSync(native.executable, [], { encoding: 'utf8' })
+    const executed = spawnSync(native.path, [], { encoding: 'utf8' })
     assert.strictEqual(executed.status, 42, executed.stderr)
 
     const wasm = yield* source(nativeExact, 'wasm32-unknown-unknown')
@@ -178,10 +178,10 @@ it.effect('executes Wasm Usize comparisons with unsigned i32 semantics', () =>
   Effect.gen(function* () {
     const snapshot = yield* source(sharedUnsigned, 'wasm32-unknown-unknown')
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main as () => number
 
-    assert.include(artifact.ir, 'i32.gt_u')
+    assert.include(artifact.wat, 'i32.gt_u')
     assert.strictEqual(main(), 42)
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
@@ -210,7 +210,7 @@ pub fn main() -> I32 {
     )
 
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )
@@ -230,7 +230,7 @@ pub fn main() -> I32 {
 
     const wasm = yield* source(program, 'wasm32-unknown-unknown')
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )
@@ -259,7 +259,7 @@ pub fn main() -> I32 { return inspect(decode(true)) }`
 
     const wasm = yield* source(program, 'wasm32-unknown-unknown')
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
     const logical = Analysis.evaluate(wasm)
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42)
@@ -334,10 +334,7 @@ pub fn main() -> I32 { if invalid() == 0 { return 1 } return 0 }`
         expression,
       )
       const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      const instance = new WebAssembly.Instance(
-        new WebAssembly.Module(artifact.bitcode.slice()),
-        {},
-      )
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
       assert.throws(() => (instance.exports.silk_main as () => number)(), WebAssembly.RuntimeError)
     }
   }),

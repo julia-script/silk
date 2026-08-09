@@ -97,8 +97,8 @@ it.effect('moves one allocation through RawBuffer and lexical Slot operations', 
         'AllocationRelease',
       ],
     )
-    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main as () => number
     assert.strictEqual(main(), 41)
     const nativeSnapshot = yield* Analysis.ofSource(

@@ -132,7 +132,7 @@ it.effect('lowers injection and widening through shared sum layouts and evaluate
     )
 
     const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main
     if (typeof main !== 'function') throw new RangeError('union program lost silk_main')
     assert.strictEqual(main(), 42)
@@ -188,7 +188,7 @@ pub fn main() -> I32 {
       )
     }
     const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main
     if (typeof main !== 'function') throw new RangeError('aggregate union program lost silk_main')
     assert.strictEqual(main(), 42)

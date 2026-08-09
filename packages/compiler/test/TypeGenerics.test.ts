@@ -625,7 +625,7 @@ pub fn main() -> I32 {
     assert.deepEqual(native.diagnostics, [])
     assert.deepEqual(wasm.diagnostics, [])
     const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
-    const wasmArtifact = yield* Analysis.codegen(wasm, { mode: 'release' })
+    const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
     assert.deepEqual(
       nativeArtifact.symbols.map((entry) => entry.symbol),
       wasmArtifact.symbols.map((entry) => entry.symbol),
@@ -657,7 +657,7 @@ pub fn main() -> I32 {
       )
     }
     const instance = new WebAssembly.Instance(
-      new WebAssembly.Module(wasmArtifact.bitcode.slice()),
+      new WebAssembly.Module(wasmArtifact.bytes.slice()),
       {},
     )
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)

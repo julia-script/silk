@@ -21,7 +21,7 @@ const snapshot = (target) => Effect.runPromise(Analysis.ofSource('fixture/Generi
 const native = await snapshot('aarch64-apple-darwin')
 const wasm = await snapshot('wasm32-unknown-unknown')
 const nativeArtifact = await Effect.runPromise(Analysis.codegen(native, { mode: 'release' }))
-const wasmArtifact = await Effect.runPromise(Analysis.codegen(wasm, { mode: 'release' }))
+const wasmArtifact = await Effect.runPromise(Analysis.codegenWasm(wasm, { mode: 'release' }))
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const layout = Analysis.layoutOf(native)
 
@@ -43,6 +43,6 @@ process.stdout.write(
     nativeSymbols: nativeArtifact.symbols.map((entry) => entry.symbol),
     wasmSymbols: wasmArtifact.symbols.map((entry) => entry.symbol),
     native: hash(nativeArtifact.bitcode),
-    wasm: hash(wasmArtifact.bitcode),
+    wasm: hash(wasmArtifact.bytes),
   }),
 )

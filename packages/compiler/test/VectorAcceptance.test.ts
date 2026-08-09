@@ -102,9 +102,9 @@ it.effect(
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       assert.isFalse(
-        watOperationNames(wasm.ir).some((operation) => operation.toLowerCase().includes('vector')),
+        watOperationNames(wasm.wat).some((operation) => operation.toLowerCase().includes('vector')),
       )
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
 
       const nativeSnapshot = yield* Analysis.ofSource(
@@ -126,7 +126,7 @@ it.effect(
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled')
       if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(run.status, 42, run.stderr)
     }),
   15_000,
@@ -200,7 +200,7 @@ it.effect('preserves the original vector when replacement allocation fails', () 
     assert.strictEqual(releases.length, 1)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
 
     const compiled = yield* Driver.compile({
@@ -213,7 +213,7 @@ it.effect('preserves the original vector when replacement allocation fails', () 
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 42, run.stderr)
   }),
 )
@@ -283,7 +283,7 @@ it.effect('drops initialized elements in order before releasing vector storage',
     assert.isBelow(lastRecord, releases[0]?.index ?? -1)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
 
     const compiled = yield* Driver.compile({
@@ -299,7 +299,7 @@ it.effect('drops initialized elements in order before releasing vector storage',
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 42, run.stderr)
   }),
 )
@@ -370,7 +370,7 @@ it.effect('transfers vector ownership and drops it early on all three engines', 
     assert.isBelow(releaseIndices[0] ?? -1, consumeReturn)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
 
     const compiled = yield* Driver.compile({
@@ -386,7 +386,7 @@ it.effect('transfers vector ownership and drops it early on all three engines', 
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 42, run.stderr)
   }),
 )

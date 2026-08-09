@@ -93,7 +93,7 @@ it.effect('keeps logical native and WebAssembly execution in parity', () =>
     const nativeArtifact = yield* Analysis.codegen(yield* snapshot('aarch64-apple-darwin'), {
       mode: 'release',
     })
-    const wasmInstance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const wasmInstance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     const wasmMain = wasmInstance.exports.silk_main as () => number
 
     const toolchain: NativeToolchain.Toolchain = Object.freeze({
@@ -118,8 +118,8 @@ it.effect('keeps logical native and WebAssembly execution in parity', () =>
         : undefined,
     )
     if (native._tag !== 'Compiled') return
-    assert.strictEqual(existsSync(native.executable), true)
-    const nativeRun = spawnSync(native.executable, [], { encoding: 'utf8' })
+    assert.strictEqual(existsSync(native.path), true)
+    const nativeRun = spawnSync(native.path, [], { encoding: 'utf8' })
 
     assert.strictEqual(logical.result.value, 42)
     assert.strictEqual(wasmMain(), logical.result.value)

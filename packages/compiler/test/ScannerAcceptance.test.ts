@@ -77,7 +77,7 @@ it.effect(
       )
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
 
       const compiled = yield* Driver.compile({
@@ -90,7 +90,7 @@ it.effect(
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled')
       if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(run.status, 42, run.stderr)
     }),
   15_000,
@@ -132,7 +132,7 @@ it.effect(
         if (again._tag === 'Completed') assert.strictEqual(again.result.value, expected, label)
 
         const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-        const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+        const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
         assert.strictEqual((instance.exports.silk_main as () => number)(), expected, label)
 
         const compiled = yield* Driver.compile({
@@ -145,7 +145,7 @@ it.effect(
         }).pipe(Effect.provide(SourceResolver.empty))
         assert.strictEqual(compiled._tag, 'Compiled', label)
         if (compiled._tag !== 'Compiled') continue
-        const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+        const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
         assert.strictEqual(run.status, expected, `${label}: ${run.stderr}`)
       }
     }),

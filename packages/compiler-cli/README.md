@@ -2,183 +2,159 @@
 
 The project-oriented command line interface for the Silk Effect bootstrap compiler.
 
-## Project setup
+## Create a project
 
-A Silk project is rooted by a `silk.toml` manifest:
-
-```toml
-[package]
-name = "hello"
-root = "src/Main.silk"
+```bash
+silk init hello
+cd hello
+silk run
 ```
 
-`package.name` starts with a lowercase letter and contains only lowercase letters, digits, and
-hyphens. `package.root` is resolved relative to the manifest. By default, the entry file's
-directory is also its source root. A wider root can be selected explicitly:
+`silk init [path] [--name <name>]` creates an executable project:
+
+```text
+hello/
+├── silk.toml
+├── .gitignore
+└── src/
+    └── main.silk
+```
+
+The generated manifest is intentionally sparse:
 
 ```toml
 [package]
 name = "hello"
+version = "0.1.0"
+root = "src/main.silk"
+```
+
+The package name is derived from the selected directory unless `--name` is supplied. Initialization
+may add a project to a non-empty directory, but it never overwrites `silk.toml` or `src/main.silk`.
+It preserves an existing `.gitignore` byte-for-byte apart from appending the exact `/build/` rule
+when needed. A failed or interrupted initialization rolls back only paths it created.
+
+## Project manifest
+
+Every project requires `[package].name`, `[package].version`, and `[package].root`. Names start with
+a lowercase letter and contain lowercase letters, digits, or hyphens. Versions follow Semantic
+Versioning. Paths are relative to the manifest. The entry directory is the default source root; a
+wider root can be selected explicitly:
+
+```toml
+[package]
+name = "hello"
+version = "0.1.0"
 root = "src/app/Main.silk"
 source-root = "src"
+
+[build]
+backend = "llvm"
+targets = ["host", "wasm32-unknown-unknown"]
+output-dir = "build"
 ```
 
-Project commands search the working directory and its ancestors for the nearest `silk.toml`.
-`--manifest-path <path>` selects one exact manifest instead and disables upward discovery.
+`[build]` is optional. The materialized defaults are backend `llvm`, targets `["host"]`, and output
+directory `build`. If only `backend = "wasm"` is supplied, its target default is
+`["wasm32-unknown-unknown"]`. `host` resolves to the current canonical native triple; duplicate
+resolved targets are built once in first-seen order.
 
-## Commands
+Project commands discover the nearest ancestor `silk.toml`. `--manifest-path <path>` selects one
+exact manifest instead.
 
-### `silk format`
+## Build, check, and run
 
-Format every exact `.silk` file beneath the project source root, including files that are not
-reachable from the project entry:
+```bash
+silk check
+silk build
+silk build --release
+silk build --backend llvm --target host --target wasm32-unknown-unknown
+silk build --backend wasm --target wasm32-unknown-unknown
+silk run -- --literal-program-argument
+```
+
+`--backend` replaces the manifest backend. One or more `--target` flags replace the complete
+manifest target array; they do not append to it. LLVM supports native targets and
+`wasm32-unknown-unknown`. The direct `wasm` backend supports only `wasm32-unknown-unknown`.
+
+Build preflights the entire backend/target batch, then processes it sequentially. Every target is
+attempted after a valid preflight, successful sibling artifacts remain committed, and the command
+prints target outcomes followed by success/failure totals. Artifacts use backend-qualified paths:
+
+```text
+build/<backend>/<canonical-target>/<profile>/<package-name>[.wasm]
+```
+
+For example, the two WebAssembly implementations do not collide:
+
+```text
+build/llvm/wasm32-unknown-unknown/debug/hello.wasm
+build/wasm/wasm32-unknown-unknown/debug/hello.wasm
+```
+
+`silk check` analyzes every resolved target in order without backend, Clang, linker, or artifact
+work. Diagnostics and summaries are target-qualified. `silk run` always builds exactly the host
+target and requires a backend that can produce a native executable; manifest foreign/Wasm targets
+are ignored for run. After a successful build, run returns the program's exact exit status.
+
+Shared options are:
+
+- `--manifest-path <path>` — select an exact manifest.
+- `--backend <llvm|wasm>` — replace the manifest backend.
+- `--target <host|canonical-target>` — repeatable; replace the manifest targets.
+- `--profile <debug|release|release-with-debug>` — select a fixed profile.
+- `--release` — shorthand for `--profile release`; conflicts with a different explicit profile.
+
+## Format
+
+`silk format` formats every exact `.silk` file beneath the project source root. Positional files and
+directories restrict the selection; `--check` reports drift without writing. Formatting does not
+accept backend, target, or profile options.
 
 ```bash
 silk format
 silk format src/model src/Draft.silk
-silk format --manifest-path ./examples/hello/silk.toml
-```
-
-Positional files and directories restrict the selection. Directories are searched recursively;
-duplicate paths are removed, symlinked directories are not followed, and selections resolving
-outside the source root are rejected. Files are processed and reported in canonical path order.
-
-Formatting is strict about concrete syntax. A file with a lexical error, parser error, missing
-token, or unexpected-token region is reported and left unchanged, while other selected files are
-still processed. Name-resolution and type errors do not prevent formatting.
-
-The canonical source representation has no style options:
-
-- 100-column layout target and two-space indentation
-- spaces instead of tabs and LF line endings
-- no trailing whitespace and exactly one final newline
-- compact lists when they fit; otherwise one item per line with a trailing comma
-- exactly one blank line between top-level declarations
-- at most one author-supplied blank line inside blocks
-- preserved line and documentation comments, except terminal spaces and tabs
-
-`///` lines immediately preceding a declaration or struct field without a blank line form its
-documentation block. Comments are never reflowed and may exceed the width target.
-
-#### How to enforce formatting in CI
-
-Run the same selection without writing files:
-
-```bash
 silk format --check
 ```
 
-The check is complete when the command exits `0`. Exit `1` means at least one file needs formatting
-or contains damaged syntax. Exit `2` means project discovery, path selection, source storage, or a
-write operation failed.
+The canonical representation uses a 100-column target, two-space indentation, LF endings, no
+trailing whitespace, and one final newline. Damaged syntax is reported and left unchanged while
+other selected files continue.
 
-### `silk check`
+## Direct-file compilation
 
-Analyze the entire reachable module graph without invoking the backend, Clang, or the linker and
-without creating `.silk` build output.
-
-```bash
-silk check
-silk check --manifest-path ./examples/hello/silk.toml
-```
-
-### `silk build`
-
-Build the nearest project as a native executable:
-
-```bash
-silk build
-silk build --release
-silk build --profile release-with-debug
-```
-
-Artifacts have a deterministic location:
-
-```text
-.silk/build/<target>/<profile>/<package-name>
-```
-
-### `silk run`
-
-Build for the host and run the resulting executable. Arguments after `--` are passed literally to
-the program, and stdin, stdout, and stderr are inherited:
-
-```bash
-silk run
-silk run --release -- --verbose input.txt
-```
-
-Cross-target execution is rejected before compilation. A successful build followed by program
-execution returns the program's exact exit status.
-
-### `silk build-exe`
-
-Compile an explicitly selected root source without a manifest. This is the low-level escape hatch
-for scripts, compiler experiments, and one-off files:
+`silk build-exe` is the low-level, native-only escape hatch for compiling a rooted source without a
+manifest:
 
 ```bash
 silk build-exe main.silk -o ./main
 silk build-exe ./src/app/Main.silk --source-root ./src -o ./main
 ```
 
-`build-exe` supports `--source-root`, `--output`/`-o`, `--target`, `--profile`, `--clang`,
-`--save-temps`, and `--timings`. The former `silk compile` command was removed; there is no
-compatibility alias.
-
-## Shared project options
-
-`build`, `check`, and `run` accept:
-
-- `--manifest-path <path>` — select an exact manifest.
-- `--target <target>` — select a native target; the host is the default.
-- `--profile <debug|release|release-with-debug>` — select the compilation profile.
-- `--release` — shorthand for `--profile release`; it conflicts with a different explicit profile.
-
-`format` accepts `--manifest-path` but does not accept target, profile, or release options because
-it does not perform semantic analysis or compilation.
-
-## Module resolution
-
-Imports resolve from the project source root, never from the importing file's directory.
-`import compiler.Syntax` requests exactly `<source-root>/compiler/Syntax.silk`. Resolution does not
-probe alternate extensions, index files, parent directories, or case-folded names.
-
-A missing imported file is a recoverable source diagnostic. Permission, I/O, and equivalent access
-failures are operational resolver failures. `check` retains all safe frontend facts for tooling;
-`build` and `run` stop before backend work when resolution or source validation fails.
+It supports `--source-root`, `--output`/`-o`, native `--target`, `--profile`, `--clang`,
+`--save-temps`, and `--timings`.
 
 ## Exit behavior
 
-- `0` — checking or building succeeded.
-- `1` — source diagnostics or a missing/invalid entry rejected the program.
-- `2` — project configuration, source storage, target, backend, or toolchain operation failed.
-- `silk format` — `0` for success, `1` for check drift or damaged syntax, and `2` for project,
-  selection, storage, or write failures.
-- `silk run` — after a successful build, the compiled program's exact exit status.
+- `0` — every selected target succeeded.
+- `1` — at least one source, semantic, entry, or backend-emission rejection occurred.
+- `2` — configuration, storage, target preflight, or external toolchain work failed; this takes
+  precedence over exit `1` in a mixed batch.
+- `silk format` uses `1` for drift/damaged syntax and `2` for project, selection, storage, or write
+  failures.
+- `silk run` returns the program's exit status after a successful build.
 
-Failed builds do not commit the requested executable. Diagnostics from every loaded module use the
-form `path:line:column: severity[CODE] message`.
+Each target commits atomically. A failed target leaves no partial destination and does not remove a
+successful sibling artifact.
 
-## Toolchain
+## Migration from the earlier alpha manifest
 
-Project workflows currently use `clang` from the process environment. `build-exe --clang <path>`
-can pin a specific executable. Automatic toolchain discovery and management are not implemented.
+Existing manifests must add a version:
 
-## Planned, not yet supported
+```toml
+version = "0.1.0"
+```
 
-The CLI intentionally exposes no placeholder commands for these future capabilities:
-
-- `test` and a language-level test model
-- `clean`
-- `new` and `init`
-- `doc`
-- target discovery/listing
-- incremental and shared build caching
-- multi-package workspaces
-- dependency and package management
-- stable machine-readable output
-- language-server command integration
-- toolchain installation, discovery, and version management
-
-Their eventual interfaces should be designed from real compiler and project requirements rather
-than reserved prematurely in the command surface.
+Build output moved from `.silk/build/<target>/<profile>/<package>` to the visible,
+backend-qualified `build/<backend>/<target>/<profile>/<package>[.wasm]` layout. No compatibility
+symlink is created.

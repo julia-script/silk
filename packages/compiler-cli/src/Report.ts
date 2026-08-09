@@ -108,6 +108,9 @@ export const phases = (self: ReadonlyArray<Driver.PhaseReport>): string => {
  * waste the only information that makes a linker error debuggable.
  */
 const toolchainFailure = (stage: string, failure: Driver.Failed['failure']): string => {
+  if (failure._tag === 'StorageFailure') {
+    return `${stage} stage failed: ${failure.message}`
+  }
   const command = [failure.planned.command, ...failure.planned.arguments].join(' ')
   const reason =
     failure.reason._tag === 'MissingInput'
@@ -156,7 +159,7 @@ export const outcome = (
       const rendered = diagnostics(self.diagnostics, sources)
       return [
         ...(rendered.length > 0 ? [rendered] : []),
-        `Compiled ${entryPath} -> ${self.executable} (${self.target.id}, ${self.symbols.length} symbols)`,
+        `Compiled ${entryPath} -> ${self.path} (${self.backend}, ${self.target.id}, ${self.symbols.length} symbols)`,
       ].join('\n')
     }
     case 'NoEntry': {

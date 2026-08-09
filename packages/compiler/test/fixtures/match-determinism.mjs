@@ -52,6 +52,6 @@ process.stdout.write(
     mir: Mir.encode(Analysis.loweredMir(native)),
     trace: Analysis.traceOf(Analysis.evaluate(native)),
     native: createHash('sha256').update(nativeArtifact.bitcode).digest('hex'),
-    wasm: createHash('sha256').update(wasmArtifact.bitcode).digest('hex'),
+    wasm: createHash('sha256').update(wasmArtifact.bytes).digest('hex'),
   }),
 )

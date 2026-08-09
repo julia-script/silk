@@ -14,7 +14,7 @@ const makeProject = Effect.fnUntraced(function* (root: string, source = compact)
   yield* fileSystem.makeDirectory(`${root}/src`, { recursive: true })
   yield* fileSystem.writeFileString(
     `${root}/silk.toml`,
-    '[package]\nname = "format-command"\nroot = "src/Main.silk"\n',
+    '[package]\nname = "format-command"\nversion = "0.1.0"\nroot = "src/Main.silk"\n',
   )
   yield* fileSystem.writeFileString(`${root}/src/Main.silk`, source)
 })

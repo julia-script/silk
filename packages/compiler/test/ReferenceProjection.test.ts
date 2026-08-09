@@ -44,7 +44,7 @@ pub fn main() -> I32 {
       ),
       { mode: 'release' },
     )
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )

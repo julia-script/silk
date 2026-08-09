@@ -26,7 +26,7 @@ const emit = (text: string) =>
 const run = Effect.fnUntraced(function* (text: string) {
   // `Uint8Array.slice` re-backs the bytes with a plain `ArrayBuffer`, which is what the
   // WebAssembly types accept; the artifact's own array is generic over `ArrayBufferLike`.
-  const bytes = (yield* emit(text)).bitcode.slice()
+  const bytes = (yield* emit(text)).bytes.slice()
   const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes), {})
   const main = instance.exports.silk_main as () => number
   try {
@@ -55,8 +55,10 @@ it.effect('emits an instantiable module whose entry is exported as silk_main', (
       ['silk_main'],
     )
     // The wasm binary preamble: "\0asm" followed by version 1.
-    assert.deepEqual(Array.from(artifact.bitcode.slice(0, 8)), [0, 97, 115, 109, 1, 0, 0, 0])
-    assert.match(artifact.ir, /\(export "silk_main"/)
+    assert.strictEqual(artifact._tag, 'WebAssemblyModuleArtifact')
+    assert.strictEqual(artifact.backend, 'wasm')
+    assert.deepEqual(Array.from(artifact.bytes.slice(0, 8)), [0, 97, 115, 109, 1, 0, 0, 0])
+    assert.match(artifact.wat, /\(export "silk_main"/)
   }),
 )
 
@@ -80,9 +82,9 @@ it.effect('matches the WAT golden and the binary digest golden', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(nestedSource)
 
-    assert.strictEqual(artifact.ir, golden('program.wat.txt'))
+    assert.strictEqual(artifact.wat, golden('program.wat.txt'))
     assert.strictEqual(
-      `${createHash('sha256').update(artifact.bitcode).digest('hex')}\n`,
+      `${createHash('sha256').update(artifact.bytes).digest('hex')}\n`,
       golden('program.wasm.sha256'),
     )
   }),
@@ -93,8 +95,8 @@ it.effect('matches the branch WAT golden and stays deterministic', () =>
     const first = yield* emit(branchSource)
     const second = yield* emit(branchSource)
 
-    assert.strictEqual(first.ir, golden('branch.wat.txt'))
-    assert.deepEqual(first.bitcode, second.bitcode)
+    assert.strictEqual(first.wat, golden('branch.wat.txt'))
+    assert.deepEqual(first.bytes, second.bytes)
   }),
 )
 
@@ -119,10 +121,10 @@ it.effect('emits source conditionals directly as structured if', () =>
       'pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }',
     )
 
-    assert.match(artifact.ir, /\bif\b/)
+    assert.match(artifact.wat, /\bif\b/)
     // The structure is taken from MIR rather than rebuilt, so no dispatch scaffolding appears.
-    assert.notMatch(artifact.ir, /br_table/)
-    assert.notMatch(artifact.ir, /\bloop\b/)
+    assert.notMatch(artifact.wat, /br_table/)
+    assert.notMatch(artifact.wat, /\bloop\b/)
   }),
 )
 
@@ -132,8 +134,8 @@ it.effect('emits a bare if when only one arm exists and the join falls through',
       'pub fn main() -> I32 { let x = 1 if I32.equals(x, 1) { let a = 5 } return x }',
     )
 
-    assert.match(artifact.ir, /\bif\b/)
-    assert.notMatch(artifact.ir, /\belse\b/)
+    assert.match(artifact.wat, /\bif\b/)
+    assert.notMatch(artifact.wat, /\belse\b/)
   }),
 )
 
@@ -144,7 +146,7 @@ it.effect('nests an if inside an arm for nested source conditionals', () =>
     )
 
     // Two conditionals in the source produce two `if` constructs, one inside the other.
-    assert.strictEqual(artifact.ir.match(/^\s*if$/gm)?.length, 2)
+    assert.strictEqual(artifact.wat.match(/^\s*if$/gm)?.length, 2)
   }),
 )
 
@@ -156,9 +158,9 @@ it.effect('emits structured match dispatch and agrees with logical evaluation', 
 
     assert.strictEqual(interpreted, 42)
     assert.strictEqual(executed, interpreted)
-    assert.match(artifact.ir, /i32\.eq/)
-    assert.match(artifact.ir, /\bif\b/)
-    assert.notMatch(artifact.ir, /br_table/)
+    assert.match(artifact.wat, /i32\.eq/)
+    assert.match(artifact.wat, /\bif\b/)
+    assert.notMatch(artifact.wat, /br_table/)
   }),
 )
 
@@ -242,15 +244,15 @@ pub fn main() -> I32 { return identity(42) }`
     const release = yield* Analysis.codegenWasm(yield* snapshotOf(source), { mode: 'release' })
 
     const decoder = new TextDecoder('utf8', { fatal: false })
-    assert.include(decoder.decode(debug.bitcode), 'name')
-    assert.match(debug.ir, /\$silk_main/)
-    assert.match(debug.ir, /\(local \$scratch/)
+    assert.include(decoder.decode(debug.bytes), 'name')
+    assert.match(debug.wat, /\$silk_main/)
+    assert.match(debug.wat, /\(local \$scratch/)
 
     // Release keeps the exports — the module stays callable — but drops every internal name.
-    assert.notMatch(release.ir, /\$silk_main/)
-    assert.notMatch(release.ir, /\$scratch/)
-    assert.match(release.ir, /\(export "silk_main"/)
-    assert.isBelow(release.bitcode.length, debug.bitcode.length)
+    assert.notMatch(release.wat, /\$silk_main/)
+    assert.notMatch(release.wat, /\$scratch/)
+    assert.match(release.wat, /\(export "silk_main"/)
+    assert.isBelow(release.bytes.length, debug.bytes.length)
   }),
 )
 
@@ -260,7 +262,7 @@ it.effect('runs identically whether or not names were stripped', () =>
     const instantiate = Effect.fnUntraced(function* (mode: 'debug' | 'release') {
       const bytes = (yield* Analysis.codegenWasm(yield* snapshotOf(source), {
         mode,
-      })).bitcode.slice()
+      })).bytes.slice()
       const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes), {})
       return (instance.exports.silk_main as () => number)()
     })
@@ -274,7 +276,7 @@ it.effect('maps divisions onto wasm operators that already trap, with no guard e
   Effect.gen(function* () {
     const artifact = yield* emit('pub fn main() -> I32 { return I32.divide(84, 2) }')
 
-    assert.match(artifact.ir, /i32\.div_s/)
+    assert.match(artifact.wat, /i32\.div_s/)
   }),
 )
 

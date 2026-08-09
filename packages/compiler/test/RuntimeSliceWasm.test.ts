@@ -35,14 +35,14 @@ pub fn main() -> I32 {
     const first = yield* emit('exclusive', source)
     const second = yield* emit('exclusive', source)
 
-    assert.strictEqual(execute(first.bitcode)(), 42)
-    assert.include(first.ir, '(memory $silk_memory')
-    assert.include(first.ir, '(global $silk_stack_pointer')
-    assert.include(first.ir, 'memory.grow')
-    assert.include(first.ir, 'i32.store')
-    assert.include(first.ir, 'i32.load')
-    assert.strictEqual(first.ir, second.ir)
-    assert.deepEqual(first.bitcode, second.bitcode)
+    assert.strictEqual(execute(first.bytes)(), 42)
+    assert.include(first.wat, '(memory $silk_memory')
+    assert.include(first.wat, '(global $silk_stack_pointer')
+    assert.include(first.wat, 'memory.grow')
+    assert.include(first.wat, 'i32.store')
+    assert.include(first.wat, 'i32.load')
+    assert.strictEqual(first.wat, second.wat)
+    assert.deepEqual(first.bytes, second.bytes)
   }),
 )
 
@@ -60,8 +60,8 @@ fn depth(value: I32) -> I32 {
 pub fn main() -> I32 { return depth(3) }`,
     )
 
-    assert.strictEqual(execute(artifact.bitcode)(), 6)
-    assert.include(artifact.ir, 'global.set $silk_stack_pointer')
+    assert.strictEqual(execute(artifact.bytes)(), 6)
+    assert.include(artifact.wat, 'global.set $silk_stack_pointer')
   }),
 )
 
@@ -73,7 +73,7 @@ it.effect('traps negative and equal-length Wasm slice indexes', () =>
         `fn choose(values: &[I32], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { let values = [10, 20] return choose(&values, ${index}) }`,
       )
-      assert.throws(() => execute(artifact.bitcode)(), WebAssembly.RuntimeError)
+      assert.throws(() => execute(artifact.bytes)(), WebAssembly.RuntimeError)
     }
   }),
 )
@@ -90,7 +90,7 @@ fn emptySize() -> I32 { let values = [Empty {}, Empty {}] return length(&values)
 pub fn main() -> I32 { return three() + six() + emptySize() }`,
     )
 
-    assert.strictEqual(execute(artifact.bitcode)(), 11)
-    assert.match(artifact.ir, /\(param i32 i32\)/)
+    assert.strictEqual(execute(artifact.bytes)(), 11)
+    assert.match(artifact.wat, /\(param i32 i32\)/)
   }),
 )

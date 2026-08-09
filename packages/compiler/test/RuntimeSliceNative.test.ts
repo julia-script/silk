@@ -72,7 +72,7 @@ it.effect(
         compiled._tag === 'BackendFailed' ? compiled.error.message : undefined,
       )
       if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(run.status, 42, run.stderr)
     }),
 )
@@ -91,7 +91,7 @@ pub fn main() -> I32 { let values = [10, 20] return choose(&values, 2) }`
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.notStrictEqual(run.signal, null)
   }),
 )

@@ -133,7 +133,7 @@ it.effect('runs Drop hooks before field cleanup exactly once on every structured
       assert.isBelow(hookIndex, releaseIndex, `${name} hook-before-field order`)
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), expected, `${name} wasm`)
 
       const compiled = yield* Driver.compile({
@@ -144,7 +144,7 @@ it.effect('runs Drop hooks before field cleanup exactly once on every structured
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled', name)
       if (compiled._tag !== 'Compiled') continue
-      const nativeRun = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+      const nativeRun = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(nativeRun.status, expected, `${name} native: ${nativeRun.stderr}`)
     }
   }),
@@ -231,7 +231,7 @@ it.effect('monomorphizes one parametric Drop conformance per reachable instantia
     assert.strictEqual(hookCallsOf(run).length, 2)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
 
     const compiled = yield* Driver.compile({
@@ -242,7 +242,7 @@ it.effect('monomorphizes one parametric Drop conformance per reachable instantia
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return
-    const nativeRun = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    const nativeRun = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(nativeRun.status, 42, `parametric native: ${nativeRun.stderr}`)
   }),
 )

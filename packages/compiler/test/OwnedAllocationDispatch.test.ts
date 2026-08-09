@@ -115,7 +115,7 @@ it.effect('dispatches provision through user allocator witnesses on all three en
         ),
         { mode: 'release' },
       )
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), expected, name)
 
       const compiled = yield* Driver.compile({
@@ -128,7 +128,7 @@ it.effect('dispatches provision through user allocator witnesses on all three en
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled', name)
       if (compiled._tag !== 'Compiled') continue
-      const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(run.status, expected, `${name}: ${run.stderr}`)
     }
   }),
@@ -204,7 +204,7 @@ it.effect('sweeps allocation failure ordinals with atomic rejection and unchange
       if (again._tag === 'Completed') assert.strictEqual(again.result.value, expected, name)
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), expected, name)
     }
   }),
@@ -277,7 +277,7 @@ it.effect('runs a counted quota allocator identically on all three engines', () 
       )
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), expected, `q${quota}`)
 
       const compiled = yield* Driver.compile({
@@ -290,7 +290,7 @@ it.effect('runs a counted quota allocator identically on all three engines', () 
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled', `q${quota}`)
       if (compiled._tag !== 'Compiled') continue
-      const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(run.status, expected, `q${quota}: ${run.stderr}`)
     }
   }),
@@ -347,7 +347,7 @@ it.effect('writes forwarded exclusive provider mutations back on all three engin
     )
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 1)
 
     const compiled = yield* Driver.compile({
@@ -363,7 +363,7 @@ it.effect('writes forwarded exclusive provider mutations back on all three engin
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 1, run.stderr)
   }),
 )

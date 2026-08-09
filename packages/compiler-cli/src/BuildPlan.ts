@@ -1,4 +1,6 @@
 import { join } from 'node:path'
+import type * as Backend from '@silk-effect/compiler/Backend'
+import * as BackendRegistry from '@silk-effect/compiler/BackendRegistry'
 import type * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
 import * as Target from '@silk-effect/compiler/Target'
 import type * as ToolchainPlan from '@silk-effect/compiler/ToolchainPlan'
@@ -11,6 +13,7 @@ export type Purpose = 'build' | 'run'
 export interface BuildPlan {
   readonly _tag: 'BuildPlan'
   readonly project: Project.Project
+  readonly backend: Backend.Backend
   readonly target: Target.Target
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly destination: string
@@ -19,11 +22,15 @@ export interface BuildPlan {
 
 export type BuildPlanErrorReason =
   | { readonly _tag: 'InvalidPackageName'; readonly name: string }
-  | { readonly _tag: 'TargetUnavailable'; readonly error: Target.TargetError }
-  | { readonly _tag: 'NonNativeTarget'; readonly target: Target.Id }
+  | {
+      readonly _tag: 'IncompatibleBackendTarget'
+      readonly error: BackendRegistry.BackendRegistryError
+    }
+  | { readonly _tag: 'NonNativeRunBackend'; readonly backend: Backend.Id }
   | { readonly _tag: 'ForeignRunTarget'; readonly target: Target.Id; readonly host: Target.Id }
+  | { readonly _tag: 'HostUnavailable'; readonly error: Target.TargetError }
 
-/** Project target/profile selection cannot produce the requested native workflow. */
+/** Project backend/target/profile selection cannot produce the requested workflow. */
 export class BuildPlanError extends Data.TaggedError('BuildPlanError')<{
   readonly operation: 'BuildPlan.make'
   readonly message: string
@@ -31,13 +38,14 @@ export class BuildPlanError extends Data.TaggedError('BuildPlanError')<{
 }> {}
 
 export interface Options {
-  readonly target?: string
+  readonly backend: Backend.Backend
+  readonly target: Target.Target
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly purpose?: Purpose
   readonly clang?: string
 }
 
-/** Resolves target policy and deterministic artifact layout for one project workflow. */
+/** Creates one immutable, already-resolved build plan with a backend-qualified destination. */
 export const make = (
   project: Project.Project,
   options: Options,
@@ -51,44 +59,44 @@ export const make = (
       }),
     )
   }
-  const selected = Target.select(options.target)
-  if (selected._tag === 'Unavailable') {
+  const compatible = BackendRegistry.requireTarget(options.backend, options.target)
+  if (Result.isFailure(compatible)) {
     return Result.fail(
       new BuildPlanError({
         operation: 'BuildPlan.make',
-        message: selected.error.message,
-        reason: { _tag: 'TargetUnavailable', error: selected.error },
-      }),
-    )
-  }
-  if (!Target.isNative(selected.target)) {
-    return Result.fail(
-      new BuildPlanError({
-        operation: 'BuildPlan.make',
-        message: `Project executables require a native target; received ${selected.target.id}`,
-        reason: { _tag: 'NonNativeTarget', target: selected.target.id },
+        message: compatible.failure.message,
+        reason: { _tag: 'IncompatibleBackendTarget', error: compatible.failure },
       }),
     )
   }
   if (options.purpose === 'run') {
+    if (options.backend.id !== 'llvm' || !Target.isNative(options.target)) {
+      return Result.fail(
+        new BuildPlanError({
+          operation: 'BuildPlan.make',
+          message: `Backend ${options.backend.id} cannot produce a host executable`,
+          reason: { _tag: 'NonNativeRunBackend', backend: options.backend.id },
+        }),
+      )
+    }
     const host = Target.select(undefined)
     if (host._tag === 'Unavailable') {
       return Result.fail(
         new BuildPlanError({
           operation: 'BuildPlan.make',
           message: host.error.message,
-          reason: { _tag: 'TargetUnavailable', error: host.error },
+          reason: { _tag: 'HostUnavailable', error: host.error },
         }),
       )
     }
-    if (selected.target.id !== host.target.id) {
+    if (options.target.id !== host.target.id) {
       return Result.fail(
         new BuildPlanError({
           operation: 'BuildPlan.make',
-          message: `Cannot run target ${selected.target.id} on host ${host.target.id}`,
+          message: `Cannot run target ${options.target.id} on host ${host.target.id}`,
           reason: {
             _tag: 'ForeignRunTarget',
-            target: selected.target.id,
+            target: options.target.id,
             host: host.target.id,
           },
         }),
@@ -96,19 +104,20 @@ export const make = (
     }
   }
 
+  const fileName = options.target.kind === 'WebAssembly' ? `${project.name}.wasm` : project.name
   return Result.succeed(
     Object.freeze({
       _tag: 'BuildPlan' as const,
       project,
-      target: selected.target,
+      backend: options.backend,
+      target: options.target,
       profile: options.profile,
       destination: join(
-        project.directory,
-        '.silk',
-        'build',
-        selected.target.id,
+        project.build.outputDirectory,
+        options.backend.id,
+        options.target.id,
         options.profile,
-        project.name,
+        fileName,
       ),
       toolchain: Object.freeze({ _tag: 'Toolchain' as const, clang: options.clang ?? 'clang' }),
     }),

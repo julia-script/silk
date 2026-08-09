@@ -57,6 +57,22 @@ it.effect('emits byte-identical bitcode across repeated fresh runs', () =>
   }),
 )
 
+it.effect('emits target-correct LLVM bitcode for wasm32 while retaining silk_main', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'golden/llvm-wasm',
+      ascii('pub fn main() -> I32 { return 42 }'),
+      'wasm32-unknown-unknown',
+    )
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
+    assert.strictEqual(artifact.backend, 'llvm')
+    assert.strictEqual(artifact.target.id, 'wasm32-unknown-unknown')
+    assert.include(artifact.ir, 'target triple = "wasm32-unknown-unknown"')
+    assert.strictEqual(artifact.symbols.at(0)?.symbol, 'silk_main')
+  }),
+)
+
 it.effect('realizes stored declaration and builtin callable sections in LLVM and Wasm', () =>
   Effect.gen(function* () {
     const programs = [
@@ -76,9 +92,9 @@ pub fn main() -> I32 { let plusTwo = add(2) return plusTwo(40) }`,
         'wasm32-unknown-unknown',
       )
       const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
-      const wasmArtifact = yield* Analysis.codegen(wasm, { mode: 'release' })
+      const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
       const instance = new WebAssembly.Instance(
-        new WebAssembly.Module(wasmArtifact.bitcode.slice()),
+        new WebAssembly.Module(wasmArtifact.bytes.slice()),
         {},
       )
       const main = instance.exports.silk_main
@@ -135,9 +151,9 @@ pub fn main() -> I32 {
           'wasm32-unknown-unknown',
         )
         const llvm = yield* Analysis.codegen(native, { mode: 'release' })
-        const artifact = yield* Analysis.codegen(wasm, { mode: 'release' })
+        const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
         const instance = new WebAssembly.Instance(
-          new WebAssembly.Module(artifact.bitcode.slice()),
+          new WebAssembly.Module(artifact.bytes.slice()),
           {},
         )
         const main = instance.exports.silk_main
@@ -178,12 +194,12 @@ pub fn main() -> I32 { let callback = add<I32>(2) return callback(42) }`
     )
     const llvmFirst = yield* Analysis.codegen(nativeFirst, { mode: 'release' })
     const llvmSecond = yield* Analysis.codegen(nativeSecond, { mode: 'release' })
-    const wasmArtifactFirst = yield* Analysis.codegen(wasmFirst, { mode: 'release' })
-    const wasmArtifactSecond = yield* Analysis.codegen(wasmSecond, { mode: 'release' })
+    const wasmArtifactFirst = yield* Analysis.codegenWasm(wasmFirst, { mode: 'release' })
+    const wasmArtifactSecond = yield* Analysis.codegenWasm(wasmSecond, { mode: 'release' })
 
     assert.strictEqual(llvmFirst.ir, llvmSecond.ir)
     assert.deepEqual(llvmFirst.bitcode, llvmSecond.bitcode)
-    assert.deepEqual(wasmArtifactFirst.bitcode, wasmArtifactSecond.bitcode)
+    assert.deepEqual(wasmArtifactFirst.bytes, wasmArtifactSecond.bytes)
     assert.deepEqual(nativeFirst.layout, nativeSecond.layout)
     assert.deepEqual(Analysis.loweredMir(nativeFirst), Analysis.loweredMir(nativeSecond))
   }),

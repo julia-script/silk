@@ -45,7 +45,7 @@ process.stdout.write(
       wasmMir: Mir.encode(Analysis.loweredMir(wasm)),
       trace: Analysis.traceOf(Analysis.evaluate(native)),
       native: createHash('sha256').update(nativeArtifact.bitcode).digest('hex'),
-      wasm: createHash('sha256').update(wasmArtifact.bitcode).digest('hex'),
+      wasm: createHash('sha256').update(wasmArtifact.bytes).digest('hex'),
     },
     (_key, value) => (typeof value === 'bigint' ? value.toString() : value),
   ),

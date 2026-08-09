@@ -5,16 +5,22 @@ import * as Result from 'effect/Result'
 import { Flag } from 'effect/unstable/cli'
 
 export const profiles = ['debug', 'release', 'release-with-debug'] as const
-const targetIds = Target.all.map((candidate) => candidate.id)
+const targetIds = ['host', ...Target.all.map((candidate) => candidate.id)]
+const backendIds = ['llvm', 'wasm'] as const
 
 export const manifestPath = Flag.string('manifest-path').pipe(
   Flag.withDescription('Path to a Silk project manifest. Disables upward discovery.'),
   Flag.optional,
 )
 
-export const target = Flag.choice('target', targetIds).pipe(
-  Flag.withDescription('Native compilation target. Defaults to the host target.'),
+export const backend = Flag.choice('backend', backendIds).pipe(
+  Flag.withDescription('Backend id. Replaces the project manifest backend when supplied.'),
   Flag.optional,
+)
+
+export const targets = Flag.choice('target', targetIds).pipe(
+  Flag.withDescription('Compilation target selector. Repeat to build more than one target.'),
+  Flag.atLeast(0),
 )
 
 export const profile = Flag.choice('profile', profiles).pipe(
@@ -28,14 +34,16 @@ export const release = Flag.boolean('release').pipe(
 
 export interface Input {
   readonly manifestPath?: string
-  readonly target?: string
+  readonly backend?: string
+  readonly targets?: ReadonlyArray<string>
   readonly profile?: ToolchainPlan.OptimizationProfile
   readonly release: boolean
 }
 
 export interface ProjectOptions {
   readonly manifestPath?: string
-  readonly target?: string
+  readonly backend?: string
+  readonly targets?: ReadonlyArray<string>
   readonly profile: ToolchainPlan.OptimizationProfile
 }
 
@@ -60,7 +68,10 @@ export const resolve = (input: Input): Result.Result<ProjectOptions, ProjectOpti
   return Result.succeed(
     Object.freeze({
       ...(input.manifestPath === undefined ? {} : { manifestPath: input.manifestPath }),
-      ...(input.target === undefined ? {} : { target: input.target }),
+      ...(input.backend === undefined ? {} : { backend: input.backend }),
+      ...(input.targets === undefined || input.targets.length === 0
+        ? {}
+        : { targets: input.targets }),
       profile: input.release ? ('release' as const) : (input.profile ?? 'debug'),
     }),
   )

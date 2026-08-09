@@ -1,7 +1,6 @@
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
-import * as BackendRegistry from './BackendRegistry.js'
 import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -850,15 +849,17 @@ export const diagnostics = (self: Snapshot): ReadonlyArray<Diagnostic.Diagnostic
 /**
  * Emits the snapshot's lowered program.
  *
- * The backend follows from the snapshot's target unless one is named explicitly, so the ordinary
- * call site picks a target and is done: pairing the two by hand is what lets them disagree.
+ * LLVM is the default backend independently of the snapshot target. Passing a backend explicitly
+ * preserves that selection and compatibility is validated at the backend boundary.
  */
-export const codegen = Effect.fn('Analysis.codegen')(function* (
+export const codegen = Effect.fn('Analysis.codegen')(function* <
+  A extends Backend.Artifact = Backend.LlvmBitcodeArtifact,
+>(
   self: Snapshot,
   request: Backend.CodegenRequest,
-  backend?: Backend.Backend,
+  backend?: Backend.Backend<A>,
 ): Effect.fn.Return<
-  Backend.Artifact,
+  A,
   Backend.BackendError | Target.TargetError | AnalysisUnavailable | CodegenUnavailable
 > {
   if (Diagnostic.hasErrors(self.diagnostics) || self.closure.resolutionFailures.length > 0) {
@@ -870,16 +871,9 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
     })
   }
   if (self.mir._tag === 'Unavailable') return yield* self.mir.error
-  const target = self.mir.value.layout.target
-  const selected = backend ?? BackendRegistry.forTarget(target)
-  if (selected === undefined) {
-    return yield* new Backend.BackendError({
-      operation: 'Backend.emit',
-      backend: 'Analysis.codegen',
-      message: `no backend supports target ${target.id}`,
-      reason: { _tag: 'UnsupportedTarget', target: target.id },
-    })
-  }
+  // The cast closes the generic default/override variance gap: omitted selection is LLVM, while
+  // an explicit backend determines A at the call site.
+  const selected = backend ?? (Backend.LlvmBackend as Backend.Backend<A>)
   return yield* Backend.emit(selected, self.mir.value, {
     ...request,
     sources:
@@ -894,22 +888,25 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
 })
 
 /**
- * Emits the snapshot's lowered program as WebAssembly. The artifact's `ir` carries the WAT
- * inspection text and its `bitcode` carries the instantiable wasm binary, mirroring how
- * {@link codegen} pairs LLVM IR text with bitcode.
- *
- * Prefer {@link codegen} on a snapshot built for a WebAssembly target: the backend follows from
- * the target, so naming both is redundant and lets them disagree. This forces the WebAssembly
- * backend regardless of target, which fails on a snapshot lowered for a native one.
+ * Emits the snapshot through the direct WebAssembly backend. The final-module artifact's `wat`
+ * carries inspection text and `bytes` carries the instantiable module. A native-target snapshot
+ * is rejected by compatibility validation.
  */
 export const codegenWasm = Effect.fn('Analysis.codegenWasm')(function* (
   self: Snapshot,
   request: Backend.CodegenRequest,
 ): Effect.fn.Return<
-  Backend.Artifact,
+  Backend.WebAssemblyModuleArtifact,
   Backend.BackendError | Target.TargetError | AnalysisUnavailable | CodegenUnavailable
 > {
-  return yield* codegen(self, request, WasmBackend.WasmBackend)
+  const artifact = yield* codegen(self, request, WasmBackend.WasmBackend)
+  if (artifact._tag === 'WebAssemblyModuleArtifact') return artifact
+  return yield* new Backend.BackendError({
+    operation: 'Backend.emit',
+    backend: WasmBackend.WasmBackend.name,
+    message: 'WebAssembly backend returned a non-WebAssembly artifact',
+    reason: { _tag: 'UnsupportedMir', detail: 'backend artifact kind mismatch' },
+  })
 })
 
 /** Returns backend-local control constructs with canonical region and source provenance. */

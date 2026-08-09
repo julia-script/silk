@@ -1,3 +1,4 @@
+import * as Backend from '@silk-effect/compiler/Backend'
 import * as Target from '@silk-effect/compiler/Target'
 import type * as ToolchainPlan from '@silk-effect/compiler/ToolchainPlan'
 import * as Console from 'effect/Console'
@@ -67,6 +68,15 @@ export interface Options {
 export const run = Effect.fn('BuildExeCommand.run')(function* (
   options: Options,
 ): Effect.fn.Return<Workflow.ExitStatus, never, FileSystem.FileSystem | Path.Path> {
+  const selected = Target.select(options.target)
+  if (selected._tag === 'Unavailable' || !Target.isNative(selected.target)) {
+    yield* Console.error(
+      selected._tag === 'Unavailable'
+        ? selected.error.message
+        : `build-exe requires a native target; received ${selected.target.id}`,
+    )
+    return 2
+  }
   const loaded = yield* Effect.result(SourceEntry.read(options.source, options.sourceRoot))
   if (Result.isFailure(loaded)) {
     yield* Console.error(loaded.failure.message)
@@ -74,6 +84,7 @@ export const run = Effect.fn('BuildExeCommand.run')(function* (
   }
   const attempted = yield* Workflow.compile({
     entry: loaded.success,
+    backend: Backend.LlvmBackend,
     ...(options.target === undefined ? {} : { target: options.target }),
     profile: options.profile,
     destination: options.output,

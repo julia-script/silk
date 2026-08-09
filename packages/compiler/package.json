@@ -41,6 +41,10 @@
       "types": "./dist/Backend.d.ts",
       "import": "./dist/Backend.js"
     },
+    "./BackendRegistry": {
+      "types": "./dist/BackendRegistry.d.ts",
+      "import": "./dist/BackendRegistry.js"
+    },
     "./BootstrapEvaluation": {
       "types": "./dist/BootstrapEvaluation.d.ts",
       "import": "./dist/BootstrapEvaluation.js"

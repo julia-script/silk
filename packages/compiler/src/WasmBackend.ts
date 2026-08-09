@@ -33,8 +33,8 @@ const planHasHook = (plan: Ownership.CleanupPlan): boolean =>
  * same MIR subset the bootstrap LLVM backend covers: logical scalar/aggregate locals, trapping
  * arithmetic, direct calls, checked replacement, and canonical structured control regions.
  *
- * The artifact reuses the nominal `Backend.Artifact` shape: `bitcode` carries the wasm binary and
- * `ir` carries the WAT inspection text, mirroring how the LLVM backend pairs bitcode with IR text.
+ * The backend returns a final-module artifact: `bytes` carries the validated wasm binary and `wat`
+ * carries deterministic inspection text. It never masquerades as LLVM bitcode.
  */
 
 /**
@@ -2443,17 +2443,17 @@ const controlProvenance = (program: Mir.Module): ReadonlyArray<Backend.ControlPr
 
 /**
  * The WebAssembly backend over the Silk wasm builder. It satisfies the same nominal `Backend`
- * contract as `Backend.LlvmBackend`, so `Analysis.codegen` and the driver accept it in place of
- * the LLVM backend with no other change.
+ * contract as `Backend.LlvmBackend`, while its artifact kind selects a different finalizer.
  */
-export const WasmBackend: Backend.Backend = Object.freeze({
+export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = Object.freeze({
   _tag: 'Backend',
+  id: 'wasm',
   name: 'WebAssembly',
   targets: Object.freeze([Target.wasm32UnknownUnknown.id]),
   emit: Effect.fn('Backend.WebAssembly.emit')(function* (
     program: Mir.Module,
     request: Backend.CodegenRequest,
-  ): Effect.fn.Return<Backend.Artifact, Backend.BackendError> {
+  ): Effect.fn.Return<Backend.WebAssemblyModuleArtifact, Backend.BackendError> {
     const output = yield* emitProgram(program, request).pipe(
       Effect.mapError((cause) =>
         cause._tag === 'BackendError'
@@ -2467,13 +2467,14 @@ export const WasmBackend: Backend.Backend = Object.freeze({
       ),
     )
     return Object.freeze({
-      _tag: 'BackendArtifact',
+      _tag: 'WebAssemblyModuleArtifact',
+      backend: 'wasm',
       module: program.module,
       target: program.layout.target,
       symbols: Object.freeze(output.symbols),
       control: controlProvenance(program),
-      bitcode: output.bitcode,
-      ir: output.ir,
+      bytes: output.bitcode,
+      wat: output.ir,
     })
   }),
 })

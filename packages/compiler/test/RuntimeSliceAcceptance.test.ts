@@ -37,7 +37,7 @@ it.effect(
 
       const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
       const wasmInstance = new WebAssembly.Instance(
-        new WebAssembly.Module(wasmArtifact.bitcode.slice()),
+        new WebAssembly.Module(wasmArtifact.bytes.slice()),
         {},
       )
       const wasmMain = wasmInstance.exports.silk_main as () => number
@@ -51,7 +51,7 @@ it.effect(
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled')
       if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(run.status, 42, run.stderr)
     }),
 )

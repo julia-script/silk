@@ -323,7 +323,10 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
   const root = mkdtempSync(join(tmpdir(), 'silk-lsp-e2e-'))
   const sourceRoot = join(root, 'src')
   mkdirSync(sourceRoot)
-  writeFileSync(join(root, 'silk.toml'), '[package]\nname = "navigation"\nroot = "src/Main.silk"\n')
+  writeFileSync(
+    join(root, 'silk.toml'),
+    '[package]\nname = "navigation"\nversion = "0.1.0"\nroot = "src/Main.silk"\n',
+  )
   const mainPath = join(sourceRoot, 'Main.silk')
   const utilPath = join(sourceRoot, 'Util.silk')
   const mainText = 'import Util\npub fn main() -> I32 { return Util.answer() }'
@@ -420,7 +423,7 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
     writeFileSync(join(alternateRoot, 'Util.silk'), 'pub fn other() -> I32 { return 11 }')
     writeFileSync(
       join(root, 'silk.toml'),
-      '[package]\nname = "navigation"\nroot = "alt/Entry.silk"\nsource-root = "alt"\n',
+      '[package]\nname = "navigation"\nversion = "0.1.0"\nroot = "alt/Entry.silk"\nsource-root = "alt"\n',
     )
     nextMessage = client.messages.length
     client.send({

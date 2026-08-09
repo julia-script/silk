@@ -1,9 +1,11 @@
+import type * as Backend from '@silk-effect/compiler/Backend'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import { parse, TomlDate, type TomlTable, type TomlValue } from 'smol-toml'
 import * as SourceEntry from './SourceEntry.js'
+import * as TargetSelector from './TargetSelector.js'
 
 /** The conventional project manifest name used by upward discovery. */
 export const manifestName = 'silk.toml'
@@ -12,9 +14,18 @@ export const manifestName = 'silk.toml'
 export interface Project {
   readonly _tag: 'Project'
   readonly name: string
+  readonly version: string
   readonly manifestPath: string
   readonly directory: string
   readonly entry: SourceEntry.SourceEntry
+  readonly build: BuildConfiguration
+}
+
+/** Materialized project build defaults, including an absolute manifest-relative output root. */
+export interface BuildConfiguration {
+  readonly backend: Backend.Id
+  readonly targets: ReadonlyArray<TargetSelector.TargetSelector>
+  readonly outputDirectory: string
 }
 
 export type ProjectErrorReason =
@@ -37,9 +48,14 @@ export interface LoadOptions {
 }
 
 const packageNamePattern = /^[a-z][a-z0-9-]*$/
+const semanticVersionPattern =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
 
 /** Whether a name is portable across the initial artifact and package conventions. */
 export const isPackageName = (name: string): boolean => packageNamePattern.test(name)
+
+/** Whether a package version is a complete Semantic Versioning 2.0.0 value. */
+export const isSemanticVersion = (version: string): boolean => semanticVersionPattern.test(version)
 
 const isTable = (value: TomlValue | undefined): value is TomlTable =>
   typeof value === 'object' &&
@@ -55,7 +71,7 @@ const invalidManifest = (manifestPath: string, detail: string): ProjectError =>
     reason: { _tag: 'InvalidManifest', detail },
   })
 
-const decodePackage = Effect.fnUntraced(function* (manifestPath: string, text: string) {
+const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: string) {
   const document = yield* Effect.try({
     try: () => parse(text),
     catch: (cause) =>
@@ -84,7 +100,67 @@ const decodePackage = Effect.fnUntraced(function* (manifestPath: string, text: s
   if (sourceRoot !== undefined && (typeof sourceRoot !== 'string' || sourceRoot.length === 0)) {
     return yield* invalidManifest(manifestPath, 'package.source-root must be a non-empty string')
   }
-  return { name, root, sourceRoot }
+  const version = packageTable.version
+  if (typeof version !== 'string' || !isSemanticVersion(version)) {
+    return yield* invalidManifest(manifestPath, 'package.version must be a valid semantic version')
+  }
+
+  const buildTable = document.build
+  if (buildTable !== undefined && !isTable(buildTable)) {
+    return yield* invalidManifest(manifestPath, '[build] must be a table')
+  }
+  const backendValue = buildTable?.backend ?? 'llvm'
+  if (backendValue !== 'llvm' && backendValue !== 'wasm') {
+    return yield* invalidManifest(manifestPath, 'build.backend must be llvm or wasm')
+  }
+  const backend: Backend.Id = backendValue === 'wasm' ? 'wasm' : 'llvm'
+  const defaultTargets: ReadonlyArray<TargetSelector.TargetSelector> =
+    backend === 'wasm' ? ['wasm32-unknown-unknown'] : ['host']
+  const targetsValue = buildTable?.targets ?? defaultTargets
+  if (
+    !Array.isArray(targetsValue) ||
+    targetsValue.length === 0 ||
+    targetsValue.some(
+      (target) => typeof target !== 'string' || !TargetSelector.isTargetSelector(target),
+    )
+  ) {
+    return yield* invalidManifest(
+      manifestPath,
+      'build.targets must be a non-empty array of host or canonical target ids',
+    )
+  }
+  const outputDirectory = buildTable?.['output-dir'] ?? 'build'
+  let outputDepth = 0
+  let outputEscapes = false
+  if (typeof outputDirectory === 'string') {
+    for (const segment of outputDirectory.split(/[\\/]+/)) {
+      if (segment === '' || segment === '.') continue
+      outputDepth += segment === '..' ? -1 : 1
+      if (outputDepth < 0) outputEscapes = true
+    }
+  }
+  if (
+    typeof outputDirectory !== 'string' ||
+    outputDirectory.length === 0 ||
+    outputDirectory.includes('\0') ||
+    outputDirectory.startsWith('/') ||
+    /^[A-Za-z]:[\\/]/.test(outputDirectory) ||
+    outputEscapes
+  ) {
+    return yield* invalidManifest(
+      manifestPath,
+      'build.output-dir must be a non-empty manifest-relative directory that does not escape the project',
+    )
+  }
+  return {
+    name,
+    version,
+    root,
+    sourceRoot,
+    backend,
+    targets: Object.freeze([...targetsValue]) as ReadonlyArray<TargetSelector.TargetSelector>,
+    outputDirectory,
+  }
 })
 
 /** Finds the nearest ancestor `silk.toml`, beginning at the selected working directory. */
@@ -145,7 +221,7 @@ export const load = Effect.fn('Project.load')(function* (
         }),
     ),
   )
-  const manifest = yield* decodePackage(manifestPath, text)
+  const manifest = yield* decodeManifest(manifestPath, text)
   const directory = path.dirname(manifestPath)
   const entryPath = path.resolve(directory, manifest.root)
   const selectedSourceRoot =
@@ -167,8 +243,14 @@ export const load = Effect.fn('Project.load')(function* (
   return Object.freeze({
     _tag: 'Project' as const,
     name: manifest.name,
+    version: manifest.version,
     manifestPath,
     directory,
     entry,
+    build: Object.freeze({
+      backend: manifest.backend,
+      targets: manifest.targets,
+      outputDirectory: path.resolve(directory, manifest.outputDirectory),
+    }),
   })
 })

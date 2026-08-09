@@ -11,7 +11,7 @@ const snapshot = (source: string, target = 'wasm32-unknown-unknown') =>
 
 const runWasm = Effect.fnUntraced(function* (source: string) {
   const self = yield* snapshot(source)
-  const bytes = (yield* Analysis.codegenWasm(self, { mode: 'release' })).bitcode.slice()
+  const bytes = (yield* Analysis.codegenWasm(self, { mode: 'release' })).bytes.slice()
   const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes), {})
   const main = instance.exports.silk_main
   if (typeof main !== 'function') throw new Error('wasm program lost silk_main')
@@ -81,9 +81,9 @@ it.effect('emits scalar and checked-array loops directly as structured WebAssemb
     assert.strictEqual(yield* runWasm(scalar), 3)
     assert.strictEqual(yield* runWasm(array), 3)
     const artifact = yield* Analysis.codegenWasm(yield* snapshot(scalar), { mode: 'release' })
-    assert.include(artifact.ir, 'block')
-    assert.include(artifact.ir, 'loop')
-    assert.notInclude(artifact.ir, 'br_table')
+    assert.include(artifact.wat, 'block')
+    assert.include(artifact.wat, 'loop')
+    assert.notInclude(artifact.wat, 'br_table')
     assert.strictEqual(
       artifact.control.some((entry) => entry.construct === 'WasmLoop'),
       true,
@@ -332,8 +332,8 @@ it.effect('repeats loop DAG encodings, facade facts, traces, and wasm bytes exac
     assert.deepEqual(Analysis.evaluate(first), Analysis.evaluate(second))
     const firstArtifact = yield* Analysis.codegenWasm(first, { mode: 'release' })
     const secondArtifact = yield* Analysis.codegenWasm(second, { mode: 'release' })
-    assert.strictEqual(firstArtifact.ir, secondArtifact.ir)
-    assert.deepEqual(firstArtifact.bitcode, secondArtifact.bitcode)
+    assert.strictEqual(firstArtifact.wat, secondArtifact.wat)
+    assert.deepEqual(firstArtifact.bytes, secondArtifact.bytes)
     assert.deepEqual(
       Analysis.backendControlOf(firstArtifact),
       Analysis.backendControlOf(secondArtifact),

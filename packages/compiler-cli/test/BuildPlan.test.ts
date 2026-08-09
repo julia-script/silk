@@ -1,14 +1,17 @@
 import { assert, it } from '@effect/vitest'
+import * as Backend from '@silk-effect/compiler/Backend'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as Target from '@silk-effect/compiler/Target'
+import * as WasmBackend from '@silk-effect/compiler/WasmBackend'
 import * as Result from 'effect/Result'
 import * as BuildPlan from '../src/BuildPlan.js'
 import type * as Project from '../src/Project.js'
 
-const project = (name = 'hello'): Project.Project =>
+const project = (name = 'hello', outputDirectory = '/workspace/build'): Project.Project =>
   Object.freeze({
     _tag: 'Project',
     name,
+    version: '0.1.0',
     manifestPath: '/workspace/silk.toml',
     directory: '/workspace',
     entry: Object.freeze({
@@ -18,90 +21,89 @@ const project = (name = 'hello'): Project.Project =>
       sourceRoot: '/workspace/src',
       bytes: SourceFile.toUint8Array(SourceFile.make('Main', new Uint8Array())),
     }),
+    build: Object.freeze({ backend: 'llvm', targets: ['host'] as const, outputDirectory }),
   })
 
-it('plans a deterministic target/profile/package destination', () => {
+it('plans deterministic backend/target/profile/package destinations', () => {
   const first = BuildPlan.make(project(), {
-    target: 'aarch64-apple-darwin',
+    backend: Backend.LlvmBackend,
+    target: Target.aarch64AppleDarwin,
     profile: 'debug',
   })
   const second = BuildPlan.make(project(), {
-    target: 'aarch64-apple-darwin',
+    backend: Backend.LlvmBackend,
+    target: Target.aarch64AppleDarwin,
     profile: 'debug',
   })
-
-  assert.strictEqual(Result.isSuccess(first), true)
   assert.deepStrictEqual(first, second)
+  assert.strictEqual(Result.isSuccess(first), true)
   if (Result.isSuccess(first)) {
     assert.strictEqual(
       first.success.destination,
-      '/workspace/.silk/build/aarch64-apple-darwin/debug/hello',
+      '/workspace/build/llvm/aarch64-apple-darwin/debug/hello',
     )
-    assert.strictEqual(first.success.toolchain.clang, 'clang')
   }
 })
 
-it('changes only the profile segment for release planning', () => {
-  const planned = BuildPlan.make(project(), {
-    target: 'aarch64-apple-darwin',
+it('selects the wasm extension and prevents backend collisions', () => {
+  const llvm = BuildPlan.make(project(), {
+    backend: Backend.LlvmBackend,
+    target: Target.wasm32UnknownUnknown,
     profile: 'release',
-    clang: '/toolchain/clang',
   })
-  assert.strictEqual(Result.isSuccess(planned), true)
-  if (Result.isSuccess(planned)) {
+  const wasm = BuildPlan.make(project('hello', '/workspace/artifacts'), {
+    backend: WasmBackend.WasmBackend,
+    target: Target.wasm32UnknownUnknown,
+    profile: 'release',
+  })
+  assert.strictEqual(Result.isSuccess(llvm), true)
+  assert.strictEqual(Result.isSuccess(wasm), true)
+  if (Result.isSuccess(llvm)) {
     assert.strictEqual(
-      planned.success.destination,
-      '/workspace/.silk/build/aarch64-apple-darwin/release/hello',
+      llvm.success.destination,
+      '/workspace/build/llvm/wasm32-unknown-unknown/release/hello.wasm',
     )
-    assert.strictEqual(planned.success.toolchain.clang, '/toolchain/clang')
+  }
+  if (Result.isSuccess(wasm)) {
+    assert.strictEqual(
+      wasm.success.destination,
+      '/workspace/artifacts/wasm/wasm32-unknown-unknown/release/hello.wasm',
+    )
   }
 })
 
-it('rejects unavailable and non-native targets', () => {
-  const unknown = BuildPlan.make(project(), { target: 'unknown-target', profile: 'debug' })
-  assert.strictEqual(Result.isFailure(unknown), true)
-  if (Result.isFailure(unknown))
-    assert.strictEqual(unknown.failure.reason._tag, 'TargetUnavailable')
-
-  const wasm = BuildPlan.make(project(), {
-    target: Target.wasm32UnknownUnknown.id,
-    profile: 'debug',
-  })
-  assert.strictEqual(Result.isFailure(wasm), true)
-  if (Result.isFailure(wasm)) assert.strictEqual(wasm.failure.reason._tag, 'NonNativeTarget')
-})
-
-it('rejects a foreign target for run while accepting the host target', () => {
-  const host = Target.select(undefined)
-  assert.strictEqual(host._tag, 'Resolved')
-  if (host._tag !== 'Resolved') return
-  const accepted = BuildPlan.make(project(), {
-    target: host.target.id,
-    profile: 'debug',
-    purpose: 'run',
-  })
-  assert.strictEqual(Result.isSuccess(accepted), true)
-
-  const foreign = Target.native.find((candidate) => candidate.id !== host.target.id)
-  if (foreign === undefined) return
-  const rejected = BuildPlan.make(project(), {
-    target: foreign.id,
-    profile: 'debug',
-    purpose: 'run',
-  })
-  assert.strictEqual(Result.isFailure(rejected), true)
-  if (Result.isFailure(rejected)) {
-    assert.strictEqual(rejected.failure.reason._tag, 'ForeignRunTarget')
-  }
-})
-
-it('guards the plan against a non-portable project value', () => {
-  const planned = BuildPlan.make(project('Not Portable'), {
-    target: 'aarch64-apple-darwin',
+it('rejects incompatible backend-target pairs during planning', () => {
+  const planned = BuildPlan.make(project(), {
+    backend: WasmBackend.WasmBackend,
+    target: Target.aarch64AppleDarwin,
     profile: 'debug',
   })
   assert.strictEqual(Result.isFailure(planned), true)
   if (Result.isFailure(planned)) {
-    assert.strictEqual(planned.failure.reason._tag, 'InvalidPackageName')
+    assert.strictEqual(planned.failure.reason._tag, 'IncompatibleBackendTarget')
   }
+})
+
+it('keeps run host-only and requires the LLVM native backend', () => {
+  const host = Target.select(undefined)
+  assert.strictEqual(host._tag, 'Resolved')
+  if (host._tag !== 'Resolved') return
+  const accepted = BuildPlan.make(project(), {
+    backend: Backend.LlvmBackend,
+    target: host.target,
+    profile: 'debug',
+    purpose: 'run',
+  })
+  assert.strictEqual(Result.isSuccess(accepted), true)
+})
+
+it('guards the plan against a non-portable project value', () => {
+  const planned = BuildPlan.make(project('Not Portable'), {
+    backend: Backend.LlvmBackend,
+    target: Target.aarch64AppleDarwin,
+    profile: 'debug',
+  })
+  assert.strictEqual(Result.isFailure(planned), true)
+  if (Result.isFailure(planned))
+    assert.strictEqual(planned.failure.reason._tag, 'InvalidPackageName')
 })

@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type * as Backend from './Backend.js'
@@ -7,8 +15,10 @@ import type * as Target from './Target.js'
 import * as ToolchainPlan from './ToolchainPlan.js'
 
 /**
- * Pinned-Clang orchestration: build scopes owning path-backed intermediates, object emission
- * completing the backend contract, the runtime shim, and the `NativeLinker` service with its
+ * Pinned-Clang and durable-artifact orchestration: build scopes own path-backed intermediates,
+ * native object/shim/link work and LLVM-Wasm finalization share one process boundary, while final
+ * direct-Wasm bytes use the same atomic storage boundary without invoking Clang. The
+ * `NativeLinker` service with its
  * `ClangLinker` implementation. Node-only by construction — reachable as a deep import so the
  * package root stays browser-safe. Failures are data with full command provenance.
  */
@@ -65,6 +75,26 @@ export interface Executable {
   readonly planned: ToolchainPlan.PlannedCommand
 }
 
+/** A durable artifact produced after backend emission. */
+export interface FinalArtifact {
+  readonly _tag: 'FinalArtifact'
+  readonly kind: 'NativeExecutable' | 'WebAssemblyModule'
+  readonly path: string
+  readonly target: Target.Target
+  readonly planned?: ToolchainPlan.PlannedCommand
+}
+
+/** Durable artifact storage failed outside an external process. */
+export interface StorageFailure {
+  readonly _tag: 'StorageFailure'
+  readonly operation: 'NativeToolchain.commit'
+  readonly destination: string
+  readonly message: string
+  readonly cause: unknown
+}
+
+export type FinalizationFailure = ToolchainFailure | StorageFailure
+
 /**
  * Runs one function inside a named build scope. The scope's directory and every unpromoted
  * artifact are removed at exit — after success and failure alike — unless `saveTemps` retains
@@ -105,6 +135,29 @@ export const promote = (artifact: PathArtifact, destination: string): string => 
   return target
 }
 
+const storageFailure = (destination: string, cause: unknown): StorageFailure =>
+  Object.freeze({
+    _tag: 'StorageFailure',
+    operation: 'NativeToolchain.commit',
+    destination,
+    message: `Cannot commit build artifact to ${destination}`,
+    cause,
+  })
+
+/** Atomically commits a scope-owned file through a same-directory temporary sibling. */
+const commit = (artifact: PathArtifact, destination: string): string | StorageFailure => {
+  const target = resolve(destination)
+  const temporary = `${target}.silk-tmp-${process.pid}`
+  try {
+    copyFileSync(artifact.path, temporary)
+    renameSync(temporary, target)
+    return target
+  } catch (cause) {
+    rmSync(temporary, { force: true })
+    return storageFailure(target, cause)
+  }
+}
+
 const runPlanned = (
   planned: ToolchainPlan.PlannedCommand,
 ): { readonly status: number | null; readonly output: string } => {
@@ -127,7 +180,7 @@ const failure = (
 export const emitObject = (
   toolchain: Toolchain,
   scope: BuildScope,
-  artifact: Backend.Artifact,
+  artifact: Backend.LlvmBitcodeArtifact,
   target: Target.Target,
   profile: ToolchainPlan.OptimizationProfile,
   baseName = 'program',
@@ -211,12 +264,13 @@ export const ClangLinker: NativeLinker = Object.freeze({
     destination: string,
   ): Executable | ToolchainFailure => {
     const destinationPath = resolve(destination)
+    const temporaryPath = `${destinationPath}.silk-tmp-${process.pid}`
     const planned = ToolchainPlan.linkCommand(
       toolchain.clang,
       target,
       objects.map((object) => object.path),
       libraries,
-      destinationPath,
+      temporaryPath,
     )
     for (const object of objects) {
       if (object.target.id !== target.id) {
@@ -235,8 +289,15 @@ export const ClangLinker: NativeLinker = Object.freeze({
       }
     }
     const result = runPlanned(planned)
-    if (result.status !== 0 || !existsSync(destinationPath)) {
+    if (result.status !== 0 || !existsSync(temporaryPath)) {
+      rmSync(temporaryPath, { force: true })
       return failure(planned, result.status, result.output)
+    }
+    try {
+      renameSync(temporaryPath, destinationPath)
+    } catch (cause) {
+      rmSync(temporaryPath, { force: true })
+      return failure(planned, null, `cannot commit linked executable: ${String(cause)}`)
     }
     return Object.freeze({
       _tag: 'Executable',
@@ -246,3 +307,97 @@ export const ClangLinker: NativeLinker = Object.freeze({
     })
   },
 })
+
+const hasWasmHeader = (path: string): boolean => {
+  const bytes = readFileSync(path)
+  return (
+    bytes.length >= 8 &&
+    bytes[0] === 0 &&
+    bytes[1] === 97 &&
+    bytes[2] === 115 &&
+    bytes[3] === 109 &&
+    bytes[4] === 1 &&
+    bytes[5] === 0 &&
+    bytes[6] === 0 &&
+    bytes[7] === 0
+  )
+}
+
+/** Finalizes LLVM bitcode as a standalone WebAssembly module and atomically commits it. */
+export const finalizeWasm = (
+  toolchain: Toolchain,
+  scope: BuildScope,
+  artifact: Backend.LlvmBitcodeArtifact,
+  target: Target.Target,
+  profile: ToolchainPlan.OptimizationProfile,
+  destination: string,
+): FinalArtifact | FinalizationFailure => {
+  try {
+    const bitcode = writeArtifact(scope, target, 'program.bc', artifact.bitcode)
+    const outputPath = join(scope.root, 'program.wasm')
+    const planned = ToolchainPlan.wasmCommand(
+      toolchain.clang,
+      target,
+      profile,
+      bitcode.path,
+      outputPath,
+    )
+    if (artifact.target.id !== target.id) {
+      return failure(
+        planned,
+        null,
+        `bitcode target ${artifact.target.id} does not match requested target ${target.id}`,
+        {
+          _tag: 'TargetMismatch',
+          expected: target.id,
+          actual: artifact.target.id,
+        },
+      )
+    }
+    const result = runPlanned(planned)
+    if (result.status !== 0 || !existsSync(outputPath) || !hasWasmHeader(outputPath)) {
+      return failure(planned, result.status, result.output)
+    }
+    const committed = commit(
+      Object.freeze({ _tag: 'PathArtifact', scope: scope.name, path: outputPath, target }),
+      destination,
+    )
+    if (typeof committed !== 'string') return committed
+    return Object.freeze({
+      _tag: 'FinalArtifact',
+      kind: 'WebAssemblyModule',
+      path: committed,
+      target,
+      planned,
+    })
+  } catch (cause) {
+    return storageFailure(destination, cause)
+  }
+}
+
+/** Atomically commits already-validated direct WebAssembly bytes without invoking Clang. */
+export const commitWasm = (
+  scope: BuildScope,
+  artifact: Backend.WebAssemblyModuleArtifact,
+  destination: string,
+): FinalArtifact | StorageFailure => {
+  try {
+    const staged = writeArtifact(scope, artifact.target, 'program.wasm', artifact.bytes)
+    if (!hasWasmHeader(staged.path)) {
+      return storageFailure(
+        destination,
+        new TypeError('backend bytes are not a WebAssembly module'),
+      )
+    }
+    const committed = commit(staged, destination)
+    if (typeof committed !== 'string') return committed
+    return Object.freeze({
+      _tag: 'FinalArtifact',
+      kind: 'WebAssemblyModule',
+      path: committed,
+      target: artifact.target,
+    })
+  } catch (cause) {
+    return storageFailure(destination, cause)
+  }
+}

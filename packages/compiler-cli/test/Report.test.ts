@@ -96,7 +96,9 @@ it('explains a missing entry in terms of the declaration the user must add', () 
 it('names the executable, target, and symbol count on success', () => {
   const outcome: Driver.Outcome = {
     _tag: 'Compiled',
-    executable: '/tmp/a.out',
+    backend: 'llvm',
+    artifactKind: 'NativeExecutable',
+    path: '/tmp/a.out',
     target: { id: 'aarch64-apple-darwin' } as Driver.Compiled['target'],
     symbols: [
       {
@@ -115,7 +117,7 @@ it('names the executable, target, and symbol count on success', () => {
   }
   assert.strictEqual(
     Report.outcome(outcome, source('pub fn main() -> I32 { return 42 }'), 'main.silk'),
-    'Compiled main.silk -> /tmp/a.out (aarch64-apple-darwin, 1 symbols)',
+    'Compiled main.silk -> /tmp/a.out (llvm, aarch64-apple-darwin, 1 symbols)',
   )
 })
 

@@ -19,8 +19,8 @@ import * as Target from './Target.js'
 import type * as ToolchainPlan from './ToolchainPlan.js'
 
 /**
- * The end-to-end compiler driver: one orchestration path from a compilation request to a running
- * native executable. The driver invokes the backend and linker services itself — no external
+ * The end-to-end compiler driver: one orchestration path from a compilation request to a durable
+ * native executable or WebAssembly module. The driver invokes backend and finalizer boundaries itself — no external
  * harness performs a stage. Outcomes are closed data naming failing stages with provenance, and
  * every run carries a per-phase report: elapsed time, input and output counts, diagnostic
  * counts, and engine-heap memory totals (the bootstrap approximation of allocator totals).
@@ -47,10 +47,12 @@ export interface CompileRequest {
   readonly saveTemps?: boolean
 }
 
-/** A completed compilation with its executable and report. */
+/** A completed compilation with its durable artifact identity and report. */
 export interface Compiled {
   readonly _tag: 'Compiled'
-  readonly executable: string
+  readonly backend: Backend.Id
+  readonly artifactKind: NativeToolchain.FinalArtifact['kind']
+  readonly path: string
   readonly target: Target.Target
   readonly symbols: ReadonlyArray<Backend.SymbolEntry>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -65,15 +67,15 @@ export interface NoEntry {
   readonly report: ReadonlyArray<PhaseReport>
 }
 
-/** A native stage failed; the outcome names it with full command provenance. */
+/** A finalization stage failed; the outcome retains command or storage provenance. */
 export interface Failed {
   readonly _tag: 'Failed'
-  readonly stage: 'object' | 'shim' | 'link'
-  readonly failure: NativeToolchain.ToolchainFailure
+  readonly stage: 'object' | 'shim' | 'link' | 'wasm-finalize' | 'artifact-commit'
+  readonly failure: NativeToolchain.FinalizationFailure
   readonly report: ReadonlyArray<PhaseReport>
 }
 
-/** Target selection or native-kind validation stopped compilation before MIR lowering. */
+/** Target selection stopped compilation before MIR lowering. */
 export interface TargetFailed {
   readonly _tag: 'TargetFailed'
   readonly error: Target.TargetError
@@ -81,7 +83,7 @@ export interface TargetFailed {
   readonly report: ReadonlyArray<PhaseReport>
 }
 
-/** Shared MIR validation, compatibility, or backend construction stopped native emission. */
+/** Shared MIR validation, compatibility, or backend construction stopped emission. */
 export interface BackendFailed {
   readonly _tag: 'BackendFailed'
   readonly error: Backend.BackendError
@@ -110,7 +112,7 @@ export class SourceResolutionFailed extends Data.TaggedError('SourceResolutionFa
 /** The closed outcome of one driver run. */
 export type Outcome = Compiled | Rejected | NoEntry | TargetFailed | BackendFailed | Failed
 
-/** Compiles one request end to end, writing the executable to the durable destination. */
+/** Compiles one request end to end, writing its final artifact to the durable destination. */
 export const compile = Effect.fn('Driver.compile')(function* (
   request: CompileRequest,
 ): Effect.fn.Return<Outcome, SourceResolutionFailed, SourceResolver.SourceResolver> {
@@ -262,19 +264,22 @@ export const compile = Effect.fn('Driver.compile')(function* (
     })
   }
 
+  const backend = request.backend ?? Backend.LlvmBackend
   const targetAndLayout = phase(
     'target-layout',
     discovery.instances.length,
     () => {
       const selection = Target.select(request.compilation.target)
       if (selection._tag === 'Unavailable') return selection
-      if (!Target.isNative(selection.target)) {
+      const compatible = BackendRegistry.requireTarget(backend, selection.target)
+      if (compatible._tag === 'Failure') {
         return Object.freeze({
-          _tag: 'Unavailable' as const,
-          error: new Target.TargetError({
-            operation: 'Target.requireNative',
-            requested: selection.target.id,
-            message: `Native compilation does not support target ${selection.target.id}`,
+          _tag: 'BackendUnavailable' as const,
+          error: new Backend.BackendError({
+            operation: 'Backend.emit',
+            backend: backend.id,
+            message: compatible.failure.message,
+            reason: { _tag: 'UnsupportedTarget', target: selection.target.id },
           }),
         })
       }
@@ -288,6 +293,14 @@ export const compile = Effect.fn('Driver.compile')(function* (
     },
     (result) => (result._tag === 'Available' ? result.layout.entries.length : 0),
   )
+  if (targetAndLayout._tag === 'BackendUnavailable') {
+    return Object.freeze({
+      _tag: 'BackendFailed',
+      error: targetAndLayout.error,
+      diagnostics,
+      report: Object.freeze([...report]),
+    })
+  }
   if (targetAndLayout._tag === 'Unavailable') {
     return Object.freeze({
       _tag: 'TargetFailed',
@@ -312,10 +325,6 @@ export const compile = Effect.fn('Driver.compile')(function* (
     () => Lower.lowerProgram(discovery, ownership, targetAndLayout.layout, index),
     (result) => result.functions.length,
   )
-  // The backend follows from the resolved target unless the request names one; defaulting to
-  // LLVM would send a WebAssembly build to a backend that rejects it.
-  const backend =
-    request.backend ?? BackendRegistry.forTarget(targetAndLayout.target) ?? Backend.LlvmBackend
   const backendStartedAt = performance.now()
   const emitted = yield* Backend.emit(backend, program, {
     mode: request.profile === 'release' ? 'release' : 'debug',
@@ -351,6 +360,68 @@ export const compile = Effect.fn('Driver.compile')(function* (
   return NativeToolchain.withBuildScope(
     request.scopeName ?? 'driver',
     (scope) => {
+      if (artifact._tag === 'WebAssemblyModuleArtifact') {
+        const committed = phase(
+          'artifact-commit',
+          1,
+          () => NativeToolchain.commitWasm(scope, artifact, request.destination),
+          (result) => (result._tag === 'FinalArtifact' ? 1 : 0),
+        )
+        if (committed._tag === 'StorageFailure') {
+          return Object.freeze({
+            _tag: 'Failed',
+            stage: 'artifact-commit',
+            failure: committed,
+            report: Object.freeze([...report]),
+          })
+        }
+        return Object.freeze({
+          _tag: 'Compiled',
+          backend: artifact.backend,
+          artifactKind: committed.kind,
+          path: committed.path,
+          target: committed.target,
+          symbols: artifact.symbols,
+          diagnostics,
+          report: Object.freeze([...report]),
+        })
+      }
+
+      if (!Target.isNative(targetAndLayout.target)) {
+        const finalized = phase(
+          'wasm-finalize',
+          1,
+          () =>
+            NativeToolchain.finalizeWasm(
+              request.toolchain,
+              scope,
+              artifact,
+              targetAndLayout.target,
+              request.profile,
+              request.destination,
+            ),
+          (result) => (result._tag === 'FinalArtifact' ? 1 : 0),
+        )
+        if (finalized._tag !== 'FinalArtifact') {
+          return Object.freeze({
+            _tag: 'Failed',
+            stage: 'wasm-finalize',
+            failure: finalized,
+            report: Object.freeze([...report]),
+          })
+        }
+        return Object.freeze({
+          _tag: 'Compiled',
+          backend: artifact.backend,
+          artifactKind: finalized.kind,
+          path: finalized.path,
+          target: finalized.target,
+          symbols: artifact.symbols,
+          diagnostics,
+          report: Object.freeze([...report]),
+        })
+      }
+
       const object = phase(
         'object',
         1,
@@ -409,7 +480,9 @@ export const compile = Effect.fn('Driver.compile')(function* (
       }
       return Object.freeze({
         _tag: 'Compiled',
-        executable: linked.path,
+        backend: artifact.backend,
+        artifactKind: 'NativeExecutable',
+        path: linked.path,
         target: linked.target,
         symbols: artifact.symbols,
         diagnostics,

@@ -8,7 +8,13 @@ import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as Target from '../src/Target.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
 
-const clang = '/usr/bin/clang'
+const clang =
+  process.env.SILK_TEST_CLANG ??
+  (existsSync('/opt/homebrew/opt/llvm/bin/clang')
+    ? '/opt/homebrew/opt/llvm/bin/clang'
+    : existsSync('/usr/local/opt/llvm/bin/clang')
+      ? '/usr/local/opt/llvm/bin/clang'
+      : 'clang')
 const toolchain: NativeToolchain.Toolchain = Object.freeze({ _tag: 'Toolchain', clang })
 
 const ascii = (value: string): Uint8Array =>
@@ -81,6 +87,54 @@ it('plans every native profile for each canonical native target', () => {
     assert.strictEqual(link.arguments.at(0), `--target=${target.triple}`)
   }
 })
+
+it('plans standalone LLVM-Wasm finalization without native shim or host libraries', () => {
+  const planned = ToolchainPlan.wasmCommand(
+    clang,
+    Target.wasm32UnknownUnknown,
+    'release',
+    'program.bc',
+    'program.wasm',
+  )
+  assert.deepEqual(planned.arguments, [
+    '--target=wasm32-unknown-unknown',
+    '-nostdlib',
+    '-x',
+    'ir',
+    'program.bc',
+    '-O2',
+    '-Wl,--no-entry',
+    '-Wl,--export=silk_main',
+    '-o',
+    'program.wasm',
+  ])
+  assert.notInclude(planned.arguments, 'silk_shim.c')
+  assert.strictEqual(
+    planned.arguments.some((argument) => argument.startsWith('-l')),
+    false,
+  )
+})
+
+it.effect('retains LLVM-Wasm command provenance on finalization failure', () =>
+  Effect.gen(function* () {
+    const artifact = yield* artifactFor(Target.wasm32UnknownUnknown, 'release')
+    NativeToolchain.withBuildScope('wasm-failure', (scope) => {
+      const outcome = NativeToolchain.finalizeWasm(
+        { _tag: 'Toolchain', clang: '/nonexistent/clang' },
+        scope,
+        artifact,
+        Target.wasm32UnknownUnknown,
+        'release',
+        join(scope.root, 'program.wasm'),
+      )
+      assert.strictEqual(outcome._tag, 'ToolchainFailure')
+      if (outcome._tag !== 'ToolchainFailure') return
+      assert.strictEqual(outcome.planned.command, '/nonexistent/clang')
+      assert.include(outcome.planned.arguments, '-Wl,--export=silk_main')
+      assert.isAbove(outcome.output.length, 0)
+    })
+  }),
+)
 
 it.effect(
   'emits a release object through the pinned Clang with provenance',

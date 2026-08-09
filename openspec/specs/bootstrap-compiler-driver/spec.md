@@ -6,43 +6,53 @@ native executable at the requested destination, with the differential harness an
 determinism gates enforced continuously and per-phase reporting as the observability substrate
 issue 09 builds on.
 ## Requirements
-### Requirement: The driver compiles a request to a native executable
+### Requirement: The driver compiles a request to a durable executable artifact
 
-The driver SHALL orchestrate the complete path itself — closure loading, header collection,
-elaboration, ownership, instance discovery, canonical target layout, MIR lowering, backend
-emission, object emission, shim compilation, and linking — writing the executable to the requested
-durable destination under a fixed optimization profile. Because this operation produces a native
-executable, the driver SHALL select an explicitly requested native bootstrap target or the
-supported current host before layout and SHALL pass the resulting target-aware MIR program through
-later phases without a second layout value. The driver, not any
-external harness, SHALL invoke the backend and linker services. An unavailable entry, unsupported
-target, inconsistent layout, or toolchain failure SHALL surface as a closed outcome naming the
-failing stage with its provenance, never as a thrown error.
+The driver SHALL orchestrate closure loading, header collection, elaboration, ownership, instance discovery, canonical target layout, MIR lowering, explicitly selected compatible backend emission, and artifact-kind-specific finalization to a requested durable destination under a fixed optimization profile. Native LLVM requests SHALL emit an object, compile the native shim, and link an executable. LLVM Wasm requests SHALL use the pinned LLVM-to-Wasm finalizer, while direct WebAssembly requests SHALL atomically commit the backend's validated module bytes without invoking Clang. The selected target-aware MIR program SHALL pass through later phases without a second layout value. An unavailable entry, unsupported backend-target pair, inconsistent layout, finalization failure, or toolchain failure SHALL surface as a closed outcome naming the failing stage and provenance, never as a thrown error.
 
-#### Scenario: Compile and run the nested program
+#### Scenario: Compile and run a native program
 
-- **WHEN** the driver compiles the nested-call corpus program to a destination with the release profile on a supported host
-- **THEN** an executable exists there and running it exits with the interpreter's result
+- **WHEN** the driver compiles the nested-call corpus through LLVM to a supported host destination
+- **THEN** a native executable exists there and running it exits with the evaluator's result
+
+#### Scenario: Produce LLVM WebAssembly
+
+- **WHEN** the request selects backend `llvm` and target `wasm32-unknown-unknown`
+- **THEN** the driver commits an instantiable `.wasm` module produced by the pinned LLVM-to-Wasm path and exporting `silk_main`
+
+#### Scenario: Produce direct WebAssembly
+
+- **WHEN** the request selects backend `wasm` and target `wasm32-unknown-unknown`
+- **THEN** the driver commits the backend's validated `.wasm` bytes atomically without invoking Clang
 
 #### Scenario: Surface an entry failure as a closed outcome
 
 - **WHEN** the request's root module has no valid entry
-- **THEN** the driver returns a no-entry outcome carrying the discovery reason and the phase report, without invoking the toolchain
+- **THEN** the driver returns a no-entry outcome carrying the discovery reason and phase report without finalizing an artifact
 
-#### Scenario: Name the failing stage
+#### Scenario: Stop on an unsupported backend-target pair
 
-- **WHEN** the pinned toolchain path is invalid
-- **THEN** the driver returns a failed outcome naming the object stage with the full command provenance
+- **WHEN** the request selects a backend and target outside their compatibility matrix
+- **THEN** the driver returns a target-stage failure before MIR lowering, backend emission, or external tool invocation
 
-#### Scenario: Stop on an unsupported target
+#### Scenario: Name the failing finalization stage
 
-- **WHEN** the request selects a target outside the bootstrap matrix
-- **THEN** the driver returns a target-stage failure before MIR lowering, backend emission, or toolchain invocation
+- **WHEN** a selected external finalizer fails
+- **THEN** the driver returns a failed outcome naming the exact finalization stage with command provenance
 
-#### Scenario: Keep WebAssembly out of native linking
+### Requirement: Driver outcomes identify backend and artifact kind
 
-- **WHEN** the native-executable driver receives `wasm32-unknown-unknown`
-- **THEN** it returns a target-kind failure before object emission or linking while leaving WebAssembly emission available through its compatible backend path
+Every successful driver outcome SHALL retain the canonical backend identifier, target, artifact kind, durable path, symbols, diagnostics, and phase report. Reports SHALL include only phases actually executed and SHALL distinguish backend emission from artifact finalization.
+
+#### Scenario: Report a direct Wasm build
+
+- **WHEN** the direct WebAssembly backend successfully produces a durable module
+- **THEN** the outcome identifies backend `wasm`, target `wasm32-unknown-unknown`, artifact kind WebAssembly module, its destination, and no Clang phases
+
+#### Scenario: Report an LLVM Wasm build
+
+- **WHEN** LLVM successfully produces a durable WebAssembly module
+- **THEN** the outcome identifies backend `llvm`, the same canonical target, the WebAssembly module kind, and the executed LLVM finalization phases
 
 ### Requirement: The differential harness is a continuous check
 

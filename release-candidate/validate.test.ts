@@ -248,6 +248,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       '.',
       './Analysis',
       './Backend',
+      './BackendRegistry',
       './BootstrapEvaluation',
       './DeclarationIndex',
       './Diagnostic',
@@ -427,10 +428,10 @@ const nativeArrayArtifact = Effect.runSync(
   api.Analysis.codegen(nativeArraySnapshot, { mode: 'release' }),
 );
 const wasmArrayArtifact = Effect.runSync(
-  api.Analysis.codegen(wasmArraySnapshot, { mode: 'release' }),
+  api.Analysis.codegenWasm(wasmArraySnapshot, { mode: 'release' }),
 );
 const wasmArrayInstance = new WebAssembly.Instance(
-  new WebAssembly.Module(wasmArrayArtifact.bitcode.slice()),
+  new WebAssembly.Module(wasmArrayArtifact.bytes.slice()),
   {},
 );
 const unionText = 'struct A {}\\nstruct B { value: I32 }\\nstruct C { left: I32 right: I32 }\\nfn accept(value: A | B | C) -> I32 { return 42 }\\nfn widen(value: A | B) -> I32 { return accept(move value) }\\npub fn main() -> I32 { return widen(A {}) }';
@@ -445,10 +446,10 @@ const nativeUnionArtifact = Effect.runSync(
   api.Analysis.codegen(nativeUnionSnapshot, { mode: 'release' }),
 );
 const wasmUnionArtifact = Effect.runSync(
-  api.Analysis.codegen(wasmUnionSnapshot, { mode: 'release' }),
+  api.Analysis.codegenWasm(wasmUnionSnapshot, { mode: 'release' }),
 );
 const wasmUnionInstance = new WebAssembly.Instance(
-  new WebAssembly.Module(wasmUnionArtifact.bitcode.slice()),
+  new WebAssembly.Module(wasmUnionArtifact.bytes.slice()),
   {},
 );
 const names = analysis.functions.map((fact) =>
@@ -578,8 +579,8 @@ console.log(
       nativeIr: nativeArrayArtifact.ir,
       nativeBitcode: Array.from(nativeArrayArtifact.bitcode),
       wasmSymbols: wasmArrayArtifact.symbols,
-      wasmWat: wasmArrayArtifact.ir,
-      wasmBytes: Array.from(wasmArrayArtifact.bitcode),
+      wasmWat: wasmArrayArtifact.wat,
+      wasmBytes: Array.from(wasmArrayArtifact.bytes),
       wasmResult: wasmArrayInstance.exports.silk_main(),
     },
     unions: {
@@ -590,7 +591,7 @@ console.log(
       mir: api.Mir.encode(api.Analysis.loweredMir(nativeUnionSnapshot)),
       trace: api.Analysis.evaluate(nativeUnionSnapshot).trace,
       nativeIr: nativeUnionArtifact.ir,
-      wasmWat: wasmUnionArtifact.ir,
+      wasmWat: wasmUnionArtifact.wat,
       wasmResult: wasmUnionInstance.exports.silk_main(),
     },
     parserDiagnostics: parse.parserDiagnostics.map((diagnostic) => diagnostic.code),
@@ -827,6 +828,7 @@ test('the compiler CLI release candidate installs with its project-first command
     ])
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
+      './BuildBatch',
       './BuildCommand',
       './BuildExeCommand',
       './BuildPlan',
@@ -835,12 +837,15 @@ test('the compiler CLI release candidate installs with its project-first command
       './FileSourceResolver',
       './FormatCommand',
       './FormatWorkflow',
+      './InitCommand',
       './Program',
       './Project',
+      './ProjectInitializer',
       './ProjectOptions',
       './Report',
       './RunCommand',
       './SourceEntry',
+      './TargetSelector',
       './Workflow',
     ])
     expect(manifest.exports).not.toHaveProperty('./CompileCommand')
@@ -883,7 +888,7 @@ test('the compiler CLI release candidate installs with its project-first command
 
     writeFileSync(
       resolve(consumerRoot, 'silk.toml'),
-      '[package]\nname = "packed-cli"\nroot = "Main.silk"\n',
+      '[package]\nname = "packed-cli"\nversion = "0.1.0"\nroot = "Main.silk"\n',
     )
     writeFileSync(resolve(consumerRoot, 'Main.silk'), 'pub fn main() -> I32 { return 42 }')
     execFileSync(executable, ['check'], { cwd: consumerRoot, stdio: 'pipe' })
@@ -901,6 +906,7 @@ test('the compiler CLI release candidate installs with its project-first command
       ),
     )
     expect(api).toEqual([
+      'BuildBatch',
       'BuildCommand',
       'BuildExeCommand',
       'BuildPlan',
@@ -909,12 +915,15 @@ test('the compiler CLI release candidate installs with its project-first command
       'FileSourceResolver',
       'FormatCommand',
       'FormatWorkflow',
+      'InitCommand',
       'Program',
       'Project',
+      'ProjectInitializer',
       'ProjectOptions',
       'Report',
       'RunCommand',
       'SourceEntry',
+      'TargetSelector',
       'Workflow',
     ])
   } finally {

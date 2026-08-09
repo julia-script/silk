@@ -12,7 +12,7 @@
  * `1 err`) and optional one-line fact strip, and only the view knows them.
  */
 
-import { Analysis, BackendRegistry, ToolchainPlan } from '@silk-effect/compiler'
+import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
 import type { BootstrapEvaluation, ToolchainPlan as ToolchainPlanNs } from '@silk-effect/compiler'
 import { backendEmission, execute, toolchainCommands } from './panels'
 import {
@@ -470,15 +470,16 @@ export const views: ReadonlyArray<ViewDefinition> = [
         }
       }
       const target = Analysis.targetOf(snapshot)
-      const backend =
-        target._tag === 'Resolved' ? BackendRegistry.forTarget(target.target) : undefined
       const artifact = emission.artifact
+      const bytes =
+        artifact._tag === 'LlvmBitcodeArtifact' ? artifact.bitcode : artifact.bytes
+      const text = artifact._tag === 'LlvmBitcodeArtifact' ? artifact.ir : artifact.wat
 
       // Only a WebAssembly module can be run right here, so the execute-and-compare check is a
       // WebAssembly-target extra rather than something every backend can answer. The interpreter
       // ran the same MIR the backend emitted from, so a disagreement is a backend bug.
-      const runnable = target._tag === 'Resolved' && target.target.kind === 'WebAssembly'
-      const execution = runnable ? execute(artifact.bitcode) : undefined
+      const runnable = artifact._tag === 'WebAssemblyModuleArtifact'
+      const execution = runnable ? execute(artifact.bytes) : undefined
       const interpreted =
         runnable && Analysis.mirOf(snapshot)._tag === 'Available'
           ? Analysis.evaluate(snapshot)
@@ -542,8 +543,8 @@ export const views: ReadonlyArray<ViewDefinition> = [
           ...symbolRows(artifact.symbols),
           ...executionRows,
           ...backendControlRows(artifact.control, (span) => onSelectSpan(span)),
-          ...backendTextRows(artifact.ir),
-          ...(runnable ? hexRows(artifact.bitcode) : []),
+          ...backendTextRows(text),
+          ...(runnable ? hexRows(bytes) : []),
         ],
         facts: [
           ...artifact.symbols.slice(0, 2).map(
@@ -553,14 +554,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
             }),
           ),
           {
-            text: `${backend?.name ?? 'backend'} · ${artifact.bitcode.length} B · ${mode}`,
+            text: `${artifact.backend} · ${bytes.length} B · ${mode}`,
             tone: 'muted',
           },
           ...(execution === undefined
             ? []
             : [{ text: agrees ? 'runs · agrees' : 'runs · disagrees', tone: agrees ? 'ok' : 'warning' } as Fact]),
         ],
-        meta: `${artifact.bitcode.length} B`,
+        meta: `${bytes.length} B`,
       }
     },
   },
@@ -672,7 +673,9 @@ export const views: ReadonlyArray<ViewDefinition> = [
           phase: 'backend',
           outputs:
             emission._tag === 'Emitted'
-              ? `${emission.artifact.bitcode.length} bitcode bytes`
+              ? emission.artifact._tag === 'LlvmBitcodeArtifact'
+                ? `${emission.artifact.bitcode.length} bitcode bytes`
+                : `${emission.artifact.bytes.length} WebAssembly bytes`
               : 'emission rejected',
           diagnostics: 0,
         },

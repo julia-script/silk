@@ -43,8 +43,8 @@ process.stdout.write(
     nativeMir: Mir.encode(Analysis.loweredMir(native)),
     wasmMir: Mir.encode(Analysis.loweredMir(wasm)),
     nativeIr: nativeArtifact.ir,
-    wasmIr: wasmArtifact.ir,
+    wasmIr: wasmArtifact.wat,
     native: createHash('sha256').update(nativeArtifact.bitcode).digest('hex'),
-    wasm: createHash('sha256').update(wasmArtifact.bitcode).digest('hex'),
+    wasm: createHash('sha256').update(wasmArtifact.bytes).digest('hex'),
   }),
 )

@@ -95,7 +95,7 @@ it.effect('provides an existing borrowed capability across evaluator and Wasm', 
     assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
     assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )
@@ -122,7 +122,7 @@ it.effect('constructs allocation-free OutOfMemory and recovers across evaluator 
     assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
     assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )
@@ -144,14 +144,14 @@ it.effect('executes the same handled failure through the evaluator and Wasm', ()
     assert.deepEqual(Mir.verify(Analysis.loweredMir(wasmSnapshot)), [])
     const logical = Analysis.evaluate(logicalSnapshot)
     const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     const main = instance.exports.silk_main as () => number
 
     assert.strictEqual(logical._tag, 'Completed')
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42)
     assert.strictEqual(main(), 42)
-    assert.include(wasm.ir, 'call')
-    assert.include(wasm.ir, 'if')
+    assert.include(wasm.wat, 'call')
+    assert.include(wasm.wat, 'if')
   }),
 )
 
@@ -170,7 +170,7 @@ it.effect('keeps callable Effect mapping in evaluator, LLVM, and Wasm parity', (
     const logical = Analysis.evaluate(native)
     const llvm = yield* Analysis.codegen(native, { mode: 'release' })
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main
 
     assert.strictEqual(logical._tag, 'Completed')
@@ -201,7 +201,7 @@ it.effect('executes the handled failure through the native toolchain', () =>
         : undefined,
     )
     if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 42, run.stderr)
 
     const succeeded = yield* Driver.compile({
@@ -216,7 +216,7 @@ it.effect('executes the handled failure through the native toolchain', () =>
       succeeded._tag === 'BackendFailed' ? succeeded.error.message : undefined,
     )
     if (succeeded._tag !== 'Compiled') return
-    const successRun = spawnSync(succeeded.executable, [], { encoding: 'utf8' })
+    const successRun = spawnSync(succeeded.path, [], { encoding: 'utf8' })
     assert.strictEqual(successRun.status, 42, successRun.stderr)
   }),
 )
@@ -231,7 +231,7 @@ it.effect('keeps the success path out of the exact handler on Wasm', () =>
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const logical = Analysis.evaluate(snapshot)
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     const main = instance.exports.silk_main as () => number
 
     assert.strictEqual(logical._tag, 'Completed')
@@ -308,7 +308,7 @@ it.effect('keeps arithmetic traps outside the typed failure channel', () =>
     assert.deepEqual(Analysis.diagnostics(wasmSnapshot), [])
     const logical = Analysis.evaluate(logicalSnapshot)
     const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     const main = instance.exports.silk_main as () => number
 
     assert.strictEqual(logical._tag, 'Blocked')
@@ -333,7 +333,7 @@ it.effect('preserves exclusive capture state across evaluator, native, and Wasm 
     assert.deepEqual(Analysis.diagnostics(wasmSnapshot), [])
     const logical = Analysis.evaluate(logicalSnapshot)
     const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     const main = instance.exports.silk_main as () => number
 
     assert.strictEqual(logical._tag, 'Completed')
@@ -356,7 +356,7 @@ it.effect('preserves exclusive capture state across evaluator, native, and Wasm 
         : undefined,
     )
     if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 12, run.stderr)
   }),
 )
@@ -378,7 +378,7 @@ it.effect('retries with fresh locals and persistent captures across all runtimes
     assert.deepEqual(Mir.verify(Analysis.loweredMir(wasmSnapshot)), [])
     const logical = Analysis.evaluate(logicalSnapshot)
     const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     const main = instance.exports.silk_main as () => number
     assert.strictEqual(logical._tag, 'Completed')
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 3)
@@ -398,7 +398,7 @@ it.effect('retries with fresh locals and persistent captures across all runtimes
         : undefined,
     )
     if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 3, run.stderr)
   }),
 )

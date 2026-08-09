@@ -1,41 +1,39 @@
-import { describe, expect, it } from 'vitest'
+import { assert, it } from '@effect/vitest'
+import * as Result from 'effect/Result'
+import * as Backend from '../src/Backend.js'
 import * as BackendRegistry from '../src/BackendRegistry.js'
 import * as Target from '../src/Target.js'
 
-describe('BackendRegistry.forTarget', () => {
-  // The point of deriving the backend is that a caller cannot pair a target with a backend that
-  // rejects it. That only holds if the mapping covers every target and never covers one twice.
-  it('serves every canonical target', () => {
-    for (const target of Target.all) {
-      expect(BackendRegistry.forTarget(target), target.id).toBeDefined()
-    }
-  })
+it('resolves stable backend ids independently from targets', () => {
+  const llvm = BackendRegistry.resolve('llvm')
+  const wasm = BackendRegistry.resolve('wasm')
+  assert.strictEqual(Result.isSuccess(llvm), true)
+  assert.strictEqual(Result.isSuccess(wasm), true)
+  if (Result.isSuccess(llvm)) assert.strictEqual(llvm.success, Backend.LlvmBackend)
+  if (Result.isSuccess(wasm)) assert.strictEqual(wasm.success.id, 'wasm')
+})
 
-  it('serves each target with exactly one backend', () => {
-    for (const target of Target.all) {
-      const claiming = BackendRegistry.backends.filter((backend) =>
-        backend.targets.includes(target.id),
-      )
-      expect(
-        claiming.map((backend) => backend.name),
-        target.id,
-      ).toHaveLength(1)
-    }
-  })
+it('rejects unknown ids and incompatible pairs as typed data', () => {
+  const unknown = BackendRegistry.resolve('native')
+  assert.strictEqual(Result.isFailure(unknown), true)
+  if (Result.isFailure(unknown)) assert.strictEqual(unknown.failure.reason._tag, 'UnknownBackend')
 
-  it('routes native targets to LLVM and WebAssembly to the wasm backend', () => {
-    for (const target of Target.all) {
-      expect(BackendRegistry.forTarget(target)?.name, target.id).toBe(
-        target.kind === 'Native' ? 'LLVM' : 'WebAssembly',
-      )
-    }
-  })
+  const wasm = BackendRegistry.resolve('wasm')
+  assert.strictEqual(Result.isSuccess(wasm), true)
+  if (Result.isFailure(wasm)) return
+  const incompatible = BackendRegistry.requireTarget(wasm.success, Target.aarch64AppleDarwin)
+  assert.strictEqual(Result.isFailure(incompatible), true)
+  if (Result.isFailure(incompatible)) {
+    assert.strictEqual(incompatible.failure.reason._tag, 'IncompatibleTarget')
+  }
+})
 
-  it('accepts the target it was selected for', () => {
-    // A backend that does not list the target it was chosen for would be rejected by
-    // `Backend.emit` at the point of use, which is exactly the failure this removes.
-    for (const target of Target.all) {
-      expect(BackendRegistry.forTarget(target)?.targets, target.id).toContain(target.id)
-    }
-  })
+it('supports both LLVM and direct Wasm for the canonical WebAssembly target', () => {
+  for (const id of ['llvm', 'wasm'] as const) {
+    const resolved = BackendRegistry.resolve(id)
+    assert.strictEqual(Result.isSuccess(resolved), true)
+    if (Result.isFailure(resolved)) continue
+    const compatible = BackendRegistry.requireTarget(resolved.success, Target.wasm32UnknownUnknown)
+    assert.strictEqual(Result.isSuccess(compatible), true)
+  }
 })

@@ -18,7 +18,7 @@ const run = (label: string, text: string) =>
     const wasmResult =
       wasm._tag === 'Success'
         ? (
-            new WebAssembly.Instance(new WebAssembly.Module(wasm.value.bitcode.slice()), {}).exports
+            new WebAssembly.Instance(new WebAssembly.Module(wasm.value.bytes.slice()), {}).exports
               .silk_main as () => number
           )()
         : String(wasm.cause).slice(0, 260)

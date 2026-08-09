@@ -75,7 +75,7 @@ it.effect('resolves imported pipelines identically across targets and repeated s
       { mode: 'release' },
     )
     assert.deepEqual(llvmA.bitcode, llvmB.bitcode)
-    assert.match(wasm.ir, /call/)
+    assert.match(wasm.wat, /call/)
     assert.strictEqual(Analysis.evaluate(first)._tag, 'Completed')
   }),
 )

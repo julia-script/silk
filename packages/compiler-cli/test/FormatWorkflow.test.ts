@@ -16,7 +16,10 @@ const writeFile = Effect.fnUntraced(function* (path: string, text: string) {
 })
 
 const makeProject = Effect.fnUntraced(function* (root: string, main = compact) {
-  yield* writeFile(`${root}/silk.toml`, '[package]\nname = "format-app"\nroot = "src/Main.silk"\n')
+  yield* writeFile(
+    `${root}/silk.toml`,
+    '[package]\nname = "format-app"\nversion = "0.1.0"\nroot = "src/Main.silk"\n',
+  )
   yield* writeFile(`${root}/src/Main.silk`, main)
 })
 

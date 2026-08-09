@@ -105,16 +105,35 @@ export interface ControlProvenance {
   readonly span: SourceSpan.SourceSpan
 }
 
-/** The backend's program artifact: deterministic bitcode plus the IR inspection text. */
-export interface Artifact {
-  readonly _tag: 'BackendArtifact'
+/** Stable public backend identifiers used by manifests and command-line selection. */
+export type Id = 'llvm' | 'wasm'
+
+interface ArtifactBase {
   readonly module: string
+  readonly backend: Id
   readonly target: Target.Target
   readonly symbols: ReadonlyArray<SymbolEntry>
   readonly control: ReadonlyArray<ControlProvenance>
+}
+
+/** Deterministic LLVM bitcode requiring target-specific durable finalization. */
+export interface LlvmBitcodeArtifact extends ArtifactBase {
+  readonly _tag: 'LlvmBitcodeArtifact'
+  readonly backend: 'llvm'
   readonly bitcode: Uint8Array
   readonly ir: string
 }
+
+/** A validated final WebAssembly module that can be committed without an external linker. */
+export interface WebAssemblyModuleArtifact extends ArtifactBase {
+  readonly _tag: 'WebAssemblyModuleArtifact'
+  readonly backend: 'wasm'
+  readonly bytes: Uint8Array
+  readonly wat: string
+}
+
+/** The closed family of backend program artifacts. */
+export type Artifact = LlvmBitcodeArtifact | WebAssemblyModuleArtifact
 
 /** An expected failure at the backend boundary. */
 export class BackendError extends Data.TaggedError('BackendError')<{
@@ -129,22 +148,20 @@ export class BackendError extends Data.TaggedError('BackendError')<{
 }> {}
 
 /** The nominal backend service contract. */
-export interface Backend {
+export interface Backend<A extends Artifact = Artifact> {
   readonly _tag: 'Backend'
+  readonly id: Id
   readonly name: string
   readonly targets: ReadonlyArray<Target.Id>
-  readonly emit: (
-    program: Mir.Module,
-    request: CodegenRequest,
-  ) => Effect.Effect<Artifact, BackendError>
+  readonly emit: (program: Mir.Module, request: CodegenRequest) => Effect.Effect<A, BackendError>
 }
 
 /** Validates shared MIR/target invariants before dispatching to one backend implementation. */
-export const emit = Effect.fn('Backend.emit')(function* (
-  self: Backend,
+export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
+  self: Backend<A>,
   program: Mir.Module,
   request: CodegenRequest,
-): Effect.fn.Return<Artifact, BackendError> {
+): Effect.fn.Return<A, BackendError> {
   const violations = Mir.verify(program)
   if (violations.length > 0) {
     return yield* new BackendError({
@@ -4252,14 +4269,18 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
   })
 
 /** The bootstrap LLVM backend over the Silk LLVM builder. */
-export const LlvmBackend: Backend = Object.freeze({
+export const LlvmBackend: Backend<LlvmBitcodeArtifact> = Object.freeze({
   _tag: 'Backend',
+  id: 'llvm',
   name: 'LLVM',
-  targets: Object.freeze(Target.native.map((target) => target.id)),
+  targets: Object.freeze([
+    ...Target.native.map((target) => target.id),
+    Target.wasm32UnknownUnknown.id,
+  ]),
   emit: Effect.fn('Backend.LLVM.emit')(function* (
     program: Mir.Module,
     request: CodegenRequest,
-  ): Effect.fn.Return<Artifact, BackendError> {
+  ): Effect.fn.Return<LlvmBitcodeArtifact, BackendError> {
     const output = yield* emitProgram(program, request).pipe(
       Effect.mapError((cause) =>
         cause._tag === 'BackendError'
@@ -4273,7 +4294,8 @@ export const LlvmBackend: Backend = Object.freeze({
       ),
     )
     return Object.freeze({
-      _tag: 'BackendArtifact',
+      _tag: 'LlvmBitcodeArtifact',
+      backend: 'llvm',
       module: program.module,
       target: program.layout.target,
       symbols: Object.freeze(output.symbols),

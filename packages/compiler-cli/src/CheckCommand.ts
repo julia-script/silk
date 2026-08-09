@@ -11,14 +11,16 @@ export const command = Command.make(
   'check',
   {
     manifestPath: ProjectOptions.manifestPath,
-    target: ProjectOptions.target,
+    backend: ProjectOptions.backend,
+    targets: ProjectOptions.targets,
     profile: ProjectOptions.profile,
     release: ProjectOptions.release,
   },
   Effect.fnUntraced(function* (config) {
     const options = ProjectOptions.resolve({
       ...(Option.isNone(config.manifestPath) ? {} : { manifestPath: config.manifestPath.value }),
-      ...(Option.isNone(config.target) ? {} : { target: config.target.value }),
+      ...(Option.isNone(config.backend) ? {} : { backend: config.backend.value }),
+      targets: config.targets,
       ...(Option.isNone(config.profile) ? {} : { profile: config.profile.value }),
       release: config.release,
     })

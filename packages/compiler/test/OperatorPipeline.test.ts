@@ -53,13 +53,13 @@ it.effect('pins one operator pipeline through canonical HIR, MIR, LLVM, and WebA
     assert.strictEqual(Hir.encode(Analysis.rootAnalysis(native).hir), golden('hir.txt'))
     assert.strictEqual(Mir.encode(Analysis.loweredMir(native)), golden('mir.txt'))
     assert.strictEqual(llvmArtifact.ir, golden('ll.txt'))
-    assert.strictEqual(wasmArtifact.ir, golden('wat.txt'))
+    assert.strictEqual(wasmArtifact.wat, golden('wat.txt'))
     assert.strictEqual(
       `${createHash('sha256').update(llvmArtifact.bitcode).digest('hex')}\n`,
       golden('bc.sha256'),
     )
     assert.strictEqual(
-      `${createHash('sha256').update(wasmArtifact.bitcode).digest('hex')}\n`,
+      `${createHash('sha256').update(wasmArtifact.bytes).digest('hex')}\n`,
       golden('wasm.sha256'),
     )
   }),

@@ -17,7 +17,10 @@ const decoder = new TextDecoder()
 const project = (): string => {
   const root = mkdtempSync(join(tmpdir(), 'silk-lsp-'))
   mkdirSync(join(root, 'src'))
-  writeFileSync(join(root, 'silk.toml'), '[package]\nname = "demo"\nroot = "src/Main.silk"\n')
+  writeFileSync(
+    join(root, 'silk.toml'),
+    '[package]\nname = "demo"\nversion = "0.1.0"\nroot = "src/Main.silk"\n',
+  )
   writeFileSync(join(root, 'src', 'Main.silk'), 'pub fn main() -> I32 { return 42 }\n')
   writeFileSync(join(root, 'src', 'Util.silk'), 'pub fn answer() -> I32 { return 7 }\n')
   return root

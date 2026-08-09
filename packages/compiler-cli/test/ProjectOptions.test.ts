@@ -25,12 +25,14 @@ it('preserves explicit project selection flags', () => {
     ProjectOptions.resolve({
       release: false,
       manifestPath: 'nested/silk.toml',
-      target: 'aarch64-apple-darwin',
+      backend: 'llvm',
+      targets: ['aarch64-apple-darwin', 'wasm32-unknown-unknown'],
       profile: 'release-with-debug',
     }),
     Result.succeed({
       manifestPath: 'nested/silk.toml',
-      target: 'aarch64-apple-darwin',
+      backend: 'llvm',
+      targets: ['aarch64-apple-darwin', 'wasm32-unknown-unknown'],
       profile: 'release-with-debug',
     }),
   )

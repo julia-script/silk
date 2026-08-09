@@ -52,7 +52,7 @@ it.effect('copies initialized Copy slots without consuming them on all three eng
     assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'SlotCopy').length, 2)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
 
     const compiled = yield* Driver.compile({
@@ -63,7 +63,7 @@ it.effect('copies initialized Copy slots without consuming them on all three eng
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 42, run.stderr)
   }),
 )

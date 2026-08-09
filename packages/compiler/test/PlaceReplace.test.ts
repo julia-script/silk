@@ -70,7 +70,7 @@ it.effect('swaps places atomically on all three engines', () =>
       assert.strictEqual(evaluated.result.value, expected, name)
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), expected, `${name} wasm`)
 
       const compiled = yield* Driver.compile({
@@ -81,7 +81,7 @@ it.effect('swaps places atomically on all three engines', () =>
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled', name)
       if (compiled._tag !== 'Compiled') continue
-      const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(run.status, expected, `${name} native: ${run.stderr}`)
     }
   }),

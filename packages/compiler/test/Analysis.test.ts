@@ -310,7 +310,7 @@ it.effect('emits clean snapshots and refuses diagnosed snapshots before the back
       'aarch64-apple-darwin',
     )
     const release = yield* Analysis.codegen(self, { mode: 'release' })
-    assert.strictEqual(release._tag, 'BackendArtifact')
+    assert.strictEqual(release._tag, 'LlvmBitcodeArtifact')
     assert.include(release.ir, 'silk_main')
 
     const invalid = yield* Analysis.ofSource(
