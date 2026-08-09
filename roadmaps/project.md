@@ -9,13 +9,13 @@
 
 Silk Effect will be a low-level systems language that combines explicit memory and execution
 control with typed failures, explicit service requirements, deterministic cleanup, and
-tooling-friendly semantics. The first destination is the smallest coherent language capable of
-compiling its own compiler; broader language and ecosystem work follows evidence from that
-self-hosting core.
+tooling-friendly semantics. The immediate destination is a small, coherent language whose design
+survives recognizable programs; broader compiler, ecosystem, and eventual self-hosting work follows
+evidence from that language rather than defining it in advance.
 
-**Current objective:** make Silk express and run familiar small programs — measured by canonical
-lowercase scalar types, inspectable standard-library source, observable output, and Game of Life,
-Sieve, matrix multiplication, and CRC-32 agreeing across evaluation and supported compiled targets.
+**Current objective:** shape Silk through complete, recognizable pressure programs — measured by
+ordinary Silk source exposing and categorizing language, standard-library, compiler, tooling, and
+cost-model gaps while preserving evaluator, native, and WebAssembly agreement.
 
 ## Column rules
 
@@ -25,21 +25,20 @@ Sieve, matrix multiplication, and CRC-32 agreeing across evaluation and supporte
 
 ## Now
 
-### Prove the language with familiar real programs
+### Shape the language through recognizable pressure programs
 
-- **Problem:** The compiler can execute carefully selected compiler-shaped fixtures, but users
-  cannot yet write the complete scalar vocabulary, inspect shipped stdlib definitions, observe
-  ordinary program output, or use familiar algorithms to expose composition and ergonomics gaps.
-- **Outcome & done-when:** Canonical stdlib `.silk` files support go-to-definition; lowercase
-  integers, floats, unit, and bottom run through every compiler phase; minimal explicit byte output
-  works without conflating logging; and the executable algorithm baseline agrees across engines.
-- **Status:** in progress — `ship-stdlib-sources` is complete and `complete-integer-scalars` is the
-  active implementation change; four focused changes follow.
-- **Appetite:** six focused OpenSpec changes, applied and archived independently; frontier programs
-  remain honest when their missing capabilities exceed the milestone.
-- **Links:** [real-programs initiative](real-programs.md) · change: `ship-stdlib-sources` · change:
-  `complete-integer-scalars` · change: `add-floating-point-scalars` · change: `add-static-text` ·
-  change: `add-standard-streams` · change: `build-algorithm-examples`
+- **Problem:** The first algorithm corpus proved the compiler can run meaningful programs, but it
+  did not yet pressure the language with a larger stateful transformation over runtime-sized input
+  and owned output. Moving directly into self-hosting would confuse that learning exercise with a
+  delivery strategy.
+- **Outcome & done-when:** Implement a real lexer in ordinary Silk, differentially checked against
+  the TypeScript lexer, and record every wall as a language, standard-library, compiler,
+  tooling/ergonomics, or performance/cost finding. Use those findings—not a predetermined compiler
+  port order—to choose the next pressure program or focused repair.
+- **Status:** active — roadmap realigned; the lexer proposal is next.
+- **Appetite:** one focused pressure-program change, then reassess before proposing another. The
+  TypeScript compiler remains canonical; a parser port and continuous self-hosting are non-goals.
+- **Links:** [real-programs initiative](real-programs.md)
 
 ### Validate the language's defining effect execution model
 
@@ -198,22 +197,17 @@ elements drop before storage release; and move-out plus early drop retain exactl
 
 ## Next
 
-### Supply the compiler's native platform
-
-- **Problem:** Silk can now express a source-to-owned-token pass, but the bootstrap compiler still
-  depends on its TypeScript host for runtime entry, filesystem/process boundaries, and the native
-  services that turn those tokens into a usable compiler pipeline.
-- **Outcome & done-when:** Add only the runtime, standard-library actors, host services, and private
-  C shim demanded by the first real Silk compiler module, preserving typed failures, scoped external
-  resources, deterministic artifacts, and the existing evaluator/native/Wasm semantic oracle.
-- **Boundary:** Shape the platform from demonstrated compiler needs. Do not introduce a broad FFI,
-  package ecosystem, ambient services, or public runtime surface speculatively.
+No project-level item is preselected. The lexer findings will determine whether the next change is
+a focused language/stdlib repair or a different pressure program that tests another part of the
+small-language boundary.
 
 ## Later
 
 - **Make Silk capable of expressing its own compiler** — progressively replace the TypeScript seed
-  implementation with Silk modules while preserving reference equivalence; revisit the exact port
-  boundaries once the frontend, MIR, and runtime interfaces have survived real use.
+  implementation with Silk modules while preserving reference equivalence, once the language is
+  small and well-defined enough that self-hosting tests it rather than prematurely steering it.
+- **Supply the compiler's native platform** — add runtime, host services, and any private C shim
+  demanded by an eventual real Silk compiler module, rather than speculating ahead of that need.
 - **Prove native self-hosting** — produce stage 1, stage 2, and a byte-identical fixed-point rebuild
   with complete conformance, failure, debug, resource, and performance evidence on all required
   native hosts.
@@ -222,8 +216,8 @@ elements drop before storage release; and move-out plus early drop retain exactl
   transparency without scheduling async work now; see the
   [direction note](../wayfinder/bootstrap-language/research/concurrency-and-parallelism-direction.md).
 - **Grow beyond the bootstrap subset** — concurrency, networking, schemas, observability, richer
-  tooling, and broader standard-library families become candidates only after the self-hosting core
-  exposes their real constraints.
+  tooling, and broader standard-library families become candidates when pressure programs expose
+  their real constraints.
 - **Deepen WebAssembly integration** — extend the direct backend toward host integration and
   generated Effect interop after the native bootstrap path is accepted.
 
@@ -253,10 +247,14 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 - What executable name and public analysis facade should eventually accompany
   `@silk-effect/compiler`?
-- Should Silk compiler modules replace their TypeScript counterparts continuously as capabilities
-  land, or should the first port begin after the stage-0 subset is feature-complete?
 
 ## Changelog
+
+- 2026-08-09: Closed the first real-program milestone after lowercase primitive families, physical
+  stdlib sources, static text, standard streams, four baseline algorithms, allocation-pressure BFS,
+  recursive quicksort, and executable FFT all reached cross-engine parity.
+- 2026-08-09: Reframed the next compiler-shaped program as a language-pressure exercise. A Silk
+  lexer comes first; parser porting and continuous self-hosting remain later decisions.
 
 - 2026-08-09: Recorded a non-binding concurrency and parallelism direction: synchronous programs
   pay no scheduler or fiber cost; suspension, fork, and parallelism add progressively explicit
