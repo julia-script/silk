@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "breadth-first-search",
+  "title": "Breadth-first search",
+  "status": "executable",
+  "source": "main.silk",
+  "input": "An unobstructed 5×5 grid searched from the first cell to the opposite corner.",
+  "expected": {
+    "entryResult": 8,
+    "summary": "The shortest path crosses eight grid edges after all 25 cells enter the queue.",
+    "allocation": {
+      "acquires": 4,
+      "releases": 4,
+      "peakLive": 2
+    }
+  },
+  "capabilities": [
+    "usize",
+    "bool",
+    "fixed arrays",
+    "mutable indexing",
+    "effects and typed failure",
+    "explicit Allocator service",
+    "Silk-written Vector growth",
+    "deterministic Drop cleanup"
+  ],
+  "targets": ["evaluation", "native", "wasm"],
+  "blockers": []
+}

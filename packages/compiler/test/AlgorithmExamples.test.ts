@@ -8,6 +8,7 @@ import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import * as Analysis from '../src/Analysis.js'
 import * as Driver from '../src/Driver.js'
+import * as Mir from '../src/Mir.js'
 import type * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -16,6 +17,12 @@ const Blocker = Schema.Struct({
   phase: Schema.String,
   code: Schema.String,
   message: Schema.String,
+})
+
+const AllocationExpectation = Schema.Struct({
+  acquires: Schema.Number,
+  releases: Schema.Number,
+  peakLive: Schema.Number,
 })
 
 const Manifest = Schema.Struct({
@@ -28,6 +35,7 @@ const Manifest = Schema.Struct({
   expected: Schema.Struct({
     entryResult: Schema.Number,
     summary: Schema.String,
+    allocation: Schema.optionalKey(AllocationExpectation),
   }),
   capabilities: Schema.Array(Schema.String),
   targets: Schema.Array(Schema.Literals(['evaluation', 'native', 'wasm'])),
@@ -44,9 +52,11 @@ const examples = exampleIds.map((id) => {
   const manifest = Schema.decodeUnknownSync(Manifest)(
     JSON.parse(readFileSync(join(root, 'example.json'), 'utf8')),
   )
+  const source = readFileSync(join(root, manifest.source), 'utf8')
   return Object.freeze({
     root,
     manifest,
+    source,
     bytes: new Uint8Array(readFileSync(join(root, manifest.source))),
     readme: readFileSync(join(root, 'README.md'), 'utf8'),
   })
@@ -63,6 +73,77 @@ const toolchain: NativeToolchain.Toolchain = Object.freeze({
 })
 
 const sourceId = (id: string, target: string): string => `examples/algorithms/${id}/${target}`
+
+interface AllocationEvent {
+  readonly _tag: 'AllocationAcquire' | 'AllocationRelease'
+  readonly ticket: number
+}
+
+interface ExpectedAllocation {
+  readonly acquires: number
+  readonly releases: number
+  readonly peakLive: number
+}
+
+type AllocationVerification =
+  | {
+      readonly _tag: 'Valid'
+      readonly observed: ExpectedAllocation
+    }
+  | {
+      readonly _tag: 'Invalid'
+      readonly reason: 'DuplicateAcquire' | 'UnknownRelease' | 'Unreleased' | 'Mismatch'
+      readonly ticket?: number
+      readonly observed?: ExpectedAllocation
+      readonly expected?: ExpectedAllocation
+    }
+
+const verifyAllocationEvidence = (
+  events: ReadonlyArray<AllocationEvent>,
+  expected: ExpectedAllocation,
+): AllocationVerification => {
+  const seen = new Set<number>()
+  const live = new Set<number>()
+  let acquires = 0
+  let releases = 0
+  let peakLive = 0
+  for (const event of events) {
+    if (event._tag === 'AllocationAcquire') {
+      if (seen.has(event.ticket))
+        return Object.freeze({
+          _tag: 'Invalid',
+          reason: 'DuplicateAcquire',
+          ticket: event.ticket,
+        })
+      seen.add(event.ticket)
+      live.add(event.ticket)
+      acquires += 1
+      peakLive = Math.max(peakLive, live.size)
+      continue
+    }
+    if (!live.delete(event.ticket))
+      return Object.freeze({
+        _tag: 'Invalid',
+        reason: 'UnknownRelease',
+        ticket: event.ticket,
+      })
+    releases += 1
+  }
+  const unreleased = live.values().next().value
+  if (unreleased !== undefined)
+    return Object.freeze({ _tag: 'Invalid', reason: 'Unreleased', ticket: unreleased })
+  const observed = Object.freeze({ acquires, releases, peakLive })
+  if (
+    observed.acquires !== expected.acquires ||
+    observed.releases !== expected.releases ||
+    observed.peakLive !== expected.peakLive
+  )
+    return Object.freeze({ _tag: 'Invalid', reason: 'Mismatch', observed, expected })
+  return Object.freeze({ _tag: 'Valid', observed })
+}
+
+const invalidReason = (verification: AllocationVerification) =>
+  verification._tag === 'Invalid' ? verification.reason : undefined
 
 const evidence = (self: Analysis.Snapshot) => {
   const diagnostics = Analysis.diagnostics(self)
@@ -89,8 +170,46 @@ const evidence = (self: Analysis.Snapshot) => {
   ]
 }
 
-it('keeps six complete, readable programs and explicit status contracts', () => {
+it('validates allocation evidence and rejects malformed resource traces', () => {
+  const expected = Object.freeze({ acquires: 2, releases: 2, peakLive: 2 })
+  assert.deepEqual(
+    verifyAllocationEvidence(
+      [
+        { _tag: 'AllocationAcquire', ticket: 0 },
+        { _tag: 'AllocationAcquire', ticket: 1 },
+        { _tag: 'AllocationRelease', ticket: 0 },
+        { _tag: 'AllocationRelease', ticket: 1 },
+      ],
+      expected,
+    ),
+    { _tag: 'Valid', observed: expected },
+  )
+  assert.strictEqual(
+    invalidReason(
+      verifyAllocationEvidence(
+        [
+          { _tag: 'AllocationAcquire', ticket: 0 },
+          { _tag: 'AllocationAcquire', ticket: 0 },
+        ],
+        expected,
+      ),
+    ),
+    'DuplicateAcquire',
+  )
+  assert.strictEqual(
+    invalidReason(verifyAllocationEvidence([{ _tag: 'AllocationRelease', ticket: 0 }], expected)),
+    'UnknownRelease',
+  )
+  assert.strictEqual(
+    invalidReason(verifyAllocationEvidence([{ _tag: 'AllocationAcquire', ticket: 0 }], expected)),
+    'Unreleased',
+  )
+  assert.strictEqual(invalidReason(verifyAllocationEvidence([], expected)), 'Mismatch')
+})
+
+it('keeps seven complete, readable programs and explicit status contracts', () => {
   assert.deepEqual(exampleIds, [
+    'breadth-first-search',
     'crc-32',
     'fft',
     'game-of-life',
@@ -102,9 +221,9 @@ it('keeps six complete, readable programs and explicit status contracts', () => 
     examples
       .filter(({ manifest }) => manifest.status === 'executable')
       .map(({ manifest }) => manifest.id),
-    ['crc-32', 'game-of-life', 'matrix-multiplication', 'sieve'],
+    ['breadth-first-search', 'crc-32', 'game-of-life', 'matrix-multiplication', 'sieve'],
   )
-  for (const { root, manifest, bytes, readme } of examples) {
+  for (const { root, manifest, source, bytes, readme } of examples) {
     assert.strictEqual(manifest.id, root.slice(root.lastIndexOf('/') + 1))
     assert.strictEqual(existsSync(join(root, manifest.source)), true)
     assert.isAbove(bytes.length, 100)
@@ -115,6 +234,11 @@ it('keeps six complete, readable programs and explicit status contracts', () => 
     assert.deepEqual(manifest.targets, ['evaluation', 'native', 'wasm'])
     assert.strictEqual(Number.isInteger(manifest.expected.entryResult), true)
     assert.strictEqual(manifest.blockers.length === 0, manifest.status === 'executable')
+    if (manifest.id === 'breadth-first-search') {
+      assert.include(source, 'import silk.vector')
+      assert.notInclude(source, 'RawBuffer')
+      assert.notInclude(source, 'Slot.')
+    }
   }
 })
 
@@ -151,6 +275,31 @@ it.effect(
         assert.strictEqual(evaluated.result._tag, 'I32Value', manifest.id)
         if (evaluated.result._tag !== 'I32Value') continue
         assert.strictEqual(evaluated.result.value, manifest.expected.entryResult, manifest.id)
+        if (manifest.expected.allocation !== undefined) {
+          const allocationEvents = evaluated.trace.flatMap(
+            (event): ReadonlyArray<AllocationEvent> =>
+              event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease'
+                ? [Object.freeze({ _tag: event._tag, ticket: event.ticket })]
+                : [],
+          )
+          const verification = verifyAllocationEvidence(
+            allocationEvents,
+            manifest.expected.allocation,
+          )
+          assert.strictEqual(
+            verification._tag,
+            'Valid',
+            `${manifest.id} allocation evidence: ${JSON.stringify(verification)}`,
+          )
+        }
+        const operations = Analysis.loweredMir(native).functions.flatMap(Mir.operations)
+        assert.isFalse(
+          operations.some((operation) => {
+            const tag = operation._tag.toLowerCase()
+            return tag.includes('vector') || tag.includes('breadth') || tag.includes('search')
+          }),
+          `${manifest.id} gained an algorithm-shaped MIR operation`,
+        )
 
         const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
         assert.isAbove(nativeArtifact.bitcode.length, 0, manifest.id)
