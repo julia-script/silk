@@ -25,7 +25,7 @@ it.effect('creates the canonical sparse executable project in a missing child di
     assert.strictEqual(yield* fileSystem.readFileString(`${root}/hello/.gitignore`), '/build/\n')
     assert.strictEqual(
       yield* fileSystem.readFileString(`${root}/hello/src/main.silk`),
-      'pub fn main() -> i32 {\n  return 0\n}\n',
+      'pub effect fn main() -> () {\n  return ()\n}\n',
     )
     const project = yield* Project.load({ workingDirectory: `${root}/hello` })
     assert.strictEqual(project.entry.module, 'main')
