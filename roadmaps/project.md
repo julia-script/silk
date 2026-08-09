@@ -27,16 +27,16 @@ cost-model gaps while preserving evaluator, native, and WebAssembly agreement.
 
 ### Repair contextual integer literals exposed by the lexer
 
-- **Problem:** The completed lexer exercise found that exact integer literal context does not reach
-  ordinary user-function arguments, despite the integer contract promising immediate contextual
-  typing. Byte classifiers therefore convert values to `i32` solely to call helpers with literals.
-- **Outcome & done-when:** Representable literals select the declared integer parameter type in
-  direct and piped ordinary calls; out-of-range and genuinely unconstrained literals retain their
-  current exact diagnostics and defaults; every integer family and engine remains in parity; and
-  the lexer removes the workaround.
-- **Status:** next proposal — selected directly from archived lexer findings.
-- **Appetite:** one focused compiler-correctness change, then reassess the remaining enum/constant,
-  read-only Vector, and cost findings without automatically promoting them.
+**Status: complete (2026-08-09).** Focused characterization corrected the initial finding: direct,
+explicit-generic, and piped calls already apply concrete integer parameter contexts. The live defect
+was `bool` from an enclosing return position suppressing homogeneous operand refinement in
+expressions such as `return byte == 13`. Operator analysis now lets a resolved scalar first operand
+refine the remaining exact literals even when an enclosing result expectation exists. The lexer
+uses `u8` classifiers without the `i32` workaround, and semantic/HIR/MIR facts, diagnostics,
+evaluator, native LLVM, direct Wasm, and fresh-process artifacts agree.
+
+The remaining enum/constant, read-only Vector, and cost findings stay unpromoted until another
+pressure program supplies independent evidence.
 - **Links:** [real-programs initiative](real-programs.md)
 
 ### Validate the language's defining effect execution model
@@ -196,9 +196,9 @@ elements drop before storage release; and move-out plus early drop retain exactl
 
 ## Next
 
-No project-level item is preselected. The lexer findings will determine whether the next change is
-a focused language/stdlib repair or a different pressure program that tests another part of the
-small-language boundary.
+No project-level item is preselected. The next change should be another recognizable pressure
+program that tests a different part of the small-language boundary; the remaining lexer findings
+are not sufficient alone to design enums/constants or a read-only Vector surface.
 
 ## Later
 
@@ -249,6 +249,10 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-09: Completed `fix-contextual-integer-call-literals`. Characterization showed ordinary
+  and piped calls were already correct; the repaired defect was enclosing `bool` result context
+  suppressing `u8` operand-to-literal refinement. The lexer now stays in byte types throughout its
+  classifiers with evaluator/native/Wasm and deterministic artifact parity.
 - 2026-08-09: Closed the first real-program milestone after lowercase primitive families, physical
   stdlib sources, static text, standard streams, four baseline algorithms, allocation-pressure BFS,
   recursive quicksort, and executable FFT all reached cross-engine parity.

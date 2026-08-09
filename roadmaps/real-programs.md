@@ -12,9 +12,9 @@ snippets alone. This initiative fills the smallest foundational gaps—scalar va
 source, static text, and output—then uses familiar algorithms to reveal the next real constraints
 without pretending the bootstrap language is already complete.
 
-**Current objective:** repair the first general defect exposed by a complete pressure program —
-measured by ordinary-call integer literals receiving their declared contextual types and the Silk
-lexer dropping its byte-to-`i32` classifier workaround without losing cross-engine parity.
+**Current objective:** choose the next recognizable pressure program from independent language
+evidence, without promoting the lexer's remaining enum/constant or Vector ergonomics from one
+consumer alone.
 
 ## Column rules
 
@@ -24,22 +24,19 @@ lexer dropping its byte-to-`i32` classifier workaround without losing cross-engi
 
 ## Now
 
-### Make exact integer context reach ordinary calls
+### Make exact integer context survive enclosing result expectations
 
-- **Problem:** `47` in `hasPair(source, index, 47, 47)` defaults to `i32` and reports `SEM0012`
-  instead of using the immediate `u8` parameter context promised by the integer specification.
-- **Outcome & done-when:** Ordinary direct and piped calls contextually type exact literals for all
-  integer parameter types, reject out-of-range values before MIR, and let the lexer compare `u8`
-  values without conversion scaffolding.
-- **Boundary:** No implicit conversion between already-typed integers, overload system, widening
-  rule, or change to unconstrained `i32` defaults.
-- **Status:** selected from the archived lexer findings; proposal next.
-- **Appetite:** one focused semantic-analysis change with integer-family and engine parity.
+**Status: complete (2026-08-09).** Direct, explicit-generic, and piped calls already selected exact
+integer literals from concrete parameter types. The actual failure was `bool` from a return context
+preventing `byte == 13` from refining `13` to the known `u8` operand type. The repair preserves
+unresolved generic inference, unconstrained `i32` defaults, and rejection of already-typed mixed
+integers. The lexer now removes its byte-to-`i32` classifier boundary with full engine and
+determinism parity.
 
 ## Next
 
-No follow-up program is preselected. The lexer findings decide whether to repair a general seam or
-choose another familiar workload that applies different pressure.
+No follow-up program is preselected. Choose another familiar workload that applies different
+pressure and can independently confirm or falsify the lexer's remaining findings.
 
 ## Later
 
@@ -77,6 +74,9 @@ and editor tooling together with the language surface so no second vocabulary su
 
 ## Changelog
 
+- 2026-08-09: Completed `fix-contextual-integer-call-literals`. Focused tests corrected the initial
+  call-boundary diagnosis and repaired homogeneous operand refinement under enclosing Boolean
+  result context. The lexer now compares `u8` values and literals directly across all engines.
 - 2026-08-09: Completed and archived the six-part foundation: `ship-stdlib-sources`,
   `complete-integer-scalars`, `add-floating-point-scalars`, `add-static-text`,
   `add-standard-streams`, and `build-algorithm-examples`.
