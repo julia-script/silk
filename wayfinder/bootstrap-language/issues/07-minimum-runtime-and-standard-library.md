@@ -165,9 +165,13 @@ Host access is split into four nominal services rather than one platform capabil
   termination. Nonzero exit is result data; failure to start, wait, or capture is `ProcessError`.
   There is no shell string, implicit environment inheritance, background child, pipe API,
   interactive input, signal control, or streaming output.
-- `StandardStreams` offers blocking all-or-failure byte writes to stdout and stderr. `StreamError`
-  includes broken pipe as a typed failure. Formatting happens above this boundary; stdin, terminal
-  detection, colors, cursor control, flushing, logging, and locking are deferred.
+- `StandardStreams` offers logically blocking all-or-failure byte writes to stdout and stderr: the
+  Effect completes only after the bytes are accepted or the write fails, without promising that a
+  future execution adapter must block its operating-system thread. `StreamError` includes broken
+  pipe as a typed failure. Formatting happens above this boundary; stdin, terminal detection,
+  colors, cursor control, flushing, logging, and locking are deferred. The later concurrency and
+  Stream/Sink constraints are recorded as a non-binding
+  [direction](../research/concurrency-and-parallelism-direction.md).
 - `MonotonicClock.now` returns an opaque copyable `Instant` infallibly; subtracting ordered instants
   produces a nominal nanosecond `Duration`. Implementations are replaceable for deterministic
   tests. Calendar time, time zones, sleeping, deadlines, timers, and scheduling are absent.
