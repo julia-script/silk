@@ -386,3 +386,12 @@ The target layout plan SHALL represent `f32` as IEEE binary32 with four-byte siz
 
 - **WHEN** a reachable signature contains `f32` and `f64`
 - **THEN** layout publishes both canonical lanes before MIR lowering
+
+### Requirement: Static data placement is compiler-owned target data
+
+Layout planning SHALL retain exact bytes, required alignment, immutable address lane, and target-selected `usize` length lane without publishing an owning String ABI.
+
+#### Scenario: Plan Wasm static text
+
+- **WHEN** a Wasm program reaches a text literal
+- **THEN** layout plans one immutable byte region and a 32-bit `usize` length lane

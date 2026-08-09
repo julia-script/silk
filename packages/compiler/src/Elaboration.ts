@@ -11,6 +11,7 @@ import * as Operator from './Operator.js'
 import * as Scalar from './Scalar.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
+import * as StaticText from './StaticText.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
@@ -120,6 +121,13 @@ export type FloatingExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
   | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
+
+export interface StaticTextExpressionFact {
+  readonly _tag: 'StaticText'
+  readonly data?: StaticText.Data
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
 
 /** A call callee resolved against top-level declarations or unavailable after syntax recovery. */
 export type CallReferenceFact =
@@ -589,6 +597,7 @@ export type ExpressionFact =
       readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }
+  | StaticTextExpressionFact
   | {
       readonly _tag: 'Unit'
       readonly type: ExpressionTypeFact
@@ -933,6 +942,7 @@ const unionConversionDiagnostic = (
 const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'IntegerLiteralExpression',
   'FloatingLiteralExpression',
+  'StaticTextLiteralExpression',
   'UnitExpression',
   'BooleanLiteralExpression',
   'IdentifierExpression',
@@ -5334,6 +5344,35 @@ function analyzeExpression(
     })
   }
 
+  if (node.kind === 'StaticTextLiteralExpression') {
+    const token = directToken(node, 'TextLiteral') ?? directToken(node, 'ByteStringLiteral')
+    const bytes =
+      token === undefined ? undefined : Option.getOrUndefined(SourceFile.slice(source, token.span))
+    const result =
+      bytes === undefined
+        ? undefined
+        : StaticText.decode(Array.from(bytes), token?.kind === 'ByteStringLiteral')
+    const diagnostic =
+      result?._tag === 'Invalid'
+        ? Diagnostic.invalidStaticLiteral(result.detail, node.span)
+        : undefined
+    const data = result?._tag === 'Decoded' ? result.data : undefined
+    const type =
+      data === undefined
+        ? unavailableExpressionType
+        : availableExpressionType(Type.slice('Shared', 'u8'))
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'StaticText',
+        ...(data === undefined ? {} : { data }),
+        type,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze(diagnostic === undefined ? [] : [diagnostic]),
+      type: type._tag === 'Available' ? type.type : undefined,
+    })
+  }
+
   if (node.kind === 'UnitExpression') {
     return Object.freeze({
       fact: Object.freeze({
@@ -6633,6 +6672,16 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
         })
       : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   }
+  if (fact._tag === 'StaticText') {
+    return fact.data === undefined
+      ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+      : Object.freeze({
+          _tag: 'StaticTextLiteral',
+          data: fact.data,
+          type: Type.slice('Shared', 'u8'),
+          span: fact.syntax.span,
+        })
+  }
   if (fact._tag === 'Unit') {
     return Object.freeze({
       _tag: 'UnitLiteral',
@@ -7547,6 +7596,7 @@ const directExpressionChildren = (expression: ExpressionFact): ReadonlyArray<Exp
     case 'Match':
     case 'Integer':
     case 'Floating':
+    case 'StaticText':
     case 'Unit':
     case 'Boolean':
     case 'Identifier':

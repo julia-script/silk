@@ -12,6 +12,7 @@ import type * as LlvmError from '@silk-effect/llvm/LlvmError'
 import * as LlvmMetadata from '@silk-effect/llvm/Metadata'
 import * as LlvmType from '@silk-effect/llvm/Type'
 import * as Value from '@silk-effect/llvm/Value'
+import * as Variable from '@silk-effect/llvm/Variable'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from './DeclarationIndex.js'
@@ -762,6 +763,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       if (!integerTypes.has(bits)) integerTypes.set(bits, yield* LlvmType.integer(builder, bits))
     }
     const hasAddressLane =
+      (program.staticData?.length ?? 0) > 0 ||
       program.functions.some((fn) =>
         Mir.operations(fn).some(
           (operation) =>
@@ -790,6 +792,21 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       )
     const i8 = hasAddressLane ? yield* LlvmType.integer(builder, 8) : i32
     const pointer = hasAddressLane ? yield* LlvmType.pointer(builder) : i32
+    const staticPointers = new Map<string, Constant.Constant>()
+    for (const [ordinal, data] of (program.staticData ?? []).entries()) {
+      const storageType = yield* LlvmType.array(builder, i8, data.bytes.length)
+      const initializer = yield* Constant.string(builder, Uint8Array.from(data.bytes))
+      const variable = yield* Variable.make(builder, `silk.static.${ordinal}`, storageType, {
+        initializer,
+        constant: true,
+        linkage: 'internal',
+        unnamedAddress: 'unnamed_addr',
+      })
+      staticPointers.set(
+        data.id,
+        yield* Constant.fromGlobal(builder, yield* Variable.global(builder, variable)),
+      )
+    }
     let voidType: LlvmType.Type | undefined
     const lanesFor = (type: Mir.Type): ReadonlyArray<Layout.CallingLane> => {
       if (type._tag === 'EffectBorrow')
@@ -2126,6 +2143,20 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                             physicalType,
                             BigInt(operation.value),
                           ),
+                    ]),
+                  )
+                  break
+                }
+                case 'StaticView': {
+                  const address = staticPointers.get(operation.data)
+                  if (address === undefined || usizeType === undefined) {
+                    throw new RangeError('LLVM static view lost its data placement or usize type')
+                  }
+                  locals.set(
+                    operation.destination.ordinal,
+                    Object.freeze([
+                      address,
+                      yield* Constant.integerUnsigned(builder, usizeType, operation.length),
                     ]),
                   )
                   break

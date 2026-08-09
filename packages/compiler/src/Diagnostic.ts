@@ -153,6 +153,8 @@ export const missingUnsafeBoundaryCode = 'SEM0082' as const
 export const invalidConformanceCode = 'SEM0083' as const
 /** Stable code for a Drop implementation outside the compiler-sealed hook contract. */
 export const invalidDropHookCode = 'SEM0084' as const
+/** Stable code for malformed escapes, invalid UTF-8, or non-byte literal values. */
+export const invalidStaticLiteralCode = 'SEM0085' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -266,6 +268,7 @@ export type Code =
   | typeof missingUnsafeBoundaryCode
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
+  | typeof invalidStaticLiteralCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -327,6 +330,7 @@ export type Reason =
   | { readonly _tag: 'MissingUnsafeBoundary'; readonly operation: string }
   | { readonly _tag: 'InvalidConformance'; readonly detail: string }
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
+  | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
   | { readonly _tag: 'UnhandledEffectRequirements'; readonly requirements: ReadonlyArray<string> }
   | { readonly _tag: 'InvalidEffectRetry'; readonly detail: string }
@@ -661,6 +665,18 @@ export const unsupportedBytes = (span: SourceSpan.SourceSpan): Diagnostic =>
     severity: 'error',
     message: 'Unsupported byte sequence',
     reason: Object.freeze({ _tag: 'UnsupportedBytes' }),
+    span,
+  })
+
+/** Creates the semantic diagnostic for a static literal that cannot decode atomically. */
+export const invalidStaticLiteral = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidStaticLiteralCode,
+    severity: 'error',
+    message: `Invalid static literal: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidStaticLiteral', detail }),
     span,
   })
 

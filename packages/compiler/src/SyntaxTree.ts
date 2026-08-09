@@ -48,6 +48,7 @@ export type NodeKind =
   | 'RoleExpression'
   | 'IntegerLiteralExpression'
   | 'FloatingLiteralExpression'
+  | 'StaticTextLiteralExpression'
   | 'UnitExpression'
   | 'BooleanLiteralExpression'
   | 'IdentifierExpression'
