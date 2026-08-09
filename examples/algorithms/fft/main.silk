@@ -58,8 +58,23 @@ fn fft(real: &[f64], imaginary: &[f64]) -> Spectrum {
 }
 
 pub fn main() -> i32 {
-  let real = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  let real = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   let imaginary = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   let spectrum = fft(&real, &imaginary)
-  return f64.toI32(spectrum.real[0])
+  let r1 = f64.toI32(spectrum.real[1] * 1000.0)
+  let i1 = f64.toI32(spectrum.imaginary[1] * 1000.0)
+  let r2 = f64.toI32(spectrum.real[2] * 1000.0)
+  let i2 = f64.toI32(spectrum.imaginary[2] * 1000.0)
+  let r3 = f64.toI32(spectrum.real[3] * 1000.0)
+  let i3 = f64.toI32(spectrum.imaginary[3] * 1000.0)
+  let r4 = f64.toI32(spectrum.real[4] * 1000.0)
+  let i4 = f64.toI32(spectrum.imaginary[4] * 1000.0)
+  let r5 = f64.toI32(spectrum.real[5] * 1000.0)
+  let i5 = f64.toI32(spectrum.imaginary[5] * 1000.0)
+  let r6 = f64.toI32(spectrum.real[6] * 1000.0)
+  let i6 = f64.toI32(spectrum.imaginary[6] * 1000.0)
+  let r7 = f64.toI32(spectrum.real[7] * 1000.0)
+  let i7 = f64.toI32(spectrum.imaginary[7] * 1000.0)
+  let fingerprint = r1 * 3 + i1 * 5 + r2 * 7 + i2 * 11 + r3 * 13 + i3 * 17 + r4 * 19 + i4 * 23 + r5 * 29 + i5 * 31 + r6 * 37 + i6 * 41 + r7 * 43 + i7 * 47
+  return fingerprint % 251
 }

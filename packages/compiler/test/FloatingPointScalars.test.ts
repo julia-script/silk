@@ -101,6 +101,9 @@ const floatArguments = (scalar: Scalar.FloatScalar, operation: Scalar.Operation)
       return '-42.0'
     case 'TotalOrder':
       return `${scalar.spelling}.fromBits(${scalar.spelling === 'f32' ? '2147483648' : '9223372036854775808'}), 0.0`
+    case 'Sin':
+    case 'Cos':
+      return '0.0'
     case 'FromBits':
       return scalar.spelling === 'f32' ? '1109917696' : '4631107791820423168'
     default:
@@ -116,6 +119,15 @@ const floatMatrix = (() => {
     const invocation = `${scalar.spelling}.${operation.spelling}(${floatArguments(scalar, operation)})`
     if (operation.result === 'Boolean')
       return `fn floatCase${ordinal}() -> i32 { if ${invocation} { return 42 } return 0 }`
+    if (operation.code === 'Sin' || operation.code === 'Cos') {
+      const expected =
+        operation.code === 'Sin'
+          ? '0'
+          : scalar.spelling === 'f32'
+            ? '1065353216'
+            : '4607182418800017408'
+      return `fn floatCase${ordinal}() -> i32 { if ${scalar.spelling}.toBits(${invocation}) == ${expected} { return 42 } return 0 }`
+    }
     if (operation.code === 'ToBits')
       return `fn floatCase${ordinal}() -> i32 { return ${scalar.spelling}.toI32(${scalar.spelling}.fromBits(${invocation})) }`
     const target = Scalar.find(operation.result === 'Self' ? scalar.spelling : operation.result)

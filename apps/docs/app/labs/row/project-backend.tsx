@@ -718,6 +718,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = reinterpret ${localText(operation.source)} → ${operation.type._tag}`
     case 'FloatUnary':
       return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${localText(operation.source)}`
+    case 'FloatTranscendental':
+      return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${localText(operation.source)}`
     case 'CheckedInteger':
       return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${operation.operands.map(localText).join(', ')}`
     case 'ValidateLayout':

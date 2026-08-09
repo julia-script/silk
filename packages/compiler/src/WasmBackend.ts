@@ -22,6 +22,7 @@ import type * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import * as StandardStreams from './StandardStreams.js'
 import * as Target from './Target.js'
+import * as Transcendental from './Transcendental.js'
 import * as SilkType from './Type.js'
 
 /** Tests whether one cleanup plan invokes a Drop hook at any nesting depth. */
@@ -76,6 +77,21 @@ const laneLoadMnemonic = (
   if (bits === 16) return scalar.signedness === 'Signed' ? 'i32.load16_s' : 'i32.load16_u'
   if (bits === 8) return scalar.signedness === 'Signed' ? 'i32.load8_s' : 'i32.load8_u'
   return 'i32.load'
+}
+
+const laneStoreMnemonic = (
+  plan: LayoutPlan.Plan,
+  lane: LayoutPlan.CallingLane,
+): Instr.MemoryAccessMnemonic => {
+  if (typeof lane.type !== 'string') return 'i32.store'
+  const scalar = Scalar.find(lane.type)
+  if (scalar?.category === 'Floating') return scalar.spelling === 'f32' ? 'f32.store' : 'f64.store'
+  if (scalar?.category !== 'Integer') return 'i32.store'
+  const bits = Scalar.bits(scalar, plan.target.pointerSize === 4 ? 32 : 64)
+  if (bits === 64) return 'i64.store'
+  if (bits === 16) return 'i32.store16'
+  if (bits === 8) return 'i32.store8'
+  return 'i32.store'
 }
 
 const alignUp = (value: number, alignment: number): number =>
@@ -649,6 +665,8 @@ interface Layout {
   readonly scratch: number
   /** The corresponding scratch lane for 64-bit integer operations. */
   readonly scratch64: number
+  readonly scratchF32?: readonly [number, number]
+  readonly scratchF64?: readonly [number, number]
   readonly frameBase?: number
   readonly frameEnd?: number
   readonly framePages?: number
@@ -971,16 +989,35 @@ const layoutOf = (
   }
   const scratch = physical
   declared.push(named(i32, 'scratch'))
-  const needsScratch64 = lanes.some((localLanes) =>
-    localLanes.some(
-      (lane) =>
-        typeof lane.type === 'string' &&
-        Scalar.bits(Scalar.find(lane.type) ?? Scalar.defaultInteger, 32) === 64,
-    ),
-  )
-  const scratch64 = needsScratch64 ? physical + 1 : scratch
+  const needsScratch64 =
+    lanes.some((localLanes) =>
+      localLanes.some(
+        (lane) =>
+          typeof lane.type === 'string' &&
+          Scalar.bits(Scalar.find(lane.type) ?? Scalar.defaultInteger, 32) === 64,
+      ),
+    ) || Mir.operations(fn).some((operation) => operation._tag === 'FloatTranscendental')
+  let nextInternal = physical + 1
+  const scratch64 = needsScratch64 ? nextInternal : scratch
   if (needsScratch64) declared.push(named(i64, 'scratch64'))
-  const internalCount = needsScratch64 ? 2 : 1
+  if (needsScratch64) nextInternal += 1
+  const needsScratchF32 = Mir.operations(fn).some(
+    (operation) => operation._tag === 'FloatTranscendental' && operation.sourceType._tag === 'f32',
+  )
+  const scratchF32 = needsScratchF32 ? ([nextInternal, nextInternal + 1] as const) : undefined
+  if (scratchF32 !== undefined) {
+    declared.push(named(f32, 'scratch_f32_a'), named(f32, 'scratch_f32_b'))
+    nextInternal += 2
+  }
+  const needsScratchF64 = Mir.operations(fn).some(
+    (operation) => operation._tag === 'FloatTranscendental' && operation.sourceType._tag === 'f64',
+  )
+  const scratchF64 = needsScratchF64 ? ([nextInternal, nextInternal + 1] as const) : undefined
+  if (scratchF64 !== undefined) {
+    declared.push(named(f64, 'scratch_f64_a'), named(f64, 'scratch_f64_b'))
+    nextInternal += 2
+  }
+  const internalCount = nextInternal - physical
   const frameBase = frame.roots.size === 0 ? undefined : physical + internalCount
   const frameEnd = frame.roots.size === 0 ? undefined : physical + internalCount + 1
   const framePages = frame.roots.size === 0 ? undefined : physical + internalCount + 2
@@ -990,6 +1027,8 @@ const layoutOf = (
   return {
     scratch,
     scratch64,
+    ...(scratchF32 === undefined ? {} : { scratchF32 }),
+    ...(scratchF64 === undefined ? {} : { scratchF64 }),
     declared: Object.freeze(declared),
     slots: Object.freeze(slots),
     lanes: Object.freeze(lanes),
@@ -1051,12 +1090,21 @@ const emitOperation = (
     const context = requireMemory()
     return [Instr.localGet(address), Instr.memoryAccess('i32.load', context.memory, { offset })]
   }
-  const storeAt = (address: number, value: number, offset = 0): ReadonlyArray<Instr.Instr> => {
+  const storeAt = (
+    address: number,
+    value: number,
+    offset = 0,
+    lane?: LayoutPlan.CallingLane,
+  ): ReadonlyArray<Instr.Instr> => {
     const context = requireMemory()
     return [
       Instr.localGet(address),
       Instr.localGet(value),
-      Instr.memoryAccess('i32.store', context.memory, { offset }),
+      Instr.memoryAccess(
+        lane === undefined ? 'i32.store' : laneStoreMnemonic(plan, lane),
+        context.memory,
+        { offset },
+      ),
     ]
   }
   const materializeRoot = (root: Mir.LocalId): ReadonlyArray<Instr.Instr> => {
@@ -1074,7 +1122,7 @@ const emitOperation = (
       return [
         ...frameAddress(planned.offset + offset),
         Instr.localGet(source),
-        Instr.memoryAccess('i32.store', memory.memory),
+        Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
       ]
     })
   }
@@ -1092,7 +1140,7 @@ const emitOperation = (
       }
       return [
         ...frameAddress(planned.offset + offset),
-        Instr.memoryAccess('i32.load', memory.memory),
+        Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
         Instr.localSet(destination),
       ]
     })
@@ -1569,7 +1617,7 @@ const emitOperation = (
         if (value === undefined || offset === undefined) {
           throw new RangeError('Wasm Slot.write lost an element lane')
         }
-        return storeAt(address, value, offset)
+        return storeAt(address, value, offset, lane)
       })
     }
     case 'SlotTake':
@@ -2009,7 +2057,7 @@ const emitOperation = (
           const offset = LayoutPlan.laneOffset(plan, target, [...staticSelectors, ...lane.path])
           if (value === undefined || offset === undefined)
             throw new RangeError('Wasm reference write lost a lane offset')
-          return storeAt(address, value, offset)
+          return storeAt(address, value, offset, lane)
         })
       }
       if (operation.rootType._tag === 'Slice') {
@@ -2525,7 +2573,7 @@ const emitOperation = (
               Instr.localGet(pointer),
               Instr.i32Const(offset),
               Instr.op('i32.add'),
-              Instr.memoryAccess('i32.load', memory.memory),
+              Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
             )
           }
         }
@@ -2993,6 +3041,158 @@ const emitOperation = (
         Instr.localSet(destination),
       ]
     }
+    case 'FloatTranscendental': {
+      const source = Scalar.find(operation.sourceType._tag)
+      if (source?.category !== 'Floating')
+        throw new RangeError('Wasm transcendental lost its source type')
+      const width = source.spelling === 'f32' ? 32 : 64
+      const prefix = source.spelling
+      const self = Transcendental.plan(width)
+      const input = scalar(operation.source)
+      const destination = scalar(operation.destination)
+      const scratchFloat = source.spelling === 'f32' ? layout.scratchF32 : layout.scratchF64
+      if (scratchFloat === undefined)
+        throw new RangeError('Wasm transcendental lost its floating scratch lanes')
+      const [scratchA, scratchB] = scratchFloat
+      const floatType = source.spelling === 'f32' ? f32 : f64
+      const constant = (bits: bigint): Instr.Instr => {
+        const value = FloatingPoint.toNumber({ width, bits })
+        return source.spelling === 'f32' ? Instr.f32Const(value) : Instr.f64Const(value)
+      }
+      const horner = (coefficients: ReadonlyArray<bigint>): ReadonlyArray<Instr.Instr> => {
+        const instructions: Array<Instr.Instr> = [constant(coefficients.at(-1) ?? 0n)]
+        for (let index = coefficients.length - 2; index >= 0; index -= 1) {
+          instructions.push(
+            Instr.localGet(scratchB),
+            Instr.op(`${prefix}.mul`),
+            constant(coefficients[index] ?? 0n),
+            Instr.op(`${prefix}.add`),
+          )
+        }
+        return instructions
+      }
+      const sine = [
+        Instr.localGet(destination),
+        Instr.localGet(destination),
+        Instr.localGet(scratchB),
+        Instr.op(`${prefix}.mul`),
+        ...horner(self.sine),
+        Instr.op(`${prefix}.mul`),
+        Instr.op(`${prefix}.add`),
+      ]
+      const cosine = [
+        constant(self.one),
+        constant(self.half),
+        Instr.localGet(scratchB),
+        Instr.op(`${prefix}.mul`),
+        Instr.op(`${prefix}.sub`),
+        Instr.localGet(scratchB),
+        Instr.localGet(scratchB),
+        Instr.op(`${prefix}.mul`),
+        ...horner(self.cosine),
+        Instr.op(`${prefix}.mul`),
+        Instr.op(`${prefix}.add`),
+      ]
+      const quadrantCase = (quadrant: number): ReadonlyArray<Instr.Instr> => {
+        const sineResult =
+          quadrant === 0
+            ? [Instr.localGet(scratchA)]
+            : quadrant === 1
+              ? [Instr.localGet(scratchB)]
+              : quadrant === 2
+                ? [Instr.localGet(scratchA), Instr.op(`${prefix}.neg`)]
+                : [Instr.localGet(scratchB), Instr.op(`${prefix}.neg`)]
+        const cosineResult =
+          quadrant === 0
+            ? [Instr.localGet(scratchB)]
+            : quadrant === 1
+              ? [Instr.localGet(scratchA), Instr.op(`${prefix}.neg`)]
+              : quadrant === 2
+                ? [Instr.localGet(scratchB), Instr.op(`${prefix}.neg`)]
+                : [Instr.localGet(scratchA)]
+        return operation.operation === 'Sin' ? sineResult : cosineResult
+      }
+      const selectQuadrant = (quadrant = 0): ReadonlyArray<Instr.Instr> =>
+        quadrant === 3
+          ? quadrantCase(3)
+          : [
+              Instr.localGet(layout.scratch64),
+              Instr.i64Const(BigInt(quadrant)),
+              Instr.op('i64.eq'),
+              Instr.ifElse(
+                Instr.valueBlockType(floatType),
+                quadrantCase(quadrant),
+                selectQuadrant(quadrant + 1),
+              ),
+            ]
+      const finite = [
+        Instr.localGet(input),
+        constant(self.inverseHalfPi),
+        Instr.op(`${prefix}.mul`),
+        constant(self.half),
+        Instr.op(`${prefix}.neg`),
+        constant(self.half),
+        Instr.localGet(input),
+        constant(0n),
+        Instr.op(`${prefix}.lt`),
+        Instr.op('select'),
+        Instr.op(`${prefix}.add`),
+        Instr.op(`i64.trunc_${prefix}_s`),
+        Instr.localSet(layout.scratch64),
+        Instr.localGet(input),
+        Instr.localSet(destination),
+        ...self.halfPi.flatMap((part) => [
+          Instr.localGet(destination),
+          Instr.localGet(layout.scratch64),
+          Instr.op(`${prefix}.convert_i64_s`),
+          constant(part),
+          Instr.op(`${prefix}.mul`),
+          Instr.op(`${prefix}.sub`),
+          Instr.localSet(destination),
+        ]),
+        Instr.localGet(destination),
+        Instr.localTee(destination),
+        Instr.localGet(destination),
+        Instr.op(`${prefix}.mul`),
+        Instr.localSet(scratchB),
+        ...sine,
+        Instr.localSet(scratchA),
+        ...cosine,
+        Instr.localSet(scratchB),
+        Instr.localGet(layout.scratch64),
+        Instr.i64Const(3n),
+        Instr.op('i64.and'),
+        Instr.localSet(layout.scratch64),
+        ...selectQuadrant(),
+      ]
+      return [
+        Instr.localGet(input),
+        Instr.localGet(input),
+        Instr.op(`${prefix}.ne`),
+        Instr.localGet(input),
+        Instr.op(`${prefix}.abs`),
+        source.spelling === 'f32'
+          ? Instr.f32Const(Number.POSITIVE_INFINITY)
+          : Instr.f64Const(Number.POSITIVE_INFINITY),
+        Instr.op(`${prefix}.eq`),
+        Instr.op('i32.or'),
+        Instr.ifElse(
+          Instr.valueBlockType(floatType),
+          [constant(self.canonicalNaN)],
+          [
+            Instr.localGet(input),
+            constant(0n),
+            Instr.op(`${prefix}.eq`),
+            Instr.ifElse(
+              Instr.valueBlockType(floatType),
+              operation.operation === 'Sin' ? [Instr.localGet(input)] : [constant(self.one)],
+              finite,
+            ),
+          ],
+        ),
+        Instr.localSet(destination),
+      ]
+    }
     case 'CheckedInteger': {
       const destination = slots(operation.destination)
       const tag = destination.at(0)
@@ -3360,7 +3560,7 @@ const emitBody = (
         return [
           Instr.localGet(pointer),
           ...(offset === 0 ? [] : [Instr.i32Const(offset), Instr.op('i32.add')]),
-          Instr.memoryAccess('i32.load', memory.memory),
+          Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
           Instr.localSet(destination),
         ]
       })

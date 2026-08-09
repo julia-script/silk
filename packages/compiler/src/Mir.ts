@@ -278,6 +278,15 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      readonly _tag: 'FloatTranscendental'
+      readonly operation: 'Sin' | 'Cos'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly sourceType: ScalarType
+      readonly type: ScalarType
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'CheckedInteger'
       readonly operation: Scalar.OperationCode
       readonly destination: LocalId
@@ -1021,6 +1030,7 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'ReinterpretScalar':
       return [operation.destination, operation.source]
     case 'FloatUnary':
+    case 'FloatTranscendental':
       return [operation.destination, operation.source]
     case 'CheckedInteger':
       return [operation.destination, ...operation.operands]
@@ -1300,6 +1310,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'ConvertScalar':
     case 'ReinterpretScalar':
     case 'FloatUnary':
+    case 'FloatTranscendental':
       return [semanticType(operation.sourceType), semanticType(operation.type)]
     case 'CheckedInteger':
       return [
@@ -1426,6 +1437,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'ConvertScalar':
     case 'ReinterpretScalar':
     case 'FloatUnary':
+    case 'FloatTranscendental':
       return [operation.source]
     case 'CheckedInteger':
       return operation.operands
@@ -2098,7 +2110,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         if (
           operation._tag === 'ConvertScalar' ||
           operation._tag === 'ReinterpretScalar' ||
-          operation._tag === 'FloatUnary'
+          operation._tag === 'FloatUnary' ||
+          operation._tag === 'FloatTranscendental'
         ) {
           const source = fn.localTypes.at(operation.source.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
@@ -2117,6 +2130,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               (operation.operation === 'Negate'
                 ? targetScalar?.spelling === sourceScalar.spelling
                 : targetScalar?.category === 'Boolean'))
+          const transcendental =
+            operation._tag !== 'FloatTranscendental' ||
+            (sourceScalar?.category === 'Floating' &&
+              targetScalar?.spelling === sourceScalar.spelling &&
+              (operation.operation === 'Sin' || operation.operation === 'Cos'))
           if (
             sourceScalar === undefined ||
             targetScalar === undefined ||
@@ -2127,7 +2145,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !SilkType.equals(semanticType(source), operation.sourceType._tag) ||
             !SilkType.equals(semanticType(destination), operation.type._tag) ||
             !reinterpretable ||
-            !unary
+            !unary ||
+            !transcendental
           )
             violations.push(
               Object.freeze({
@@ -3259,6 +3278,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = reinterpret ${localText(operation.source)} ${typeText(operation.sourceType)} -> ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'FloatUnary':
       return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'FloatTranscendental':
+      return `${localText(operation.destination)} = float-${operation.operation.toLowerCase()} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'CheckedInteger':
       return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${operation.operands.map(localText).join(', ')} ${typeText(operation.sourceType)} -> ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ValidateLayout':

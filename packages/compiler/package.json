@@ -182,6 +182,10 @@
       "types": "./dist/FloatingPoint.d.ts",
       "import": "./dist/FloatingPoint.js"
     },
+    "./Transcendental": {
+      "types": "./dist/Transcendental.d.ts",
+      "import": "./dist/Transcendental.js"
+    },
     "./Hir": {
       "types": "./dist/Hir.d.ts",
       "import": "./dist/Hir.js"

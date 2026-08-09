@@ -2773,6 +2773,26 @@ function lowerExpression(
         )
         return finishBuiltin(destination)
       }
+      if (expression.operation === 'Sin' || expression.operation === 'Cos') {
+        const [source] = argumentLocals
+        const sourceType = source === undefined ? undefined : fn.localTypes.at(source.ordinal)
+        const targetType = fn.type(expression.type)
+        if (source === undefined || sourceType === undefined || targetType === undefined)
+          return undefined
+        const destination = fn.alloc(targetType)
+        fn.emit(
+          Object.freeze({
+            _tag: 'FloatTranscendental' as const,
+            operation: expression.operation,
+            destination,
+            source,
+            sourceType: sourceType as Mir.ScalarType,
+            type: targetType as Mir.ScalarType,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
       if (
         expression.operation === 'IsNaN' ||
         expression.operation === 'IsInfinite' ||

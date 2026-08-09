@@ -8,6 +8,7 @@ import type * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StandardStreams from './StandardStreams.js'
+import * as Transcendental from './Transcendental.js'
 import * as Type from './Type.js'
 
 /**
@@ -2692,6 +2693,15 @@ function* executeFunction(
               fromCall: false,
             })
             break
+          case 'FloatTranscendental': {
+            const source = readFloat(operation.source)
+            const result = Transcendental.evaluate(operation.operation, floatingBits(source))
+            write(operation.destination, {
+              value: floatValue(source.type, result.bits),
+              fromCall: false,
+            })
+            break
+          }
           case 'CheckedInteger': {
             const operands = operation.operands.map((operand) => BigInt(readInteger(operand).value))
             const left = operands.at(0)
