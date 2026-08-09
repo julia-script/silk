@@ -14,7 +14,7 @@ const build = () => {
   const lexical = [Diagnostic.unsupportedBytes(spanAt(10, 12))]
   const parser = [
     Diagnostic.missingToken('RightParenthesis', spanAt(4, 4)),
-    Diagnostic.unexpectedTokens(spanAt(10, 12)),
+    Diagnostic.unexpectedTokens(['Invalid'], 'syntax', ['identifier'], spanAt(10, 12)),
   ]
   const semantic = [
     Diagnostic.unknownType('Bogus', spanAt(2, 7)),
@@ -58,7 +58,7 @@ it('produces an identical merged sequence across repeated fresh constructions', 
 it('orders same-span same-phase diagnostics by stable code', () => {
   const span = spanAt(3, 5)
   const merged = Diagnostic.merge([
-    Diagnostic.unexpectedTokens(span),
+    Diagnostic.unexpectedTokens(['Invalid'], 'syntax', ['identifier'], span),
     Diagnostic.missingToken('Identifier', span),
   ])
 
@@ -103,6 +103,33 @@ it('describes missing tokens with source-language spelling', () => {
       },
       { message: 'Expected `=`', reason: { _tag: 'MissingToken', expected: 'Equals' } },
     ],
+  )
+})
+
+it('describes unexpected syntax with the encountered token and parser context', () => {
+  const diagnostic = Diagnostic.unexpectedTokens(
+    ['Semicolon'],
+    'statement',
+    ['`let`', '`return`', 'an expression', '`}`'],
+    spanAt(4, 5),
+  )
+
+  assert.deepEqual(
+    {
+      message: diagnostic.message,
+      reason: diagnostic.reason,
+      notes: diagnostic.notes,
+    },
+    {
+      message: 'Unexpected `;` while parsing a statement',
+      reason: {
+        _tag: 'UnexpectedTokens',
+        unexpected: ['Semicolon'],
+        context: 'statement',
+        expected: ['`let`', '`return`', 'an expression', '`}`'],
+      },
+      notes: ['Expected one of: `let`, `return`, an expression, `}`'],
+    },
   )
 })
 

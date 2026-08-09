@@ -83,6 +83,45 @@ it('elaborates binding statements into typed locals with moves', () => {
   assert.strictEqual(result.diagnostics.length, 0)
 })
 
+it('keeps expression statements as Evaluate HIR with unavailable causes intact', () => {
+  const accepted = elaborate(
+    'golden://evaluate.silk',
+    `effect fn pulse() -> () { return () }
+effect fn main() -> () { run pulse() return () }`,
+  )
+  const damaged = elaborate(
+    'golden://evaluate-damaged.silk',
+    'fn main() -> () { missing() return () }',
+  )
+  const effectBlock = accepted.hir.functions
+    .flatMap((fn) => fn.statements)
+    .flatMap(Hir.statementExpressions)
+    .flatMap(Hir.expressionTree)
+    .find(
+      (expression) =>
+        expression._tag === 'EffectBlock' &&
+        expression.statements.some((statement) => statement._tag === 'Evaluate'),
+    )
+  const evaluated =
+    effectBlock?._tag === 'EffectBlock'
+      ? effectBlock.statements.find((statement) => statement._tag === 'Evaluate')
+      : undefined
+  const unavailable = damaged.hir.functions
+    .flatMap((fn) => fn.statements)
+    .find((statement) => statement._tag === 'Evaluate')
+
+  assert.strictEqual(evaluated?._tag, 'Evaluate')
+  if (evaluated?._tag !== 'Evaluate') return
+  assert.strictEqual(evaluated.expression._tag, 'Run')
+  assert.include(Hir.encode(accepted.hir), 'evaluate r0')
+
+  assert.strictEqual(unavailable?._tag, 'Evaluate')
+  if (unavailable?._tag !== 'Evaluate') return
+  assert.strictEqual(unavailable.expression._tag, 'Unavailable')
+  if (unavailable.expression._tag !== 'Unavailable') return
+  assert.strictEqual(unavailable.expression.cause?.code, 'SEM0004')
+})
+
 it('rejects rebinding a name while references keep resolving to the original', () => {
   const result = elaborate(
     'golden://rebind.silk',

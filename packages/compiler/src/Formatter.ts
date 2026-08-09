@@ -743,6 +743,13 @@ const printNode = (
         printToken(context, tokenOf(node, 'UnsafeKeyword'), prefix, preserveBlank),
         printNode(context, nodeOf(node, 'Block'), FormatDocument.text(' ')),
       )
+    case 'ExpressionStatement':
+      return printNode(
+        context,
+        directNodes(node)[0] ?? nodeOf(node, 'IdentifierExpression'),
+        prefix,
+        preserveBlank,
+      )
     case 'BindingStatement': {
       const mutableKeyword = directTokens(node).find((token) => token.kind === 'MutKeyword')
       return FormatDocument.concat(
@@ -1089,6 +1096,7 @@ const printNode = (
         tokenOf(node, 'RightParenthesis'),
         prefix,
       )
+    case 'ErrorStatement':
     case 'Error':
       throw new FormatterImplementationError('Damaged Error node reached the syntax printer')
   }

@@ -753,8 +753,23 @@ it('keeps a sibling argument after damaged nested syntax', () => {
     2,
   )
   assert.deepEqual(
-    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0002'],
+    result.parserDiagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      message: diagnostic.message,
+      reason: diagnostic.reason,
+    })),
+    [
+      {
+        code: 'PAR0002',
+        message: 'Unexpected `:`; expected identifier',
+        reason: {
+          _tag: 'UnexpectedTokens',
+          unexpected: ['Colon'],
+          context: 'syntax',
+          expected: ['identifier'],
+        },
+      },
+    ],
   )
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(damagedNestedSiblingSource))
@@ -1041,7 +1056,17 @@ it('groups unexpected punctuation and following trivia before the function name'
     ['Invalid', 'Whitespace'],
   )
   assert.deepEqual(diagnosticView(result), [
-    { code: 'PAR0002', start: 7, end: 9, reason: { _tag: 'UnexpectedTokens' } },
+    {
+      code: 'PAR0002',
+      start: 7,
+      end: 9,
+      reason: {
+        _tag: 'UnexpectedTokens',
+        unexpected: ['Invalid', 'Whitespace'],
+        context: 'syntax',
+        expected: ['identifier'],
+      },
+    },
   ])
   assert.deepEqual(
     result.lexicalDiagnostics.map((diagnostic) => diagnostic.code),
@@ -1266,6 +1291,93 @@ it('parses a binding sequence as ordered statement branches', () => {
   )
 })
 
+it('parses standalone expressions as ordered statements without phantom declarations', () => {
+  const source = `pub effect fn first() -> () { return () }
+pub effect fn second() -> () { return () }
+pub effect fn main() -> () {
+  run first()
+  run second()
+  return ()
+}`
+  const result = parseText('memory/expression-statements', source)
+  const declarations = directFunctionDeclarations(result.root)
+  const main = declarations.at(2)
+  const block = main === undefined ? undefined : SyntaxTree.directNode(main, 'Block')
+
+  assert.strictEqual(declarations.length, 3)
+  assert.notStrictEqual(block, undefined)
+  assert.deepEqual(
+    (block?.children ?? []).filter(SyntaxTree.isNode).map((node) => node.kind),
+    ['ExpressionStatement', 'ExpressionStatement', 'ReturnStatement'],
+  )
+  assert.strictEqual(
+    (block === undefined ? [] : SyntaxTree.directNodes(block, 'ExpressionStatement')).every(
+      (statement) => SyntaxTree.directNode(statement, 'RunExpression') !== undefined,
+    ),
+    true,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
+it('keeps assignment dispatch ahead of identifier-led expression statements', () => {
+  const source = `fn observe(value: i32) -> () { return () }
+fn main() -> () {
+  let mut value = 0
+  value = 1
+  observe(value)
+}`
+  const result = parseText('memory/expression-statement-assignment', source)
+  const main = directFunctionDeclarations(result.root).at(1)
+  const block = main === undefined ? undefined : SyntaxTree.directNode(main, 'Block')
+
+  assert.deepEqual(
+    (block?.children ?? []).filter(SyntaxTree.isNode).map((node) => node.kind),
+    ['BindingStatement', 'AssignmentStatement', 'ExpressionStatement', 'ReturnStatement'],
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
+it('keeps a valid return inside its block after a damaged run expression', () => {
+  const source = `pub effect fn main() -> () {
+  run )
+  return ()
+}`
+  const result = parseText('memory/damaged-expression-statement', source)
+  const declarations = directFunctionDeclarations(result.root)
+  const block = SyntaxTree.directNode(declarations[0] ?? result.root, 'Block')
+
+  assert.strictEqual(declarations.length, 1)
+  assert.deepEqual(
+    (block?.children ?? []).filter(SyntaxTree.isNode).map((node) => node.kind),
+    ['ExpressionStatement', 'ErrorStatement', 'ReturnStatement'],
+  )
+  assert.strictEqual(result.parserDiagnostics.length, 1)
+  assertOriginalTokenTraversal(result)
+})
+
+it('recovers unexpected statement punctuation at the next statement and owning brace', () => {
+  const source = `pub fn main() -> () {
+  ;
+  return ()
+}`
+  const result = parseText('memory/unexpected-statement-punctuation', source)
+  const declarations = directFunctionDeclarations(result.root)
+  const block = SyntaxTree.directNode(declarations[0] ?? result.root, 'Block')
+
+  assert.strictEqual(declarations.length, 1)
+  assert.deepEqual(
+    (block?.children ?? []).filter(SyntaxTree.isNode).map((node) => node.kind),
+    ['ErrorStatement', 'ReturnStatement'],
+  )
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0002'],
+  )
+  assertOriginalTokenTraversal(result)
+})
+
 it('parses a move operand with its keyword and name', () => {
   const result = parseText(
     'fixture://move.silk',
@@ -1367,26 +1479,29 @@ it('recovers a block with only bindings by inserting the missing return', () => 
   assertOriginalTokenTraversal(result)
 })
 
-it('recovers a final identifier as a return expression instead of an assignment', () => {
+it('keeps a final identifier as an expression statement before the missing return', () => {
   const result = parseText('fixture://missing-return-keyword.silk', 'pub fn main() -> i32 { foo }')
   const declaration = directFunctionDeclarations(result.root).at(0)
   const block = declaration === undefined ? undefined : SyntaxTree.directNode(declaration, 'Block')
   const returned = block === undefined ? undefined : SyntaxTree.directNode(block, 'ReturnStatement')
+  const expression =
+    block === undefined ? undefined : SyntaxTree.directNode(block, 'ExpressionStatement')
 
   assert.notStrictEqual(returned, undefined)
-  if (returned === undefined) return
+  assert.notStrictEqual(expression, undefined)
+  if (returned === undefined || expression === undefined) return
   assert.strictEqual(SyntaxTree.directNode(block ?? result.root, 'AssignmentStatement'), undefined)
-  assert.notStrictEqual(SyntaxTree.directNode(returned, 'IdentifierExpression'), undefined)
+  assert.notStrictEqual(SyntaxTree.directNode(expression, 'IdentifierExpression'), undefined)
   assert.deepEqual(
     missingLeaves(returned).map((element) => element.expected),
-    ['ReturnKeyword'],
+    ['ReturnKeyword', 'DecimalInteger'],
   )
   assert.deepEqual(
     result.parserDiagnostics.map((diagnostic) => ({
       code: diagnostic.code,
       message: diagnostic.message,
     })),
-    [{ code: 'PAR0001', message: 'Expected `return`' }],
+    [{ code: 'PAR0004', message: 'Expected return statement' }],
   )
   assertOriginalTokenTraversal(result)
 })

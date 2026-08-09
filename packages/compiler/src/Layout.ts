@@ -1024,6 +1024,7 @@ const addStatementTypes = (
   for (const statement of statements) {
     if (statement._tag === 'Unsafe') addStatementTypes(types, statement.statements, substitution)
     if (statement._tag === 'Bind') addExpressionTypes(types, statement.initializer, substitution)
+    if (statement._tag === 'Evaluate') addExpressionTypes(types, statement.expression, substitution)
     if (statement._tag === 'Return') addExpressionTypes(types, statement.expression, substitution)
     if (statement._tag === 'Fail' || statement._tag === 'Drop')
       addExpressionTypes(types, statement.expression, substitution)

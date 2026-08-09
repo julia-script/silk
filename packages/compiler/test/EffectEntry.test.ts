@@ -35,6 +35,34 @@ pub effect fn main() -> () ! SomeError | OutOfMemory {
   fail SomeError { storage: move storage }
 }`
 
+const evaluateOrderingSource = `pub struct SomeError {}
+impl Report for SomeError {}
+pub effect fn main() -> () ! SomeError {
+  let mut counter = 0
+  run effect { counter = counter + 1 return () }
+  run effect { counter = counter * 10 + 2 return () }
+  if counter != 12 { fail SomeError {} }
+  return ()
+}`
+
+const evaluateFailureSource = `pub struct SomeError {}
+pub struct Guard { storage: Allocation }
+impl Report for SomeError {}
+impl Report for OutOfMemory {}
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () { return () }
+}
+effect fn stop() -> never ! SomeError { fail SomeError {} }
+pub effect fn main() -> () ! SomeError | OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<i32>()
+  let storage = run Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let guard = Guard { storage: move storage }
+  run stop()
+  drop guard
+  return ()
+}`
+
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-effect-entry-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
@@ -121,6 +149,58 @@ it.effect('runs the selected failure payload cleanup before exposing its tag', (
     assert.isFunction(main)
     if (typeof main !== 'function') return
     assert.strictEqual(main(), 1)
+  }),
+)
+
+it.effect('executes Evaluate effects in order and halts on failure across every engine', () =>
+  Effect.gen(function* () {
+    for (const [name, source, expected] of [
+      ['evaluate-success', evaluateOrderingSource, 0],
+      ['evaluate-failure', evaluateFailureSource, 1],
+    ] as const) {
+      const module = `effect-entry/${name}`
+      const logical = yield* Analysis.ofSourceRealized(
+        module,
+        ascii(source),
+        'aarch64-apple-darwin',
+      )
+      const wasm = yield* Analysis.ofSourceRealized(module, ascii(source), 'wasm32-unknown-unknown')
+      assert.deepEqual(Analysis.diagnostics(logical), [])
+      assert.deepEqual(Analysis.diagnostics(wasm), [])
+      assert.deepEqual(Mir.verify(Analysis.loweredMir(logical)), [])
+
+      const evaluated = Analysis.evaluate(logical)
+      assert.strictEqual(
+        evaluated._tag,
+        expected === 0 ? 'Completed' : 'UnhandledFailure',
+        JSON.stringify(evaluated),
+      )
+      if (name === 'evaluate-failure') {
+        assert.strictEqual(
+          evaluated.trace.filter(
+            (event) => event._tag === 'Call' && event.target.name === 'drop@impl#2',
+          ).length,
+          1,
+        )
+      }
+
+      const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+      const wasmMain = instance.exports.silk_main
+      assert.isFunction(wasmMain)
+      if (typeof wasmMain === 'function') assert.strictEqual(wasmMain(), expected)
+
+      const compiled = yield* Driver.compile({
+        compilation: { root: SourceFile.make(module, ascii(source)) },
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        profile: 'release',
+        destination: join(destinationRoot, name),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(compiled._tag, 'Compiled')
+      if (compiled._tag !== 'Compiled') continue
+      const native = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      assert.strictEqual(native.status, expected, native.stderr)
+    }
   }),
 )
 

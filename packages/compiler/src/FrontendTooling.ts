@@ -82,6 +82,8 @@ export const statementExpressions = (
       return Object.freeze(statement.statements.flatMap(statementExpressions))
     case 'BindStatement':
       return nestedExpressions(statement.binding.initializer)
+    case 'ExpressionStatement':
+      return nestedExpressions(statement.expression)
     case 'ReturnStatement':
       return nestedExpressions(statement.expression)
     case 'FailStatement':

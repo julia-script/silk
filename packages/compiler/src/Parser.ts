@@ -6,7 +6,7 @@ import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
-import type * as Token from './Token.js'
+import * as Token from './Token.js'
 
 interface State {
   readonly lexical: Lexer.LexicalResult
@@ -136,7 +136,15 @@ const expect = (
 
   if (unexpected.length > 0) {
     const error = syntaxNode(state, 'Error', unexpected)
-    state = addDiagnostic(state, Diagnostic.unexpectedTokens(error.span))
+    state = addDiagnostic(
+      state,
+      Diagnostic.unexpectedTokens(
+        unexpected.map((item) => item.kind),
+        'syntax',
+        [Token.describe(expected)],
+        error.span,
+      ),
+    )
     elements = Object.freeze([...elements, error])
   }
 
@@ -1293,6 +1301,14 @@ const parseDropStatement = (initial: State): NodeResult => {
   })
 }
 
+const parseExpressionStatement = (initial: State): NodeResult => {
+  const expression = parseExpression(initial, 0, 'Identifier')
+  return Object.freeze({
+    state: expression.state,
+    node: syntaxNode(expression.state, 'ExpressionStatement', [expression.node]),
+  })
+}
+
 const parseUnsafeStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'UnsafeKeyword', ['LeftBrace', 'RightBrace'])
   const block = parseBlock(keyword.state, false)
@@ -1427,6 +1443,79 @@ const parseTransferStatement = (
   })
 }
 
+const startsBlockStatement = (state: State): boolean => {
+  const kind = nextSignificantKind(state)
+  if (kind === undefined) return false
+  return (
+    kind === 'LetKeyword' ||
+    kind === 'ReturnKeyword' ||
+    kind === 'FailKeyword' ||
+    kind === 'DropKeyword' ||
+    kind === 'UnsafeKeyword' ||
+    kind === 'IfKeyword' ||
+    kind === 'WhileKeyword' ||
+    kind === 'BreakKeyword' ||
+    kind === 'ContinueKeyword' ||
+    expressionStarts.includes(kind)
+  )
+}
+
+const endsBlock = (state: State): boolean => {
+  const kind = nextSignificantKind(state)
+  return (
+    kind === undefined ||
+    kind === 'RightBrace' ||
+    kind === 'EndOfFile' ||
+    kind === 'ElseKeyword' ||
+    kind === 'ImportKeyword' ||
+    kind === 'PubKeyword' ||
+    kind === 'ConstKeyword' ||
+    kind === 'StructKeyword' ||
+    kind === 'FnKeyword' ||
+    kind === 'ImplKeyword' ||
+    (kind === 'EffectKeyword' && significantKindAfter(state, 1) === 'FnKeyword')
+  )
+}
+
+const parseErrorStatement = (initial: State): NodeResult => {
+  const leading = consumeTrivia(initial)
+  let state = leading.state
+  let unexpected: ReadonlyArray<Token.Token> = Object.freeze([])
+  let token = currentToken(state)
+
+  while (token !== undefined) {
+    if (unexpected.length > 0 && (startsBlockStatement(state) || endsBlock(state))) break
+    unexpected = Object.freeze([...unexpected, token])
+    state = advance(state)
+    token = currentToken(state)
+  }
+
+  const error = syntaxNode(state, 'Error', unexpected)
+  state = addDiagnostic(
+    state,
+    Diagnostic.unexpectedTokens(
+      unexpected.map((item) => item.kind),
+      'statement',
+      [
+        '`let`',
+        '`return`',
+        '`if`',
+        '`while`',
+        '`fail`',
+        '`drop`',
+        '`unsafe`',
+        'an expression',
+        '`}`',
+      ],
+      error.span,
+    ),
+  )
+  return Object.freeze({
+    state,
+    node: syntaxNode(state, 'ErrorStatement', [...leading.elements, error]),
+  })
+}
+
 function parseBlock(
   initial: State,
   requireReturn: boolean,
@@ -1447,20 +1536,7 @@ function parseBlock(
   let sawReturn = false
 
   let kind = nextSignificantKind(state)
-  while (
-    kind === 'LetKeyword' ||
-    kind === 'ReturnKeyword' ||
-    kind === 'FailKeyword' ||
-    kind === 'DropKeyword' ||
-    kind === 'UnsafeKeyword' ||
-    kind === 'IfKeyword' ||
-    kind === 'WhileKeyword' ||
-    kind === 'BreakKeyword' ||
-    kind === 'ContinueKeyword' ||
-    (kind === 'Identifier' &&
-      significantKindAfter(state, 1) !== 'Colon' &&
-      startsAssignmentStatement(state))
-  ) {
+  while (!endsBlock(state)) {
     const statement =
       kind === 'LetKeyword'
         ? parseBindingStatement(state)
@@ -1472,7 +1548,7 @@ function parseBlock(
               ? parseTransferStatement(state, 'BreakKeyword', 'BreakStatement')
               : kind === 'ContinueKeyword'
                 ? parseTransferStatement(state, 'ContinueKeyword', 'ContinueStatement')
-                : kind === 'Identifier'
+                : kind === 'Identifier' && startsAssignmentStatement(state)
                   ? parseAssignmentStatement(state)
                   : kind === 'FailKeyword'
                     ? parseFailStatement(state)
@@ -1480,7 +1556,11 @@ function parseBlock(
                       ? parseDropStatement(state)
                       : kind === 'UnsafeKeyword'
                         ? parseUnsafeStatement(state)
-                        : parseReturnStatement(state)
+                        : kind === 'ReturnKeyword'
+                          ? parseReturnStatement(state)
+                          : startsBlockStatement(state)
+                            ? parseExpressionStatement(state)
+                            : parseErrorStatement(state)
     if (kind === 'ReturnKeyword' || kind === 'FailKeyword') sawReturn = true
     children = Object.freeze([...children, statement.node])
     state = statement.state

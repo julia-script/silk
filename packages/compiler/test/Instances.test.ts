@@ -40,6 +40,19 @@ pub fn other() -> i32 { return main() }`),
   }),
 )
 
+it.effect('discovers calls nested in Evaluate statements deterministically', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`effect fn pulse() -> () { return () }
+pub effect fn main() -> () { run pulse() return () }`)
+
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(
+      Analysis.instancesOf(result).instances.map((instance) => instance.key.declaration.name),
+      ['main', 'pulse'],
+    )
+  }),
+)
+
 it.effect('discovers concrete stored and deferred-generic callable section identities', () =>
   Effect.gen(function* () {
     const stored = Analysis.instancesOf(

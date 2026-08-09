@@ -510,6 +510,12 @@ export type Statement =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'Evaluate'
+      readonly expression: Expression
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'If'
       readonly condition: Expression
       readonly taken: ReadonlyArray<Statement>
@@ -594,6 +600,8 @@ export const statementExpressions = (statement: Statement): ReadonlyArray<Expres
       return statement.statements.flatMap(statementExpressions)
     case 'Bind':
       return [statement.initializer]
+    case 'Evaluate':
+      return [statement.expression]
     case 'Write':
       return [
         ...statement.place.selectors.flatMap((selector) =>
@@ -1314,6 +1322,11 @@ const encodeStatement = (statement: Statement, depth: number): string => {
       return [
         `${indent}bind ${statement.mutability.toLowerCase()} b${statement.binding.ordinal} ${statement.name ?? '?'} r${statement.region.ordinal} ${spanText(statement.span)}`,
         encodeExpression(statement.initializer, depth + 1),
+      ].join('\n')
+    case 'Evaluate':
+      return [
+        `${indent}evaluate r${statement.region.ordinal} ${spanText(statement.span)}`,
+        encodeExpression(statement.expression, depth + 1),
       ].join('\n')
     case 'Write':
       return [

@@ -750,6 +750,9 @@ const collectStatement = (
         )
       collectExpression(statement.binding.initializer, index, scope, pending)
       return
+    case 'ExpressionStatement':
+      collectExpression(statement.expression, index, scope, pending)
+      return
     case 'ReturnStatement':
     case 'FailStatement':
     case 'DropStatement':

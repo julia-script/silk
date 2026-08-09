@@ -366,6 +366,62 @@ pub fn main() -> i32 {
   assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Satisfied')
 })
 
+it('treats Evaluate expressions as ownership roots without inventing bindings', () => {
+  const moved = check(
+    'ownership://evaluate-move.silk',
+    `struct Token { value: i32 }
+fn consume(token: Token) -> () { drop move token return () }
+pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  consume(move token)
+  consume(move token)
+  return 0
+}`,
+  )
+  const borrowed = check(
+    'ownership://evaluate-borrow.silk',
+    `effect fn inspect(values: &[i32]) -> () { return () }
+pub fn main() -> i32 {
+  let mut values = [1]
+  let recipe = inspect(&values)
+  run recipe
+  values[0] = 2
+  return values[0]
+}`,
+  )
+  const propagated = check(
+    'ownership://evaluate-propagation.silk',
+    `struct Token { value: i32 }
+struct Problem {}
+effect fn stop() -> () ! Problem { fail move Problem {} }
+effect fn outer() -> () ! Problem {
+  let token = Token { value: 1 }
+  run stop()
+  return ()
+}`,
+  )
+  const outer = propagated.functions.at(1)
+  const propagation = outer?.exits.find((exit) => exit.kind === 'Propagation')
+
+  assert.include(
+    moved.diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0001',
+  )
+  assert.deepEqual(borrowed.diagnostics, [])
+  assert.strictEqual(borrowed.functions.at(1)?.loans.length, 1)
+  assert.deepEqual(propagated.diagnostics, [])
+  assert.deepEqual(
+    outer?.deferredBindings
+      .filter((binding) => binding.site._tag === 'Let')
+      .map((binding) => binding.name),
+    ['token'],
+  )
+  assert.deepEqual(
+    propagation?.releases.map((release) => release.binding.name),
+    ['token'],
+  )
+})
+
 it('plans a stored callable environment and drops moved slots in reverse capture order', () => {
   const facts = check(
     'ownership://callable-environment.silk',

@@ -26,6 +26,31 @@ pub fn main() -> i32 { return 42 }`),
   }),
 )
 
+it.effect('plans nominal types carried through Evaluate expressions', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'layout/evaluate',
+      ascii(`struct Token { value: i32 }
+fn consume(token: Token) -> () { drop move token return () }
+pub fn main() -> i32 { consume(Token { value: 1 }) return 0 }`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(
+      Analysis.instancesOf(snapshot).instances.map((instance) => instance.key.declaration.name),
+      ['main', 'consume'],
+    )
+    const plan = Analysis.layoutOf(snapshot)
+    assert.strictEqual(plan._tag, 'Available')
+    if (plan._tag !== 'Available') return
+    assert.include(
+      plan.value.entries.map((entry) => Type.encode(entry.type)),
+      'layout/evaluate.Token',
+    )
+    assert.deepEqual(Layout.verify(plan.value), [])
+  }),
+)
+
 it.effect('plans hidden Effect capture environments by construction site and target', () =>
   Effect.gen(function* () {
     for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {

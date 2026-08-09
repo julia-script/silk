@@ -36,6 +36,8 @@ export type NodeKind =
   | 'ParameterDeclaration'
   | 'ReturnType'
   | 'Block'
+  | 'ExpressionStatement'
+  | 'ErrorStatement'
   | 'BindingStatement'
   | 'AssignmentStatement'
   | 'ConditionalStatement'
