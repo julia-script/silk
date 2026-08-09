@@ -3,8 +3,10 @@ import * as Option from 'effect/Option'
 import type * as Analysis from './Analysis.js'
 import * as FrontendTooling from './FrontendTooling.js'
 import * as ModuleClosure from './ModuleClosure.js'
-import type * as PhaseReport from './PhaseReport.js'
+import type * as ModuleSurface from './ModuleSurface.js'
+import * as PhaseReport from './PhaseReport.js'
 import * as Pipeline from './Pipeline.js'
+import * as SemanticInvalidation from './SemanticInvalidation.js'
 import type * as SourceFile from './SourceFile.js'
 import type * as SourceResolver from './SourceResolver.js'
 import * as SyntaxCorrespondence from './SyntaxCorrespondence.js'
@@ -38,6 +40,9 @@ export interface ProjectAnalysis {
   readonly closure: ModuleClosure.ProjectClosure
   readonly views: ReadonlyMap<string, Analysis.FrontendSnapshot>
   readonly syntaxRevisions: ReadonlyMap<string, SyntaxRevision>
+  readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
+  readonly semanticEnvironment: string
+  readonly semanticInvalidation: SemanticInvalidation.SemanticInvalidation
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
 }
 
@@ -50,21 +55,6 @@ const analyze = Effect.fnUntraced(function* (
     ...(previous === undefined ? {} : { previous: previous.closure }),
   })
   const tooling = FrontendTooling.make(frontend)
-  const views = new Map<string, Analysis.FrontendSnapshot>()
-  for (const rootModule of frontend.closure.rootModules) {
-    const closure = ModuleClosure.view(frontend.closure, rootModule)
-    if (closure === undefined)
-      throw new RangeError(`Project analysis lost requested root ${rootModule}`)
-    views.set(
-      rootModule,
-      Object.freeze({
-        _tag: 'AnalysisSnapshot',
-        ...frontend,
-        ...tooling,
-        closure,
-      }),
-    )
-  }
   const previousModules = new Map(
     previous?.closure.modules.map((module) => [module.name, module.syntax]),
   )
@@ -103,13 +93,73 @@ const analyze = Effect.fnUntraced(function* (
       }),
     )
   }
+  const semanticProject: SemanticInvalidation.Project = Object.freeze({
+    closure: frontend.closure,
+    surfaces: frontend.surfaces,
+    environment: SemanticInvalidation.environment,
+  })
+  const previousSemanticProject: SemanticInvalidation.Project | undefined =
+    previous === undefined
+      ? undefined
+      : Object.freeze({
+          closure: previous.closure,
+          surfaces: previous.surfaces,
+          environment: previous.semanticEnvironment,
+        })
+  const measuredInvalidation = PhaseReport.measure(
+    'semantic-invalidation',
+    frontend.closure.modules.length,
+    () =>
+      SemanticInvalidation.make({
+        current: semanticProject,
+        revisions: syntaxRevisions,
+        ...(previousSemanticProject === undefined ? {} : { previous: previousSemanticProject }),
+      }),
+    (value) => value.totals.recomputed,
+  )
+  const totals = measuredInvalidation.value.totals
+  const invalidationReport = PhaseReport.make({
+    ...measuredInvalidation.report,
+    counters: Object.freeze({
+      _tag: 'SemanticInvalidationCounters',
+      reusable: totals.reusable,
+      recomputed: totals.recomputed,
+      fresh: totals.reasons.Fresh,
+      localChange: totals.reasons.LocalChange,
+      dependencySurfaceChange: totals.reasons.DependencySurfaceChange,
+      cyclicPeerChange: totals.reasons.CyclicPeerChange,
+      environmentChange: totals.reasons.EnvironmentChange,
+      surfaceChange: totals.reasons.SurfaceChange,
+    }),
+  })
+  const report = Object.freeze([...tooling.report, invalidationReport])
+  const views = new Map<string, Analysis.FrontendSnapshot>()
+  for (const rootModule of frontend.closure.rootModules) {
+    const closure = ModuleClosure.view(frontend.closure, rootModule)
+    if (closure === undefined)
+      throw new RangeError(`Project analysis lost requested root ${rootModule}`)
+    views.set(
+      rootModule,
+      Object.freeze({
+        _tag: 'AnalysisSnapshot',
+        ...frontend,
+        ...tooling,
+        closure,
+        semanticInvalidation: measuredInvalidation.value,
+        report,
+      }),
+    )
+  }
   return Object.freeze({
     _tag: 'ProjectAnalysis',
     roots: frontend.closure.rootModules,
     closure: frontend.closure,
     views,
     syntaxRevisions,
-    report: tooling.report,
+    surfaces: frontend.surfaces,
+    semanticEnvironment: SemanticInvalidation.environment,
+    semanticInvalidation: measuredInvalidation.value,
+    report,
   })
 })
 

@@ -507,6 +507,7 @@ it.effect('constructs a frontend snapshot without runtime realization', () =>
         'declaration-collection',
         'declaration-index',
         'name-resolution',
+        'module-surface',
         'elaboration',
         'ownership',
         'semantic-occurrences',

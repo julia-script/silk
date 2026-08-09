@@ -1,3 +1,18 @@
+/** Deterministic semantic-revision counts attached to the invalidation phase. */
+export interface SemanticInvalidationCounters {
+  readonly _tag: 'SemanticInvalidationCounters'
+  readonly reusable: number
+  readonly recomputed: number
+  readonly fresh: number
+  readonly localChange: number
+  readonly dependencySurfaceChange: number
+  readonly cyclicPeerChange: number
+  readonly environmentChange: number
+  readonly surfaceChange: number
+}
+
+export type Counters = SemanticInvalidationCounters
+
 /** One compiler or artifact-production phase's operational observation. */
 export interface PhaseReport {
   readonly phase: string
@@ -6,6 +21,7 @@ export interface PhaseReport {
   readonly outputs: number
   readonly diagnostics: number
   readonly heapBytes?: number
+  readonly counters?: Counters
 }
 
 /** One measured value paired with the phase observation produced while computing it. */
@@ -22,6 +38,7 @@ export const make = (options: {
   readonly outputs: number
   readonly diagnostics: number
   readonly heapBytes?: number
+  readonly counters?: Counters
 }): PhaseReport => Object.freeze({ ...options })
 
 /** Measures one synchronous compiler phase without making its deterministic result time-dependent. */

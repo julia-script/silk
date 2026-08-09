@@ -10,6 +10,7 @@ import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
 import type * as Mir from './Mir.js'
 import * as ModuleClosure from './ModuleClosure.js'
+import * as ModuleSurface from './ModuleSurface.js'
 import * as NameResolution from './NameResolution.js'
 import * as Ownership from './Ownership.js'
 import * as PhaseReport from './PhaseReport.js'
@@ -32,6 +33,7 @@ export type Targeted<A> =
 interface FrontendFacts {
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
+  readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -161,6 +163,15 @@ const analyzeFrontend = (
     (value) => value.diagnostics.length,
     options,
   )
+  const surfaces = measured(
+    report,
+    'module-surface',
+    index.modules.length,
+    () => ModuleSurface.fromIndex(index),
+    (value) => value.size,
+    () => 0,
+    options,
+  )
   const results = measured(
     report,
     'elaboration',
@@ -205,6 +216,7 @@ const analyzeFrontend = (
   return Object.freeze({
     index,
     resolution,
+    surfaces,
     results,
     ownership,
     diagnostics,

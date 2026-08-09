@@ -167,6 +167,7 @@ it.effect('keeps editor analysis on frontend phases only', () =>
         'declaration-collection',
         'declaration-index',
         'name-resolution',
+        'module-surface',
         'elaboration',
         'ownership',
         'semantic-occurrences',
@@ -206,12 +207,17 @@ it.effect('shares one project frontend across overlapping open roots', () =>
     if (mainSession === undefined || utilSession === undefined) return
     assert.strictEqual(mainSession.project, utilSession.project)
     assert.strictEqual(mainSession.snapshot.index, utilSession.snapshot.index)
+    assert.strictEqual(mainSession.snapshot.surfaces, utilSession.snapshot.surfaces)
     assert.strictEqual(mainSession.snapshot.results, utilSession.snapshot.results)
     assert.strictEqual(
       mainSession.snapshot.semanticOccurrences,
       utilSession.snapshot.semanticOccurrences,
     )
     assert.strictEqual(Analysis.phases(mainSession.snapshot), Analysis.phases(utilSession.snapshot))
+    assert.strictEqual(
+      mainSession.snapshot.semanticInvalidation,
+      utilSession.snapshot.semanticInvalidation,
+    )
     assert.strictEqual(mainSession.moduleUris, utilSession.moduleUris)
     assert.strictEqual(mainSession.snapshot.closure.rootModule, 'Main')
     assert.strictEqual(utilSession.snapshot.closure.rootModule, 'Util')
@@ -253,6 +259,16 @@ it.effect('shares one project frontend across overlapping open roots', () =>
     assert.strictEqual(revisedMain.project.syntaxRevisions.get('Main')?._tag, 'Changed')
     assert.strictEqual(revisedMain.project.syntaxRevisions.get('Util')?._tag, 'Reused')
     assert.strictEqual(revisedMain.project.syntaxRevisions.get('Shared')?._tag, 'Reused')
+    assert.deepEqual(revisedMain.project.semanticInvalidation.observations, [
+      {
+        _tag: 'Recomputed',
+        module: 'Main',
+        reasons: ['LocalChange'],
+        surfaceChanged: true,
+      },
+      { _tag: 'Reusable', module: 'Shared', surfaceChanged: false },
+      { _tag: 'Reusable', module: 'Util', surfaceChanged: false },
+    ])
     const previousSyntax = new Map(
       mainSession.project.closure.modules.map((module) => [module.name, module.syntax]),
     )

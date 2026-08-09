@@ -38,17 +38,23 @@ it.effect('analyzes a shared dependency once and derives structurally shared roo
     assert.isDefined(right)
     if (left === undefined || right === undefined) return
     assert.deepEqual(project.roots, ['app/A', 'app/B'])
+    assert.strictEqual(project.semanticInvalidation.totals.modules, 3)
+    assert.strictEqual(project.semanticInvalidation.totals.recomputed, 3)
+    assert.strictEqual(project.semanticInvalidation.totals.reasons.Fresh, 3)
     assert.strictEqual(left.closure.rootModule, 'app/A')
     assert.strictEqual(right.closure.rootModule, 'app/B')
     assert.strictEqual(left.closure.modules, right.closure.modules)
     assert.strictEqual(left.closure.sources, right.closure.sources)
     assert.strictEqual(left.index, right.index)
     assert.strictEqual(left.resolution, right.resolution)
+    assert.strictEqual(left.surfaces, right.surfaces)
+    assert.strictEqual(left.surfaces, project.surfaces)
     assert.strictEqual(left.results, right.results)
     assert.strictEqual(left.ownership, right.ownership)
     assert.strictEqual(left.semanticOccurrences, right.semanticOccurrences)
     assert.strictEqual(left.anonymousExpressions, right.anonymousExpressions)
     assert.strictEqual(Analysis.phases(left), Analysis.phases(right))
+    assert.strictEqual(left.semanticInvalidation, project.semanticInvalidation)
     assert.deepEqual(
       Analysis.modules(left).map(({ name }) => name),
       ['app/A', 'app/B', 'shared/Core'],
@@ -63,10 +69,12 @@ it.effect('analyzes a shared dependency once and derives structurally shared roo
         'declaration-collection',
         'declaration-index',
         'name-resolution',
+        'module-surface',
         'elaboration',
         'ownership',
         'semantic-occurrences',
         'anonymous-expressions',
+        'semantic-invalidation',
       ],
     )
     assert.deepEqual(deterministicReport(project).at(0), {
@@ -151,6 +159,40 @@ it.effect('reuses exact unchanged syntax while rebuilding one coherent semantic 
     assert.notStrictEqual(currentView.results, previousView.results)
     assert.notStrictEqual(currentView.ownership, previousView.ownership)
     assert.notStrictEqual(currentView.semanticOccurrences, previousView.semanticOccurrences)
+    assert.notStrictEqual(currentView.surfaces, previousView.surfaces)
+    assert.strictEqual(currentView.semanticInvalidation, current.semanticInvalidation)
+    assert.strictEqual(Analysis.phases(currentView), current.report)
+    assert.deepEqual(current.semanticInvalidation.observations, [
+      {
+        _tag: 'Recomputed',
+        module: 'app/A',
+        reasons: ['LocalChange'],
+        surfaceChanged: true,
+      },
+      { _tag: 'Reusable', module: 'app/B', surfaceChanged: false },
+      { _tag: 'Reusable', module: 'shared/Core', surfaceChanged: false },
+    ])
+    assert.deepEqual(current.report.at(-1)?.counters, {
+      _tag: 'SemanticInvalidationCounters',
+      reusable: 2,
+      recomputed: 1,
+      fresh: 0,
+      localChange: 1,
+      dependencySurfaceChange: 0,
+      cyclicPeerChange: 0,
+      environmentChange: 0,
+      surfaceChange: 0,
+    })
+    assert.notStrictEqual(currentView.results.get('app/B'), previousView.results.get('app/B'))
+    assert.notStrictEqual(currentView.ownership.get('app/B'), previousView.ownership.get('app/B'))
+    assert.notStrictEqual(
+      currentView.semanticOccurrences.modules.get('app/B'),
+      previousView.semanticOccurrences.modules.get('app/B'),
+    )
+    assert.notStrictEqual(
+      currentView.anonymousExpressions.get('app/B'),
+      previousView.anonymousExpressions.get('app/B'),
+    )
     assert.deepEqual(Analysis.diagnostics(currentView), [])
   }),
 )
