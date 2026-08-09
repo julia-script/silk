@@ -6,7 +6,7 @@ import * as Ownership from '../src/Ownership.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
-import { elaborate } from './support/elaborate.js'
+import { elaborate, ownership } from './support/elaborate.js'
 import { raise } from './support/raise.js'
 
 const analyze = (id: string, source: string): Elaboration.Result =>
@@ -217,7 +217,7 @@ pub fn inspect(event: Token | End) -> i32 {
   return finish(move event)
 }`,
   )
-  assert.deepEqual(Ownership.checkModule(shared).diagnostics, [])
+  assert.deepEqual(ownership(shared).diagnostics, [])
 
   const consumed = analyze(
     'consumed-owner',
@@ -230,7 +230,7 @@ pub fn inspect(event: Token | End) -> i32 {
 }`,
   )
   assert.include(
-    Ownership.checkModule(consumed).diagnostics.map((diagnostic) => diagnostic.code),
+    ownership(consumed).diagnostics.map((diagnostic) => diagnostic.code),
     'OWN0001',
   )
 
@@ -240,7 +240,7 @@ pub fn inspect(event: Token | End) -> i32 {
 pub fn inspect(event: Token) -> i32 { return match event { Token { kind } => kind } }`,
   )
   assert.include(
-    Ownership.checkModule(bare).diagnostics.map((diagnostic) => diagnostic.code),
+    ownership(bare).diagnostics.map((diagnostic) => diagnostic.code),
     'OWN0003',
   )
 
@@ -250,7 +250,7 @@ pub fn inspect(event: Token) -> i32 { return match event { Token { kind } => kin
 pub fn inspect(event: Token) -> i32 { return match &mut event { Token { kind } => kind } }`,
   )
   assert.include(
-    Ownership.checkModule(exclusive).diagnostics.map((diagnostic) => diagnostic.code),
+    ownership(exclusive).diagnostics.map((diagnostic) => diagnostic.code),
     'OWN0007',
   )
 })
@@ -269,7 +269,7 @@ pub fn inspect(input: Box) -> i32 {
 }`,
   )
   assert.include(
-    Ownership.checkModule(guarded).diagnostics.map((diagnostic) => diagnostic.code),
+    ownership(guarded).diagnostics.map((diagnostic) => diagnostic.code),
     'OWN0008',
   )
 
@@ -282,7 +282,7 @@ pub fn inspect(input: Box) -> Payload {
 }`,
   )
   assert.include(
-    Ownership.checkModule(borrowed).diagnostics.map((diagnostic) => diagnostic.code),
+    ownership(borrowed).diagnostics.map((diagnostic) => diagnostic.code),
     'OWN0006',
   )
 })
@@ -296,10 +296,10 @@ pub fn inspect(input: Box) -> i32 {
   return match move input { Box { code, .. } => code }
 }`,
   )
-  const ownership = Ownership.checkModule(result)
-  const match = ownership.functions.at(0)?.matches.at(0)
+  const ownershipFacts = ownership(result)
+  const match = ownershipFacts.functions.at(0)?.matches.at(0)
 
-  assert.deepEqual(ownership.diagnostics, [])
+  assert.deepEqual(ownershipFacts.diagnostics, [])
   assert.strictEqual(match?.access, 'Move')
   assert.deepEqual(
     match?.arms.at(0)?.cleanup.map((entry) => ({
@@ -308,5 +308,8 @@ pub fn inspect(input: Box) -> i32 {
     })),
     [{ path: [0], cleanup: 'StructCleanup' }],
   )
-  assert.include(Ownership.encode(ownership), 'cleanup=#0(struct:cleanup-owner.Payload fields=)')
+  assert.include(
+    Ownership.encode(ownershipFacts),
+    'cleanup=#0(struct:cleanup-owner.Payload fields=)',
+  )
 })

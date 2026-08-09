@@ -10,9 +10,12 @@ import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
 import type * as Mir from './Mir.js'
 import * as ModuleClosure from './ModuleClosure.js'
+import * as ModuleSemantics from './ModuleSemantics.js'
+import * as ModuleSurface from './ModuleSurface.js'
 import * as NameResolution from './NameResolution.js'
 import * as Ownership from './Ownership.js'
 import * as PhaseReport from './PhaseReport.js'
+import * as SemanticInvalidation from './SemanticInvalidation.js'
 import type * as SourceResolver from './SourceResolver.js'
 import * as Target from './Target.js'
 
@@ -32,6 +35,8 @@ export type Targeted<A> =
 interface FrontendFacts {
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
+  readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
+  readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -47,6 +52,15 @@ export interface Frontend extends FrontendFacts {
 /** Immutable multi-root frontend facts computed once for one project revision. */
 export interface ProjectFrontend extends FrontendFacts {
   readonly closure: ModuleClosure.ProjectClosure
+  readonly semanticInvalidation: SemanticInvalidation.SemanticInvalidation
+}
+
+/** Prior immutable project facts permitted to seed module semantic structural sharing. */
+export interface ProjectReuseBasis {
+  readonly closure: ModuleClosure.ProjectClosure
+  readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
+  readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
+  readonly environment: string
 }
 
 /** Immutable target/runtime facts derived from exactly one Frontend value. */
@@ -107,6 +121,37 @@ const measured = <A>(
   return result.value
 }
 
+const measuredModuleWork = <A>(
+  report: Array<PhaseReport.PhaseReport>,
+  phase: string,
+  modules: number,
+  reused: number,
+  run: () => A,
+  outputs: (value: A) => number,
+  diagnostics: (value: A) => number,
+  options: Options,
+): A => {
+  const result = PhaseReport.measure(
+    phase,
+    modules - reused,
+    run,
+    outputs,
+    diagnostics,
+    options.heapBytes,
+  )
+  report.push(
+    PhaseReport.make({
+      ...result.report,
+      counters: Object.freeze({
+        _tag: 'ModuleReuseCounters',
+        reused,
+        recomputed: modules - reused,
+      }),
+    }),
+  )
+  return result.value
+}
+
 const hasInvalidGenericBody = (
   index: DeclarationIndex.Index,
   diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
@@ -124,11 +169,17 @@ const hasInvalidGenericBody = (
     ),
   )
 
-const analyzeFrontend = (
+interface HeaderFacts {
+  readonly index: DeclarationIndex.Index
+  readonly resolution: NameResolution.Resolution
+  readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
+}
+
+const analyzeHeaders = (
   closure: ModuleClosure.Facts,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
-): FrontendFacts => {
+): HeaderFacts => {
   const collected = measured(
     report,
     'declaration-collection',
@@ -161,20 +212,68 @@ const analyzeFrontend = (
     (value) => value.diagnostics.length,
     options,
   )
-  const results = measured(
+  const surfaces = measured(
+    report,
+    'module-surface',
+    index.modules.length,
+    () => ModuleSurface.fromIndex(index),
+    (value) => value.size,
+    () => 0,
+    options,
+  )
+  return Object.freeze({ index, resolution, surfaces })
+}
+
+const analyzeSemantics = (
+  closure: ModuleClosure.Facts,
+  headers: HeaderFacts,
+  report: Array<PhaseReport.PhaseReport>,
+  options: Options,
+  reuse?: {
+    readonly previous: ProjectReuseBasis
+    readonly invalidation: SemanticInvalidation.SemanticInvalidation
+  },
+): Omit<FrontendFacts, keyof HeaderFacts | 'report'> => {
+  const reusable = new Set(
+    reuse?.invalidation.observations.flatMap((observation) =>
+      observation._tag === 'Reusable' ? [observation.module] : [],
+    ) ?? [],
+  )
+  const retained = new Map<string, ModuleSemantics.ModuleSemantics>()
+  for (const module of closure.modules) {
+    if (!reusable.has(module.name)) continue
+    const artifact = reuse?.previous.semantics.get(module.name)
+    if (
+      artifact !== undefined &&
+      artifact.module === module.name &&
+      artifact.elaboration.syntax === module.syntax
+    )
+      retained.set(module.name, artifact)
+  }
+  const results = measuredModuleWork(
     report,
     'elaboration',
-    index.modules.length,
+    closure.modules.length,
+    retained.size,
     () =>
       new Map(
         closure.modules.map((module) => {
-          const headers = index.modules.find((candidate) => candidate.module === module.name)
-          const scope = NameResolution.scopeOf(resolution, module.name)
-          if (headers === undefined || scope === undefined)
+          const reused = retained.get(module.name)
+          if (reused !== undefined) return [module.name, reused.elaboration]
+          const moduleHeaders = headers.index.modules.find(
+            (candidate) => candidate.module === module.name,
+          )
+          const scope = NameResolution.scopeOf(headers.resolution, module.name)
+          if (moduleHeaders === undefined || scope === undefined)
             throw new RangeError(`Pipeline lost module facts for ${module.name}`)
           return [
             module.name,
-            Elaboration.elaborateModule({ syntax: module.syntax, headers, scope, index }),
+            Elaboration.elaborateModule({
+              syntax: module.syntax,
+              headers: moduleHeaders,
+              scope,
+              index: headers.index,
+            }),
           ]
         }),
       ),
@@ -182,34 +281,51 @@ const analyzeFrontend = (
     (value) => [...value.values()].reduce((sum, module) => sum + module.diagnostics.length, 0),
     options,
   )
-  const ownership = measured(
+  const ownership = measuredModuleWork(
     report,
     'ownership',
     results.size,
+    retained.size,
     () =>
       new Map(
-        [...results.entries()].map(([name, result]) => [name, Ownership.checkModule(result)]),
+        [...results.entries()].map(([name, result]) => [
+          name,
+          retained.get(name)?.ownership ?? Ownership.checkModule(result, headers.index),
+        ]),
       ),
     (value) => [...value.values()].reduce((sum, module) => sum + module.functions.length, 0),
     (value) => [...value.values()].reduce((sum, module) => sum + module.diagnostics.length, 0),
     options,
   )
+  const semantics = new Map(
+    [...results.entries()].map(([module, elaboration]) => {
+      const reused = retained.get(module)
+      if (reused !== undefined) return [module, reused] as const
+      const moduleOwnership = ownership.get(module)
+      if (moduleOwnership === undefined)
+        throw new RangeError(`Pipeline lost ownership facts for ${module}`)
+      return [module, ModuleSemantics.make(module, elaboration, moduleOwnership)] as const
+    }),
+  )
   const diagnostics = Diagnostic.merge(
     ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
     ...closure.modules.map((module) => module.syntax.parserDiagnostics),
     closure.diagnostics,
-    resolution.diagnostics,
+    headers.resolution.diagnostics,
     ...[...results.values()].map((result) => result.diagnostics),
     ...[...ownership.values()].map((facts) => facts.diagnostics),
   )
-  return Object.freeze({
-    index,
-    resolution,
-    results,
-    ownership,
-    diagnostics,
-    report: Object.freeze([...report]),
-  })
+  return Object.freeze({ semantics, results, ownership, diagnostics })
+}
+
+const analyzeFrontend = (
+  closure: ModuleClosure.Facts,
+  report: Array<PhaseReport.PhaseReport>,
+  options: Options,
+): FrontendFacts => {
+  const headers = analyzeHeaders(closure, report, options)
+  const semantics = analyzeSemantics(closure, headers, report, options)
+  return Object.freeze({ ...headers, ...semantics, report: Object.freeze([...report]) })
 }
 
 /** Constructs the complete recoverable compiler frontend for one compilation request. */
@@ -243,6 +359,7 @@ export const frontend = Effect.fn('Pipeline.frontend')(function* (
 export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
   request: ModuleClosure.ProjectRequest,
   options: Options = {},
+  previous?: ProjectReuseBasis,
 ): Effect.fn.Return<ProjectFrontend, never, SourceResolver.SourceResolver> {
   const report: Array<PhaseReport.PhaseReport> = []
   const closureStartedAt = performance.now()
@@ -258,7 +375,77 @@ export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
       ...(closureHeap === undefined ? {} : { heapBytes: closureHeap }),
     }),
   )
-  return Object.freeze({ closure, ...analyzeFrontend(closure, report, options) })
+  const headers = analyzeHeaders(closure, report, options)
+  const previousSyntax = new Map(
+    previous?.closure.modules.map((module) => [module.name, module.syntax]),
+  )
+  const revisions = new Map(
+    closure.modules.map((module) => [
+      module.name,
+      Object.freeze({
+        _tag:
+          previousSyntax.get(module.name) === undefined
+            ? ('Fresh' as const)
+            : previousSyntax.get(module.name) === module.syntax
+              ? ('Reused' as const)
+              : ('Changed' as const),
+      }),
+    ]),
+  )
+  const invalidation = PhaseReport.measure(
+    'semantic-invalidation',
+    closure.modules.length,
+    () =>
+      SemanticInvalidation.make({
+        current: Object.freeze({
+          closure,
+          surfaces: headers.surfaces,
+          environment: SemanticInvalidation.environment,
+        }),
+        revisions,
+        ...(previous === undefined
+          ? {}
+          : {
+              previous: Object.freeze({
+                closure: previous.closure,
+                surfaces: previous.surfaces,
+                environment: previous.environment,
+              }),
+            }),
+      }),
+    (value) => value.totals.recomputed,
+  )
+  const totals = invalidation.value.totals
+  report.push(
+    PhaseReport.make({
+      ...invalidation.report,
+      counters: Object.freeze({
+        _tag: 'SemanticInvalidationCounters',
+        reusable: totals.reusable,
+        recomputed: totals.recomputed,
+        fresh: totals.reasons.Fresh,
+        localChange: totals.reasons.LocalChange,
+        dependencySurfaceChange: totals.reasons.DependencySurfaceChange,
+        cyclicPeerChange: totals.reasons.CyclicPeerChange,
+        environmentChange: totals.reasons.EnvironmentChange,
+        surfaceChange: totals.reasons.SurfaceChange,
+      }),
+    }),
+  )
+  const semantics = analyzeSemantics(
+    closure,
+    headers,
+    report,
+    options,
+    previous === undefined ? undefined : { previous, invalidation: invalidation.value },
+  )
+  return Object.freeze({
+    closure,
+    ...headers,
+    ...semantics,
+    semanticInvalidation: invalidation.value,
+    report: Object.freeze([...report]),
+  })
 })
 
 /** Derives immutable target/runtime facts from one completed frontend. */

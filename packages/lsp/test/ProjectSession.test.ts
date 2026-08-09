@@ -92,7 +92,13 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
     const release = yield* Deferred.make<void>()
     const analyzedVersions: Array<number> = []
     const priorVersions: Array<ReadonlyArray<number>> = []
+    const semanticPlans: Array<{
+      readonly version: number
+      readonly tag: string
+      readonly reasons: ReadonlyArray<string>
+    }> = []
     const publishedVersions: Array<number> = []
+    const semanticArtifacts = new Map<number, unknown>()
     let active = 0
     let maximumActive = 0
     const project = ProjectSession.make({
@@ -111,6 +117,18 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
           yield* Deferred.await(release)
         }
         const result = yield* analyzed(documents, previous)
+        const observation = result
+          .values()
+          .next()
+          .value?.project.semanticInvalidation.observations.at(0)
+        if (observation !== undefined)
+          semanticPlans.push({
+            version: self.version,
+            tag: observation._tag,
+            reasons: observation._tag === 'Recomputed' ? observation.reasons : [],
+          })
+        const artifact = result.values().next().value?.project.semantics.get('Main')
+        if (artifact !== undefined) semanticArtifacts.set(self.version, artifact)
         active -= 1
         return result
       }),
@@ -121,13 +139,13 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
       }),
     })
     const first = yield* Effect.forkChild(
-      project.open(document('file:///workspace/Main.silk', 1)),
+      project.open(document('file:///workspace/Main.silk', 1, 'pub fn main() -> i32 { return 1 }')),
       { startImmediately: true },
     )
     yield* TestClock.adjust(10)
     yield* Deferred.await(started)
     const second = yield* Effect.forkChild(
-      project.open(document('file:///workspace/Main.silk', 2)),
+      project.open(document('file:///workspace/Main.silk', 2, 'pub fn main() -> i32 { return 2 }')),
       { startImmediately: true },
     )
     yield* Effect.yieldNow
@@ -137,7 +155,7 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
     yield* Fiber.join(second)
 
     const third = yield* Effect.forkChild(
-      project.open(document('file:///workspace/Main.silk', 3)),
+      project.open(document('file:///workspace/Main.silk', 3, 'pub fn main() -> i32 { return 1 }')),
       { startImmediately: true },
     )
     yield* TestClock.adjust(10)
@@ -146,7 +164,14 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
     assert.strictEqual(maximumActive, 1)
     assert.deepEqual(analyzedVersions, [1, 2, 3])
     assert.deepEqual(priorVersions, [[], [], [2]])
+    assert.deepEqual(semanticPlans, [
+      { version: 1, tag: 'Recomputed', reasons: ['Fresh'] },
+      { version: 2, tag: 'Recomputed', reasons: ['Fresh'] },
+      { version: 3, tag: 'Recomputed', reasons: ['LocalChange'] },
+    ])
     assert.deepEqual(publishedVersions, [2, 3])
+    assert.notStrictEqual(semanticArtifacts.get(3), semanticArtifacts.get(1))
+    assert.notStrictEqual(semanticArtifacts.get(3), semanticArtifacts.get(2))
   }),
 )
 

@@ -75,16 +75,29 @@ const location = (
   selectionSpan: SourceSpan.SourceSpan,
 ): DeclarationLocation => Object.freeze({ module, span, selectionSpan })
 
-const locationOfDeclaration = (
+const currentDeclaration = (
+  index: DeclarationIndex.Index,
   declaration: DeclarationIndex.MemberFact,
-): DeclarationLocation | undefined =>
-  declaration.name._tag === 'Present'
-    ? location(
-        declaration.name.token.span.sourceId,
-        declaration.syntax.span,
-        declaration.name.token.span,
-      )
+): DeclarationIndex.MemberFact =>
+  declaration.canonical._tag === 'Canonical'
+    ? (DeclarationIndex.byCanonical(index, declaration.canonical.id) ?? declaration)
+    : (index.modules
+        .find((module) => module.module === declaration.id.sourceId)
+        ?.members.find(
+          (candidate) =>
+            candidate.id.sourceId === declaration.id.sourceId &&
+            candidate.id.ordinal === declaration.id.ordinal,
+        ) ?? declaration)
+
+const locationOfDeclaration = (
+  index: DeclarationIndex.Index,
+  declaration: DeclarationIndex.MemberFact,
+): DeclarationLocation | undefined => {
+  const current = currentDeclaration(index, declaration)
+  return current.name._tag === 'Present'
+    ? location(current.name.token.span.sourceId, current.syntax.span, current.name.token.span)
     : undefined
+}
 
 const locationOfParameter = (
   parameter: DeclarationIndex.ParameterFact,
@@ -107,10 +120,23 @@ const locationOfBinding = (
     ? location(binding.name.token.span.sourceId, binding.syntax.span, binding.name.token.span)
     : undefined
 
-const locationOfField = (field: DeclarationIndex.FieldFact): DeclarationLocation | undefined =>
-  field.name._tag === 'Present'
-    ? location(field.name.token.span.sourceId, field.syntax.span, field.name.token.span)
+const locationOfField = (
+  index: DeclarationIndex.Index,
+  field: DeclarationIndex.FieldFact,
+): DeclarationLocation | undefined => {
+  const current =
+    index.modules
+      .find((module) => module.module === field.id.struct.sourceId)
+      ?.structs.find(
+        (struct) =>
+          struct.id.sourceId === field.id.struct.sourceId &&
+          struct.id.ordinal === field.id.struct.ordinal,
+      )
+      ?.fields.find((candidate) => candidate.id.ordinal === field.id.ordinal) ?? field
+  return current.name._tag === 'Present'
+    ? location(current.name.token.span.sourceId, current.syntax.span, current.name.token.span)
     : undefined
+}
 
 const available = (identity: Identity): Resolution => Object.freeze({ _tag: 'Available', identity })
 
@@ -270,7 +296,7 @@ const collectResolvedType = (
         token.span,
         'Type',
         available(identityOfDeclaration(declaration)),
-        locationOfDeclaration(declaration),
+        locationOfDeclaration(index, declaration),
       )
       return
     }
@@ -325,7 +351,7 @@ const collectDeclaredType = (
         ? undefined
         : (() => {
             const declaration = declarationByNominal(index, fact.candidate)
-            return declaration === undefined ? undefined : locationOfDeclaration(declaration)
+            return declaration === undefined ? undefined : locationOfDeclaration(index, declaration)
           })(),
     )
     return
@@ -406,9 +432,10 @@ const parameterResolution = (
 
 const callResolution = (
   reference: Elaboration.CallReferenceFact,
+  index: DeclarationIndex.Index,
 ): { readonly resolution: Resolution; readonly declaration?: DeclarationLocation } => {
   if (reference._tag === 'Resolved') {
-    const declaration = locationOfDeclaration(reference.declaration)
+    const declaration = locationOfDeclaration(index, reference.declaration)
     return Object.freeze({
       resolution: available(identityOfDeclaration(reference.declaration)),
       ...(declaration === undefined ? {} : { declaration }),
@@ -463,7 +490,7 @@ const collectCallReference = (
       collectQualifier(qualifier, qualifierName, scope, index, pending)
   }
   const selected = 'token' in reference ? reference.token : tokens.at(-1)
-  const resolved = callResolution(reference)
+  const resolved = callResolution(reference, index)
   push(
     pending,
     selected?.span,
@@ -475,6 +502,7 @@ const collectCallReference = (
 
 const collectIntrinsicReference = (
   reference: Elaboration.IntrinsicReferenceFact,
+  index: DeclarationIndex.Index,
   pending: Array<Pending>,
 ): void => {
   if (reference._tag === 'UnavailableIntrinsicReference') return
@@ -483,7 +511,9 @@ const collectIntrinsicReference = (
       ? available(Object.freeze({ _tag: 'IntrinsicActorIdentity', id: reference.actor.id }))
       : available(identityOfDeclaration(reference.actor))
   const actorDeclaration =
-    reference.actor._tag === 'IntrinsicActor' ? undefined : locationOfDeclaration(reference.actor)
+    reference.actor._tag === 'IntrinsicActor'
+      ? undefined
+      : locationOfDeclaration(index, reference.actor)
   push(pending, reference.actorToken.span, 'Actor', actorResolution, actorDeclaration)
   push(
     pending,
@@ -507,7 +537,7 @@ const collectPattern = (
         token?.span,
         'Type',
         available(identityOfDeclaration(pattern.target.struct)),
-        locationOfDeclaration(pattern.target.struct),
+        locationOfDeclaration(index, pattern.target.struct),
       )
     for (const field of pattern.fields) {
       const fieldToken = field.token
@@ -517,7 +547,7 @@ const collectPattern = (
           fieldToken?.span,
           'Field',
           available(Object.freeze({ _tag: 'FieldIdentity', id: field.state.field.id })),
-          locationOfField(field.state.field),
+          locationOfField(index, field.state.field),
         )
       if (field.nested !== undefined) collectPattern(field.nested, index, scope, pending)
     }
@@ -546,7 +576,7 @@ const collectExpression = (
         expression.token.span,
         'Value',
         available(identityOfDeclaration(expression.declaration)),
-        locationOfDeclaration(expression.declaration),
+        locationOfDeclaration(index, expression.declaration),
       )
       return
     case 'Identifier': {
@@ -594,7 +624,7 @@ const collectExpression = (
           token?.span,
           'Field',
           available(Object.freeze({ _tag: 'FieldIdentity', id: expression.state.field.id })),
-          locationOfField(expression.state.field),
+          locationOfField(index, expression.state.field),
         )
       else
         push(
@@ -618,7 +648,7 @@ const collectExpression = (
           token?.span,
           'Type',
           available(identityOfDeclaration(expression.target.struct)),
-          locationOfDeclaration(expression.target.struct),
+          locationOfDeclaration(index, expression.target.struct),
         )
       for (const initializer of expression.initializers) {
         const fieldToken = initializer.token
@@ -628,7 +658,7 @@ const collectExpression = (
             fieldToken?.span,
             'Field',
             available(Object.freeze({ _tag: 'FieldIdentity', id: initializer.state.field.id })),
-            locationOfField(initializer.state.field),
+            locationOfField(index, initializer.state.field),
           )
         collectExpression(initializer.expression, index, scope, pending)
       }
@@ -640,7 +670,7 @@ const collectExpression = (
       collectExpression(expression.subject, index, scope, pending)
       return
     case 'PlaceReplace':
-      collectIntrinsicReference(expression.reference, pending)
+      collectIntrinsicReference(expression.reference, index, pending)
       collectExpression(expression.destination, index, scope, pending)
       collectExpression(expression.value, index, scope, pending)
       return
@@ -668,28 +698,28 @@ const collectExpression = (
         collectStatement(statement, index, scope, pending)
       return
     case 'EffectCatch':
-      collectIntrinsicReference(expression.reference, pending)
+      collectIntrinsicReference(expression.reference, index, pending)
       for (const typeArgument of expression.typeArguments)
         collectDeclaredType(typeArgument.declared, index, scope, pending)
       collectExpression(expression.protected, index, scope, pending)
       collectExpression(expression.handler, index, scope, pending)
       return
     case 'EffectRetry':
-      collectIntrinsicReference(expression.reference, pending)
+      collectIntrinsicReference(expression.reference, index, pending)
       collectExpression(expression.protected, index, scope, pending)
       collectExpression(expression.retries, index, scope, pending)
       return
     case 'EffectProvide':
-      collectIntrinsicReference(expression.reference, pending)
+      collectIntrinsicReference(expression.reference, index, pending)
       collectExpression(expression.protected, index, scope, pending)
       return
     case 'EffectProvideWith':
-      collectIntrinsicReference(expression.reference, pending)
+      collectIntrinsicReference(expression.reference, index, pending)
       collectExpression(expression.protected, index, scope, pending)
       collectExpression(expression.acquisition, index, scope, pending)
       return
     case 'EffectTransform':
-      collectIntrinsicReference(expression.reference, pending)
+      collectIntrinsicReference(expression.reference, index, pending)
       collectExpression(expression.protected, index, scope, pending)
       collectExpression(expression.callback, index, scope, pending)
       return
@@ -750,7 +780,7 @@ const collectMember = (
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
-  const declaration = locationOfDeclaration(member)
+  const declaration = locationOfDeclaration(index, member)
   if (member.name._tag === 'Present')
     push(
       pending,
@@ -800,7 +830,7 @@ const collectMember = (
         field.name.token.span,
         'Declaration',
         available(Object.freeze({ _tag: 'FieldIdentity', id: field.id })),
-        locationOfField(field),
+        locationOfField(index, field),
       )
     collectDeclaredType(field.declaredType, index, scope, pending)
   }
@@ -848,7 +878,9 @@ const collectImports = (
             token.span,
             'Import',
             identity === undefined ? Object.freeze({ _tag: 'Unavailable' }) : available(identity),
-            declarationFact === undefined ? undefined : locationOfDeclaration(declarationFact),
+            declarationFact === undefined
+              ? undefined
+              : locationOfDeclaration(index, declarationFact),
           )
         continue
       }

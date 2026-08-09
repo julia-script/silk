@@ -138,6 +138,14 @@
       "types": "./dist/ModuleClosure.d.ts",
       "import": "./dist/ModuleClosure.js"
     },
+    "./ModuleSurface": {
+      "types": "./dist/ModuleSurface.d.ts",
+      "import": "./dist/ModuleSurface.js"
+    },
+    "./ModuleSemantics": {
+      "types": "./dist/ModuleSemantics.d.ts",
+      "import": "./dist/ModuleSemantics.js"
+    },
     "./NameResolution": {
       "types": "./dist/NameResolution.d.ts",
       "import": "./dist/NameResolution.js"
@@ -177,6 +185,10 @@
     "./SemanticOccurrence": {
       "types": "./dist/SemanticOccurrence.d.ts",
       "import": "./dist/SemanticOccurrence.js"
+    },
+    "./SemanticInvalidation": {
+      "types": "./dist/SemanticInvalidation.d.ts",
+      "import": "./dist/SemanticInvalidation.js"
     },
     "./Elaboration": {
       "types": "./dist/Elaboration.d.ts",

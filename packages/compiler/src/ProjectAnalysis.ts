@@ -3,8 +3,11 @@ import * as Option from 'effect/Option'
 import type * as Analysis from './Analysis.js'
 import * as FrontendTooling from './FrontendTooling.js'
 import * as ModuleClosure from './ModuleClosure.js'
+import type * as ModuleSemantics from './ModuleSemantics.js'
+import type * as ModuleSurface from './ModuleSurface.js'
 import type * as PhaseReport from './PhaseReport.js'
 import * as Pipeline from './Pipeline.js'
+import * as SemanticInvalidation from './SemanticInvalidation.js'
 import type * as SourceFile from './SourceFile.js'
 import type * as SourceResolver from './SourceResolver.js'
 import * as SyntaxCorrespondence from './SyntaxCorrespondence.js'
@@ -31,13 +34,23 @@ export type SyntaxRevision =
       readonly correspondence: SyntaxCorrespondence.SyntaxCorrespondence
     }
 
+/** One frontend-query-compatible root view that cannot be passed to runtime realization. */
+export interface View extends Analysis.FrontendSnapshot {
+  readonly _tag: 'ProjectAnalysisView'
+  readonly realization: 'ProjectView'
+}
+
 /** One immutable multi-root compiler frontend and its structurally shared root views. */
 export interface ProjectAnalysis {
   readonly _tag: 'ProjectAnalysis'
   readonly roots: ReadonlyArray<string>
   readonly closure: ModuleClosure.ProjectClosure
-  readonly views: ReadonlyMap<string, Analysis.FrontendSnapshot>
+  readonly views: ReadonlyMap<string, View>
   readonly syntaxRevisions: ReadonlyMap<string, SyntaxRevision>
+  readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
+  readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
+  readonly semanticEnvironment: string
+  readonly semanticInvalidation: SemanticInvalidation.SemanticInvalidation
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
 }
 
@@ -45,26 +58,22 @@ const analyze = Effect.fnUntraced(function* (
   roots: ReadonlyArray<SourceFile.SourceFile>,
   previous?: ProjectAnalysis,
 ): Effect.fn.Return<ProjectAnalysis, never, SourceResolver.SourceResolver> {
-  const frontend = yield* Pipeline.frontendProject({
-    roots,
-    ...(previous === undefined ? {} : { previous: previous.closure }),
-  })
+  const frontend = yield* Pipeline.frontendProject(
+    {
+      roots,
+      ...(previous === undefined ? {} : { previous: previous.closure }),
+    },
+    {},
+    previous === undefined
+      ? undefined
+      : {
+          closure: previous.closure,
+          surfaces: previous.surfaces,
+          semantics: previous.semantics,
+          environment: previous.semanticEnvironment,
+        },
+  )
   const tooling = FrontendTooling.make(frontend)
-  const views = new Map<string, Analysis.FrontendSnapshot>()
-  for (const rootModule of frontend.closure.rootModules) {
-    const closure = ModuleClosure.view(frontend.closure, rootModule)
-    if (closure === undefined)
-      throw new RangeError(`Project analysis lost requested root ${rootModule}`)
-    views.set(
-      rootModule,
-      Object.freeze({
-        _tag: 'AnalysisSnapshot',
-        ...frontend,
-        ...tooling,
-        closure,
-      }),
-    )
-  }
   const previousModules = new Map(
     previous?.closure.modules.map((module) => [module.name, module.syntax]),
   )
@@ -103,13 +112,36 @@ const analyze = Effect.fnUntraced(function* (
       }),
     )
   }
+  const report = tooling.report
+  const views = new Map<string, View>()
+  for (const rootModule of frontend.closure.rootModules) {
+    const closure = ModuleClosure.view(frontend.closure, rootModule)
+    if (closure === undefined)
+      throw new RangeError(`Project analysis lost requested root ${rootModule}`)
+    views.set(
+      rootModule,
+      Object.freeze({
+        _tag: 'ProjectAnalysisView',
+        realization: 'ProjectView',
+        ...frontend,
+        ...tooling,
+        closure,
+        semanticInvalidation: frontend.semanticInvalidation,
+        report,
+      }),
+    )
+  }
   return Object.freeze({
     _tag: 'ProjectAnalysis',
     roots: frontend.closure.rootModules,
     closure: frontend.closure,
     views,
     syntaxRevisions,
-    report: tooling.report,
+    surfaces: frontend.surfaces,
+    semantics: frontend.semantics,
+    semanticEnvironment: SemanticInvalidation.environment,
+    semanticInvalidation: frontend.semanticInvalidation,
+    report,
   })
 })
 
@@ -129,10 +161,8 @@ export const revise = Effect.fn('ProjectAnalysis.revise')(function* (
 })
 
 /** Returns the requested root view, or `undefined` when it was not part of the project request. */
-export const view = (
-  self: ProjectAnalysis,
-  rootModule: string,
-): Analysis.FrontendSnapshot | undefined => self.views.get(rootModule)
+export const view = (self: ProjectAnalysis, rootModule: string): View | undefined =>
+  self.views.get(rootModule)
 
 /** Returns the one phase sequence that produced every root view. */
 export const phases = (self: ProjectAnalysis): ReadonlyArray<PhaseReport.PhaseReport> => self.report
