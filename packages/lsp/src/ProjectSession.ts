@@ -1,4 +1,5 @@
 import type * as Analysis from '@silk-effect/compiler/Analysis'
+import type * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
 import * as Deferred from 'effect/Deferred'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
@@ -8,6 +9,7 @@ import type * as Document from './Document.js'
 /** One coherent document and analysis snapshot committed at a project revision. */
 export interface AnalyzedDocument {
   readonly document: Document.Document
+  readonly project: ProjectAnalysis.ProjectAnalysis
   readonly snapshot: Analysis.FrontendSnapshot
   readonly moduleUris: ReadonlyMap<string, string>
 }
@@ -18,6 +20,7 @@ export interface Options<R> {
   readonly debounce?: Duration.Input
   readonly analyze: (
     documents: ReadonlyArray<Document.Document>,
+    previous: ReadonlyMap<string, AnalyzedDocument>,
   ) => Effect.Effect<ReadonlyMap<string, AnalyzedDocument>, never, R>
   readonly publish: (session: AnalyzedDocument) => Effect.Effect<void, never, R>
 }
@@ -90,7 +93,9 @@ export const make = <R>(options: Options<R>): ProjectSession<R> => {
             ...work.documents.filter((document) => document.uri !== work.priority),
           ])
     const analyzed =
-      ordered.length === 0 ? new Map<string, AnalyzedDocument>() : yield* options.analyze(ordered)
+      ordered.length === 0
+        ? new Map<string, AnalyzedDocument>()
+        : yield* options.analyze(ordered, new Map(committed))
     if (closed || work.revision !== revision) return
     committed = new Map(analyzed)
     committedRevision = work.revision

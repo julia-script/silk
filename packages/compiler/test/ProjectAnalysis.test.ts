@@ -4,6 +4,7 @@ import * as Exit from 'effect/Exit'
 import * as Analysis from '../src/Analysis.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as SourceOrigin from '../src/SourceOrigin.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -104,5 +105,87 @@ it.effect('rejects conflicting source bytes for one canonical root', () =>
       ]),
     )
     assert.strictEqual(Exit.isFailure(exit), true)
+  }),
+)
+
+it.effect('reuses exact unchanged syntax while rebuilding one coherent semantic frontend', () =>
+  Effect.gen(function* () {
+    const previous = yield* make()
+    const revisedRoots = Object.freeze([
+      SourceFile.make(
+        'app/A',
+        ascii(
+          'import shared.Core\npub fn inserted() -> i32 { return 0 }\npub fn a() -> i32 { return Core.answer() }',
+        ),
+      ),
+      roots.at(1) ?? assert.fail('missing app/B root'),
+    ])
+    const current = yield* ProjectAnalysis.revise(previous, revisedRoots).pipe(
+      Effect.provide(SourceResolver.memory(sources)),
+    )
+    const previousModules = new Map(
+      previous.closure.modules.map((module) => [module.name, module.syntax]),
+    )
+    const currentModules = new Map(
+      current.closure.modules.map((module) => [module.name, module.syntax]),
+    )
+
+    assert.notStrictEqual(currentModules.get('app/A'), previousModules.get('app/A'))
+    assert.strictEqual(currentModules.get('app/B'), previousModules.get('app/B'))
+    assert.strictEqual(currentModules.get('shared/Core'), previousModules.get('shared/Core'))
+    assert.strictEqual(current.syntaxRevisions.get('app/A')?._tag, 'Changed')
+    assert.strictEqual(current.syntaxRevisions.get('app/B')?._tag, 'Reused')
+    assert.strictEqual(current.syntaxRevisions.get('shared/Core')?._tag, 'Reused')
+    const changed = current.syntaxRevisions.get('app/A')
+    assert.strictEqual(changed?._tag, 'Changed')
+    if (changed?._tag === 'Changed')
+      assert.isAbove(changed.correspondence.counts.correspondingElements, 0)
+
+    const previousView = ProjectAnalysis.view(previous, 'app/A')
+    const currentView = ProjectAnalysis.view(current, 'app/A')
+    assert.isDefined(previousView)
+    assert.isDefined(currentView)
+    if (previousView === undefined || currentView === undefined) return
+    assert.notStrictEqual(currentView.index, previousView.index)
+    assert.notStrictEqual(currentView.resolution, previousView.resolution)
+    assert.notStrictEqual(currentView.results, previousView.results)
+    assert.notStrictEqual(currentView.ownership, previousView.ownership)
+    assert.notStrictEqual(currentView.semanticOccurrences, previousView.semanticOccurrences)
+    assert.deepEqual(Analysis.diagnostics(currentView), [])
+  }),
+)
+
+it.effect('reports fresh and removed modules and refuses reuse across source origins', () =>
+  Effect.gen(function* () {
+    const previousRoot = SourceFile.make(
+      'app/Main',
+      ascii('pub fn main() -> i32 { return 1 }'),
+      SourceOrigin.memory('file:///old/Main.silk'),
+    )
+    const previous = yield* ProjectAnalysis.make([previousRoot]).pipe(
+      Effect.provide(SourceResolver.empty),
+    )
+    const current = yield* ProjectAnalysis.revise(previous, [
+      SourceFile.make(
+        'app/Next',
+        ascii('pub fn next() -> i32 { return 2 }'),
+        SourceOrigin.memory('file:///new/Next.silk'),
+      ),
+    ]).pipe(Effect.provide(SourceResolver.empty))
+    assert.strictEqual(current.syntaxRevisions.has('app/Main'), false)
+    assert.strictEqual(current.syntaxRevisions.get('app/Next')?._tag, 'Fresh')
+
+    const changedOrigin = yield* ProjectAnalysis.revise(previous, [
+      SourceFile.make(
+        'app/Main',
+        ascii('pub fn main() -> i32 { return 1 }'),
+        SourceOrigin.memory('file:///new/Main.silk'),
+      ),
+    ]).pipe(Effect.provide(SourceResolver.empty))
+    assert.strictEqual(changedOrigin.syntaxRevisions.get('app/Main')?._tag, 'Changed')
+    assert.notStrictEqual(
+      changedOrigin.closure.modules.at(0)?.syntax,
+      previous.closure.modules.at(0)?.syntax,
+    )
   }),
 )
