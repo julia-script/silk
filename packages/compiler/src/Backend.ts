@@ -674,7 +674,24 @@ const linearize = (fn: Mir.MirFunction): ReadonlyArray<LinearBlock> => {
     }
     return Object.freeze({ ...block, operations: Object.freeze(operations), terminator })
   })
-  return expandMatches(fn, Object.freeze(blocks.filter((block) => !inlined.has(block.id.ordinal))))
+  const referenced = new Set<number>([fn.entry.ordinal])
+  // Structural incoming counts do not include every edge introduced by outcome lowering. Keep an
+  // inline candidate when the rewritten graph still names it; otherwise a valid branch can target
+  // a block removed by this private optimization.
+  for (const block of blocks) {
+    const terminator = block.terminator
+    if (terminator._tag === 'Jump') referenced.add(terminator.target.ordinal)
+    if (terminator._tag === 'Branch' || terminator._tag === 'MatchBranch') {
+      referenced.add(terminator.taken.ordinal)
+      referenced.add(terminator.otherwise.ordinal)
+    }
+  }
+  return expandMatches(
+    fn,
+    Object.freeze(
+      blocks.filter((block) => !inlined.has(block.id.ordinal) || referenced.has(block.id.ordinal)),
+    ),
+  )
 }
 
 const llvmControl = (program: Mir.Module): ReadonlyArray<ControlProvenance> =>

@@ -12,9 +12,9 @@ snippets alone. This initiative fills the smallest foundational gaps—scalar va
 source, static text, and output—then uses familiar algorithms to reveal the next real constraints
 without pretending the bootstrap language is already complete.
 
-**Current objective:** make the first familiar algorithm set executable and inspectable — measured
-by cross-engine agreement for Game of Life, Sieve, matrix multiplication, and CRC-32, plus durable
-frontier evidence for quicksort and FFT where required.
+**Current objective:** repair the first general defect exposed by a complete pressure program —
+measured by ordinary-call integer literals receiving their declared contextual types and the Silk
+lexer dropping its byte-to-`i32` classifier workaround without losing cross-engine parity.
 
 ## Column rules
 
@@ -24,63 +24,22 @@ frontier evidence for quicksort and FFT where required.
 
 ## Now
 
-### Make shipped standard-library source real and navigable
+### Make exact integer context reach ordinary calls
 
-- **Problem:** `silk/vector` is embedded in a JavaScript string and the LSP invents a project URI
-  for its definitions, so the canonical source neither ships as an inspectable file nor supports
-  truthful go-to-definition.
-- **Outcome & done-when:** Physical `.silk` files are canonical, generated embedding is verified,
-  installed packages include the files, and navigation opens the analyzed toolchain source.
-- **Status:** complete (2026-08-09) — source generation, origins, navigation, and packed artifacts verified.
-- **Appetite:** one focused change.
-- **Links:** change: `ship-stdlib-sources`
-
-### Complete the integer foundation
-
-- **Problem:** Only `i32`, `usize`, and `bool` are genuine scalars; source spelling is cumbersome,
-  bytes are counterfeited by a nominal wrapper, and indices still use mixed conventions.
-- **Outcome & done-when:** Lowercase unit/bottom and the full signed/unsigned integer family have
-  exact literals, explicit conversions and operation modes, `usize` indices, and evaluator/LLVM/
-  Wasm parity with no uppercase compatibility aliases.
-- **Status:** in progress — implementation is now applying the 19-task integer parity plan.
-- **Appetite:** one substantial but integer-only change with an internal parity matrix.
-- **Links:** change: `complete-integer-scalars` ·
-  [accepted type model](../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md)
+- **Problem:** `47` in `hasPair(source, index, 47, 47)` defaults to `i32` and reports `SEM0012`
+  instead of using the immediate `u8` parameter context promised by the integer specification.
+- **Outcome & done-when:** Ordinary direct and piped calls contextually type exact literals for all
+  integer parameter types, reject out-of-range values before MIR, and let the lexer compare `u8`
+  values without conversion scaffolding.
+- **Boundary:** No implicit conversion between already-typed integers, overload system, widening
+  rule, or change to unconstrained `i32` defaults.
+- **Status:** selected from the archived lexer findings; proposal next.
+- **Appetite:** one focused semantic-analysis change with integer-family and engine parity.
 
 ## Next
 
-### Real numeric algorithms need floating-point values
-
-- **Problem:** FFT and many familiar numerical programs cannot be represented without `f32` and
-  `f64` or tested honestly without explicit IEEE semantics.
-- **Hypothesis:** a focused conservative-float change after the integer catalog will preserve
-  backend parity while keeping fast math and a complete math library out of scope.
-- **Confidence:** high
-- **Assumes:** the scalar catalog and exact conversion boundary survive the integer change — unvalidated
-- **Open questions:** which missing math operations FFT records as frontier evidence.
-- **Links:** change: `add-floating-point-scalars`
-
-### Observable programs need text bytes and explicit output
-
-- **Problem:** Programs cannot render a board or explain a result, while prematurely defining
-  String, Logger, or Streams would entangle several still-open architecture choices.
-- **Hypothesis:** static UTF-8/byte literals followed by an explicit `StandardStreams.writeAll`
-  service will enable observation without fixing owning String or structured logging semantics.
-- **Confidence:** medium
-- **Assumes:** static literal storage can remain a non-owning target-neutral view — unvalidated
-- **Open questions:** exact private Wasm host import naming; not the source-level service contract.
-- **Links:** change: `add-static-text` · change: `add-standard-streams`
-
-### Familiar algorithms become the acceptance surface
-
-- **Problem:** Synthetic fixtures reveal phase bugs but not whether ordinary programs compose
-  naturally or which missing capabilities matter to users.
-- **Hypothesis:** executable and frontier examples with checked-in evidence will expose useful walls
-  without distorting algorithms to satisfy the compiler.
-- **Confidence:** high
-- **Assumes:** Game of Life, Sieve, matrix multiplication, and CRC-32 fit the shaped foundation — unvalidated
-- **Open questions:** whether quicksort needs additional slice behavior and which FFT dependencies remain.
-- **Links:** change: `build-algorithm-examples`
+No follow-up program is preselected. The lexer findings decide whether to repair a general seam or
+choose another familiar workload that applies different pressure.
 
 ## Later
 
@@ -112,11 +71,25 @@ and editor tooling together with the language surface so no second vocabulary su
 
 ## Open questions
 
-- Which quicksort and FFT blockers remain after the shaped changes are implemented?
 - Does real static-text use favor a target-selected semantic string representation or a text service?
+- Which lexer findings are general enough to justify a language or standard-library change rather
+  than remaining local ergonomics?
 
 ## Changelog
 
+- 2026-08-09: Completed and archived the six-part foundation: `ship-stdlib-sources`,
+  `complete-integer-scalars`, `add-floating-point-scalars`, `add-static-text`,
+  `add-standard-streams`, and `build-algorithm-examples`.
+- 2026-08-09: Closed the algorithm frontiers through allocation-pressure BFS, indexed static byte
+  views, bounded runtime recursion, deterministic transcendental float operations, and effectful
+  algorithm entry points. Game of Life, Sieve, matrix multiplication, CRC-32, BFS, quicksort, and
+  FFT are executable across supported engines.
+- 2026-08-09: Started the lexer as a language-pressure exercise. Self-hosting and a parser port are
+  explicitly not implied by this step.
+- 2026-08-09: Completed and archived `exercise-language-with-silk-lexer`: exact TypeScript
+  differential parity across all 67 token kinds, invalid diagnostics, owned token/diagnostic
+  vectors, four failure ordinals, evaluator/native/Wasm parity, and deterministic artifacts. The
+  findings selected ordinary-call contextual integer literals as the next repair.
 - 2026-08-09: Completed `ship-stdlib-sources` and moved active implementation to
   `complete-integer-scalars`.
 - 2026-08-09: Created by splitting the oversized `bootstrap-real-programs` proposal into six
