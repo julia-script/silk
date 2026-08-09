@@ -1,0 +1,76 @@
+import silk.vector { Vector, make, append, get, length }
+
+struct QueueEntry {
+  cell: usize
+  distance: usize
+}
+
+effect fn search() -> usize ! OutOfMemory ? &mut Allocator {
+  let mut visited = [
+    false, false, false, false, false,
+    false, false, false, false, false,
+    false, false, false, false, false,
+    false, false, false, false, false,
+    false, false, false, false, false
+  ]
+  let mut queue = make<QueueEntry>()
+  visited[0] = true
+  let first = QueueEntry { cell: usize.add(0, 0), distance: usize.add(0, 0) }
+  let started = run append<QueueEntry>(&mut queue, move first)
+  let mut cursor = usize.add(0, 0)
+
+  while cursor < length<QueueEntry>(&queue) {
+    let current = get<QueueEntry>(&mut queue, cursor)
+    cursor = cursor + 1
+    if current.cell == 24 {
+      return current.distance
+    }
+    let row = current.cell / 5
+    let column = current.cell % 5
+    let nextDistance = current.distance + 1
+
+    if row > 0 {
+      let neighbor = current.cell - 5
+      if !visited[neighbor] {
+        visited[neighbor] = true
+        let entry = QueueEntry { cell: neighbor, distance: nextDistance }
+        let appended = run append<QueueEntry>(&mut queue, move entry)
+      }
+    }
+    if column > 0 {
+      let neighbor = current.cell - 1
+      if !visited[neighbor] {
+        visited[neighbor] = true
+        let entry = QueueEntry { cell: neighbor, distance: nextDistance }
+        let appended = run append<QueueEntry>(&mut queue, move entry)
+      }
+    }
+    if column < 4 {
+      let neighbor = current.cell + 1
+      if !visited[neighbor] {
+        visited[neighbor] = true
+        let entry = QueueEntry { cell: neighbor, distance: nextDistance }
+        let appended = run append<QueueEntry>(&mut queue, move entry)
+      }
+    }
+    if row < 4 {
+      let neighbor = current.cell + 5
+      if !visited[neighbor] {
+        visited[neighbor] = true
+        let entry = QueueEntry { cell: neighbor, distance: nextDistance }
+        let appended = run append<QueueEntry>(&mut queue, move entry)
+      }
+    }
+  }
+  return usize.add(0, 0)
+}
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let pending = search() |> Allocator.provide(&mut allocator)
+  return usize.toI32(run pending)
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }
