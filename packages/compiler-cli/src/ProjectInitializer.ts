@@ -167,8 +167,8 @@ const ignoreBytes = (previous: Uint8Array | undefined): Uint8Array => {
 const manifest = (name: string): string =>
   `[package]\nname = "${name}"\nversion = "0.1.0"\nroot = "src/main.silk"\n`
 
-const entry = `pub fn main() -> i32 {
-  return 0
+const entry = `pub effect fn main() -> () {
+  return ()
 }
 `
 
