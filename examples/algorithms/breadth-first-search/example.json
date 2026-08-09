@@ -6,7 +6,8 @@
   "source": "main.silk",
   "input": "An unobstructed 5×5 grid searched from the first cell to the opposite corner.",
   "expected": {
-    "entryResult": 8,
+    "entryResult": 0,
+    "algorithmResult": 8,
     "summary": "The shortest path crosses eight grid edges after all 25 cells enter the queue.",
     "allocation": {
       "acquires": 4,

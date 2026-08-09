@@ -50,13 +50,16 @@ The harness SHALL retain deterministic frontier evidence and SHALL fail if an ex
 
 The suite SHALL contain an executable breadth-first search over a deterministic 5×5 grid whose
 queue is an ordinary `Vector<QueueEntry>`. The search SHALL visit all 25 cells, return the committed
-shortest-path result, and force vector capacities 4, 8, 16, and 32 through the explicit allocator
-capability without using raw storage in the example source.
+shortest-path result to its effectful entry point for verification, and force vector capacities 4,
+8, 16, and 32 through the explicit allocator capability without using raw storage in the example
+source. The entry point SHALL leave reportable allocation failures unhandled so the runtime exposes
+them as execution errors.
 
 #### Scenario: Traverse the complete grid
 
 - **WHEN** breadth-first search runs from the first cell to the opposite corner
-- **THEN** evaluation, native execution, and direct WebAssembly return the same shortest distance
+- **THEN** evaluation, native execution, and direct WebAssembly verify the same shortest distance
+  before completing the effectful entry point successfully
 
 ### Requirement: Allocation-sensitive examples retain resource evidence
 

@@ -31,10 +31,10 @@ fn step(board: &[bool]) -> [bool; 25] {
   while row < 5 {
     let mut column = usize.add(0, 0)
     while column < 5 {
-      let up = previous(row)
-      let down = following(row)
-      let left = previous(column)
-      let right = following(column)
+      let up = row |> previous
+      let down = row |> following
+      let left = column |> previous
+      let right = column |> following
       let neighbors = alive(board, up, left) + alive(board, up, column) +
         alive(board, up, right) + alive(board, row, left) + alive(board, row, right) +
         alive(board, down, left) + alive(board, down, column) + alive(board, down, right)

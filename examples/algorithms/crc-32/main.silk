@@ -2,21 +2,22 @@ fn crc32(input: &[u8]) -> u32 {
   let mut crc = u32.bitNot(0)
   let mut index = usize.add(0, 0)
   while index < input.length {
-    crc = u32.bitXor(crc, u8.toU32(input[index]))
+    let byte = input[index] |> u8.toU32
+    crc = crc |> u32.bitXor(byte)
     let mut bit = 0
     while bit < 8 {
       if u32.bitAnd(crc, 1) == 1 {
-        crc = u32.bitXor(u32.shiftRight(crc, 1), 3988292384)
+        crc = crc |> u32.shiftRight(1) |> u32.bitXor(3988292384)
       } else {
-        crc = u32.shiftRight(crc, 1)
+        crc = crc |> u32.shiftRight(1)
       }
       bit = bit + 1
     }
     index = index + 1
   }
-  return u32.bitNot(crc)
+  return crc |> u32.bitNot
 }
 
 pub fn main() -> i32 {
-  return u32.toI32(crc32(b"\x99\x13\x1d\x00"))
+  return crc32(b"\x99\x13\x1d\x00") |> u32.toI32
 }

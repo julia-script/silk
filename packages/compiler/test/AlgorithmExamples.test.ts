@@ -34,6 +34,7 @@ const Manifest = Schema.Struct({
   input: Schema.String,
   expected: Schema.Struct({
     entryResult: Schema.Number,
+    algorithmResult: Schema.optionalKey(Schema.Number),
     summary: Schema.String,
     allocation: Schema.optionalKey(AllocationExpectation),
   }),
@@ -244,8 +245,13 @@ it('keeps seven complete, readable programs and explicit status contracts', () =
     assert.strictEqual(manifest.blockers.length === 0, manifest.status === 'executable')
     if (manifest.id === 'breadth-first-search') {
       assert.include(source, 'import silk.vector')
+      assert.include(source, 'impl Report for OutOfMemory {}')
+      assert.include(source, 'pub effect fn main() -> () ! OutOfMemory')
+      assert.notInclude(source, 'Effect.catch')
       assert.notInclude(source, 'RawBuffer')
       assert.notInclude(source, 'Slot.')
+      assert.strictEqual(manifest.expected.entryResult, 0)
+      assert.strictEqual(manifest.expected.algorithmResult, 8)
     }
   }
 })
