@@ -131,7 +131,7 @@ it.effect('pairs every intrinsic presentation with accepted semantic analysis', 
   Effect.gen(function* () {
     const observed = new Set<string>()
     for (const [ordinal, source] of acceptedSources.entries()) {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         `intrinsic/accepted-${ordinal}`,
         encoder.encode(source),
       )
@@ -151,7 +151,7 @@ it.effect('keeps every intrinsic identifiable and presentable in rejected calls'
       for (const operation of actor.operations) {
         const arguments_ = operation.parameters.length === 0 ? '0' : ''
         const source = `pub fn main() -> i32 { let rejected = ${actor.spelling}.${operation.spelling}(${arguments_}) return 0 }`
-        const snapshot = yield* Analysis.ofSource(
+        const snapshot = yield* Analysis.ofSourceRealized(
           `intrinsic/rejected-${actor.spelling}-${operation.spelling}`,
           encoder.encode(source),
         )

@@ -110,7 +110,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const bytes = new TextEncoder().encode(source)
-      const native = yield* Analysis.ofSource(
+      const native = yield* Analysis.ofSourceRealized(
         'transcendental/native',
         bytes,
         'aarch64-apple-darwin',
@@ -153,7 +153,11 @@ it.effect(
         assert.strictEqual(process.status, 42, process.stderr)
       }
 
-      const wasm = yield* Analysis.ofSource('transcendental/wasm', bytes, 'wasm32-unknown-unknown')
+      const wasm = yield* Analysis.ofSourceRealized(
+        'transcendental/wasm',
+        bytes,
+        'wasm32-unknown-unknown',
+      )
       assert.deepEqual(Analysis.diagnostics(wasm), [])
       const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
       assert.notInclude(wasmArtifact.wat, '(import')
@@ -167,7 +171,7 @@ it.effect(
 
 it.effect('rejects a mismatched transcendental MIR result before execution', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'transcendental/malformed',
       new TextEncoder().encode('pub fn main() -> i32 { return f64.toI32(f64.cos(1.0)) }'),
       'aarch64-apple-darwin',

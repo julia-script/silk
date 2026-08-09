@@ -40,7 +40,7 @@ afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 it.effect('runs an effect entry once and retains deterministic unhandled-failure data', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'effect-entry/failure',
       ascii(failureSource),
       'aarch64-apple-darwin',
@@ -64,12 +64,12 @@ it.effect('keeps effect-entry success and failure in LLVM/direct-Wasm parity', (
       ['success', successSource, 0],
       ['failure', failureSource, 1],
     ] as const) {
-      const native = yield* Analysis.ofSource(
+      const native = yield* Analysis.ofSourceRealized(
         `effect-entry/${name}`,
         ascii(source),
         'aarch64-apple-darwin',
       )
-      const wasm = yield* Analysis.ofSource(
+      const wasm = yield* Analysis.ofSourceRealized(
         `effect-entry/${name}`,
         ascii(source),
         'wasm32-unknown-unknown',
@@ -99,12 +99,12 @@ it.effect('keeps effect-entry success and failure in LLVM/direct-Wasm parity', (
 
 it.effect('runs the selected failure payload cleanup before exposing its tag', () =>
   Effect.gen(function* () {
-    const logical = yield* Analysis.ofSource(
+    const logical = yield* Analysis.ofSourceRealized(
       'effect-entry/cleanup',
       ascii(cleanupSource),
       'aarch64-apple-darwin',
     )
-    const wasm = yield* Analysis.ofSource(
+    const wasm = yield* Analysis.ofSourceRealized(
       'effect-entry/cleanup',
       ascii(cleanupSource),
       'wasm32-unknown-unknown',

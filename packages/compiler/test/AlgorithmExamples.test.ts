@@ -261,8 +261,12 @@ it.effect('keeps frontier evidence normalized and deterministic on both targets'
     for (const { manifest, bytes } of examples) {
       if (manifest.status !== 'frontier') continue
       for (const target of ['aarch64-apple-darwin', 'wasm32-unknown-unknown'] as const) {
-        const first = yield* Analysis.ofSource(sourceId(manifest.id, target), bytes, target)
-        const second = yield* Analysis.ofSource(sourceId(manifest.id, target), bytes, target)
+        const first = yield* Analysis.ofSourceRealized(sourceId(manifest.id, target), bytes, target)
+        const second = yield* Analysis.ofSourceRealized(
+          sourceId(manifest.id, target),
+          bytes,
+          target,
+        )
         assert.deepEqual(evidence(first), manifest.blockers, `${manifest.id} ${target}`)
         assert.deepEqual(evidence(second), manifest.blockers, `${manifest.id} ${target}`)
         assert.deepEqual(evidence(first), evidence(second), `${manifest.id} changed evidence`)
@@ -277,7 +281,7 @@ it.effect(
     Effect.gen(function* () {
       for (const { manifest, bytes } of examples) {
         if (manifest.status !== 'executable') continue
-        const native = yield* Analysis.ofSource(
+        const native = yield* Analysis.ofSourceRealized(
           sourceId(manifest.id, 'native'),
           bytes,
           'aarch64-apple-darwin',
@@ -318,7 +322,7 @@ it.effect(
         const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
         assert.isAbove(nativeArtifact.bitcode.length, 0, manifest.id)
 
-        const wasm = yield* Analysis.ofSource(
+        const wasm = yield* Analysis.ofSourceRealized(
           sourceId(manifest.id, 'wasm'),
           bytes,
           'wasm32-unknown-unknown',

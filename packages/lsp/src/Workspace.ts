@@ -127,7 +127,7 @@ export const resolver = (
 export const analyze = Effect.fn('Workspace.analyze')(function* (
   document: Document.Document,
   openDocuments: Iterable<Document.Document>,
-): Effect.fn.Return<Analysis.Snapshot, never, FileSystem.FileSystem | Path.Path> {
+): Effect.fn.Return<Analysis.FrontendSnapshot, never, FileSystem.FileSystem | Path.Path> {
   const overlays = new Map<string, SourceResolver.ResolvedSource>()
   for (const open of openDocuments) {
     if (open.workspace === document.workspace && open.uri !== document.uri) {

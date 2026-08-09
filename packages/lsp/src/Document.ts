@@ -67,7 +67,7 @@ const noteSuffix = (diagnostic: Diagnostic.Diagnostic): string =>
 /** Converts the document's own compiler diagnostics into protocol diagnostics. */
 export const diagnostics = (
   self: Document,
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   uriOf: (module: string) => string | undefined,
 ): ReadonlyArray<LspDiagnostic> => {
   // Sibling modules' line maps, built once per module from the snapshot's exact loaded bytes.
@@ -112,7 +112,7 @@ export const diagnostics = (
 /** Returns the source-like semantic presentation under one position. */
 export const hover = (
   self: Document,
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   position: Position,
 ): Hover | undefined => {
   const subject = Analysis.hoverSubjectAt(
@@ -148,7 +148,7 @@ export const hover = (
 /** Converts one semantic target into an exact snapshot-owned definition link. */
 export const definition = (
   self: Document,
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   position: Position,
   uriOf: (module: string) => string | undefined,
 ): LocationLink | undefined => {
@@ -178,7 +178,7 @@ export const definition = (
 /** Converts compiler-owned inferred local types into standard protocol inlay hints. */
 export const inlayHints = (
   self: Document,
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   range: Range,
 ): ReadonlyArray<InlayHint> => {
   const start = LineIndex.offsetOf(self.index, range.start)
@@ -218,7 +218,7 @@ const completionKind = (kind: string): CompletionItemKind => {
 /** Converts compiler-owned semantic candidates into deterministic protocol completion items. */
 export const completion = (
   self: Document,
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   position: Position,
 ): CompletionList => {
   const result = Analysis.completionAt(
@@ -242,7 +242,7 @@ export const completion = (
 /** Returns the document's top-level function and struct declarations as symbols. */
 export const symbols = (
   self: Document,
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
 ): ReadonlyArray<DocumentSymbol> => {
   const headers = Analysis.declarationIndex(snapshot).modules.find(
     (candidate) => candidate.module === self.module,
@@ -289,7 +289,7 @@ export const symbols = (
 /** Formats the whole document, yielding no edits for damaged or already canonical sources. */
 export const format = Effect.fnUntraced(function* (
   self: Document,
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
 ): Effect.fn.Return<ReadonlyArray<TextEdit>, never> {
   const syntax = Analysis.syntaxOf(snapshot, self.module)
   if (syntax === undefined) return []

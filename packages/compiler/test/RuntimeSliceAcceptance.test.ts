@@ -20,8 +20,8 @@ it.effect(
   'keeps exclusive move-only replacement and cleanup in parity across all three engines',
   () =>
     Effect.gen(function* () {
-      const native = yield* Analysis.ofSource(moduleName, bytes, 'aarch64-apple-darwin')
-      const wasm = yield* Analysis.ofSource(moduleName, bytes, 'wasm32-unknown-unknown')
+      const native = yield* Analysis.ofSourceRealized(moduleName, bytes, 'aarch64-apple-darwin')
+      const wasm = yield* Analysis.ofSourceRealized(moduleName, bytes, 'wasm32-unknown-unknown')
       assert.deepEqual(Analysis.diagnostics(native), [])
       assert.deepEqual(Analysis.diagnostics(wasm), [])
 

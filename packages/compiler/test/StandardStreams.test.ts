@@ -23,7 +23,7 @@ const source = `pub effect fn main() -> () ! StreamWriteFailure ? &StandardStrea
 }`
 
 const snapshot = (target = 'aarch64-apple-darwin') =>
-  Analysis.ofSource('standard-streams/main', encoder.encode(source), target)
+  Analysis.ofSourceRealized('standard-streams/main', encoder.encode(source), target)
 
 it.effect('retains the explicit requirement and reports a missing evaluator provider', () =>
   Effect.gen(function* () {

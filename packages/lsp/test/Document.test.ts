@@ -12,7 +12,7 @@ const open = (
   text: string,
 ): Effect.Effect<{
   readonly document: Document.Document
-  readonly snapshot: Analysis.Snapshot
+  readonly snapshot: Analysis.FrontendSnapshot
 }> =>
   Effect.gen(function* () {
     const bytes = encoder.encode(text)

@@ -12,7 +12,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const snapshotOf = (text: string) =>
-  Analysis.ofSource('wasm/program', ascii(text), 'wasm32-unknown-unknown')
+  Analysis.ofSourceRealized('wasm/program', ascii(text), 'wasm32-unknown-unknown')
 
 const emit = (text: string) =>
   Effect.flatMap(snapshotOf(text), (snapshot) =>
@@ -217,7 +217,7 @@ it.effect('rejects a structural MIR cycle before structured emission', () =>
 
 it.effect('rejects native-target MIR before constructing a WebAssembly module', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'wasm/native-plan',
       ascii('pub fn main() -> i32 { return 42 }'),
       'aarch64-apple-darwin',

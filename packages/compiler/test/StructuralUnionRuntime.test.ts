@@ -81,7 +81,11 @@ it('computes canonical total member mappings', () => {
 
 it.effect('lowers injection and widening through shared sum layouts and evaluates them', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSource('unions/main', ascii(source), 'wasm32-unknown-unknown')
+    const self = yield* Analysis.ofSourceRealized(
+      'unions/main',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
     assert.deepEqual(Analysis.diagnostics(self), [])
 
     const hir = Analysis.hirOf(self, 'unions/main')
@@ -141,8 +145,16 @@ it.effect('lowers injection and widening through shared sum layouts and evaluate
 
 it.effect('emits deterministic native union conversion artifacts', () =>
   Effect.gen(function* () {
-    const first = yield* Analysis.ofSource('unions/main', ascii(source), 'aarch64-apple-darwin')
-    const second = yield* Analysis.ofSource('unions/main', ascii(source), 'aarch64-apple-darwin')
+    const first = yield* Analysis.ofSourceRealized(
+      'unions/main',
+      ascii(source),
+      'aarch64-apple-darwin',
+    )
+    const second = yield* Analysis.ofSourceRealized(
+      'unions/main',
+      ascii(source),
+      'aarch64-apple-darwin',
+    )
     const left = yield* Analysis.codegen(first, { mode: 'release' })
     const right = yield* Analysis.codegen(second, { mode: 'release' })
     assert.deepEqual(left.bitcode, right.bitcode)
@@ -163,7 +175,7 @@ pub fn main() -> i32 {
   box.value = B { value: 7 }
   return accept([A {}, B { value: 42 }])
 }`
-    const self = yield* Analysis.ofSource(
+    const self = yield* Analysis.ofSourceRealized(
       'union-aggregate/main',
       ascii(aggregateSource),
       'wasm32-unknown-unknown',
@@ -197,7 +209,7 @@ pub fn main() -> i32 {
 
 it.effect('diagnoses narrowing and non-containing union targets deterministically', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSource(
+    const self = yield* Analysis.ofSourceRealized(
       'union-invalid/main',
       ascii(`struct A {}
 struct B {}

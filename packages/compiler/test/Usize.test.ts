@@ -16,7 +16,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const source = (text: string, target: string) =>
-  Analysis.ofSource('usize/program', ascii(text), target)
+  Analysis.ofSourceRealized('usize/program', ascii(text), target)
 
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-usize-'))
 afterAll(() => {

@@ -116,7 +116,7 @@ it.effect('formats generic declarations, applications, and calls idempotently', 
 
 it.effect('infers and explicitly selects finite concrete instances before MIR', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.make({ root: file }).pipe(
+    const snapshot = yield* Analysis.makeRealized({ root: file }).pipe(
       Effect.provide(SourceResolver.memory(new Map())),
     )
 
@@ -154,7 +154,7 @@ it.effect('infers and explicitly selects finite concrete instances before MIR', 
 
 it.effect('uses complete explicit arguments as value-argument context', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'generics/ExplicitContext',
       new TextEncoder().encode(`struct Left { value: i32 }
 struct Right { value: i32 }
@@ -173,7 +173,7 @@ pub fn main() -> i32 {
 
 it.effect('retains unresolved type-argument causes without fabricating arity failures', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'generics/UnresolvedArgument',
       new TextEncoder().encode(
         'struct Box<T> { value: T }\nfn bad(value: Box<Missing>) -> i32 { return 0 }\npub fn main() -> i32 { return 42 }',
@@ -187,7 +187,7 @@ it.effect('retains unresolved type-argument causes without fabricating arity fai
 
 it.effect('does not fabricate a second identity for duplicate type parameters', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'generics/DuplicateIdentity',
       new TextEncoder().encode(
         'fn bad<T, T>(value: T) -> T { return move value }\npub fn main() -> i32 { return 42 }',
@@ -204,7 +204,7 @@ it.effect('does not fabricate a second identity for duplicate type parameters', 
 
 it.effect('keeps open cleanup symbolic and specializes it before MIR', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'generics/Cleanup',
       new TextEncoder().encode(`struct Payload {}
 fn discard<T>(value: T) -> i32 { return 42 }
@@ -240,7 +240,7 @@ pub fn main() -> i32 {
   return box.value
 }`),
     )
-    const snapshot = yield* Analysis.make({ root: structFile }).pipe(
+    const snapshot = yield* Analysis.makeRealized({ root: structFile }).pipe(
       Effect.provide(SourceResolver.memory(new Map())),
     )
 
@@ -264,7 +264,7 @@ it.effect('resolves inferred and explicit generic calls across module namespaces
       new TextEncoder().encode(`import library.Generic
 pub fn main() -> i32 { return Generic.identity<i32>(Generic.identity(42)) }`),
     )
-    const snapshot = yield* Analysis.make({ root }).pipe(
+    const snapshot = yield* Analysis.makeRealized({ root }).pipe(
       Effect.provide(
         SourceResolver.memory(
           new Map([
@@ -296,7 +296,7 @@ it.effect('cuts off recursive generic calls that change an ancestor specializati
 }
 pub fn main() -> i32 { return expand<i32>(1) }`),
     )
-    const snapshot = yield* Analysis.make({ root: recursive }).pipe(
+    const snapshot = yield* Analysis.makeRealized({ root: recursive }).pipe(
       Effect.provide(SourceResolver.memory(new Map())),
     )
 
@@ -316,7 +316,7 @@ pub fn main() -> i32 { return expand<i32>(1) }`),
 
 it.effect('keeps same-argument generic recursion finite and omits unused declarations', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'generics/SameRecursion',
       new TextEncoder().encode(`fn recurse<T>(value: T) -> i32 {
   if false { return recurse<T>(move value) }
@@ -339,7 +339,7 @@ pub fn main() -> i32 { return recurse<i32>(1) }`),
 
 it.effect('detects parameter-changing recursion across a mutual generic cycle', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'generics/MutualRecursion',
       new TextEncoder().encode(`fn first<T>(value: T) -> i32 {
   return second<[T; 1]>([move value])
@@ -361,7 +361,7 @@ pub fn main() -> i32 { return first<i32>(1) }`),
 
 it.effect('checks repeated instances under every recursive ancestor context', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'generics/ContextualRecursion',
       new TextEncoder().encode(`fn a<T>(value: T) -> i32 { return x<T>(move value) }
 fn x<T>(value: T) -> i32 {
@@ -435,7 +435,7 @@ const invalidCases: ReadonlyArray<readonly [string, string, string]> = [
 for (const [name, text, code] of invalidCases) {
   it.effect(`diagnoses ${name} before target-dependent phases`, () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         `generics/invalid/${name.replaceAll(' ', '-')}`,
         new TextEncoder().encode(text),
       )
@@ -454,7 +454,7 @@ it.effect(
   'substitutes generic nominal pattern fields without rechecking the declaration body',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         'generics/Pattern',
         new TextEncoder().encode(`struct Box<T> { value: T }
 fn take<T>(input: Box<T>) -> T {
@@ -471,7 +471,7 @@ pub fn main() -> i32 { return take(Box<i32> { value: 42 }) }`),
 
 it.effect('substitutes cleanup through applied pattern paths and omitted fields', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'generics/PatternCleanup',
       new TextEncoder().encode(`struct Token { value: i32 }
 struct Pair<A, B> { first: A second: B }
@@ -510,7 +510,7 @@ pub fn main() -> i32 {
 
 it.effect('classifies generic writes after substituting the concrete element type', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'generics/Write',
       new TextEncoder().encode(`fn replace<T>(values: [T; 1], value: T) -> i32 {
   let mut result = move values
@@ -533,7 +533,7 @@ pub fn main() -> i32 { return replace<i32>([1], 2) }`),
 
 it.effect('links an open HIR call through every reached caller instance', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'generics/Facade',
       new TextEncoder().encode(`fn inner<T>(value: T) -> T { return move value }
 fn outer<T>(value: T) -> T { return inner<T>(move value) }
@@ -559,7 +559,7 @@ pub fn main() -> i32 {
 
 it.effect('rejects residual open MIR and keeps specialization symbols injective', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'generics/MirBoundary',
       new TextEncoder().encode(source),
     )
@@ -612,12 +612,12 @@ pub fn main() -> i32 {
   let pair = Box<Pair> { value: identity<Pair>(Pair { left: 40, right: 2 }) }
   return scalar.value + pair.value.left + pair.value.right
 }`
-    const native = yield* Analysis.ofSource(
+    const native = yield* Analysis.ofSourceRealized(
       'generics/Backend',
       new TextEncoder().encode(text),
       'aarch64-apple-darwin',
     )
-    const wasm = yield* Analysis.ofSource(
+    const wasm = yield* Analysis.ofSourceRealized(
       'generics/Backend',
       new TextEncoder().encode(text),
       'wasm32-unknown-unknown',

@@ -107,7 +107,11 @@ const source = pressureSource
 
 const snapshot = (target) =>
   Effect.runPromise(
-    Analysis.ofSource('lexer-pressure/determinism', new TextEncoder().encode(source), target),
+    Analysis.ofSourceRealized(
+      'lexer-pressure/determinism',
+      new TextEncoder().encode(source),
+      target,
+    ),
   )
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const json = (value) =>

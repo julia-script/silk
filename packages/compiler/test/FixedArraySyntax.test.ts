@@ -132,7 +132,7 @@ pub fn keep(values: [Model.Token; 8]) -> [Model.Token; 8] { return values }
 pub fn main() -> i32 { return 0 }`,
       ),
     )
-    const snapshot = yield* Analysis.make({ root }).pipe(
+    const snapshot = yield* Analysis.makeRealized({ root }).pipe(
       Effect.provide(
         SourceResolver.memory(
           new Map([['model/Token', ascii('pub struct Token { pub kind: i32 }')]]),

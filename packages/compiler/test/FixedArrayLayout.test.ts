@@ -8,7 +8,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const snapshot = (source: string) =>
-  Analysis.ofSource('fixed-array-layout/main', ascii(source), 'wasm32-unknown-unknown')
+  Analysis.ofSourceRealized('fixed-array-layout/main', ascii(source), 'wasm32-unknown-unknown')
 
 it.effect('plans repeated layouts and canonical mixed selectors once before MIR', () =>
   Effect.gen(function* () {

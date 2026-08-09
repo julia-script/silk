@@ -179,7 +179,7 @@ const checkTarget = Effect.fnUntraced(function* (
 ): Effect.fn.Return<CheckAttempt, never, FileSystem.FileSystem | Path.Path> {
   const path = yield* Path.Path
   const resolver = FileSourceResolver.make(project.entry.sourceRoot)
-  const analysis = yield* Analysis.make({
+  const analysis = yield* Analysis.makeRealized({
     root: SourceFile.make(project.entry.module, project.entry.bytes),
     target: target.id,
   }).pipe(Effect.provide(FileSourceResolver.layer(resolver)))

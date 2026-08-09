@@ -10,11 +10,12 @@ import { Analysis } from '@silk-effect/compiler'
 import * as Effect from 'effect/Effect'
 
 const program = Effect.gen(function* () {
-  const snapshot = yield* Analysis.ofSource(
+  const frontend = yield* Analysis.ofSource(
     'memory/example',
     new TextEncoder().encode(`pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(42) }`),
   )
+  const snapshot = Analysis.realize(frontend)
   const result = Analysis.rootAnalysis(snapshot)
 
   console.log(result.syntax.root.kind) // SourceFile
@@ -32,18 +33,21 @@ the `SourceResolver` Effect service by canonical, extensionless identity. `compi
 logical identity—not an operating-system path. Browser and editor tooling can provide
 `SourceResolver.memory(sources)`; the compiler package never depends on a host filesystem.
 
-`Analysis.make` is Effectful and resilient. An absent source becomes an ordinary missing-module
+`Analysis.make` is Effectful, frontend-only, and resilient. An absent source becomes an ordinary missing-module
 diagnostic, while an operational resolver failure remains typed data available through
 `Analysis.resolutionFailures`. Successfully loaded modules and unrelated facts remain queryable.
-`Analysis.codegen` and `Driver.compile` are strict boundaries: they refuse any snapshot containing
+Call `Analysis.realize` when evaluation, layout, MIR, or code generation is required. Realization
+derives a new immutable snapshot without changing the frontend input. `Analysis.codegen` and
+`Driver.compile` are strict boundaries: they refuse any snapshot containing
 an error diagnostic or resolver failure before invoking a backend or toolchain.
 
 ## The facade is the supported consumer surface
 
-Tooling consumes compiler phases exclusively through `Analysis`: build a snapshot from a
+Tooling consumes compiler phases exclusively through `Analysis`: build a frontend snapshot from a
 compilation request (or one source), then query immutable facts — sources, syntax, imports and
-cycles, declarations, references, types, contracts, HIR, evaluation, and the compilation's
-diagnostics merged in deterministic driver order. The immutable data-model vocabularies
+cycles, declarations, references, types, contracts, HIR, and the compilation's
+diagnostics merged in deterministic driver order. Runtime consumers explicitly realize that
+frontend snapshot before evaluation, layout, MIR, or code generation. The immutable data-model vocabularies
 (`SyntaxTree`, `SourceFile`, `SourceSpan`, `Token`, `Diagnostic`, `Hir`, and the fact type
 namespaces) are part of the facade's answers and remain importable, including as type-only
 imports. Running phase modules directly (`Lexer`, `Parser`, `ModuleClosure`,
@@ -54,7 +58,7 @@ separate tool.
 
 ## Editor intelligence
 
-`Analysis.Snapshot` owns editor semantics as immutable compiler data. `SemanticOccurrence` indexes
+`Analysis.FrontendSnapshot` owns editor semantics as immutable compiler data. `SemanticOccurrence` indexes
 each meaningful identifier token separately: declarations, values, types, fields, imported
 namespaces, intrinsic actors, and intrinsic operations. An occurrence carries an explicit
 resolution state and an exact source declaration only when one exists. Compiler-provided

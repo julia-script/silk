@@ -8,7 +8,7 @@ import type * as Document from './Document.js'
 /** One coherent document and analysis snapshot committed at a project revision. */
 export interface AnalyzedDocument {
   readonly document: Document.Document
-  readonly snapshot: Analysis.Snapshot
+  readonly snapshot: Analysis.FrontendSnapshot
   readonly moduleUris: ReadonlyMap<string, string>
 }
 

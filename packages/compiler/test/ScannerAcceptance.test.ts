@@ -48,7 +48,7 @@ it.effect(
   'returns an owned token vector through two reallocations on all three engines',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         'scanner-acceptance/main',
         ascii(scannerSource),
         'wasm32-unknown-unknown',
@@ -104,7 +104,7 @@ it.effect(
         const label = `q${quota}`
         const source = quotaScannerSource(quota)
         const expected = quota === 3 ? 42 : 7
-        const snapshot = yield* Analysis.ofSource(
+        const snapshot = yield* Analysis.ofSourceRealized(
           `scanner-acceptance/${label}`,
           ascii(source),
           'wasm32-unknown-unknown',

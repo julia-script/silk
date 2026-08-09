@@ -54,6 +54,10 @@
       "types": "./dist/Completion.d.ts",
       "import": "./dist/Completion.js"
     },
+    "./PhaseReport": {
+      "types": "./dist/PhaseReport.d.ts",
+      "import": "./dist/PhaseReport.js"
+    },
     "./NativeToolchain": {
       "types": "./dist/NativeToolchain.d.ts",
       "import": "./dist/NativeToolchain.js"

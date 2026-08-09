@@ -1,5 +1,9 @@
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
+
+export { AnalysisUnavailable } from './AnalysisUnavailable.js'
+
+import type { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as Backend from './Backend.js'
 import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as Completion from './Completion.js'
@@ -8,14 +12,15 @@ import * as Diagnostic from './Diagnostic.js'
 import * as DocBlock from './DocBlock.js'
 import * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
-import * as Instances from './Instances.js'
+import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
-import * as Lower from './Lower.js'
 import * as Mir from './Mir.js'
-import * as ModuleClosure from './ModuleClosure.js'
+import type * as ModuleClosure from './ModuleClosure.js'
 import * as NameResolution from './NameResolution.js'
-import * as Ownership from './Ownership.js'
+import type * as Ownership from './Ownership.js'
+import * as PhaseReport from './PhaseReport.js'
+import * as Pipeline from './Pipeline.js'
 import * as Presentation from './Presentation.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SourceFile from './SourceFile.js'
@@ -23,7 +28,7 @@ import * as SourceResolver from './SourceResolver.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
-import * as Target from './Target.js'
+import type * as Target from './Target.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 import * as TypeHint from './TypeHint.js'
@@ -44,14 +49,8 @@ export type Targeted<A> =
       readonly error: Target.TargetError | AnalysisUnavailable
     }
 
-/** A valid target phase intentionally withheld because source specialization is invalid. */
-export class AnalysisUnavailable extends Data.TaggedError('AnalysisUnavailable')<{
-  readonly operation: 'Analysis.make'
-  readonly message: string
-}> {}
-
-/** One immutable analysis snapshot of one compilation request. */
-export interface Snapshot {
+/** One immutable frontend analysis snapshot of one compilation request. */
+export interface FrontendSnapshot {
   readonly _tag: 'AnalysisSnapshot'
   readonly closure: ModuleClosure.Closure
   readonly index: DeclarationIndex.Index
@@ -60,12 +59,18 @@ export interface Snapshot {
   readonly semanticOccurrences: SemanticOccurrence.Index
   readonly anonymousExpressions: ReadonlyMap<string, ReadonlyArray<AnonymousExpression>>
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly report: ReadonlyArray<PhaseReport.PhaseReport>
+  readonly requestedTarget?: string
+}
+
+/** One immutable runtime realization derived from a completed frontend snapshot. */
+export interface Snapshot extends FrontendSnapshot {
   readonly instances: Instances.Discovery
   readonly target: Target.Selection
   readonly layoutCatalog: Targeted<Layout.Catalog>
   readonly layout: Targeted<Layout.Plan>
   readonly mir: Targeted<Mir.Module>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 /** One available anonymous expression type cached for position fallback. */
@@ -95,124 +100,54 @@ export class CodegenUnavailable extends Data.TaggedError('CodegenUnavailable')<{
   readonly resolutionFailures: ReadonlyArray<SourceResolver.SourceResolverError>
 }> {}
 
-const hasInvalidGenericBody = (
-  index: DeclarationIndex.Index,
-  diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
-): boolean =>
-  index.modules.some((module) =>
-    module.members.some(
-      (member) =>
-        member.typeParameters.length > 0 &&
-        diagnostics.some(
-          (diagnostic) =>
-            diagnostic.span.sourceId === member.syntax.span.sourceId &&
-            diagnostic.span.start >= member.syntax.span.start &&
-            diagnostic.span.end <= member.syntax.span.end,
-        ),
-    ),
-  )
-
-/** Builds the snapshot of one compilation request. */
+/** Builds the frontend snapshot of one compilation request. */
 export const make = Effect.fn('Analysis.make')(function* (
   request: ModuleClosure.CompilationRequest,
-): Effect.fn.Return<Snapshot, never, SourceResolver.SourceResolver> {
-  const closure = yield* ModuleClosure.load(request)
-  const declarations = NameResolution.analyze(closure)
-  const index = declarations.index
-  const resolution = declarations.resolution
-  const results = new Map(
-    closure.modules.map((module) => {
-      const headers = index.modules.find((candidate) => candidate.module === module.name)
-      const scope = NameResolution.scopeOf(resolution, module.name)
-      if (headers === undefined || scope === undefined)
-        throw new RangeError(`Analysis lost module facts for ${module.name}`)
-      return [
-        module.name,
-        Elaboration.elaborateModule({ syntax: module.syntax, headers, scope, index }),
-      ]
-    }),
+): Effect.fn.Return<FrontendSnapshot, never, SourceResolver.SourceResolver> {
+  const frontend = yield* Pipeline.frontend(request)
+  const report = [...frontend.report]
+  const occurrences = PhaseReport.measure(
+    'semantic-occurrences',
+    frontend.results.size,
+    () => SemanticOccurrence.make(frontend.results, frontend.index, frontend.resolution),
+    (value) =>
+      [...value.modules.values()].reduce((sum, module) => sum + module.occurrences.length, 0),
   )
-  const semanticOccurrences = SemanticOccurrence.make(results, index, resolution)
-  const anonymousExpressions = makeAnonymousExpressionIndex(results)
-  const ownership = new Map(
-    [...results.entries()].map(([name, result]) => [name, Ownership.checkModule(result)]),
+  report.push(occurrences.report)
+  const expressions = PhaseReport.measure(
+    'anonymous-expressions',
+    frontend.results.size,
+    () => makeAnonymousExpressionIndex(frontend.results),
+    (value) => [...value.values()].reduce((sum, entries) => sum + entries.length, 0),
   )
-  const frontendDiagnostics = Diagnostic.merge(
-    ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
-    ...closure.modules.map((module) => module.syntax.parserDiagnostics),
-    closure.diagnostics,
-    resolution.diagnostics,
-    ...[...results.values()].map((result) => result.diagnostics),
-    ...[...ownership.values()].map((facts) => facts.diagnostics),
-  )
-  const frontendSpecializationInvalid =
-    Diagnostic.hasGenericSpecializationErrors(frontendDiagnostics) ||
-    hasInvalidGenericBody(index, frontendDiagnostics)
-  const instances = frontendSpecializationInvalid
-    ? Instances.invalid(request.root.id)
-    : Instances.discover(request.root.id, results, ownership, index)
-  const baseDiagnostics = Diagnostic.merge(
-    frontendDiagnostics,
-    Instances.violationDiagnostics(instances),
-    Instances.copyDropViolations(instances, index),
-  )
-  const target = Target.select(request.target)
-  const specializationError =
-    frontendSpecializationInvalid || Diagnostic.hasGenericSpecializationErrors(baseDiagnostics)
-      ? new AnalysisUnavailable({
-          operation: 'Analysis.make',
-          message: 'Target-dependent phases are unavailable for invalid source specialization',
-        })
-      : undefined
-  const layoutCatalog: Targeted<Layout.Catalog> =
-    specializationError !== undefined
-      ? Object.freeze({ _tag: 'Unavailable', error: specializationError })
-      : target._tag === 'Resolved'
-        ? Object.freeze({
-            _tag: 'Available',
-            value: Layout.catalog(target.target, index, instances),
-          })
-        : Object.freeze({ _tag: 'Unavailable', error: target.error })
-  const layout: Targeted<Layout.Plan> =
-    layoutCatalog._tag === 'Available'
-      ? Object.freeze({ _tag: 'Available', value: Layout.plan(layoutCatalog.value, instances) })
-      : layoutCatalog
-  const diagnostics = Diagnostic.merge(
-    baseDiagnostics,
-    ...(layout._tag === 'Available' ? [layout.value.diagnostics] : []),
-  )
-  const targetLiteralError =
-    layout._tag === 'Available' && Diagnostic.hasErrors(layout.value.diagnostics)
-      ? new AnalysisUnavailable({
-          operation: 'Analysis.make',
-          message: 'MIR is unavailable because a usize literal exceeds the selected target',
-        })
-      : undefined
-  const mir: Targeted<Mir.Module> =
-    targetLiteralError !== undefined
-      ? Object.freeze({ _tag: 'Unavailable', error: targetLiteralError })
-      : layout._tag === 'Available'
-        ? Object.freeze({
-            _tag: 'Available',
-            value: Lower.lowerProgram(instances, ownership, layout.value, index),
-          })
-        : layout
+  report.push(expressions.report)
   return Object.freeze({
     _tag: 'AnalysisSnapshot',
-    closure,
-    index,
-    resolution,
-    results,
-    semanticOccurrences,
-    anonymousExpressions,
-    ownership,
-    instances,
-    target,
-    layoutCatalog,
-    layout,
-    mir,
-    diagnostics,
+    ...frontend,
+    semanticOccurrences: occurrences.value,
+    anonymousExpressions: expressions.value,
+    report: Object.freeze(report),
   })
+})
+
+/** Explicitly derives one immutable runtime snapshot from completed frontend facts. */
+export const realize = (
+  self: FrontendSnapshot,
+  target: string | undefined = self.requestedTarget,
+): Snapshot => {
+  const realization = Pipeline.realize(self, target)
+  return Object.freeze({
+    ...self,
+    ...realization,
+    _tag: 'AnalysisSnapshot',
+  })
+}
+
+/** Builds and explicitly realizes one compilation request in a single effect. */
+export const makeRealized = Effect.fn('Analysis.makeRealized')(function* (
+  request: ModuleClosure.CompilationRequest,
+): Effect.fn.Return<Snapshot, never, SourceResolver.SourceResolver> {
+  return realize(yield* make(request))
 })
 
 /** Builds the snapshot of one single-module source. */
@@ -220,7 +155,7 @@ export const ofSource = (
   sourceId: string,
   bytes: Uint8Array,
   target?: string,
-): Effect.Effect<Snapshot> =>
+): Effect.Effect<FrontendSnapshot> =>
   Effect.provide(
     target === undefined
       ? make({ root: SourceFile.make(sourceId, bytes) })
@@ -228,19 +163,28 @@ export const ofSource = (
     SourceResolver.empty,
   )
 
+/** Builds and explicitly realizes one single-module source. */
+export const ofSourceRealized = (
+  sourceId: string,
+  bytes: Uint8Array,
+  target?: string,
+): Effect.Effect<Snapshot> => Effect.map(ofSource(sourceId, bytes, target), realize)
+
 /** Returns every loaded module of the snapshot in canonical identity order. */
-export const modules = (self: Snapshot): ReadonlyArray<ModuleClosure.Module> => self.closure.modules
+export const modules = (self: FrontendSnapshot): ReadonlyArray<ModuleClosure.Module> =>
+  self.closure.modules
 
 /** Returns the snapshot's import cycle facts in canonical order. */
-export const cycles = (self: Snapshot): ReadonlyArray<ReadonlyArray<string>> => self.closure.cycles
+export const cycles = (self: FrontendSnapshot): ReadonlyArray<ReadonlyArray<string>> =>
+  self.closure.cycles
 
 /** Returns exact immutable source snapshots for every successfully loaded module. */
-export const sources = (self: Snapshot): ReadonlyMap<string, SourceFile.SourceFile> =>
+export const sources = (self: FrontendSnapshot): ReadonlyMap<string, SourceFile.SourceFile> =>
   self.closure.sources
 
 /** Returns the smallest exact-token semantic occurrence containing one byte offset. */
 export const semanticOccurrenceAt = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   byteOffset: number,
 ): SemanticOccurrence.SemanticOccurrence | undefined =>
@@ -248,7 +192,7 @@ export const semanticOccurrenceAt = (
 
 /** Returns exact-token semantic occurrences overlapping one source range. */
 export const semanticOccurrencesInRange = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   range: SourceSpan.SourceSpan,
 ): ReadonlyArray<SemanticOccurrence.SemanticOccurrence> =>
@@ -256,19 +200,19 @@ export const semanticOccurrencesInRange = (
 
 /** Returns operational source-resolution failures in canonical module order. */
 export const resolutionFailures = (
-  self: Snapshot,
+  self: FrontendSnapshot,
 ): ReadonlyArray<SourceResolver.SourceResolverError> => self.closure.resolutionFailures
 
 /** Returns the closure's declaration index. */
-export const declarationIndex = (self: Snapshot): DeclarationIndex.Index => self.index
+export const declarationIndex = (self: FrontendSnapshot): DeclarationIndex.Index => self.index
 
-export const nameResolution = (self: Snapshot): NameResolution.Resolution => self.resolution
+export const nameResolution = (self: FrontendSnapshot): NameResolution.Resolution => self.resolution
 export const moduleScope = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): NameResolution.ModuleScope | undefined => NameResolution.scopeOf(self.resolution, module)
 export const lookupName = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   spelling: string,
 ): NameResolution.Lookup => {
@@ -278,7 +222,7 @@ export const lookupName = (
     : NameResolution.lookup(scope, self.index, spelling)
 }
 export const lookupQualifiedName = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   namespace: string,
   member: string,
@@ -291,12 +235,14 @@ export const lookupQualifiedName = (
 }
 
 /** Returns one module's syntax artifact, or `undefined` for an unknown identity. */
-export const syntaxOf = (self: Snapshot, module: string): SyntaxFile.SyntaxFile | undefined =>
-  self.results.get(module)?.syntax
+export const syntaxOf = (
+  self: FrontendSnapshot,
+  module: string,
+): SyntaxFile.SyntaxFile | undefined => self.results.get(module)?.syntax
 
 /** Returns one module's raw leading `//!` documentation without interpreting Markdown. */
 export const moduleDocumentation = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): DocBlock.DocBlock | undefined => {
   const syntax = syntaxOf(self, module)
@@ -305,7 +251,7 @@ export const moduleDocumentation = (
 
 /** Returns raw documentation for a source-owned declaration-like syntax node. */
 export const documentationOfSyntax = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   node: SyntaxTree.Node,
 ): DocBlock.DocBlock | undefined => {
@@ -314,11 +260,13 @@ export const documentationOfSyntax = (
 }
 
 /** Returns one module's elaborated analysis, or `undefined` for an unknown identity. */
-export const moduleAnalysis = (self: Snapshot, module: string): Elaboration.Result | undefined =>
-  self.results.get(module)
+export const moduleAnalysis = (
+  self: FrontendSnapshot,
+  module: string,
+): Elaboration.Result | undefined => self.results.get(module)
 
 /** Returns the root module's elaborated analysis. The root is always loaded. */
-export const rootAnalysis = (self: Snapshot): Elaboration.Result => {
+export const rootAnalysis = (self: FrontendSnapshot): Elaboration.Result => {
   const result = self.results.get(self.closure.rootModule)
   if (result === undefined) {
     throw new RangeError(`Snapshot lost its root module ${self.closure.rootModule}`)
@@ -327,7 +275,7 @@ export const rootAnalysis = (self: Snapshot): Elaboration.Result => {
 }
 
 const declarationForIdentity = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   identity: Extract<SemanticOccurrence.Identity, { readonly _tag: 'DeclarationIdentity' }>,
 ): DeclarationIndex.MemberFact | undefined => {
   if (identity.id._tag === 'CanonicalDeclarationId')
@@ -339,7 +287,7 @@ const declarationForIdentity = (
 }
 
 const syntaxForIdentity = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   identity: SemanticOccurrence.Identity,
 ): SyntaxTree.Node | undefined => {
   if (identity._tag === 'DeclarationIdentity') return declarationForIdentity(self, identity)?.syntax
@@ -383,7 +331,7 @@ const syntaxForIdentity = (
 
 /** Returns raw documentation for one source-backed semantic identity. */
 export const documentationOfIdentity = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   identity: SemanticOccurrence.Identity,
 ): DocBlock.DocBlock | undefined => {
   const node = syntaxForIdentity(self, identity)
@@ -392,7 +340,7 @@ export const documentationOfIdentity = (
 
 /** Resolves one source position and returns the selected declaration's raw documentation. */
 export const documentationAt = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   byteOffset: number,
 ): DocBlock.DocBlock | undefined => {
@@ -403,7 +351,7 @@ export const documentationAt = (
 }
 
 const presentationOfIdentity = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   identity: SemanticOccurrence.Identity,
 ): Presentation.Presentation | undefined => {
@@ -494,7 +442,7 @@ const presentationOfIdentity = (
 
 /** Lazily presents one available occurrence through declaration and scope facts. */
 export const occurrencePresentation = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   occurrence: SemanticOccurrence.SemanticOccurrence,
 ): Presentation.Presentation | undefined =>
@@ -504,7 +452,7 @@ export const occurrencePresentation = (
 
 /** Returns the smallest cached available anonymous expression containing one byte offset. */
 export const anonymousExpressionAt = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   offset: number,
 ): AnonymousExpression | undefined =>
@@ -519,7 +467,7 @@ export const anonymousExpressionAt = (
 
 /** Selects an occurrence presentation first, with anonymous expression type as a strict fallback. */
 export const hoverSubjectAt = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   offset: number,
 ): HoverSubject | undefined => {
@@ -545,7 +493,7 @@ export const hoverSubjectAt = (
 
 /** Returns source-ordered inferred local type hints clipped to one byte range. */
 export const typeHints = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   start: number,
   end: number,
@@ -560,7 +508,7 @@ export const typeHints = (
 
 /** Returns deterministic recovery-aware completion for one module byte offset. */
 export const completionAt = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   offset: number,
 ): Completion.Result | undefined => {
@@ -690,7 +638,7 @@ const nestedStatementFacts = (
 
 /** Returns every semantic statement fact in deterministic source nesting order. */
 export const statementsOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Elaboration.StatementFact> =>
   Object.freeze(
@@ -701,14 +649,14 @@ export const statementsOf = (
 
 /** Returns every binding with its canonical identity and immutable/mutable classification. */
 export const bindingsOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Elaboration.BindingDeclarationFact> =>
   Object.freeze(self.results.get(module)?.functions.flatMap((fn) => fn.bindings) ?? [])
 
 /** Returns every complete or unavailable assignment fact in source order. */
 export const writesOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Extract<Elaboration.StatementFact, { readonly _tag: 'WriteStatement' }>> =>
   Object.freeze(
@@ -722,7 +670,7 @@ export const writesOf = (
 
 /** Returns canonical loop identities, lexical parents, conditions, and ordered bodies. */
 export const loopsOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Extract<Elaboration.StatementFact, { readonly _tag: 'WhileStatement' }>> =>
   Object.freeze(
@@ -736,7 +684,7 @@ export const loopsOf = (
 
 /** Returns every lexical loop transfer, including explicitly unresolved invalid transfers. */
 export const transfersOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<
   Extract<Elaboration.StatementFact, { readonly _tag: 'BreakStatement' | 'ContinueStatement' }>
@@ -754,7 +702,7 @@ export const transfersOf = (
 
 /** Returns every semantic expression fact in deterministic source nesting order. */
 export const expressionsOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Elaboration.ExpressionFact> =>
   Object.freeze(
@@ -795,7 +743,7 @@ const makeAnonymousExpressionIndex = (
 
 /** Returns every retained semantic match with source patterns and canonical coverage facts. */
 export const matchesOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Extract<Elaboration.ExpressionFact, { readonly _tag: 'Match' }>> =>
   Object.freeze(
@@ -807,7 +755,7 @@ export const matchesOf = (
 
 /** Returns every retained struct literal fact without reconstructing field mappings. */
 export const structLiteralsOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Elaboration.StructLiteralExpressionFact> =>
   Object.freeze(
@@ -819,7 +767,7 @@ export const structLiteralsOf = (
 
 /** Returns every canonical or explicitly unavailable field-projection step. */
 export const fieldProjectionsOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Elaboration.FieldProjectionExpressionFact> =>
   Object.freeze(
@@ -831,7 +779,7 @@ export const fieldProjectionsOf = (
 
 /** Returns every retained array literal with its ordered elements and completeness state. */
 export const arrayLiteralsOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Elaboration.ArrayLiteralExpressionFact> =>
   Object.freeze(
@@ -843,7 +791,7 @@ export const arrayLiteralsOf = (
 
 /** Returns every retained indexed-place step with its canonical bounds mode. */
 export const indexProjectionsOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Elaboration.IndexProjectionExpressionFact> =>
   Object.freeze(
@@ -855,7 +803,7 @@ export const indexProjectionsOf = (
 
 /** Returns canonical fixed-array types used by one module's contracts and expressions. */
 export const fixedArrayTypesOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Type.FixedArray> => {
   const found = new Map<string, Type.FixedArray>()
@@ -884,31 +832,36 @@ export const fixedArrayTypesOf = (
 }
 
 /** Returns one module's HIR, or `undefined` for an unknown identity. */
-export const hirOf = (self: Snapshot, module: string): Hir.Module | undefined =>
+export const hirOf = (self: FrontendSnapshot, module: string): Hir.Module | undefined =>
   self.results.get(module)?.hir
 
 /** Returns one module's ownership facts and cleanup plans, or `undefined` for an unknown identity. */
 export const ownershipOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): Ownership.ModuleOwnership | undefined => self.ownership.get(module)
 
 /** Returns deterministic loop-header ownership fixed points for one module. */
 export const ownershipFixedPointsOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Ownership.LoopFixedPoint> =>
   Object.freeze(self.ownership.get(module)?.functions.flatMap((fn) => fn.fixedPoints) ?? [])
 
 /** Returns every lexical cleanup exit, including loop fallthrough and transfers. */
-export const cleanupExitsOf = (self: Snapshot, module: string): ReadonlyArray<Ownership.ExitPlan> =>
+export const cleanupExitsOf = (
+  self: FrontendSnapshot,
+  module: string,
+): ReadonlyArray<Ownership.ExitPlan> =>
   Object.freeze(self.ownership.get(module)?.functions.flatMap((fn) => fn.exits) ?? [])
 
 /** Returns the snapshot's instance discovery: entry state and ordered instances. */
 export const instancesOf = (self: Snapshot): Instances.Discovery => self.instances
 
 /** Returns declarations that own canonical type parameters in module/source order. */
-export const genericDeclarationsOf = (self: Snapshot): ReadonlyArray<DeclarationIndex.MemberFact> =>
+export const genericDeclarationsOf = (
+  self: FrontendSnapshot,
+): ReadonlyArray<DeclarationIndex.MemberFact> =>
   Object.freeze(
     self.index.modules.flatMap((module) =>
       module.members.filter((member) => member.typeParameters.length > 0),
@@ -917,7 +870,7 @@ export const genericDeclarationsOf = (self: Snapshot): ReadonlyArray<Declaration
 
 /** Returns every typed generic call in deterministic HIR preorder. */
 export const genericCallsOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
 ): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'Call' }>> =>
   Object.freeze(
     [...self.results.values()].flatMap((result) =>
@@ -1027,7 +980,7 @@ export const unionCallingShapesOf = (self: Snapshot): ReadonlyArray<Layout.Calli
 
 /** Returns every explicit HIR union conversion in source semantic order. */
 export const hirUnionConversionsOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'UnionConvert' }>> =>
   Object.freeze(
@@ -1041,7 +994,7 @@ export const hirUnionConversionsOf = (
 
 /** Returns every typed structured HIR match in deterministic expression preorder. */
 export const hirMatchesOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'Match' }>> =>
   Object.freeze(
@@ -1055,7 +1008,7 @@ export const hirMatchesOf = (
 
 /** Returns every match-local ownership and cleanup plan in function/source order. */
 export const ownershipMatchesOf = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Ownership.MatchOwnership> =>
   Object.freeze(self.ownership.get(module)?.functions.flatMap((fn) => fn.matches) ?? [])
@@ -1152,7 +1105,7 @@ export const memberByName = (
 
 /** Looks up one nominal struct declaration. */
 export const structByName = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   spelling: string,
 ): DeclarationIndex.StructLookup => DeclarationIndex.struct(self.index, module, spelling)
@@ -1176,8 +1129,12 @@ export const parameterLookup = (
 ): DeclarationIndex.ParameterLookup => Elaboration.parameterByName(declaration, spelling)
 
 /** The compilation's complete diagnostic sequence in deterministic driver order. */
-export const diagnostics = (self: Snapshot): ReadonlyArray<Diagnostic.Diagnostic> =>
+export const diagnostics = (self: FrontendSnapshot): ReadonlyArray<Diagnostic.Diagnostic> =>
   self.diagnostics
+
+/** Returns immutable operational observations for exactly the phases that produced this snapshot. */
+export const phases = (self: FrontendSnapshot): ReadonlyArray<PhaseReport.PhaseReport> =>
+  self.report
 
 /** Emits the snapshot's lowered program through the nominal backend service. */
 /**

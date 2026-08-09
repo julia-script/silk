@@ -29,7 +29,7 @@ const imports = new Map([...modules].filter(([name]) => name !== rootModule))
 const resolver = SourceResolver.memory(imports)
 
 const snapshot = (target: string) =>
-  Analysis.make({ root: SourceFile.make(rootModule, rootBytes), target }).pipe(
+  Analysis.makeRealized({ root: SourceFile.make(rootModule, rootBytes), target }).pipe(
     Effect.provide(resolver),
   )
 

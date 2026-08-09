@@ -273,6 +273,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Operator',
       './Ownership',
       './Parser',
+      './PhaseReport',
       './Presentation',
       './Scalar',
       './SemanticOccurrence',
@@ -367,7 +368,7 @@ const source = api.SourceFile.make(
     'pub fn identity(value: i32) -> i32 { return value }\\npub fn main() -> i32 { return identity(42) }',
   ),
 );
-const snapshotOfSource = (id, bytes) => Effect.runSync(api.Analysis.ofSource(id, bytes));
+const snapshotOfSource = (id, bytes) => Effect.runSync(api.Analysis.ofSourceRealized(id, bytes));
 const parse = api.Parser.parse(api.Lexer.lex(source));
 const concreteFunctions = parse.root.children.filter(
   (element) => api.SyntaxTree.isNode(element) && element.kind === 'FunctionDeclaration',
@@ -444,10 +445,10 @@ const nestedEvaluation = api.Analysis.evaluate(nestedSnapshot);
 const arrayText = 'struct Pair { left: i32 right: i32 }\\nfn choose(values: [Pair; 2], index: usize) -> i32 { return values[index].left }\\npub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }';
 const arrayBytes = new TextEncoder().encode(arrayText);
 const nativeArraySnapshot = Effect.runSync(
-  api.Analysis.ofSource('memory/packed-array', arrayBytes, 'aarch64-apple-darwin'),
+  api.Analysis.ofSourceRealized('memory/packed-array', arrayBytes, 'aarch64-apple-darwin'),
 );
 const wasmArraySnapshot = Effect.runSync(
-  api.Analysis.ofSource('memory/packed-array', arrayBytes, 'wasm32-unknown-unknown'),
+  api.Analysis.ofSourceRealized('memory/packed-array', arrayBytes, 'wasm32-unknown-unknown'),
 );
 const nativeArrayArtifact = Effect.runSync(
   api.Analysis.codegen(nativeArraySnapshot, { mode: 'release' }),
@@ -462,10 +463,10 @@ const wasmArrayInstance = new WebAssembly.Instance(
 const unionText = 'struct A {}\\nstruct B { value: i32 }\\nstruct C { left: i32 right: i32 }\\nfn accept(value: A | B | C) -> i32 { return 42 }\\nfn widen(value: A | B) -> i32 { return accept(move value) }\\npub fn main() -> i32 { return widen(A {}) }';
 const unionBytes = new TextEncoder().encode(unionText);
 const nativeUnionSnapshot = Effect.runSync(
-  api.Analysis.ofSource('memory/packed-union', unionBytes, 'aarch64-apple-darwin'),
+  api.Analysis.ofSourceRealized('memory/packed-union', unionBytes, 'aarch64-apple-darwin'),
 );
 const wasmUnionSnapshot = Effect.runSync(
-  api.Analysis.ofSource('memory/packed-union', unionBytes, 'wasm32-unknown-unknown'),
+  api.Analysis.ofSourceRealized('memory/packed-union', unionBytes, 'wasm32-unknown-unknown'),
 );
 const nativeUnionArtifact = Effect.runSync(
   api.Analysis.codegen(nativeUnionSnapshot, { mode: 'release' }),
@@ -658,6 +659,7 @@ console.log(
       'Operator',
       'Ownership',
       'Parser',
+      'PhaseReport',
       'Presentation',
       'Scalar',
       'SemanticOccurrence',

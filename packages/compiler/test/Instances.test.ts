@@ -9,7 +9,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const snapshot = (text: string): Effect.Effect<Analysis.Snapshot> =>
-  Analysis.ofSource('golden/program', ascii(text))
+  Analysis.ofSourceRealized('golden/program', ascii(text))
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')

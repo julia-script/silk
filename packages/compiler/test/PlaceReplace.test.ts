@@ -58,7 +58,7 @@ it.effect('swaps places atomically on all three engines', () =>
       ['scalar', scalarSwap, 42],
       ['union', unionSwap, 42],
     ] as const) {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         `place-replace/${name}`,
         ascii(source),
         'wasm32-unknown-unknown',
@@ -89,7 +89,7 @@ it.effect('swaps places atomically on all three engines', () =>
 
 it.effect('rejects invalid replace places with assignment diagnostics', () =>
   Effect.gen(function* () {
-    const immutable = yield* Analysis.ofSource(
+    const immutable = yield* Analysis.ofSourceRealized(
       'place-replace/immutable',
       ascii(`pub fn main() -> i32 {
   let value = 1
@@ -102,7 +102,7 @@ it.effect('rejects invalid replace places with assignment diagnostics', () =>
       'SEM0035',
     )
 
-    const sharedRoot = yield* Analysis.ofSource(
+    const sharedRoot = yield* Analysis.ofSourceRealized(
       'place-replace/shared',
       ascii(`struct Counter {
   value: i32
@@ -118,7 +118,7 @@ pub fn main() -> i32 { return 0 }`),
       'SEM0036',
     )
 
-    const missingRoot = yield* Analysis.ofSource(
+    const missingRoot = yield* Analysis.ofSourceRealized(
       'place-replace/missing',
       ascii(`pub fn main() -> i32 {
   let old = Place.replace(missing, 2)
@@ -130,7 +130,7 @@ pub fn main() -> i32 { return 0 }`),
       ['SEM0006'],
     )
 
-    const arity = yield* Analysis.ofSource(
+    const arity = yield* Analysis.ofSourceRealized(
       'place-replace/arity',
       ascii(`pub fn main() -> i32 {
   let mut value = 1

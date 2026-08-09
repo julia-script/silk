@@ -10,7 +10,7 @@ pub fn main() -> i32 {
 }`
 const bytes = new TextEncoder().encode(source)
 const snapshot = await Effect.runPromise(
-  Analysis.ofSource('fixture/stdlib-determinism', bytes, 'wasm32-unknown-unknown'),
+  Analysis.ofSourceRealized('fixture/stdlib-determinism', bytes, 'wasm32-unknown-unknown'),
 )
 
 process.stdout.write(

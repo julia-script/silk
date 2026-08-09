@@ -39,7 +39,7 @@ pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
 
 it.effect('copies initialized Copy slots without consuming them on all three engines', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'slot-copy/read',
       ascii(copyRead),
       'wasm32-unknown-unknown',
@@ -98,7 +98,7 @@ pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
 
 it.effect('rejects copying a non-Copy element at MIR verification', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource('slot-copy/non-copy', ascii(nonCopy))
+    const snapshot = yield* Analysis.ofSourceRealized('slot-copy/non-copy', ascii(nonCopy))
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Blocked')
     if (evaluated._tag !== 'Blocked') return

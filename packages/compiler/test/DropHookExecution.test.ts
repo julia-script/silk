@@ -137,7 +137,7 @@ it.effect('runs Drop hooks before field cleanup exactly once on every structured
       ['failure-propagation', failurePropagation, 7, 1, 1],
       ['recursive-return', recursiveReturn, 42, 3, 3],
     ] as const) {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         `drop-hook/${name}`,
         ascii(source),
         'wasm32-unknown-unknown',
@@ -220,7 +220,7 @@ pub fn main() -> i32 { return keep<i32>(41) + 1 }`
 
 it.effect('rejects a parametric Drop instantiated at a Copy provider', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'drop-hook/copy-instantiation',
       ascii(copyInstantiation),
       'wasm32-unknown-unknown',
@@ -234,7 +234,7 @@ it.effect('rejects a parametric Drop instantiated at a Copy provider', () =>
 
 it.effect('monomorphizes one parametric Drop conformance per reachable instantiation', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'drop-hook/parametric',
       ascii(parametric),
       'wasm32-unknown-unknown',

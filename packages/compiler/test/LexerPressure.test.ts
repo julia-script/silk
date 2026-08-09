@@ -304,7 +304,7 @@ it.effect('matches the canonical lexer over a complete table-driven corpus', () 
     for (const entry of corpus) {
       const generated = sourceFor(entry.input, `lexer-pressure/oracle/${entry.id}`)
       for (const token of generated.expected.tokens) covered.add(token.kind)
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         `lexer-pressure/${entry.id}`,
         ascii(generated.source),
         'wasm32-unknown-unknown',
@@ -328,7 +328,7 @@ it.effect('matches the canonical lexer over a complete table-driven corpus', () 
 it.effect('publishes only general MIR operations for the pressure program', () =>
   Effect.gen(function* () {
     const generated = sourceFor(corpus[1].input, 'lexer-pressure/general-mir')
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'lexer-pressure/general-mir',
       ascii(generated.source),
       'wasm32-unknown-unknown',
@@ -363,7 +363,7 @@ for (const representative of [corpus[1], corpus[5]]) {
           representative.input,
           `lexer-pressure/representative/${representative.id}`,
         )
-        const snapshot = yield* Analysis.ofSource(
+        const snapshot = yield* Analysis.ofSourceRealized(
           `lexer-pressure/representative/${representative.id}`,
           ascii(generated.source),
           'wasm32-unknown-unknown',
@@ -413,7 +413,7 @@ it.effect(
     Effect.gen(function* () {
       const representative = corpus[5]
       const baseline = sourceFor(representative.input, 'lexer-pressure/quota/baseline')
-      const baselineSnapshot = yield* Analysis.ofSource(
+      const baselineSnapshot = yield* Analysis.ofSourceRealized(
         'lexer-pressure/quota/baseline',
         ascii(baseline.source),
         'wasm32-unknown-unknown',
@@ -429,7 +429,11 @@ it.effect(
       for (let quota = 0; quota <= allocationCount; quota += 1) {
         const id = `lexer-pressure/quota/q${quota}`
         const source = quotaSourceFor(representative.input, id, quota)
-        const snapshot = yield* Analysis.ofSource(id, ascii(source), 'wasm32-unknown-unknown')
+        const snapshot = yield* Analysis.ofSourceRealized(
+          id,
+          ascii(source),
+          'wasm32-unknown-unknown',
+        )
         assert.deepEqual(Analysis.diagnostics(snapshot), [], id)
         const expectedTag = quota === allocationCount ? 'Completed' : 'UnhandledFailure'
         const evaluated = Analysis.evaluate(snapshot)

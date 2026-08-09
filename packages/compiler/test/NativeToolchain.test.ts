@@ -27,7 +27,7 @@ const artifactFor = Effect.fnUntraced(function* (
   target: Target.Target,
   profile: ToolchainPlan.OptimizationProfile,
 ) {
-  const snapshot = yield* Analysis.ofSource('memory/native', ascii(nestedSource), target.id)
+  const snapshot = yield* Analysis.ofSourceRealized('memory/native', ascii(nestedSource), target.id)
   return yield* Analysis.codegen(snapshot, { mode: ToolchainPlan.codegenModeFor(profile) })
 })
 

@@ -8,7 +8,7 @@ const source = `fn recurse(value: i32) -> i32 {
 }
 pub fn main() -> i32 { return recurse(4) }`
 const bytes = new TextEncoder().encode(source)
-const snapshot = (name, target) => Effect.runPromise(Analysis.ofSource(name, bytes, target))
+const snapshot = (name, target) => Effect.runPromise(Analysis.ofSourceRealized(name, bytes, target))
 const native = await snapshot('fixture/runtime-recursion-native', 'aarch64-apple-darwin')
 const wasm = await snapshot('fixture/runtime-recursion-wasm', 'wasm32-unknown-unknown')
 const evaluation = Analysis.evaluate(native)

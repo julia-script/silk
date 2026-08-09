@@ -16,7 +16,8 @@ pub fn main() -> i32 {
   return 0
 }`
 const bytes = new TextEncoder().encode(source)
-const snapshot = (target) => Effect.runPromise(Analysis.ofSource('fixture/Generic', bytes, target))
+const snapshot = (target) =>
+  Effect.runPromise(Analysis.ofSourceRealized('fixture/Generic', bytes, target))
 
 const native = await snapshot('aarch64-apple-darwin')
 const wasm = await snapshot('wasm32-unknown-unknown')

@@ -79,12 +79,12 @@ afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 it.effect('provides an existing borrowed capability across evaluator and Wasm', () =>
   Effect.gen(function* () {
-    const logical = yield* Analysis.ofSource(
+    const logical = yield* Analysis.ofSourceRealized(
       'effect-runtime/provider-logical',
       ascii(providerSource),
       'aarch64-apple-darwin',
     )
-    const wasm = yield* Analysis.ofSource(
+    const wasm = yield* Analysis.ofSourceRealized(
       'effect-runtime/provider-wasm',
       ascii(providerSource),
       'wasm32-unknown-unknown',
@@ -102,12 +102,12 @@ it.effect('provides an existing borrowed capability across evaluator and Wasm', 
 
 it.effect('constructs allocation-free OutOfMemory and recovers across evaluator and Wasm', () =>
   Effect.gen(function* () {
-    const logical = yield* Analysis.ofSource(
+    const logical = yield* Analysis.ofSourceRealized(
       'effect-runtime/oom-logical',
       ascii(outOfMemorySource),
       'aarch64-apple-darwin',
     )
-    const wasm = yield* Analysis.ofSource(
+    const wasm = yield* Analysis.ofSourceRealized(
       'effect-runtime/oom-wasm',
       ascii(outOfMemorySource),
       'wasm32-unknown-unknown',
@@ -129,12 +129,12 @@ it.effect('constructs allocation-free OutOfMemory and recovers across evaluator 
 
 it.effect('executes the same handled failure through the evaluator and Wasm', () =>
   Effect.gen(function* () {
-    const logicalSnapshot = yield* Analysis.ofSource(
+    const logicalSnapshot = yield* Analysis.ofSourceRealized(
       'effect-runtime/main',
       ascii(source),
       'aarch64-apple-darwin',
     )
-    const wasmSnapshot = yield* Analysis.ofSource(
+    const wasmSnapshot = yield* Analysis.ofSourceRealized(
       'effect-runtime/main',
       ascii(source),
       'wasm32-unknown-unknown',
@@ -157,12 +157,12 @@ it.effect('executes the same handled failure through the evaluator and Wasm', ()
 
 it.effect('keeps callable Effect mapping in evaluator, LLVM, and Wasm parity', () =>
   Effect.gen(function* () {
-    const native = yield* Analysis.ofSource(
+    const native = yield* Analysis.ofSourceRealized(
       'effect-runtime/callable-map',
       ascii(callableMapSource),
       'aarch64-apple-darwin',
     )
-    const wasm = yield* Analysis.ofSource(
+    const wasm = yield* Analysis.ofSourceRealized(
       'effect-runtime/callable-map',
       ascii(callableMapSource),
       'wasm32-unknown-unknown',
@@ -223,7 +223,7 @@ it.effect('executes the handled failure through the native toolchain', () =>
 
 it.effect('keeps the success path out of the exact handler on Wasm', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'effect-runtime/success',
       ascii(successSource),
       'wasm32-unknown-unknown',
@@ -249,7 +249,7 @@ it.effect('keeps the success path out of the exact handler on Wasm', () =>
 
 it.effect('rejects a forged catch tag before backend realization', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'effect-runtime/malformed',
       ascii(source),
       'aarch64-apple-darwin',
@@ -294,12 +294,12 @@ it.effect('rejects a forged catch tag before backend realization', () =>
 
 it.effect('keeps arithmetic traps outside the typed failure channel', () =>
   Effect.gen(function* () {
-    const logicalSnapshot = yield* Analysis.ofSource(
+    const logicalSnapshot = yield* Analysis.ofSourceRealized(
       'effect-runtime/trap-native',
       ascii(trapSource),
       'aarch64-apple-darwin',
     )
-    const wasmSnapshot = yield* Analysis.ofSource(
+    const wasmSnapshot = yield* Analysis.ofSourceRealized(
       'effect-runtime/trap-wasm',
       ascii(trapSource),
       'wasm32-unknown-unknown',
@@ -319,12 +319,12 @@ it.effect('keeps arithmetic traps outside the typed failure channel', () =>
 
 it.effect('preserves exclusive capture state across evaluator, native, and Wasm runs', () =>
   Effect.gen(function* () {
-    const logicalSnapshot = yield* Analysis.ofSource(
+    const logicalSnapshot = yield* Analysis.ofSourceRealized(
       'effect-runtime/exclusive-logical',
       ascii(exclusiveCaptureSource),
       'aarch64-apple-darwin',
     )
-    const wasmSnapshot = yield* Analysis.ofSource(
+    const wasmSnapshot = yield* Analysis.ofSourceRealized(
       'effect-runtime/exclusive-wasm',
       ascii(exclusiveCaptureSource),
       'wasm32-unknown-unknown',
@@ -363,12 +363,12 @@ it.effect('preserves exclusive capture state across evaluator, native, and Wasm 
 
 it.effect('retries with fresh locals and persistent captures across all runtimes', () =>
   Effect.gen(function* () {
-    const logicalSnapshot = yield* Analysis.ofSource(
+    const logicalSnapshot = yield* Analysis.ofSourceRealized(
       'effect-runtime/retry-logical',
       ascii(retrySource),
       'aarch64-apple-darwin',
     )
-    const wasmSnapshot = yield* Analysis.ofSource(
+    const wasmSnapshot = yield* Analysis.ofSourceRealized(
       'effect-runtime/retry-wasm',
       ascii(retrySource),
       'wasm32-unknown-unknown',
