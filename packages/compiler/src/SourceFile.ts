@@ -1,4 +1,5 @@
 import * as Option from 'effect/Option'
+import * as SourceOrigin from './SourceOrigin.js'
 import type * as SourceSpan from './SourceSpan.js'
 
 const SourceFileTypeId: unique symbol = Symbol.for('@silk-effect/compiler/SourceFile')
@@ -8,14 +9,20 @@ export interface SourceFile {
   readonly [SourceFileTypeId]: typeof SourceFileTypeId
   readonly id: string
   readonly bytes: ReadonlyArray<number>
+  readonly origin: SourceOrigin.SourceOrigin
 }
 
 /** Copies source bytes so later mutations of the caller's `Uint8Array` cannot change the file. */
-export const make = (id: string, bytes: Uint8Array): SourceFile => {
+export const make = (
+  id: string,
+  bytes: Uint8Array,
+  origin: SourceOrigin.SourceOrigin = SourceOrigin.memory(),
+): SourceFile => {
   const source: SourceFile = {
     [SourceFileTypeId]: SourceFileTypeId,
     id,
     bytes: Object.freeze(Array.from(bytes)),
+    origin,
   }
   return Object.freeze(source)
 }
@@ -47,5 +54,6 @@ export const spelling = (self: SourceFile, span: SourceSpan.SourceSpan): Option.
 /** Tests identity and byte-for-byte equality between two immutable source snapshots. */
 export const equals = (self: SourceFile, other: SourceFile): boolean =>
   self.id === other.id &&
+  SourceOrigin.equals(self.origin, other.origin) &&
   self.bytes.length === other.bytes.length &&
   self.bytes.every((byte, index) => byte === other.bytes[index])

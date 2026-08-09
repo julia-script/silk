@@ -1,4 +1,6 @@
+import * as SourceOrigin from '@silk-effect/compiler/SourceOrigin'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
+import * as Stdlib from '@silk-effect/compiler/Stdlib'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
@@ -9,11 +11,16 @@ import * as Path from 'effect/Path'
 export interface FileSourceResolver {
   readonly _tag: 'FileSourceResolver'
   readonly root: string
+  readonly toolchainRoot?: string
 }
 
 /** Creates a resolver configuration from an already normalized absolute source root. */
-export const make = (root: string): FileSourceResolver =>
-  Object.freeze({ _tag: 'FileSourceResolver', root })
+export const make = (root: string, toolchainRoot?: string): FileSourceResolver =>
+  Object.freeze(
+    toolchainRoot === undefined
+      ? { _tag: 'FileSourceResolver', root }
+      : { _tag: 'FileSourceResolver', root, toolchainRoot },
+  )
 
 /** Maps one canonical module exactly to `<source-root>/<module>.silk`. */
 export const sourcePath = (self: FileSourceResolver, module: string, path: Path.Path): string =>
@@ -53,7 +60,62 @@ export const layer = (
                       reason: { _tag: 'WrappedFailure', cause },
                     }),
                   ),
-            onSuccess: (bytes) => Effect.succeed(Option.some(Uint8Array.from(bytes))),
+            onSuccess: (bytes) =>
+              Effect.succeed(
+                Option.some(
+                  SourceResolver.resolved(Uint8Array.from(bytes), SourceOrigin.projectFile(file)),
+                ),
+              ),
+          })
+        }),
+        resolveStandardLibrary: Effect.fn('FileSourceResolver.resolveStandardLibrary')(function* (
+          module: string,
+        ) {
+          const entry = Stdlib.find(module)
+          if (entry === undefined) return Option.none()
+          const sourceUrl =
+            self.toolchainRoot === undefined
+              ? entry.sourceUrl
+              : new URL(entry.path, self.toolchainRoot)
+          const file = yield* path.fromFileUrl(sourceUrl).pipe(
+            Effect.mapError(
+              (cause) =>
+                new SourceResolver.SourceResolverError({
+                  operation: 'FileSourceResolver.resolveStandardLibrary',
+                  module,
+                  message: `Invalid toolchain source URL for ${module}: ${sourceUrl.href}`,
+                  reason: { _tag: 'WrappedFailure', cause },
+                }),
+            ),
+          )
+          return yield* Effect.matchEffect(fileSystem.readFile(file), {
+            onFailure: (cause) =>
+              cause.reason._tag === 'NotFound'
+                ? Effect.fail(
+                    new SourceResolver.SourceResolverError({
+                      operation: 'FileSourceResolver.resolveStandardLibrary',
+                      module,
+                      message: `Missing toolchain source module ${module} at ${file}`,
+                      reason: { _tag: 'MissingToolchainSource', path: file },
+                    }),
+                  )
+                : Effect.fail(
+                    new SourceResolver.SourceResolverError({
+                      operation: 'FileSourceResolver.resolveStandardLibrary',
+                      module,
+                      message: `Cannot read toolchain source module ${module} at ${file}`,
+                      reason: { _tag: 'WrappedFailure', cause },
+                    }),
+                  ),
+            onSuccess: (bytes) =>
+              Effect.succeed(
+                Option.some(
+                  SourceResolver.resolved(
+                    Uint8Array.from(bytes),
+                    SourceOrigin.toolchainFile(sourceUrl.href),
+                  ),
+                ),
+              ),
           })
         }),
       }

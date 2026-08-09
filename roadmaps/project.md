@@ -2,7 +2,7 @@
 
 > Direction, not commitment — Now is committed; Next is planned; Later is exploration.
 > Only Now items may be promised to anyone. This document changes as we learn.
-> Last reviewed: 2026-08-08 · Review cadence: after each OpenSpec archive, or monthly when no
+> Last reviewed: 2026-08-09 · Review cadence: after each OpenSpec archive, or monthly when no
 > change ships · Scope: whole project
 
 ## Vision
@@ -13,14 +13,9 @@ tooling-friendly semantics. The first destination is the smallest coherent langu
 compiling its own compiler; broader language and ecosystem work follows evidence from that
 self-hosting core.
 
-**Current objective:** supply the compiler's minimum native platform. The accepted baseline now includes
-target-aware layouts, runtime-sized borrowed input, typed Effects, capability requirements and
-provision, first-class callables, automatic data-first sections, affine ownership, deterministic
-cleanup, and — as of 2026-08-08 — the self-contained owned-allocation substrate: general `Allocator`
-dispatch through user-authored conformances, affine `Allocation`, unsafe typed `RawBuffer`/`Slot`
-storage, compiler-sealed `Drop`, and an ordinary Silk-written `Vector<T>` proven by a scanner that
-borrows runtime-sized input and returns owned tokens. The next missing piece is the minimum runtime,
-standard library, host-service surface, and private C shim required by a real compiler module.
+**Current objective:** make Silk express and run familiar small programs — measured by canonical
+lowercase scalar types, inspectable standard-library source, observable output, and Game of Life,
+Sieve, matrix multiplication, and CRC-32 agreeing across evaluation and supported compiled targets.
 
 ## Column rules
 
@@ -29,6 +24,22 @@ standard library, host-service surface, and private C shim required by a real co
 - **Later** — problem worth solving, no solution chosen. Options, not a queue.
 
 ## Now
+
+### Prove the language with familiar real programs
+
+- **Problem:** The compiler can execute carefully selected compiler-shaped fixtures, but users
+  cannot yet write the complete scalar vocabulary, inspect shipped stdlib definitions, observe
+  ordinary program output, or use familiar algorithms to expose composition and ergonomics gaps.
+- **Outcome & done-when:** Canonical stdlib `.silk` files support go-to-definition; lowercase
+  integers, floats, unit, and bottom run through every compiler phase; minimal explicit byte output
+  works without conflating logging; and the executable algorithm baseline agrees across engines.
+- **Status:** in progress — `ship-stdlib-sources` is complete and `complete-integer-scalars` is the
+  active implementation change; four focused changes follow.
+- **Appetite:** six focused OpenSpec changes, applied and archived independently; frontier programs
+  remain honest when their missing capabilities exceed the milestone.
+- **Links:** [real-programs initiative](real-programs.md) · change: `ship-stdlib-sources` · change:
+  `complete-integer-scalars` · change: `add-floating-point-scalars` · change: `add-static-text` ·
+  change: `add-standard-streams` · change: `build-algorithm-examples`
 
 ### Validate the language's defining effect execution model
 
@@ -242,6 +253,10 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   land, or should the first port begin after the stage-0 subset is feature-complete?
 
 ## Changelog
+
+- 2026-08-09: Promoted the real-programs initiative to Now and split its former umbrella proposal
+  into six independently implementable changes. Native-platform expansion remains Next; String,
+  Logger, default providers, and Stream/Sink stay explicit future seams rather than hidden scope.
 
 - 2026-08-08: Completed `add-silk-vector-and-scanner` and promoted the minimum native compiler
   platform to Next. `silk.vector` is the first embedded, explicitly imported standard-library

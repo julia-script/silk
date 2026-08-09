@@ -1,11 +1,4 @@
-/**
- * The Silk standard library: ordinary Silk source shipped with the compiler. Modules live in
- * the reserved `silk/` namespace, resolve through the module closure before any user resolver
- * is consulted, and compile through the same pipeline as user code with no privilege.
- */
-
-const ascii = (value: string): Uint8Array =>
-  Uint8Array.from(value, (character) => character.charCodeAt(0))
+import { modules } from './Stdlib.generated.js'
 
 /** The reserved namespace prefix. User resolvers are never consulted for these identities. */
 export const namespacePrefix = 'silk/'
@@ -14,197 +7,34 @@ export const namespacePrefix = 'silk/'
 export const isReserved = (module: string): boolean =>
   module === 'silk' || module.startsWith(namespacePrefix)
 
-const vector = `// A growable owned sequence over the allocation substrate. Ordinary Silk: no compiler phase
-// knows this type, and every capability it uses is available to user code.
-//
-// The storage union keeps the empty vector allocation-free; Place.replace moves it out and back
-// through &mut self without a partial move, and the Drop hook destroys exactly the
-// initialized elements before the backing buffer releases.
-
-pub struct Empty {}
-
-pub struct Full<T> {
-  buffer: RawBuffer<T>
+/** One generated view of a canonical, compiler-shipped Silk source file. */
+export interface Module {
+  readonly module: string
+  readonly path: string
+  readonly sourceUrl: URL
+  readonly bytes: Uint8Array
 }
 
-pub struct Vector<T> {
-  storage: Empty | Full<T>
-  length: Usize
-  capacity: Usize
-}
+const encoder = new TextEncoder()
 
-// A Usize-typed literal anchor: parameters drive literal typing, so bare counts stay explicit.
-fn counted(value: Usize) -> Usize {
-  return value
-}
+/** The deterministic standard-library manifest, ordered by canonical module identity. */
+export const manifest: ReadonlyArray<Module> = Object.freeze(
+  modules.map((entry) =>
+    Object.freeze({
+      module: entry.module,
+      path: entry.path,
+      sourceUrl: new URL(`../stdlib/${entry.path}`, import.meta.url),
+      bytes: encoder.encode(entry.source),
+    }),
+  ),
+)
 
-// Diverges on the arms the surrounding logic has already proven impossible.
-fn absurd<T>() -> T {
-  let boom = 1 / 0
-  return absurd<T>()
-}
+const byModule = new Map(manifest.map((entry) => [entry.module, entry] as const))
 
-pub fn make<T>() -> Vector<T> {
-  return Vector<T> { storage: Empty {}, length: counted(0), capacity: counted(0) }
-}
+/** Returns the generated manifest entry for one standard-library module identity. */
+export const find = (module: string): Module | undefined => byModule.get(module)
 
-pub fn length<T>(self: &Vector<T>) -> Usize {
-  return self.length
-}
-
-pub fn capacity<T>(self: &Vector<T>) -> Usize {
-  return self.capacity
-}
-
-impl<T> Drop for Vector<T> {
-  fn drop(self: &mut Vector<T>) -> Unit {
-    let storage = Place.replace(self.storage, Empty {})
-    let count = Place.replace(self.length, counted(0))
-    return match move storage {
-      Empty nothing => Unit.make()
-      Full<T> full => releaseFull<T>(move full, count)
-    }
-  }
-}
-
-fn releaseFull<T>(full: Full<T>, length: Usize) -> Unit {
-  return match move full {
-    Full<T> { buffer } => releaseBuffer<T>(move buffer, length)
-  }
-}
-
-fn releaseBuffer<T>(buffer: RawBuffer<T>, length: Usize) -> Unit {
-  unsafe {
-    let mut owned = move buffer
-    let mut index = counted(0)
-    while index < length {
-      let cleared = Slot.drop(RawBuffer.slot(&mut owned, index))
-      index = index + counted(1)
-    }
-    drop owned
-  }
-  return Unit.make()
-}
-
-// Growth is atomic: the replacement buffer exists and holds every element before the vector's
-// storage commits, so a failed allocation leaves the original untouched.
-pub effect fn append<T>(self: &mut Vector<T>, value: T) -> Unit ! OutOfMemory ? &mut Allocator {
-  if self.length == self.capacity {
-    let mut next = self.capacity + self.capacity
-    if self.capacity == counted(0) {
-      next = counted(4)
-    }
-    let element = Layout.of<T>()
-    let plan = Layout.repeat(element, next)
-    let layout = match move plan {
-      Layout ready => ready
-      LayoutOverflow overflow => run overflowed()
-    }
-    let recipe = Allocator.allocate(move layout)
-    let allocation = run recipe
-    let storage = Place.replace(self.storage, Empty {})
-    let moved = match move storage {
-      Empty nothing => Full<T> { buffer: freshBuffer<T>(move allocation, next) }
-      Full<T> full => Full<T> { buffer: migrate<T>(move full, move allocation, self.length, next) }
-    }
-    self.storage = move moved
-    self.capacity = next
-  }
-  let storage = Place.replace(self.storage, Empty {})
-  let stored = match move storage {
-    Empty nothing => absurd<Full<T>>()
-    Full<T> full => writeAt<T>(move full, self.length, move value)
-  }
-  self.storage = move stored
-  self.length = self.length + counted(1)
-  return Unit.make()
-}
-
-effect fn overflowed() -> Layout ! OutOfMemory {
-  fail OutOfMemory {}
-}
-
-fn freshBuffer<T>(allocation: Allocation, count: Usize) -> RawBuffer<T> {
-  unsafe {
-    let made = RawBuffer.from<T>(move allocation, count)
-    return move made
-  }
-  return absurd<RawBuffer<T>>()
-}
-
-fn migrate<T>(full: Full<T>, allocation: Allocation, length: Usize, count: Usize) -> RawBuffer<T> {
-  return match move full {
-    Full<T> { buffer } => migrateBuffer<T>(move buffer, move allocation, length, count)
-  }
-}
-
-fn migrateBuffer<T>(old: RawBuffer<T>, allocation: Allocation, length: Usize, count: Usize) -> RawBuffer<T> {
-  let mut target = freshBuffer<T>(move allocation, count)
-  unsafe {
-    let mut source = move old
-    let mut index = counted(0)
-    while index < length {
-      let element = Slot.take(RawBuffer.slot(&mut source, index))
-      let written = Slot.write(RawBuffer.slot(&mut target, index), move element)
-      index = index + counted(1)
-    }
-    drop source
-  }
-  return move target
-}
-
-fn writeAt<T>(full: Full<T>, index: Usize, value: T) -> Full<T> {
-  return match move full {
-    Full<T> { buffer } => Full<T> { buffer: writeSlot<T>(move buffer, index, move value) }
-  }
-}
-
-fn writeSlot<T>(buffer: RawBuffer<T>, index: Usize, value: T) -> RawBuffer<T> {
-  unsafe {
-    let mut owned = move buffer
-    let written = Slot.write(RawBuffer.slot(&mut owned, index), move value)
-    return move owned
-  }
-  return absurd<RawBuffer<T>>()
-}
-
-struct Taken<T> {
-  element: T
-  rest: Empty | Full<T>
-}
-
-// Checked read for Copy element types: out-of-range access traps identically on every engine.
-pub fn get<T>(self: &mut Vector<T>, index: Usize) -> T {
-  if self.length <= index {
-    let boom = 1 / 0
-  }
-  let storage = Place.replace(self.storage, Empty {})
-  let mut taken = match move storage {
-    Empty nothing => absurd<Taken<T>>()
-    Full<T> full => copyAt<T>(move full, index)
-  }
-  let restored = Place.replace(taken.rest, Empty {})
-  self.storage = move restored
-  return match move taken {
-    Taken<T> { element, rest } => move element
-  }
-}
-
-fn copyAt<T>(full: Full<T>, index: Usize) -> Taken<T> {
-  return match move full {
-    Full<T> { buffer } => copySlot<T>(move buffer, index)
-  }
-}
-
-fn copySlot<T>(buffer: RawBuffer<T>, index: Usize) -> Taken<T> {
-  unsafe {
-    let mut owned = move buffer
-    let element = Slot.copy(RawBuffer.slot(&mut owned, index))
-    return Taken<T> { element: move element, rest: Full<T> { buffer: move owned } }
-  }
-  return absurd<Taken<T>>()
-}
-`
-
-/** Every standard-library module's source bytes by canonical identity. */
-export const sources: ReadonlyMap<string, Uint8Array> = new Map([['silk/vector', ascii(vector)]])
+/** Every standard-library module's exact source bytes by canonical identity. */
+export const sources: ReadonlyMap<string, Uint8Array> = new Map(
+  manifest.map((entry) => [entry.module, Uint8Array.from(entry.bytes)] as const),
+)

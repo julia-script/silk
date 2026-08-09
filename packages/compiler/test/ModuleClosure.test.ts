@@ -5,6 +5,7 @@ import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as SourceOrigin from '../src/SourceOrigin.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -43,11 +44,14 @@ it.effect('loads a diamond once per module and excludes unreachable sources', ()
       ['island', ascii(fn)],
     ])
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
+      resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
       resolve: (module: string) =>
         Effect.sync(() => {
           calls.push(module)
           const bytes = sources.get(module)
-          return bytes === undefined ? Option.none() : Option.some(Uint8Array.from(bytes))
+          return bytes === undefined
+            ? Option.none()
+            : Option.some(SourceResolver.resolved(bytes, SourceOrigin.memory()))
         }),
     })
     const closure = yield* ModuleClosure.load({
@@ -110,8 +114,13 @@ it.effect('suppresses resolver calls and module diagnostics for damaged import s
 it.effect('retains partial closure facts around ordered operational failures', () =>
   Effect.gen(function* () {
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
+      resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
       resolve: (module: string) => {
-        if (module === 'readable') return Effect.succeed(Option.some(ascii(fn)))
+        if (module === 'readable') {
+          return Effect.succeed(
+            Option.some(SourceResolver.resolved(ascii(fn), SourceOrigin.memory())),
+          )
+        }
         return Effect.fail(
           new SourceResolver.SourceResolverError({
             operation: 'test.resolve',

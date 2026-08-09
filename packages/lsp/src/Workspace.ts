@@ -1,5 +1,6 @@
 import * as Analysis from '@silk-effect/compiler/Analysis'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as SourceOrigin from '@silk-effect/compiler/SourceOrigin'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
 import * as FileSourceResolver from '@silk-effect/compiler-cli/FileSourceResolver'
 import * as Project from '@silk-effect/compiler-cli/Project'
@@ -105,7 +106,7 @@ export const open = Effect.fn('Workspace.open')(function* (options: {
 /** A resolver serving open-document overlays first, then rooted `.silk` files. */
 export const resolver = (
   sourceRoot: string,
-  overlays: ReadonlyMap<string, Uint8Array>,
+  overlays: ReadonlyMap<string, SourceResolver.ResolvedSource>,
 ): Layer.Layer<SourceResolver.SourceResolver, never, FileSystem.FileSystem | Path.Path> =>
   Layer.effect(
     SourceResolver.SourceResolver,
@@ -113,10 +114,11 @@ export const resolver = (
       const files = yield* SourceResolver.SourceResolver
       return {
         resolve: Effect.fnUntraced(function* (module: string) {
-          const bytes = overlays.get(module)
-          if (bytes !== undefined) return Option.some(Uint8Array.from(bytes))
+          const source = overlays.get(module)
+          if (source !== undefined) return Option.some(source)
           return yield* files.resolve(module)
         }),
+        resolveStandardLibrary: files.resolveStandardLibrary,
       }
     }),
   ).pipe(Layer.provide(FileSourceResolver.layer(FileSourceResolver.make(sourceRoot))))
@@ -126,27 +128,33 @@ export const analyze = Effect.fn('Workspace.analyze')(function* (
   document: Document.Document,
   openDocuments: Iterable<Document.Document>,
 ): Effect.fn.Return<Analysis.Snapshot, never, FileSystem.FileSystem | Path.Path> {
-  const overlays = new Map<string, Uint8Array>()
+  const overlays = new Map<string, SourceResolver.ResolvedSource>()
   for (const open of openDocuments) {
     if (open.workspace === document.workspace && open.uri !== document.uri) {
-      overlays.set(open.module, open.bytes)
+      overlays.set(open.module, SourceResolver.resolved(open.bytes, SourceOrigin.memory(open.uri)))
     }
   }
   return yield* Analysis.make({
-    root: SourceFile.make(document.module, document.bytes),
+    root: SourceFile.make(document.module, document.bytes, SourceOrigin.memory(document.uri)),
   }).pipe(Effect.provide(resolver(document.sourceRoot, overlays)))
 })
 
 /** Maps one module identity back to a document URI for cross-file references. */
 export const uriOf = Effect.fn('Workspace.uriOf')(function* (
-  sourceRoot: string,
-  module: string,
+  source: SourceFile.SourceFile,
   openDocuments: Iterable<Document.Document>,
 ): Effect.fn.Return<string | undefined, never, Path.Path> {
   for (const open of openDocuments) {
-    if (open.sourceRoot === sourceRoot && open.module === module) return open.uri
+    if (open.module === source.id) return open.uri
   }
-  const path = yield* Path.Path
-  const url = yield* path.toFileUrl(path.join(sourceRoot, `${module}.silk`)).pipe(Effect.option)
-  return Option.isSome(url) ? url.value.href : undefined
+  switch (source.origin._tag) {
+    case 'Memory':
+    case 'ToolchainFile':
+      return source.origin.uri
+    case 'ProjectFile': {
+      const path = yield* Path.Path
+      const url = yield* path.toFileUrl(source.origin.path).pipe(Effect.option)
+      return Option.isSome(url) ? url.value.href : undefined
+    }
+  }
 })

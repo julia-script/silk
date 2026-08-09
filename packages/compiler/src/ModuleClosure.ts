@@ -110,8 +110,8 @@ interface ModuleAnalysis {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
-const parseModule = (name: string, bytes: Uint8Array): ParsedModule => {
-  const syntax = Parser.parse(Lexer.lex(SourceFile.make(name, bytes)))
+const parseModule = (name: string, source: SourceResolver.ResolvedSource): ParsedModule => {
+  const syntax = Parser.parse(Lexer.lex(SourceFile.make(name, source.bytes, source.origin)))
   const imports = syntax.root.children.flatMap((element): ParsedModule['imports'] => {
     if (!SyntaxTree.isNode(element) || element.kind !== 'ImportDeclaration') return []
     const path = SyntaxTree.directNode(element, 'ImportPath')
@@ -132,7 +132,7 @@ const parseModule = (name: string, bytes: Uint8Array): ParsedModule => {
 }
 
 type Resolution =
-  | { readonly _tag: 'Found'; readonly bytes: Uint8Array }
+  | { readonly _tag: 'Found'; readonly source: SourceResolver.ResolvedSource }
   | { readonly _tag: 'Absent' }
   | { readonly _tag: 'Failed'; readonly error: SourceResolver.SourceResolverError }
 
@@ -317,7 +317,13 @@ export const load = Effect.fn('ModuleClosure.load')(function* (
     diagnostics.push(Object.freeze([Diagnostic.reservedModuleIdentity(rootModule, span)]))
   }
   const resolutions = new Map<string, Resolution>([
-    [rootModule, Object.freeze({ _tag: 'Found', bytes: SourceFile.toUint8Array(request.root) })],
+    [
+      rootModule,
+      Object.freeze({
+        _tag: 'Found',
+        source: SourceResolver.resolved(SourceFile.toUint8Array(request.root), request.root.origin),
+      }),
+    ],
   ])
   const pending: Array<string> = [rootModule]
 
@@ -329,11 +335,13 @@ export const load = Effect.fn('ModuleClosure.load')(function* (
     // Standard-library identities resolve from the compiler-shipped sources exclusively; a
     // user resolver is never consulted inside the reserved namespace.
     if (Stdlib.isReserved(module)) {
-      const embedded = Stdlib.sources.get(module)
-      const resolution: Resolution =
-        embedded === undefined
-          ? Object.freeze({ _tag: 'Absent' as const })
-          : Object.freeze({ _tag: 'Found' as const, bytes: Uint8Array.from(embedded) })
+      const attempted = yield* Effect.result(SourceResolver.resolveStandardLibrary(module))
+      const resolution: Resolution = Result.isFailure(attempted)
+        ? Object.freeze({ _tag: 'Failed', error: attempted.failure })
+        : Option.match(attempted.success, {
+            onNone: () => Object.freeze({ _tag: 'Absent' as const }),
+            onSome: (source) => Object.freeze({ _tag: 'Found' as const, source }),
+          })
       resolutions.set(module, resolution)
       return resolution
     }
@@ -342,8 +350,7 @@ export const load = Effect.fn('ModuleClosure.load')(function* (
       ? Object.freeze({ _tag: 'Failed', error: attempted.failure })
       : Option.match(attempted.success, {
           onNone: () => Object.freeze({ _tag: 'Absent' as const }),
-          onSome: (bytes) =>
-            Object.freeze({ _tag: 'Found' as const, bytes: Uint8Array.from(bytes) }),
+          onSome: (source) => Object.freeze({ _tag: 'Found' as const, source }),
         })
     resolutions.set(module, resolution)
     return resolution
@@ -355,7 +362,7 @@ export const load = Effect.fn('ModuleClosure.load')(function* (
     if (name === undefined || loaded.has(name)) continue
     const resolution = resolutions.get(name)
     if (resolution?._tag !== 'Found') continue
-    const analysis = yield* analyzeModule(parseModule(name, resolution.bytes), resolve)
+    const analysis = yield* analyzeModule(parseModule(name, resolution.source), resolve)
     loaded.set(name, analysis.module)
     diagnostics.push(analysis.diagnostics)
     for (const target of resolvedTargets(analysis.module)) {

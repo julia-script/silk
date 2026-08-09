@@ -220,6 +220,7 @@ it.effect('gates source rejection and operational resolution failure before back
     )
 
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
+      resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
       resolve: (module: string) =>
         Effect.fail(
           new SourceResolver.SourceResolverError({

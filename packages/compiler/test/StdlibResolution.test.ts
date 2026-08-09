@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -16,6 +17,18 @@ const importing = `import silk.vector { Vector, length }
 pub fn main() -> I32 {
   return 42
 }`
+
+it('keeps the generated manifest ordered and byte-identical to canonical Silk files', () => {
+  assert.deepEqual(
+    Stdlib.manifest.map((entry) => entry.module),
+    [...Stdlib.manifest.map((entry) => entry.module)].sort(),
+  )
+  for (const entry of Stdlib.manifest) {
+    assert.strictEqual(entry.path, `${entry.module}.silk`)
+    assert.deepEqual(entry.bytes, new Uint8Array(readFileSync(entry.sourceUrl)))
+    assert.deepEqual(Stdlib.sources.get(entry.module), entry.bytes)
+  }
+})
 
 it.effect('resolves standard-library imports without vendoring source', () =>
   Effect.gen(function* () {
@@ -54,6 +67,7 @@ it.effect('never consults a user resolver inside the reserved namespace', () =>
           .decode(SourceFile.toUint8Array(librarySource))
           .includes('struct Vector<T>'),
     )
+    assert.strictEqual(librarySource?.origin._tag, 'Memory')
   }),
 )
 
@@ -88,6 +102,7 @@ it.effect('compiles library source with ordinary diagnostics and no privilege', 
         attributed.map((diagnostic) => diagnostic.code),
         'SEM0001',
       )
+      assert.strictEqual(Analysis.sources(snapshot).get('silk/vector')?.origin._tag, 'Memory')
     } finally {
       sources.set('silk/vector', original)
     }

@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url'
 import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
@@ -17,7 +18,13 @@ it.effect('maps canonical modules exactly below the source root', () =>
 
     const found = yield* SourceResolver.resolve('compiler/Syntax').pipe(Effect.provide(resolver))
     assert.strictEqual(Option.isSome(found), true)
-    if (Option.isSome(found)) assert.strictEqual(new TextDecoder().decode(found.value), 'source')
+    if (Option.isSome(found)) {
+      assert.strictEqual(new TextDecoder().decode(found.value.bytes), 'source')
+      assert.deepEqual(found.value.origin, {
+        _tag: 'ProjectFile',
+        path: `${root}/compiler/Syntax.silk`,
+      })
+    }
     const absent = yield* SourceResolver.resolve('missing/Module').pipe(Effect.provide(resolver))
     assert.strictEqual(Option.isNone(absent), true)
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -34,5 +41,31 @@ it.effect('distinguishes not found from an operational read failure', () =>
     )
     assert.strictEqual(Result.isFailure(result), true)
     if (Result.isFailure(result)) assert.strictEqual(result.failure.reason._tag, 'WrappedFailure')
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)
+
+it.effect('resolves canonical toolchain sources and reports a missing packaged file', () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const root = yield* fileSystem.makeTempDirectoryScoped()
+    const projectResolver = FileSourceResolver.layer(FileSourceResolver.make(root))
+    const found = yield* SourceResolver.resolveStandardLibrary('silk/vector').pipe(
+      Effect.provide(projectResolver),
+    )
+    assert.isTrue(Option.isSome(found))
+    if (Option.isSome(found)) {
+      assert.strictEqual(found.value.origin._tag, 'ToolchainFile')
+      assert.include(new TextDecoder().decode(found.value.bytes), 'struct Vector<T>')
+    }
+
+    const missingRoot = pathToFileURL(`${root}/missing-toolchain/`).href
+    const missingResolver = FileSourceResolver.layer(FileSourceResolver.make(root, missingRoot))
+    const missing = yield* Effect.result(
+      SourceResolver.resolveStandardLibrary('silk/vector').pipe(Effect.provide(missingResolver)),
+    )
+    assert.isTrue(Result.isFailure(missing))
+    if (Result.isFailure(missing)) {
+      assert.strictEqual(missing.failure.reason._tag, 'MissingToolchainSource')
+    }
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )

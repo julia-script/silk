@@ -273,8 +273,10 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Presentation',
       './SemanticOccurrence',
       './SourceFile',
+      './SourceOrigin',
       './SourceResolver',
       './SourceSpan',
+      './Stdlib',
       './SyntaxFile',
       './SyntaxTree',
       './Target',
@@ -289,7 +291,15 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'README.md'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/manifest.json'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/vector.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
+    expect(JSON.parse(readFileSync(resolve(packedRoot, 'stdlib/manifest.json'), 'utf8'))).toEqual([
+      { module: 'silk/vector', path: 'silk/vector.silk' },
+    ])
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/vector.silk'), 'utf8')).toContain(
+      'pub struct Vector<T>',
+    )
 
     const packedFiles = (directory: string): ReadonlyArray<string> =>
       readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -638,8 +648,10 @@ console.log(
       'Presentation',
       'SemanticOccurrence',
       'SourceFile',
+      'SourceOrigin',
       'SourceResolver',
       'SourceSpan',
+      'Stdlib',
       'SyntaxFile',
       'SyntaxTree',
       'Target',
@@ -898,7 +910,12 @@ test('the compiler CLI release candidate installs with its project-first command
       resolve(consumerRoot, 'silk.toml'),
       '[package]\nname = "packed-cli"\nversion = "0.1.0"\nroot = "Main.silk"\n',
     )
-    writeFileSync(resolve(consumerRoot, 'Main.silk'), 'pub fn main() -> I32 { return 42 }')
+    mkdirSync(resolve(consumerRoot, 'silk'))
+    writeFileSync(resolve(consumerRoot, 'silk/vector.silk'), 'pub struct Hostile {}')
+    writeFileSync(
+      resolve(consumerRoot, 'Main.silk'),
+      'import silk.vector { Vector }\npub fn main() -> I32 { return 42 }',
+    )
     execFileSync(executable, ['check'], { cwd: consumerRoot, stdio: 'pipe' })
     expect(existsSync(resolve(consumerRoot, '.silk'))).toBe(false)
 

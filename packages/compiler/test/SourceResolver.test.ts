@@ -14,7 +14,10 @@ it.effect('resolves exact immutable bytes from replaceable memory storage', () =
     original[0] = 0
     const found = yield* SourceResolver.resolve('compiler/Syntax').pipe(Effect.provide(layer))
     assert.strictEqual(Option.isSome(found), true)
-    if (Option.isSome(found)) assert.deepEqual(found.value, ascii('source'))
+    if (Option.isSome(found)) {
+      assert.deepEqual(found.value.bytes, ascii('source'))
+      assert.strictEqual(found.value.origin._tag, 'Memory')
+    }
     const absent = yield* SourceResolver.resolve('compiler/syntax').pipe(Effect.provide(layer))
     assert.strictEqual(Option.isNone(absent), true)
   }),

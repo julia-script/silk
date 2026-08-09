@@ -25,6 +25,7 @@
   "type": "module",
   "files": [
     "dist",
+    "stdlib",
     "README.md",
     "LICENSE"
   ],
@@ -61,9 +62,17 @@
       "types": "./dist/SourceFile.d.ts",
       "import": "./dist/SourceFile.js"
     },
+    "./SourceOrigin": {
+      "types": "./dist/SourceOrigin.d.ts",
+      "import": "./dist/SourceOrigin.js"
+    },
     "./SourceResolver": {
       "types": "./dist/SourceResolver.d.ts",
       "import": "./dist/SourceResolver.js"
+    },
+    "./Stdlib": {
+      "types": "./dist/Stdlib.d.ts",
+      "import": "./dist/Stdlib.js"
     },
     "./SourceSpan": {
       "types": "./dist/SourceSpan.d.ts",
@@ -187,12 +196,14 @@
     }
   },
   "scripts": {
-    "build": "pnpm clean && tsc -p tsconfig.json",
+    "build": "pnpm stdlib:generate && pnpm clean && tsc -p tsconfig.json",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "lexer:bench": "pnpm build && node scripts/lexer-benchmark.mjs",
-    "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+    "stdlib:check": "node scripts/generate-stdlib.mjs --check",
+    "stdlib:generate": "node scripts/generate-stdlib.mjs",
+    "test": "pnpm stdlib:check && vitest run --passWithNoTests",
+    "typecheck": "pnpm stdlib:check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "@silk-effect/llvm": "workspace:*",

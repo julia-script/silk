@@ -5,7 +5,10 @@ import { pathToFileURL } from 'node:url'
 import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as SourceOrigin from '@silk-effect/compiler/SourceOrigin'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
+import * as Stdlib from '@silk-effect/compiler/Stdlib'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Document from '../src/Document.js'
@@ -97,18 +100,32 @@ it.effect('assigns stable non-colliding identities to virtual documents', () =>
 it.effect('resolves open-document overlays before rooted files', () =>
   Effect.gen(function* () {
     const root = project()
-    const overlays = new Map([['Util', encoder.encode('pub fn answer() -> I32 { return 8 }')]])
+    const overlays = new Map([
+      [
+        'Util',
+        SourceResolver.resolved(
+          encoder.encode('pub fn answer() -> I32 { return 8 }'),
+          SourceOrigin.memory('file:///overlay/Util.silk'),
+        ),
+      ],
+    ])
     const overlaid = yield* SourceResolver.resolve('Util').pipe(
       Effect.provide(Workspace.resolver(join(root, 'src'), overlays)),
     )
     assert.isTrue(Option.isSome(overlaid))
-    if (Option.isSome(overlaid)) assert.include(decoder.decode(overlaid.value), 'return 8')
+    if (Option.isSome(overlaid)) {
+      assert.include(decoder.decode(overlaid.value.bytes), 'return 8')
+      assert.deepEqual(overlaid.value.origin, {
+        _tag: 'Memory',
+        uri: 'file:///overlay/Util.silk',
+      })
+    }
 
     const fromDisk = yield* SourceResolver.resolve('Main').pipe(
       Effect.provide(Workspace.resolver(join(root, 'src'), overlays)),
     )
     assert.isTrue(Option.isSome(fromDisk))
-    if (Option.isSome(fromDisk)) assert.include(decoder.decode(fromDisk.value), 'return 42')
+    if (Option.isSome(fromDisk)) assert.include(decoder.decode(fromDisk.value.bytes), 'return 42')
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
@@ -130,5 +147,37 @@ it.effect('analyzes imports against sibling files on disk', () =>
       Analysis.modules(snapshot).map((module) => module.name),
       ['Main', 'Util'],
     )
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('navigates standard-library definitions to the analyzed toolchain source', () =>
+  Effect.gen(function* () {
+    const root = project()
+    mkdirSync(join(root, 'src', 'silk'))
+    writeFileSync(join(root, 'src', 'silk', 'vector.silk'), 'pub struct Hostile {}')
+    const source =
+      'import silk.vector { Vector }\npub fn size(value: &Vector<I32>) -> Usize { return silk.vector.length(value) }'
+    const document = yield* Workspace.open({
+      uri: pathToFileURL(join(root, 'src', 'Main.silk')).href,
+      version: 1,
+      bytes: encoder.encode(source),
+    })
+    const snapshot = yield* Workspace.analyze(document, [])
+    const librarySource = Analysis.sources(snapshot).get('silk/vector')
+    assert.isDefined(librarySource)
+    if (librarySource === undefined) return
+    assert.strictEqual(librarySource.origin._tag, 'ToolchainFile')
+    assert.include(decoder.decode(SourceFile.toUint8Array(librarySource)), 'struct Vector<T>')
+    const libraryUri = yield* Workspace.uriOf(librarySource, [document])
+    assert.strictEqual(libraryUri, Stdlib.find('silk/vector')?.sourceUrl.href)
+
+    const definition = Document.definition(
+      document,
+      snapshot,
+      { line: 0, character: source.indexOf('Vector') },
+      (module) => (module === 'silk/vector' ? libraryUri : undefined),
+    )
+    assert.strictEqual(definition?.targetUri, libraryUri)
+    assert.deepEqual(definition?.targetSelectionRange.start, { line: 13, character: 11 })
   }).pipe(Effect.provide(NodeServices.layer)),
 )

@@ -90,7 +90,9 @@ export const start = (): void => {
         const snapshot = yield* Workspace.analyze(document, openDocuments)
         const moduleUris = new Map<string, string>()
         for (const module of Analysis.modules(snapshot)) {
-          const uri = yield* Workspace.uriOf(document.sourceRoot, module.name, openDocuments)
+          const source = Analysis.sources(snapshot).get(module.name)
+          if (source === undefined) continue
+          const uri = yield* Workspace.uriOf(source, openDocuments)
           if (uri !== undefined) moduleUris.set(module.name, uri)
         }
         return Object.freeze({ document, snapshot, moduleUris })
