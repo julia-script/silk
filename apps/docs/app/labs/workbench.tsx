@@ -37,6 +37,7 @@ import {
   countsAtom,
   cursorAtom,
   evaluationAtom,
+  evaluationOptionsAtom,
   modeAtom,
   modulesAtom,
   profileAtom,
@@ -166,6 +167,7 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
   const cursor = useAtomValue(cursorAtom)
   const setCursor = useAtomSet(cursorAtom)
   const evaluation = useAtomValue(evaluationAtom)
+  const evaluationOptions = useAtomValue(evaluationOptionsAtom)
   const setEvaluation = useAtomSet(evaluationAtom)
 
   // A layout saved before the redesign carries a `source`-component panel with no `view` param
@@ -231,7 +233,9 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
     // Evaluation runs the lowered MIR, which is absent when the target did not resolve.
     onEvaluate: () =>
       setEvaluation(
-        Analysis.mirOf(snapshot)._tag === 'Available' ? Analysis.evaluate(snapshot) : undefined,
+        Analysis.mirOf(snapshot)._tag === 'Available'
+          ? Analysis.evaluate(snapshot, evaluationOptions)
+          : undefined,
       ),
     filter,
     showTrivia,
@@ -430,6 +434,7 @@ function WorkbenchInner() {
   const [root, setRoot] = useAtom(rootAtom)
   const [activeModule, setActiveModule] = useAtom(activeModuleAtom)
   const [programName, setProgramName] = useAtom(programNameAtom)
+  const setEvaluationOptions = useAtomSet(evaluationOptionsAtom)
   const [profile, setProfile] = useAtom(profileAtom)
   const [target, setTarget] = useAtom(targetAtom)
   const cursor = useAtomValue(cursorAtom)
@@ -460,9 +465,10 @@ function WorkbenchInner() {
         setRoot(preset.root)
         setActiveModule(preset.root)
         setProgramName(preset.label)
+        setEvaluationOptions(preset.evaluation ?? {})
       })
     },
-    [setModules, setRoot, setActiveModule, setProgramName],
+    [setModules, setRoot, setActiveModule, setProgramName, setEvaluationOptions],
   )
 
   const addModule = (): void => {

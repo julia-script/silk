@@ -227,12 +227,12 @@ or the current evaluation outcome.
 - **THEN** the same nested groups, ordered nodes, relationships, states, values, and source ranges are available without relying on position or color
 
 ### Requirement: Incomplete data flow remains explicit
-The data-flow view SHALL represent missing, ambiguous, incompatible, unavailable, blocked, and cyclic
-relationships as terminal or branched states rather than drawing a successful enclosing path. It
-SHALL preserve all known nested provenance and link each stopped edge to the semantic fact,
-evaluation reason, trace prefix, or phase-owned diagnostic that explains it. A completed earlier
-argument branch SHALL remain visible when a later sibling blocks, but bindings or returns that did
-not occur MUST NOT be drawn as evaluated flow.
+The data-flow view SHALL represent missing, ambiguous, incompatible, unavailable, blocked, cyclic,
+and resource-limited relationships as terminal or branched states rather than drawing a successful
+enclosing path. It SHALL preserve all known nested provenance and link each stopped edge to the
+semantic fact, evaluation reason, trace prefix, or phase-owned diagnostic that explains it. A
+completed earlier argument branch SHALL remain visible when a later sibling blocks, but bindings or
+returns that did not occur MUST NOT be drawn as evaluated flow.
 
 #### Scenario: Stop at wrong arity
 - **WHEN** a resolved call at any nesting depth has an arity-mismatch contract
@@ -250,18 +250,18 @@ not occur MUST NOT be drawn as evaluated flow.
 - **WHEN** an inner argument blocks after an earlier argument completed
 - **THEN** the earlier completed branch and partial trace remain visible while the inner reason terminates the enclosing evaluated path before its bindings
 
-#### Scenario: Show a recursive cycle as a closed terminal path
-- **WHEN** nested evaluation reports a recursive call cycle
-- **THEN** the view lists the ordered declaration cycle and closing call-site span without drawing an infinite or successful path
+#### Scenario: Show an evaluation limit as a closed terminal path
+- **WHEN** nested evaluation exhausts its step or call-depth limit
+- **THEN** the view lists the limit, active call identities, and stopping span without drawing an infinite or successful path
 
 ### Requirement: Data-flow presets remain disposable
 The inspector SHALL provide complete flat, complete nested, nested sibling, wrong-arity,
-unknown-reference, ambiguous-reference, syntax-damaged, inner-blocked, and nested-cycle data-flow
-presets. Data-flow mode, evaluation overlay, selection, and source emphasis SHALL remain in browser memory
-and SHALL reset to the canonical preset on reload.
+unknown-reference, ambiguous-reference, syntax-damaged, inner-blocked, recursive-complete, and
+evaluation-limit data-flow presets. Data-flow mode, evaluation overlay, selection, and source
+emphasis SHALL remain in browser memory and SHALL reset to the canonical preset on reload.
 
 #### Scenario: Compare complete and incomplete paths
-- **WHEN** a developer switches among flat, nested, and blocked data-flow presets
+- **WHEN** a developer switches among flat, nested, recursive, and blocked data-flow presets
 - **THEN** the projection and accessible description recompute locally from each preset's current semantic facts and optional evaluation outcome
 
 #### Scenario: Compare static and evaluated flow
@@ -284,7 +284,7 @@ write files, persist results, or imply native compilation.
 - **THEN** the inspector displays result `42` and an ordered trace matching the visible semantic data-flow path
 
 #### Scenario: Inspect a blocked evaluation
-- **WHEN** a developer evaluates a preset with a missing entry, wrong call arity, unavailable fact, or recursive cycle
+- **WHEN** a developer evaluates a preset with a missing entry, wrong call arity, unavailable fact, or evaluation limit
 - **THEN** the inspector shows the exact blocked reason, partial trace, and relevant source relationships without becoming unresponsive
 
 #### Scenario: Edit after evaluation
@@ -296,24 +296,24 @@ write files, persist results, or imply native compilation.
 - **THEN** the canonical source returns with no persisted result or trace
 
 ### Requirement: Inspect recursive evaluation outcomes
-The Syntax Inspector SHALL provide completed, inner-blocked, and nested-cycle evaluation presets
-and SHALL render each nested trace event beside the semantic expression and source provenance that
-produced it. Successful inner results SHALL be visibly connected to their enclosing positional
-bindings, while a blocked inner path SHALL end before any enclosing binding or return that did not
-occur. The trace SHALL remain available as an ordered accessible text structure and MUST NOT rely
-on indentation, position, or color alone to communicate nesting.
+The Syntax Inspector SHALL provide terminating-recursion, inner-blocked, and evaluation-limit
+presets and SHALL render every activation's trace events beside the semantic expression and source
+provenance that produced them. Successful recursive results SHALL connect through their caller
+bindings and returns, while a limited path SHALL end before events that did not occur. The trace
+SHALL remain available as an ordered accessible text structure and MUST NOT rely on indentation,
+position, or color alone to communicate nesting.
 
-#### Scenario: Inspect a completed nested evaluation
-- **WHEN** a developer evaluates the `identity(identity(42))` preset
-- **THEN** the inspector displays result `42` and distinguishes the inner call, inner return, outer binding, outer return, and their two call-site spans in trace order
+#### Scenario: Inspect completed recursion
+- **WHEN** a developer evaluates a recursive countdown that reaches its base case
+- **THEN** the inspector distinguishes each activation, binding, base-case return, and unwound return in trace order
 
-#### Scenario: Inspect an inner blocked outcome
-- **WHEN** a nested argument blocks because its target, contract, value, or cycle is unavailable
-- **THEN** the inspector shows the exact inner reason and partial trace without displaying an enclosing binding or completed result
+#### Scenario: Inspect a call-depth limit
+- **WHEN** recursive evaluation exhausts its configured call-depth limit
+- **THEN** the inspector shows the configured limit, complete active call identities, stopping span, and partial trace without a completed result
 
-#### Scenario: Read nested trace order without graphics
-- **WHEN** the nested trace is consumed through its accessible text representation
-- **THEN** call depth, event order, values, identities, states, and source ranges communicate the same outcome as the visual trace
+#### Scenario: Read recursive trace order without graphics
+- **WHEN** the recursive trace is consumed through its accessible text representation
+- **THEN** activation depth, event order, values, identities, states, and source ranges communicate the same outcome as the visual trace
 
 ### Requirement: Inspect the unified diagnostic stream
 The inspector SHALL present the compilation's diagnostics from the unified model: each diagnostic

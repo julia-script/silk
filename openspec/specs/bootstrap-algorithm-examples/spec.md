@@ -23,7 +23,9 @@ An example SHALL be `executable` only when it passes analysis and its declared t
 
 ### Requirement: The suite has an executable baseline
 
-Game of Life, Sieve, matrix multiplication, and CRC-32 SHALL execute through evaluation and every supported backend whose host requirements they declare. Results or output SHALL match exactly. Quicksort and FFT MAY remain frontier only with precise current blockers.
+Game of Life, Sieve, matrix multiplication, quicksort, and CRC-32 SHALL execute through evaluation
+and every supported backend whose host requirements they declare. Results or output SHALL match
+exactly. FFT MAY remain frontier only with precise current blockers.
 
 #### Scenario: Run Game of Life
 
@@ -77,3 +79,14 @@ values MUST NOT satisfy this example contract.
 
 - **WHEN** CRC-32 processes the committed bytes `99 13 1d 00`
 - **THEN** evaluation, native execution, and direct WebAssembly return the committed checksum with no allocation
+
+### Requirement: Quicksort is an executable recursive algorithm
+
+The in-place quicksort example SHALL recursively partition and sort its committed signed integers
+through evaluation, native LLVM, and direct WebAssembly. It MUST NOT be rewritten as an iterative
+fixture or granted an algorithm-specific recursion exception.
+
+#### Scenario: Sort through recursive partitions
+
+- **WHEN** quicksort processes `[9, -3, 5, 1, 0, -8, 7, 2]`
+- **THEN** all three engines return the fingerprint for `[-8, -3, 0, 1, 2, 5, 7, 9]`

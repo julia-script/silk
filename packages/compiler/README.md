@@ -226,7 +226,9 @@ from left to right before their values are bound to the enclosing target. The tr
 enclosing call first, then every nested argument event, then the enclosing bindings and target body.
 An inner blocked reason propagates unchanged without claiming enclosing bindings or returns that did
 not happen. Unreachable broken declarations do not block a valid entry path, and direct, mutual, or
-nested-argument recursion becomes a bounded `RecursiveCycle` outcome.
+nested-argument recursion runs through independent activation frames. Evaluation is bounded by
+configurable operation and active-frame limits reported as structured `EvaluationLimit` data;
+emitted native and WebAssembly recursion has no evaluator-only budget.
 
 This bootstrap evaluator proves that the frontend facts compose into one source-to-result vertical
 slice. It is not lowering, bytecode, LLVM, native compilation, a process runtime, a general

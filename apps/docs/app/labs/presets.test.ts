@@ -80,6 +80,27 @@ const acceptanceContext = (
 })
 
 describe('preset catalog', () => {
+  it('shows both completed recursion and a configured call-depth stop', () => {
+    const completed = presets.find(
+      (preset) => preset.label === 'ok · Completed runtime recursion',
+    )
+    const limited = presets.find(
+      (preset) => preset.label === 'trap · Call-depth evaluation limit',
+    )
+    expect(completed).toBeDefined()
+    expect(limited).toBeDefined()
+    if (completed === undefined || limited === undefined) return
+
+    expect(Analysis.evaluate(snapshotOf(completed))._tag).toBe('Completed')
+    const outcome = Analysis.evaluate(snapshotOf(limited), limited.evaluation)
+    expect(outcome._tag).toBe('Blocked')
+    if (outcome._tag !== 'Blocked') return
+    expect(outcome.reason._tag).toBe('EvaluationLimit')
+    if (outcome.reason._tag !== 'EvaluationLimit') return
+    expect(outcome.reason.kind).toBe('CallDepth')
+    expect(outcome.reason.activeFrames).toHaveLength(4)
+  })
+
   it('has a unique label per preset, so the picker can key on it', () => {
     const labels = presets.map((preset) => preset.label)
     expect(new Set(labels).size).toBe(labels.length)
@@ -141,6 +162,7 @@ describe('preset catalog', () => {
     expect(groups).toEqual(
       new Set([
         'syntax',
+        'evaluation',
         'generics',
         'acceptance',
         'modules',

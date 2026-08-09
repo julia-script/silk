@@ -110,38 +110,44 @@ lowered program MUST NOT affect the outcome.
 - **WHEN** a reachable function's ownership verdict is a violation
 - **THEN** its lowered function is a generated trap and evaluation blocks there with the violation's provenance
 
-### Requirement: Recursive call cycles are bounded data
+### Requirement: Recursive calls execute in distinct activation frames
 
-Evaluation SHALL track the active call path by canonical function identity. Re-entering an active
-function SHALL stop evaluation with a recursive-cycle `Blocked` outcome containing the complete
-cycle in call order and the closing call's provenance. Evaluation MUST NOT recurse indefinitely,
-overflow the host stack, or define a language-wide recursion policy beyond this bootstrap
-interpreter.
+Evaluation SHALL permit direct and mutual recursive calls by creating one independent activation
+frame per invocation. Parameters, locals, borrows, cleanup, returns, and trace events MUST belong to
+the correct frame even when several active frames share one canonical function identity.
 
-#### Scenario: Block direct self recursion
+#### Scenario: Complete terminating recursion
 
-- **WHEN** `main` calls its own unique declaration
-- **THEN** evaluation stops with the cycle `main → main` and the self-call span
+- **WHEN** a recursive function reduces its input to a base case and returns through several active invocations
+- **THEN** evaluation completes with the same result and caller-visible mutations as native and WebAssembly execution
 
-#### Scenario: Block mutual recursion
+#### Scenario: Keep recursive mutable slices distinct
 
-- **WHEN** `main` calls `other` and `other` calls `main`
-- **THEN** evaluation stops with the ordered cycle `main → other → main`
+- **WHEN** quicksort recursively passes one mutable slice with different low and high bounds
+- **THEN** every activation observes its own scalar bounds while mutations remain visible through the shared slice
 
-#### Scenario: Block a cycle reached inside an argument
+### Requirement: Evaluation limits are deterministic blocked data
 
-- **WHEN** evaluating a nested argument call would re-enter an active function
-- **THEN** evaluation stops at that inner call with the complete active cycle and its exact call-site span
+Evaluation SHALL accept positive maximum-step and maximum-call-depth limits with stable defaults.
+Each executed MIR operation consumes one step and each active invocation consumes one depth unit.
+Exhaustion SHALL produce an `EvaluationLimit` blocked outcome naming `Steps` or `CallDepth`, the
+configured limit, the active function, the source span that attempted further work, and the complete
+active call identities. Evaluation MUST NOT depend on JavaScript stack overflow or wall-clock time.
 
-#### Scenario: Do not enter an enclosing target before its arguments
+#### Scenario: Bound direct non-termination
 
-- **WHEN** an enclosing call's nested argument blocks before producing a value
-- **THEN** the enclosing target is absent from the active path unless it was already active for another reason
+- **WHEN** a function recursively calls itself without reaching a base case
+- **THEN** evaluation blocks at the configured call-depth limit with a deterministic active call path
 
-#### Scenario: Repeat recursive evaluation
+#### Scenario: Bound an infinite loop
 
-- **WHEN** an equivalent recursive program is evaluated repeatedly
-- **THEN** its blocked reason, cycle identities, call-site provenance, and trace are identical
+- **WHEN** a reachable loop executes beyond the configured step limit
+- **THEN** evaluation blocks at the next operation with the `Steps` limit and exact operation span
+
+#### Scenario: Repeat a limited evaluation
+
+- **WHEN** an equivalent program is evaluated repeatedly under equal limits
+- **THEN** its blocked reason, active frames, source provenance, and trace are identical
 
 ### Requirement: Evaluation trace is deterministic data
 

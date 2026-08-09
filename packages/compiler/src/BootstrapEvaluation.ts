@@ -181,6 +181,8 @@ export type Value =
 /** Entered the resolved entry instance. */
 export interface EntryTraceEvent {
   readonly _tag: 'Entry'
+  readonly frame: number
+  readonly depth: number
   readonly function: DeclarationIndex.CanonicalId
   readonly instance: Instances.InstanceKey
   readonly span: SourceSpan.SourceSpan
@@ -189,6 +191,8 @@ export interface EntryTraceEvent {
 /** Executed one call operation after its argument locals were computed. */
 export interface CallTraceEvent {
   readonly _tag: 'Call'
+  readonly frame: number
+  readonly depth: number
   readonly caller: DeclarationIndex.CanonicalId
   readonly target: DeclarationIndex.CanonicalId
   readonly callerInstance: Instances.InstanceKey
@@ -199,6 +203,8 @@ export interface CallTraceEvent {
 /** Bound one computed argument value to its positional parameter local. */
 export interface BindingTraceEvent {
   readonly _tag: 'Binding'
+  readonly frame: number
+  readonly depth: number
   readonly target: DeclarationIndex.CanonicalId
   readonly targetInstance: Instances.InstanceKey
   readonly callSpan: SourceSpan.SourceSpan
@@ -212,6 +218,8 @@ export interface BindingTraceEvent {
 /** Returned one evaluated value from a lowered function. */
 export interface ReturnTraceEvent {
   readonly _tag: 'Return'
+  readonly frame: number
+  readonly depth: number
   readonly function: DeclarationIndex.CanonicalId
   readonly instance: Instances.InstanceKey
   readonly value: Value
@@ -279,6 +287,8 @@ export interface PlaceReadTraceEvent {
 
 export interface CleanupTraceEvent {
   readonly _tag: 'Cleanup'
+  readonly frame: number
+  readonly depth: number
   readonly function: DeclarationIndex.CanonicalId
   readonly local: number
   readonly members?: ReadonlyArray<Type.Nominal>
@@ -405,9 +415,13 @@ export type BlockedReason =
       readonly span: SourceSpan.SourceSpan
     }
   | {
-      readonly _tag: 'RecursiveCycle'
-      readonly cycle: ReadonlyArray<Instances.InstanceKey>
-      readonly closingCallSpan: SourceSpan.SourceSpan
+      readonly _tag: 'EvaluationLimit'
+      readonly kind: 'Steps' | 'CallDepth'
+      readonly limit: number
+      readonly count: number
+      readonly function: DeclarationIndex.CanonicalId
+      readonly span: SourceSpan.SourceSpan
+      readonly activeFrames: ReadonlyArray<ActiveFrame>
     }
   | {
       readonly _tag: 'InvalidCallableReuse'
@@ -543,15 +557,6 @@ const floatingBinary = (
 const blockedStep = (reason: BlockedReason): Step =>
   Object.freeze({ _tag: 'Blocked', reason: Object.freeze(reason) })
 
-const sameInstance = (left: Instances.InstanceKey, right: Instances.InstanceKey): boolean =>
-  left.declaration.module === right.declaration.module &&
-  left.declaration.name === right.declaration.name &&
-  left.typeArguments.length === right.typeArguments.length &&
-  left.typeArguments.every((argument, ordinal) => {
-    const candidate = right.typeArguments.at(ordinal)
-    return candidate !== undefined && Type.equals(argument, candidate)
-  })
-
 const functionFor = (
   program: Mir.Module,
   id: DeclarationIndex.CanonicalId,
@@ -568,28 +573,86 @@ interface EvaluationState {
   nextFrame: number
   nextAllocation: number
   nextCallable: number
+  steps: number
+  readonly maxSteps: number
+  readonly maxCallDepth: number
+  activeFrames: ReadonlyArray<ActiveFrame>
   readonly cells: Map<string, LocalState>
   readonly allocations: Map<number, { active: boolean; readonly values: Map<string, Value> }>
   readonly callables: Map<number, { state: 'Available' | 'Running' | 'Consumed' | 'Released' }>
   readonly standardStreams?: StandardStreams.Provider
 }
 
+export interface ActiveFrame {
+  readonly frame: number
+  readonly depth: number
+  readonly function: DeclarationIndex.CanonicalId
+  readonly instance: Instances.InstanceKey
+}
+
+interface CallRequest {
+  readonly _tag: 'CallRequest'
+  readonly target: Mir.MirFunction
+  readonly arguments: ReadonlyArray<Value>
+  readonly span: SourceSpan.SourceSpan
+}
+
+interface ActivationRecord extends ActiveFrame {
+  readonly locals: Map<number, LocalState>
+  readonly cells: EvaluationState['cells']
+  continuation?: FunctionExecution
+  pendingCall?: CallRequest
+  cleanupState?: Ownership.CleanupPlan['_tag']
+}
+
+type FunctionExecution = Generator<CallRequest, Step, Step>
+type CleanupExecution = Generator<CallRequest, Step | undefined, Step>
+type OperationsExecution = Generator<CallRequest, Step | undefined, Step>
+
 const cellKey = (frame: number, cell: number): string => `${frame}:${cell}`
 
-function executeFunction(
+function* executeFunction(
   program: Mir.Module,
   fn: Mir.MirFunction,
-  argumentValues: ReadonlyArray<Value>,
-  active: ReadonlyArray<Instances.InstanceKey>,
+  activation: ActivationRecord,
   trace: Array<TraceEvent>,
   state: EvaluationState,
-): Step {
-  const frame = state.nextFrame
-  state.nextFrame += 1
-  const locals = new Map<number, LocalState>()
-  argumentValues.forEach((argument, ordinal) => {
-    locals.set(ordinal, { value: argument, fromCall: false })
-  })
+): FunctionExecution {
+  const frame = activation.frame
+  const locals = activation.locals
+
+  const callFunction = function* (
+    target: Mir.MirFunction,
+    arguments_: ReadonlyArray<Value>,
+    span: SourceSpan.SourceSpan,
+  ): FunctionExecution {
+    const request: CallRequest = Object.freeze({
+      _tag: 'CallRequest',
+      target,
+      arguments: arguments_,
+      span,
+    })
+    activation.pendingCall = request
+    const result: Step = yield request
+    delete activation.pendingCall
+    return result
+  }
+
+  const evaluationLimit = (
+    kind: 'Steps' | 'CallDepth',
+    limit: number,
+    count: number,
+    span: SourceSpan.SourceSpan,
+  ): Step =>
+    blockedStep({
+      _tag: 'EvaluationLimit',
+      kind,
+      limit,
+      count,
+      function: fn.id,
+      span,
+      activeFrames: Object.freeze([...state.activeFrames]),
+    })
 
   const read = (local: Mir.LocalId): LocalState => {
     const direct = state.cells.get(cellKey(frame, local.ordinal)) ??
@@ -673,12 +736,13 @@ function executeFunction(
    * exactly once. Returns a blocked step when a hook call blocks or unsafe code already
    * consumed a ticket this plan still owns.
    */
-  const releaseThroughPlan = (
+  const releaseThroughPlan = function* (
     cleanup: Ownership.CleanupPlan,
     owner: Value,
     provenance: Mir.Provenance,
     localOrdinal: number,
-  ): Step | undefined => {
+  ): CleanupExecution {
+    activation.cleanupState = cleanup._tag
     switch (cleanup._tag) {
       case 'NoCleanup':
       case 'ParameterCleanup':
@@ -753,7 +817,12 @@ function executeFunction(
         for (const slot of cleanup.slots) {
           const capture = owner.captures.find((candidate) => candidate.ordinal === slot.ordinal)
           if (capture === undefined) continue
-          const blocked = releaseThroughPlan(slot.cleanup, capture.value, provenance, localOrdinal)
+          const blocked = yield* releaseThroughPlan(
+            slot.cleanup,
+            capture.value,
+            provenance,
+            localOrdinal,
+          )
           if (blocked !== undefined) return blocked
         }
         return undefined
@@ -767,19 +836,13 @@ function executeFunction(
             span: provenance.span,
           })
         }
-        const cycleStart = active.findIndex((candidate) => sameInstance(candidate, target.instance))
-        if (cycleStart >= 0) {
-          return blockedStep({
-            _tag: 'RecursiveCycle',
-            cycle: Object.freeze([...active.slice(cycleStart), target.instance]),
-            closingCallSpan: provenance.span,
-          })
-        }
         const key = cellKey(frame, localOrdinal)
         state.cells.set(key, { value: owner, fromCall: false })
         trace.push(
           Object.freeze({
             _tag: 'Call',
+            frame: activation.frame,
+            depth: activation.depth,
             caller: fn.id,
             target: cleanup.hook,
             callerInstance: fn.instance,
@@ -792,17 +855,10 @@ function executeFunction(
           frame,
           cell: localOrdinal,
         })
-        const result = executeFunction(
-          program,
-          target,
-          [reference],
-          Object.freeze([...active, target.instance]),
-          trace,
-          state,
-        )
+        const result = yield* callFunction(target, [reference], provenance.span)
         if (result._tag === 'Blocked') return result
         const updated = state.cells.get(key)?.value ?? owner
-        return releaseThroughPlan(cleanup.inner, updated, provenance, localOrdinal)
+        return yield* releaseThroughPlan(cleanup.inner, updated, provenance, localOrdinal)
       }
       case 'StructCleanup': {
         if (owner._tag !== 'AggregateValue') return undefined
@@ -811,7 +867,12 @@ function executeFunction(
             (candidate) => candidate.field.ordinal === field.field.ordinal,
           )
           if (entry === undefined) continue
-          const blocked = releaseThroughPlan(field.cleanup, entry.value, provenance, localOrdinal)
+          const blocked = yield* releaseThroughPlan(
+            field.cleanup,
+            entry.value,
+            provenance,
+            localOrdinal,
+          )
           if (blocked !== undefined) return blocked
         }
         return undefined
@@ -819,7 +880,12 @@ function executeFunction(
       case 'ArrayCleanup': {
         if (owner._tag !== 'ArrayValue') return undefined
         for (const element of owner.elements) {
-          const blocked = releaseThroughPlan(cleanup.element, element, provenance, localOrdinal)
+          const blocked = yield* releaseThroughPlan(
+            cleanup.element,
+            element,
+            provenance,
+            localOrdinal,
+          )
           if (blocked !== undefined) return blocked
         }
         return undefined
@@ -831,7 +897,7 @@ function executeFunction(
         )
         return activeCase === undefined
           ? undefined
-          : releaseThroughPlan(activeCase.cleanup, owner.payload, provenance, localOrdinal)
+          : yield* releaseThroughPlan(activeCase.cleanup, owner.payload, provenance, localOrdinal)
       }
     }
   }
@@ -849,12 +915,12 @@ function executeFunction(
   )
   const checkedPlaces = new Map<ReadonlyArray<Mir.PlaceSelector>, ReadonlyArray<number>>()
 
-  const invokeCallableTarget = (
+  const invokeCallableTarget = function* (
     target: Hir.CallableTarget,
     typeArguments: ReadonlyArray<Type.Type>,
     arguments_: ReadonlyArray<Value>,
     span: SourceSpan.SourceSpan,
-  ): Step => {
+  ): FunctionExecution {
     if (target._tag === 'DeclarationCallableTarget') {
       const callee = functionFor(program, target.declaration, typeArguments)
       if (callee === undefined) {
@@ -863,6 +929,8 @@ function executeFunction(
       trace.push(
         Object.freeze({
           _tag: 'Call',
+          frame: activation.frame,
+          depth: activation.depth,
           caller: fn.id,
           target: target.declaration,
           callerInstance: fn.instance,
@@ -870,18 +938,12 @@ function executeFunction(
           span,
         }),
       )
-      const cycleStart = active.findIndex((candidate) => sameInstance(candidate, callee.instance))
-      if (cycleStart >= 0) {
-        return blockedStep({
-          _tag: 'RecursiveCycle',
-          cycle: Object.freeze([...active.slice(cycleStart), callee.instance]),
-          closingCallSpan: span,
-        })
-      }
       arguments_.forEach((argument, ordinal) => {
         trace.push(
           Object.freeze({
             _tag: 'Binding',
+            frame: state.nextFrame,
+            depth: activation.depth + 1,
             target: target.declaration,
             targetInstance: callee.instance,
             callSpan: span,
@@ -893,14 +955,7 @@ function executeFunction(
           }),
         )
       })
-      return executeFunction(
-        program,
-        callee,
-        arguments_,
-        Object.freeze([...active, callee.instance]),
-        trace,
-        state,
-      )
+      return yield* callFunction(callee, arguments_, span)
     }
 
     const operation = target.operation
@@ -1308,11 +1363,11 @@ function executeFunction(
     })
   }
 
-  const invokeCallableValue = (
+  const invokeCallableValue = function* (
     callable: CallableValue,
     supplied: ReadonlyArray<Value>,
     span: SourceSpan.SourceSpan,
-  ): Step => {
+  ): FunctionExecution {
     const callableState = state.callables.get(callable.ticket)
     if (callableState === undefined)
       throw new RangeError('Callable application referenced a missing evaluator identity')
@@ -1357,7 +1412,7 @@ function executeFunction(
         span,
       }),
     )
-    const result = invokeCallableTarget(
+    const result = yield* invokeCallableTarget(
       callable.target,
       callable.typeArguments,
       Object.freeze(
@@ -1653,8 +1708,14 @@ function executeFunction(
       continue
     }
 
-    const executeOperations = (operations: ReadonlyArray<Mir.Operation>): Step | undefined => {
+    const executeOperations = function* (
+      operations: ReadonlyArray<Mir.Operation>,
+    ): OperationsExecution {
       for (const operation of operations) {
+        if (state.steps >= state.maxSteps) {
+          return evaluationLimit('Steps', state.maxSteps, state.steps, operation.provenance.span)
+        }
+        state.steps += 1
         switch (operation._tag) {
           case 'Match': {
             const scrutinee = read(operation.scrutinee).value
@@ -1727,7 +1788,7 @@ function executeFunction(
                 )
               }
               if (arm.guard !== undefined) {
-                const guardStep = executeOperations(arm.guard.operations)
+                const guardStep = yield* executeOperations(arm.guard.operations)
                 if (guardStep !== undefined) return guardStep
                 if (readI32(arm.guard.result).value === 0) continue
               }
@@ -1742,7 +1803,7 @@ function executeFunction(
                   span: arm.provenance.span,
                 }),
               )
-              const selectedStep = executeOperations(arm.selected.operations)
+              const selectedStep = yield* executeOperations(arm.selected.operations)
               if (selectedStep !== undefined) return selectedStep
               for (const cleanup of arm.selected.cleanup) {
                 const owner = selectFieldPath(payload, cleanup.path)
@@ -2337,7 +2398,7 @@ function executeFunction(
                 span: operation.provenance.span,
               })
             }
-            const blocked = releaseThroughPlan(
+            const blocked = yield* releaseThroughPlan(
               operation.cleanup,
               selected,
               operation.provenance,
@@ -2964,7 +3025,7 @@ function executeFunction(
           }
           case 'Drop': {
             const dropped = read(operation.local).value
-            const blocked = releaseThroughPlan(
+            const blocked = yield* releaseThroughPlan(
               operation.cleanup,
               dropped,
               operation.provenance,
@@ -2975,6 +3036,8 @@ function executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'Cleanup',
+                frame: activation.frame,
+                depth: activation.depth,
                 function: fn.id,
                 local: operation.local.ordinal,
                 ...(members.length === 0 ? {} : { members }),
@@ -3109,7 +3172,7 @@ function executeFunction(
                 span: operation.provenance.span,
               }),
             )
-            const result = invokeCallableTarget(
+            const result = yield* invokeCallableTarget(
               target,
               stored?.typeArguments ?? operation.typeArguments,
               arguments_,
@@ -3199,6 +3262,8 @@ function executeFunction(
               trace.push(
                 Object.freeze({
                   _tag: 'Call',
+                  frame: activation.frame,
+                  depth: activation.depth,
                   caller: fn.id,
                   target: protectedTargetId,
                   callerInstance: fn.instance,
@@ -3210,6 +3275,8 @@ function executeFunction(
                 trace.push(
                   Object.freeze({
                     _tag: 'Binding',
+                    frame: state.nextFrame,
+                    depth: activation.depth + 1,
                     target: protectedTargetId,
                     targetInstance: protectedTarget.instance,
                     callSpan: operation.provenance.span,
@@ -3225,13 +3292,10 @@ function executeFunction(
             const protectedValue =
               protectedTarget === undefined
                 ? read(operation.protectedValue).value
-                : executeFunction(
-                    program,
+                : yield* callFunction(
                     protectedTarget,
                     protectedArguments.map((argument) => argument.value),
-                    Object.freeze([...active, protectedTarget.instance]),
-                    trace,
-                    state,
+                    operation.provenance.span,
                   )
             if (protectedValue._tag === 'Blocked') return protectedValue
             const protectedEffect =
@@ -3250,16 +3314,13 @@ function executeFunction(
                 target: operation.protectedRunner,
                 span: operation.provenance.span,
               })
-            const protectedExecution = executeFunction(
-              program,
+            const protectedExecution = yield* callFunction(
               protectedRunner,
               Object.freeze([
                 ...protectedEffect.captures,
                 ...operation.protectedRunnerArguments.map((argument) => read(argument).value),
               ]),
-              Object.freeze([...active, protectedRunner.instance]),
-              trace,
-              state,
+              operation.provenance.span,
             )
             if (protectedExecution._tag === 'Blocked') return protectedExecution
             if (protectedExecution.value._tag !== 'EffectOutcomeValue')
@@ -3278,7 +3339,7 @@ function executeFunction(
             const handlerCallable = read(operation.handlerCallable).value
             if (handlerCallable._tag !== 'CallableValue')
               throw new RangeError('MIR catch handler lost its callable environment')
-            const handlerResult = invokeCallableValue(
+            const handlerResult = yield* invokeCallableValue(
               handlerCallable,
               Object.freeze([protectedOutcome.payload]),
               operation.provenance.span,
@@ -3298,13 +3359,10 @@ function executeFunction(
                 target: operation.handlerRunner,
                 span: operation.provenance.span,
               })
-            const handlerExecution = executeFunction(
-              program,
+            const handlerExecution = yield* callFunction(
               handlerRunner,
               handlerResult.value.captures,
-              Object.freeze([...active, handlerRunner.instance]),
-              trace,
-              state,
+              operation.provenance.span,
             )
             if (handlerExecution._tag === 'Blocked') return handlerExecution
             if (
@@ -3344,13 +3402,10 @@ function executeFunction(
             const protectedValue =
               protectedTarget === undefined
                 ? read(operation.protectedValue).value
-                : executeFunction(
-                    program,
+                : yield* callFunction(
                     protectedTarget,
                     protectedArguments.map((argument) => argument.value),
-                    Object.freeze([...active, protectedTarget.instance]),
-                    trace,
-                    state,
+                    operation.provenance.span,
                   )
             if ('_tag' in protectedValue && protectedValue._tag === 'Blocked') return protectedValue
             const effectValue =
@@ -3368,6 +3423,8 @@ function executeFunction(
               trace.push(
                 Object.freeze({
                   _tag: 'Call',
+                  frame: activation.frame,
+                  depth: activation.depth,
                   caller: fn.id,
                   target: operation.protectedRunner,
                   callerInstance: fn.instance,
@@ -3375,13 +3432,10 @@ function executeFunction(
                   span: operation.provenance.span,
                 }),
               )
-              const execution = executeFunction(
-                program,
+              const execution = yield* callFunction(
                 protectedRunner,
                 effectValue.captures,
-                Object.freeze([...active, protectedRunner.instance]),
-                trace,
-                state,
+                operation.provenance.span,
               )
               if (execution._tag === 'Blocked') return execution
               if (execution.value._tag !== 'EffectOutcomeValue')
@@ -3399,7 +3453,7 @@ function executeFunction(
             const mapping = operation.tagMappings.find((candidate) => candidate.source === last.tag)
             if (mapping === undefined)
               throw new RangeError('MIR retry has no canonical failure-tag mapping')
-            const released = executeOperations(operation.releases ?? [])
+            const released = yield* executeOperations(operation.releases ?? [])
             if (released !== undefined) return released
             const propagated: EffectOutcomeValue = Object.freeze({
               _tag: 'EffectOutcomeValue',
@@ -3416,6 +3470,8 @@ function executeFunction(
               }),
               Object.freeze({
                 _tag: 'Return',
+                frame: activation.frame,
+                depth: activation.depth,
                 function: fn.id,
                 instance: fn.instance,
                 value: propagated,
@@ -3435,6 +3491,8 @@ function executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'Call',
+                frame: activation.frame,
+                depth: activation.depth,
                 caller: fn.id,
                 target: operation.target,
                 callerInstance: fn.instance,
@@ -3447,6 +3505,8 @@ function executeFunction(
               trace.push(
                 Object.freeze({
                   _tag: 'Binding',
+                  frame: state.nextFrame,
+                  depth: activation.depth + 1,
                   target: operation.target,
                   targetInstance: target.instance,
                   callSpan: operation.provenance.span,
@@ -3458,13 +3518,10 @@ function executeFunction(
                 }),
               )
             })
-            const result = executeFunction(
-              program,
+            const result = yield* callFunction(
               target,
               arguments_.map((argument) => argument.value),
-              Object.freeze([...active, target.instance]),
-              trace,
-              state,
+              operation.provenance.span,
             )
             if (result._tag === 'Blocked') return result
             if (result.value._tag !== 'EffectOutcomeValue')
@@ -3480,7 +3537,7 @@ function executeFunction(
             )
             if (mapping === undefined)
               throw new RangeError('MIR propagated effect has no canonical failure-tag mapping')
-            const released = executeOperations(operation.releases ?? [])
+            const released = yield* executeOperations(operation.releases ?? [])
             if (released !== undefined) return released
             const propagated: EffectOutcomeValue = Object.freeze({
               _tag: 'EffectOutcomeValue',
@@ -3497,6 +3554,8 @@ function executeFunction(
               }),
               Object.freeze({
                 _tag: 'Return',
+                frame: activation.frame,
+                depth: activation.depth,
                 function: fn.id,
                 instance: fn.instance,
                 value: propagated,
@@ -3519,6 +3578,8 @@ function executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'Call',
+                frame: activation.frame,
+                depth: activation.depth,
                 caller: fn.id,
                 target: operation.runner,
                 callerInstance: fn.instance,
@@ -3526,16 +3587,13 @@ function executeFunction(
                 span: operation.provenance.span,
               }),
             )
-            const result = executeFunction(
-              program,
+            const result = yield* callFunction(
               target,
               Object.freeze([
                 ...effect.captures,
                 ...operation.arguments.map((argument) => read(argument).value),
               ]),
-              Object.freeze([...active, target.instance]),
-              trace,
-              state,
+              operation.provenance.span,
             )
             if (result._tag === 'Blocked') return result
             if (result.value._tag !== 'EffectOutcomeValue')
@@ -3558,7 +3616,7 @@ function executeFunction(
             )
             if (mapping === undefined)
               throw new RangeError('MIR Effect runner has no failure-tag mapping')
-            const released = executeOperations(operation.releases ?? [])
+            const released = yield* executeOperations(operation.releases ?? [])
             if (released !== undefined) return released
             const propagated: EffectOutcomeValue = Object.freeze({
               _tag: 'EffectOutcomeValue',
@@ -3580,6 +3638,8 @@ function executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'Call',
+                frame: activation.frame,
+                depth: activation.depth,
                 caller: fn.id,
                 target: operation.target,
                 callerInstance: fn.instance,
@@ -3587,14 +3647,7 @@ function executeFunction(
                 span: operation.provenance.span,
               }),
             )
-            const result = executeFunction(
-              program,
-              target,
-              [],
-              Object.freeze([...active, target.instance]),
-              trace,
-              state,
-            )
+            const result = yield* callFunction(target, [], operation.provenance.span)
             if (result._tag === 'Blocked') return result
             if (result.value._tag !== 'EffectValue')
               throw new RangeError('MIR effect entry constructor returned a non-Effect value')
@@ -3603,6 +3656,8 @@ function executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'Call',
+                frame: activation.frame,
+                depth: activation.depth,
                 caller: fn.id,
                 target: operation.runner,
                 callerInstance: fn.instance,
@@ -3610,13 +3665,10 @@ function executeFunction(
                 span: operation.provenance.span,
               }),
             )
-            const execution = executeFunction(
-              program,
+            const execution = yield* callFunction(
               runner,
               effect.captures,
-              Object.freeze([...active, runner.instance]),
-              trace,
-              state,
+              operation.provenance.span,
             )
             if (execution._tag === 'Blocked') return execution
             if (execution.value._tag !== 'EffectOutcomeValue')
@@ -3638,7 +3690,7 @@ function executeFunction(
                 span: operation.provenance.span,
               })
             write(failure.payload, { value: effectOutcome.payload, fromCall: true })
-            const released = releaseThroughPlan(
+            const released = yield* releaseThroughPlan(
               failure.cleanup,
               effectOutcome.payload,
               operation.provenance,
@@ -3668,6 +3720,8 @@ function executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'Call',
+                frame: activation.frame,
+                depth: activation.depth,
                 caller: fn.id,
                 target: operation.target,
                 callerInstance: fn.instance,
@@ -3675,39 +3729,28 @@ function executeFunction(
                 span: operation.provenance.span,
               }),
             )
-            const cycleStart = active.findIndex((candidate) =>
-              sameInstance(candidate, target.instance),
-            )
-            if (cycleStart >= 0) {
-              return blockedStep({
-                _tag: 'RecursiveCycle',
-                cycle: Object.freeze([...active.slice(cycleStart), target.instance]),
-                closingCallSpan: operation.provenance.span,
-              })
-            }
             const argumentStates = operation.arguments.map((argument) => read(argument))
-            argumentStates.forEach((state, ordinal) => {
+            argumentStates.forEach((argumentState, ordinal) => {
               trace.push(
                 Object.freeze({
                   _tag: 'Binding',
+                  frame: state.nextFrame,
+                  depth: activation.depth + 1,
                   target: operation.target,
                   targetInstance: target.instance,
                   callSpan: operation.provenance.span,
                   argumentOrdinal: ordinal,
                   parameterOrdinal: ordinal,
-                  value: state.value,
-                  fromCall: state.fromCall,
+                  value: argumentState.value,
+                  fromCall: argumentState.fromCall,
                   span: operation.provenance.span,
                 }),
               )
             })
-            const result = executeFunction(
-              program,
+            const result = yield* callFunction(
               target,
               argumentStates.map((state) => state.value),
-              Object.freeze([...active, target.instance]),
-              trace,
-              state,
+              operation.provenance.span,
             )
             if (result._tag === 'Blocked') return result
             write(operation.destination, { value: result.value, fromCall: true })
@@ -3718,7 +3761,7 @@ function executeFunction(
       return undefined
     }
     const operations = region._tag === 'OperationRegion' ? region.operations : region.releases
-    const operationStep = executeOperations(operations)
+    const operationStep = yield* executeOperations(operations)
     if (operationStep !== undefined) return operationStep
     const outcome = region.outcome
     switch (outcome._tag) {
@@ -3727,6 +3770,8 @@ function executeFunction(
         trace.push(
           Object.freeze({
             _tag: 'Return',
+            frame: activation.frame,
+            depth: activation.depth,
             function: fn.id,
             instance: fn.instance,
             value: result.value,
@@ -3814,9 +3859,135 @@ const firstFunctionSpan = (program: Mir.Module): SourceSpan.SourceSpan => {
   return first === undefined ? raiseNoSpan() : argumentSpanFallback(first)
 }
 
+const makeActivation = (
+  program: Mir.Module,
+  fn: Mir.MirFunction,
+  arguments_: ReadonlyArray<Value>,
+  depth: number,
+  trace: Array<TraceEvent>,
+  state: EvaluationState,
+): ActivationRecord => {
+  const frame = state.nextFrame
+  state.nextFrame += 1
+  const locals = new Map<number, LocalState>()
+  arguments_.forEach((argument, ordinal) => {
+    locals.set(ordinal, { value: argument, fromCall: false })
+  })
+  const activation: ActivationRecord = {
+    frame,
+    depth,
+    function: fn.id,
+    instance: fn.instance,
+    locals,
+    cells: state.cells,
+  }
+  trace.push(
+    Object.freeze({
+      _tag: 'Entry',
+      frame,
+      depth,
+      function: fn.id,
+      instance: fn.instance,
+      span: argumentSpanFallback(fn),
+    }),
+  )
+  activation.continuation = executeFunction(program, fn, activation, trace, state)
+  return activation
+}
+
+const activeFrameSnapshot = (stack: ReadonlyArray<ActivationRecord>): ReadonlyArray<ActiveFrame> =>
+  Object.freeze(
+    stack.map(({ frame, depth, function: function_, instance }) =>
+      Object.freeze({ frame, depth, function: function_, instance }),
+    ),
+  )
+
+const executeMachine = (
+  program: Mir.Module,
+  entry: Mir.MirFunction,
+  trace: Array<TraceEvent>,
+  state: EvaluationState,
+): Step => {
+  const stack: Array<ActivationRecord> = [makeActivation(program, entry, [], 1, trace, state)]
+  let resumed: Step | undefined
+  while (stack.length > 0) {
+    state.activeFrames = activeFrameSnapshot(stack)
+    const activation = stack.at(-1)
+    if (activation?.continuation === undefined) {
+      throw new RangeError('Evaluator activation lost its continuation')
+    }
+    const advanced =
+      resumed === undefined ? activation.continuation.next() : activation.continuation.next(resumed)
+    resumed = undefined
+    if (advanced.done) {
+      stack.pop()
+      if (advanced.value._tag === 'Blocked' || stack.length === 0) return advanced.value
+      resumed = advanced.value
+      continue
+    }
+    const request = advanced.value
+    if (stack.length >= state.maxCallDepth) {
+      for (;;) {
+        const attemptedBinding = trace.at(-1)
+        if (attemptedBinding?._tag !== 'Binding' || attemptedBinding.frame !== state.nextFrame)
+          break
+        trace.pop()
+      }
+      const attemptedCall = trace.at(-1)
+      if (
+        attemptedCall?._tag === 'Call' &&
+        attemptedCall.frame === activation.frame &&
+        attemptedCall.target.module === request.target.id.module &&
+        attemptedCall.target.name === request.target.id.name &&
+        attemptedCall.span.start === request.span.start &&
+        attemptedCall.span.end === request.span.end
+      ) {
+        trace.pop()
+      }
+      return blockedStep({
+        _tag: 'EvaluationLimit',
+        kind: 'CallDepth',
+        limit: state.maxCallDepth,
+        count: stack.length,
+        function: activation.function,
+        span: request.span,
+        activeFrames: activeFrameSnapshot(stack),
+      })
+    }
+    stack.push(
+      makeActivation(
+        program,
+        request.target,
+        request.arguments,
+        activation.depth + 1,
+        trace,
+        state,
+      ),
+    )
+  }
+  throw new RangeError('Evaluator activation machine stopped without a result')
+}
+
+export const defaultMaxSteps = 1_000_000
+export const defaultMaxCallDepth = 1_024
+
+const evaluationLimitOption = (
+  name: string,
+  value: number | undefined,
+  fallback: number,
+): number => {
+  const selected = value ?? fallback
+  if (!Number.isSafeInteger(selected) || selected <= 0) {
+    throw new RangeError(`${name} must be a positive safe integer`)
+  }
+  return selected
+}
+
 /** Explicit host services available to one deterministic evaluation. */
 export interface Options {
   readonly standardStreams?: StandardStreams.Provider
+  readonly maxSteps?: number
+  readonly maxCallDepth?: number
 }
 
 /** Executes the lowered program from the discovered entry, replaying MIR operations as a trace. */
@@ -3825,6 +3996,12 @@ export const evaluate = (
   program: Mir.Module,
   options: Options = {},
 ): Outcome => {
+  const maxSteps = evaluationLimitOption('maxSteps', options.maxSteps, defaultMaxSteps)
+  const maxCallDepth = evaluationLimitOption(
+    'maxCallDepth',
+    options.maxCallDepth,
+    defaultMaxCallDepth,
+  )
   if (discovery.entry._tag !== 'Resolved') {
     return Object.freeze({
       _tag: 'Blocked',
@@ -3873,18 +4050,14 @@ export const evaluate = (
   }
 
   const trace: Array<TraceEvent> = []
-  trace.push(
-    Object.freeze({
-      _tag: 'Entry',
-      function: entry,
-      instance: fn.instance,
-      span: argumentSpanFallback(fn),
-    }),
-  )
-  const result = executeFunction(program, fn, [], Object.freeze([fn.instance]), trace, {
+  const result = executeMachine(program, fn, trace, {
     nextFrame: 0,
     nextAllocation: 0,
     nextCallable: 0,
+    steps: 0,
+    maxSteps,
+    maxCallDepth,
+    activeFrames: Object.freeze([]),
     cells: new Map(),
     allocations: new Map(),
     callables: new Map(),

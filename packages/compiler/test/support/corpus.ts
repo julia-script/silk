@@ -11,7 +11,6 @@ export interface CorpusProgram {
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
     | { readonly _tag: 'Trap' }
-    | { readonly _tag: 'RecursiveCycle'; readonly cycle: ReadonlyArray<string> }
     | { readonly _tag: 'UnavailableEntry'; readonly reason: string }
 }
 
@@ -66,11 +65,37 @@ pub fn main() -> i32 {
   },
   {
     name: 'same-specialization-recursion',
-    source: `fn recurse<T>(value: T) -> i32 {
-  if false { return recurse<T>(move value) }
+    source: `fn recurse<T>(value: T, remaining: i32) -> i32 {
+  if remaining > 0 { return recurse<T>(move value, remaining - 1) }
   return 42
 }
-pub fn main() -> i32 { return recurse<i32>(1) }`,
+pub fn main() -> i32 { return recurse<i32>(1, 4) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'recursive-aggregate-return',
+    source: `struct Pair { left: i32 right: i32 }
+fn build(remaining: i32) -> Pair {
+  if remaining == 0 { return Pair { left: 40, right: 2 } }
+  return build(remaining - 1)
+}
+pub fn main() -> i32 {
+  let pair = build(4)
+  return pair.left + pair.right
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'recursive-mutable-slice',
+    source: `fn fill(values: &mut [i32], index: usize) -> i32 {
+  if index == 4 { return values[0] + values[1] + values[2] + values[3] }
+  values[index] = usize.toI32(index) + 9
+  return fill(&mut values, index + 1)
+}
+pub fn main() -> i32 {
+  let mut values = [0, 0, 0, 0]
+  return fill(&mut values, 0)
+}`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -81,14 +106,22 @@ pub fn answer() -> i32 { return 42 }`,
   },
   {
     name: 'direct-recursion',
-    source: 'pub fn main() -> i32 { return main() }',
-    expected: { _tag: 'RecursiveCycle', cycle: ['main', 'main'] },
+    source: `fn countdown(value: i32) -> i32 {
+  if value == 0 { return 42 }
+  return countdown(value - 1)
+}
+pub fn main() -> i32 { return countdown(4) }`,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'mutual-recursion',
-    source: `pub fn main() -> i32 { return other() }
-pub fn other() -> i32 { return main() }`,
-    expected: { _tag: 'RecursiveCycle', cycle: ['main', 'other', 'main'] },
+    source: `fn even(value: i32) -> i32 {
+  if value == 0 { return 42 }
+  return odd(value - 1)
+}
+fn odd(value: i32) -> i32 { return even(value - 1) }
+pub fn main() -> i32 { return odd(5) }`,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'unknown-call-trap',
