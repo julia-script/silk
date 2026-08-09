@@ -596,8 +596,8 @@ it.effect('rejects residual open MIR and keeps specialization symbols injective'
       })
     }
     assert.notStrictEqual(
-      Backend.symbolFor(collision('a/b'), 1),
-      Backend.symbolFor(collision('a_b'), 1),
+      Backend.symbolFor(collision('a/b'), fn.instance),
+      Backend.symbolFor(collision('a_b'), fn.instance),
     )
   }),
 )

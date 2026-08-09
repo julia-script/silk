@@ -27,6 +27,7 @@ it('reports broken graphs deterministically as data', () => {
   const broken: Mir.Module = {
     _tag: 'MirModule',
     module: 'sample://broken.silk',
+    entry: straight?.entry ?? raise('expected the sample entry'),
     layout: straight?.layout ?? raise('expected the sample layout'),
     functions: [
       { ...fn, entry: { _tag: 'Region', ordinal: 9 } },

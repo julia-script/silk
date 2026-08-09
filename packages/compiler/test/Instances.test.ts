@@ -113,6 +113,73 @@ pub fn main() -> I32 { return 42 }`),
   }),
 )
 
+it.effect('resolves closed reportable effect entries and rejects invalid effect contracts', () =>
+  Effect.gen(function* () {
+    const resolved = Analysis.instancesOf(
+      yield* snapshot(`struct SomeError { code: I32 }
+impl Report for SomeError {}
+pub effect fn main() -> Unit ! SomeError { fail SomeError { code: 1 } }`),
+    )
+    assert.strictEqual(resolved.entry._tag, 'Resolved')
+    if (resolved.entry._tag === 'Resolved') {
+      assert.strictEqual(resolved.entry.kind, 'Effect')
+      if (resolved.entry.kind === 'Effect') {
+        assert.deepEqual(resolved.entry.failures, [
+          {
+            type: Type.nominal('golden/program', 'SomeError'),
+            report: 'golden/program.SomeError',
+          },
+        ])
+      }
+    }
+
+    const invalidResult = Analysis.instancesOf(
+      yield* snapshot('pub effect fn main() -> I32 { return 0 }'),
+    )
+    const requirements = Analysis.instancesOf(
+      yield* snapshot('pub effect fn main() -> Unit ? &mut Allocator { return Unit.make() }'),
+    )
+    const unreportable = Analysis.instancesOf(
+      yield* snapshot(`struct SomeError { code: I32 }
+pub effect fn main() -> Unit ! SomeError { fail SomeError { code: 1 } }`),
+    )
+    assert.deepEqual(invalidResult.entry, {
+      _tag: 'Unavailable',
+      reason: 'InvalidEffectEntryResult',
+    })
+    assert.deepEqual(requirements.entry, {
+      _tag: 'Unavailable',
+      reason: 'EffectEntryRequirements',
+    })
+    assert.deepEqual(unreportable.entry, {
+      _tag: 'Unavailable',
+      reason: 'UnreportableEntryFailure',
+    })
+  }),
+)
+
+it.effect('discovers cleanup hooks owned by effect-entry failures', () =>
+  Effect.gen(function* () {
+    const discovery = Analysis.instancesOf(
+      yield* snapshot(`struct SomeError { storage: RawBuffer<I32> }
+impl Report for SomeError {}
+impl Drop for SomeError {
+  fn drop(self: &mut SomeError) -> Unit { return Unit.make() }
+}
+fn makeError() -> SomeError { return makeError() }
+pub effect fn main() -> Unit ! SomeError {
+  let error = makeError()
+  fail move error
+}`),
+    )
+    assert.strictEqual(discovery.entry._tag, 'Resolved')
+    assert.deepEqual(
+      discovery.instances.map((instance) => instance.key.declaration.name),
+      ['main', 'makeError', 'drop@impl#1'],
+    )
+  }),
+)
+
 it.effect('lowers discovered instances deterministically to verifier-clean MIR', () =>
   Effect.gen(function* () {
     const first = Mir.encode(Analysis.loweredMir(yield* snapshot(nestedSource)))

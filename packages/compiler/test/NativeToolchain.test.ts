@@ -77,6 +77,18 @@ it('plans fixed profile arguments and nothing else varies', () => {
   ])
 })
 
+it('generates effect-reporting shims from byte arrays with closed status handling', () => {
+  const source = ToolchainPlan.shimSource({
+    _tag: 'EffectReports',
+    reports: ['module.Error"\\name'],
+  })
+  const expected = Array.from(new TextEncoder().encode('Error: module.Error"\\name\n')).join(', ')
+  assert.include(source, `{ ${expected} }`)
+  assert.notInclude(source, 'Error: module.Error"\\name')
+  assert.include(source, 'if (written <= 0) return 0;')
+  assert.include(source, 'default:\n      return 2;')
+})
+
 it('plans every native profile for each canonical native target', () => {
   for (const target of Target.native) {
     const object = ToolchainPlan.objectCommand(clang, target, 'release', 'in.bc', 'out.o')
@@ -258,7 +270,7 @@ it.effect('links the shim with the program and the executable exits with the I32
     const artifact = yield* artifactFor(target, 'release')
     NativeToolchain.withBuildScope('link-run', (scope) => {
       const object = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
-      const shim = NativeToolchain.compileShim(toolchain, scope, target)
+      const shim = NativeToolchain.compileShim(toolchain, scope, target, artifact.termination)
       assert.strictEqual(object._tag, 'ObjectArtifact')
       assert.strictEqual(shim._tag, 'ObjectArtifact')
       if (object._tag !== 'ObjectArtifact' || shim._tag !== 'ObjectArtifact') return

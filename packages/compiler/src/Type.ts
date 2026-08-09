@@ -121,6 +121,8 @@ export const allocator: Nominal = nominal('silk/core', 'Allocator')
 export const allocation: Nominal = nominal('silk/core', 'Allocation')
 /** Compiler-sealed cleanup capability used only by restricted impl declarations. */
 export const dropCapability: Nominal = nominal('silk/core', 'Drop')
+/** Compiler-sealed marker authorizing a canonical terminal failure report. */
+export const reportCapability: Nominal = nominal('silk/core', 'Report')
 /** The nominal system-backed implementation of the Allocator capability. */
 export const systemAllocator: Nominal = nominal('silk/core', 'SystemAllocator')
 /** The canonical empty success value used by effect-free cleanup operations. */
@@ -162,6 +164,7 @@ export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [allocator.name, allocator],
   [allocation.name, allocation],
   [dropCapability.name, dropCapability],
+  [reportCapability.name, reportCapability],
   [systemAllocator.name, systemAllocator],
   [unit.name, unit],
   ['RawBuffer', nominal('silk/core', 'RawBuffer')],

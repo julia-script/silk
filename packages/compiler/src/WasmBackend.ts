@@ -92,9 +92,16 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
               operation._tag === 'RetryEffect'
             ? (operation.releases ?? [])
             : []
-      return dropped.flatMap((release) =>
-        planHasHook(release.cleanup) ? [release.local.ordinal] : [],
-      )
+      return [
+        ...dropped.flatMap((release) =>
+          planHasHook(release.cleanup) ? [release.local.ordinal] : [],
+        ),
+        ...(operation._tag === 'CloseEffectEntry'
+          ? operation.failures.flatMap((failure) =>
+              planHasHook(failure.cleanup) ? [failure.payload.ordinal] : [],
+            )
+          : []),
+      ]
     }),
   ])
   const roots = new Map<number, FrameRoot>()
@@ -1776,6 +1783,49 @@ const emitOperation = (
         Instr.ifElse(Instr.emptyBlockType, success, failure),
       ]
     }
+    case 'CloseEffectEntry': {
+      const outcomeSlots = slots(operation.outcome)
+      const tag = outcomeSlots.at(0)
+      const destination = scalar(operation.destination)
+      if (tag === undefined) throw new RangeError('Wasm effect entry lost its outcome tag')
+      const failureBranch = (ordinal: number): ReadonlyArray<Instr.Instr> => {
+        const failure = operation.failures.at(ordinal)
+        if (failure === undefined) return [Instr.op('unreachable')]
+        const payload = slots(failure.payload)
+        const selected = outcomeSlots.slice(1, 1 + payload.length)
+        if (selected.length !== payload.length)
+          throw new RangeError('Wasm effect entry failure payload shape is inconsistent')
+        return [
+          Instr.localGet(tag),
+          Instr.i32Const(failure.tag),
+          Instr.op('i32.eq'),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            [
+              ...copy(selected, payload),
+              ...hookReleaseInstructions(failure.cleanup, failure.payload),
+              Instr.i32Const(failure.tag),
+              Instr.localSet(destination),
+            ],
+            failureBranch(ordinal + 1),
+          ),
+        ]
+      }
+      return [
+        Instr.call(resolve(operation.target, operation.typeArguments)),
+        ...[...slots(operation.effect)].reverse().map((slot) => Instr.localSet(slot)),
+        ...slots(operation.effect).map((slot) => Instr.localGet(slot)),
+        Instr.call(resolve(operation.runner, operation.typeArguments)),
+        ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
+        Instr.localGet(tag),
+        Instr.op('i32.eqz'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          [Instr.i32Const(0), Instr.localSet(destination)],
+          failureBranch(0),
+        ),
+      ]
+    }
     case 'Call':
       return [
         ...operation.arguments.flatMap((argument) =>
@@ -2257,7 +2307,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       readonly symbol: string
       readonly handle: FuncActor.Func
     }> = []
-    for (const [ordinal, fn] of program.functions.entries()) {
+    for (const fn of program.functions) {
       const lanesFor = (type: Mir.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
         if (type._tag === 'EffectBorrow')
           return Object.freeze([
@@ -2290,7 +2340,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
               .flatMap((type) => lanesFor(type).map(() => i32)),
         lanesFor(fn.result).map(() => i32),
       )
-      const symbol = symbolFor(fn, ordinal)
+      const symbol = symbolFor(fn, Mir.machineEntry(program))
       declared.push({
         fn,
         symbol,
@@ -2472,6 +2522,7 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
       module: program.module,
       target: program.layout.target,
       symbols: Object.freeze(output.symbols),
+      termination: Backend.terminationOf(program),
       control: controlProvenance(program),
       bytes: output.bitcode,
       wat: output.ir,

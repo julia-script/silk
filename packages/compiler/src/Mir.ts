@@ -489,6 +489,27 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Runs a closed application effect and converts its owned outcome to a machine status. */
+      readonly _tag: 'CloseEffectEntry'
+      readonly destination: LocalId
+      readonly effect: LocalId
+      readonly outcome: LocalId
+      readonly target: DeclarationIndex.CanonicalId
+      readonly runner: DeclarationIndex.CanonicalId
+      readonly typeArguments: ReadonlyArray<SilkType.Type>
+      readonly effectType: Extract<Type, { readonly _tag: 'EffectValue' }>
+      readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly failures: ReadonlyArray<{
+        readonly tag: number
+        readonly type: SilkType.Nominal
+        readonly report: string
+        readonly payload: LocalId
+        readonly cleanup: Ownership.CleanupPlan
+      }>
+      readonly type: Extract<Type, { readonly _tag: 'I32' }>
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'Construct'
       readonly destination: LocalId
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
@@ -666,11 +687,41 @@ export interface MirFunction {
   readonly regions: ReadonlyArray<Region>
 }
 
+export type Entry =
+  | {
+      readonly _tag: 'UnavailableEntry'
+      readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
+    }
+  | {
+      readonly _tag: 'OrdinaryEntry'
+      readonly target: Instances.InstanceKey
+      readonly machine: Instances.InstanceKey
+    }
+  | {
+      readonly _tag: 'EffectEntry'
+      readonly target: Instances.InstanceKey
+      readonly machine: Instances.InstanceKey
+      readonly failures: ReadonlyArray<{
+        readonly tag: number
+        readonly type: SilkType.Nominal
+        readonly report: string
+      }>
+    }
+
 export interface Module {
   readonly _tag: 'MirModule'
   readonly module: string
+  readonly entry: Entry
   readonly layout: Layout.Plan
   readonly functions: ReadonlyArray<MirFunction>
+}
+
+/** The concrete zero-parameter `I32` function exported as the machine entry. */
+export const machineEntry = (self: Module): Instances.InstanceKey => {
+  if (self.entry._tag === 'UnavailableEntry') {
+    throw new RangeError(`MIR has no machine entry: ${self.entry.reason}`)
+  }
+  return self.entry.machine
 }
 
 /** Tests whether a MIR function realizes one concrete call target. */
@@ -686,6 +737,10 @@ export const matchesInstance = (
     const expected = typeArguments.at(index)
     return expected !== undefined && SilkType.equals(argument, expected)
   })
+
+/** Tests exact concrete instance identity, including the resolved contract row. */
+export const matchesInstanceKey = (fn: MirFunction, key: Instances.InstanceKey): boolean =>
+  instanceText(fn.instance) === instanceText(key)
 
 export interface ControlEdge {
   readonly _tag: 'ControlEdge'
@@ -771,6 +826,7 @@ export interface Violation {
     | 'InvalidCallShape'
     | 'InvalidCallableOperation'
     | 'InvalidEffectOperation'
+    | 'InvalidEntry'
     | 'InvalidWrite'
     | 'InvalidLoan'
     | 'InvalidSliceOperation'
@@ -916,6 +972,13 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination, operation.outcome, ...operation.arguments]
     case 'RunEffectValue':
       return [operation.destination, operation.outcome, operation.effect, ...operation.arguments]
+    case 'CloseEffectEntry':
+      return [
+        operation.destination,
+        operation.effect,
+        operation.outcome,
+        ...operation.failures.map((failure) => failure.payload),
+      ]
     case 'Construct':
       return [operation.destination, ...operation.fields.map((field) => field.value)]
     case 'ConstructArray':
@@ -1173,6 +1236,17 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
         semanticType(operation.type),
         ...operation.runnerTypeArguments,
       ]
+    case 'CloseEffectEntry':
+      return [
+        semanticType(operation.effectType),
+        semanticType(operation.outcomeType),
+        semanticType(operation.type),
+        ...operation.typeArguments,
+        ...operation.failures.flatMap((failure) => [
+          failure.type,
+          ...cleanupTypes(failure.cleanup),
+        ]),
+      ]
     case 'Construct':
     case 'ConstructArray':
       return [semanticType(operation.type)]
@@ -1257,6 +1331,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return operation.arguments
     case 'RunEffectValue':
       return [operation.effect, ...operation.arguments]
+    case 'CloseEffectEntry':
+      return []
     case 'Construct':
       return operation.fields.map((field) => field.value)
     case 'ConstructArray':
@@ -1444,6 +1520,58 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       detail: `${violation.rule}: ${violation.detail}`,
     }),
   )
+  const availableEntry = self.entry._tag === 'UnavailableEntry' ? undefined : self.entry
+  const target = self.functions.find(
+    (fn) =>
+      availableEntry !== undefined &&
+      instanceText(fn.instance) === instanceText(availableEntry.target),
+  )
+  const machine = self.functions.find(
+    (fn) =>
+      availableEntry !== undefined &&
+      instanceText(fn.instance) === instanceText(availableEntry.machine),
+  )
+  const machineClosures =
+    machine?.regions
+      .flatMap(operationsOf)
+      .flatMap(operationTree)
+      .filter((operation) => operation._tag === 'CloseEffectEntry') ?? []
+  const entryValid =
+    availableEntry !== undefined &&
+    target !== undefined &&
+    machine !== undefined &&
+    machine.parameterCount === 0 &&
+    machine.result._tag === 'I32' &&
+    (availableEntry._tag === 'OrdinaryEntry'
+      ? instanceText(availableEntry.target) === instanceText(availableEntry.machine) &&
+        target.result._tag === 'I32' &&
+        machineClosures.length === 0
+      : target.result._tag === 'EffectValue' &&
+        target.parameterCount === 0 &&
+        machineClosures.length === 1 &&
+        availableEntry.failures.length === target.result.type.failures.length &&
+        availableEntry.failures.every((failure, ordinal) => {
+          const expected =
+            target.result._tag === 'EffectValue'
+              ? target.result.type.failures.at(ordinal)
+              : undefined
+          return (
+            expected !== undefined &&
+            failure.tag === ordinal + 1 &&
+            SilkType.equals(failure.type, expected) &&
+            failure.report === SilkType.encode(expected)
+          )
+        }))
+  if (!entryValid) {
+    violations.push(
+      Object.freeze({
+        _tag: 'Violation',
+        rule: 'InvalidEntry',
+        detail:
+          'machine entry must resolve to one zero-parameter I32 function and preserve its ordinary or effect-closing contract',
+      }),
+    )
+  }
   const instanceKeys = new Set<string>()
   for (const fn of self.functions) {
     const currentInstance = instanceText(fn.instance)
@@ -2586,6 +2714,71 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               }),
             )
         }
+        if (operation._tag === 'CloseEffectEntry') {
+          const target = self.functions.find((candidate) =>
+            matchesInstance(candidate, operation.target, operation.typeArguments),
+          )
+          const runner = self.functions.find((candidate) =>
+            matchesInstance(candidate, operation.runner, operation.typeArguments),
+          )
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const effect = fn.localTypes.at(operation.effect.ordinal)
+          const outcome = fn.localTypes.at(operation.outcome.ordinal)
+          const entryFailures =
+            self.entry._tag === 'EffectEntry' &&
+            instanceText(self.entry.machine) === instanceText(fn.instance)
+              ? self.entry.failures
+              : undefined
+          const failuresValid =
+            runner?.result._tag === 'EffectOutcome' &&
+            entryFailures !== undefined &&
+            operation.failures.length === runner.result.type.failures.length &&
+            operation.failures.every((failure, ordinal) => {
+              const expected =
+                runner.result._tag === 'EffectOutcome'
+                  ? runner.result.type.failures.at(ordinal)
+                  : undefined
+              const entryFailure = entryFailures.at(ordinal)
+              const payload = fn.localTypes.at(failure.payload.ordinal)
+              return (
+                expected !== undefined &&
+                entryFailure !== undefined &&
+                failure.tag === ordinal + 1 &&
+                entryFailure.tag === failure.tag &&
+                SilkType.equals(failure.type, expected) &&
+                SilkType.equals(entryFailure.type, expected) &&
+                failure.report === entryFailure.report &&
+                payload !== undefined &&
+                SilkType.equals(semanticType(payload), expected) &&
+                SilkType.equals(failure.cleanup.type, expected)
+              )
+            })
+          if (
+            target === undefined ||
+            target.parameterCount !== 0 ||
+            target.result._tag !== 'EffectValue' ||
+            runner?.result._tag !== 'EffectOutcome' ||
+            destination?._tag !== 'I32' ||
+            effect?._tag !== 'EffectValue' ||
+            !SilkType.equals(effect.type, operation.effectType.type) ||
+            !SilkType.equals(target.result.type, operation.effectType.type) ||
+            outcome?._tag !== 'EffectOutcome' ||
+            !SilkType.equals(outcome.type, operation.outcomeType.type) ||
+            !SilkType.equals(runner.result.type, operation.outcomeType.type) ||
+            !failuresValid
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidEntry',
+                function: fn.id,
+                region: region.id,
+                detail:
+                  'effect entry closure disagrees with its target, normalized failures, typed payloads, or cleanup plans',
+              }),
+            )
+          }
+        }
         if (operation._tag === 'CatchEffect') {
           const protectedTargetId = operation.protectedTarget
           const protectedTarget =
@@ -2755,6 +2948,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = run-effect ${targetText(operation.target)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'RunEffectValue':
       return `${localText(operation.destination)} = run-effect-value ${localText(operation.effect)} runner=${targetText(operation.runner)} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
+    case 'CloseEffectEntry':
+      return `${localText(operation.destination)} = close-effect-entry ${targetText(operation.target)} effect=${localText(operation.effect)} runner=${targetText(operation.runner)} outcome=${localText(operation.outcome)} failures=${operation.failures.map((failure) => `${failure.tag}:${SilkType.encode(failure.type)}->${localText(failure.payload)}:${failure.cleanup._tag}`).join(',') || 'none'} : I32 ${provenanceText(operation.provenance)}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`).join(', ')} } ${provenanceText(operation.provenance)}`
     case 'ConstructArray':
@@ -2853,6 +3048,11 @@ const regionLines = (region: Region): ReadonlyArray<string> => {
 export const encode = (self: Module): string =>
   [
     `mir-module ${self.module}`,
+    self.entry._tag === 'UnavailableEntry'
+      ? `entry unavailable reason=${self.entry.reason}`
+      : self.entry._tag === 'OrdinaryEntry'
+        ? `entry ordinary target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)}`
+        : `entry effect target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)} failures=${self.entry.failures.map((failure) => `${failure.tag}:${failure.report}`).join(',') || 'none'}`,
     ...Layout.encode(self.layout).trimEnd().split('\n'),
     ...self.functions.flatMap((fn) => [
       `fn ${targetText(fn.id)}${
@@ -2898,6 +3098,11 @@ export const samples = (): ReadonlyArray<Module> => {
   const straight: Module = Object.freeze({
     _tag: 'MirModule',
     module: source.id,
+    entry: Object.freeze({
+      _tag: 'OrdinaryEntry',
+      target: instance(canonical(source.id, 'answer')),
+      machine: instance(canonical(source.id, 'answer')),
+    }),
     layout: Layout.make(Target.aarch64AppleDarwin, ['I32']),
     functions: Object.freeze([
       Object.freeze({
@@ -2934,13 +3139,18 @@ export const samples = (): ReadonlyArray<Module> => {
   const conditional: Module = Object.freeze({
     _tag: 'MirModule',
     module: source.id,
+    entry: Object.freeze({
+      _tag: 'OrdinaryEntry',
+      target: instance(canonical(source.id, 'choose')),
+      machine: instance(canonical(source.id, 'choose')),
+    }),
     layout: Layout.make(Target.aarch64AppleDarwin, ['I32', 'Bool']),
     functions: Object.freeze([
       Object.freeze({
         _tag: 'MirFunction' as const,
         id: canonical(source.id, 'choose'),
         instance: instance(canonical(source.id, 'choose')),
-        parameterCount: 1,
+        parameterCount: 0,
         localTypes: Object.freeze([bool, i32]),
         result: i32,
         entry: region(0),

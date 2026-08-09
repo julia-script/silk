@@ -340,6 +340,7 @@ const operations = Object.freeze([
       }),
     ]),
   ),
+  actor('Report', 'Type', Object.freeze([])),
   actor(
     'Unit',
     'Type',

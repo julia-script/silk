@@ -895,7 +895,9 @@ export const projectDataFlow = (
       ? 'Semantic relationships only; evaluate explicitly to add reachable order and exact values.'
       : outcome._tag === 'Completed'
         ? `Evaluation completed with ${outcome.result.value}; trace-backed order and values are overlaid.`
-        : `Evaluation stopped at ${outcome.reason._tag}; only its completed trace prefix is overlaid.`
+        : outcome._tag === 'UnhandledFailure'
+          ? `Evaluation terminated with ${outcome.report} (tag ${outcome.tag}); its completed trace is overlaid.`
+          : `Evaluation stopped at ${outcome.reason._tag}; only its completed trace prefix is overlaid.`
   return Object.freeze({
     _tag: 'FlowModel',
     mode: outcome === undefined ? 'Semantic' : 'Evaluated',

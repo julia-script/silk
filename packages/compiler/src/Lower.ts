@@ -165,6 +165,13 @@ const runnerId = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): typeof 
     name: `${owner.declaration.name}$effect$${site.function.ordinal}$${site.span.start}`,
   })
 
+const effectEntryAdapterId = (module: string): DeclarationIndex.CanonicalId =>
+  Object.freeze({
+    _tag: 'CanonicalDeclarationId',
+    module,
+    name: '$effect-entry',
+  })
+
 const baseRunnerKey = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): string =>
   `${instanceText(owner.declaration, owner.typeArguments)}\u0000${site.function.sourceId}\u0000${site.function.ordinal}\u0000${site.span.start}`
 
@@ -3852,9 +3859,132 @@ export const lowerProgram = (
     )
     if (runner !== undefined) functions.push(runner)
   }
+  if (discovery.entry._tag !== 'Resolved') {
+    return Object.freeze({
+      _tag: 'MirModule',
+      module: discovery.rootModule,
+      entry: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
+      layout,
+      functions: Object.freeze(functions),
+    })
+  }
+  const resolvedEntry = discovery.entry
+  let entry: Mir.Entry
+  if (resolvedEntry.kind === 'Ordinary') {
+    entry = Object.freeze({
+      _tag: 'OrdinaryEntry',
+      target: resolvedEntry.key,
+      machine: resolvedEntry.key,
+    })
+  } else {
+    const target = functions.find(
+      (fn) =>
+        instanceText(fn.instance.declaration, fn.instance.typeArguments) ===
+        instanceText(resolvedEntry.key.declaration, resolvedEntry.key.typeArguments),
+    )
+    const runnerSpec = generatedRunners.find(
+      (candidate) =>
+        instanceText(candidate.owner.key.declaration, candidate.owner.key.typeArguments) ===
+        instanceText(resolvedEntry.key.declaration, resolvedEntry.key.typeArguments),
+    )
+    const runner =
+      runnerSpec === undefined
+        ? undefined
+        : functions.find((fn) =>
+            Mir.matchesInstance(fn, runnerSpec.id, resolvedEntry.key.typeArguments),
+          )
+    if (target?.result._tag !== 'EffectValue' || runner?.result._tag !== 'EffectOutcome') {
+      throw new RangeError('Effect entry lowering lost its constructor or runner')
+    }
+    const adapterId = effectEntryAdapterId(discovery.rootModule)
+    const adapterKey: Instances.InstanceKey = Object.freeze({
+      _tag: 'InstanceKey',
+      declaration: adapterId,
+      typeArguments: Object.freeze([]),
+      contractRow: Object.freeze(['generated:effect-entry']),
+    })
+    const span = target.regions
+      .flatMap((region) =>
+        region._tag === 'OperationRegion'
+          ? region.operations.map((operation) => operation.provenance.span)
+          : region._tag === 'CleanupRegion'
+            ? region.releases.map((operation) => operation.provenance.span)
+            : [region.provenance.span],
+      )
+      .at(0)
+    if (span === undefined) throw new RangeError('Effect entry lowering lost source provenance')
+    const failures = resolvedEntry.failures.map((failure, ordinal) =>
+      Object.freeze({
+        tag: ordinal + 1,
+        type: failure.type,
+        report: failure.report,
+        payload: local(ordinal + 3),
+        cleanup: Ownership.cleanupPlan(index, failure.type),
+      }),
+    )
+    const effect = local(1)
+    const outcome = local(2)
+    const status = local(0)
+    functions.push(
+      Object.freeze({
+        _tag: 'MirFunction',
+        id: adapterId,
+        instance: adapterKey,
+        parameterCount: 0,
+        localTypes: Object.freeze([
+          i32,
+          target.result,
+          runner.result,
+          ...failures.map((failure) =>
+            Object.freeze({ _tag: 'Nominal' as const, type: failure.type }),
+          ),
+        ]),
+        result: i32,
+        entry: Object.freeze({ _tag: 'Region', ordinal: 0 }),
+        regions: Object.freeze([
+          Object.freeze({
+            _tag: 'OperationRegion' as const,
+            id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
+            operations: Object.freeze([
+              Object.freeze({
+                _tag: 'CloseEffectEntry' as const,
+                destination: status,
+                effect,
+                outcome,
+                target: resolvedEntry.key.declaration,
+                runner: runner.id,
+                typeArguments: resolvedEntry.key.typeArguments,
+                effectType: target.result,
+                outcomeType: runner.result,
+                failures: Object.freeze(failures),
+                type: i32,
+                provenance: generated(span),
+              }),
+            ]),
+            outcome: Object.freeze({
+              _tag: 'Return' as const,
+              value: status,
+              provenance: generated(span),
+            }),
+          }),
+        ]),
+      }),
+    )
+    entry = Object.freeze({
+      _tag: 'EffectEntry',
+      target: resolvedEntry.key,
+      machine: adapterKey,
+      failures: Object.freeze(
+        resolvedEntry.failures.map((failure, ordinal) =>
+          Object.freeze({ tag: ordinal + 1, type: failure.type, report: failure.report }),
+        ),
+      ),
+    })
+  }
   return Object.freeze({
     _tag: 'MirModule',
     module: discovery.rootModule,
+    entry,
     layout,
     functions: Object.freeze(functions),
   })

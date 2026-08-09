@@ -214,10 +214,15 @@ export const views: ReadonlyArray<ViewDefinition> = [
               { text: `${evaluation.entry.name}() → ${evaluation.result.value}` },
               { text: `${evaluation.trace.length} steps`, tone: 'muted' },
             ]
-          : [
-              { text: 'Blocked', tone: 'warning' },
-              { text: evaluation.reason._tag, tone: 'muted' },
-            ]
+          : evaluation._tag === 'UnhandledFailure'
+            ? [
+                { text: 'Unhandled failure', tone: 'warning' },
+                { text: `${evaluation.report} · tag ${evaluation.tag}`, tone: 'muted' },
+              ]
+            : [
+                { text: 'Blocked', tone: 'warning' },
+                { text: evaluation.reason._tag, tone: 'muted' },
+              ]
       return { rows, facts, meta: `${evaluation.trace.length} steps` }
     },
   },
