@@ -217,6 +217,10 @@ elements drop before storage release; and move-out plus early drop retain exactl
 - **Prove native self-hosting** — produce stage 1, stage 2, and a byte-identical fixed-point rebuild
   with complete conformance, failure, debug, resource, and performance evidence on all required
   native hosts.
+- **Preserve a pay-for-use path to Effect synchronization** — keep sequential Stream demand,
+  single-thread concurrency, and later parallel execution compatible with low-level cost
+  transparency without scheduling async work now; see the
+  [direction note](../wayfinder/bootstrap-language/research/concurrency-and-parallelism-direction.md).
 - **Grow beyond the bootstrap subset** — concurrency, networking, schemas, observability, richer
   tooling, and broader standard-library families become candidates only after the self-hosting core
   exposes their real constraints.
@@ -254,6 +258,9 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-09: Recorded a non-binding concurrency and parallelism direction: synchronous programs
+  pay no scheduler or fiber cost; suspension, fork, and parallelism add progressively explicit
+  runtime costs; and future Stream/Sink adapters build above primitive effectful standard I/O.
 - 2026-08-09: Promoted the real-programs initiative to Now and split its former umbrella proposal
   into six independently implementable changes. Native-platform expansion remains Next; String,
   Logger, default providers, and Stream/Sink stay explicit future seams rather than hidden scope.
