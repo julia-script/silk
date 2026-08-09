@@ -22,4 +22,4 @@
 
 - [x] 4.1 Run focused shared-read, Vector, lexer, and stack-VM tests across evaluation, native, and Wasm.
 - [x] 4.2 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and `pnpm release:candidate` if public package contents or exports changed.
-- [ ] 4.3 Validate the OpenSpec change strictly, synchronize its delta specs, archive it, and merge the completed branch to main.
+- [x] 4.3 Validate the OpenSpec change strictly, synchronize its delta specs, archive it, and merge the completed branch to main.

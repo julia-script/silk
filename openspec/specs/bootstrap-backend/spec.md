@@ -496,11 +496,13 @@ allocation or runtime callable interpreter.
 
 Native LLVM and direct WebAssembly SHALL lower verified general allocator witness calls,
 compiler-planned target layouts, typed `OutOfMemory`, affine allocation and reclaim tickets,
-RawBuffer and Slot operations, restricted Drop, and cleanup ordering from MIR. Neither backend may
-recognize an allocator implementation kind, retain a provider borrow in the result, substitute a
-trap for exhaustion, choose a different typed stride, add a named lifetime scope, or promise cleanup
-after a trap. Physical reclamation policy may differ, but observable logical ownership, failure,
-and exactly-once release MUST match evaluation.
+RawBuffer and Slot operations, shared bounds-checked non-union Copy reads, restricted Drop, and
+cleanup ordering from MIR. A shared read SHALL load the canonical element layout without writing
+storage, changing owner state, or allocating. Neither backend may recognize an allocator
+implementation kind, retain a provider borrow in the result, substitute a trap for exhaustion,
+choose a different typed stride, add a named lifetime scope, or promise cleanup after a trap.
+Physical reclamation policy may differ, but observable logical ownership, failure, read values, and
+exactly-once release MUST match evaluation.
 
 #### Scenario: Agree on successful allocation
 
@@ -516,6 +518,11 @@ and exactly-once release MUST match evaluation.
 
 - **WHEN** two zero-byte allocations remain live simultaneously
 - **THEN** each backend preserves two distinct affine logical owners even if their physical address representation is shared or synthetic
+
+#### Scenario: Agree on shared raw-buffer reads
+
+- **WHEN** verified MIR reads an initialized non-union Copy element through a shared raw-buffer borrow
+- **THEN** native and Wasm return the evaluator's value, enforce the same bounds trap, perform no write or allocation, and preserve later cleanup
 
 ### Requirement: Runtime layout operations lower natively
 
