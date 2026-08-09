@@ -1249,8 +1249,11 @@ export const backendControlOf = (
 ): ReadonlyArray<Backend.ControlProvenance> => artifact.control
 
 /** Executes the snapshot's lowered MIR program through the closed bootstrap interpreter. */
-export const evaluate = (self: Snapshot): BootstrapEvaluation.Outcome =>
-  BootstrapEvaluation.evaluate(self.instances, loweredMir(self))
+export const evaluate = (
+  self: Snapshot,
+  options: BootstrapEvaluation.Options = {},
+): BootstrapEvaluation.Outcome =>
+  BootstrapEvaluation.evaluate(self.instances, loweredMir(self), options)
 
 /** Returns the compact array-specific events from an explicit evaluation outcome. */
 export const arrayTraceEventsOf = (

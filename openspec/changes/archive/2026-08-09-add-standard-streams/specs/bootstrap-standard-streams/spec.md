@@ -44,4 +44,3 @@ This capability SHALL NOT define `Effect.log` as stdout writing. A future Logger
 
 - **WHEN** an algorithm renders through `StandardStreams`
 - **THEN** no log level, Logger requirement, or telemetry metadata is invented
-

@@ -263,6 +263,53 @@ const operations = Object.freeze([
       }),
     ]),
   ),
+  actor(
+    'StandardStreams',
+    'Type',
+    Object.freeze([
+      builtin({
+        actor: 'StandardStreams',
+        name: 'stdout',
+        operation: 'StandardStreamsStdout',
+        parameters: Object.freeze([]),
+        semanticParameters: Object.freeze([]),
+        result: 'bool',
+        semanticResult: 'bool',
+      }),
+      builtin({
+        actor: 'StandardStreams',
+        name: 'stderr',
+        operation: 'StandardStreamsStderr',
+        parameters: Object.freeze([]),
+        semanticParameters: Object.freeze([]),
+        result: 'bool',
+        semanticResult: 'bool',
+      }),
+      builtin({
+        actor: 'StandardStreams',
+        name: 'writeAll',
+        operation: 'StandardStreamsWriteAll',
+        parameters: Object.freeze([
+          valueParameter('destination', 'bool'),
+          valueParameter('bytes', '&[u8]'),
+        ]),
+        semanticParameters: Object.freeze(['bool', Type.slice('Shared', 'u8')]),
+        result: 'Effect<() ! StreamWriteFailure ? &StandardStreams>',
+        semanticResult: Type.effect(
+          Type.unit,
+          Object.freeze([Type.streamWriteFailure]),
+          'Shared',
+          Object.freeze([
+            Object.freeze({
+              capability: Type.standardStreams,
+              role: 'DefaultRole',
+              access: 'Shared',
+            }),
+          ]),
+        ),
+      }),
+    ]),
+  ),
   actor('Report', 'Type', Object.freeze([])),
   actor(
     'RawBuffer',

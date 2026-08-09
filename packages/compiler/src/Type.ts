@@ -119,6 +119,10 @@ export const invalidAlignment: Nominal = nominal('silk/core', 'InvalidAlignment'
 export const layoutOverflow: Nominal = nominal('silk/core', 'LayoutOverflow')
 /** The implementation-erased allocation capability requested by allocation Effects. */
 export const allocator: Nominal = nominal('silk/core', 'Allocator')
+/** Explicit host capability for complete stdout and stderr byte writes. */
+export const standardStreams: Nominal = nominal('silk/core', 'StandardStreams')
+/** Allocation-free typed failure returned when a host cannot commit a complete write. */
+export const streamWriteFailure: Nominal = nominal('silk/core', 'StreamWriteFailure')
 /** A self-contained affine owner carrying one private active reclaim ticket. */
 export const allocation: Nominal = nominal('silk/core', 'Allocation')
 /** Compiler-sealed cleanup capability used only by restricted impl declarations. */
@@ -173,6 +177,8 @@ export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [invalidAlignment.name, invalidAlignment],
   [layoutOverflow.name, layoutOverflow],
   [allocator.name, allocator],
+  [standardStreams.name, standardStreams],
+  [streamWriteFailure.name, streamWriteFailure],
   [allocation.name, allocation],
   [dropCapability.name, dropCapability],
   [reportCapability.name, reportCapability],
@@ -192,6 +198,7 @@ export const intrinsicNominalOrdinal = (self: Nominal): number =>
 /** Compiler-shipped nominal capability witnesses; user declarations extend this in the index. */
 export const intrinsicConformances: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['nominal:silk/core.SystemAllocator<>', new Set(['nominal:silk/core.Allocator<>'])],
+  ['nominal:silk/core.StreamWriteFailure<>', new Set(['nominal:silk/core.Report<>'])],
 ])
 
 /** Tests one compiler-shipped nominal capability witness without inspecting provider kinds. */

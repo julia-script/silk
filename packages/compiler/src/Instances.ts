@@ -61,6 +61,7 @@ export type Entry =
       readonly kind: 'Effect'
       readonly key: InstanceKey
       readonly failures: ReadonlyArray<EntryFailure>
+      readonly requirements: ReadonlyArray<Type.Requirement>
     }
   | {
       readonly _tag: 'Unavailable'
@@ -235,7 +236,14 @@ const resolveEntry = (root: Elaboration.Result, index: DeclarationIndex.Index): 
   if (!Type.equals(declaration.returnType.type, Type.unit)) {
     return Object.freeze({ _tag: 'Unavailable', reason: 'InvalidEffectEntryResult' })
   }
-  if (declaration.requirementRow.requirements.length !== 0) {
+  if (
+    declaration.requirementRow.requirements.some(
+      (requirement) =>
+        requirement.access !== 'Shared' ||
+        requirement.role !== 'DefaultRole' ||
+        !Type.equals(requirement.capability, Type.standardStreams),
+    )
+  ) {
     return Object.freeze({ _tag: 'Unavailable', reason: 'EffectEntryRequirements' })
   }
   if (
@@ -249,6 +257,7 @@ const resolveEntry = (root: Elaboration.Result, index: DeclarationIndex.Index): 
     _tag: 'Resolved',
     kind: 'Effect',
     key: keyOf(declaration.canonical.id, Hir.contractOf(declaration)),
+    requirements: Object.freeze(declaration.requirementRow.requirements),
     failures: Object.freeze(
       declaration.failureRow.failures.map((failure) =>
         Object.freeze({ type: failure, report: Type.encode(failure) }),
