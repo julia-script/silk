@@ -33,6 +33,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   ModuleDocComment: { name: 'module-doc-comment', tags: [tags.docComment] },
   Identifier: { name: 'identifier', tags: [tags.variableName] },
   DecimalInteger: { name: 'number', tags: [tags.integer] },
+  DecimalFloat: { name: 'number', tags: [tags.float] },
   PubKeyword: keyword,
   StructKeyword: keyword,
   FnKeyword: keyword,

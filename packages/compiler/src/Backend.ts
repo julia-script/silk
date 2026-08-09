@@ -15,6 +15,7 @@ import * as Value from '@silk-effect/llvm/Value'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as FloatingPoint from './FloatingPoint.js'
 import type * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type * as Match from './Match.js'
@@ -740,6 +741,14 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       strip: request.mode !== 'debug',
     })
     const i32 = yield* LlvmType.integer(builder, scalarBits)
+    const usesScalar = (spelling: Scalar.Spelling): boolean =>
+      program.layout.callingShapes.some((shape) =>
+        shape.lanes.some((lane) => lane.type === spelling),
+      )
+    // LLVM assigns type-table identities in creation order, so preserve byte-for-byte output for
+    // programs that do not use floating-point values by creating these types only when required.
+    const f32 = usesScalar('f32') ? yield* LlvmType.float(builder) : i32
+    const f64 = usesScalar('f64') ? yield* LlvmType.double(builder) : i32
     const usizeLayout = Layout.entry(program.layout, 'usize')
     const usizeType =
       usizeLayout?.representation._tag === 'UnsignedInteger'
@@ -821,6 +830,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       if (typeof lane.type !== 'string') return pointer
       const scalar = Scalar.find(lane.type)
       if (scalar === undefined) return i32
+      if (scalar.category === 'Floating') return scalar.spelling === 'f32' ? f32 : f64
       const bits = Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
       return integerTypes.get(bits) ?? i32
     }
@@ -1202,6 +1212,61 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               typeof semanticOperand === 'string' ? Scalar.find(semanticOperand) : undefined
             const unsigned = scalar?.signedness === 'Unsigned'
             const operandType = laneType(leftLane)
+            if (scalar?.category === 'Floating') {
+              const predicate: FunctionBody.FloatingPredicate | undefined =
+                operator === 'Equals'
+                  ? 'oeq'
+                  : operator === 'NotEquals'
+                    ? 'une'
+                    : operator === 'LessThan'
+                      ? 'olt'
+                      : operator === 'LessOrEqual'
+                        ? 'ole'
+                        : operator === 'GreaterThan'
+                          ? 'ogt'
+                          : operator === 'GreaterOrEqual'
+                            ? 'oge'
+                            : undefined
+              if (predicate !== undefined) {
+                const flag = yield* FunctionBody.floatingCompare(
+                  body,
+                  predicate,
+                  left,
+                  right,
+                  `callable_fcmp${nameOrdinal}_flag`,
+                )
+                return yield* FunctionBody.cast(
+                  body,
+                  'zext',
+                  flag,
+                  i32,
+                  `callable_fcmp${nameOrdinal}`,
+                )
+              }
+              const mnemonic: FunctionBody.FloatingBinaryKind | undefined =
+                operator === 'Add'
+                  ? 'fadd'
+                  : operator === 'Subtract'
+                    ? 'fsub'
+                    : operator === 'Multiply'
+                      ? 'fmul'
+                      : operator === 'Divide'
+                        ? 'fdiv'
+                        : operator === 'Remainder'
+                          ? 'frem'
+                          : undefined
+              if (mnemonic === undefined)
+                throw new RangeError(`LLVM callable float ${operator} is unavailable`)
+              const result = yield* FunctionBody.binary(
+                body,
+                mnemonic,
+                left,
+                right,
+                `callable_float${nameOrdinal}`,
+              )
+              yield* locate(span, yield* Value.instruction(body, result))
+              return result
+            }
             const comparisonPredicates: Readonly<
               Partial<
                 Record<
@@ -2027,6 +2092,24 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   if (lane === undefined) throw new RangeError('LLVM literal lost its lane')
                   const physicalType = laneType(lane)
                   const semantic = Mir.semanticType(operation.type)
+                  const floating = typeof semantic === 'string' ? Scalar.find(semantic) : undefined
+                  if (floating?.category === 'Floating') {
+                    locals.set(
+                      operation.destination.ordinal,
+                      Object.freeze([
+                        yield* Constant.floatingRaw(
+                          builder,
+                          physicalType,
+                          floating.spelling === 'f32' ? 'float' : 'double',
+                          FloatingPoint.littleEndianBytes({
+                            width: floating.spelling === 'f32' ? 32 : 64,
+                            bits: BigInt(operation.value),
+                          }),
+                        ),
+                      ]),
+                    )
+                    break
+                  }
                   const unsigned =
                     typeof semantic === 'string' && Scalar.find(semantic)?.signedness === 'Unsigned'
                   locals.set(
@@ -3467,6 +3550,227 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(operation.destination.ordinal, Object.freeze([result]))
                   break
                 }
+                case 'ConvertScalar': {
+                  const source = Scalar.find(operation.sourceType._tag)
+                  const target = Scalar.find(operation.type._tag)
+                  if (
+                    source === undefined ||
+                    target === undefined ||
+                    source.category === 'Boolean' ||
+                    target.category === 'Boolean'
+                  )
+                    throw new RangeError('LLVM scalar conversion lost its types')
+                  const sourceValue = readScalar(operation.source)
+                  const destinationType =
+                    target.category === 'Floating'
+                      ? target.spelling === 'f32'
+                        ? f32
+                        : f64
+                      : (integerTypes.get(
+                          Scalar.bits(target, program.layout.target.pointerSize === 4 ? 32 : 64),
+                        ) ?? i32)
+                  const kind: FunctionBody.CastKind =
+                    source.category === 'Floating' && target.category === 'Floating'
+                      ? source.spelling === 'f64'
+                        ? 'fptrunc'
+                        : 'fpext'
+                      : source.category === 'Floating' && target.category === 'Integer'
+                        ? target.signedness === 'Signed'
+                          ? 'fptosi'
+                          : 'fptoui'
+                        : source.category === 'Integer' && target.category === 'Floating'
+                          ? source.signedness === 'Signed'
+                            ? 'sitofp'
+                            : 'uitofp'
+                          : (() => {
+                              throw new RangeError('LLVM scalar conversion was not numeric')
+                            })()
+                  const result = yield* FunctionBody.cast(
+                    body,
+                    kind,
+                    sourceValue,
+                    destinationType,
+                    `convert${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.destination.ordinal, Object.freeze([result]))
+                  break
+                }
+                case 'ReinterpretScalar': {
+                  const targetLane = lanesFor(operation.type).at(0)
+                  if (targetLane === undefined)
+                    throw new RangeError('LLVM reinterpretation lost its lane')
+                  const result = yield* FunctionBody.cast(
+                    body,
+                    'bitcast',
+                    readScalar(operation.source),
+                    laneType(targetLane),
+                    `reinterpret${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.destination.ordinal, Object.freeze([result]))
+                  break
+                }
+                case 'FloatUnary': {
+                  const source = Scalar.find(operation.sourceType._tag)
+                  if (source?.category !== 'Floating')
+                    throw new RangeError('LLVM float unary lost its source type')
+                  const subject = readScalar(operation.source)
+                  if (operation.operation === 'Negate') {
+                    const result = yield* FunctionBody.unary(
+                      body,
+                      'fneg',
+                      subject,
+                      `fneg${operation.destination.ordinal}`,
+                    )
+                    locals.set(operation.destination.ordinal, Object.freeze([result]))
+                    break
+                  }
+                  const width = source.spelling === 'f32' ? 32 : 64
+                  const integerType = integerTypes.get(width) ?? i32
+                  const raw = yield* FunctionBody.cast(
+                    body,
+                    'bitcast',
+                    subject,
+                    integerType,
+                    `floatbits${operation.destination.ordinal}`,
+                  )
+                  const fractionBits = source.spelling === 'f32' ? 23 : 52
+                  const exponentBits = source.spelling === 'f32' ? 8 : 11
+                  const exponentMask = ((1n << BigInt(exponentBits)) - 1n) << BigInt(fractionBits)
+                  const fractionMask = (1n << BigInt(fractionBits)) - 1n
+                  const zero = yield* Constant.integerUnsigned(builder, integerType, 0n)
+                  const exponentMaskValue = yield* Constant.integerUnsigned(
+                    builder,
+                    integerType,
+                    exponentMask,
+                  )
+                  const fractionMaskValue = yield* Constant.integerUnsigned(
+                    builder,
+                    integerType,
+                    fractionMask,
+                  )
+                  const exponent = yield* FunctionBody.binary(
+                    body,
+                    'and',
+                    raw,
+                    exponentMaskValue,
+                    `fclass_exp${operation.destination.ordinal}`,
+                  )
+                  const fraction = yield* FunctionBody.binary(
+                    body,
+                    'and',
+                    raw,
+                    fractionMaskValue,
+                    `fclass_frac${operation.destination.ordinal}`,
+                  )
+                  const exponentZero = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    exponent,
+                    zero,
+                    `fclass_exp_zero${operation.destination.ordinal}`,
+                  )
+                  const exponentAll = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    exponent,
+                    exponentMaskValue,
+                    `fclass_exp_all${operation.destination.ordinal}`,
+                  )
+                  const fractionZero = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    fraction,
+                    zero,
+                    `fclass_frac_zero${operation.destination.ordinal}`,
+                  )
+                  let flag: Value.Input
+                  if (operation.operation === 'IsSignNegative') {
+                    flag = yield* FunctionBody.integerCompare(
+                      body,
+                      'slt',
+                      raw,
+                      zero,
+                      `fclass_sign${operation.destination.ordinal}`,
+                    )
+                  } else if (operation.operation === 'IsNaN') {
+                    const fractionNonzero = yield* FunctionBody.integerCompare(
+                      body,
+                      'ne',
+                      fraction,
+                      zero,
+                      `fclass_frac_nonzero${operation.destination.ordinal}`,
+                    )
+                    flag = yield* FunctionBody.binary(
+                      body,
+                      'and',
+                      exponentAll,
+                      fractionNonzero,
+                      `fclass_nan${operation.destination.ordinal}`,
+                    )
+                  } else if (operation.operation === 'IsInfinite') {
+                    flag = yield* FunctionBody.binary(
+                      body,
+                      'and',
+                      exponentAll,
+                      fractionZero,
+                      `fclass_inf${operation.destination.ordinal}`,
+                    )
+                  } else if (operation.operation === 'IsFinite') {
+                    flag = yield* FunctionBody.integerCompare(
+                      body,
+                      'ne',
+                      exponent,
+                      exponentMaskValue,
+                      `fclass_finite${operation.destination.ordinal}`,
+                    )
+                  } else if (operation.operation === 'IsNormal') {
+                    const nonzero = yield* FunctionBody.integerCompare(
+                      body,
+                      'ne',
+                      exponent,
+                      zero,
+                      `fclass_nonzero${operation.destination.ordinal}`,
+                    )
+                    const finite = yield* FunctionBody.integerCompare(
+                      body,
+                      'ne',
+                      exponent,
+                      exponentMaskValue,
+                      `fclass_notall${operation.destination.ordinal}`,
+                    )
+                    flag = yield* FunctionBody.binary(
+                      body,
+                      'and',
+                      nonzero,
+                      finite,
+                      `fclass_normal${operation.destination.ordinal}`,
+                    )
+                  } else {
+                    const fractionNonzero = yield* FunctionBody.integerCompare(
+                      body,
+                      'ne',
+                      fraction,
+                      zero,
+                      `fclass_sub_frac${operation.destination.ordinal}`,
+                    )
+                    flag = yield* FunctionBody.binary(
+                      body,
+                      'and',
+                      exponentZero,
+                      fractionNonzero,
+                      `fclass_sub${operation.destination.ordinal}`,
+                    )
+                  }
+                  const result = yield* FunctionBody.cast(
+                    body,
+                    'zext',
+                    flag,
+                    i32,
+                    `fclass${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.destination.ordinal, Object.freeze([result]))
+                  break
+                }
                 case 'CheckedInteger': {
                   const leftLocal = operation.operands.at(0)
                   const rightLocal = operation.operands.at(1)
@@ -3727,6 +4031,136 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const operandType = laneType(leftLane)
                   const ordinal = checkOrdinal
                   checkOrdinal += 1
+                  if (scalar?.category === 'Floating') {
+                    if (operation.operator === 'TotalOrder') {
+                      const width = scalar.spelling === 'f32' ? 32 : 64
+                      const integerType = integerTypes.get(width) ?? i32
+                      const leftBits = yield* FunctionBody.cast(
+                        body,
+                        'bitcast',
+                        left,
+                        integerType,
+                        `total${ordinal}_left_bits`,
+                      )
+                      const rightBits = yield* FunctionBody.cast(
+                        body,
+                        'bitcast',
+                        right,
+                        integerType,
+                        `total${ordinal}_right_bits`,
+                      )
+                      const zero = yield* Constant.integerUnsigned(builder, integerType, 0n)
+                      const all = yield* Constant.integerUnsigned(
+                        builder,
+                        integerType,
+                        (1n << BigInt(width)) - 1n,
+                      )
+                      const sign = yield* Constant.integerUnsigned(
+                        builder,
+                        integerType,
+                        1n << BigInt(width - 1),
+                      )
+                      const key = Effect.fnUntraced(function* (bits: Value.Input, side: string) {
+                        const negative = yield* FunctionBody.integerCompare(
+                          body,
+                          'slt',
+                          bits,
+                          zero,
+                          `total${ordinal}_${side}_negative`,
+                        )
+                        const mask = yield* FunctionBody.select(
+                          body,
+                          negative,
+                          all,
+                          sign,
+                          `total${ordinal}_${side}_mask`,
+                        )
+                        return yield* FunctionBody.binary(
+                          body,
+                          'xor',
+                          bits,
+                          mask,
+                          `total${ordinal}_${side}_key`,
+                        )
+                      })
+                      const leftKey = yield* key(leftBits, 'left')
+                      const rightKey = yield* key(rightBits, 'right')
+                      const flag = yield* FunctionBody.integerCompare(
+                        body,
+                        'ule',
+                        leftKey,
+                        rightKey,
+                        `total${ordinal}_flag`,
+                      )
+                      const result = yield* FunctionBody.cast(
+                        body,
+                        'zext',
+                        flag,
+                        i32,
+                        `total${ordinal}`,
+                      )
+                      locals.set(operation.destination.ordinal, Object.freeze([result]))
+                      break
+                    }
+                    const predicate: FunctionBody.FloatingPredicate | undefined =
+                      operation.operator === 'Equals'
+                        ? 'oeq'
+                        : operation.operator === 'NotEquals'
+                          ? 'une'
+                          : operation.operator === 'LessThan'
+                            ? 'olt'
+                            : operation.operator === 'LessOrEqual'
+                              ? 'ole'
+                              : operation.operator === 'GreaterThan'
+                                ? 'ogt'
+                                : operation.operator === 'GreaterOrEqual'
+                                  ? 'oge'
+                                  : undefined
+                    if (predicate !== undefined) {
+                      const flag = yield* FunctionBody.floatingCompare(
+                        body,
+                        predicate,
+                        left,
+                        right,
+                        `fcmp${ordinal}_flag`,
+                      )
+                      const result = yield* FunctionBody.cast(
+                        body,
+                        'zext',
+                        flag,
+                        i32,
+                        `fcmp${ordinal}`,
+                      )
+                      locals.set(operation.destination.ordinal, Object.freeze([result]))
+                      break
+                    }
+                    const mnemonic: FunctionBody.FloatingBinaryKind | undefined =
+                      operation.operator === 'Add'
+                        ? 'fadd'
+                        : operation.operator === 'Subtract'
+                          ? 'fsub'
+                          : operation.operator === 'Multiply'
+                            ? 'fmul'
+                            : operation.operator === 'Divide'
+                              ? 'fdiv'
+                              : operation.operator === 'Remainder'
+                                ? 'frem'
+                                : undefined
+                    if (mnemonic === undefined)
+                      throw new RangeError(
+                        `LLVM float operation ${operation.operator} is unavailable`,
+                      )
+                    const result = yield* FunctionBody.binary(
+                      body,
+                      mnemonic,
+                      left,
+                      right,
+                      `float${ordinal}`,
+                    )
+                    yield* locate(operation.provenance.span, yield* Value.instruction(body, result))
+                    locals.set(operation.destination.ordinal, Object.freeze([result]))
+                    break
+                  }
                   const comparisonPredicates: Readonly<
                     Partial<
                       Record<
@@ -4952,13 +5386,72 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       throw new RangeError('LLVM callable builtin lost its first operand')
                     const conversionTarget = Scalar.conversionTarget(target.operation)
                     if (conversionTarget !== undefined) {
-                      if (!Scalar.isIntegerSpelling(firstType._tag))
+                      const sourceScalar = Scalar.find(firstType._tag)
+                      if (sourceScalar?.category === 'Floating') {
+                        const destination =
+                          integerTypes.get(
+                            Scalar.bits(
+                              conversionTarget,
+                              program.layout.target.pointerSize === 4 ? 32 : 64,
+                            ),
+                          ) ?? i32
+                        const result = yield* FunctionBody.cast(
+                          body,
+                          conversionTarget.signedness === 'Signed' ? 'fptosi' : 'fptoui',
+                          first,
+                          destination,
+                          `callable_convert${operation.destination.ordinal}`,
+                        )
+                        locals.set(operation.destination.ordinal, Object.freeze([result]))
+                        break
+                      }
+                      if (sourceScalar?.category !== 'Integer')
                         throw new RangeError('LLVM callable conversion lost its source type')
                       const result = yield* emitIntegerConversion(
                         first,
-                        Object.freeze({ _tag: firstType._tag }),
+                        Object.freeze({ _tag: sourceScalar.spelling }),
                         Object.freeze({ _tag: conversionTarget.spelling }),
                         `callable_convert${operation.destination.ordinal}`,
+                      )
+                      locals.set(operation.destination.ordinal, Object.freeze([result]))
+                      break
+                    }
+                    const floatTarget = Scalar.floatConversionTarget(target.operation)
+                    if (floatTarget !== undefined) {
+                      const source = Scalar.find(firstType._tag)
+                      if (source === undefined || source.category === 'Boolean')
+                        throw new RangeError('LLVM callable float conversion lost its source type')
+                      const destination = floatTarget.spelling === 'f32' ? f32 : f64
+                      const result =
+                        source.category === 'Floating'
+                          ? source.spelling === floatTarget.spelling
+                            ? first
+                            : yield* FunctionBody.cast(
+                                body,
+                                source.spelling === 'f64' ? 'fptrunc' : 'fpext',
+                                first,
+                                destination,
+                                `callable_convert${operation.destination.ordinal}`,
+                              )
+                          : yield* FunctionBody.cast(
+                              body,
+                              source.signedness === 'Signed' ? 'sitofp' : 'uitofp',
+                              first,
+                              destination,
+                              `callable_convert${operation.destination.ordinal}`,
+                            )
+                      locals.set(operation.destination.ordinal, Object.freeze([result]))
+                      break
+                    }
+                    if (
+                      target.operation === 'Negate' &&
+                      Scalar.find(firstType._tag)?.category === 'Floating'
+                    ) {
+                      const result = yield* FunctionBody.unary(
+                        body,
+                        'fneg',
+                        first,
+                        `callable_fneg${operation.destination.ordinal}`,
                       )
                       locals.set(operation.destination.ordinal, Object.freeze([result]))
                       break

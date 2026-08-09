@@ -8,6 +8,7 @@ export type TokenKind =
   | 'ModuleDocComment'
   | 'Identifier'
   | 'DecimalInteger'
+  | 'DecimalFloat'
   | 'PubKeyword'
   | 'StructKeyword'
   | 'EffectKeyword'
@@ -74,6 +75,7 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   ModuleDocComment: 'module documentation comment',
   Identifier: 'identifier',
   DecimalInteger: 'decimal integer',
+  DecimalFloat: 'decimal floating-point literal',
   PubKeyword: '`pub`',
   StructKeyword: '`struct`',
   EffectKeyword: '`effect`',

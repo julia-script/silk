@@ -165,6 +165,13 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'FloatingLiteral'
+      readonly bits: bigint
+      readonly spelling: string
+      readonly type: Scalar.FloatSpelling
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'UnitLiteral'
       readonly type: typeof Type.unit
       readonly span: SourceSpan.SourceSpan
@@ -1082,6 +1089,8 @@ const encodeExpression = (expression: Expression, depth: number): string => {
   switch (expression._tag) {
     case 'IntegerLiteral':
       return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+    case 'FloatingLiteral':
+      return `${indent}literal ${expression.spelling} bits=0x${expression.bits.toString(16)} : ${expression.type} ${spanText(expression.span)}`
     case 'UnitLiteral':
       return `${indent}unit : () ${spanText(expression.span)}`
     case 'BooleanLiteral':

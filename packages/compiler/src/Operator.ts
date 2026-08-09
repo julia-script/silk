@@ -142,12 +142,16 @@ export const target = (
       operation: self === 'Equals' ? 'equals' : 'notEquals',
     })
   }
+  const selected = Scalar.find(equalityActor)
   return Object.freeze({
     actor:
       self === 'Not'
         ? Scalar.boolean.spelling
-        : Scalar.find(equalityActor)?.category !== 'Integer' ||
-            (self === 'Negate' && Scalar.find(equalityActor)?.signedness !== 'Signed')
+        : selected === undefined ||
+            selected.category === 'Boolean' ||
+            (self === 'Negate' &&
+              selected.category === 'Integer' &&
+              selected.signedness !== 'Signed')
           ? Scalar.defaultInteger.spelling
           : equalityActor,
     operation: operationByOperator[self],

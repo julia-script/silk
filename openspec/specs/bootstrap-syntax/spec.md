@@ -5,7 +5,6 @@
 Turn the bootstrap lexer result into the smallest source-faithful grammatical structure that can
 recover from ordinary mistakes without introducing semantic or lowering representations.
 ## Requirements
-
 ### Requirement: Canonical integer, unit, and bottom syntax is lossless
 
 The parser SHALL preserve every lowercase integer primitive spelling, `()` in type and value positions, `never` in type positions, omitted unit results, bare `return`, and exact signed or unsigned literal tokens under existing bounded recovery rules.
@@ -14,6 +13,7 @@ The parser SHALL preserve every lowercase integer primitive spelling, `()` in ty
 
 - **WHEN** source contains lowercase integer declarations plus unit and bottom forms
 - **THEN** syntax retains every token and exact span without deciding target width
+
 ### Requirement: First function grammar
 The parser SHALL recognize a source file containing zero or more top-level import or function
 declarations followed by end-of-file. Every function SHALL have the form `[pub] fn <name>(<parameters>)
@@ -540,7 +540,6 @@ error regions, and a damaged struct MUST NOT consume a following top-level decla
 - **WHEN** a struct contains `pub : i32` before its closing brace
 - **THEN** the field retains an explicit missing name and the struct retains its closing brace
 
-
 ### Requirement: Struct literals parse losslessly
 
 Every expression position SHALL accept a one- or two-segment type path followed by a braced,
@@ -726,7 +725,6 @@ nesting later. Type-level `|` SHALL remain distinct from expression operators.
 - **WHEN** a parameter type contains `Token |` before its closing delimiter
 - **THEN** the union records an explicit missing member without consuming the following parameter or function body
 
-
 ### Requirement: Match expressions are lossless in every expression position
 
 Every expression position SHALL accept `match` followed by an optional `move`, `&`, or `&mut` mode,
@@ -803,7 +801,6 @@ operand is borrowable or the type is permitted at that source position.
 
 - **WHEN** a parameter starts a slice type but omits its element or closing bracket before the parameter boundary
 - **THEN** the parser inserts explicit missing syntax, preserves following parameters and the function body, and emits deterministic parser diagnostics
-
 
 ### Requirement: Effect and failure syntax is lossless and locally recoverable
 
@@ -897,3 +894,12 @@ canonical formatting and local recovery inside the containing arm.
 
 - **WHEN** source matches with arms `Empty nothing => 0` and `Full full => 1`
 - **THEN** the syntax tree retains both binding patterns with full-fidelity reproduction and the formatter prints them canonically
+
+### Requirement: Floating literal syntax is lossless
+
+The parser SHALL preserve decimal point, exponent marker/sign, leading sign, digits, trivia, recovery elements, and exact spans without rounding during syntax construction.
+
+#### Scenario: Parse exponent notation
+
+- **WHEN** source contains `-1.25e-3`
+- **THEN** syntax retains every component as one recoverable expression

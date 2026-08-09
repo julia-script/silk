@@ -106,6 +106,15 @@ it.effect('hovers the type of the smallest enclosing expression', () =>
   }),
 )
 
+it.effect('hovers the exact default float width', () =>
+  Effect.gen(function* () {
+    const source = 'fn value() -> f64 { return 1.25e2 }'
+    const { document, snapshot } = yield* open(source)
+    const hover = Document.hover(document, snapshot, positionOf(source, '1.25e2'))
+    assert.deepEqual(hover?.contents, { kind: 'markdown', value: '```silk\nf64\n```' })
+  }),
+)
+
 it.effect('hovers nothing outside typed expressions', () =>
   Effect.gen(function* () {
     const { document, snapshot } = yield* open('pub fn main() -> i32 { return 42 }')

@@ -544,6 +544,8 @@ fn identity<T>(value: ) -> i32 { return 0 }`
     )
     assert.deepEqual(typeResult?.context, { _tag: 'DeclaredTypeContext' })
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'Local')
+    assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'f32')
+    assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'f64')
     assert.notInclude(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'true')
   }),
 )

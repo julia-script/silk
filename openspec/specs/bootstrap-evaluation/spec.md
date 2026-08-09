@@ -228,7 +228,6 @@ values; the layout table does not require simulation of raw bytes when no operat
 - **WHEN** a MIR program omits the layout of a runtime type used by an operation
 - **THEN** MIR verification reports the inconsistency and the interpreter does not execute the malformed program
 
-
 ### Requirement: Evaluation carries immutable nominal values
 
 The MIR evaluator SHALL represent a nominal struct value by its canonical type and complete
@@ -523,3 +522,17 @@ events for acquisition, initialization, destruction, and release.
 
 - **WHEN** a guard owns initialized move-only elements and its backing allocation
 - **THEN** the trace records element destruction by the hook before recursive field cleanup releases the bytes
+
+### Requirement: Evaluation is bit-aware for floats
+
+Evaluation SHALL store explicit float width and IEEE bits, round after every `f32` operation, preserve signed zero, canonicalize arithmetic NaNs where payload is unspecified, and implement classification, total order, reinterpretation, and conversions deterministically.
+
+#### Scenario: Round an f32 operation
+
+- **WHEN** an `f32` arithmetic result needs binary32 rounding
+- **THEN** evaluation rounds once at that operation and matches both backends
+
+#### Scenario: Preserve fromBits-toBits
+
+- **WHEN** a float is created from same-width integer bits and reinterpreted back
+- **THEN** evaluation returns the original bits exactly

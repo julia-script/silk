@@ -2,6 +2,7 @@ import { dual } from 'effect/Function'
 import * as Option from 'effect/Option'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as FloatingPoint from './FloatingPoint.js'
 import * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Match from './Match.js'
@@ -108,6 +109,17 @@ export type IntegerExpressionFact =
       readonly _tag: 'Unavailable'
       readonly syntax: SyntaxTree.Element
     }
+
+export type FloatingExpressionFact =
+  | {
+      readonly _tag: 'Available'
+      readonly type: Scalar.FloatSpelling
+      readonly bits: bigint
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+    }
+  | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
 
 /** A call callee resolved against top-level declarations or unavailable after syntax recovery. */
 export type CallReferenceFact =
@@ -572,6 +584,12 @@ export type ExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
   | {
+      readonly _tag: 'Floating'
+      readonly floating: FloatingExpressionFact
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
       readonly _tag: 'Unit'
       readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
@@ -914,6 +932,7 @@ const unionConversionDiagnostic = (
 
 const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'IntegerLiteralExpression',
+  'FloatingLiteralExpression',
   'UnitExpression',
   'BooleanLiteralExpression',
   'IdentifierExpression',
@@ -1138,6 +1157,33 @@ const analyzeInteger = (
         : Diagnostic.integerOutOfRange(tokenSpelling, literalSpan),
     ]),
   })
+}
+
+const analyzeFloating = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  expected?: SemanticType,
+): FloatingExpressionFact => {
+  const token = directToken(node, 'DecimalFloat')
+  if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: node })
+  const bytes = Option.getOrThrowWith(
+    SourceFile.slice(source, token.span),
+    () => new RangeError(`Semantic float span does not belong to source ${source.id}`),
+  )
+  const unsigned = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
+  const spelling = directToken(node, 'Minus') === undefined ? unsigned : `-${unsigned}`
+  const selected = Scalar.isFloatSpelling(expected) ? expected : Scalar.defaultFloat.spelling
+  const encoded = FloatingPoint.fromDecimal(spelling, selected === 'f32' ? 32 : 64)
+  return encoded === undefined
+    ? Object.freeze({ _tag: 'Unavailable', syntax: node })
+    : Object.freeze({
+        _tag: 'Available',
+        type: selected,
+        bits: encoded.bits,
+        spelling,
+        token,
+        syntax: node,
+      })
 }
 
 /** The value names visible at one body position: parameters plus completed bindings. */
@@ -4093,9 +4139,7 @@ const analyzeOperatorExpression = (
         : Operator.infix(operatorToken.kind)?.operator
   const operandNodes = node.children.filter(isExpressionNode)
   const initialExpected =
-    typeof expected === 'string' &&
-    (Scalar.isIntegerSpelling(expected) || expected === Scalar.boolean.spelling) &&
-    node.kind === 'InfixExpression'
+    typeof expected === 'string' && Scalar.isSpelling(expected) && node.kind === 'InfixExpression'
       ? Object.freeze(operandNodes.map(() => expected))
       : Object.freeze([])
   let argumentsResult = analyzeArgumentNodes(
@@ -4137,7 +4181,7 @@ const analyzeOperatorExpression = (
     initialExpected.length === 0 &&
     firstType?._tag === 'Available' &&
     typeof firstType.type === 'string' &&
-    (Scalar.isIntegerSpelling(firstType.type) || firstType.type === Scalar.boolean.spelling) &&
+    Scalar.isSpelling(firstType.type) &&
     operandNodes.length > 1
   ) {
     argumentsResult = analyzeArgumentNodes(
@@ -5274,6 +5318,19 @@ function analyzeExpression(
       }),
       diagnostics: integer.diagnostics,
       type: integer.fact._tag === 'Available' ? integer.fact.type : undefined,
+    })
+  }
+
+  if (node.kind === 'FloatingLiteralExpression') {
+    const floating = analyzeFloating(source, node, expected)
+    const type =
+      floating._tag === 'Available'
+        ? availableExpressionType(floating.type)
+        : unavailableExpressionType
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'Floating', floating, type, syntax: node }),
+      diagnostics: Object.freeze([]),
+      type: floating._tag === 'Available' ? floating.type : undefined,
     })
   }
 
@@ -6565,6 +6622,17 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
         })
       : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   }
+  if (fact._tag === 'Floating') {
+    return fact.floating._tag === 'Available'
+      ? Object.freeze({
+          _tag: 'FloatingLiteral',
+          bits: fact.floating.bits,
+          spelling: fact.floating.spelling,
+          type: fact.floating.type,
+          span: fact.syntax.span,
+        })
+      : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+  }
   if (fact._tag === 'Unit') {
     return Object.freeze({
       _tag: 'UnitLiteral',
@@ -7478,6 +7546,7 @@ const directExpressionChildren = (expression: ExpressionFact): ReadonlyArray<Exp
     case 'EffectBlock':
     case 'Match':
     case 'Integer':
+    case 'Floating':
     case 'Unit':
     case 'Boolean':
     case 'Identifier':

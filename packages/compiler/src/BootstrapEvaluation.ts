@@ -1,4 +1,5 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as FloatingPoint from './FloatingPoint.js'
 import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import type * as Match from './Match.js'
@@ -32,6 +33,12 @@ export interface ScalarIntegerValue {
   readonly _tag: 'ScalarIntegerValue'
   readonly type: Scalar.IntegerSpelling
   readonly value: bigint
+}
+
+export interface FloatValue {
+  readonly _tag: 'FloatValue'
+  readonly type: Scalar.FloatSpelling
+  readonly bits: bigint
 }
 
 export interface AggregateValue {
@@ -146,6 +153,7 @@ export type Value =
   | I32Value
   | UsizeValue
   | ScalarIntegerValue
+  | FloatValue
   | AggregateValue
   | ArrayValue
   | SliceValue
@@ -426,6 +434,83 @@ const scalarIntegerValue = (
       ? usizeValue(input)
       : Object.freeze({ _tag: 'ScalarIntegerValue', type, value: input })
 
+const floatValue = (type: Scalar.FloatSpelling, bits: bigint): FloatValue =>
+  Object.freeze({ _tag: 'FloatValue', type, bits: BigInt.asUintN(type === 'f32' ? 32 : 64, bits) })
+
+const floatingBits = (self: FloatValue): FloatingPoint.Bits =>
+  Object.freeze({ width: self.type === 'f32' ? 32 : 64, bits: self.bits })
+
+const floatingUnary = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'FloatUnary' }>['operation'],
+  self: FloatValue,
+): Value => {
+  const bits = floatingBits(self)
+  if (operation === 'Negate')
+    return floatValue(self.type, self.bits ^ (1n << BigInt(bits.width - 1)))
+  const result =
+    operation === 'IsNaN'
+      ? FloatingPoint.isNotANumber(bits)
+      : operation === 'IsInfinite'
+        ? FloatingPoint.isInfinite(bits)
+        : operation === 'IsFinite'
+          ? FloatingPoint.isFiniteNumber(bits)
+          : operation === 'IsNormal'
+            ? FloatingPoint.isNormal(bits)
+            : operation === 'IsSubnormal'
+              ? FloatingPoint.isSubnormal(bits)
+              : FloatingPoint.isSignNegative(bits)
+  return value(result ? 1 : 0)
+}
+
+const floatingBinary = (
+  operation: Mir.BinaryOperator,
+  left: FloatValue,
+  right: FloatValue,
+): Value => {
+  const leftBits = floatingBits(left)
+  const rightBits = floatingBits(right)
+  const leftNumber = FloatingPoint.toNumber(leftBits)
+  const rightNumber = FloatingPoint.toNumber(rightBits)
+  if (
+    operation === 'Equals' ||
+    operation === 'NotEquals' ||
+    operation === 'LessThan' ||
+    operation === 'LessOrEqual' ||
+    operation === 'GreaterThan' ||
+    operation === 'GreaterOrEqual'
+  ) {
+    const result =
+      operation === 'Equals'
+        ? leftNumber === rightNumber
+        : operation === 'NotEquals'
+          ? leftNumber !== rightNumber
+          : operation === 'LessThan'
+            ? leftNumber < rightNumber
+            : operation === 'LessOrEqual'
+              ? leftNumber <= rightNumber
+              : operation === 'GreaterThan'
+                ? leftNumber > rightNumber
+                : leftNumber >= rightNumber
+    return value(result ? 1 : 0)
+  }
+  if (operation === 'TotalOrder')
+    return value(
+      FloatingPoint.totalOrderKey(leftBits) <= FloatingPoint.totalOrderKey(rightBits) ? 1 : 0,
+    )
+  const result =
+    operation === 'Add'
+      ? leftNumber + rightNumber
+      : operation === 'Subtract'
+        ? leftNumber - rightNumber
+        : operation === 'Multiply'
+          ? leftNumber * rightNumber
+          : operation === 'Divide'
+            ? leftNumber / rightNumber
+            : leftNumber % rightNumber
+  const encoded = FloatingPoint.fromNumber(result, leftBits.width)
+  return floatValue(left.type, encoded.bits)
+}
+
 const blockedStep = (reason: BlockedReason): Step =>
   Object.freeze({ _tag: 'Blocked', reason: Object.freeze(reason) })
 
@@ -542,6 +627,13 @@ function executeFunction(
     ) {
       throw new RangeError(`MIR verifier allowed aggregate local %${local.ordinal} as an integer`)
     }
+    return found
+  }
+
+  const readFloat = (local: Mir.LocalId): FloatValue => {
+    const found = read(local).value
+    if (found._tag !== 'FloatValue')
+      throw new RangeError(`MIR verifier allowed non-float local %${local.ordinal} as a float`)
     return found
   }
 
@@ -783,6 +875,88 @@ function executeFunction(
 
     const operation = target.operation
     const conversionTarget = Scalar.conversionTarget(operation)
+    const actorScalar = Scalar.find(target.actor)
+    if (actorScalar?.category === 'Floating') {
+      const first = arguments_.at(0)
+      if (operation === 'FromBits') {
+        if (
+          first === undefined ||
+          (first._tag !== 'I32Value' &&
+            first._tag !== 'UsizeValue' &&
+            first._tag !== 'ScalarIntegerValue')
+        )
+          throw new RangeError('MIR verifier allowed invalid float bits')
+        return Object.freeze({
+          _tag: 'Value',
+          value: floatValue(actorScalar.spelling, BigInt(first.value)),
+        })
+      }
+      if (first?._tag !== 'FloatValue')
+        throw new RangeError('MIR verifier allowed invalid float callable')
+      if (operation === 'ToBits') {
+        const targetType: Scalar.IntegerSpelling = actorScalar.spelling === 'f32' ? 'u32' : 'u64'
+        return Object.freeze({ _tag: 'Value', value: scalarIntegerValue(targetType, first.bits) })
+      }
+      const floatTarget = Scalar.floatConversionTarget(operation)
+      if (floatTarget !== undefined) {
+        const converted = FloatingPoint.fromNumber(
+          FloatingPoint.toNumber(floatingBits(first)),
+          floatTarget.spelling === 'f32' ? 32 : 64,
+        )
+        return Object.freeze({
+          _tag: 'Value',
+          value: floatValue(floatTarget.spelling, converted.bits),
+        })
+      }
+      if (conversionTarget !== undefined) {
+        const number = FloatingPoint.toNumber(floatingBits(first))
+        const exact = Number.isFinite(number) ? BigInt(Math.trunc(number)) : undefined
+        const range = Scalar.range(
+          conversionTarget,
+          program.layout.target.pointerSize === 4 ? 32 : 64,
+        )
+        if (exact === undefined || exact < range.minimum || exact > range.maximum)
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'float conversion out of range',
+            span,
+          })
+        return Object.freeze({
+          _tag: 'Value',
+          value: scalarIntegerValue(conversionTarget.spelling, exact),
+        })
+      }
+      if (
+        operation === 'Negate' ||
+        operation === 'IsNaN' ||
+        operation === 'IsInfinite' ||
+        operation === 'IsFinite' ||
+        operation === 'IsNormal' ||
+        operation === 'IsSubnormal' ||
+        operation === 'IsSignNegative'
+      )
+        return Object.freeze({ _tag: 'Value', value: floatingUnary(operation, first) })
+      const second = arguments_.at(1)
+      if (second?._tag === 'FloatValue' && Mir.isBinaryOperator(operation))
+        return Object.freeze({ _tag: 'Value', value: floatingBinary(operation, first, second) })
+    }
+    const floatTarget = Scalar.floatConversionTarget(operation)
+    if (actorScalar?.category === 'Integer' && floatTarget !== undefined) {
+      const first = arguments_.at(0)
+      if (
+        first === undefined ||
+        (first._tag !== 'I32Value' &&
+          first._tag !== 'UsizeValue' &&
+          first._tag !== 'ScalarIntegerValue')
+      )
+        throw new RangeError('MIR verifier allowed invalid integer-to-float callable')
+      const encoded = FloatingPoint.fromNumber(
+        Number(BigInt(first.value)),
+        floatTarget.spelling === 'f32' ? 32 : 64,
+      )
+      return Object.freeze({ _tag: 'Value', value: floatValue(floatTarget.spelling, encoded.bits) })
+    }
     if (Scalar.isCheckedOperation(operation)) {
       const source = Scalar.find(target.actor)
       const resultScalar = conversionTarget ?? source
@@ -1580,10 +1754,13 @@ function executeFunction(
             {
               const semantic = Mir.semanticType(operation.type)
               const integer = typeof semantic === 'string' && Scalar.isIntegerSpelling(semantic)
+              const floating = typeof semantic === 'string' && Scalar.isFloatSpelling(semantic)
               write(operation.destination, {
-                value: integer
-                  ? scalarIntegerValue(semantic, BigInt(operation.value))
-                  : value(Number(operation.value)),
+                value: floating
+                  ? floatValue(semantic, BigInt(operation.value))
+                  : integer
+                    ? scalarIntegerValue(semantic, BigInt(operation.value))
+                    : value(Number(operation.value)),
                 fromCall: false,
               })
             }
@@ -2061,9 +2238,21 @@ function executeFunction(
             break
           }
           case 'Binary': {
+            const leftType = fn.localTypes.at(operation.left.ordinal)
+            const semantic = leftType === undefined ? undefined : Mir.semanticType(leftType)
+            if (Scalar.isFloatSpelling(semantic)) {
+              write(operation.destination, {
+                value: floatingBinary(
+                  operation.operator,
+                  readFloat(operation.left),
+                  readFloat(operation.right),
+                ),
+                fromCall: false,
+              })
+              break
+            }
             const leftValue = readInteger(operation.left)
             const rightValue = readInteger(operation.right)
-            const leftType = fn.localTypes.at(operation.left.ordinal)
             const rightType = fn.localTypes.at(operation.right.ordinal)
             const operand = leftType === undefined ? undefined : Mir.semanticType(leftType)
             if (
@@ -2238,6 +2427,82 @@ function executeFunction(
             })
             break
           }
+          case 'ConvertScalar': {
+            const sourceType = Scalar.find(operation.sourceType._tag)
+            const targetType = Scalar.find(operation.type._tag)
+            if (sourceType?.category === 'Floating' && targetType?.category === 'Floating') {
+              const source = readFloat(operation.source)
+              const encoded = FloatingPoint.fromNumber(
+                FloatingPoint.toNumber(floatingBits(source)),
+                targetType.spelling === 'f32' ? 32 : 64,
+              )
+              write(operation.destination, {
+                value: floatValue(targetType.spelling, encoded.bits),
+                fromCall: false,
+              })
+              break
+            }
+            if (sourceType?.category === 'Floating' && targetType?.category === 'Integer') {
+              const number = FloatingPoint.toNumber(floatingBits(readFloat(operation.source)))
+              const exact = Number.isFinite(number) ? BigInt(Math.trunc(number)) : undefined
+              const range = Scalar.range(
+                targetType,
+                program.layout.target.pointerSize === 4 ? 32 : 64,
+              )
+              if (exact === undefined || exact < range.minimum || exact > range.maximum)
+                return blockedStep({
+                  _tag: 'Trap',
+                  function: fn.id,
+                  reason: 'float conversion out of range',
+                  span: operation.provenance.span,
+                })
+              write(operation.destination, {
+                value: scalarIntegerValue(targetType.spelling, exact),
+                fromCall: false,
+              })
+              break
+            }
+            if (sourceType?.category === 'Integer' && targetType?.category === 'Floating') {
+              const encoded = FloatingPoint.fromNumber(
+                Number(BigInt(readInteger(operation.source).value)),
+                targetType.spelling === 'f32' ? 32 : 64,
+              )
+              write(operation.destination, {
+                value: floatValue(targetType.spelling, encoded.bits),
+                fromCall: false,
+              })
+              break
+            }
+            throw new RangeError('MIR verifier allowed an invalid scalar conversion')
+          }
+          case 'ReinterpretScalar': {
+            const target = Scalar.find(operation.type._tag)
+            const subject = read(operation.source).value
+            if (target?.category === 'Floating') {
+              if (
+                subject._tag !== 'I32Value' &&
+                subject._tag !== 'UsizeValue' &&
+                subject._tag !== 'ScalarIntegerValue'
+              )
+                throw new RangeError('MIR verifier allowed invalid float reinterpretation')
+              write(operation.destination, {
+                value: floatValue(target.spelling, BigInt(subject.value)),
+                fromCall: false,
+              })
+            } else if (target?.category === 'Integer' && subject._tag === 'FloatValue') {
+              write(operation.destination, {
+                value: scalarIntegerValue(target.spelling, subject.bits),
+                fromCall: false,
+              })
+            } else throw new RangeError('MIR verifier allowed invalid scalar reinterpretation')
+            break
+          }
+          case 'FloatUnary':
+            write(operation.destination, {
+              value: floatingUnary(operation.operation, readFloat(operation.source)),
+              fromCall: false,
+            })
+            break
           case 'CheckedInteger': {
             const operands = operation.operands.map((operand) => BigInt(readInteger(operand).value))
             const left = operands.at(0)

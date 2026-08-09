@@ -183,6 +183,7 @@ const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
 
 const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'DecimalInteger',
+  'DecimalFloat',
   'Identifier',
   'LeftBrace',
   'MoveKeyword',
@@ -310,6 +311,25 @@ const parseIntegerLiteralExpression = (initial: State): NodeResult => {
   })
 }
 
+const parseFloatingLiteralExpression = (initial: State): NodeResult => {
+  if (nextSignificantKind(initial) === 'Minus') {
+    const minus = expect(initial, 'Minus', ['DecimalFloat', ...expressionFollowing])
+    const literal = expect(minus.state, 'DecimalFloat', expressionFollowing)
+    return Object.freeze({
+      state: literal.state,
+      node: syntaxNode(literal.state, 'FloatingLiteralExpression', [
+        ...minus.elements,
+        ...literal.elements,
+      ]),
+    })
+  }
+  const literal = expect(initial, 'DecimalFloat', expressionFollowing)
+  return Object.freeze({
+    state: literal.state,
+    node: syntaxNode(literal.state, 'FloatingLiteralExpression', literal.elements),
+  })
+}
+
 const parseIdentifierExpression = (initial: State): NodeResult => {
   const identifier = expect(initial, 'Identifier', [
     'Dot',
@@ -341,6 +361,7 @@ const primaryKind = (
   allowStructLiteral: boolean,
 ):
   | 'Integer'
+  | 'Floating'
   | 'Boolean'
   | 'Identifier'
   | 'Move'
@@ -360,8 +381,13 @@ const primaryKind = (
 
   while (token !== undefined) {
     if (token.kind === 'DecimalInteger') return 'Integer'
+    if (token.kind === 'DecimalFloat') return 'Floating'
     if (token.kind === 'Minus')
-      return significantKindAfter(state, 1) === 'DecimalInteger' ? 'Integer' : 'Prefix'
+      return significantKindAfter(state, 1) === 'DecimalInteger'
+        ? 'Integer'
+        : significantKindAfter(state, 1) === 'DecimalFloat'
+          ? 'Floating'
+          : 'Prefix'
     if (token.kind === 'Bang') return 'Prefix'
     if (token.kind === 'TrueKeyword' || token.kind === 'FalseKeyword') return 'Boolean'
     if (token.kind === 'MoveKeyword') return 'Move'
@@ -1029,6 +1055,7 @@ function parsePrimaryExpression(
     })
   }
   if (kind === 'Boolean') return parseBooleanLiteralExpression(initial)
+  if (kind === 'Floating') return parseFloatingLiteralExpression(initial)
   if (kind === 'Identifier') return parseIdentifierExpression(initial)
   if (kind === 'Grouped') return parseGroupedExpression(initial, reservedForEnclosingCalls)
   return parseIntegerLiteralExpression(initial)

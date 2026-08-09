@@ -657,6 +657,21 @@ function lowerExpression(
       )
       return { result: destination }
     }
+    case 'FloatingLiteral': {
+      const type = fn.type(expression.type)
+      if (type?._tag !== expression.type) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'Literal',
+          destination,
+          type,
+          value: expression.bits,
+          provenance: authored(expression.span),
+        }),
+      )
+      return { result: destination }
+    }
     case 'UnitLiteral': {
       const type = fn.type(expression.type)
       if (type?._tag !== 'Nominal' || !Type.equals(type.type, Type.unit)) return undefined
@@ -2613,7 +2628,7 @@ function lowerExpression(
         const targetType = fn.type(expression.type)
         if (
           source === undefined ||
-          sourceScalar?.category !== 'Integer' ||
+          (sourceScalar?.category !== 'Integer' && sourceScalar?.category !== 'Floating') ||
           sourceType?._tag !== sourceScalar.spelling ||
           targetType?._tag !== conversionTarget.spelling
         )
@@ -2621,11 +2636,95 @@ function lowerExpression(
         const destination = fn.alloc(targetType)
         fn.emit(
           Object.freeze({
-            _tag: 'ConvertInteger' as const,
+            _tag:
+              sourceScalar.category === 'Integer'
+                ? ('ConvertInteger' as const)
+                : ('ConvertScalar' as const),
             destination,
             source,
             sourceType,
             type: targetType,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      const floatConversionTarget = Scalar.floatConversionTarget(expression.operation)
+      if (floatConversionTarget !== undefined) {
+        const [source] = argumentLocals
+        const sourceType = source === undefined ? undefined : fn.localTypes.at(source.ordinal)
+        const semanticSource = sourceType === undefined ? undefined : Mir.semanticType(sourceType)
+        const sourceScalar =
+          typeof semanticSource === 'string' ? Scalar.find(semanticSource) : undefined
+        const targetType = fn.type(expression.type)
+        if (
+          source === undefined ||
+          sourceScalar === undefined ||
+          sourceScalar.category === 'Boolean' ||
+          sourceType?._tag !== sourceScalar.spelling ||
+          targetType?._tag !== floatConversionTarget.spelling
+        )
+          return undefined
+        const destination = fn.alloc(targetType)
+        fn.emit(
+          Object.freeze({
+            _tag: 'ConvertScalar' as const,
+            destination,
+            source,
+            sourceType,
+            type: targetType,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      if (expression.operation === 'ToBits' || expression.operation === 'FromBits') {
+        const [source] = argumentLocals
+        const sourceType = source === undefined ? undefined : fn.localTypes.at(source.ordinal)
+        const targetType = fn.type(expression.type)
+        if (source === undefined || sourceType === undefined || targetType === undefined)
+          return undefined
+        const destination = fn.alloc(targetType)
+        fn.emit(
+          Object.freeze({
+            _tag: 'ReinterpretScalar' as const,
+            destination,
+            source,
+            sourceType: sourceType as Mir.ScalarType,
+            type: targetType as Mir.ScalarType,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      if (
+        expression.operation === 'IsNaN' ||
+        expression.operation === 'IsInfinite' ||
+        expression.operation === 'IsFinite' ||
+        expression.operation === 'IsNormal' ||
+        expression.operation === 'IsSubnormal' ||
+        expression.operation === 'IsSignNegative' ||
+        (expression.operation === 'Negate' &&
+          argumentLocals.some((local) => {
+            const type = fn.localTypes.at(local.ordinal)
+            const semantic = type === undefined ? undefined : Mir.semanticType(type)
+            return typeof semantic === 'string' && Scalar.find(semantic)?.category === 'Floating'
+          }))
+      ) {
+        const [source] = argumentLocals
+        const sourceType = source === undefined ? undefined : fn.localTypes.at(source.ordinal)
+        const targetType = fn.type(expression.type)
+        if (source === undefined || sourceType === undefined || targetType === undefined)
+          return undefined
+        const destination = fn.alloc(targetType)
+        fn.emit(
+          Object.freeze({
+            _tag: 'FloatUnary' as const,
+            operation: expression.operation,
+            destination,
+            source,
+            sourceType: sourceType as Mir.ScalarType,
+            type: targetType as Mir.ScalarType,
             provenance: authored(expression.span),
           }),
         )

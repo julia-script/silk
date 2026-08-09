@@ -710,6 +710,12 @@ const operationLabel = (operation: Mir.Operation): string => {
       )}, ${localText(operation.right)}`
     case 'ConvertInteger':
       return `${localText(operation.destination)} = convert ${localText(operation.source)} → ${operation.type._tag}`
+    case 'ConvertScalar':
+      return `${localText(operation.destination)} = convert ${localText(operation.source)} → ${operation.type._tag}`
+    case 'ReinterpretScalar':
+      return `${localText(operation.destination)} = reinterpret ${localText(operation.source)} → ${operation.type._tag}`
+    case 'FloatUnary':
+      return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${localText(operation.source)}`
     case 'CheckedInteger':
       return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${operation.operands.map(localText).join(', ')}`
     case 'ValidateLayout':
@@ -1001,6 +1007,8 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
       ? `${value.value.toString()}usize`
       : value._tag === 'ScalarIntegerValue'
         ? `${value.value.toString()}${value.type}`
+        : value._tag === 'FloatValue'
+          ? `${value.type}(bits=0x${value.bits.toString(16)})`
     : value._tag === 'ArrayValue'
       ? `${typeText(value.type)} [${value.elements.map(valueText).join(', ')}]`
       : value._tag === 'SliceValue'

@@ -168,7 +168,6 @@ For MIR planned for `wasm32-unknown-unknown`, `LlvmBackend` SHALL realize the co
 - **WHEN** the same Wasm-target MIR and profile are emitted through LLVM in fresh processes
 - **THEN** their LLVM IR and bitcode are byte-identical
 
-
 ### Requirement: Native emission realizes compiler-planned aggregates
 
 The native backend SHALL lower canonical nominal MIR values, construction, projection, whole moves,
@@ -545,3 +544,12 @@ backends' cleanup paths.
 
 - **WHEN** a dropped union currently holds its allocation-owning member
 - **THEN** exactly that allocation releases once, and dropping the same union holding its empty member releases nothing
+
+### Requirement: Backends emit conservative floating operations
+
+LLVM SHALL emit ordinary float operations without implicit fast-math flags; direct WebAssembly SHALL emit corresponding `f32`/`f64` instructions. Both SHALL realize MIR comparison, classification, total order, reinterpretation, and conversion semantics consistently.
+
+#### Scenario: Emit f64 arithmetic
+
+- **WHEN** accepted `f64` arithmetic lowers
+- **THEN** generated artifacts contain no reassociation, no-NaN, no-infinity, or equivalent promises

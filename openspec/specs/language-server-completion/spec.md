@@ -4,9 +4,7 @@
 
 Defines deterministic, recovery-aware Silk completions selected from compiler scope, type, member,
 intrinsic, and syntax context rather than protocol-side spelling heuristics.
-
 ## Requirements
-
 ### Requirement: Type completion offers canonical integer types
 
 Type completion SHALL derive the ordered lowercase integer vocabulary plus `bool`, `()`, and `never` from semantic identities and MUST NOT offer removed uppercase aliases.
@@ -102,3 +100,12 @@ signature detail SHALL be deterministic for identical source and position.
 
 - **WHEN** identical snapshots are queried repeatedly at the same position
 - **THEN** the ordered completion items and their semantic details are identical
+
+### Requirement: Type completion offers float types
+
+Type completion SHALL offer canonical `f32` and `f64` items derived from semantic type identities.
+
+#### Scenario: Complete a float type
+
+- **WHEN** completion is requested in a type position
+- **THEN** `f32` and `f64` appear deterministically

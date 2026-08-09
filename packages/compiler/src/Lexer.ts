@@ -286,7 +286,19 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
     if (isDecimalDigit(byte)) {
       index += 1
       while (index < bytes.length && isDecimalDigit(bytes[index])) index += 1
-      pushToken('DecimalInteger', start, index)
+      let floating = false
+      if (bytes[index] === 0x2e && bytes[index + 1] !== 0x2e && isDecimalDigit(bytes[index + 1])) {
+        floating = true
+        index += 1
+        while (index < bytes.length && isDecimalDigit(bytes[index])) index += 1
+      }
+      if (bytes[index] === 0x65 || bytes[index] === 0x45) {
+        floating = true
+        index += 1
+        if (bytes[index] === 0x2b || bytes[index] === 0x2d) index += 1
+        while (index < bytes.length && isDecimalDigit(bytes[index])) index += 1
+      }
+      pushToken(floating ? 'DecimalFloat' : 'DecimalInteger', start, index)
       continue
     }
 
