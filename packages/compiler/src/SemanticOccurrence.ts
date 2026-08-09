@@ -540,6 +540,15 @@ const collectExpression = (
   pending: Array<Pending>,
 ): void => {
   switch (expression._tag) {
+    case 'Constant':
+      push(
+        pending,
+        expression.token.span,
+        'Value',
+        available(identityOfDeclaration(expression.declaration)),
+        locationOfDeclaration(expression.declaration),
+      )
+      return
     case 'Identifier': {
       const resolved = parameterResolution(expression.reference)
       push(
@@ -778,6 +787,10 @@ const collectMember = (
       collectDeclaredType(failure, index, scope, pending)
     for (const requirement of member.requirementRow.entries)
       collectDeclaredType(requirement.capability, index, scope, pending)
+    return
+  }
+  if (member._tag === 'ConstantDeclaration') {
+    collectDeclaredType(member.declaredType, index, scope, pending)
     return
   }
   for (const field of member.fields) {

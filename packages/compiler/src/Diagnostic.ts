@@ -155,6 +155,8 @@ export const invalidConformanceCode = 'SEM0083' as const
 export const invalidDropHookCode = 'SEM0084' as const
 /** Stable code for malformed escapes, invalid UTF-8, or non-byte literal values. */
 export const invalidStaticLiteralCode = 'SEM0085' as const
+/** Stable code for a typed constant whose type or literal is outside the constant contract. */
+export const invalidConstantCode = 'SEM0086' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -269,6 +271,7 @@ export type Code =
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
   | typeof invalidStaticLiteralCode
+  | typeof invalidConstantCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -331,6 +334,7 @@ export type Reason =
   | { readonly _tag: 'InvalidConformance'; readonly detail: string }
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
+  | { readonly _tag: 'InvalidConstant'; readonly detail: string }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
   | { readonly _tag: 'UnhandledEffectRequirements'; readonly requirements: ReadonlyArray<string> }
   | { readonly _tag: 'InvalidEffectRetry'; readonly detail: string }
@@ -677,6 +681,18 @@ export const invalidStaticLiteral = (detail: string, span: SourceSpan.SourceSpan
     severity: 'error',
     message: `Invalid static literal: ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidStaticLiteral', detail }),
+    span,
+  })
+
+/** Creates the semantic diagnostic for a constant outside the literal scalar contract. */
+export const invalidConstant = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidConstantCode,
+    severity: 'error',
+    message: `Invalid constant: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidConstant', detail }),
     span,
   })
 

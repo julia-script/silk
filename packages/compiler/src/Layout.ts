@@ -111,11 +111,18 @@ export interface UnavailableEntry {
 
 export type CatalogEntry = Entry | UnavailableEntry
 
+/** One valid target-word constant awaiting the selected target's exact range verdict. */
+export interface UsizeConstantLiteral {
+  readonly value: bigint
+  readonly span: SourceSpan.SourceSpan
+}
+
 /** Every canonical nominal declaration laid out for one selected target. */
 export interface Catalog {
   readonly _tag: 'LayoutCatalog'
   readonly target: Target.Target
   readonly entries: ReadonlyArray<CatalogEntry>
+  readonly usizeConstants: ReadonlyArray<UsizeConstantLiteral>
 }
 
 /** The concrete layouts reached by one target-aware MIR program. */
@@ -855,10 +862,12 @@ export const catalog = (
           if (parameter.declaredType._tag === 'Resolved') addReferenced(parameter.declaredType.type)
         }
         if (member.returnType._tag === 'Resolved') addReferenced(member.returnType.type)
-      } else {
+      } else if (member._tag === 'StructDeclaration') {
         for (const field of member.fields) {
           if (field.declaredType._tag === 'Resolved') addReferenced(field.declaredType.type)
         }
+      } else if (member.declaredType._tag === 'Resolved') {
+        addReferenced(member.declaredType.type)
       }
     }
   }
@@ -899,6 +908,22 @@ export const catalog = (
     target,
     entries: Object.freeze(
       [...completed.values()].sort((left, right) => Type.compare(left.type, right.type)),
+    ),
+    usizeConstants: Object.freeze(
+      index.modules.flatMap((module) =>
+        module.constants.flatMap((constant) =>
+          constant.declaredType._tag === 'Resolved' &&
+          constant.declaredType.type === 'usize' &&
+          constant.literal._tag === 'IntegerLiteral'
+            ? [
+                Object.freeze({
+                  value: constant.literal.value,
+                  span: constant.literal.token.span,
+                }),
+              ]
+            : [],
+        ),
+      ),
     ),
   })
 }
@@ -1253,6 +1278,7 @@ const callableEnvironments = (
 const usizeLiteralVerdicts = (
   target: Target.Target,
   discovery: Instances.Discovery,
+  constants: ReadonlyArray<UsizeConstantLiteral>,
 ): {
   readonly verdicts: ReadonlyArray<UsizeLiteralVerdict>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -1262,6 +1288,34 @@ const usizeLiteralVerdicts = (
   const verdicts: Array<UsizeLiteralVerdict> = []
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const seen = new Set<string>()
+  const add = (value: bigint, span: SourceSpan.SourceSpan): void => {
+    const key = `${span.sourceId}:${span.start}:${span.end}:${value}`
+    if (seen.has(key)) return
+    seen.add(key)
+    if (value <= maximum) {
+      verdicts.push(
+        Object.freeze({
+          _tag: 'AvailableUsizeLiteral',
+          value,
+          bits,
+          span,
+        }),
+      )
+      return
+    }
+    const diagnostic = Diagnostic.usizeTargetOutOfRange(value.toString(), target.id, bits, span)
+    diagnostics.push(diagnostic)
+    verdicts.push(
+      Object.freeze({
+        _tag: 'UnavailableUsizeLiteral',
+        value,
+        bits,
+        span,
+        cause: Diagnostic.identity(diagnostic),
+      }),
+    )
+  }
+  for (const constant of constants) add(constant.value, constant.span)
   for (const instance of discovery.instances) {
     const expressions = instance.function.statements
       .flatMap(Hir.statementExpressions)
@@ -1269,41 +1323,13 @@ const usizeLiteralVerdicts = (
     for (const expression of expressions) {
       if (
         expression._tag !== 'IntegerLiteral' ||
+        expression.constant !== undefined ||
         Type.substitute(expression.type, instance.substitution) !== 'usize'
       ) {
         continue
       }
       const value = BigInt(expression.value)
-      const key = `${expression.span.sourceId}:${expression.span.start}:${expression.span.end}:${value}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      if (value <= maximum) {
-        verdicts.push(
-          Object.freeze({
-            _tag: 'AvailableUsizeLiteral',
-            value,
-            bits,
-            span: expression.span,
-          }),
-        )
-        continue
-      }
-      const diagnostic = Diagnostic.usizeTargetOutOfRange(
-        value.toString(),
-        target.id,
-        bits,
-        expression.span,
-      )
-      diagnostics.push(diagnostic)
-      verdicts.push(
-        Object.freeze({
-          _tag: 'UnavailableUsizeLiteral',
-          value,
-          bits,
-          span: expression.span,
-          cause: Diagnostic.identity(diagnostic),
-        }),
-      )
+      add(value, expression.span)
     }
   }
   return Object.freeze({
@@ -1366,7 +1392,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const orderedEntries = Object.freeze(
     [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
   )
-  const literals = usizeLiteralVerdicts(self.target, discovery)
+  const literals = usizeLiteralVerdicts(self.target, discovery, self.usizeConstants)
   const shaped = new Map(orderedEntries.map((entry) => [Type.key(entry.type), entry.type] as const))
   for (const type of reached.values()) {
     if (Type.isConcrete(type) && (Type.isEffect(type) || Type.isNever(type)))
@@ -2546,6 +2572,10 @@ export const encodeCatalog = (self: Catalog): string =>
     `target ${Target.encode(self.target)}`,
     ...self.entries.flatMap((candidate) =>
       candidate._tag === 'LayoutEntry' ? entryLines(candidate) : [unavailableText(candidate)],
+    ),
+    ...self.usizeConstants.map(
+      (constant) =>
+        `usize-constant ${constant.value.toString()} [${constant.span.sourceId}:${constant.span.start}, ${constant.span.end})`,
     ),
     '',
   ].join('\n')

@@ -25,6 +25,7 @@ export type TokenKind =
   | 'ImportKeyword'
   | 'AsKeyword'
   | 'LetKeyword'
+  | 'ConstKeyword'
   | 'MutKeyword'
   | 'OnceKeyword'
   | 'MoveKeyword'
@@ -94,6 +95,7 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   ImportKeyword: '`import`',
   AsKeyword: '`as`',
   LetKeyword: '`let`',
+  ConstKeyword: '`const`',
   MutKeyword: '`mut`',
   OnceKeyword: '`once`',
   MoveKeyword: '`move`',

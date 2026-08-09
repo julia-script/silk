@@ -331,6 +331,31 @@ const printStructDeclaration = (
   )
 }
 
+const printConstantDeclaration = (
+  context: Context,
+  node: SyntaxTree.Node,
+  prefix: FormatDocument.Document,
+): FormatDocument.Document => {
+  const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
+  const value = directNodes(node).at(-1) ?? nodeOf(node, 'IntegerLiteralExpression')
+  const type = directNodes(node).at(0) ?? nodeOf(node, 'TypePath')
+  return FormatDocument.concat(
+    ...(publicKeyword === undefined
+      ? []
+      : [printToken(context, publicKeyword, prefix), FormatDocument.text(' ')]),
+    printToken(
+      context,
+      tokenOf(node, 'ConstKeyword'),
+      publicKeyword === undefined ? prefix : FormatDocument.empty,
+    ),
+    printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+    printToken(context, tokenOf(node, 'Colon')),
+    printNode(context, type, FormatDocument.text(' ')),
+    printToken(context, tokenOf(node, 'Equals'), FormatDocument.text(' ')),
+    printNode(context, value, FormatDocument.text(' ')),
+  )
+}
+
 const printFunctionDeclaration = (
   context: Context,
   node: SyntaxTree.Node,
@@ -533,6 +558,8 @@ const printNode = (
     }
     case 'StructDeclaration':
       return printStructDeclaration(context, node, prefix)
+    case 'ConstantDeclaration':
+      return printConstantDeclaration(context, node, prefix)
     case 'ImplDeclaration':
       return printImplDeclaration(context, node, prefix)
     case 'ImplOperation':

@@ -25,6 +25,20 @@ cost-model gaps while preserving evaluator, native, and WebAssembly agreement.
 
 ## Now
 
+### Add typed scalar constants from repeated program evidence
+
+**Status: complete (2026-08-09).** Silk now accepts literal-only, explicitly typed scalar
+constants with optional public visibility. Boolean, integer, `usize`, and floating declarations
+resolve in local, selected-import, and qualified scopes; editor presentation and navigation use the
+same canonical identity. Accepted references inline into existing typed immediate values, so there
+is no global storage, runtime initialization, allocation, cleanup, or new backend representation.
+The lexer and stack VM now name their repeated token codes, opcodes, limits, and diagnostics while
+preserving evaluator, native LLVM, direct Wasm, allocation-failure, and fresh-process evidence.
+
+Computed and aggregate constants, inferred types, addressable globals, and enum/exhaustiveness
+semantics remain deliberately separate.
+- **Links:** [real-programs initiative](real-programs.md)
+
 ### Exercise Silk with a bounded stack bytecode VM
 
 **Status: complete (2026-08-09).** The ordinary Silk VM differentially matches its TypeScript oracle
@@ -50,8 +64,8 @@ refine the remaining exact literals even when an enclosing result expectation ex
 uses `u8` classifiers without the `i32` workaround, and semantic/HIR/MIR facts, diagnostics,
 evaluator, native LLVM, direct Wasm, and fresh-process artifacts agree.
 
-The remaining enum/constant, read-only Vector, and cost findings stay unpromoted until another
-pressure program supplies independent evidence.
+Enum/exhaustiveness and cost findings remain unpromoted. Shared Vector reads now have independent
+evidence from both pressure programs and follow typed constants as the next focused boundary.
 - **Links:** [real-programs initiative](real-programs.md)
 
 ### Validate the language's defining effect execution model
@@ -211,11 +225,9 @@ elements drop before storage release; and move-out plus early drop retain exactl
 
 ## Next
 
-The native address-root repair is complete: ordinary multi-affine transport was already sound, and
-LLVM now preserves a mutable affine root when its exclusive-borrow branch is untaken while retaining
-callee writeback on taken paths. Reassess whether typed constants or shared Vector reads are the
-smallest evidence-backed language or library improvement. No neighboring compiler port is
-preselected.
+Typed scalar constants and the native address-root repair are complete. Shape shared `Vector<T>`
+reads for ordinary Copy elements while keeping the structural-union `Slot.copy` provenance repair
+as an explicit prerequisite for union elements. No neighboring compiler port is preselected.
 
 ## Later
 
@@ -265,6 +277,12 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   `@silk-effect/compiler`?
 
 ## Changelog
+
+- 2026-08-09: Completed `add-typed-constants`. Literal-only explicit scalar names participate in
+  module visibility, import resolution, tooling, and direct immediate lowering with no runtime
+  storage. The lexer and stack VM now name representative codes and limits without losing their
+  allocator, evaluator/native/Wasm, or determinism gates. Shared Vector reads become the next
+  evidence-backed boundary; enums remain separate.
 
 - 2026-08-09: Selected a bounded stack bytecode VM as the second language-pressure program. It
   independently tests closed opcode vocabulary, Vector observation, allocation rollback, invalid

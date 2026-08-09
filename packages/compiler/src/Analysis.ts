@@ -344,9 +344,11 @@ const presentationOfIdentity = (
     const declaration = declarationForIdentity(self, identity)
     return declaration?._tag === 'FunctionDeclaration'
       ? Presentation.functionDeclaration(declaration)
-      : declaration === undefined
-        ? undefined
-        : Presentation.structDeclaration(declaration)
+      : declaration?._tag === 'StructDeclaration'
+        ? Presentation.structDeclaration(declaration)
+        : declaration?._tag === 'ConstantDeclaration'
+          ? Presentation.constantDeclaration(declaration)
+          : undefined
   }
   if (identity._tag === 'TypeParameterIdentity') {
     for (const headers of self.index.modules)
@@ -683,10 +685,12 @@ export const fixedArrayTypesOf = (
         if (parameter.declaredType._tag === 'Resolved') add(parameter.declaredType.type)
       }
       if (member.returnType._tag === 'Resolved') add(member.returnType.type)
-    } else {
+    } else if (member._tag === 'StructDeclaration') {
       for (const field of member.fields) {
         if (field.declaredType._tag === 'Resolved') add(field.declaredType.type)
       }
+    } else if (member.declaredType._tag === 'Resolved') {
+      add(member.declaredType.type)
     }
   }
   for (const expression of expressionsOf(self, module)) {

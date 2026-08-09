@@ -26,6 +26,7 @@ export type Kind =
   | 'Binding'
   | 'Parameter'
   | 'Function'
+  | 'Constant'
   | 'Constructor'
   | 'Type'
   | 'Field'
@@ -233,12 +234,19 @@ const namespaceCandidates = (
         : [
             candidate({
               identity: semantic(declarationIdentity(declaration)),
-              kind: declaration._tag === 'FunctionDeclaration' ? 'Function' : 'Type',
+              kind:
+                declaration._tag === 'FunctionDeclaration'
+                  ? 'Function'
+                  : declaration._tag === 'ConstantDeclaration'
+                    ? 'Constant'
+                    : 'Type',
               label: declaration.name.spelling,
               detail:
                 declaration._tag === 'FunctionDeclaration'
                   ? PresentationRenderer.functionDeclaration(declaration)
-                  : PresentationRenderer.structDeclaration(declaration),
+                  : declaration._tag === 'ConstantDeclaration'
+                    ? PresentationRenderer.constantDeclaration(declaration)
+                    : PresentationRenderer.structDeclaration(declaration),
               sortGroup: 0,
             }),
           ],
@@ -429,12 +437,19 @@ const expressionCandidates = (
       candidates.push(
         candidate({
           identity: semantic(declarationIdentity(declaration)),
-          kind: declaration._tag === 'FunctionDeclaration' ? 'Function' : 'Constructor',
+          kind:
+            declaration._tag === 'FunctionDeclaration'
+              ? 'Function'
+              : declaration._tag === 'ConstantDeclaration'
+                ? 'Constant'
+                : 'Constructor',
           label: declaration.name.spelling,
           detail:
             declaration._tag === 'FunctionDeclaration'
               ? PresentationRenderer.functionDeclaration(declaration)
-              : PresentationRenderer.structDeclaration(declaration),
+              : declaration._tag === 'ConstantDeclaration'
+                ? PresentationRenderer.constantDeclaration(declaration)
+                : PresentationRenderer.structDeclaration(declaration),
           sortGroup: 2,
         }),
       )
@@ -445,12 +460,19 @@ const expressionCandidates = (
       candidates.push(
         candidate({
           identity: semantic(declarationIdentity(declaration)),
-          kind: declaration._tag === 'FunctionDeclaration' ? 'Function' : 'Constructor',
+          kind:
+            declaration._tag === 'FunctionDeclaration'
+              ? 'Function'
+              : declaration._tag === 'ConstantDeclaration'
+                ? 'Constant'
+                : 'Constructor',
           label: binding.spelling,
           detail:
             declaration._tag === 'FunctionDeclaration'
               ? PresentationRenderer.functionDeclaration(declaration)
-              : PresentationRenderer.structDeclaration(declaration),
+              : declaration._tag === 'ConstantDeclaration'
+                ? PresentationRenderer.constantDeclaration(declaration)
+                : PresentationRenderer.structDeclaration(declaration),
           sortGroup: 3,
         }),
       )
