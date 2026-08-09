@@ -137,20 +137,20 @@ sequence and structurally shared root views.
 ### Requirement: Global indexes remain current during module semantic reuse
 
 Every project revision SHALL construct declaration collection, declaration completion, name
-resolution, semantic surfaces, merged diagnostics, and project tooling indexes for the complete
-current closure until a later capability makes those artifacts composable. Reusing a module
-semantic artifact MUST NOT substitute a predecessor project index, resolution, tooling index, or
-merged diagnostic sequence.
+resolution, semantic surfaces, and merged diagnostics for the complete current closure. Project
+tooling indexes SHALL be composed from current module tooling artifacts, structurally sharing only
+artifacts whose exact semantic inputs are shared. Reusing module semantics or tooling MUST NOT
+substitute a predecessor project declaration index, resolution, or merged diagnostic sequence.
 
-#### Scenario: Reuse semantics inside a new project
+#### Scenario: Reuse semantics and tooling inside a new project
 
-- **WHEN** an adjacent revision shares one or more module semantic artifacts
-- **THEN** every root view combines those artifacts with the new project's current declaration, resolution, diagnostic, and tooling facts
+- **WHEN** an adjacent revision shares one or more module semantic and tooling artifacts
+- **THEN** every root view combines those artifacts with the new project's current declaration, resolution, diagnostic, and composed tooling facts
 
 #### Scenario: Recover from an invalid edit
 
 - **WHEN** a changed module produces unavailable or erroneous current facts
-- **THEN** the current project exposes those facts and diagnostics without falling back to its prior valid semantic artifact
+- **THEN** the current project exposes those facts and diagnostics with newly computed tooling for that module rather than falling back to prior valid facts
 
 ### Requirement: Only the accepted predecessor governs semantic invalidation
 

@@ -99,6 +99,7 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
     }> = []
     const publishedVersions: Array<number> = []
     const semanticArtifacts = new Map<number, unknown>()
+    const toolingArtifacts = new Map<number, unknown>()
     let active = 0
     let maximumActive = 0
     const project = ProjectSession.make({
@@ -129,6 +130,8 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
           })
         const artifact = result.values().next().value?.project.semantics.get('Main')
         if (artifact !== undefined) semanticArtifacts.set(self.version, artifact)
+        const toolingArtifact = result.values().next().value?.project.toolingModules.get('Main')
+        if (toolingArtifact !== undefined) toolingArtifacts.set(self.version, toolingArtifact)
         active -= 1
         return result
       }),
@@ -172,6 +175,8 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
     assert.deepEqual(publishedVersions, [2, 3])
     assert.notStrictEqual(semanticArtifacts.get(3), semanticArtifacts.get(1))
     assert.notStrictEqual(semanticArtifacts.get(3), semanticArtifacts.get(2))
+    assert.notStrictEqual(toolingArtifacts.get(3), toolingArtifacts.get(1))
+    assert.notStrictEqual(toolingArtifacts.get(3), toolingArtifacts.get(2))
   }),
 )
 

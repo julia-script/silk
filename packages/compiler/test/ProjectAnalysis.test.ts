@@ -61,6 +61,8 @@ it.effect('analyzes a shared dependency once and derives structurally shared roo
     assert.strictEqual(left.surfaces, project.surfaces)
     assert.strictEqual(left.semantics, right.semantics)
     assert.strictEqual(left.semantics, project.semantics)
+    assert.strictEqual(left.toolingModules, right.toolingModules)
+    assert.strictEqual(left.toolingModules, project.toolingModules)
     assert.strictEqual(left.results, right.results)
     assert.strictEqual(left.ownership, right.ownership)
     assert.strictEqual(left.semanticOccurrences, right.semanticOccurrences)
@@ -95,6 +97,22 @@ it.effect('analyzes a shared dependency once and derives structurally shared roo
       outputs: 3,
       diagnostics: 0,
     })
+    assert.deepEqual(
+      project.report.find(({ phase }) => phase === 'semantic-occurrences')?.counters,
+      {
+        _tag: 'ModuleReuseCounters',
+        reused: 0,
+        recomputed: 3,
+      },
+    )
+    assert.deepEqual(
+      project.report.find(({ phase }) => phase === 'anonymous-expressions')?.counters,
+      {
+        _tag: 'ModuleReuseCounters',
+        reused: 0,
+        recomputed: 3,
+      },
+    )
   }),
 )
 
@@ -109,6 +127,18 @@ it.effect('keeps project facts deterministic when root supply order changes', ()
       second.closure.modules.map(({ name }) => name),
     )
     assert.deepEqual(deterministicReport(first), deterministicReport(second))
+    assert.deepEqual(
+      first.report
+        .filter(
+          ({ phase }) => phase === 'semantic-occurrences' || phase === 'anonymous-expressions',
+        )
+        .map(({ phase, counters }) => ({ phase, counters })),
+      second.report
+        .filter(
+          ({ phase }) => phase === 'semantic-occurrences' || phase === 'anonymous-expressions',
+        )
+        .map(({ phase, counters }) => ({ phase, counters })),
+    )
     assert.deepEqual(
       Analysis.diagnostics(ProjectAnalysis.view(first, 'app/A') ?? assert.fail('missing app/A')),
       Analysis.diagnostics(ProjectAnalysis.view(second, 'app/A') ?? assert.fail('missing app/A')),
@@ -217,13 +247,27 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
       reused: 2,
       recomputed: 1,
     })
-    assert.notStrictEqual(
+    assert.strictEqual(
       currentView.semanticOccurrences.modules.get('app/B'),
       previousView.semanticOccurrences.modules.get('app/B'),
     )
-    assert.notStrictEqual(
+    assert.strictEqual(
       currentView.anonymousExpressions.get('app/B'),
       previousView.anonymousExpressions.get('app/B'),
+    )
+    assert.notStrictEqual(current.toolingModules.get('app/A'), previous.toolingModules.get('app/A'))
+    assert.strictEqual(current.toolingModules.get('app/B'), previous.toolingModules.get('app/B'))
+    assert.strictEqual(
+      current.toolingModules.get('shared/Core'),
+      previous.toolingModules.get('shared/Core'),
+    )
+    assert.deepEqual(
+      current.report.find(({ phase }) => phase === 'semantic-occurrences')?.counters,
+      { _tag: 'ModuleReuseCounters', reused: 2, recomputed: 1 },
+    )
+    assert.deepEqual(
+      current.report.find(({ phase }) => phase === 'anonymous-expressions')?.counters,
+      { _tag: 'ModuleReuseCounters', reused: 2, recomputed: 1 },
     )
     assert.deepEqual(Analysis.diagnostics(currentView), [])
   }),
@@ -284,5 +328,32 @@ it.effect('recomputes conservatively when a reusable prior artifact is missing',
       reused: 2,
       recomputed: 1,
     })
+  }),
+)
+
+it.effect('recomputes tooling conservatively when prior module tooling is missing', () =>
+  Effect.gen(function* () {
+    const previous = yield* make()
+    const incomplete = Object.freeze({
+      ...previous,
+      toolingModules: new Map(
+        [...previous.toolingModules].filter(([module]) => module !== 'app/B'),
+      ),
+    })
+    const current = yield* ProjectAnalysis.revise(incomplete, roots).pipe(
+      Effect.provide(SourceResolver.memory(sources)),
+    )
+
+    assert.strictEqual(current.semantics.get('app/B'), previous.semantics.get('app/B'))
+    assert.notStrictEqual(current.toolingModules.get('app/B'), previous.toolingModules.get('app/B'))
+    assert.strictEqual(current.toolingModules.get('app/A'), previous.toolingModules.get('app/A'))
+    assert.deepEqual(
+      current.report.find(({ phase }) => phase === 'semantic-occurrences')?.counters,
+      { _tag: 'ModuleReuseCounters', reused: 2, recomputed: 1 },
+    )
+    assert.deepEqual(
+      current.report.find(({ phase }) => phase === 'anonymous-expressions')?.counters,
+      { _tag: 'ModuleReuseCounters', reused: 2, recomputed: 1 },
+    )
   }),
 )

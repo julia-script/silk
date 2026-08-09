@@ -55,12 +55,14 @@ export interface SemanticOccurrence {
 export interface ModuleIndex {
   readonly occurrences: ReadonlyArray<SemanticOccurrence>
   readonly prefixMaximumEnd: ReadonlyArray<number>
+  readonly declarationLocations: ReadonlyMap<string, DeclarationLocation>
 }
 
 /** Deterministic semantic occurrences grouped by canonical source module. */
 export interface Index {
   readonly _tag: 'SemanticOccurrenceIndex'
   readonly modules: ReadonlyMap<string, ModuleIndex>
+  readonly declarationLocations: ReadonlyMap<string, DeclarationLocation>
 }
 
 const identityOfDeclaration = (declaration: DeclarationIndex.MemberFact): Identity =>
@@ -899,42 +901,92 @@ const collectImports = (
   }
 }
 
+/** Builds one module's immutable exact-token occurrence index from recovered compiler facts. */
+export const makeModule = (
+  module: string,
+  result: Elaboration.Result,
+  index: DeclarationIndex.Index,
+  resolution: NameResolution.Resolution,
+): ModuleIndex => {
+  const pending: Array<Pending> = []
+  const scope = NameResolution.scopeOf(resolution, module)
+  const headers = index.modules.find((candidate) => candidate.module === module)
+  for (const member of headers?.members ?? []) collectMember(member, index, scope, pending)
+  for (const fn of result.functions)
+    for (const statement of fn.statements) collectStatement(statement, index, scope, pending)
+  collectImports(scope, index, pending)
+  pending.sort(
+    (left, right) =>
+      left.occurrence.span.start - right.occurrence.span.start ||
+      left.occurrence.span.end -
+        left.occurrence.span.start -
+        (right.occurrence.span.end - right.occurrence.span.start) ||
+      left.ordinal - right.ordinal,
+  )
+  const occurrences = Object.freeze(
+    pending.map((entry) => Object.freeze({ ...entry.occurrence, ordinal: entry.ordinal })),
+  )
+  let maximumEnd = 0
+  const prefixMaximumEnd = Object.freeze(
+    occurrences.map((occurrence) => {
+      maximumEnd = Math.max(maximumEnd, occurrence.span.end)
+      return maximumEnd
+    }),
+  )
+  const declarationLocations = new Map<string, DeclarationLocation>()
+  for (const occurrence of occurrences) {
+    if (occurrence.resolution._tag !== 'Available') continue
+    const declaration = occurrence.declaration
+    if (
+      declaration === undefined ||
+      declaration.module !== module ||
+      occurrence.span.start !== declaration.selectionSpan.start ||
+      occurrence.span.end !== declaration.selectionSpan.end
+    )
+      continue
+    declarationLocations.set(identityKey(occurrence.resolution.identity), declaration)
+  }
+  return Object.freeze({ occurrences, prefixMaximumEnd, declarationLocations })
+}
+
+/** Shallowly composes current module indexes and their current declaration locations. */
+export const compose = (modules: ReadonlyMap<string, ModuleIndex>): Index => {
+  const declarationLocations = new Map<string, DeclarationLocation>()
+  for (const moduleIndex of modules.values())
+    for (const [identity, declaration] of moduleIndex.declarationLocations)
+      declarationLocations.set(identity, declaration)
+  return Object.freeze({ _tag: 'SemanticOccurrenceIndex', modules, declarationLocations })
+}
+
 /** Builds the immutable exact-token occurrence index from recovered compiler facts. */
 export const make = (
   results: ReadonlyMap<string, Elaboration.Result>,
   index: DeclarationIndex.Index,
   resolution: NameResolution.Resolution,
-): Index => {
-  const modules = new Map<string, ModuleIndex>()
-  for (const [module, result] of results) {
-    const pending: Array<Pending> = []
-    const scope = NameResolution.scopeOf(resolution, module)
-    const headers = index.modules.find((candidate) => candidate.module === module)
-    for (const member of headers?.members ?? []) collectMember(member, index, scope, pending)
-    for (const fn of result.functions)
-      for (const statement of fn.statements) collectStatement(statement, index, scope, pending)
-    collectImports(scope, index, pending)
-    pending.sort(
-      (left, right) =>
-        left.occurrence.span.start - right.occurrence.span.start ||
-        left.occurrence.span.end -
-          left.occurrence.span.start -
-          (right.occurrence.span.end - right.occurrence.span.start) ||
-        left.ordinal - right.ordinal,
-    )
-    const occurrences = Object.freeze(
-      pending.map((entry) => Object.freeze({ ...entry.occurrence, ordinal: entry.ordinal })),
-    )
-    let maximumEnd = 0
-    const prefixMaximumEnd = Object.freeze(
-      occurrences.map((occurrence) => {
-        maximumEnd = Math.max(maximumEnd, occurrence.span.end)
-        return maximumEnd
-      }),
-    )
-    modules.set(module, Object.freeze({ occurrences, prefixMaximumEnd }))
-  }
-  return Object.freeze({ _tag: 'SemanticOccurrenceIndex', modules })
+): Index =>
+  compose(
+    new Map(
+      [...results].map(([module, result]) => [
+        module,
+        makeModule(module, result, index, resolution),
+      ]),
+    ),
+  )
+
+const withCurrentDeclaration = (
+  self: Index,
+  occurrence: SemanticOccurrence,
+): SemanticOccurrence => {
+  const current =
+    occurrence.resolution._tag === 'Available'
+      ? self.declarationLocations.get(identityKey(occurrence.resolution.identity))
+      : undefined
+  if (current === occurrence.declaration) return occurrence
+  const { declaration: _previous, ...withoutDeclaration } = occurrence
+  return Object.freeze({
+    ...withoutDeclaration,
+    ...(current === undefined ? {} : { declaration: current }),
+  })
 }
 
 const lastStartAtOrBefore = (
@@ -975,7 +1027,7 @@ export const at = (self: Index, module: string, offset: number): SemanticOccurre
       selected = candidate
     cursor -= 1
   }
-  return selected
+  return selected === undefined ? undefined : withCurrentDeclaration(self, selected)
 }
 
 /** Returns occurrences whose exact token spans overlap one half-open byte range. */
@@ -985,9 +1037,11 @@ export const inRange = (
   range: SourceSpan.SourceSpan,
 ): ReadonlyArray<SemanticOccurrence> =>
   Object.freeze(
-    (self.modules.get(module)?.occurrences ?? []).filter(
-      (occurrence) => occurrence.span.start < range.end && range.start < occurrence.span.end,
-    ),
+    (self.modules.get(module)?.occurrences ?? [])
+      .filter(
+        (occurrence) => occurrence.span.start < range.end && range.start < occurrence.span.end,
+      )
+      .map((occurrence) => withCurrentDeclaration(self, occurrence)),
   )
 
 /** Returns a stable structural key for identity deduplication and lookup. */

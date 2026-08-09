@@ -5,6 +5,7 @@ import * as FrontendTooling from './FrontendTooling.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as ModuleSurface from './ModuleSurface.js'
+import type * as ModuleTooling from './ModuleTooling.js'
 import type * as PhaseReport from './PhaseReport.js'
 import * as Pipeline from './Pipeline.js'
 import * as SemanticInvalidation from './SemanticInvalidation.js'
@@ -49,6 +50,7 @@ export interface ProjectAnalysis {
   readonly syntaxRevisions: ReadonlyMap<string, SyntaxRevision>
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
+  readonly toolingModules: ReadonlyMap<string, ModuleTooling.ModuleTooling>
   readonly semanticEnvironment: string
   readonly semanticInvalidation: SemanticInvalidation.SemanticInvalidation
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
@@ -73,7 +75,7 @@ const analyze = Effect.fnUntraced(function* (
           environment: previous.semanticEnvironment,
         },
   )
-  const tooling = FrontendTooling.make(frontend)
+  const tooling = FrontendTooling.make(frontend, previous?.toolingModules)
   const previousModules = new Map(
     previous?.closure.modules.map((module) => [module.name, module.syntax]),
   )
@@ -139,6 +141,7 @@ const analyze = Effect.fnUntraced(function* (
     syntaxRevisions,
     surfaces: frontend.surfaces,
     semantics: frontend.semantics,
+    toolingModules: tooling.toolingModules,
     semanticEnvironment: SemanticInvalidation.environment,
     semanticInvalidation: frontend.semanticInvalidation,
     report,
