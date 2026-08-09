@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Stream from 'effect/Stream'
@@ -119,7 +120,7 @@ it.effect('derives truncate, ranged streams, and ordered whole-file sinks', () =
   )
 })
 
-it.effect('approximates stat without inventing host metadata', () => {
+it.effect('approximates stat from directory listings without reading contents', () => {
   const virtual = VirtualFileSystem.make()
   return withVirtualFileSystem(
     virtual,
@@ -127,15 +128,71 @@ it.effect('approximates stat without inventing host metadata', () => {
       const fs = yield* FileSystem.FileSystem
       yield* fs.makeDirectory('dir')
       yield* fs.writeFile('file.bin', new Uint8Array([1, 2, 3, 4]))
+      const readsAfterSetup = virtual.fileReads()
       const file = yield* fs.stat('file.bin')
       const directory = yield* fs.stat('dir')
+      assert.isTrue(yield* fs.exists('file.bin'))
+      assert.isFalse(yield* fs.exists('absent.bin'))
+      yield* fs.access('file.bin')
       assert.strictEqual(file.type, 'File')
-      assert.strictEqual(file.size, 4n)
+      assert.strictEqual(file.size, 0n)
       assert.strictEqual(file.mtime._tag, 'None')
       assert.strictEqual(file.ino._tag, 'None')
       assert.strictEqual(directory.type, 'Directory')
       assert.strictEqual(directory.size, 0n)
       assert.strictEqual(directory.mode, 0)
+      assert.strictEqual(virtual.fileReads(), readsAfterSetup)
+    }),
+  )
+})
+
+it.effect('maps watch notifications onto typed watch events', () => {
+  const virtual = VirtualFileSystem.make()
+  return withVirtualFileSystem(
+    virtual,
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      yield* fs.makeDirectory('project')
+      yield* fs.writeFile('project/kept.ts', new Uint8Array([1]))
+      const fiber = yield* fs
+        .watch('project')
+        .pipe(Stream.take(3), Stream.runCollect, Effect.forkChild)
+      while (virtual.watcherCount() === 0) {
+        yield* Effect.yieldNow
+      }
+      virtual.emit('project/kept.ts', 'change')
+      virtual.emit('project/kept.ts', 'rename')
+      virtual.emit('project/gone.ts', 'rename')
+      const events = yield* Fiber.join(fiber)
+      assert.deepStrictEqual(events, [
+        { _tag: 'Update', path: 'project/kept.ts' },
+        { _tag: 'Create', path: 'project/kept.ts' },
+        { _tag: 'Remove', path: 'project/gone.ts' },
+      ])
+      assert.strictEqual(virtual.watcherCount(), 0)
+    }),
+  )
+})
+
+it.effect('watch fails NotFound before registering and closes watchers on interruption', () => {
+  const virtual = VirtualFileSystem.make()
+  return withVirtualFileSystem(
+    virtual,
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const missing = yield* Effect.result(fs.watch('absent').pipe(Stream.runDrain))
+      assert.strictEqual(missing._tag, 'Failure')
+      if (missing._tag === 'Failure') {
+        assert.strictEqual(missing.failure.reason._tag, 'NotFound')
+      }
+      assert.strictEqual(virtual.watcherCount(), 0)
+      yield* fs.makeDirectory('project')
+      const fiber = yield* fs.watch('project').pipe(Stream.runDrain, Effect.forkChild)
+      while (virtual.watcherCount() === 0) {
+        yield* Effect.yieldNow
+      }
+      yield* Fiber.interrupt(fiber)
+      assert.strictEqual(virtual.watcherCount(), 0)
     }),
   )
 })
@@ -176,7 +233,6 @@ it.effect('fails every unavailable capability explicitly', () => {
         fs.readLink('file'),
         fs.symlink('from', 'to'),
         fs.utimes('file', 0, 0),
-        fs.watch('file').pipe(Stream.runDrain),
       ]
       for (const operation of effects) {
         const result = yield* Effect.result(operation)

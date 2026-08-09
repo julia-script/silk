@@ -79,18 +79,25 @@ API has no backpressure protocol, so an unconsumed subscription can grow in memo
 
 | Classification | Operations |
 | --- | --- |
-| Native | `access`, `exists`, `makeDirectory`, `readDirectory`, `readFile`, `readFileString`, `remove`, `rename`, `writeFile`, `writeFileString` |
+| Native | `access`, `exists`, `makeDirectory`, `readDirectory`, `readFile`, `readFileString`, `remove`, `rename`, `watch`, `writeFile`, `writeFileString` |
 | Derived | `copy`, `copyFile`, `makeTempDirectory`, `makeTempDirectoryScoped`, `makeTempFile`, `makeTempFileScoped`, recursive `readDirectory`, `realPath`, `sink`, `stream`, `truncate` |
 | Approximated | `stat` |
-| Unsupported | `chmod`, `chown`, `glob`, `link`, `open`, `readLink`, `symlink`, `utimes`, `watch` |
+| Unsupported | `chmod`, `chown`, `glob`, `link`, `open`, `readLink`, `symlink`, `utimes` |
 
 Unsupported operations fail immediately with a typed `PlatformError` whose description identifies
 the unsupported capability. They do not pretend the path is missing.
 
 Derived operations have these deliberate limits:
 
-- `stat` accurately reports file/directory type and file byte size. Mode and device are stable zero
-  values; timestamps, inode, ownership, link count, block size, and block count are absent.
+- `stat`, `access`, and `exists` answer from directory listings alone and never read file
+  contents, so tree walks scale with entry count. File/directory type is accurate; file byte
+  sizes are a stable `0` approximation (use `readFile(...).byteLength` for an accurate size).
+  Mode and device are stable zero values; timestamps, inode, ownership, link count, block size,
+  and block count are absent.
+- `watch` adapts WebContainer's native watcher. `change` notifications become `Update` events;
+  Node-style `rename` notifications are classified as `Create` or `Remove` through a parent
+  directory listing, so a path recreated between the notification and the probe can be reported
+  as `Create` for what was momentarily a removal. Consumers reconcile on the next event.
 - `stream` reads the whole file once, then emits the selected offset/limit range in bounded chunks.
 - `sink` buffers input chunks in order and performs one whole-file write on completion.
 - Copy, stat, temporary-name allocation, append, and exclusive-write behavior are derived from

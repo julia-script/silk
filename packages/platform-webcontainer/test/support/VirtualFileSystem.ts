@@ -1,6 +1,7 @@
 import * as Effect from 'effect/Effect'
 import type * as WebContainer from '../../src/WebContainer.js'
 import * as WebContainerError from '../../src/WebContainerError.js'
+import * as WebContainerEvent from '../../src/WebContainerEvent.js'
 import * as WebContainerService from './WebContainerService.js'
 
 const failure = (code: string, message: string): Error & { readonly code: string } =>
@@ -38,15 +39,47 @@ const boundary = <A>(operation: string, evaluate: () => A) =>
       ),
   })
 
+interface Watcher {
+  readonly path: string
+  readonly recursive: boolean
+  readonly listener: (notification: WebContainer.WatchNotification) => void
+}
+
 export interface VirtualFileSystem {
   readonly service: WebContainer.Service
   readonly files: Map<string, Uint8Array>
   readonly directories: Set<string>
+  /** Delivers one raw watch notification to every watcher covering `target`. */
+  readonly emit: (target: string, event: 'rename' | 'change') => void
+  readonly watcherCount: () => number
+  /** How many times file contents were read — proves stat/exists never touch contents. */
+  readonly fileReads: () => number
 }
 
 export const make = (): VirtualFileSystem => {
   const files = new Map<string, Uint8Array>()
   const directories = new Set<string>([''])
+  const watchers = new Set<Watcher>()
+  let fileReads = 0
+
+  const emit = (target: string, event: 'rename' | 'change'): void => {
+    const normalized = normalize(target)
+    for (const watcher of watchers) {
+      if (watcher.path === normalized) {
+        watcher.listener({ event, filename: normalized.split('/').pop() ?? '' })
+        continue
+      }
+      const prefix = watcher.path === '' ? '' : `${watcher.path}/`
+      if (!normalized.startsWith(prefix)) {
+        continue
+      }
+      const relative = normalized.slice(prefix.length)
+      if (!watcher.recursive && relative.includes('/')) {
+        continue
+      }
+      watcher.listener({ event, filename: relative })
+    }
+  }
 
   const fileSystem: WebContainer.FileSystem = {
     makeDirectory: (target, options) =>
@@ -109,6 +142,7 @@ export const make = (): VirtualFileSystem => {
             `${target} is not a file`,
           )
         }
+        fileReads += 1
         return value.slice()
       }),
     readFileString: (target) =>
@@ -121,6 +155,7 @@ export const make = (): VirtualFileSystem => {
             `${target} is not a file`,
           )
         }
+        fileReads += 1
         return new TextDecoder().decode(value)
       }),
     writeFile: (target, data) =>
@@ -198,11 +233,30 @@ export const make = (): VirtualFileSystem => {
           }
         }
       }),
+    watch: (target, options) =>
+      WebContainerEvent.stream((listener) =>
+        Effect.sync(() => {
+          const watcher: Watcher = {
+            path: normalize(target),
+            recursive: options?.recursive === true,
+            listener,
+          }
+          watchers.add(watcher)
+          return {
+            unsubscribe: Effect.sync(() => {
+              watchers.delete(watcher)
+            }),
+          }
+        }),
+      ),
   }
 
   return {
     files,
     directories,
+    emit,
+    watcherCount: () => watchers.size,
+    fileReads: () => fileReads,
     service: WebContainerService.make({ fileSystem }),
   }
 }

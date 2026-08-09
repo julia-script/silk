@@ -306,16 +306,50 @@ const makeService = Effect.fnUntraced(function* () {
     if (entry === undefined) {
       return yield* Effect.fail(notFound('stat', target))
     }
-    if (entry.type === 'Directory') {
-      return emptyInfo('Directory', FileSystem.Size(0))
-    }
-    const data = yield* readFile(target)
-    return emptyInfo('File', FileSystem.Size(data.byteLength))
+    // File sizes are a documented zero approximation: upstream exposes no stat, and measuring
+    // them by reading contents would make every tree walk O(total bytes). Use
+    // `readFile(...).byteLength` when an accurate size is required.
+    return emptyInfo(entry.type, FileSystem.Size(0))
   })
 
   const access = Effect.fnUntraced(function* (target: string) {
     yield* stat(target)
   })
+
+  const watchEvent = (
+    tag: FileSystem.WatchEvent['_tag'],
+    affected: string,
+  ): FileSystem.WatchEvent => ({ _tag: tag, path: affected })
+
+  /**
+   * Node-style `rename` covers both creation and removal; a parent-listing existence probe
+   * (never a content read) decides which one this notification was.
+   */
+  const renameEvent = Effect.fnUntraced(function* (affected: string) {
+    const present = yield* pathExists(affected)
+    return watchEvent(present ? 'Create' : 'Remove', affected)
+  })
+
+  const watch: FileSystem.FileSystem['watch'] = (target) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const info = yield* stat(target)
+        const isDirectory = info.type === 'Directory'
+        const base = path.normalize(target)
+        return primitive.watch(target, { recursive: isDirectory }).pipe(
+          Stream.mapError((error) => platformError('watch', target, error)),
+          Stream.mapEffect((notification) => {
+            const affected =
+              isDirectory && notification.filename !== ''
+                ? path.join(base, notification.filename)
+                : base
+            return notification.event === 'change'
+              ? Effect.succeed(watchEvent('Update', affected))
+              : renameEvent(affected)
+          }),
+        )
+      }),
+    )
 
   const remove: FileSystem.FileSystem['remove'] = (
     target: string,
@@ -520,7 +554,7 @@ const makeService = Effect.fnUntraced(function* () {
       symlink: (fromPath) => Effect.fail(unsupported('symlink', fromPath)),
       truncate,
       utimes: (target) => Effect.fail(unsupported('utimes', target)),
-      watch: (target) => Stream.fail(unsupported('watch', target)),
+      watch,
       writeFile: writeBytes,
       writeFileString: writeString,
     }),

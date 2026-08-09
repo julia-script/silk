@@ -47,6 +47,23 @@ export interface DirectoryEntry {
 }
 
 /**
+ * Raw Node-style watch notification delivered by the runtime's primitive watcher.
+ *
+ * **Details**
+ *
+ * `rename` covers both creation and removal, exactly as upstream reports it; classifying which
+ * one happened is left to consumers with directory-listing access. Filenames are relative to the
+ * watched path and normalized to strings.
+ *
+ * @category models
+ * @since 0.0.0
+ */
+export interface WatchNotification {
+  readonly event: 'rename' | 'change'
+  readonly filename: string
+}
+
+/**
  * Typed WebContainer filesystem primitives used to build the standard Effect filesystem service.
  *
  * @category services
@@ -84,6 +101,10 @@ export interface FileSystem {
     oldPath: string,
     newPath: string,
   ) => Effect.Effect<void, WebContainerError.WebContainerError>
+  readonly watch: (
+    path: string,
+    options?: { readonly recursive?: boolean },
+  ) => Stream.Stream<WatchNotification, WebContainerError.WebContainerError>
 }
 
 /**
@@ -256,6 +277,8 @@ const previewMessage = (message: RawPreviewMessage): WebContainerEvent.PreviewMe
   }
 }
 
+const watchDecoder = new TextDecoder()
+
 const makeFileSystem = (raw: RawWebContainer): FileSystem => ({
   makeDirectory: Effect.fnUntraced(function* (path, options) {
     if (options?.recursive === true) {
@@ -327,6 +350,21 @@ const makeFileSystem = (raw: RawWebContainer): FileSystem => ({
       `Unable to rename ${oldPath} to ${newPath}`,
       () => raw.fs.rename(oldPath, newPath),
       { path: oldPath },
+    ),
+  watch: (path, options) =>
+    WebContainerEvent.stream(
+      makeSubscription('WebContainer.fileSystem.watch', (listener) => {
+        const watcher = raw.fs.watch(
+          path,
+          { recursive: options?.recursive === true },
+          (event, filename) =>
+            listener({
+              event,
+              filename: typeof filename === 'string' ? filename : watchDecoder.decode(filename),
+            }),
+        )
+        return () => watcher.close()
+      }),
     ),
 })
 

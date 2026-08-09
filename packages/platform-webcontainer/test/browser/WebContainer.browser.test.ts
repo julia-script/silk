@@ -33,6 +33,23 @@ it.effect('boots one runtime and exercises its live capabilities', () => {
     const exported = yield* WebContainer.exportJson('.')
     assert.property(exported, 'written.txt')
 
+    const watched = yield* fs.watch('project').pipe(
+      Stream.filter((watchEvent) => watchEvent.path.endsWith('from-process.txt')),
+      Stream.take(1),
+      Stream.runHead,
+      Effect.forkScoped,
+    )
+    const writer = yield* WebContainer.spawn('node', [
+      '-e',
+      "require('node:fs').writeFileSync('project/from-process.txt', 'watched')",
+    ])
+    assert.strictEqual(yield* WebContainerProcess.awaitExit(writer), 0)
+    const watchEvent = yield* Fiber.join(watched)
+    assert.isTrue(Option.isSome(watchEvent))
+    if (Option.isSome(watchEvent)) {
+      assert.oneOf(watchEvent.value._tag, ['Create', 'Update'])
+    }
+
     const command = yield* WebContainer.spawn(
       'node',
       ['-e', "process.stdout.write(process.env.SMOKE + ':' + process.cwd())"],

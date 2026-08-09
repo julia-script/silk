@@ -19,6 +19,7 @@ export const make = (overrides: Partial<WebContainer.Service> = {}): WebContaine
       writeFileString: () => unavailable('writeFileString'),
       remove: () => unavailable('remove'),
       rename: () => unavailable('rename'),
+      watch: () => Stream.unwrap(unavailable('watch')),
     },
     mount: () => unavailable('mount'),
     exportJson: () => unavailable('exportJson'),
