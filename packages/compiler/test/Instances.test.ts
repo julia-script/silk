@@ -343,7 +343,7 @@ pub fn main() -> i32 { return (run work()) |> i32.add(1) }`),
         composedMain === undefined
           ? []
           : Mir.operations(composedMain).map((operation) => operation._tag),
-        'RunEffectValue',
+        'RunStaticEffect',
       )
       assert.strictEqual(
         groupedMain === undefined ? undefined : Mir.operations(groupedMain).at(-1)?._tag,

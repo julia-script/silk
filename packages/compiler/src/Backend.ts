@@ -319,6 +319,7 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'UnpackEffectSuccess':
     case 'RunEffect':
     case 'RunEffectValue':
+    case 'RunStaticEffect':
     case 'ReifyEffect':
     case 'CloseEffectEntry':
     case 'Construct':
@@ -356,6 +357,7 @@ const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'RawBufferRead' ||
   operation._tag === 'RunEffect' ||
   operation._tag === 'RunEffectValue' ||
+  operation._tag === 'RunStaticEffect' ||
   operation._tag === 'ReifyEffect' ||
   operation._tag === 'CloseEffectEntry' ||
   (operation._tag === 'Binary' &&
@@ -5330,7 +5332,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(operation.destination.ordinal, Object.freeze(loaded))
                   break
                 }
-                case 'RunEffectValue': {
+                case 'RunEffectValue':
+                case 'RunStaticEffect': {
                   const target = declared.find((candidate) =>
                     Mir.matchesInstance(
                       candidate.fn,
@@ -5345,7 +5348,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const outcomeValues = yield* callValues(
                     target,
                     [
-                      ...readLocal(operation.effect),
+                      ...(operation._tag === 'RunEffectValue'
+                        ? readLocal(operation.effect)
+                        : operation.captures.flatMap((capture) => [...readLocal(capture.source)])),
                       ...operation.arguments.flatMap((argument) => [...readLocal(argument)]),
                     ],
                     `effect_value_run${operation.destination.ordinal}`,

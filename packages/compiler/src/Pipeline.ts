@@ -9,6 +9,7 @@ import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
 import type * as Mir from './Mir.js'
+import * as MirNormalization from './MirNormalization.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import * as ModuleSemantics from './ModuleSemantics.js'
 import * as ModuleSurface from './ModuleSurface.js'
@@ -22,7 +23,12 @@ import * as Target from './Target.js'
 /** Optional environment-specific observations attached to compiler phase reports. */
 export interface Options {
   readonly heapBytes?: () => number
+  /** Internal differential-test escape hatch; production paths normalize shared MIR. */
+  readonly normalizeMir?: boolean
 }
+
+const normalizeMir = (program: Mir.Module, options: Options): Mir.Module =>
+  options.normalizeMir === false ? program : MirNormalization.normalize(program)
 
 /** An available target-owned artifact or the reason realization could not construct it. */
 export type Targeted<A> =
@@ -530,7 +536,11 @@ export const realize = (
         report,
         'mir-lowering',
         instances.instances.length,
-        () => Lower.lowerProgram(instances, self.ownership, availableLayout, self.index),
+        () =>
+          normalizeMir(
+            Lower.lowerProgram(instances, self.ownership, availableLayout, self.index),
+            options,
+          ),
         (value) => value.functions.length,
         () => 0,
         options,
@@ -642,7 +652,11 @@ export const prepare = (
     report,
     'mir-lowering',
     discovery.instances.length,
-    () => Lower.lowerProgram(discovery, self.ownership, targetAndLayout.layout, self.index),
+    () =>
+      normalizeMir(
+        Lower.lowerProgram(discovery, self.ownership, targetAndLayout.layout, self.index),
+        options,
+      ),
     (value) => value.functions.length,
     () => 0,
     options,

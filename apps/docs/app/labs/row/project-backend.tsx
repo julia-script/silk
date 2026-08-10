@@ -765,6 +765,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = run ${operation.target.name} · propagate ${operation.tagMappings.map((mapping) => `${mapping.source}→${mapping.target}`).join(', ') || 'none'}`
     case 'RunEffectValue':
       return `${localText(operation.destination)} = run ${localText(operation.effect)} with ${operation.runner.name}`
+    case 'RunStaticEffect':
+      return `${localText(operation.destination)} = run static ${operation.runner.name} with ${operation.captures.map((capture) => localText(capture.source)).join(', ') || 'no captures'}`
     case 'ReifyEffect':
       return `${localText(operation.destination)} = result ${localText(operation.effect)} with ${operation.runner.name}`
     case 'CloseEffectEntry':

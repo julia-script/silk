@@ -138,7 +138,9 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
       const dropped =
         operation._tag === 'Drop'
           ? [operation]
-          : operation._tag === 'RunEffect' || operation._tag === 'RunEffectValue'
+          : operation._tag === 'RunEffect' ||
+              operation._tag === 'RunEffectValue' ||
+              operation._tag === 'RunStaticEffect'
             ? (operation.releases ?? [])
             : []
       return [
@@ -2418,13 +2420,17 @@ const emitOperation = (
         ),
       ]
     }
-    case 'RunEffectValue': {
+    case 'RunEffectValue':
+    case 'RunStaticEffect': {
       const outcomeSlots = slots(operation.outcome)
       const destinationSlots = slots(operation.destination)
       const tag = outcomeSlots.at(0)
       if (tag === undefined) throw new RangeError('Wasm Effect value lost its outcome tag lane')
       const invoke = [
-        ...slots(operation.effect).map((slot) => Instr.localGet(slot)),
+        ...(operation._tag === 'RunEffectValue'
+          ? slots(operation.effect)
+          : operation.captures.flatMap((capture) => slots(capture.source))
+        ).map((slot) => Instr.localGet(slot)),
         ...operation.arguments.flatMap((argument) =>
           slots(argument).map((slot) => Instr.localGet(slot)),
         ),

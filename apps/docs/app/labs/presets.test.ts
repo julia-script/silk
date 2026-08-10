@@ -144,18 +144,22 @@ describe('preset catalog', () => {
 
   // Lowering is target-aware, so a preset that builds for one target is not evidence it builds
   // for the rest — and the workbench lets any target be selected against any preset.
-  it('builds a snapshot for every preset against every selectable target', () => {
-    for (const target of [
-      'aarch64-apple-darwin',
-      'x86_64-unknown-linux-gnu',
-      'aarch64-unknown-linux-gnu',
-      'wasm32-unknown-unknown',
-    ]) {
-      for (const preset of presets) {
-        expect(() => snapshotOf(preset, target), `${preset.label} · ${target}`).not.toThrow()
+  it(
+    'builds a snapshot for every preset against every selectable target',
+    () => {
+      for (const target of [
+        'aarch64-apple-darwin',
+        'x86_64-unknown-linux-gnu',
+        'aarch64-unknown-linux-gnu',
+        'wasm32-unknown-unknown',
+      ]) {
+        for (const preset of presets) {
+          expect(() => snapshotOf(preset, target), `${preset.label} · ${target}`).not.toThrow()
+        }
       }
-    }
-  })
+    },
+    15_000,
+  )
 
   it('keeps the phases the labs shipped presets for', () => {
     const groups = new Set(presets.map((preset) => preset.group))

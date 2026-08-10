@@ -139,6 +139,36 @@ export interface Provenance {
   readonly generated: boolean
 }
 
+export type NormalizationRejection =
+  | 'ComplexConstructor'
+  | 'DynamicTarget'
+  | 'EffectEscapes'
+  | 'EffectReused'
+  | 'AffineCapture'
+  | 'CrossRegionUse'
+  | 'SuspensionUnknown'
+
+export type NormalizationVerdict =
+  | {
+      readonly _tag: 'Normalized'
+      readonly kind: 'FoldedConstructor' | 'DirectStaticRun'
+      readonly function: DeclarationIndex.CanonicalId
+      readonly region: RegionId
+      readonly local: LocalId
+      readonly guards: ReadonlyArray<
+        'DirectTarget' | 'SingleRegion' | 'SingleUse' | 'Synchronous' | 'CopyOrShared'
+      >
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'Rejected'
+      readonly reason: NormalizationRejection
+      readonly function: DeclarationIndex.CanonicalId
+      readonly region: RegionId
+      readonly local: LocalId
+      readonly provenance: Provenance
+    }
+
 export type BinaryOperator =
   | 'Add'
   | 'Subtract'
@@ -578,6 +608,26 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Runs a statically selected Effect directly from its proven local capture values. */
+      readonly _tag: 'RunStaticEffect'
+      readonly destination: LocalId
+      readonly outcome: LocalId
+      readonly runner: DeclarationIndex.CanonicalId
+      readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+      readonly captures: ReadonlyArray<{
+        readonly source: LocalId
+        readonly access: 'Copy' | 'Shared'
+      }>
+      readonly arguments: ReadonlyArray<LocalId>
+      readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly propagationType?: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly tagMappings: ReadonlyArray<{ readonly source: number; readonly target: number }>
+      readonly propagationLaneCount: number
+      readonly releases?: ReadonlyArray<DropOperation>
+      readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly provenance: Provenance
+    }
+  | {
       /** Runs one Effect and materializes only its completed typed channel as silk/result data. */
       readonly _tag: 'ReifyEffect'
       readonly destination: LocalId
@@ -831,6 +881,7 @@ export interface Module {
   readonly layout: Layout.Plan
   readonly staticData?: ReadonlyArray<StaticText.Data>
   readonly functions: ReadonlyArray<MirFunction>
+  readonly normalization?: ReadonlyArray<NormalizationVerdict>
 }
 
 /** The concrete zero-parameter `i32` function exported as the machine entry. */
@@ -947,6 +998,7 @@ export interface Violation {
     | 'InvalidCallShape'
     | 'InvalidCallableOperation'
     | 'InvalidEffectOperation'
+    | 'InvalidNormalization'
     | 'InvalidEntry'
     | 'InvalidWrite'
     | 'InvalidLoan'
@@ -976,7 +1028,9 @@ const operationChildren = (operation: Operation): ReadonlyArray<Operation> =>
         ...(arm.guard?.operations ?? []),
         ...arm.selected.operations,
       ])
-    : operation._tag === 'RunEffect' || operation._tag === 'RunEffectValue'
+    : operation._tag === 'RunEffect' ||
+        operation._tag === 'RunEffectValue' ||
+        operation._tag === 'RunStaticEffect'
       ? (operation.releases ?? [])
       : []
 
@@ -1088,6 +1142,13 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination, operation.outcome, ...operation.arguments]
     case 'RunEffectValue':
       return [operation.destination, operation.outcome, operation.effect, ...operation.arguments]
+    case 'RunStaticEffect':
+      return [
+        operation.destination,
+        operation.outcome,
+        ...operation.captures.map((capture) => capture.source),
+        ...operation.arguments,
+      ]
     case 'ReifyEffect':
       return [operation.destination, operation.outcome, operation.effect, ...operation.arguments]
     case 'CloseEffectEntry':
@@ -1367,6 +1428,15 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
         semanticType(operation.type),
         ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
       ]
+    case 'RunStaticEffect':
+      return [
+        semanticType(operation.outcomeType),
+        ...(operation.propagationType === undefined
+          ? []
+          : [semanticType(operation.propagationType)]),
+        semanticType(operation.type),
+        ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
+      ]
     case 'ReifyEffect':
       return [
         semanticType(operation.outcomeType),
@@ -1481,6 +1551,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return operation.arguments
     case 'RunEffectValue':
       return [operation.effect, ...operation.arguments]
+    case 'RunStaticEffect':
+      return [...operation.captures.map((capture) => capture.source), ...operation.arguments]
     case 'ReifyEffect':
       return [operation.effect, ...operation.arguments]
     case 'CloseEffectEntry':
@@ -3172,6 +3244,66 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               }),
             )
         }
+        if (operation._tag === 'RunStaticEffect') {
+          const runner = self.functions.find((candidate) =>
+            matchesInstance(candidate, operation.runner, operation.runnerTypeArguments),
+          )
+          const outcome = fn.localTypes.at(operation.outcome.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const inputs = [
+            ...operation.captures.map((capture) => capture.source),
+            ...operation.arguments,
+          ]
+          const parametersValid =
+            runner !== undefined &&
+            runner.parameterCount === inputs.length &&
+            inputs.every((input, ordinal) => {
+              const actual = fn.localTypes.at(input.ordinal)
+              const expected = runner.localTypes.at(ordinal)
+              return (
+                actual !== undefined &&
+                expected !== undefined &&
+                TypeCompatibility.isCompatible(
+                  TypeCompatibility.check(semanticType(actual), semanticType(expected)),
+                )
+              )
+            })
+          const mappingsValid =
+            operation.propagationType === undefined
+              ? operation.tagMappings.length === 0
+              : operation.tagMappings.length === operation.outcomeType.type.failures.length &&
+                operation.tagMappings.every((mapping) => {
+                  const source = operation.outcomeType.type.failures.at(mapping.source - 1)
+                  const targetFailure = operation.propagationType?.type.failures.at(
+                    mapping.target - 1,
+                  )
+                  return (
+                    source !== undefined &&
+                    targetFailure !== undefined &&
+                    SilkType.equals(source, targetFailure)
+                  )
+                })
+          if (
+            runner?.result._tag !== 'EffectOutcome' ||
+            outcome?._tag !== 'EffectOutcome' ||
+            destination === undefined ||
+            !SilkType.equals(runner.result.type, operation.outcomeType.type) ||
+            !SilkType.equals(outcome.type, operation.outcomeType.type) ||
+            !SilkType.equals(semanticType(destination), semanticType(operation.type)) ||
+            !parametersValid ||
+            !mappingsValid
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidNormalization',
+                function: fn.id,
+                region: region.id,
+                detail:
+                  'direct static Effect run disagrees with its runner, captures, outcome, or propagation contract',
+              }),
+            )
+        }
         if (operation._tag === 'ReifyEffect') {
           const runner = self.functions.find((candidate) =>
             matchesInstance(candidate, operation.runner, operation.runnerTypeArguments),
@@ -3294,6 +3426,27 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       }
     }
   }
+  for (const verdict of self.normalization ?? []) {
+    const fn = self.functions.find(
+      (candidate) =>
+        candidate.id.module === verdict.function.module &&
+        candidate.id.name === verdict.function.name,
+    )
+    const region = fn?.regions.find((candidate) => candidate.id.ordinal === verdict.region.ordinal)
+    const local = fn?.localTypes.at(verdict.local.ordinal)
+    const synchronous = verdict._tag === 'Rejected' || verdict.guards.includes('Synchronous')
+    if (fn === undefined || region === undefined || local === undefined || !synchronous) {
+      violations.push(
+        Object.freeze({
+          _tag: 'Violation',
+          rule: 'InvalidNormalization',
+          ...(fn === undefined ? {} : { function: fn.id }),
+          ...(region === undefined ? {} : { region: region.id }),
+          detail: 'normalization verdict has dangling identities or lacks its synchronous proof',
+        }),
+      )
+    }
+  }
   return Object.freeze(violations)
 }
 
@@ -3390,6 +3543,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = run-effect ${targetText(operation.target)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'RunEffectValue':
       return `${localText(operation.destination)} = run-effect-value ${localText(operation.effect)} runner=${targetText(operation.runner)} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
+    case 'RunStaticEffect':
+      return `${localText(operation.destination)} = run-static-effect runner=${targetText(operation.runner)} captures=${operation.captures.map((capture) => `${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'ReifyEffect':
       return `${localText(operation.destination)} = effect-result ${localText(operation.effect)} runner=${targetText(operation.runner)} arguments=${operation.arguments.map(localText).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'CloseEffectEntry':
@@ -3500,6 +3655,11 @@ export const encode = (self: Module): string =>
     ...(self.staticData ?? []).map(
       (data) =>
         `static ${data.id} kind=${data.kind.toLowerCase()} utf8=${data.utf8} bytes=${data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')}`,
+    ),
+    ...(self.normalization ?? []).map((verdict) =>
+      verdict._tag === 'Normalized'
+        ? `normalization accepted kind=${verdict.kind} function=${targetText(verdict.function)} region=${regionText(verdict.region)} local=${localText(verdict.local)} guards=${verdict.guards.join(',')} ${provenanceText(verdict.provenance)}`
+        : `normalization rejected reason=${verdict.reason} function=${targetText(verdict.function)} region=${regionText(verdict.region)} local=${localText(verdict.local)} ${provenanceText(verdict.provenance)}`,
     ),
     ...Layout.encode(self.layout).trimEnd().split('\n'),
     ...self.functions.flatMap((fn) => [

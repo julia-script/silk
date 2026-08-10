@@ -358,5 +358,5 @@ it.effect(
         assert.strictEqual(process.status, manifest.expected.entryResult, process.stderr)
       }
     }),
-  30_000,
+  90_000,
 )

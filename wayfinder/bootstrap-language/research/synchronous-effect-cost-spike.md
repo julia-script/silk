@@ -19,6 +19,38 @@ and preserved failure, requirement, trap, ownership, and cleanup behavior.
 The normalization should initially target only cases this corpus proves. Dynamic callables,
 escaping Effect values, reusable mutable Effects, and future suspension remain unspecialized.
 
+## Implemented follow-up
+
+The first shared slice shipped on 2026-08-10. It folds direct functions whose complete body is one
+`MakeEffect` and return, then replaces a same-region, single-use Copy/shared environment plus
+`RunEffectValue` with `RunStaticEffect`. The evaluator, LLVM, and direct-Wasm backends consume that
+same operation. MIR records accepted and first-rejection verdicts; the labs expose their counts.
+
+This intentionally stops before runner CFG inlining. Entry-local WAT showed that constructor and
+environment round trips can be removed without cloning control flow, while eliminating the final
+runner call would require typed-exit, region, and affine-cleanup remapping. Stored/provider shapes
+therefore receive constructor folding but may retain a value run; affine/exclusive captures and
+unknown suspension are rejected.
+
+The deterministic harness now emits normalized and explicitly unnormalized behavior and WAT entry
+structure. Selected entry results are:
+
+| Case | unnormalized calls | normalized calls | folded constructors | direct static runs |
+| --- | ---: | ---: | ---: | ---: |
+| map Effect | 3 | 1 | 2 | 1 |
+| mapBoth success Effect | 4 | 1 | 4 | 2 |
+| mapBoth failure Effect | 4 | 1 | 4 | 2 |
+| flatMap Effect | 3 | 1 | 2 | 1 |
+| provide + generic adapter Effect | 4 | 2 | 2 | 0 |
+| stored maps Effect | 4 | 1 | 3 | 0 |
+| affine allocation Effect | 3 | 1 | 5 | 3 |
+| trap Effect | 3 | 1 | 2 | 1 |
+
+The tiny whole-module Wasm size reduction is intentionally not presented as dead-code elimination:
+specialized constructors and runners remain exported. Native optimized entry structure remains
+unchanged, and normalized/unnormalized evaluator and Wasm behavior agree. The affine pair retains
+the same Drop count on both paths.
+
 ## Reproduction
 
 Baseline compiler commit: `6e566f6914540788f70b0faf245d38d3ab5929f5`.
@@ -123,7 +155,8 @@ too small for stable distributions, and structural evidence answers the design q
 
 ## Recommendation and guards
 
-The follow-up proposal should normalize only when all of the following are compiler facts:
+The shipped constructor/static-dispatch slice normalizes only when all of the following are compiler
+facts:
 
 - the Effect runner and callback targets are statically selected;
 - the Effect value does not escape the normalized region;
@@ -133,9 +166,10 @@ The follow-up proposal should normalize only when all of the following are compi
 - trap behavior remains outside typed failure; and
 - ownership proves every moved value and cleanup obligation has exactly one destination.
 
-The pass should run on shared MIR before LLVM and direct-Wasm emission. It should not recognize
-`Effect.map`, `|>`, the standard-library module, or any declaration spelling. The proof target is
-the generic runner/call/result shape produced by ordinary source-defined combinators.
+The pass runs on shared MIR before evaluation and LLVM/direct-Wasm emission. It does not recognize
+`Effect.map`, `|>`, the standard-library module, or any declaration spelling. Its proof target is
+the generic constructor/call/run shape produced by ordinary source-defined combinators. Full
+runner/call/result CFG normalization remains a separate proposal.
 
 When genuine suspension is implemented, rerun this corpus with two additions: one suspending control
 whose continuation must survive, and one statically non-suspending case that must remain equal to

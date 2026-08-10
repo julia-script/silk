@@ -228,6 +228,16 @@ pub fn main() -> i32 { return run zero() |> Effect.map(divide) }`,
 const temporary = mkdtempSync(join(tmpdir(), 'silk-effect-cost-'))
 const clang = process.env.SILK_EFFECT_COST_CLANG ?? 'clang'
 const artifactDirectory = process.env.SILK_EFFECT_COST_ARTIFACT_DIR
+const directStaticCases = new Set([
+  'map-effect',
+  'map-both-success-effect',
+  'map-both-failure-effect',
+  'flat-map-effect',
+  'affine-imperative',
+  'affine-effect',
+  'trap-effect',
+])
+const constructorOnlyCases = new Set(['provide-effect', 'stored-effect'])
 
 const clangText = (bitcode, id, arguments_) => {
   const bitcodePath = join(temporary, `${id}.bc`)
@@ -285,6 +295,60 @@ const assemblyEntry = (text) => {
   return match?.[0] ?? ''
 }
 
+const topLevelWasmForms = (text) => {
+  const forms = []
+  let depth = 0
+  let start = -1
+  let quoted = false
+  let escaped = false
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]
+    if (quoted) {
+      if (escaped) escaped = false
+      else if (character === '\\') escaped = true
+      else if (character === '"') quoted = false
+      continue
+    }
+    if (character === '"') {
+      quoted = true
+      continue
+    }
+    if (character === '(') {
+      if (depth === 1) start = index
+      depth += 1
+      continue
+    }
+    if (character !== ')') continue
+    depth -= 1
+    if (depth === 1 && start >= 0) {
+      forms.push(text.slice(start, index + 1))
+      start = -1
+    }
+  }
+  return Object.freeze(forms)
+}
+
+const wasmEntry = (text) => {
+  const forms = topLevelWasmForms(text)
+  const export_ = forms.find((form) => /^\(export\s+"silk_main"\s+\(func\s+\d+\)\)/.test(form))
+  const index = export_ === undefined ? undefined : Number(/\(func\s+(\d+)\)/.exec(export_)?.[1])
+  if (index === undefined || !Number.isInteger(index)) return ''
+  const imported = forms.filter((form) => /^\(import\b/.test(form) && /\(func\b/.test(form)).length
+  return forms.filter((form) => /^\(func\b/.test(form)).at(index - imported) ?? ''
+}
+
+const wasmBehavior = (artifact, id) => {
+  const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+  const main = instance.exports.silk_main
+  if (typeof main !== 'function') throw new Error(`${id} has no Wasm silk_main`)
+  try {
+    return main()
+  } catch (cause) {
+    if (!(cause instanceof WebAssembly.RuntimeError)) throw cause
+    return 'trap'
+  }
+}
+
 try {
   const cases = []
   for (const sample of sources) {
@@ -304,6 +368,14 @@ try {
           'wasm32-unknown-unknown',
         ),
       )
+      const unnormalizedWasm = await Effect.runPromise(
+        Analysis.ofSourceRealized(
+          `${sourceId}/wasm`,
+          encoder.encode(sample.source),
+          'wasm32-unknown-unknown',
+          { normalizeMir: false },
+        ),
+      )
       const diagnostics = Analysis.diagnostics(native)
       const wasmDiagnostics = Analysis.diagnostics(wasm)
       if (diagnostics.length > 0 || wasmDiagnostics.length > 0) {
@@ -313,6 +385,7 @@ try {
       }
 
       const evaluated = Analysis.evaluate(native)
+      const unnormalizedEvaluated = Analysis.evaluate(unnormalizedWasm)
       const evaluatorBehavior =
         evaluated._tag === 'Completed'
           ? evaluated.result.value
@@ -329,19 +402,14 @@ try {
       const debug = await Effect.runPromise(Analysis.codegen(native, { mode: 'debug' }))
       const release = await Effect.runPromise(Analysis.codegen(native, { mode: 'release' }))
       const wasmArtifact = await Effect.runPromise(Analysis.codegenWasm(wasm, { mode: 'release' }))
-      const wasmInstance = new WebAssembly.Instance(
-        new WebAssembly.Module(wasmArtifact.bytes.slice()),
-        {},
+      const unnormalizedWasmArtifact = await Effect.runPromise(
+        Analysis.codegenWasm(unnormalizedWasm, { mode: 'release' }),
       )
-      const wasmMain = wasmInstance.exports.silk_main
-      if (typeof wasmMain !== 'function') throw new Error(`${sample.id} has no Wasm silk_main`)
-      let wasmBehavior
-      try {
-        wasmBehavior = wasmMain()
-      } catch (cause) {
-        if (!(cause instanceof WebAssembly.RuntimeError)) throw cause
-        wasmBehavior = 'trap'
-      }
+      const directWasmBehavior = wasmBehavior(wasmArtifact, sample.id)
+      const unnormalizedDirectWasmBehavior = wasmBehavior(
+        unnormalizedWasmArtifact,
+        `${sample.id} (unnormalized)`,
+      )
       const hir = normalize(Hir.encode(Analysis.rootAnalysis(native).hir))
       const mir = normalize(Mir.encode(Analysis.loweredMir(native)))
       const debugLlvm = normalize(debug.ir)
@@ -353,6 +421,7 @@ try {
       ])
       const assembly = clangText(release.bitcode, `${sample.id}-assembly`, ['-O2', '-S'])
       const wat = normalize(wasmArtifact.wat)
+      const unnormalizedWat = normalize(unnormalizedWasmArtifact.wat)
       if (artifactDirectory !== undefined) {
         const destination = join(artifactDirectory, sample.id)
         mkdirSync(destination, { recursive: true })
@@ -364,6 +433,7 @@ try {
           ['llvm-optimized.ll', optimizedLlvm],
           ['native.s', assembly],
           ['direct.wat', wat],
+          ['direct-unnormalized.wat', unnormalizedWat],
         ]) {
           writeFileSync(join(destination, name), text)
         }
@@ -373,6 +443,15 @@ try {
       const dropCalls = evaluated.trace.filter(
         (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl#'),
       ).length
+      const unnormalizedDropCalls = unnormalizedEvaluated.trace.filter(
+        (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl#'),
+      ).length
+      const verdicts = Analysis.effectNormalizationOf(wasm)
+      const applicability = directStaticCases.has(sample.id)
+        ? 'DirectStaticRun'
+        : constructorOnlyCases.has(sample.id)
+          ? 'ConstructorOnly'
+          : 'None'
 
       cases.push(
         Object.freeze({
@@ -382,8 +461,27 @@ try {
           expected: sample.expected,
           behavior: Object.freeze({
             evaluator: evaluatorBehavior,
-            wasm: wasmBehavior,
+            unnormalizedEvaluator:
+              unnormalizedEvaluated._tag === 'Completed'
+                ? unnormalizedEvaluated.result.value
+                : unnormalizedEvaluated.reason._tag === 'Trap'
+                  ? 'trap'
+                  : unnormalizedEvaluated._tag,
+            wasm: directWasmBehavior,
+            unnormalizedWasm: unnormalizedDirectWasmBehavior,
             dropCalls,
+            unnormalizedDropCalls,
+          }),
+          applicability,
+          normalization: Object.freeze({
+            accepted: verdicts.filter((verdict) => verdict._tag === 'Normalized').length,
+            rejected: verdicts.filter((verdict) => verdict._tag === 'Rejected').length,
+            foldedConstructors: verdicts.filter(
+              (verdict) => verdict._tag === 'Normalized' && verdict.kind === 'FoldedConstructor',
+            ).length,
+            directStaticRuns: verdicts.filter(
+              (verdict) => verdict._tag === 'Normalized' && verdict.kind === 'DirectStaticRun',
+            ).length,
           }),
           pipeTokens: Object.freeze({
             hir: occurrences(hir, /\|>/g),
@@ -398,6 +496,12 @@ try {
           assembly: summarizeAssembly(assembly),
           assemblyEntry: summarizeAssembly(assemblyEntry(assembly)),
           wasm: Object.freeze({ ...summarize(wat), binaryBytes: wasmArtifact.bytes.length }),
+          wasmEntry: summarize(wasmEntry(wat)),
+          unnormalizedWasm: Object.freeze({
+            ...summarize(unnormalizedWat),
+            binaryBytes: unnormalizedWasmArtifact.bytes.length,
+          }),
+          unnormalizedWasmEntry: summarize(wasmEntry(unnormalizedWat)),
           symbols: Object.freeze({
             native: release.symbols.map((entry) => entry.declaration.name),
             wasm: wasmArtifact.symbols.map((entry) => entry.declaration.name),
