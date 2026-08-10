@@ -13,6 +13,24 @@ interface Structure {
   readonly effectTerms: number
 }
 
+interface RunnerClassification {
+  readonly regions: ReadonlyArray<{ readonly tag: string; readonly count: number }>
+  readonly outcomes: ReadonlyArray<{ readonly tag: string; readonly count: number }>
+  readonly operations: ReadonlyArray<{ readonly tag: string; readonly count: number }>
+  readonly nestedMatches: number
+  readonly directCalls: number
+  readonly dynamicCalls: number
+  readonly effectOperations: number
+  readonly loans: number
+  readonly releases: number
+  readonly cleanup: number
+  readonly recursive: boolean
+  readonly affineAccesses: number
+  readonly estimatedClonedSize: number
+  readonly blockers: ReadonlyArray<string>
+  readonly prototypeEligible: boolean
+}
+
 interface CostCase {
   readonly id: string
   readonly pair: string
@@ -33,6 +51,7 @@ interface CostCase {
     readonly foldedConstructors: number
     readonly directStaticRuns: number
   }
+  readonly runners: ReadonlyArray<RunnerClassification>
   readonly pipeTokens: { readonly hir: number; readonly mir: number }
   readonly mir: Structure
   readonly optimizedLlvm: Structure
@@ -104,14 +123,39 @@ it('captures synchronous Effect costs deterministically in fresh processes', () 
       assert.isAbove(sample.normalization.foldedConstructors, 0, sample.id)
       assert.isAbove(sample.normalization.directStaticRuns, 0, sample.id)
       assert.isBelow(sample.wasmEntry.calls, sample.unnormalizedWasmEntry.calls, sample.id)
+      assert.strictEqual(sample.runners.length, sample.normalization.directStaticRuns, sample.id)
+      assert.isAbove(sample.wasmEntry.calls, 0, sample.id)
     } else if (sample.applicability === 'ConstructorOnly') {
       assert.isAbove(sample.normalization.foldedConstructors, 0, sample.id)
       assert.strictEqual(sample.normalization.directStaticRuns, 0, sample.id)
       assert.isBelow(sample.wasmEntry.calls, sample.unnormalizedWasmEntry.calls, sample.id)
     } else {
       assert.strictEqual(sample.normalization.directStaticRuns, 0, sample.id)
+      assert.deepEqual(sample.runners, [], sample.id)
     }
   }
+
+  const runners = report.cases.flatMap((sample) => sample.runners)
+  assert.strictEqual(runners.length, 13)
+  assert.isTrue(runners.every((runner) => runner.estimatedClonedSize > 0))
+  assert.isTrue(runners.every((runner) => !runner.prototypeEligible))
+  assert.deepEqual(
+    new Set(runners.flatMap((runner) => runner.blockers)),
+    new Set([
+      'AffineOperation',
+      'Cleanup',
+      'DynamicCallable',
+      'NestedEffectExecution',
+      'NestedMatch',
+      'StructuredRegion',
+    ]),
+  )
+  assert.isTrue(
+    runners.every(
+      (runner) =>
+        runner.regions.length > 0 && runner.outcomes.length > 0 && runner.operations.length > 0,
+    ),
+  )
 
   const affine = report.cases.filter((sample) => sample.pair === 'affine')
   assert.strictEqual(affine.length, 2)
