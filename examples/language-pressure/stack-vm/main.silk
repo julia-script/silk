@@ -297,5 +297,5 @@ pub effect fn main() -> () ! OutOfMemory {
   return run execute(bytecode)
     |> Effect.map(fingerprint)
     |> Effect.map(verify)
-    |> Effect.bindRequirement(&mut allocator)
+    |> Allocator.provide(&mut allocator)
 }

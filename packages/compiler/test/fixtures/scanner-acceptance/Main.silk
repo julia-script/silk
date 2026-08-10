@@ -27,7 +27,7 @@ effect fn build() -> i32 ! OutOfMemory {
     U8 { value: 2 }, U8 { value: 3 }, U8 { value: 1 }, U8 { value: 2 },
     U8 { value: 3 }, U8 { value: 1 }
   ]
-  let pending = scan(&source) |> Effect.bindRequirement(&mut allocator)
+  let pending = scan(&source) |> Allocator.provide(&mut allocator)
   let mut tokens = run pending
   if length<Token>(&tokens) == 10 {} else { return 0 }
   if capacity<Token>(&tokens) == 16 {} else { return 1 }

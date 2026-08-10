@@ -9,7 +9,7 @@ const ascii = (value: string): Uint8Array =>
 const source = `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)
@@ -29,7 +29,7 @@ pub fn main() -> i32 {
 const sharedReadSource = `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 1]>()
-  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 1)
@@ -49,10 +49,10 @@ const nonCopyReadSource = `struct Guard { storage: Allocation }
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Guard; 1]>()
-  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   let innerLayout = Layout.of<[i32; 1]>()
-  let innerRecipe = Allocator.allocate(move innerLayout) |> Effect.bindRequirement(&mut allocator)
+  let innerRecipe = Allocator.allocate(move innerLayout) |> Allocator.provide(&mut allocator)
   let payload = run innerRecipe
   unsafe {
     let mut buffer = RawBuffer.from<Guard>(move allocation, 1)
@@ -76,7 +76,7 @@ fn left(value: i32) -> Left | Right { return Left { value: value } }
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Left | Right; 1]>()
-  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<Left | Right>(move allocation, 1)
@@ -103,10 +103,10 @@ fn guarded(storage: Allocation) -> Guard | Marker {
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Guard | Marker; 1]>()
-  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   let innerLayout = Layout.of<[i32; 1]>()
-  let innerRecipe = Allocator.allocate(move innerLayout) |> Effect.bindRequirement(&mut allocator)
+  let innerRecipe = Allocator.allocate(move innerLayout) |> Allocator.provide(&mut allocator)
   let payload = run innerRecipe
   unsafe {
     let mut buffer = RawBuffer.from<Guard | Marker>(move allocation, 1)
@@ -130,7 +130,7 @@ const unsafeProgram = (
 ): string => `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<${layout}>()
-  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)

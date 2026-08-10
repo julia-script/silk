@@ -504,7 +504,7 @@ it('provides Allocator through nominal system and user-authored witnesses', () =
     'allocation://nominal-system-provider',
     `effect fn use(layout: Layout) -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   drop allocation
   return 42
@@ -523,7 +523,7 @@ pub fn main() -> i32 { return 0 }`,
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }
 effect fn use(layout: Layout) -> i32 ! OutOfMemory {
   let mut allocator = TestAllocator { remaining: 1 }
-  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   drop allocation
   return 42
