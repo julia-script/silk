@@ -543,9 +543,9 @@ it('ends exclusive allocator access when allocation returns, not when Allocation
     'ownership://allocation-provider-loan.silk',
     `effect fn allocateTwice(firstLayout: Layout, secondLayout: Layout, provider: Allocator) -> i32 ! OutOfMemory {
   let mut allocator = move provider
-  let firstRecipe = Allocator.allocate(move firstLayout) |> Allocator.provide(&mut allocator)
+  let firstRecipe = Allocator.allocate(move firstLayout) |> Effect.provideMut(&mut allocator)
   let first = run firstRecipe
-  let secondRecipe = Allocator.allocate(move secondLayout) |> Allocator.provide(&mut allocator)
+  let secondRecipe = Allocator.allocate(move secondLayout) |> Effect.provideMut(&mut allocator)
   let second = run secondRecipe
   drop second
   drop first

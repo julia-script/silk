@@ -417,6 +417,48 @@ fn main() -> i32 {
   )
 })
 
+it.effect('rejects a concrete provideMut provider without the required capability', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'effect/provide-mut-conformance',
+      new TextEncoder().encode(`struct Clock {}
+struct Wrong {}
+effect fn read() -> i32 ? &mut Clock { return 42 }
+pub fn main() -> i32 {
+  let mut wrong = Wrong {}
+  let recipe = read() |> Effect.provideMut(&mut wrong)
+  return run recipe
+}`),
+    )
+
+    assert.include(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      'SEM0074',
+    )
+    assert.strictEqual(Analysis.mirOf(snapshot)._tag, 'Unavailable')
+  }),
+)
+
+it.effect('type-checks provideMut for a custom service', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'effect/provide-mut-custom-capability',
+      new TextEncoder().encode(`struct Clock {}
+effect fn read() -> i32 ? &mut Clock { return 42 }
+pub fn main() -> i32 {
+  let mut clock = Clock {}
+  let recipe = Effect.provideMut(read(), &mut clock)
+  return run recipe
+}`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+  }),
+)
+
 it('owns a moved provider in a take-once Effect wrapper', () => {
   const result = analyzeText(
     'effect://moved-provider',
@@ -499,39 +541,41 @@ fn main() -> i32 {
     assert.strictEqual(operation.type.access, 'Exclusive')
 })
 
-it('provides Allocator through nominal system and user-authored witnesses', () => {
-  const system = analyzeText(
-    'allocation://nominal-system-provider',
-    `effect fn use(layout: Layout) -> i32 ! OutOfMemory {
+it.effect('provides Allocator through nominal system and user-authored witnesses', () =>
+  Effect.gen(function* () {
+    const system = yield* analyzeWithStdlib(
+      'allocation://nominal-system-provider',
+      `effect fn use(layout: Layout) -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   drop allocation
   return 42
 }
 pub fn main() -> i32 { return 0 }`,
-  )
-  assert.deepEqual(system.diagnostics, [])
-  const providerType = system.functions.at(0)?.bindings.at(0)?.inferredType
-  assert.strictEqual(providerType?._tag, 'Available')
-  if (providerType?._tag === 'Available')
-    assert.isTrue(Type.equals(providerType.type, Type.systemAllocator))
+    )
+    assert.deepEqual(system.diagnostics, [])
+    const providerType = system.functions.at(0)?.bindings.at(0)?.inferredType
+    assert.strictEqual(providerType?._tag, 'Available')
+    if (providerType?._tag === 'Available')
+      assert.isTrue(Type.equals(providerType.type, Type.systemAllocator))
 
-  const custom = analyzeText(
-    'allocation://custom-provider',
-    `struct TestAllocator { remaining: i32 }
+    const custom = yield* analyzeWithStdlib(
+      'allocation://custom-provider',
+      `struct TestAllocator { remaining: i32 }
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }
 effect fn use(layout: Layout) -> i32 ! OutOfMemory {
   let mut allocator = TestAllocator { remaining: 1 }
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   drop allocation
   return 42
 }
 pub fn main() -> i32 { return 0 }`,
-  )
-  assert.deepEqual(custom.diagnostics, [])
-})
+    )
+    assert.deepEqual(custom.diagnostics, [])
+  }),
+)
 
 it.effect('rejects dynamically shaped or type-incompatible catch handlers', () =>
   Effect.gen(function* () {

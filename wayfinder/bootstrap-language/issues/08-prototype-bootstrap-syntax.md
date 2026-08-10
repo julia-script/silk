@@ -95,11 +95,11 @@ callers can branch and specialize it before supplying affine inputs.
 
 ```silk
 let fsCompilation = Compiler.compile(move diskRequest)
-  |> Allocator.provide(&mut scratch, @Scratch)
+  |> Effect.provideMut(&mut scratch, @Scratch)
   |> FileSystem.provide(&fileSystem)
 
 let memoryCompilation = Compiler.compile(move memoryRequest)
-  |> Allocator.provide(&mut scratch, @Scratch)
+  |> Effect.provideMut(&mut scratch, @Scratch)
   |> FileSystem.provide(&virtualFileSystem)
 
 let diskArtifact = run fsCompilation

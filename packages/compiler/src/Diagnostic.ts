@@ -648,6 +648,7 @@ export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagno
       diagnostic.code === typeArgumentInferenceCode ||
       diagnostic.code === genericParameterKindMismatchCode ||
       diagnostic.code === contractRowInferenceCode ||
+      diagnostic.code === invalidEffectProvisionCode ||
       diagnostic.code === polymorphicRecursionCode,
   )
 

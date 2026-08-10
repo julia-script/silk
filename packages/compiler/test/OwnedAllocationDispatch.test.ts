@@ -27,7 +27,7 @@ impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.allocate }
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = ExhaustedAllocator { tag: 0 }
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   drop allocation
   return 1
@@ -44,7 +44,7 @@ const delegating = `struct QuotaAllocator { tag: i32 }
 
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
   let mut inner = SystemAllocator.make()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut inner)
+  let recipe = Effect.provideMut(Allocator.allocate(move layout), &mut inner)
   let block = run recipe
   return move block
 }
@@ -54,7 +54,7 @@ impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = QuotaAllocator { tag: 0 }
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   drop allocation
   return 42
@@ -95,7 +95,13 @@ it.effect('dispatches provision through user allocator witnesses on all three en
     )
     assert.deepEqual(Analysis.diagnostics(delegated), [])
     const delegatedRun = Analysis.evaluate(delegated)
-    assert.strictEqual(delegatedRun._tag, 'Completed')
+    assert.strictEqual(
+      delegatedRun._tag,
+      'Completed',
+      JSON.stringify(delegatedRun, (_, value) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      ),
+    )
     if (delegatedRun._tag !== 'Completed') return
     assert.strictEqual(delegatedRun.result.value, 42)
     assert.deepEqual(
@@ -148,10 +154,10 @@ effect fn build() -> i32 ! OutOfMemory {
   let mut good = SystemAllocator.make()
   let mut empty = ExhaustedAllocator { tag: 0 }
   let first = Layout.of<[i32; 2]>()
-  let recipeA = Allocator.allocate(move first) |> Allocator.provide(&mut ${providers[0]})
+  let recipeA = Allocator.allocate(move first) |> Effect.provideMut(&mut ${providers[0]})
   let a = run recipeA
   let second = Layout.of<[i32; 2]>()
-  let recipeB = Allocator.allocate(move second) |> Allocator.provide(&mut ${providers[1]})
+  let recipeB = Allocator.allocate(move second) |> Effect.provideMut(&mut ${providers[1]})
   let b = run recipeB
   drop a
   drop b
@@ -216,7 +222,7 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! Ou
   if self.remaining == 0 { fail OutOfMemory {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut inner)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   let block = run recipe
   return move block
 }
@@ -226,10 +232,10 @@ impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = QuotaAllocator { remaining: ${quota} }
   let first = Layout.of<[i32; 2]>()
-  let recipeA = Allocator.allocate(move first) |> Allocator.provide(&mut allocator)
+  let recipeA = Allocator.allocate(move first) |> Effect.provideMut(&mut allocator)
   let a = run recipeA
   let second = Layout.of<[i32; 2]>()
-  let recipeB = Allocator.allocate(move second) |> Allocator.provide(&mut allocator)
+  let recipeB = Allocator.allocate(move second) |> Effect.provideMut(&mut allocator)
   let b = run recipeB
   drop a
   drop b
@@ -301,7 +307,7 @@ const forwardedProvider = `struct CountingAllocator { hits: i32 }
 effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemory {
   self.hits = self.hits + 1
   let mut inner = SystemAllocator.make()
-  let pending = Allocator.allocate(move layout) |> Allocator.provide(&mut inner)
+  let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   let block = run pending
   return move block
 }
@@ -317,7 +323,7 @@ effect fn allocateForwarded(layout: Layout) -> Allocation ! OutOfMemory ? &mut A
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = CountingAllocator { hits: 0 }
   let layout = Layout.of<[i32; 2]>()
-  let pending = allocateForwarded(move layout) |> Allocator.provide(&mut allocator)
+  let pending = allocateForwarded(move layout) |> Effect.provideMut(&mut allocator)
   let block = run pending
   drop block
   return allocator.hits
@@ -338,7 +344,13 @@ it.effect('writes forwarded exclusive provider mutations back on all three engin
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
+    assert.strictEqual(
+      evaluated._tag,
+      'Completed',
+      JSON.stringify(evaluated, (_, value) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      ),
+    )
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 1)
     assert.deepEqual(

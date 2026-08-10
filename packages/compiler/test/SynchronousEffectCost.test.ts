@@ -145,6 +145,7 @@ it('captures synchronous Effect costs deterministically in fresh processes', () 
       'AffineOperation',
       'Cleanup',
       'DynamicCallable',
+      'Loan',
       'NestedEffectExecution',
       'NestedMatch',
       'StructuredRegion',

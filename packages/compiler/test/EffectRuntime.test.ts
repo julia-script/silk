@@ -209,7 +209,7 @@ fn discard(self: once Effect<Payload>) -> () {
 pub effect fn main() -> () ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
-  let storage = run Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let storage = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let payload = Payload { storage: move storage }
   let pending = effect { return move payload }
   discard(move pending)
