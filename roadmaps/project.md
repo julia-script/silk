@@ -40,10 +40,10 @@ reduces every measured native entry to its imperative shape. Shared constructor 
 two or three direct-Wasm entry calls from eligible Effect cases, and local single-use Copy/shared
 environments dispatch through `RunStaticEffect`. Stored/provider shapes conservatively stop after
 constructor folding; affine captures and unknown suspension remain explicit. A follow-up classifier
-found no production-safe runner CFG subset: the smallest runners delegate to another static runner,
-while useful combinators also carry matches, dynamic callables, cleanup, and affine moves. The named
-prerequisite is a fixed-point summary for one-region static-runner delegation, not a pipe rewrite or
-suspension ABI.
+found that shared runner CFG inlining would need nested-effect, callable, cleanup, and ownership
+semantics. That work is intentionally deferred: production builds use LLVM, which already removes
+the measured composition overhead, while direct Wasm prioritizes external-tool independence and
+browser compilation. Its remaining runner call is acceptable and does not block Effect or releases.
 
 ### Add typed scalar constants from repeated program evidence
 
@@ -300,10 +300,10 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
-- 2026-08-10: Closed the static-runner CFG-inlining spike with a named prerequisite. Thirteen real
-  static-run roots were classified and a test-only immutable local/region/exit remapper was proven;
-  none fit the closed production subset. One-region static-runner delegation must be summarized
-  before reevaluating general CFG cloning.
+- 2026-08-10: Closed the static-runner CFG-inlining spike with backend-only disposition. Thirteen
+  roots across the cost corpus were classified and a test-only immutable local/region/exit remapper
+  was proven. LLVM already removes the measured production overhead; optimizing the portable
+  browser-capable direct-Wasm backend remains optional future work.
 
 - 2026-08-10: Shipped shared static Effect representation normalization. Direct single-region
   constructors fold by body shape, local Copy/shared environments become `RunStaticEffect`, and

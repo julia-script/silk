@@ -1,25 +1,25 @@
 # Static runner CFG inlining spike
 
 **Date:** 2026-08-10  
-**Disposition:** named prerequisite — static runner delegation summaries
+**Disposition:** backend-only closure — production optimization remains with LLVM
 
 ## Decision
 
-Do not propose general runner CFG inlining yet, and do not close the remaining direct-Wasm call as
-backend-only overhead. First add a shared analysis/normalization prerequisite that summarizes and
-collapses a one-region, one-return static runner whose only effectful step delegates to another
-`RunStaticEffect`. Then rerun this classifier against the exposed runner. A CFG-inlining proposal is
-justified only when that rerun finds a useful closed, acyclic, loan-free, cleanup-free, non-affine
-runner with one typed exit map.
+Do not propose runner CFG inlining or static-runner delegation as current compiler work. Production
+builds go through LLVM, and Clang `-O2` already reduces every measured Effect entry to its imperative
+shape. The custom direct-Wasm backend exists primarily to keep Silk independent of external tools
+and fully compilable in browser demos; matching LLVM's optimizer is not one of its current goals.
 
-This is not a semantic objection to source-defined Effect composition. Clang `-O2` already reduces
-the measured native entries to their imperative shapes. It is a proof-boundary decision for shared
-MIR and the unoptimized direct-Wasm backend.
+The remaining direct-Wasm runner call is therefore acceptable. If direct-Wasm performance or code
+size later becomes important, these findings can seed a general MIR or backend optimization effort.
+Collapsing one-region forwarding runners is one possible first optimization, but it is optional
+future work rather than a prerequisite for Effect, the language, or production releases.
 
 ## Evidence
 
 The deterministic cost harness follows every `RunStaticEffect` identity to its concrete MIR
-function. Across seven normalized Effect cases it finds 13 roots:
+function. Across seven separate normalized Effect cases it finds 13 roots. These are corpus
+observations—including nested runners and repeated patterns—not 13 runtime calls in one program:
 
 | Case | Roots | Runner sizes (regions + operations + outcomes) | Direct-Wasm entry calls |
 | --- | ---: | --- | ---: |
@@ -31,10 +31,10 @@ function. Across seven normalized Effect cases it finds 13 roots:
 | affine Effect | 3 | 4, 14, 15 | 1 |
 | trap | 1 | 15 | 1 |
 
-No root fits the synthetic prototype vocabulary. Four roots are minimal forwarding runners: one
-operation region, one return, `RunStaticEffect`, and `PackEffectOutcome`. They are blocked only by
-nested static execution, which is the named prerequisite above. The remaining useful composition
-runners require broader semantics:
+No root fits the deliberately small synthetic prototype vocabulary. Four roots are minimal
+forwarding runners: one operation region, one return, `RunStaticEffect`, and `PackEffectOutcome`.
+They could be collapsed by a future optimizer. The remaining composition runners require broader
+semantics:
 
 - 9 roots contain cleanup and affine operations;
 - 8 contain nested matches and dynamically applied callables;
@@ -42,8 +42,9 @@ runners require broader semantics:
 - 9 use a structured or cleanup region.
 
 No classified runner is recursive and none uses an explicit MIR loan. Estimated cloned sizes range
-from 4 to 22 nodes, so size is not the blocker. Typed exit, nested-effect, callable, and ownership
-semantics are.
+from 4 to 22 nodes. The spike therefore shows that a shared inliner would need typed-exit,
+nested-effect, callable, and ownership semantics; it does not show that such an inliner is necessary
+now or that Effect composition is expensive in production.
 
 The test-only immutable remapper proves the mechanical subset. It deterministically renumbers local
 and region identities, rewrites `Forward`, binds the sole `Return` value into a caller destination,
@@ -58,7 +59,10 @@ reach compiler MIR or a backend.
   ownership analysis.
 - The prototype does not model nested `Match` operations, typed failure lanes, cleanup transfer,
   suspension, recursion, or callable-environment realization.
-- LLVM optimization success is performance evidence, not proof that shared MIR cloning is safe.
+- LLVM optimization success applies to the measured corpus and current production path; it is not a
+  universal performance guarantee for every future Effect program.
+- Direct-Wasm optimization goals may change if browser demos eventually require smaller or faster
+  artifacts.
 
 ## Reproduction
 

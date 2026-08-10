@@ -95,10 +95,10 @@ and editor tooling together with the language surface so no second vocabulary su
 
 ## Changelog
 
-- 2026-08-10: Classified all 13 `RunStaticEffect` roots in the synchronous cost corpus. No real
-  runner fits the closed synthetic inlining vocabulary: four are nested static delegations and the
-  useful combinators add matches, dynamic callables, cleanup, and affine moves. Selected static
-  runner delegation summaries as the prerequisite before reconsidering shared CFG inlining.
+- 2026-08-10: Classified 13 `RunStaticEffect` roots across the synchronous cost corpus. Four are
+  nested static delegations and the useful combinators add matches, dynamic callables, cleanup, and
+  affine moves. Production LLVM already removes the measured overhead, so direct-Wasm optimization
+  is deferred until the standalone browser backend has a demonstrated performance need.
 
 - 2026-08-10: Added a deterministic nine-pair synchronous Effect cost corpus, including generic
   provision, stored composition, traps, and allocator-backed affine cleanup. Native `silk_main`
