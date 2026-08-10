@@ -6,14 +6,14 @@ export const allocatorSource = `pub fn main() -> i32 {
 
 export const effectHandlerSource = `effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
-  return run Effect.catch<OutOfMemory>(store(), recover)
+  return run Effect.catch(store(), recover)
 }`
 
 export const pipedCatchSource = `struct Problem {}
 effect fn recover(error: Problem) -> i32 { return 0 }
 pub fn main() -> i32 {
   let recipe = relay(0)
-    |> Effect.catch<Problem>(recover)
+    |> Effect.catch(recover)
   return run recipe
 }`
 

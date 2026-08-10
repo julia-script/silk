@@ -96,14 +96,14 @@ fn observe(returned: Returned) -> i32 {
 
 effect fn execute() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let pending = build() |> Allocator.provide(&mut allocator)
+  let pending = build() |> Effect.bindRequirement(&mut allocator)
   let returned = run pending
   return observe(move returned)
 }
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(execute(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(execute(), recover) }`
 
 const stackVmWithSeparateVectors = readFileSync(
   new URL('../../../examples/language-pressure/stack-vm/main.silk', import.meta.url),

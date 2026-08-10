@@ -43,16 +43,8 @@ const nestedExpressions = (
         return [expression.expression]
       case 'Run':
         return [expression.subject]
-      case 'EffectCatch':
-        return [expression.protected, expression.handler]
-      case 'EffectRetry':
-        return [expression.protected, expression.retries]
-      case 'EffectProvide':
+      case 'EffectBindRequirement':
         return [expression.protected]
-      case 'EffectProvideWith':
-        return [expression.protected, expression.acquisition]
-      case 'EffectTransform':
-        return [expression.protected, expression.callback]
       case 'CallableSection':
         return expression.captures.map((capture) => capture.expression)
       case 'CallableApply':

@@ -216,7 +216,7 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! Ou
   if self.remaining == 0 { fail OutOfMemory {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
-  let pending = Allocator.allocate(move layout) |> Allocator.provide(&mut inner)
+  let pending = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut inner)
   return run pending
 }
 

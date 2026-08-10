@@ -155,6 +155,18 @@ export type CleanupPlan =
         readonly cleanup: CleanupPlan
       }>
     }
+  | {
+      readonly _tag: 'EffectCleanup'
+      readonly type: Type.Effect
+      readonly site: Hir.EffectSiteId
+      /** Owned environment slots in deterministic last-captured, first-released order. */
+      readonly slots: ReadonlyArray<{
+        readonly ordinal: number
+        readonly laneOffset: number
+        readonly laneCount: number
+        readonly cleanup: CleanupPlan
+      }>
+    }
 
 /** One structured exit path with its ordered (last-acquired, first-released) releases. */
 export interface ExitPlan {
@@ -390,6 +402,14 @@ const checkExpression = (
   guard = false,
   escaping = false,
 ): void => {
+  const argumentConsumes = (argument: Hir.Expression): boolean =>
+    argument._tag === 'Unavailable'
+      ? true
+      : Type.isEffect(argument.type)
+        ? argument.type.access === 'Take'
+        : Type.isCallable(argument.type)
+          ? argument.type.mode === 'Take'
+          : true
   switch (expression._tag) {
     case 'ParameterReference':
     case 'BindingReference': {
@@ -545,7 +565,7 @@ const checkExpression = (
       }
       const checkArguments = (): void => {
         for (const argument of expression.arguments) {
-          checkExpression(state, live, argument, true, guard, escaping)
+          checkExpression(state, live, argument, argumentConsumes(argument), guard, escaping)
         }
       }
       if (expression.evaluation === 'LeftThenCallable') {
@@ -564,12 +584,12 @@ const checkExpression = (
     }
     case 'Call': {
       for (const argument of expression.arguments)
-        checkExpression(state, live, argument, true, guard, escaping)
+        checkExpression(state, live, argument, argumentConsumes(argument), guard, escaping)
       return
     }
     case 'EffectConstruct': {
       for (const argument of expression.arguments)
-        checkExpression(state, live, argument, true, guard, escaping)
+        checkExpression(state, live, argument, argumentConsumes(argument), guard, escaping)
       return
     }
     case 'EffectBlock': {
@@ -584,19 +604,7 @@ const checkExpression = (
       }
       return
     }
-    case 'EffectCatch':
-      checkExpression(state, live, expression.protected, false, guard, escaping)
-      checkExpression(state, live, expression.handler, false, guard, true)
-      return
-    case 'EffectRetry':
-      checkExpression(state, live, expression.protected, false, guard, escaping)
-      checkExpression(state, live, expression.retries, false, guard, escaping)
-      return
-    case 'EffectTransform':
-      checkExpression(state, live, expression.protected, false, guard, true)
-      checkExpression(state, live, expression.callback, false, guard, true)
-      return
-    case 'EffectProvide': {
+    case 'EffectBindRequirement': {
       checkExpression(state, live, expression.protected, false, guard, escaping)
       const site: BindingSite | undefined =
         expression.provider.binding !== undefined
@@ -608,10 +616,6 @@ const checkExpression = (
         checkUse(state, live, site, expression.provider.span, expression.provider.access === 'Take')
       return
     }
-    case 'EffectProvideWith':
-      checkExpression(state, live, expression.protected, false, guard, escaping)
-      checkExpression(state, live, expression.acquisition, false, guard, escaping)
-      return
     case 'Run': {
       if (
         expression.subject._tag === 'BindingReference' &&
@@ -946,9 +950,6 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
       case 'CallableSection':
         for (const capture of expression.captures) scanRunEnds(capture.expression, region)
         return
-      case 'EffectCatch':
-        scanRunEnds(expression.protected, region)
-        return
       case 'EffectBlock':
       case 'FunctionItem':
         return
@@ -1183,7 +1184,15 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
           )
         const inspectArguments = (): void => {
           for (const argument of expression.arguments) {
-            inspect(argument.expression, region, active, naturalAccess(argument.expression))
+            inspect(
+              argument.expression,
+              region,
+              active,
+              naturalAccess(argument.expression),
+              argument.type._tag === 'Available' && Type.isEffect(argument.type.type)
+                ? delayedEnd
+                : undefined,
+            )
           }
         }
         if (expression.provenance._tag === 'PipelineCallableApplication') {
@@ -1206,12 +1215,18 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
           const candidate = argument.expression
           if (candidate._tag !== 'Borrow' || candidate.formation._tag === 'Unavailable') {
+            const preservesEffectLifetime =
+              argument.type._tag === 'Available' && Type.isEffect(argument.type.type)
             inspect(
               candidate,
               region,
               callActive,
               naturalAccess(candidate),
-              consumesSlot ? Object.freeze({ region, span: expression.syntax.span }) : undefined,
+              preservesEffectLifetime
+                ? delayedEnd
+                : consumesSlot
+                  ? Object.freeze({ region, span: expression.syntax.span })
+                  : undefined,
             )
             continue
           }
@@ -1305,12 +1320,15 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         return
       }
       case 'Run':
-        inspect(expression.subject, region, active, 'Read')
+        inspect(
+          expression.subject,
+          region,
+          active,
+          'Read',
+          Object.freeze({ region, span: expression.syntax.span }),
+        )
         return
-      case 'EffectCatch':
-        inspect(expression.protected, region, active, 'Read', delayedEnd)
-        return
-      case 'EffectProvide': {
+      case 'EffectBindRequirement': {
         inspect(expression.protected, region, active, 'Read', delayedEnd)
         const provider = expression.provider
         if (provider === undefined || provider.access === 'Take') return
@@ -1353,10 +1371,6 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         )
         return
       }
-      case 'EffectProvideWith':
-        inspect(expression.protected, region, active, 'Read', delayedEnd)
-        inspect(expression.acquisition, region, active, 'Read', delayedEnd)
-        return
     }
   }
 
@@ -1477,6 +1491,7 @@ export const cleanupPlan = (
   if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
+  if (Type.isFailureProjection(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isSlice(type) || Type.isReference(type))
     return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })
@@ -1612,7 +1627,7 @@ const cleanupTypeAtPath = (
 /** Substitutes one checked symbolic cleanup proof into a concrete instance. */
 export const specializeCleanup = (
   cleanup: CleanupPlan,
-  substitution: ReadonlyMap<string, Type.Type>,
+  substitution: Type.Substitution,
   resolveConcrete?: (type: Type.Type) => CleanupPlan,
 ): CleanupPlan => {
   const type = Type.substitute(cleanup.type, substitution)
@@ -1698,6 +1713,23 @@ export const specializeCleanup = (
           cleanup.slots.map((slot) =>
             Object.freeze({
               ordinal: slot.ordinal,
+              cleanup: specializeCleanup(slot.cleanup, substitution, resolveConcrete),
+            }),
+          ),
+        ),
+      })
+    case 'EffectCleanup':
+      if (!Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+      return Object.freeze({
+        _tag: 'EffectCleanup',
+        type,
+        site: cleanup.site,
+        slots: Object.freeze(
+          cleanup.slots.map((slot) =>
+            Object.freeze({
+              ordinal: slot.ordinal,
+              laneOffset: slot.laneOffset,
+              laneCount: slot.laneCount,
               cleanup: specializeCleanup(slot.cleanup, substitution, resolveConcrete),
             }),
           ),
@@ -2299,6 +2331,9 @@ const cleanupText = (cleanup: CleanupPlan): string => {
   }
   if (cleanup._tag === 'CallableCleanup') {
     return `callable:${Type.encode(cleanup.type)} site=${cleanup.site.function.ordinal}@${cleanup.site.span.start} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
+  }
+  if (cleanup._tag === 'EffectCleanup') {
+    return `effect:${Type.encode(cleanup.type)} site=${cleanup.site.function.ordinal}@${cleanup.site.span.start} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
   }
   if (cleanup._tag === 'HookCleanup') {
     return `hook:${Type.encode(cleanup.type)} target=${cleanup.hook.module}.${cleanup.hook.name}${

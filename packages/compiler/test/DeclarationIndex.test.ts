@@ -129,6 +129,106 @@ it.effect('resolves callable parameter and result contracts canonically', () =>
   }),
 )
 
+it.effect('indexes value, failure-row, and requirement-row binders as distinct kinds', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        'effect fn transform<A, !E, ?R>(self: Effect<A ! E ? R>, value: A) -> Effect<A ! E ? R> ! E ? R { return self }',
+      ],
+    ])
+    const declaration = index.modules.at(0)?.declarations.at(0)
+
+    assert.deepEqual(
+      declaration?.typeParameters.map((parameter) => ({
+        name: parameter.type.name,
+        kind: parameter.type.kind,
+      })),
+      [
+        { name: 'A', kind: 'Value' },
+        { name: 'E', kind: 'FailureRow' },
+        { name: 'R', kind: 'RequirementRow' },
+      ],
+    )
+    assert.deepEqual(
+      declaration?.failureRow.parameters.map((parameter) => parameter.name),
+      ['E'],
+    )
+    assert.deepEqual(
+      declaration?.requirementRow.parameters.map((parameter) => parameter.name),
+      ['R'],
+    )
+    const parameterEffect = declaration?.parameters.at(0)?.declaredType
+    const returnEffect = declaration?.returnType
+    assert.strictEqual(parameterEffect?._tag, 'Resolved')
+    assert.strictEqual(returnEffect?._tag, 'Resolved')
+    if (
+      parameterEffect?._tag === 'Resolved' &&
+      Type.isEffect(parameterEffect.type) &&
+      returnEffect?._tag === 'Resolved' &&
+      Type.isEffect(returnEffect.type)
+    ) {
+      assert.deepEqual(
+        [parameterEffect.type, returnEffect.type].map((effect) => ({
+          failures: effect.failureParameters.map((parameter) => parameter.name),
+          requirements: effect.requirementParameters.map((parameter) => parameter.name),
+        })),
+        [
+          { failures: ['E'], requirements: ['R'] },
+          { failures: ['E'], requirements: ['R'] },
+        ],
+      )
+    }
+    assert.deepEqual(index.diagnostics, [])
+  }),
+)
+
+it.effect('diagnoses generic row binders used in the wrong channel and unbound row names', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `effect fn bad<!E, ?R>(left: E, right: R) -> E ! R ? E { return left }
+effect fn unbound() -> i32 ? MissingRow { return 0 }`,
+      ],
+    ])
+
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        reason: diagnostic.reason._tag,
+      })),
+      [
+        { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
+        { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
+        { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
+        { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
+        { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
+        { code: 'SEM0001', reason: 'UnknownType' },
+      ],
+    )
+  }),
+)
+
+it.effect('keeps cross-kind duplicate binders attached to the first canonical identity', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      ['root', 'effect fn duplicate<A, !A, ?A>(value: A) -> A { return value }'],
+    ])
+    const parameters = index.modules.at(0)?.declarations.at(0)?.typeParameters ?? []
+
+    assert.strictEqual(parameters.at(1)?.type, parameters.at(0)?.type)
+    assert.strictEqual(parameters.at(2)?.type, parameters.at(0)?.type)
+    assert.strictEqual(parameters.at(1)?.duplicateOf, parameters.at(0)?.type)
+    assert.strictEqual(parameters.at(2)?.duplicateOf, parameters.at(0)?.type)
+    assert.strictEqual(parameters.at(0)?.type.kind, 'Value')
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0050', 'SEM0050'],
+    )
+  }),
+)
+
 it.effect('normalizes effect failure rows while retaining source members', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [

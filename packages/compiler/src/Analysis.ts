@@ -789,7 +789,7 @@ export const instancesOfCall = (
         .some((expression) => expression === call)
       if (!ownsCall) return []
       const arguments_ = call.typeArguments.map((argument) =>
-        Type.substitute(argument, caller.substitution),
+        Type.substituteGenericArgument(argument, caller.substitution),
       )
       const target = self.instances.instances.find(
         (candidate) =>
@@ -798,7 +798,10 @@ export const instancesOfCall = (
           candidate.key.typeArguments.length === arguments_.length &&
           candidate.key.typeArguments.every((argument, index) => {
             const callArgument = arguments_.at(index)
-            return callArgument !== undefined && Type.equals(argument, callArgument)
+            return (
+              callArgument !== undefined &&
+              Type.genericArgumentKey(argument) === Type.genericArgumentKey(callArgument)
+            )
           }),
       )
       return target === undefined ? [] : [Object.freeze({ call, caller, target })]

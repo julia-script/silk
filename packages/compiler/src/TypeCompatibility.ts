@@ -34,6 +34,11 @@ export type Compatibility =
       readonly target: Type.Callable
     }
   | {
+      readonly _tag: 'EffectAccess'
+      readonly source: Type.Effect
+      readonly target: Type.Effect
+    }
+  | {
       readonly _tag: 'Bottom'
       readonly source: Type.Bottom
       readonly target: Type.Type
@@ -69,6 +74,37 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
     ) {
       return Object.freeze({ _tag: 'CallableMode', source, target })
     }
+  }
+  if (Type.isEffect(source) && Type.isEffect(target)) {
+    const sourceRank = source.access === 'Shared' ? 0 : source.access === 'Exclusive' ? 1 : 2
+    const targetRank = target.access === 'Shared' ? 0 : target.access === 'Exclusive' ? 1 : 2
+    const sameOutputs =
+      Type.equals(source.success, target.success) &&
+      source.failures.length === target.failures.length &&
+      source.failures.every((failure, index) =>
+        Type.equals(failure, target.failures.at(index) ?? 'never'),
+      ) &&
+      source.failureParameters.length === target.failureParameters.length &&
+      source.failureParameters.every((parameter, index) =>
+        Type.equals(parameter, target.failureParameters.at(index) ?? 'never'),
+      )
+    const compatibleRequirements =
+      source.requirements.length === target.requirements.length &&
+      source.requirements.every((requirement, index) => {
+        const expected = target.requirements.at(index)
+        return (
+          expected !== undefined &&
+          Type.equals(requirement.capability, expected.capability) &&
+          requirement.role === expected.role &&
+          (requirement.access === expected.access || expected.access === 'Exclusive')
+        )
+      }) &&
+      source.requirementParameters.length === target.requirementParameters.length &&
+      source.requirementParameters.every((parameter, index) =>
+        Type.equals(parameter, target.requirementParameters.at(index) ?? 'never'),
+      )
+    if (sourceRank <= targetRank && sameOutputs && compatibleRequirements)
+      return Object.freeze({ _tag: 'EffectAccess', source, target })
   }
   const members = sourceMembers(source)
   if (members === undefined || !Type.isUnion(target)) {

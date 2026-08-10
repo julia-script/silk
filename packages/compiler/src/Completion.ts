@@ -205,24 +205,6 @@ const actorCandidates = (actor: Intrinsic.Actor): ReadonlyArray<Candidate> =>
     }),
   )
 
-const capabilityCandidates = (): ReadonlyArray<Candidate> =>
-  (Intrinsic.findActor('Effect')?.operations ?? []).flatMap((operation) =>
-    operation.rule._tag === 'EffectRule' &&
-    (operation.rule.operation === 'Provide' || operation.rule.operation === 'ProvideWith')
-      ? [
-          candidate({
-            identity: semantic(
-              Object.freeze({ _tag: 'IntrinsicOperationIdentity', id: operation.id }),
-            ),
-            kind: 'Operation',
-            label: operation.spelling,
-            detail: PresentationRenderer.intrinsicOperation(operation),
-            sortGroup: 0,
-          }),
-        ]
-      : [],
-  )
-
 const namespaceCandidates = (
   index: DeclarationIndex.Index,
   module: string,
@@ -585,7 +567,9 @@ export const complete = (options: {
           replacement: replacement.span,
           candidates: stable([
             ...actorCandidates(intrinsic),
-            ...(intrinsic.spelling === 'Allocator' ? capabilityCandidates() : []),
+            ...(intrinsic.spelling === 'Effect'
+              ? namespaceCandidates(options.index, 'silk/effects')
+              : []),
           ]),
         })
     }
@@ -595,13 +579,6 @@ export const complete = (options: {
         context: Object.freeze({ _tag: 'ActorMemberContext', actor: lookup.module }),
         replacement: replacement.span,
         candidates: stable(namespaceCandidates(options.index, lookup.module)),
-      })
-    if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'StructDeclaration')
-      return Object.freeze({
-        _tag: 'CompletionResult',
-        context: Object.freeze({ _tag: 'ActorMemberContext', actor: lookup.spelling }),
-        replacement: replacement.span,
-        candidates: stable(capabilityCandidates()),
       })
     return Object.freeze({
       _tag: 'CompletionResult',

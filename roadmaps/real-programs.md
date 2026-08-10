@@ -95,6 +95,11 @@ and editor tooling together with the language surface so no second vocabulary su
 
 ## Changelog
 
+- 2026-08-10: Migrated the lexer, stack VM, and allocation-bearing algorithm entry points to
+  direct Effect pipelines. Data-first, piped, grouped, and stored compositions now agree across
+  evaluator, native LLVM, and direct Wasm; the final implementation goes through visible
+  source-defined combinators rather than privileged stored-recipe lowering.
+
 - 2026-08-09: Completed shared Vector reads and `fix-structural-union-copy-provenance`. The lexer
   retains independent nominal-record coverage, and the VM again stores one ordered
   `Step | VmDiagnostic` vector whose shared read-back validates each active member and payload

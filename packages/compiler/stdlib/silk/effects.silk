@@ -1,0 +1,152 @@
+// Familiar channel transformations derived from the closed compiler core. The core executes one
+// Effect into Result data and binds one typed requirement; everything here is ordinary Silk.
+
+import silk.result { Result, Success, Failure }
+
+effect fn raise<!E>(error: Row<!E>) -> never ! E {
+  fail move error
+}
+
+/// Transforms both the success and typed-failure channels of an Effect.
+pub effect fn mapBoth<A, B, !E, !F, ?R>(
+  self: once Effect<A ! E ? R>,
+  onSuccess: once fn(A) -> B,
+  onFailure: once fn(Row<!E>) -> Row<!F>
+) -> B ! F ? R {
+  let completed = run Effect.result(move self)
+  return match move completed {
+    Result<A, Row<!E>> { value: outcome } => match move outcome {
+      Success<A> { value: success } => onSuccess(move success)
+      Failure<Row<!E>> { error } => run raise(onFailure(move error))
+    }
+  }
+}
+
+/// Transforms the success channel of an Effect.
+pub effect fn map<A, B, !E, ?R>(
+  self: once Effect<A ! E ? R>,
+  onSuccess: once fn(A) -> B
+) -> B ! E ? R {
+  let completed = run Effect.result(move self)
+  return match move completed {
+    Result<A, Row<!E>> { value: outcome } => match move outcome {
+      Success<A> { value: success } => onSuccess(move success)
+      Failure<Row<!E>> { error } => run raise(move error)
+    }
+  }
+}
+
+/// Transforms the typed-failure channel of an Effect.
+pub effect fn mapError<A, !E, !F, ?R>(
+  self: once Effect<A ! E ? R>,
+  onFailure: once fn(Row<!E>) -> Row<!F>
+) -> A ! F ? R {
+  let completed = run Effect.result(move self)
+  return match move completed {
+    Result<A, Row<!E>> { value: outcome } => match move outcome {
+      Success<A> { value: success } => move success
+      Failure<Row<!E>> { error } => run raise(onFailure(move error))
+    }
+  }
+}
+
+/// Continues an Effect with an effectful success callback.
+pub effect fn flatMap<A, B, !E, !F, ?R, ?S>(
+  self: once Effect<A ! E ? R>,
+  onSuccess: once fn(A) -> Effect<B ! F ? S>
+) -> B ! E | F ? R | S {
+  let completed = run Effect.result(move self)
+  return match move completed {
+    Result<A, Row<!E>> { value: outcome } => match move outcome {
+      Success<A> { value: success } => run onSuccess(move success)
+      Failure<Row<!E>> { error } => run raise(move error)
+    }
+  }
+}
+
+/// Runs an effectful callback while preserving its returned success value.
+pub effect fn tap<A, !E, !F, ?R, ?S>(
+  self: once Effect<A ! E ? R>,
+  callback: once fn(A) -> Effect<A ! F ? S>
+) -> A ! E | F ? R | S {
+  let completed = run Effect.result(move self)
+  return match move completed {
+    Result<A, Row<!E>> { value: outcome } => match move outcome {
+      Success<A> { value: success } => run callback(move success)
+      Failure<Row<!E>> { error } => run raise(move error)
+    }
+  }
+}
+
+/// Recovers every typed failure with another Effect.
+pub effect fn catchAll<A, !E, !F, ?R, ?S>(
+  self: once Effect<A ! E ? R>,
+  onFailure: once fn(Row<!E>) -> Effect<A ! F ? S>
+) -> A ! F ? R | S {
+  let completed = run Effect.result(move self)
+  return match move completed {
+    Result<A, Row<!E>> { value: outcome } => match move outcome {
+      Success<A> { value: success } => move success
+      Failure<Row<!E>> { error } => run onFailure(move error)
+    }
+  }
+}
+
+/// Recovers every typed failure with another Effect.
+pub effect fn catch<A, !E, !F, ?R, ?S>(
+  self: once Effect<A ! E ? R>,
+  onFailure: once fn(Row<!E>) -> Effect<A ! F ? S>
+) -> A ! F ? R | S {
+  return run catchAll(move self, move onFailure)
+}
+
+effect fn retryFailure<A, !E, ?R>(
+  self: mut Effect<A ! E ? R>,
+  error: Row<!E>,
+  retries: usize
+) -> A ! E ? R {
+  if retries == 0 {
+    return run raise(move error)
+  }
+  return run retryLoop(self, retries - 1)
+}
+
+effect fn retryLoop<A, !E, ?R>(
+  self: mut Effect<A ! E ? R>,
+  retries: usize
+) -> A ! E ? R {
+  let completed = run Effect.result(self)
+  return match move completed {
+    Result<A, Row<!E>> { value: outcome } => match move outcome {
+      Success<A> { value: success } => move success
+      Failure<Row<!E>> { error } => run retryFailure(self, move error, retries)
+    }
+  }
+}
+
+/// Repeats a reusable Effect after typed failure up to the requested count.
+pub effect fn retry<A, !E, ?R>(
+  self: mut Effect<A ! E ? R>,
+  retries: usize
+) -> A ! E ? R {
+  return run retryLoop(self, retries)
+}
+
+/// Satisfies one typed service requirement with an existing provider.
+pub effect fn provide<A, C, !E, ?R>(
+  self: once Effect<A ! E ? &C | R>,
+  provider: &C
+) -> A ! E ? R {
+  let bound = Effect.bindRequirement(move self, provider)
+  return run bound
+}
+
+/// Acquires and lexically provides one typed service requirement.
+pub effect fn provideWith<A, C, !E, !F, ?R, ?S>(
+  self: once Effect<A ! E ? &mut C | R>,
+  acquire: Effect<C ! F ? S>
+) -> A ! E | F ? R | S {
+  let mut provider = run acquire
+  let bound = Effect.bindRequirement(move self, &mut provider)
+  return run bound
+}

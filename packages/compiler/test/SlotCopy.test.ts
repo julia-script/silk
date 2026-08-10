@@ -20,7 +20,7 @@ afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 const copyRead = `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)
@@ -36,7 +36,7 @@ const copyRead = `effect fn store() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
 
 /** Slot and shared-buffer copies preserve the active member across distinct union payload shapes. */
 const unionCopyRead = `struct Left { value: i32 }
@@ -63,7 +63,7 @@ fn observed(input: EmptyEvent | Left | Right) -> i32 {
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[EmptyEvent | Left | Right; 3]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<EmptyEvent | Left | Right>(move allocation, 3)
@@ -90,7 +90,7 @@ effect fn store() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
 
 it.effect('copies initialized Copy slots without consuming them on all three engines', () =>
   Effect.gen(function* () {
@@ -197,10 +197,10 @@ const nonCopy = `struct Guard { storage: Allocation }
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Guard; 1]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   let inner = Layout.of<[i32; 1]>()
-  let innerRecipe = Allocator.allocate(move inner) |> Allocator.provide(&mut allocator)
+  let innerRecipe = Allocator.allocate(move inner) |> Effect.bindRequirement(&mut allocator)
   let payload = run innerRecipe
   unsafe {
     let mut buffer = RawBuffer.from<Guard>(move allocation, 1)
@@ -218,7 +218,7 @@ effect fn store() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
 
 it.effect('rejects copying a non-Copy element at MIR verification', () =>
   Effect.gen(function* () {

@@ -2,7 +2,7 @@
 
 Status: exploratory direction, not an accepted language design or scheduled milestone.
 
-Last reviewed: 2026-08-09.
+Last reviewed: 2026-08-10.
 
 ## Purpose
 
@@ -72,6 +72,14 @@ construction and stack-safe trampolining. A runtime suspension parks an unfinish
 retains its continuation and live state, and permits another ready execution to advance. A future
 compiler may lower suspension-capable Effects to stackless resumable state machines while compiling
 non-suspending Effects as ordinary direct code.
+
+The current source-defined Effect library deliberately observes only completed typed outcomes
+through `Effect.result`. That operation and propagating `run` are the suspension-compatible seams:
+future lowering may park and later resume the current execution before either produces its value,
+without exposing a pending constructor to `map`, `flatMap`, or `catch`. Requirements remain erased
+type rows plus compiler-selected provider arguments; no runtime environment record is part of the
+public model. The synchronous cost spike measures this actual library/core boundary before any
+complete-or-suspended representation or optimizer is selected.
 
 The smallest plausible runtime seam is correspondingly narrow: schedule or resume a frame, park it
 on a wait condition, wake that condition, track structured children, and interrupt with deterministic

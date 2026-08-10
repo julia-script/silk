@@ -421,7 +421,8 @@ pub effect fn main() -> () ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   // PRESSURE_INPUT: the harness replaces this literal only.
   let source = b"pub fn main() -> i32 { return 42 }\n"
-  let pending = lex(source) |> Allocator.provide(&mut allocator)
-  let result = run pending
-  return fingerprint(move result) |> verify
+  return run lex(source)
+    |> Effect.map(fingerprint)
+    |> Effect.map(verify)
+    |> Effect.bindRequirement(&mut allocator)
 }

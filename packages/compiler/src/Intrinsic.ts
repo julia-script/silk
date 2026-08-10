@@ -37,7 +37,7 @@ export type Rule =
     }
   | {
       readonly _tag: 'EffectRule'
-      readonly operation: 'Catch' | 'Retry' | 'Map' | 'FlatMap' | 'Tap' | 'Provide' | 'ProvideWith'
+      readonly operation: 'Result' | 'BindRequirement'
     }
   | { readonly _tag: 'PlaceRule'; readonly operation: 'Replace' }
 
@@ -441,74 +441,21 @@ const operations = Object.freeze([
     'Namespace',
     Object.freeze([
       effect({
-        name: 'catch',
-        operation: 'Catch',
-        typeParameters: Object.freeze(['E']),
-        parameters: Object.freeze([
-          valueParameter('protected', 'Effect<A ! E | Rest>'),
-          valueParameter('handler', 'fn(E) -> Effect<A ! HandlerFailures>'),
-        ]),
-        result: 'Effect<A ! Rest | HandlerFailures>',
+        name: 'result',
+        operation: 'Result',
+        typeParameters: Object.freeze([]),
+        parameters: Object.freeze([valueParameter('protected', 'Effect<A ! E ? R>')]),
+        result: 'Effect<Result<A, Row<!E>> ? R>',
       }),
       effect({
-        name: 'retry',
-        operation: 'Retry',
+        name: 'bindRequirement',
+        operation: 'BindRequirement',
         typeParameters: Object.freeze([]),
         parameters: Object.freeze([
-          valueParameter('protected', 'Effect<A ! E>'),
-          valueParameter('retries', 'i32'),
+          valueParameter('protected', 'Effect<A ! E ? Selected | Rest>'),
+          valueParameter('provider', '&Provider'),
         ]),
-        result: 'Effect<A ! E>',
-      }),
-      effect({
-        name: 'map',
-        operation: 'Map',
-        typeParameters: Object.freeze([]),
-        parameters: Object.freeze([
-          valueParameter('protected', 'Effect<A ! E>'),
-          valueParameter('callback', 'fn(A) -> B'),
-        ]),
-        result: 'Effect<B ! E>',
-      }),
-      effect({
-        name: 'flatMap',
-        operation: 'FlatMap',
-        typeParameters: Object.freeze([]),
-        parameters: Object.freeze([
-          valueParameter('protected', 'Effect<A ! E>'),
-          valueParameter('callback', 'fn(A) -> Effect<B ! F>'),
-        ]),
-        result: 'Effect<B ! E | F>',
-      }),
-      effect({
-        name: 'tap',
-        operation: 'Tap',
-        typeParameters: Object.freeze([]),
-        parameters: Object.freeze([
-          valueParameter('protected', 'Effect<A ! E>'),
-          valueParameter('callback', 'fn(A) -> Effect<B ! F>'),
-        ]),
-        result: 'Effect<A ! E | F>',
-      }),
-      effect({
-        name: 'provide',
-        operation: 'Provide',
-        typeParameters: Object.freeze([]),
-        parameters: Object.freeze([
-          valueParameter('protected', 'Effect<A ? Capability>'),
-          valueParameter('provider', 'Provider'),
-        ]),
-        result: 'Effect<A>',
-      }),
-      effect({
-        name: 'provideWith',
-        operation: 'ProvideWith',
-        typeParameters: Object.freeze([]),
-        parameters: Object.freeze([
-          valueParameter('protected', 'Effect<A ? Capability>'),
-          valueParameter('acquire', 'Effect<Provider>'),
-        ]),
-        result: 'Effect<A>',
+        result: 'Effect<A ! E ? Rest>',
       }),
     ]),
   ),

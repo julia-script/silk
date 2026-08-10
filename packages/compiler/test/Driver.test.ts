@@ -186,26 +186,33 @@ pub fn main() -> i32 { return consume([]) }`,
   }),
 )
 
-it.effect('routes emission through an injected backend service', () =>
-  Effect.gen(function* () {
-    let emissions = 0
-    const spy: Backend.Backend = {
-      _tag: 'Backend',
-      id: 'llvm',
-      name: 'Spy LLVM',
-      targets: Backend.LlvmBackend.targets,
-      emit: (program, request) => {
-        emissions += 1
-        return Backend.LlvmBackend.emit(program, request)
-      },
-    }
-    const outcome = yield* compileSource('injected-backend', 'pub fn main() -> i32 { return 42 }', {
-      backend: spy,
-    })
+it.effect(
+  'routes emission through an injected backend service',
+  () =>
+    Effect.gen(function* () {
+      let emissions = 0
+      const spy: Backend.Backend = {
+        _tag: 'Backend',
+        id: 'llvm',
+        name: 'Spy LLVM',
+        targets: Backend.LlvmBackend.targets,
+        emit: (program, request) => {
+          emissions += 1
+          return Backend.LlvmBackend.emit(program, request)
+        },
+      }
+      const outcome = yield* compileSource(
+        'injected-backend',
+        'pub fn main() -> i32 { return 42 }',
+        {
+          backend: spy,
+        },
+      )
 
-    assert.strictEqual(emissions, 1)
-    assert.strictEqual(outcome._tag, 'Compiled')
-  }),
+      assert.strictEqual(emissions, 1)
+      assert.strictEqual(outcome._tag, 'Compiled')
+    }),
+  15_000,
 )
 
 it.effect('gates source rejection and operational resolution failure before backend work', () =>

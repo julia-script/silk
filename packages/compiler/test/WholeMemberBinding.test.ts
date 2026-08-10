@@ -45,7 +45,7 @@ const layoutExtract = `effect fn store() -> i32 ! OutOfMemory {
     Layout value => value
     LayoutOverflow overflow => trapLayout()
   }
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 3)
@@ -61,7 +61,7 @@ fn trapLayout() -> Layout {
   return trapLayout()
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
 
 // Whole-member binding on an affine member (move it out of the union).
 const affineExtract = `struct Empty {}
@@ -69,7 +69,7 @@ struct Full { storage: Allocation }
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   let cell = Full { storage: move allocation }
   let widened = wrap(move cell)
@@ -88,7 +88,7 @@ fn takeStorage(full: Full) -> Allocation {
 }
 effect fn fallback() -> Full ! OutOfMemory { fail OutOfMemory {} }
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect('binds whole members and lowers runtime layouts on all three engines', () =>
   Effect.gen(function* () {

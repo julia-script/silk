@@ -170,6 +170,33 @@ pub fn recover(value: i32) -> i32 { return value }`
   )
 })
 
+it.effect('links public Effect operations to visible standard-library source', () => {
+  const source = `fn increment(value: i32) -> i32 { return value + 1 }
+effect fn answer() -> i32 { return 41 }
+pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const occurrence = occurrenceAt(snapshot, source, 'map')
+      assert.strictEqual(occurrence?.role, 'Value')
+      assert.strictEqual(occurrence?.declaration?.module, 'silk/effects')
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', source.indexOf('map')),
+        ),
+        '/// Transforms the success channel of an Effect.',
+      )
+      assert.strictEqual(
+        occurrence === undefined
+          ? undefined
+          : Analysis.occurrencePresentation(snapshot, 'main', occurrence)?.text,
+        'pub effect fn map<A, B, !E, ?R>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> B) -> B ! E ? R',
+      )
+      return undefined
+    }),
+  )
+})
+
 it.effect('indexes declaration and nominal type reference locations', () =>
   Analysis.ofSourceRealized(
     'main',
@@ -386,6 +413,13 @@ pub struct Other {}`
       const box = Type.nominal('types/Models', 'Box', Object.freeze(['i32']))
       const other = Type.nominal('types/Models', 'Other')
       const problem = Type.nominal('main', 'Problem')
+      const failureRow = Type.parameter({ module: 'main', name: 'transform' }, 0, 'E', 'FailureRow')
+      const requirementRow = Type.parameter(
+        { module: 'main', name: 'transform' },
+        1,
+        'R',
+        'RequirementRow',
+      )
       assert.strictEqual(Presentation.type(box, 'main', scope), 'Schema.Box<i32>')
       assert.strictEqual(Presentation.type(other, 'main', scope), 'Schema.Other')
       assert.strictEqual(Presentation.type(box, 'detached'), 'types/Models.Box<i32>')
@@ -401,10 +435,26 @@ pub struct Other {}`
             access: 'Exclusive' as const,
           }),
         ]),
+        [failureRow],
+        [requirementRow],
       )
       assert.strictEqual(
         Presentation.type(effect, 'main', scope),
-        'Effect<&mut Schema.Box<i32> ! Problem ? &mut Allocator@Heap>',
+        'Effect<&mut Schema.Box<i32> ! Problem | E ? &mut Allocator@Heap | R>',
+      )
+      assert.strictEqual(
+        Presentation.genericArgument(Type.failureRowArgument([problem]), 'main', scope),
+        '! Problem',
+      )
+      assert.strictEqual(
+        Presentation.genericArgument(
+          Type.requirementRowArgument([
+            { capability: Type.allocator, role: 'Heap', access: 'Exclusive' },
+          ]),
+          'main',
+          scope,
+        ),
+        '? &mut Allocator@Heap',
       )
       const union = Type.union(Object.freeze([problem, Type.outOfMemory]))
       assert.strictEqual(
@@ -445,29 +495,30 @@ fn damaged( -> {`
   })
 })
 
-it.effect('indexes and completes catalog-backed capability provision operations', () => {
+it.effect('indexes and completes source-backed Effect provision operations', () => {
   const source = `struct Clock {}
 effect fn read() -> i32 ? &Clock { return 42 }
 pub fn main() -> i32 {
   let clock = Clock {}
-  let recipe = read() |> Clock.provide(&clock)
+  let recipe = read() |> Effect.provide(&clock)
   return run recipe
 }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
-      const qualifier = occurrenceAt(snapshot, source, 'Clock', 3)
+      const qualifier = occurrenceAt(snapshot, source, 'Effect')
       const operation = occurrenceAt(snapshot, source, 'provide')
       assert.strictEqual(qualifier?.role, 'Actor')
-      assert.strictEqual(qualifier?.declaration?.selectionSpan.start, source.indexOf('Clock'))
-      assert.strictEqual(operation?.role, 'Operation')
+      assert.isUndefined(qualifier?.declaration)
+      assert.strictEqual(operation?.role, 'Value')
+      assert.strictEqual(operation?.declaration?.module, 'silk/effects')
       assert.include(
         operation === undefined
           ? ''
           : (Analysis.occurrencePresentation(snapshot, 'main', operation)?.text ?? ''),
-        'fn Effect.provide',
+        'effect fn provide',
       )
 
-      const offset = source.lastIndexOf('Clock.provide') + 'Clock.'.length
+      const offset = source.lastIndexOf('Effect.provide') + 'Effect.'.length
       const completion = Analysis.completionAt(snapshot, 'main', offset)
       assert.include(completion?.candidates.map((candidate) => candidate.label) ?? [], 'provide')
       assert.include(

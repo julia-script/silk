@@ -163,7 +163,7 @@ it.effect('uses one source-like effect function hover at declarations and refere
   Effect.gen(function* () {
     const source = `effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
-  return run Effect.catch<OutOfMemory>(store(), recover)
+  return run Effect.catch(store(), recover)
 }`
     const { document, snapshot } = yield* open(source)
     const declaration = Document.hover(document, snapshot, positionOf(source, 'recover', 0))
@@ -213,7 +213,7 @@ it.effect('distinguishes Effect, catch, and a nominal type argument', () =>
 effect fn recover(error: Problem) -> i32 { return 0 }
 pub fn main() -> i32 {
   let recipe = relay(0)
-    |> Effect.catch<Problem>(recover)
+    |> Effect.catch(recover)
   return run recipe
 }`
     const { document, snapshot } = yield* open(source)
@@ -224,8 +224,8 @@ pub fn main() -> i32 {
         : undefined
     }
     assert.strictEqual(text('Effect'), '```silk\nintrinsic namespace Effect\n```')
-    assert.include(text('catch') ?? '', 'fn Effect.catch<E>')
-    assert.strictEqual(text('Problem', 2), '```silk\nstruct Problem\n```')
+    assert.include(text('catch') ?? '', 'pub effect fn catch')
+    assert.strictEqual(text('Problem', 1), '```silk\nstruct Problem\n```')
   }),
 )
 
@@ -304,7 +304,7 @@ it.effect('completes intrinsic operations after actor member access', () =>
     )
     assert.include(
       completion.items.find((item) => item.label === 'catch')?.detail ?? '',
-      'fn Effect.catch<E>',
+      'pub effect fn catch',
     )
 
     const allocatorSource = `pub fn main() -> i32 {

@@ -9,7 +9,7 @@ const ascii = (value: string): Uint8Array =>
 const source = `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)
@@ -22,14 +22,14 @@ const source = `effect fn store() -> i32 ! OutOfMemory {
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
-  let recipe = Effect.catch<OutOfMemory>(store(), recover)
+  let recipe = Effect.catch(store(), recover)
   return run recipe
 }`
 
 const sharedReadSource = `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 1]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 1)
@@ -43,16 +43,16 @@ const sharedReadSource = `effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
 
 const nonCopyReadSource = `struct Guard { storage: Allocation }
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Guard; 1]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   let innerLayout = Layout.of<[i32; 1]>()
-  let innerRecipe = Allocator.allocate(move innerLayout) |> Allocator.provide(&mut allocator)
+  let innerRecipe = Allocator.allocate(move innerLayout) |> Effect.bindRequirement(&mut allocator)
   let payload = run innerRecipe
   unsafe {
     let mut buffer = RawBuffer.from<Guard>(move allocation, 1)
@@ -68,7 +68,7 @@ effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
 
 const unionReadSource = `struct Left { value: i32 }
 struct Right { value: i32 }
@@ -76,7 +76,7 @@ fn left(value: i32) -> Left | Right { return Left { value: value } }
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Left | Right; 1]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<Left | Right>(move allocation, 1)
@@ -91,7 +91,7 @@ effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
 
 const moveOnlyUnionReadSource = `struct Guard { storage: Allocation }
 struct Marker { value: i32 }
@@ -103,10 +103,10 @@ fn guarded(storage: Allocation) -> Guard | Marker {
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Guard | Marker; 1]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   let innerLayout = Layout.of<[i32; 1]>()
-  let innerRecipe = Allocator.allocate(move innerLayout) |> Allocator.provide(&mut allocator)
+  let innerRecipe = Allocator.allocate(move innerLayout) |> Effect.bindRequirement(&mut allocator)
   let payload = run innerRecipe
   unsafe {
     let mut buffer = RawBuffer.from<Guard | Marker>(move allocation, 1)
@@ -122,7 +122,7 @@ effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
 
 const unsafeProgram = (
   body: string,
@@ -130,7 +130,7 @@ const unsafeProgram = (
 ): string => `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<${layout}>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)
@@ -140,7 +140,7 @@ ${body}
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
-  return run Effect.catch<OutOfMemory>(store(), recover)
+  return run Effect.catch(store(), recover)
 }`
 
 const expectTrap = Effect.fnUntraced(function* (name: string, source: string, reason: string) {

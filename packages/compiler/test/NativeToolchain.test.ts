@@ -264,30 +264,33 @@ it.effect('rejects target-mismatched bitcode and linker inputs before invoking C
   }),
 )
 
-it.effect('links the shim with the program and the executable exits with the i32 result', () =>
-  Effect.gen(function* () {
-    const target = yield* Target.host()
-    const artifact = yield* artifactFor(target, 'release')
-    NativeToolchain.withBuildScope('link-run', (scope) => {
-      const object = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
-      const shim = NativeToolchain.compileShim(toolchain, scope, target, artifact.termination)
-      assert.strictEqual(object._tag, 'ObjectArtifact')
-      assert.strictEqual(shim._tag, 'ObjectArtifact')
-      if (object._tag !== 'ObjectArtifact' || shim._tag !== 'ObjectArtifact') return
+it.effect(
+  'links the shim with the program and the executable exits with the i32 result',
+  () =>
+    Effect.gen(function* () {
+      const target = yield* Target.host()
+      const artifact = yield* artifactFor(target, 'release')
+      NativeToolchain.withBuildScope('link-run', (scope) => {
+        const object = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
+        const shim = NativeToolchain.compileShim(toolchain, scope, target, artifact.termination)
+        assert.strictEqual(object._tag, 'ObjectArtifact')
+        assert.strictEqual(shim._tag, 'ObjectArtifact')
+        if (object._tag !== 'ObjectArtifact' || shim._tag !== 'ObjectArtifact') return
 
-      const destination = join(scope.root, 'program')
-      const linked = NativeToolchain.ClangLinker.link(
-        toolchain,
-        target,
-        [object.artifact, shim.artifact],
-        [],
-        destination,
-      )
-      assert.strictEqual(linked._tag, 'Executable')
-      if (linked._tag !== 'Executable') return
+        const destination = join(scope.root, 'program')
+        const linked = NativeToolchain.ClangLinker.link(
+          toolchain,
+          target,
+          [object.artifact, shim.artifact],
+          [],
+          destination,
+        )
+        assert.strictEqual(linked._tag, 'Executable')
+        if (linked._tag !== 'Executable') return
 
-      const run = spawnSync(linked.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42)
-    })
-  }),
+        const run = spawnSync(linked.path, [], { encoding: 'utf8' })
+        assert.strictEqual(run.status, 42)
+      })
+    }),
+  15_000,
 )

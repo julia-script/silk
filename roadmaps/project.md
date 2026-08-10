@@ -2,7 +2,7 @@
 
 > Direction, not commitment — Now is committed; Next is planned; Later is exploration.
 > Only Now items may be promised to anyone. This document changes as we learn.
-> Last reviewed: 2026-08-09 · Review cadence: after each OpenSpec archive, or monthly when no
+> Last reviewed: 2026-08-10 · Review cadence: after each OpenSpec archive, or monthly when no
 > change ships · Scope: whole project
 
 ## Vision
@@ -24,6 +24,21 @@ cost-model gaps while preserving evaluator, native, and WebAssembly agreement.
 - **Later** — problem worth solving, no solution chosen. Options, not a queue.
 
 ## Now
+
+### Make Effect composition ordinary visible Silk
+
+**Status: complete (2026-08-10).** Kinded failure and requirement rows now specialize and erase
+through ordinary generics, while hidden-identity Effect values cross parameters, returns, locals,
+captures, and stored pipelines with explicit shared, exclusive, or take-once access. The compiler
+core is reduced to lazy execution, typed propagation, completed-outcome reification, and one typed
+requirement binding operation. Canonical `Result`, `mapBoth`, `map`, `mapError`, `flatMap`, `tap`,
+whole-channel `catch`, `retry`, `provide`, and `provideWith` are navigable `.silk` source with no
+combinator-name branches in HIR, MIR, the evaluator, LLVM, or direct Wasm.
+
+The next bounded step is evidence, not an optimizer commitment: compare source-defined synchronous
+pipelines with matched imperative/Result programs across MIR, optimized native output, and direct
+Wasm, then decide whether backend optimization is sufficient or a separately proposed compiler
+normalization is justified.
 
 ### Add typed scalar constants from repeated program evidence
 
@@ -279,6 +294,12 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   `@silk-effect/compiler`?
 
 ## Changelog
+
+- 2026-08-10: Replaced privileged Effect combinator recipes with visible source-defined `Result`
+  and Effect modules. Added erased channel-row generics, ordinary higher-order Effect values,
+  completed-outcome reification, typed requirement binding, and access-bounded `Effect`,
+  `mut Effect`, and `once Effect` contracts. The suspension seam remains private and the dependent
+  synchronous-cost spike now measures the actual library/core boundary.
 
 - 2026-08-09: Completed shared Vector observation and structural-union Copy provenance. The lexer
   reads nominal Copy records, while the stack VM again uses and verifies one ordered

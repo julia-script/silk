@@ -179,7 +179,7 @@ struct Problem { position: usize }
 effect fn risky() -> Empty ! Problem { fail move Problem { position: 1 } }
 effect fn recover(problem: Problem) -> Empty { return Empty {} }
 pub fn main() -> i32 {
-  let recipe = Effect.catch<Problem>(risky(), recover)
+  let recipe = Effect.catch(risky(), recover)
   let ignored = run recipe
   return 42
 }`

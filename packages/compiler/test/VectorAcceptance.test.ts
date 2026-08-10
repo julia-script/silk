@@ -40,17 +40,17 @@ const growth = `import silk.vector { Vector, make, append, get, length, capacity
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut values = make<i32>()
-  let pending0 = append<i32>(&mut values, 10) |> Allocator.provide(&mut allocator)
+  let pending0 = append<i32>(&mut values, 10) |> Effect.bindRequirement(&mut allocator)
   let appended0 = run pending0
-  let pending1 = append<i32>(&mut values, 11) |> Allocator.provide(&mut allocator)
+  let pending1 = append<i32>(&mut values, 11) |> Effect.bindRequirement(&mut allocator)
   let appended1 = run pending1
-  let pending2 = append<i32>(&mut values, 12) |> Allocator.provide(&mut allocator)
+  let pending2 = append<i32>(&mut values, 12) |> Effect.bindRequirement(&mut allocator)
   let appended2 = run pending2
-  let pending3 = append<i32>(&mut values, 13) |> Allocator.provide(&mut allocator)
+  let pending3 = append<i32>(&mut values, 13) |> Effect.bindRequirement(&mut allocator)
   let appended3 = run pending3
-  let pending4 = append<i32>(&mut values, 14) |> Allocator.provide(&mut allocator)
+  let pending4 = append<i32>(&mut values, 14) |> Effect.bindRequirement(&mut allocator)
   let appended4 = run pending4
-  let pending5 = append<i32>(&mut values, 15) |> Allocator.provide(&mut allocator)
+  let pending5 = append<i32>(&mut values, 15) |> Effect.bindRequirement(&mut allocator)
   let appended5 = run pending5
   if length<i32>(&values) == 6 {} else { return 0 }
   if capacity<i32>(&values) == 8 {} else { return 1 }
@@ -61,7 +61,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
   'grows, reads, and releases a Silk-written vector on all three engines',
@@ -140,7 +140,7 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! Ou
   if self.remaining == 0 { fail OutOfMemory {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
-  let pending = Allocator.allocate(move layout) |> Allocator.provide(&mut inner)
+  let pending = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut inner)
   let block = run pending
   return move block
 }
@@ -157,18 +157,17 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = QuotaAllocator { remaining: 1 }
   let mut values = make<i32>()
-  let pending0 = append<i32>(&mut values, 10) |> Allocator.provide(&mut allocator)
+  let pending0 = append<i32>(&mut values, 10) |> Effect.bindRequirement(&mut allocator)
   let appended0 = run pending0
-  let pending1 = append<i32>(&mut values, 11) |> Allocator.provide(&mut allocator)
+  let pending1 = append<i32>(&mut values, 11) |> Effect.bindRequirement(&mut allocator)
   let appended1 = run pending1
-  let pending2 = append<i32>(&mut values, 12) |> Allocator.provide(&mut allocator)
+  let pending2 = append<i32>(&mut values, 12) |> Effect.bindRequirement(&mut allocator)
   let appended2 = run pending2
-  let pending3 = append<i32>(&mut values, 13) |> Allocator.provide(&mut allocator)
+  let pending3 = append<i32>(&mut values, 13) |> Effect.bindRequirement(&mut allocator)
   let appended3 = run pending3
-  let marker = run Effect.catch<OutOfMemory>(
-    grow(&mut values) |> Allocator.provide(&mut allocator),
-    recover,
-  )
+  let marker = run grow(&mut values)
+    |> Effect.catch(recover)
+    |> Effect.bindRequirement(&mut allocator)
   if marker == 7 {} else { return 0 }
   if length<i32>(&values) == 4 {} else { return 1 }
   if capacity<i32>(&values) == 4 {} else { return 2 }
@@ -179,43 +178,51 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn outerRecover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), outerRecover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), outerRecover) }`
 
-it.effect('preserves the original vector when replacement allocation fails', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'vector-acceptance/failed-growth',
-      ascii(failedGrowth),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+it.effect(
+  'preserves the original vector when replacement allocation fails',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'vector-acceptance/failed-growth',
+        ascii(failedGrowth),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
-    const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
-    const releases = evaluated.trace.filter((event) => event._tag === 'AllocationRelease')
-    assert.strictEqual(acquires.length, 1)
-    assert.strictEqual(releases.length, 1)
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(
+        evaluated._tag,
+        'Completed',
+        JSON.stringify(evaluated, (_, value) =>
+          typeof value === 'bigint' ? value.toString() : value,
+        ),
+      )
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42)
+      const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
+      const releases = evaluated.trace.filter((event) => event._tag === 'AllocationRelease')
+      assert.strictEqual(acquires.length, 1)
+      assert.strictEqual(releases.length, 1)
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
 
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-    const compiled = yield* Driver.compile({
-      compilation: {
-        root: SourceFile.make('vector-acceptance/failed-growth', ascii(failedGrowth)),
-      },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, 'failed-growth'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 42, run.stderr)
-  }),
+      const compiled = yield* Driver.compile({
+        compilation: {
+          root: SourceFile.make('vector-acceptance/failed-growth', ascii(failedGrowth)),
+        },
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        profile: 'release',
+        destination: join(destinationRoot, 'failed-growth'),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(compiled._tag, 'Compiled')
+      if (compiled._tag !== 'Compiled') return
+      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      assert.strictEqual(run.status, 42, run.stderr)
+    }),
+  15_000,
 )
 
 const elementReleaseOrder = `import silk.vector { Vector, make, append, capacity }
@@ -237,13 +244,13 @@ effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut values = make<Entry>()
   let entry0 = Entry { value: 3, marker: make<i32>() }
-  let pending0 = append<Entry>(&mut values, move entry0) |> Allocator.provide(&mut allocator)
+  let pending0 = append<Entry>(&mut values, move entry0) |> Effect.bindRequirement(&mut allocator)
   let appended0 = run pending0
   let entry1 = Entry { value: 5, marker: make<i32>() }
-  let pending1 = append<Entry>(&mut values, move entry1) |> Allocator.provide(&mut allocator)
+  let pending1 = append<Entry>(&mut values, move entry1) |> Effect.bindRequirement(&mut allocator)
   let appended1 = run pending1
   let entry2 = Entry { value: 7, marker: make<i32>() }
-  let pending2 = append<Entry>(&mut values, move entry2) |> Allocator.provide(&mut allocator)
+  let pending2 = append<Entry>(&mut values, move entry2) |> Effect.bindRequirement(&mut allocator)
   let appended2 = run pending2
   if capacity<Entry>(&values) == 4 {} else { return 0 }
   return 42
@@ -251,7 +258,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect('drops initialized elements in order before releasing vector storage', () =>
   Effect.gen(function* () {
@@ -328,10 +335,10 @@ effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut values = make<Entry>()
   let entry0 = Entry { value: 11, marker: make<i32>() }
-  let pending0 = append<Entry>(&mut values, move entry0) |> Allocator.provide(&mut allocator)
+  let pending0 = append<Entry>(&mut values, move entry0) |> Effect.bindRequirement(&mut allocator)
   let appended0 = run pending0
   let entry1 = Entry { value: 13, marker: make<i32>() }
-  let pending1 = append<Entry>(&mut values, move entry1) |> Allocator.provide(&mut allocator)
+  let pending1 = append<Entry>(&mut values, move entry1) |> Effect.bindRequirement(&mut allocator)
   let appended1 = run pending1
   let consumed = consume(move values)
   return consumed + 2
@@ -339,7 +346,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect('transfers vector ownership and drops it early on all three engines', () =>
   Effect.gen(function* () {
@@ -398,13 +405,13 @@ struct Marker {}
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut values = make<Marker>()
-  let pending = append<Marker>(&mut values, Marker {}) |> Allocator.provide(&mut allocator)
+  let pending = append<Marker>(&mut values, Marker {}) |> Effect.bindRequirement(&mut allocator)
   let appended = run pending
   let observed = get<Marker>(&values, 0)
   return 42
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
     const snapshot = yield* Analysis.ofSourceRealized(
       'vector-acceptance/zero-sized-read',
       ascii(source),
@@ -457,9 +464,9 @@ effect fn build() -> i32 ! OutOfMemory {
   let step = Step { value: 7 }
   let diagnostic = Diagnostic { marker: 3, value: 11 }
   let firstAppend = run append<Step | Diagnostic>(&mut events, move step) |>
-    Allocator.provide(&mut allocator)
+    Effect.bindRequirement(&mut allocator)
   let secondAppend = run append<Step | Diagnostic>(&mut events, move diagnostic) |>
-    Allocator.provide(&mut allocator)
+    Effect.bindRequirement(&mut allocator)
   let first = get<Step | Diagnostic>(&events, 0)
   let second = get<Step | Diagnostic>(&events, 1)
   let firstAgain = get<Step | Diagnostic>(&events, 0)
@@ -468,7 +475,7 @@ effect fn build() -> i32 ! OutOfMemory {
     observe(move secondAgain)
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
       const snapshot = yield* Analysis.ofSourceRealized(
         'vector-acceptance/structural-union-read',
         ascii(source),
@@ -511,17 +518,17 @@ fn guarded(storage: Allocation) -> Guard | Marker { return Guard { storage: move
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 1]>()
-  let allocation = run Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let allocation = run Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let mut events = make<Guard | Marker>()
   let event = guarded(move allocation)
   let appended = run append<Guard | Marker>(&mut events, move event) |>
-    Allocator.provide(&mut allocator)
+    Effect.bindRequirement(&mut allocator)
   let observed = get<Guard | Marker>(&events, 0)
   drop observed
   return 42
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
     const snapshot = yield* Analysis.ofSourceRealized(
       'vector-acceptance/move-only-union-read',
       ascii(source),

@@ -13,6 +13,11 @@ const forbiddenArtifactKeys = new Set([
   'providerDependency',
   'providerDependencies',
   'allocatorKind',
+  'runnerCallback',
+  'pendingStep',
+  'requirementContainer',
+  'requirementsContainer',
+  'runtimeRequirements',
 ])
 
 const visit = (value: unknown, path: string, violations: Array<string>): void => {
@@ -48,4 +53,40 @@ it.effect(
         'Arena',
       )
     }),
+)
+
+it.effect('keeps synchronous Effect core artifacts free of concurrency runtime ABI', () =>
+  Effect.gen(function* () {
+    const source = `import silk.result { Result, Success, Failure }
+struct Clock {}
+effect fn read() -> i32 ? &Clock { return 42 }
+pub fn main() -> i32 {
+  let clock = Clock {}
+  let closed = Effect.bindRequirement(read(), &clock)
+  let completed = run Effect.result(closed)
+  return match move completed {
+    Result<i32, never> { value: outcome } => match move outcome {
+      Success<i32> { value: answer } => answer
+      Failure<never> { error: impossible } => 0
+    }
+  }
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'architecture/effect-core',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const violations: Array<string> = []
+    visit(snapshot, 'snapshot', violations)
+    assert.deepEqual(violations, [])
+
+    const llvm = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    for (const artifact of [llvm.ir, wasm.wat]) {
+      assert.notMatch(artifact, /silk_(?:scheduler|fiber|suspend|atomic)/i)
+      assert.notInclude(artifact, 'complete-or-suspended')
+      assert.notInclude(artifact, 'requirement_container')
+    }
+  }),
 )

@@ -305,15 +305,25 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(existsSync(resolve(packedRoot, 'README.md'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/manifest.json'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/effects.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/option.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/result.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/vector.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
     expect(JSON.parse(readFileSync(resolve(packedRoot, 'stdlib/manifest.json'), 'utf8'))).toEqual([
+      { module: 'silk/effects', path: 'silk/effects.silk' },
       { module: 'silk/option', path: 'silk/option.silk' },
+      { module: 'silk/result', path: 'silk/result.silk' },
       { module: 'silk/vector', path: 'silk/vector.silk' },
     ])
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/effects.silk'), 'utf8')).toContain(
+      'pub effect fn mapBoth',
+    )
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/option.silk'), 'utf8')).toContain(
       'pub struct Option<T>',
+    )
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/result.silk'), 'utf8')).toContain(
+      'pub struct Result<A, F>',
     )
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/vector.silk'), 'utf8')).toContain(
       'pub struct Vector<T>',

@@ -101,12 +101,12 @@ it('normalizes compiler-private effect contract identity and traverses substitut
 
   assert.strictEqual(Type.isEffect(contract), true)
   assert.strictEqual(Type.equals(contract, permuted), true)
-  assert.strictEqual(Type.encode(contract), 'Effect<T ! errors.First | errors.Second>')
+  assert.strictEqual(Type.encode(contract), 'once Effect<T ! errors.First | errors.Second>')
   assert.deepEqual(Type.parameters(contract), [parameter])
   assert.deepEqual(Type.nominals(contract).map(Type.encode), ['errors.First', 'errors.Second'])
 
   const substituted = Type.substitute(contract, new Map([[Type.key(parameter), 'usize']]))
-  assert.strictEqual(Type.encode(substituted), 'Effect<usize ! errors.First | errors.Second>')
+  assert.strictEqual(Type.encode(substituted), 'once Effect<usize ! errors.First | errors.Second>')
   assert.strictEqual(Type.isConcrete(substituted), true)
 })
 

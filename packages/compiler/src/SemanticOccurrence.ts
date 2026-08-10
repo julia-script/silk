@@ -699,31 +699,13 @@ const collectExpression = (
       for (const statement of expression.statements)
         collectStatement(statement, index, scope, pending)
       return
-    case 'EffectCatch':
-      collectIntrinsicReference(expression.reference, index, pending)
-      for (const typeArgument of expression.typeArguments)
-        collectDeclaredType(typeArgument.declared, index, scope, pending)
-      collectExpression(expression.protected, index, scope, pending)
-      collectExpression(expression.handler, index, scope, pending)
-      return
-    case 'EffectRetry':
-      collectIntrinsicReference(expression.reference, index, pending)
-      collectExpression(expression.protected, index, scope, pending)
-      collectExpression(expression.retries, index, scope, pending)
-      return
-    case 'EffectProvide':
+    case 'EffectResult':
       collectIntrinsicReference(expression.reference, index, pending)
       collectExpression(expression.protected, index, scope, pending)
       return
-    case 'EffectProvideWith':
+    case 'EffectBindRequirement':
       collectIntrinsicReference(expression.reference, index, pending)
       collectExpression(expression.protected, index, scope, pending)
-      collectExpression(expression.acquisition, index, scope, pending)
-      return
-    case 'EffectTransform':
-      collectIntrinsicReference(expression.reference, index, pending)
-      collectExpression(expression.protected, index, scope, pending)
-      collectExpression(expression.callback, index, scope, pending)
       return
     case 'Integer':
     case 'Boolean':

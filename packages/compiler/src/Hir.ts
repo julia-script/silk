@@ -230,9 +230,9 @@ export type Expression =
   | {
       readonly _tag: 'UnionConvert'
       readonly source: Expression
-      readonly sourceType: Type.Nominal | Type.StructuralUnion | Type.Bottom
-      readonly target: Type.StructuralUnion
-      readonly conversion: 'Inject' | 'Widen'
+      readonly sourceType: Type.Nominal | Type.StructuralUnion | Type.Bottom | Type.Effect
+      readonly target: Type.StructuralUnion | Type.Effect
+      readonly conversion: 'Inject' | 'Widen' | 'EffectAccess'
       readonly mappings: ReadonlyArray<TypeCompatibility.MemberMapping>
       readonly access: 'Copy' | 'Owned'
       readonly context:
@@ -243,7 +243,7 @@ export type Expression =
         | 'Assignment'
         | 'MatchArm'
       readonly expectedAt: SourceSpan.SourceSpan
-      readonly type: Type.StructuralUnion
+      readonly type: Type.StructuralUnion | Type.Effect
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -353,7 +353,7 @@ export type Expression =
   | {
       readonly _tag: 'Call'
       readonly target: DeclarationIndex.CanonicalId
-      readonly typeArguments: ReadonlyArray<Type.Type>
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: DeclarationIndex.SemanticType
@@ -376,8 +376,8 @@ export type Expression =
         readonly value: Expression
         readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
       }>
-      readonly typeArguments: ReadonlyArray<Type.Type>
-      readonly substitution: ReadonlyMap<string, Type.Type>
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+      readonly substitution: Type.Substitution
       readonly retainedDependencies: ReadonlyArray<number>
       readonly mode: Type.CallableMode
       readonly type: Type.Callable
@@ -388,7 +388,7 @@ export type Expression =
       readonly callee: Expression
       readonly arguments: ReadonlyArray<Expression>
       readonly access: Type.CallableMode
-      readonly substitution: ReadonlyMap<string, Type.Type>
+      readonly substitution: Type.Substitution
       readonly evaluation: 'CalleeThenArguments' | 'LeftThenCallable'
       readonly realization: 'Environment' | 'DirectErasedSection'
       readonly type: DeclarationIndex.SemanticType
@@ -397,7 +397,7 @@ export type Expression =
   | {
       readonly _tag: 'EffectConstruct'
       readonly target: DeclarationIndex.CanonicalId
-      readonly typeArguments: ReadonlyArray<Type.Type>
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: Type.Effect
@@ -423,51 +423,24 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
-      readonly _tag: 'EffectCatch'
+      readonly _tag: 'EffectResult'
       readonly protected: Expression
-      readonly handled: Type.Nominal
-      readonly handler: Expression
-      readonly handlerEffect: Type.Effect
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
     }
   | {
-      readonly _tag: 'EffectRetry'
-      readonly protected: Expression
-      readonly retries: Expression
-      readonly type: Type.Effect
-      readonly span: SourceSpan.SourceSpan
-    }
-  | {
-      readonly _tag: 'EffectTransform'
-      readonly operation: 'Map' | 'FlatMap' | 'Tap'
-      readonly protected: Expression
-      readonly callback: Expression
-      readonly type: Type.Effect
-      readonly span: SourceSpan.SourceSpan
-    }
-  | {
-      readonly _tag: 'EffectProvide'
+      readonly _tag: 'EffectBindRequirement'
       readonly protected: Expression
       readonly provider: {
         readonly binding?: BindingId
         readonly parameter?: DeclarationIndex.ParameterId
-        readonly capability: Type.Nominal
-        readonly providerType: Type.Nominal
-        readonly witness: DeclarationIndex.ConformanceWitness
+        readonly capability: Type.Nominal | Type.Parameter
+        readonly providerType: Type.Nominal | Type.Parameter
+        readonly witness?: DeclarationIndex.ConformanceWitness
         readonly role: string
         readonly access: 'Shared' | 'Exclusive' | 'Take'
         readonly span: SourceSpan.SourceSpan
       }
-      readonly type: Type.Effect
-      readonly span: SourceSpan.SourceSpan
-    }
-  | {
-      readonly _tag: 'EffectProvideWith'
-      readonly protected: Expression
-      readonly acquisition: Expression
-      readonly capability: Type.Nominal
-      readonly role: string
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
     }
@@ -560,7 +533,7 @@ export type Statement =
   | {
       readonly _tag: 'Fail'
       readonly expression: Expression
-      readonly failure: Type.Nominal
+      readonly failure: Type.Nominal | Type.FailureProjection
       readonly transfer: 'Copy' | 'Move'
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
@@ -662,16 +635,10 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
         return expression.statements.flatMap(statementExpressions)
       case 'Run':
         return [expression.subject]
-      case 'EffectCatch':
-        return [expression.protected, expression.handler]
-      case 'EffectRetry':
-        return [expression.protected, expression.retries]
-      case 'EffectTransform':
-        return [expression.protected, expression.callback]
-      case 'EffectProvide':
+      case 'EffectResult':
         return [expression.protected]
-      case 'EffectProvideWith':
-        return [expression.protected, expression.acquisition]
+      case 'EffectBindRequirement':
+        return [expression.protected]
       case 'Match':
         return [
           expression.scrutinee,
@@ -724,16 +691,10 @@ export const hasUnavailable = (self: HirFunction): boolean => {
         return walk(expression.callee) || expression.arguments.some(walk)
       case 'Run':
         return walk(expression.subject)
-      case 'EffectCatch':
-        return walk(expression.protected) || walk(expression.handler)
-      case 'EffectRetry':
-        return walk(expression.protected) || walk(expression.retries)
-      case 'EffectTransform':
-        return walk(expression.protected) || walk(expression.callback)
-      case 'EffectProvide':
+      case 'EffectResult':
         return walk(expression.protected)
-      case 'EffectProvideWith':
-        return walk(expression.protected) || walk(expression.acquisition)
+      case 'EffectBindRequirement':
+        return walk(expression.protected)
       case 'Match':
         return (
           walk(expression.scrutinee) ||
@@ -812,16 +773,10 @@ export const firstUnavailable = (
       }
       case 'Run':
         return walk(expression.subject)
-      case 'EffectCatch':
-        return walk(expression.protected) ?? walk(expression.handler)
-      case 'EffectRetry':
-        return walk(expression.protected) ?? walk(expression.retries)
-      case 'EffectTransform':
-        return walk(expression.protected) ?? walk(expression.callback)
-      case 'EffectProvide':
+      case 'EffectResult':
         return walk(expression.protected)
-      case 'EffectProvideWith':
-        return walk(expression.protected) ?? walk(expression.acquisition)
+      case 'EffectBindRequirement':
+        return walk(expression.protected)
       case 'Match': {
         const scrutinee = walk(expression.scrutinee)
         if (scrutinee !== undefined) return scrutinee
@@ -1139,34 +1094,15 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         `${indent}run : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
-    case 'EffectCatch':
+    case 'EffectResult':
       return [
-        `${indent}effect-catch ${Type.encode(expression.handled)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}effect-result : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.protected, depth + 1),
-        encodeExpression(expression.handler, depth + 1),
       ].join('\n')
-    case 'EffectRetry':
-      return [
-        `${indent}effect-retry : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
-        encodeExpression(expression.protected, depth + 1),
-        encodeExpression(expression.retries, depth + 1),
-      ].join('\n')
-    case 'EffectTransform':
-      return [
-        `${indent}effect-${expression.operation.toLowerCase()} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
-        encodeExpression(expression.protected, depth + 1),
-        encodeExpression(expression.callback, depth + 1),
-      ].join('\n')
-    case 'EffectProvide':
+    case 'EffectBindRequirement':
       return [
         `${indent}effect-provide ${Type.encode(expression.provider.capability)}@${expression.provider.role} ${expression.provider.access.toLowerCase()} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.protected, depth + 1),
-      ].join('\n')
-    case 'EffectProvideWith':
-      return [
-        `${indent}effect-provide-with ${Type.encode(expression.capability)}@${expression.role} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
-        encodeExpression(expression.protected, depth + 1),
-        encodeExpression(expression.acquisition, depth + 1),
       ].join('\n')
     case 'EffectBlock':
       return [
@@ -1265,7 +1201,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'CallableApply':
       return [
-        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization} substitution=${[...expression.substitution.entries()].map(([parameter, type]) => `${parameter}=${Type.encode(type)}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization} substitution=${[...expression.substitution.entries()].map(([parameter, argument]) => `${parameter}=${Type.encodeGenericArgument(argument)}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         ...(expression.evaluation === 'LeftThenCallable'
           ? [
               ...expression.arguments.map(
@@ -1290,7 +1226,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         `${indent}${expression._tag === 'EffectConstruct' ? 'effect-' : ''}call ${expression.target.module}.${expression.target.name}${
           expression.typeArguments.length === 0
             ? ''
-            : `<${expression.typeArguments.map(Type.encode).join(', ')}>`
+            : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
         } : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')

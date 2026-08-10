@@ -71,7 +71,7 @@ const acceptedSources = Object.freeze([
   `effect fn storage() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)
@@ -88,12 +88,12 @@ const acceptedSources = Object.freeze([
   return 0
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(storage(), recover) }`,
+pub fn main() -> i32 { return run Effect.catch(storage(), recover) }`,
   `struct Problem {}
 struct Clock {}
 effect fn succeed(value: i32) -> i32 { return value }
 effect fn double(value: i32) -> i32 { return value * 2 }
-effect fn observe(value: i32) -> () { return () }
+effect fn observe(value: i32) -> i32 { return value }
 effect fn risky() -> i32 ! Problem { fail Problem {} }
 effect fn recover(error: Problem) -> i32 { return 1 }
 effect fn read() -> i32 ? &Clock { return 20 }
@@ -103,10 +103,10 @@ pub fn main() -> i32 {
   let chained = mapped |> Effect.flatMap(double)
   let tapped = chained |> Effect.tap(observe)
   let retried = tapped |> Effect.retry(1)
-  let handled = risky() |> Effect.catch<Problem>(recover)
+  let handled = risky() |> Effect.catch(recover)
   let clock = Clock {}
-  let provided = read() |> Clock.provide(&clock)
-  let acquired = read() |> Clock.provideWith(acquire())
+  let provided = read() |> Effect.provide(&clock)
+  let acquired = read() |> Effect.provideWith(acquire())
   let retriedValue = run retried
   let handledValue = run handled
   let providedValue = run provided
@@ -118,6 +118,18 @@ fn replace(self: &mut Counter) -> i32 { return Place.replace(self.value, 42) }
 pub fn main() -> i32 {
   let mut counter = Counter { value: 1 }
   return replace(&mut counter)
+}`,
+  `import silk.result { Result, Success, Failure }
+struct ResultProblem {}
+effect fn succeed() -> i32 ! ResultProblem { return 42 }
+pub effect fn main() -> i32 {
+  let completed = run Effect.result(succeed())
+  return match move completed {
+    Result<i32, ResultProblem> { value: outcome } => match move outcome {
+      Success<i32> { value } => value
+      Failure<ResultProblem> { error } => 0
+    }
+  }
 }`,
   `pub effect fn main() -> () ! StreamWriteFailure ? &StandardStreams {
   let stdout = StandardStreams.stdout()

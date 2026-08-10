@@ -8,8 +8,8 @@
  * has to say. It also makes each phase testable without rendering anything.
  */
 
-import { Diagnostic, SyntaxTree } from '@silk-effect/compiler'
-import type { Elaboration, Hir, SyntaxFile, Type } from '@silk-effect/compiler'
+import { Diagnostic, SyntaxTree, Type } from '@silk-effect/compiler'
+import type { Elaboration, Hir, SyntaxFile } from '@silk-effect/compiler'
 import type { FlowModel } from './flow-model'
 import type { RowModel, RowTone, Span } from './row'
 
@@ -214,7 +214,9 @@ const hirTypeText = (type: Type.Type): string =>
             ? `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
             : type._tag === 'ReferenceType'
               ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${hirTypeText(type.target)}`
-              : type.members.map(hirTypeText).join(' | ')
+              : type._tag === 'FailureProjectionType'
+                ? `Row<!${type.parameter.name}>`
+                : type.members.map(hirTypeText).join(' | ')
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {
@@ -251,7 +253,7 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
       return `call ${expression.target.name}${
         expression.typeArguments.length === 0
           ? ''
-          : `<${expression.typeArguments.map(hirTypeText).join(', ')}>`
+          : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
       } · loan ends ${expression.loanEnds.map((loan) => `#${loan.ordinal}`).join(', ') || 'none'}`
     case 'FunctionItem':
       return `function ${expression.target._tag === 'DeclarationCallableTarget' ? expression.target.declaration.name : `${expression.target.actor}.${expression.target.operation}`}`
@@ -263,22 +265,16 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
       return `effect recipe ${expression.target.name}${
         expression.typeArguments.length === 0
           ? ''
-          : `<${expression.typeArguments.map(hirTypeText).join(', ')}>`
+          : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
       } · ${expression.type.access.toLowerCase()}`
     case 'EffectBlock':
       return `effect block · ${expression.type.access.toLowerCase()}`
     case 'Run':
       return 'run recipe'
-    case 'EffectCatch':
-      return `catch ${hirTypeText(expression.handled)} with ${hirExpressionLabel(expression.handler)}`
-    case 'EffectRetry':
-      return 'retry effect'
-    case 'EffectTransform':
-      return `${expression.operation.toLowerCase()} effect with ${hirExpressionLabel(expression.callback)}`
-    case 'EffectProvide':
-      return `provide ${hirTypeText(expression.provider.capability)}@${expression.provider.role}`
-    case 'EffectProvideWith':
-      return `provideWith ${hirTypeText(expression.capability)}@${expression.role}`
+    case 'EffectResult':
+      return 'materialize effect result'
+    case 'EffectBindRequirement':
+      return `bind ${hirTypeText(expression.provider.capability)}@${expression.provider.role}`
     case 'BuiltinCall':
       return `builtin i32.${expression.operation}`
     default:
@@ -323,24 +319,8 @@ export const hirRows = (
         expression(argument, depth + 1, `${path}.argument${index}`),
       )
     }
-    if (node._tag === 'EffectCatch') {
+    if (node._tag === 'EffectResult' || node._tag === 'EffectBindRequirement') {
       expression(node.protected, depth + 1, `${path}.protected`)
-      expression(node.handler, depth + 1, `${path}.handler`)
-    }
-    if (node._tag === 'EffectRetry') {
-      expression(node.protected, depth + 1, `${path}.protected`)
-      expression(node.retries, depth + 1, `${path}.retries`)
-    }
-    if (node._tag === 'EffectTransform') {
-      expression(node.protected, depth + 1, `${path}.protected`)
-      expression(node.callback, depth + 1, `${path}.callback`)
-    }
-    if (node._tag === 'EffectProvide') {
-      expression(node.protected, depth + 1, `${path}.protected`)
-    }
-    if (node._tag === 'EffectProvideWith') {
-      expression(node.protected, depth + 1, `${path}.protected`)
-      expression(node.acquisition, depth + 1, `${path}.acquisition`)
     }
     if (node._tag === 'SliceLength') expression(node.slice, depth + 1, `${path}.s`)
     if (node._tag === 'SliceIndexPlace') {

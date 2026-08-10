@@ -214,7 +214,7 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     )
     assert.include(
       completion.items.find((item) => item.label === 'catch')?.detail ?? '',
-      'fn Effect.catch<E>',
+      'pub effect fn catch',
     )
   } finally {
     await client.close()

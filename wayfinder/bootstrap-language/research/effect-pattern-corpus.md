@@ -1,6 +1,6 @@
 # Effect pattern corpus for Silk execution-model review
 
-Research date: 2026-08-07.
+Research date: 2026-08-07. Implementation review: 2026-08-10.
 
 Primary current target: Effect `4.0.0-beta.102`, which this repository pins, from the official
 `Effect-TS/effect` source at commit
@@ -49,6 +49,15 @@ accepted bootstrap direction is:
 - named scopes, dynamic finalizer registries, hidden resource-dependency sets, `depends on`, arena-
   backed escaping values, concurrency, cancellation, and asynchronous cleanup are deferred; and
 - a future arena remains ordinary standard-library code and receives no compiler privilege.
+
+The 2026-08-10 implementation review further reduced the privileged Effect surface. Finite
+failure and requirement rows are now kinded generic contracts that erase after specialization;
+closed Effects cross ordinary higher-order boundaries with explicit reusable, exclusive, or
+take-once access. Canonical `Result` and Effect combinator modules are visible Silk source.
+`Effect.result` reifies only a completed typed outcome and `Effect.bindRequirement` satisfies one
+typed requirement; all familiar channel transformations compile as ordinary declarations. This is
+the concrete boundary used by the follow-up synchronous-cost corpus and the future suspension
+direction.
 
 Entries below that explore named scopes or provider-dependent values remain intentionally preserved
 as rejected/deferred stress cases. They are useful tests for a future design round, not normative

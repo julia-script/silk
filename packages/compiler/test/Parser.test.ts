@@ -356,7 +356,7 @@ it('bounds a damaged unsafe call before the following statement and declaration'
 it('parses an explicit provider role in a provision pipeline', () => {
   const result = parseText(
     'memory://provider-role.silk',
-    'fn main() -> i32 { let recipe = work() |> Clock.provide(&clock, @Scratch) return 0 }',
+    'fn main() -> i32 { let recipe = work() |> Effect.provide(&clock, @Scratch) return 0 }',
   )
   assert.deepEqual(result.parserDiagnostics, [])
   assert.include(
@@ -1776,7 +1776,7 @@ it('parses complete callable pipelines left-to-right', () => {
   const source =
     'pub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }\n' +
     'pub fn flag() -> bool { return true |> bool.not }\n' +
-    'pub fn recover() -> i32 { return risky() |> Effect.catch<Problem>(handler) }'
+    'pub fn recover() -> i32 { return risky() |> Effect.catch(handler) }'
   const result = parseText('memory/operator-pipelines', source)
   const pipelines = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
@@ -1800,7 +1800,7 @@ it('parses complete callable pipelines left-to-right', () => {
     targets.map((target) =>
       target === undefined ? 0 : SyntaxTree.directNodes(target, 'CallTypeArgumentList').length,
     ),
-    [0, 0, 0, 1],
+    [0, 0, 0, 0],
   )
   assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
@@ -1827,6 +1827,30 @@ it('parses callable contracts with ordered parameters and all invocation modes',
       { mut: false, once: false, parameters: 2 },
       { mut: true, once: false, parameters: 1 },
       { mut: false, once: true, parameters: 0 },
+    ],
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
+it('parses reusable, exclusive, and take-capable Effect access bounds', () => {
+  const source =
+    'fn use(shared: Effect<i32>, exclusive: mut Effect<i32>, any: once Effect<i32>) -> i32 { return 0 }'
+  const result = parseText('memory/effect-access-bounds', source)
+  const effects = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'AppliedType',
+  )
+
+  assert.deepEqual(
+    effects.map((effect) => ({
+      mut: SyntaxTree.directToken(effect, 'MutKeyword') !== undefined,
+      once: SyntaxTree.directToken(effect, 'OnceKeyword') !== undefined,
+    })),
+    [
+      { mut: false, once: false },
+      { mut: true, once: false },
+      { mut: false, once: true },
     ],
   )
   assert.deepEqual(result.parserDiagnostics, [])

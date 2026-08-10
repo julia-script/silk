@@ -74,6 +74,14 @@ argument sections. The standard Effect actor consumes those ordinary callables i
 allocation captured by a callable remains an ordinary affine owner and is released if the callable
 is dropped uninvoked.
 
+The Effect actor itself is shipped as canonical `.silk` source alongside the source-defined
+`Result<A, E>` data module. Tooling navigates to those declarations, and copied equivalents receive
+the same parsing, row inference, ownership, specialization, and lowering as the shipped functions.
+Only outcome reification and single-requirement binding remain compiler-shaped operations; they do
+not expose a callback ABI, scheduler, continuation, or runtime dependency container. This keeps the
+current implementation direct and synchronous while leaving suspension behind the execution
+boundary rather than freezing it into the public standard-library representation.
+
 The core owned indirection and sequence surface consists of the already settled `Box<T>`, intrinsic
 `[T; N]`, lexical `Slice<T>`, and one dynamic `Vector<T>`. `Vector` owns growable contiguous
 storage with length and capacity, exposes shared or exclusive slices, and supports the ordinary

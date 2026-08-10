@@ -114,6 +114,7 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
       return record('EffectType', [
         declaredType(value.success),
         array(value.failures.map(declaredType)),
+        array(value.failureParameters.map(type)),
         array(
           value.requirements.map((requirement) =>
             record('Requirement', [
@@ -123,6 +124,7 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
             ]),
           ),
         ),
+        array(value.requirementParameters.map(type)),
         boolean(value.cause !== undefined),
       ])
     case 'Union':
@@ -155,6 +157,7 @@ const failureRow = (value: DeclarationIndex.FailureRowFact): string =>
   record('FailureRow', [
     boolean(value.available),
     array(value.members.map(declaredType)),
+    array(value.parameters.map(type)),
     array(value.failures.map(type)),
   ])
 
@@ -166,6 +169,7 @@ const requirementRow = (value: DeclarationIndex.RequirementRowFact): string =>
         record('RequirementEntry', [declaredType(entry.capability), entry.role, entry.access]),
       ),
     ),
+    array(value.parameters.map(type)),
     array(
       value.requirements.map((requirement) =>
         record('ResolvedRequirement', [

@@ -1,7 +1,7 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
-import type * as Instances from './Instances.js'
+import * as Instances from './Instances.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
@@ -154,6 +154,7 @@ export type EffectEnvironment =
       readonly instance: Instances.InstanceKey
       readonly site: Hir.EffectSiteId
       readonly effect: Type.Effect
+      readonly successEffectIdentity?: string
       readonly fields: ReadonlyArray<EffectEnvironmentField>
       readonly size: number
       readonly alignment: number
@@ -176,7 +177,9 @@ export interface EffectEnvironmentField {
   readonly size: number
   readonly alignment: number
   readonly padding: number
-  readonly representation: 'Value' | 'Borrow'
+  readonly representation: 'Value' | 'Borrow' | 'Callable'
+  readonly effectIdentity?: string
+  readonly callableIdentity?: Type.CallableIdentityArgument
 }
 
 /** Target-owned storage and call-scoped view for one concrete callable section identity. */
@@ -472,6 +475,22 @@ const unionEntry = (type: Type.StructuralUnion, members: ReadonlyArray<Entry>): 
   })
 }
 
+// `never` has no values or calling lanes, but generic aggregates still need a compositional
+// physical fact for impossible fields such as `Failure<never>`. This entry is never materialized
+// as a value; it only lets the enclosing representation remain well-defined.
+const neverEntry = (): Entry =>
+  Object.freeze({
+    _tag: 'LayoutEntry',
+    type: 'never',
+    size: 0,
+    alignment: 1,
+    representation: Object.freeze({
+      _tag: 'Aggregate',
+      fields: Object.freeze([]),
+      tailPadding: 0,
+    }),
+  })
+
 const nominalOf = (struct: DeclarationIndex.StructFact): Type.Nominal | undefined =>
   struct.canonical._tag === 'Canonical'
     ? Type.nominal(struct.canonical.id.module, struct.canonical.id.name)
@@ -479,7 +498,7 @@ const nominalOf = (struct: DeclarationIndex.StructFact): Type.Nominal | undefine
 
 const dependenciesOf = (
   struct: DeclarationIndex.StructFact,
-  substitution: ReadonlyMap<string, Type.Type> = new Map(),
+  substitution: Type.Substitution = new Map(),
 ): ReadonlyArray<Type.Nominal> => {
   const dependencies = new Map<string, Type.Nominal>()
   for (const field of struct.fields) {
@@ -742,10 +761,9 @@ export const catalog = (
   const layoutType = (type: DeclarationIndex.SemanticType): CatalogEntry => {
     if (Type.isBuiltin(type)) return scalarEntry(target, type)
     if (Type.isNever(type)) {
-      return unavailable(type, Object.freeze([]), {
-        _tag: 'InvalidDeclaration',
-        detail: 'never is uninhabited and has no runtime layout',
-      })
+      const result = neverEntry()
+      completed.set(Type.key(type), result)
+      return result
     }
     if (Type.isParameter(type)) {
       return unavailable(type, Object.freeze([]), {
@@ -813,6 +831,14 @@ export const catalog = (
       const result = unavailable(type, Object.freeze(Type.nominals(type)), {
         _tag: 'InvalidDeclaration',
         detail: 'callable environment layout is planned from its hidden concrete identity',
+      })
+      completed.set(key, result)
+      return result
+    }
+    if (Type.isFailureProjection(type)) {
+      const result = unavailable(type, Object.freeze([]), {
+        _tag: 'InvalidDeclaration',
+        detail: 'open failure-row projections require concrete specialization before layout',
       })
       completed.set(key, result)
       return result
@@ -900,7 +926,7 @@ export const catalog = (
     }
   }
   for (const type of referenced.values()) {
-    if (!Type.isBuiltin(type) && !Type.isNever(type)) layoutType(type)
+    if (!Type.isBuiltin(type)) layoutType(type)
   }
 
   return Object.freeze({
@@ -931,7 +957,7 @@ export const catalog = (
 const addExpressionTypes = (
   types: Map<string, DeclarationIndex.SemanticType>,
   expression: Hir.Expression,
-  substitution: ReadonlyMap<string, Type.Type> = new Map(),
+  substitution: Type.Substitution = new Map(),
 ): void => {
   if (expression._tag === 'Unavailable') return
   const specialized = Type.substitute(expression.type, substitution)
@@ -982,24 +1008,8 @@ const addExpressionTypes = (
     addStatementTypes(types, expression.statements, substitution)
   }
   if (expression._tag === 'Run') addExpressionTypes(types, expression.subject, substitution)
-  if (expression._tag === 'EffectCatch') {
+  if (expression._tag === 'EffectBindRequirement')
     addExpressionTypes(types, expression.protected, substitution)
-    addExpressionTypes(types, expression.handler, substitution)
-  }
-  if (expression._tag === 'EffectRetry') {
-    addExpressionTypes(types, expression.protected, substitution)
-    addExpressionTypes(types, expression.retries, substitution)
-  }
-  if (expression._tag === 'EffectTransform') {
-    addExpressionTypes(types, expression.protected, substitution)
-    addExpressionTypes(types, expression.callback, substitution)
-  }
-  if (expression._tag === 'EffectProvide')
-    addExpressionTypes(types, expression.protected, substitution)
-  if (expression._tag === 'EffectProvideWith') {
-    addExpressionTypes(types, expression.protected, substitution)
-    addExpressionTypes(types, expression.acquisition, substitution)
-  }
   if (expression._tag === 'Match') {
     addExpressionTypes(types, expression.scrutinee, substitution)
     for (const member of expression.members) {
@@ -1019,7 +1029,7 @@ const addExpressionTypes = (
 const addStatementTypes = (
   types: Map<string, DeclarationIndex.SemanticType>,
   statements: ReadonlyArray<Hir.Statement>,
-  substitution: ReadonlyMap<string, Type.Type> = new Map(),
+  substitution: Type.Substitution = new Map(),
 ): void => {
   for (const statement of statements) {
     if (statement._tag === 'Unsafe') addStatementTypes(types, statement.statements, substitution)
@@ -1083,126 +1093,249 @@ const effectEnvironments = (
   target: Target.Target,
   entries: ReadonlyArray<Entry>,
   discovery: Instances.Discovery,
+  callablePlans: ReadonlyArray<CallableEnvironment>,
 ): ReadonlyArray<EffectEnvironment> => {
   const layouts = new Map(
     entries.map((candidate) => [Type.key(candidate.type), candidate] as const),
   )
   const environments: Array<EffectEnvironment> = []
 
-  for (const instance of discovery.instances) {
-    const bindingTypes = new Map<number, DeclarationIndex.SemanticType>()
-    const collectBindings = (statements: ReadonlyArray<Hir.Statement>): void => {
-      for (const statement of statements) {
-        if (statement._tag === 'Bind' && statement.initializer._tag !== 'Unavailable') {
-          bindingTypes.set(
-            statement.binding.ordinal,
-            Type.substitute(statement.initializer.type, instance.substitution),
-          )
-        } else if (statement._tag === 'If') {
-          collectBindings(statement.taken)
-          collectBindings(statement.otherwise)
-        } else if (statement._tag === 'While') collectBindings(statement.body)
-        else if (statement._tag === 'Unsafe') collectBindings(statement.statements)
-        for (const expression of Hir.statementExpressions(statement)) {
-          for (const child of Hir.expressionTree(expression)) {
-            if (child._tag === 'EffectBlock') collectBindings(child.statements)
+  // Effect parameters capture concrete environments supplied elsewhere in the instance graph.
+  // Resolve those dependencies to a fixed point: breadth-first discovery is deterministic but is
+  // not a topological order once combinators both consume and produce Effects.
+  for (let pass = 0; pass <= discovery.instances.length; pass += 1) {
+    const availableBefore = new Set(
+      environments.flatMap((environment) =>
+        environment._tag === 'EffectEnvironment'
+          ? [Instances.effectIdentity(environment.instance, environment.site)]
+          : [],
+      ),
+    ).size
+    for (const instance of [...discovery.instances].reverse()) {
+      const bindingTypes = new Map<number, DeclarationIndex.SemanticType>()
+      const collectBindings = (statements: ReadonlyArray<Hir.Statement>): void => {
+        for (const statement of statements) {
+          if (statement._tag === 'Bind' && statement.initializer._tag !== 'Unavailable') {
+            bindingTypes.set(
+              statement.binding.ordinal,
+              Type.substitute(statement.initializer.type, instance.substitution),
+            )
+          } else if (statement._tag === 'If') {
+            collectBindings(statement.taken)
+            collectBindings(statement.otherwise)
+          } else if (statement._tag === 'While') collectBindings(statement.body)
+          else if (statement._tag === 'Unsafe') collectBindings(statement.statements)
+          for (const expression of Hir.statementExpressions(statement)) {
+            for (const child of Hir.expressionTree(expression)) {
+              if (child._tag === 'EffectBlock') collectBindings(child.statements)
+            }
           }
         }
       }
-    }
-    collectBindings(instance.function.statements)
+      collectBindings(instance.function.statements)
 
-    const blocks = instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
-      .filter(
-        (expression): expression is Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }> =>
-          expression._tag === 'EffectBlock',
-      )
-    for (const block of blocks) {
-      const effect = Type.substitute(block.type, instance.substitution)
-      if (!Type.isEffect(effect)) continue
-      let cursor = 0
-      let environmentAlignment = 1
-      let unavailable: string | undefined
-      const fields: Array<EffectEnvironmentField> = []
-      for (const capture of block.captures) {
-        const source = capture.binding === undefined ? 'Parameter' : 'Binding'
-        const ordinal = capture.binding?.ordinal ?? capture.parameter?.ordinal
-        const type =
-          capture.binding === undefined
-            ? instance.function.contract._tag === 'Contract' && ordinal !== undefined
-              ? instance.function.contract.parameters.at(ordinal)
-              : undefined
-            : ordinal === undefined
-              ? undefined
-              : bindingTypes.get(ordinal)
-        if (ordinal === undefined || type === undefined) {
-          unavailable = `capture ${source.toLowerCase()} has no concrete type`
-          break
-        }
-        const specialized = Type.substitute(type, instance.substitution)
-        // Slice and reference values are already stable borrow descriptors. Capturing their
-        // descriptor inline preserves the underlying loan without retaining a pointer to the
-        // effect factory's short-lived stack slot.
-        const borrowed =
-          (capture.access === 'Shared' || capture.access === 'Exclusive') &&
-          !Type.isSlice(specialized) &&
-          !Type.isReference(specialized)
-        const valueLayout = borrowed ? undefined : layouts.get(Type.key(specialized))
-        if (!borrowed && valueLayout === undefined) {
-          unavailable = `capture ${source.toLowerCase()} ${ordinal} has no value layout`
-          break
-        }
-        const size = borrowed ? target.pointerSize : (valueLayout?.size ?? 0)
-        const alignment = borrowed ? target.pointerAlignment : (valueLayout?.alignment ?? 1)
-        const offset = alignUp(cursor, alignment)
-        fields.push(
-          Object.freeze({
-            source,
-            ordinal,
-            access: capture.access,
-            type: specialized,
-            offset,
-            size,
-            alignment,
-            padding: offset - cursor,
-            representation: borrowed ? 'Borrow' : 'Value',
-          }),
+      const blocks = instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .filter(
+          (expression): expression is Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }> =>
+            expression._tag === 'EffectBlock',
         )
-        cursor = offset + size
-        environmentAlignment = Math.max(environmentAlignment, alignment)
-      }
-      if (unavailable !== undefined) {
+      for (const block of blocks) {
+        const structuralEffect = Type.substitute(block.type, instance.substitution)
+        if (!Type.isEffect(structuralEffect)) continue
+        let effect = structuralEffect
+        let cursor = 0
+        let environmentAlignment = 1
+        let unavailable: string | undefined
+        const fields: Array<EffectEnvironmentField> = []
+        for (const capture of block.captures) {
+          const source = capture.binding === undefined ? 'Parameter' : 'Binding'
+          const ordinal = capture.binding?.ordinal ?? capture.parameter?.ordinal
+          const type =
+            capture.binding === undefined
+              ? instance.function.contract._tag === 'Contract' && ordinal !== undefined
+                ? instance.function.contract.parameters.at(ordinal)
+                : undefined
+              : ordinal === undefined
+                ? undefined
+                : bindingTypes.get(ordinal)
+          if (ordinal === undefined || type === undefined) {
+            unavailable = `capture ${source.toLowerCase()} has no concrete type`
+            break
+          }
+          const specialized = Type.substitute(type, instance.substitution)
+          const capturedEffectIdentity =
+            Type.isEffect(specialized) && source === 'Parameter'
+              ? Instances.parameterEffectIdentity(instance.function, instance.key, ordinal)
+              : undefined
+          const capturedEffectEnvironment =
+            capturedEffectIdentity === undefined
+              ? undefined
+              : environments.find(
+                  (
+                    candidate,
+                  ): candidate is Extract<
+                    EffectEnvironment,
+                    { readonly _tag: 'EffectEnvironment' }
+                  > =>
+                    candidate._tag === 'EffectEnvironment' &&
+                    Instances.effectIdentity(candidate.instance, candidate.site) ===
+                      capturedEffectIdentity,
+                )
+          const capturedCallableIdentity =
+            Type.isCallable(specialized) && source === 'Parameter'
+              ? Instances.parameterCallableIdentity(instance.function, instance.key, ordinal)
+              : undefined
+          const capturedCallableEnvironment =
+            capturedCallableIdentity?.environment === undefined
+              ? undefined
+              : callablePlans.find(
+                  (
+                    candidate,
+                  ): candidate is Extract<
+                    CallableEnvironment,
+                    { readonly _tag: 'CallableEnvironment' }
+                  > =>
+                    candidate._tag === 'CallableEnvironment' &&
+                    Instances.callableIdentity(candidate.callable) ===
+                      capturedCallableIdentity.environment,
+                )
+          const fieldType =
+            capturedEffectEnvironment?.effect ??
+            (capturedCallableEnvironment === undefined
+              ? undefined
+              : Object.freeze({
+                  ...capturedCallableEnvironment.callable.type,
+                  mode: capturedCallableEnvironment.callable.mode,
+                })) ??
+            (capturedCallableIdentity !== undefined && Type.isCallable(specialized)
+              ? Object.freeze({ ...specialized, mode: 'Shared' as const })
+              : specialized)
+          const access =
+            capturedEffectEnvironment?.effect.access ??
+            capturedCallableEnvironment?.callable.mode ??
+            (capturedCallableIdentity === undefined ? capture.access : 'Shared')
+          // Slice and reference values are already stable borrow descriptors. Capturing their
+          // descriptor inline preserves the underlying loan without retaining a pointer to the
+          // effect factory's short-lived stack slot.
+          const callable = capturedCallableIdentity !== undefined
+          const borrowed =
+            (access === 'Shared' || access === 'Exclusive') &&
+            capturedEffectEnvironment === undefined &&
+            !callable &&
+            !Type.isSlice(fieldType) &&
+            !Type.isReference(fieldType)
+          const valueLayout =
+            borrowed || callable
+              ? undefined
+              : (capturedEffectEnvironment ?? layouts.get(Type.key(fieldType)))
+          if (!borrowed && !callable && valueLayout === undefined) {
+            unavailable = `capture ${source.toLowerCase()} ${ordinal} has no value layout`
+            break
+          }
+          const size = borrowed
+            ? target.pointerSize
+            : callable
+              ? (capturedCallableEnvironment?.size ?? 0)
+              : (valueLayout?.size ?? 0)
+          const alignment = borrowed
+            ? target.pointerAlignment
+            : callable
+              ? (capturedCallableEnvironment?.alignment ?? 1)
+              : (valueLayout?.alignment ?? 1)
+          const offset = alignUp(cursor, alignment)
+          fields.push(
+            Object.freeze({
+              source,
+              ordinal,
+              access,
+              type: fieldType,
+              offset,
+              size,
+              alignment,
+              padding: offset - cursor,
+              representation: borrowed ? 'Borrow' : callable ? 'Callable' : 'Value',
+              ...(capturedEffectIdentity === undefined
+                ? {}
+                : { effectIdentity: capturedEffectIdentity }),
+              ...(capturedCallableIdentity === undefined
+                ? {}
+                : { callableIdentity: capturedCallableIdentity }),
+            }),
+          )
+          cursor = offset + size
+          environmentAlignment = Math.max(environmentAlignment, alignment)
+        }
+        if (unavailable === undefined) {
+          const access = fields.some((field) => field.access === 'Take')
+            ? 'Take'
+            : fields.some((field) => field.access === 'Exclusive')
+              ? 'Exclusive'
+              : 'Shared'
+          effect = Type.effect(
+            structuralEffect.success,
+            structuralEffect.failures,
+            access,
+            structuralEffect.requirements,
+            structuralEffect.failureParameters,
+            structuralEffect.requirementParameters,
+          )
+        }
+        if (unavailable !== undefined) {
+          environments.push(
+            Object.freeze({
+              _tag: 'UnavailableEffectEnvironment',
+              instance: instance.key,
+              site: block.site,
+              effect,
+              reason: unavailable,
+            }),
+          )
+          continue
+        }
+        const size = alignUp(cursor, environmentAlignment)
+        const successEffectIdentity = (instance.effectSuccesses ?? []).find(
+          (success) =>
+            success.site.function.sourceId === block.site.function.sourceId &&
+            success.site.function.ordinal === block.site.function.ordinal &&
+            success.site.span.start === block.site.span.start &&
+            success.site.span.end === block.site.span.end,
+        )?.identity
         environments.push(
           Object.freeze({
-            _tag: 'UnavailableEffectEnvironment',
+            _tag: 'EffectEnvironment',
             instance: instance.key,
             site: block.site,
             effect,
-            reason: unavailable,
+            ...(successEffectIdentity === undefined ? {} : { successEffectIdentity }),
+            fields: Object.freeze(fields),
+            size,
+            alignment: environmentAlignment,
+            tailPadding: size - cursor,
           }),
         )
-        continue
       }
-      const size = alignUp(cursor, environmentAlignment)
-      environments.push(
-        Object.freeze({
-          _tag: 'EffectEnvironment',
-          instance: instance.key,
-          site: block.site,
-          effect,
-          fields: Object.freeze(fields),
-          size,
-          alignment: environmentAlignment,
-          tailPadding: size - cursor,
-        }),
-      )
     }
+    const availableAfter = new Set(
+      environments.flatMap((environment) =>
+        environment._tag === 'EffectEnvironment'
+          ? [Instances.effectIdentity(environment.instance, environment.site)]
+          : [],
+      ),
+    ).size
+    if (availableAfter === availableBefore) break
   }
 
+  const resolved = new Map<string, EffectEnvironment>()
+  for (const environment of environments) {
+    const identity = Instances.effectIdentity(environment.instance, environment.site)
+    const previous = resolved.get(identity)
+    if (previous === undefined || environment._tag === 'EffectEnvironment')
+      resolved.set(identity, environment)
+  }
   return Object.freeze(
-    environments.sort(
+    [...resolved.values()].sort(
       (left, right) =>
         left.instance.declaration.module.localeCompare(right.instance.declaration.module) ||
         left.instance.declaration.name.localeCompare(right.instance.declaration.name) ||
@@ -1352,7 +1485,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const entries = new Map<string, Entry>()
   const resolve = (type: DeclarationIndex.SemanticType): Entry | undefined => {
     if (Type.isBuiltin(type)) return scalarEntry(self.target, type)
-    if (Type.isNever(type)) return undefined
+    if (Type.isNever(type)) return neverEntry()
     const candidate = catalogEntry(self, type)
     if (candidate?._tag === 'LayoutEntry') return candidate
     if (Type.isSlice(type)) {
@@ -1424,13 +1557,22 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
         }),
       ),
   )
+  const callablePlans = callableEnvironments(self.target, orderedEntries, discovery)
+  const effectPlans = effectEnvironments(self.target, orderedEntries, discovery, callablePlans)
+  const specializedShapeTypes = new Map(shapeTypes.map((type) => [Type.key(type), type] as const))
+  for (const environment of effectPlans)
+    specializedShapeTypes.set(Type.key(environment.effect), environment.effect)
   return Object.freeze({
     _tag: 'LayoutPlan',
     target: self.target,
     entries: orderedEntries,
-    effectEnvironments: effectEnvironments(self.target, orderedEntries, discovery),
-    callableEnvironments: callableEnvironments(self.target, orderedEntries, discovery),
-    callingShapes: callingShapes(self.target, orderedEntries, shapeTypes),
+    effectEnvironments: effectPlans,
+    callableEnvironments: callablePlans,
+    callingShapes: callingShapes(
+      self.target,
+      orderedEntries,
+      [...specializedShapeTypes.values()].sort(Type.compare),
+    ),
     staticData,
     literalVerdicts: literals.verdicts,
     diagnostics: literals.diagnostics,
@@ -1469,6 +1611,9 @@ const shapeNode = (
   }
   if (Type.isParameter(type)) {
     throw new RangeError(`open generic parameter ${Type.encode(type)} has no calling shape`)
+  }
+  if (Type.isFailureProjection(type)) {
+    throw new RangeError(`open failure-row projection ${Type.encode(type)} has no calling shape`)
   }
   if (Type.isSlice(type)) {
     return Object.freeze({
@@ -1771,6 +1916,26 @@ export const effectEnvironmentLanes = (
           }),
         ]
       }
+      if (field.callableIdentity !== undefined) {
+        const captured = self.callableEnvironments.find(
+          (candidate) =>
+            candidate._tag === 'CallableEnvironment' &&
+            Instances.callableIdentity(candidate.callable) === field.callableIdentity?.environment,
+        )
+        return captured?._tag === 'CallableEnvironment'
+          ? callableEnvironmentLanes(self, captured)
+          : Object.freeze([])
+      }
+      if (field.effectIdentity !== undefined) {
+        const captured = self.effectEnvironments.find(
+          (candidate) =>
+            candidate._tag === 'EffectEnvironment' &&
+            Instances.effectIdentity(candidate.instance, candidate.site) === field.effectIdentity,
+        )
+        return captured?._tag === 'EffectEnvironment'
+          ? effectEnvironmentLanes(self, captured)
+          : Object.freeze([])
+      }
       return callingShape(self, field.type)?.lanes ?? Object.freeze([])
     }),
   )
@@ -2067,9 +2232,18 @@ const verifyEntry = (
         ])
   }
   if (Type.isNever(candidate.type)) {
-    return Object.freeze([
-      invalid('InvalidAggregate', candidate.type, 'never cannot have a runtime layout entry'),
-    ])
+    const canonical = neverEntry()
+    return candidate.size === canonical.size &&
+      candidate.alignment === canonical.alignment &&
+      representationEquals(candidate.representation, canonical.representation)
+      ? Object.freeze([])
+      : Object.freeze([
+          invalid(
+            'InvalidAggregate',
+            candidate.type,
+            'never must use its zero-sized uninhabited placeholder layout',
+          ),
+        ])
   }
   if (candidate.representation._tag !== 'Aggregate') {
     return Object.freeze([
