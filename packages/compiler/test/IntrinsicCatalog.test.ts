@@ -71,8 +71,12 @@ const acceptedSources = Object.freeze([
   `effect fn storage() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
+  let coreLayout = Layout.of<i32>()
+  let coreRecipe = Allocator.allocate(move coreLayout) |> Effect.bindRequirement(&mut allocator)
+  let coreAllocation = run coreRecipe
+  drop coreAllocation
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)
     let count = RawBuffer.count(&buffer)

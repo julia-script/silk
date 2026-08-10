@@ -100,16 +100,19 @@ const builtin = (options: {
     }),
   })
 
-const effect = (options: {
-  readonly name: string
-  readonly operation: Extract<Rule, { readonly _tag: 'EffectRule' }>['operation']
-  readonly typeParameters: ReadonlyArray<string>
-  readonly parameters: ReadonlyArray<ValueParameter>
-  readonly result: string
-}): Operation =>
+const effect = (
+  actor: string,
+  options: {
+    readonly name: string
+    readonly operation: Extract<Rule, { readonly _tag: 'EffectRule' }>['operation']
+    readonly typeParameters: ReadonlyArray<string>
+    readonly parameters: ReadonlyArray<ValueParameter>
+    readonly result: string
+  },
+): Operation =>
   Object.freeze({
     _tag: 'IntrinsicOperation',
-    id: operationId('Effect', options.name),
+    id: operationId(actor, options.name),
     spelling: options.name,
     typeParameters: Object.freeze(options.typeParameters.map(typeParameter)),
     parameters: Object.freeze(Array.from(options.parameters)),
@@ -260,6 +263,18 @@ const operations = Object.freeze([
             }),
           ]),
         ),
+      }),
+      // Public service spelling for the general requirement-binding core.
+      // Allocation keeps no separate provision or dispatch semantics.
+      effect('Allocator', {
+        name: 'provide',
+        operation: 'BindRequirement',
+        typeParameters: Object.freeze([]),
+        parameters: Object.freeze([
+          valueParameter('protected', 'Effect<A ! E ? &mut Allocator | Rest>'),
+          valueParameter('provider', '&mut Provider'),
+        ]),
+        result: 'Effect<A ! E ? Rest>',
       }),
     ]),
   ),
@@ -440,14 +455,14 @@ const operations = Object.freeze([
     'Effect',
     'Namespace',
     Object.freeze([
-      effect({
+      effect('Effect', {
         name: 'result',
         operation: 'Result',
         typeParameters: Object.freeze([]),
         parameters: Object.freeze([valueParameter('protected', 'Effect<A ! E ? R>')]),
         result: 'Effect<Result<A, Row<!E>> ? R>',
       }),
-      effect({
+      effect('Effect', {
         name: 'bindRequirement',
         operation: 'BindRequirement',
         typeParameters: Object.freeze([]),

@@ -78,5 +78,5 @@ pub effect fn main() -> () ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   return run search()
     |> Effect.map(verifyShortestDistance)
-    |> Effect.bindRequirement(&mut allocator)
+    |> Allocator.provide(&mut allocator)
 }
