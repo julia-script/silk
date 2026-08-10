@@ -349,6 +349,157 @@ const wasmBehavior = (artifact, id) => {
   }
 }
 
+const identity = (value) => JSON.stringify(value)
+
+const structuralTargets = (region) => {
+  switch (region._tag) {
+    case 'OperationRegion':
+    case 'CleanupRegion':
+      return region.outcome._tag === 'Forward' ? [region.outcome.target.ordinal] : []
+    case 'ConditionalRegion':
+      return [
+        region.taken.ordinal,
+        region.otherwise.ordinal,
+        ...(region.following === undefined ? [] : [region.following.ordinal]),
+      ]
+    case 'LoopRegion':
+      return [region.condition.ordinal, region.body.ordinal, region.following.ordinal]
+  }
+}
+
+const hasStructuralCycle = (fn) => {
+  const edges = new Map(fn.regions.map((region) => [region.id.ordinal, structuralTargets(region)]))
+  const active = new Set()
+  const complete = new Set()
+  const visit = (region) => {
+    if (active.has(region)) return true
+    if (complete.has(region)) return false
+    active.add(region)
+    const cyclic = (edges.get(region) ?? []).some(visit)
+    active.delete(region)
+    complete.add(region)
+    return cyclic
+  }
+  return fn.regions.some((region) => visit(region.id.ordinal))
+}
+
+const countTags = (values) =>
+  Object.freeze(
+    [
+      ...values.reduce(
+        (counts, value) => counts.set(value._tag, (counts.get(value._tag) ?? 0) + 1),
+        new Map(),
+      ),
+    ]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([tag, count]) => Object.freeze({ tag, count })),
+  )
+
+const runnerClassifications = (program) => {
+  const classifications = []
+  for (const owner of program.functions) {
+    for (const operation of Mir.operations(owner)) {
+      if (operation._tag !== 'RunStaticEffect') continue
+      const runner = program.functions.find((candidate) =>
+        Mir.matchesInstance(candidate, operation.runner, operation.runnerTypeArguments),
+      )
+      if (runner === undefined) {
+        throw new Error(`missing static runner ${identity(operation.runner)}`)
+      }
+      const regions = Mir.topologicalRegions(runner)
+      const operations = Mir.operations(runner)
+      const outcomes = Mir.outcomes(runner)
+      const operationTags = countTags(operations)
+      const regionTags = countTags(regions)
+      const outcomeTags = countTags(outcomes)
+      const nestedMatches = operations.filter((candidate) => candidate._tag === 'Match').length
+      const directCalls = operations.filter((candidate) => candidate._tag === 'Call').length
+      const dynamicCalls = operations.filter(
+        (candidate) => candidate._tag === 'ApplyCallable' && candidate.target === undefined,
+      ).length
+      const effectOperations = operations.filter((candidate) =>
+        [
+          'MakeEffect',
+          'RunEffect',
+          'RunEffectValue',
+          'RunStaticEffect',
+          'ReifyEffect',
+          'CloseEffectEntry',
+        ].includes(candidate._tag),
+      ).length
+      const loans = operations.filter(
+        (candidate) => candidate._tag === 'BeginLoan' || candidate._tag === 'EndLoan',
+      ).length
+      const releases = operations.filter(
+        (candidate) => candidate._tag === 'Drop' || candidate._tag === 'EndLoan',
+      ).length
+      const cleanup =
+        regions.filter((region) => region._tag === 'CleanupRegion').length +
+        operations.filter((candidate) => candidate._tag === 'Drop' || candidate._tag === 'SlotDrop')
+          .length
+      const recursive = operations.some(
+        (candidate) =>
+          candidate._tag === 'Call' && identity(candidate.target) === identity(runner.id),
+      )
+      const affineAccesses =
+        operations
+          .flatMap((candidate) => ('captures' in candidate ? candidate.captures : []))
+          .filter((capture) => capture.access === 'Exclusive' || capture.access === 'Take').length +
+        operations.filter(
+          (candidate) =>
+            candidate._tag === 'Move' ||
+            candidate._tag === 'Drop' ||
+            candidate._tag === 'SlotTake' ||
+            candidate._tag === 'SlotDrop',
+        ).length
+      const returns = outcomes.filter((outcome) => outcome._tag === 'Return').length
+      const lexicalExits = outcomes.filter(
+        (outcome) => outcome._tag === 'Repeat' || outcome._tag === 'Exit',
+      ).length
+      const blockers = [
+        ...(regions.some((region) => region._tag !== 'OperationRegion')
+          ? ['StructuredRegion']
+          : []),
+        ...(nestedMatches > 0 ? ['NestedMatch'] : []),
+        ...(dynamicCalls > 0 ? ['DynamicCallable'] : []),
+        ...(effectOperations > 0 ? ['NestedEffectExecution'] : []),
+        ...(loans > 0 ? ['Loan'] : []),
+        ...(cleanup > 0 ? ['Cleanup'] : []),
+        ...(recursive ? ['Recursive'] : []),
+        ...(affineAccesses > 0 ? ['AffineOperation'] : []),
+        ...(returns !== 1 ? ['AmbiguousReturn'] : []),
+        ...(lexicalExits > 0 ? ['LexicalExit'] : []),
+        ...(hasStructuralCycle(runner) ? ['CyclicControl'] : []),
+      ].sort()
+      classifications.push(
+        Object.freeze({
+          site: Object.freeze({
+            owner: identity(owner.instance),
+            region: operation.provenance.span,
+          }),
+          runner: identity(runner.instance),
+          regions: regionTags,
+          outcomes: outcomeTags,
+          operations: operationTags,
+          nestedMatches,
+          directCalls,
+          dynamicCalls,
+          effectOperations,
+          loans,
+          releases,
+          cleanup,
+          recursive,
+          affineAccesses,
+          estimatedClonedSize: regions.length + operations.length + outcomes.length,
+          blockers: Object.freeze(blockers),
+          prototypeEligible: blockers.length === 0,
+        }),
+      )
+    }
+  }
+  return Object.freeze(classifications)
+}
+
 try {
   const cases = []
   for (const sample of sources) {
@@ -447,6 +598,7 @@ try {
         (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl#'),
       ).length
       const verdicts = Analysis.effectNormalizationOf(wasm)
+      const runners = runnerClassifications(Analysis.loweredMir(wasm))
       const applicability = directStaticCases.has(sample.id)
         ? 'DirectStaticRun'
         : constructorOnlyCases.has(sample.id)
@@ -483,6 +635,7 @@ try {
               (verdict) => verdict._tag === 'Normalized' && verdict.kind === 'DirectStaticRun',
             ).length,
           }),
+          runners,
           pipeTokens: Object.freeze({
             hir: occurrences(hir, /\|>/g),
             mir: occurrences(mir, /\|>/g),
