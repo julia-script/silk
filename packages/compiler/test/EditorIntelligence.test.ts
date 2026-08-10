@@ -530,6 +530,37 @@ pub fn main() -> i32 {
   )
 })
 
+it.effect('links provideMut to visible standard-library source', () => {
+  const source = `struct Clock {}
+effect fn read() -> i32 ? &mut Clock { return 42 }
+pub fn main() -> i32 {
+  let mut clock = Clock {}
+  let recipe = read() |> Effect.provideMut(&mut clock)
+  return run recipe
+}`
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const operation = occurrenceAt(snapshot, source, 'provideMut')
+      assert.strictEqual(operation?.role, 'Value')
+      assert.strictEqual(operation?.declaration?.module, 'silk/effects')
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', source.indexOf('provideMut')),
+        ),
+        '/// Satisfies one typed service requirement with an existing exclusive provider.',
+      )
+      assert.include(
+        operation === undefined
+          ? ''
+          : (Analysis.occurrencePresentation(snapshot, 'main', operation)?.text ?? ''),
+        'effect fn provideMut',
+      )
+      return undefined
+    }),
+  )
+})
+
 it.effect('preserves ambiguous, missing, namespace, and type completion contexts', () =>
   Effect.gen(function* () {
     const ambiguousSource = `struct SystemAllocator {}

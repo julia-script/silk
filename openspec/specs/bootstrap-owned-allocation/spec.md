@@ -134,16 +134,3 @@ provider-dependent escaping allocation remains unavailable.
 
 - **WHEN** one Effect requires `Allocator@Scratch` and `Allocator@Durable`
 - **THEN** each allocation resolves through its statically selected general capability slot while both successful owners remain independent of the provider values
-
-### Requirement: Allocator exposes service-facing provision
-
-`Allocator.provide` SHALL accept an Effect with one exclusive `Allocator` requirement and an
-exclusive borrow of any conforming allocator, remove that requirement from the resulting Effect,
-and preserve its success, failure, and remaining requirement channels. It SHALL be a public
-service-facing spelling of the general requirement-binding compiler core, not a distinct allocator
-dispatch or execution mechanism.
-
-#### Scenario: Provide a custom allocator through a pipeline
-
-- **WHEN** an allocation-requiring Effect is piped through `Allocator.provide(&mut allocator)` where `allocator` is any conforming implementation
-- **THEN** the allocator requirement is satisfied through ordinary capability dispatch and execution agrees with the equivalent general requirement-binding operation

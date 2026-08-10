@@ -141,6 +141,15 @@ pub effect fn provide<A, C, !E, ?R>(
   return run bound
 }
 
+/// Satisfies one typed service requirement with an existing exclusive provider.
+pub effect fn provideMut<A, C, P, !E, ?R>(
+  self: once Effect<A ! E ? &mut C | R>,
+  provider: &mut P
+) -> A ! E ? R {
+  let bound = Effect.bindRequirement(move self, provider)
+  return run bound
+}
+
 /// Acquires and lexically provides one typed service requirement.
 pub effect fn provideWith<A, C, !E, !F, ?R, ?S>(
   self: once Effect<A ! E ? &mut C | R>,

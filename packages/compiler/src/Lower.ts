@@ -105,6 +105,7 @@ class FunctionLowering {
     readonly substitution: Type.Substitution,
     readonly effectOutcome: Type.Effect | undefined,
     readonly owner: Instances.Instance,
+    readonly instances: ReadonlyArray<Instances.Instance>,
     readonly calls: ReadonlyArray<Instances.CallInstance>,
     readonly effectResults: ReadonlyMap<
       string,
@@ -176,6 +177,145 @@ class FunctionLowering {
         call.span.end === span.end,
     )
   }
+}
+
+const forwardedRequirementBinding = (
+  instance: Instances.Instance,
+): Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }> | undefined => {
+  const returned = instance.function.statements.at(-1)
+  if (instance.function.statements.length !== 1 || returned?._tag !== 'Return') return undefined
+  const block = returned.expression
+  if (block._tag !== 'EffectBlock' || block.statements.length !== 2) return undefined
+  const binding = block.statements.at(0)
+  const completed = block.statements.at(1)
+  if (
+    binding?._tag !== 'Bind' ||
+    binding.initializer._tag !== 'EffectBindRequirement' ||
+    binding.initializer.provider.access !== 'Exclusive' ||
+    binding.initializer.protected._tag !== 'Move' ||
+    binding.initializer.protected.subject._tag !== 'ParameterReference' ||
+    binding.initializer.protected.subject.parameter.ordinal !== 0 ||
+    binding.initializer.provider.parameter?.ordinal !== 1 ||
+    completed?._tag !== 'Return' ||
+    completed.expression._tag !== 'Run' ||
+    completed.expression.subject._tag !== 'BindingReference' ||
+    completed.expression.subject.binding.ordinal !== binding.binding.ordinal
+  )
+    return undefined
+  return binding.initializer
+}
+
+const callableApplicationArgument = (
+  expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
+  ordinal: number,
+): Hir.Expression | undefined => {
+  const section = expression.callee._tag === 'CallableSection' ? expression.callee : undefined
+  if (section === undefined) return expression.arguments.at(ordinal)
+  const captured = section.captures.find((capture) => capture.parameterOrdinal === ordinal)
+  if (captured !== undefined) return captured.value
+  return ordinal === section.omittedParameter ? expression.arguments.at(0) : undefined
+}
+
+const inlineForwardedRequirement = (
+  fn: FunctionLowering,
+  expression: Hir.Expression,
+):
+  | {
+      readonly binding: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>
+      readonly provider: Extract<Hir.Expression, { readonly _tag: 'ValueBorrow' }>
+    }
+  | undefined => {
+  if (expression._tag !== 'CallableApply' && expression._tag !== 'EffectConstruct') return undefined
+  const call = fn.call(expression.span)
+  const declaration =
+    expression._tag === 'EffectConstruct'
+      ? expression.target
+      : expression.callee._tag === 'CallableSection' &&
+          expression.callee.target._tag === 'DeclarationCallableTarget'
+        ? expression.callee.target.declaration
+        : undefined
+  const candidates =
+    declaration === undefined
+      ? []
+      : fn.instances.filter(
+          (instance) =>
+            instance.key.declaration.module === declaration.module &&
+            instance.key.declaration.name === declaration.name,
+        )
+  const inferredArguments = (() => {
+    if (expression._tag === 'EffectConstruct')
+      return expression.typeArguments.map((argument) => fn.semanticArgument(argument))
+    if (expression.callee._tag !== 'CallableSection') return undefined
+    const candidate = candidates.at(0)
+    if (candidate === undefined) return undefined
+    const inferred = new Map([...expression.callee.substitution, ...expression.substitution])
+    const arguments_ = candidate.function.declaration.typeParameters.flatMap((parameter) => {
+      const argument = inferred.get(Type.key(parameter.type))
+      return argument === undefined ? [] : [fn.semanticArgument(argument)]
+    })
+    return arguments_.length === candidate.function.declaration.typeParameters.length
+      ? arguments_
+      : undefined
+  })()
+  const target =
+    call !== undefined
+      ? fn.instances.find(
+          (instance) => Instances.keyText(instance.key) === Instances.keyText(call.target),
+        )
+      : inferredArguments === undefined
+        ? undefined
+        : (candidates.find((candidate) => {
+            const explicit = candidate.key.typeArguments.filter(
+              (argument) => !Type.isHiddenIdentityArgument(argument),
+            )
+            return (
+              explicit.length === inferredArguments.length &&
+              explicit.every(
+                (argument, ordinal) =>
+                  Type.genericArgumentKey(argument) ===
+                  Type.genericArgumentKey(inferredArguments.at(ordinal) ?? argument),
+              )
+            )
+          }) ?? (candidates.length === 1 ? candidates.at(0) : undefined))
+  const forwarded = target === undefined ? undefined : forwardedRequirementBinding(target)
+  if (target === undefined || forwarded === undefined) return undefined
+  const protected_ =
+    expression._tag === 'CallableApply'
+      ? callableApplicationArgument(expression, 0)
+      : expression.arguments.at(0)
+  const provider =
+    expression._tag === 'CallableApply'
+      ? callableApplicationArgument(expression, 1)
+      : expression.arguments.at(1)
+  if (protected_ === undefined || provider?._tag !== 'ValueBorrow') return undefined
+  if (provider.root._tag === 'PatternSliceRoot') return undefined
+  const capability = Type.substitute(forwarded.provider.capability, target.substitution)
+  const providerType = Type.substitute(forwarded.provider.providerType, target.substitution)
+  const type = fn.semantic(expression.type)
+  if (!Type.isNominal(capability) || !Type.isNominal(providerType) || !Type.isEffect(type))
+    return undefined
+  const witness = DeclarationIndex.witness(fn.index, providerType, capability)
+  if (witness === undefined) return undefined
+  return Object.freeze({
+    binding: Object.freeze({
+      _tag: 'EffectBindRequirement',
+      protected: protected_,
+      provider: Object.freeze({
+        ...(provider.root._tag === 'BindingSliceRoot'
+          ? { binding: provider.root.binding }
+          : { parameter: provider.root.parameter }),
+        capability,
+        providerType,
+        witness,
+        role: forwarded.provider.role,
+        access: provider.access,
+        span: provider.span,
+      }),
+      type,
+      span: expression.span,
+    }),
+    provider,
+  })
 }
 
 interface GeneratedEffectRunner {
@@ -364,6 +504,17 @@ const ensureProvidedRunner = (
   return id
 }
 
+const runtimeRequirementArguments = (
+  requirements: ReadonlyArray<ProvidedRequirement> | undefined,
+): ReadonlyArray<Mir.LocalId> =>
+  Object.freeze(
+    requirements?.flatMap((requirement) =>
+      requirement.witness._tag !== 'SourceConformanceWitness' || requirement.local === undefined
+        ? []
+        : [requirement.local],
+    ) ?? [],
+  )
+
 const sameSite = (left: Hir.CallableSiteId, right: Hir.CallableSiteId): boolean =>
   left.function.sourceId === right.function.sourceId &&
   left.function.ordinal === right.function.ordinal &&
@@ -486,11 +637,7 @@ const lowerRunEffectValue = (
       effect,
       runner: providedRunner ?? runnerId(effectType.environment.instance, effectType.site),
       runnerTypeArguments: effectType.environment.instance.typeArguments,
-      arguments: Object.freeze(
-        provided?.flatMap((requirement) =>
-          requirement.local === undefined ? [] : [requirement.local],
-        ) ?? [],
-      ),
+      arguments: runtimeRequirementArguments(provided),
       outcomeType,
       ...(propagationType === undefined ? {} : { propagationType }),
       tagMappings: Object.freeze(tagMappings),
@@ -739,6 +886,29 @@ const lowerEffectExecution = (
       return lowerEffectExecution(fn, storedRecipe, success, span, availableRequirements)
   }
 
+  const forwarded = inlineForwardedRequirement(fn, subject)
+  if (forwarded !== undefined) {
+    const selectedProvider = specializeProvider(fn, forwarded.binding.provider)
+    const provider = lowerExpression(fn, forwarded.provider)
+    if (selectedProvider === undefined || provider === undefined) return undefined
+    const result = lowerEffectExecution(
+      fn,
+      forwarded.binding.protected,
+      success,
+      span,
+      Object.freeze([
+        ...availableRequirements,
+        Object.freeze({ ...selectedProvider, local: provider.result }),
+      ]),
+    )
+    if (result === undefined) return undefined
+    endRunLoans(fn, span)
+    endLoans(fn, [forwarded.provider.borrow], span)
+    if (forwarded.binding.protected._tag === 'EffectConstruct')
+      endLoans(fn, forwarded.binding.protected.loanEnds, span)
+    return result
+  }
+
   if (subject._tag === 'EffectBindRequirement') {
     if (subject.provider.access === 'Take') return undefined
     const selectedProvider = specializeProvider(fn, subject.provider)
@@ -752,6 +922,10 @@ const lowerEffectExecution = (
           : subject.provider.parameter !== undefined
             ? fn.parameterLocals.get(subject.provider.parameter.ordinal)
             : undefined
+      const forwardedReference =
+        subject.provider.parameter === undefined || provider === undefined
+          ? undefined
+          : fn.localTypes.at(provider.ordinal)
       const providerType = fn.type(selectedProvider.providerType)
       const referenceType = fn.type(
         Object.freeze({
@@ -762,35 +936,46 @@ const lowerEffectExecution = (
       )
       const loan = fn.ownership?.loans.find(
         (candidate) =>
-          candidate.origin === 'EffectCapture' &&
+          (candidate.origin === 'EffectCapture' ||
+            candidate.origin === 'CallableCapture' ||
+            candidate.origin === 'ValueBorrow') &&
           candidate.access === subject.provider.access &&
           candidate.startSpan.start === subject.provider.span.start &&
           candidate.startSpan.end === subject.provider.span.end,
       )
       if (
-        provider === undefined ||
-        providerType?._tag !== 'Nominal' ||
-        referenceType?._tag !== 'Reference' ||
-        loan === undefined
-      )
-        return undefined
-      const reference = fn.alloc(referenceType)
-      fn.emit(
-        Object.freeze({
-          _tag: 'BeginLoan',
-          borrow: loan.id,
-          destination: reference,
-          root: provider,
-          sourceType: providerType,
-          type: referenceType,
-          access: subject.provider.access,
-          reborrow: false,
-          suspendsParent: false,
-          provenance: authored(subject.provider.span),
-        }),
-      )
-      provided = Object.freeze({ ...selectedProvider, local: reference })
-      providerLoan = Object.freeze({ borrow: loan.id, slice: reference })
+        provider !== undefined &&
+        forwardedReference?._tag === 'Reference' &&
+        forwardedReference.type.access === subject.provider.access &&
+        Type.equals(forwardedReference.type.target, selectedProvider.providerType)
+      ) {
+        provided = Object.freeze({ ...selectedProvider, local: provider })
+      } else {
+        if (
+          provider === undefined ||
+          providerType?._tag !== 'Nominal' ||
+          referenceType?._tag !== 'Reference' ||
+          loan === undefined
+        )
+          return undefined
+        const reference = fn.alloc(referenceType)
+        fn.emit(
+          Object.freeze({
+            _tag: 'BeginLoan',
+            borrow: loan.id,
+            destination: reference,
+            root: provider,
+            sourceType: providerType,
+            type: referenceType,
+            access: subject.provider.access,
+            reborrow: false,
+            suspendsParent: false,
+            provenance: authored(subject.provider.span),
+          }),
+        )
+        provided = Object.freeze({ ...selectedProvider, local: reference })
+        providerLoan = Object.freeze({ borrow: loan.id, slice: reference })
+      }
     }
     const result = lowerEffectExecution(
       fn,
@@ -815,11 +1000,20 @@ const lowerEffectExecution = (
     return result
   }
 
-  if (subject._tag === 'BuiltinCall' && Type.isEffect(subject.type))
-    return lowerExpression(
-      fn,
-      Object.freeze({ _tag: 'Run' as const, subject, type: success, span }),
-    )
+  if (subject._tag === 'BuiltinCall' && Type.isEffect(subject.type)) {
+    const run = Object.freeze({ _tag: 'Run' as const, subject, type: success, span })
+    if (subject.operation === 'AllocatorAllocate') {
+      const provided = availableRequirements.find(
+        (requirement) =>
+          requirement.role === 'DefaultRole' && Type.equals(requirement.capability, Type.allocator),
+      )
+      if (provided?.witness._tag === 'SourceConformanceWitness') {
+        if (provided.local === undefined) return undefined
+        return lowerSourceAllocatorAllocate(fn, run, subject, provided.local, provided.witness)
+      }
+    }
+    return lowerExpression(fn, run)
+  }
 
   const lowered = lowerExpression(fn, subject)
   const loweredType = lowered === undefined ? undefined : fn.localTypes.at(lowered.result.ordinal)
@@ -1300,11 +1494,7 @@ function lowerExpression(
             ? runnerId(protectedType.environment.instance, protectedType.site)
             : ensureProvidedRunner(fn, protectedType, provided)
         if (runner === undefined) return undefined
-        const arguments_ = Object.freeze(
-          provided.flatMap((requirement) =>
-            requirement.local === undefined ? [] : [requirement.local],
-          ),
-        )
+        const arguments_ = runtimeRequirementArguments(provided)
         const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
           _tag: 'EffectOutcome',
           type: protectedType.type,
@@ -1396,6 +1586,8 @@ function lowerExpression(
           endLoans(fn, resultRecipe.protected.loanEnds, expression.span)
         return Object.freeze({ result: destination })
       }
+      if (resultRecipe !== undefined && inlineForwardedRequirement(fn, resultRecipe) !== undefined)
+        return lowerEffectExecution(fn, resultRecipe, expression.type, expression.span)
       const loweredSubject = lowerExpression(fn, expression.subject)
       const effectValueType =
         loweredSubject === undefined ? undefined : fn.localTypes.at(loweredSubject.result.ordinal)
@@ -1451,11 +1643,7 @@ function lowerExpression(
               providedRunner ??
               runnerId(effectValueType.environment.instance, effectValueType.site),
             runnerTypeArguments: effectValueType.environment.instance.typeArguments,
-            arguments: Object.freeze(
-              provided?.flatMap((requirement) =>
-                requirement.local === undefined ? [] : [requirement.local],
-              ) ?? [],
-            ),
+            arguments: runtimeRequirementArguments(provided),
             outcomeType,
             ...(propagationType === undefined ? {} : { propagationType }),
             tagMappings: Object.freeze(tagMappings),
@@ -3222,6 +3410,7 @@ const lowerSequence = (
 
   if (statement._tag === 'Bind') {
     if (
+      inlineForwardedRequirement(fn, statement.initializer) !== undefined ||
       (statement.initializer._tag === 'EffectConstruct' &&
         fn.call(statement.initializer.span)?.resultEffect === undefined &&
         fn.effectResults.get(
@@ -3937,6 +4126,7 @@ const lowerInstance = (
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
   index: DeclarationIndex.Index,
+  instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
   effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
   generatedRunners: Array<GeneratedEffectRunner>,
@@ -4011,6 +4201,7 @@ const lowerInstance = (
     instance.substitution,
     effectOutcome,
     instance,
+    instances,
     calls,
     effectResults,
     generatedRunners,
@@ -4046,6 +4237,7 @@ const lowerEffectRunner = (
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
   index: DeclarationIndex.Index,
+  instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
   effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
   generatedRunners: Array<GeneratedEffectRunner>,
@@ -4104,6 +4296,7 @@ const lowerEffectRunner = (
     owner.substitution,
     type.type,
     owner,
+    instances,
     calls,
     effectResults,
     generatedRunners,
@@ -4199,6 +4392,7 @@ export const lowerProgram = (
       ownership.get(instance.key.declaration.module),
       layout,
       index,
+      discovery.instances,
       discovery.calls,
       effectResults,
       generatedRunners,
@@ -4216,6 +4410,7 @@ export const lowerProgram = (
       ownership.get(generated.owner.key.declaration.module),
       layout,
       index,
+      discovery.instances,
       discovery.calls,
       effectResults,
       generatedRunners,

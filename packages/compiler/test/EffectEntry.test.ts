@@ -30,7 +30,7 @@ impl Drop for SomeError {
 pub effect fn main() -> () ! SomeError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let storage = run recipe
   fail SomeError { storage: move storage }
 }`
@@ -56,7 +56,7 @@ effect fn stop() -> never ! SomeError { fail SomeError {} }
 pub effect fn main() -> () ! SomeError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
-  let storage = run Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let storage = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let guard = Guard { storage: move storage }
   run stop()
   drop guard

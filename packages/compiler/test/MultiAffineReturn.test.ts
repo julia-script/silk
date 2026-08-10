@@ -96,7 +96,7 @@ fn observe(returned: Returned) -> i32 {
 
 effect fn execute() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let pending = build() |> Allocator.provide(&mut allocator)
+  let pending = build() |> Effect.provideMut(&mut allocator)
   let returned = run pending
   return observe(move returned)
 }

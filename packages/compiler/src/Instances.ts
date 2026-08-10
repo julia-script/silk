@@ -139,6 +139,77 @@ export const copyDropViolations = (
     }),
   )
 
+const requirementBindings = (
+  fn: Hir.HirFunction,
+): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>> =>
+  fn.statements.flatMap((statement) =>
+    Hir.statementExpressions(statement).flatMap((expression) =>
+      Hir.expressionTree(expression).flatMap((candidate) =>
+        candidate._tag === 'EffectBindRequirement' ? [candidate] : [],
+      ),
+    ),
+  )
+
+const requirementBindingWitness = (
+  binding: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
+  substitution: Type.Substitution,
+  index: DeclarationIndex.Index,
+): DeclarationIndex.ConformanceWitness | undefined => {
+  const capability = Type.substitute(binding.provider.capability, substitution)
+  const provider = Type.substitute(binding.provider.providerType, substitution)
+  return Type.isNominal(capability) && Type.isNominal(provider)
+    ? (binding.provider.witness ?? DeclarationIndex.witness(index, provider, capability))
+    : undefined
+}
+
+const forwardedRequirementBinding = (
+  fn: Hir.HirFunction,
+): Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }> | undefined => {
+  const returned = fn.statements.at(-1)
+  if (fn.statements.length !== 1 || returned?._tag !== 'Return') return undefined
+  const block = returned.expression
+  if (block._tag !== 'EffectBlock' || block.statements.length !== 2) return undefined
+  const binding = block.statements.at(0)
+  const completed = block.statements.at(1)
+  if (
+    binding?._tag !== 'Bind' ||
+    binding.initializer._tag !== 'EffectBindRequirement' ||
+    binding.initializer.provider.access !== 'Exclusive' ||
+    binding.initializer.protected._tag !== 'Move' ||
+    binding.initializer.protected.subject._tag !== 'ParameterReference' ||
+    binding.initializer.protected.subject.parameter.ordinal !== 0 ||
+    binding.initializer.provider.parameter?.ordinal !== 1 ||
+    completed?._tag !== 'Return' ||
+    completed.expression._tag !== 'Run' ||
+    completed.expression.subject._tag !== 'BindingReference' ||
+    completed.expression.subject.binding.ordinal !== binding.binding.ordinal
+  )
+    return undefined
+  return binding.initializer
+}
+
+/** Rejects concrete requirement bindings whose provider does not implement the capability. */
+export const requirementBindingViolations = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<Diagnostic.Diagnostic> =>
+  Object.freeze(
+    self.instances.flatMap((instance) =>
+      requirementBindings(instance.function).flatMap((binding) => {
+        const capability = Type.substitute(binding.provider.capability, instance.substitution)
+        const provider = Type.substitute(binding.provider.providerType, instance.substitution)
+        if (requirementBindingWitness(binding, instance.substitution, index) !== undefined)
+          return []
+        return [
+          Diagnostic.invalidEffectProvision(
+            `provider type ${Type.encode(provider)} does not match ${Type.encode(capability)}`,
+            binding.provider.span,
+          ),
+        ]
+      }),
+    ),
+  )
+
 /** Produces semantic diagnostics for every finite-discovery violation. */
 export const violationDiagnostics = (self: Discovery): ReadonlyArray<Diagnostic.Diagnostic> =>
   Object.freeze(
@@ -389,6 +460,37 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
 
 const bodyCallTargets = (fn: Hir.HirFunction): ReadonlyArray<CallTarget> =>
   fn.statements.flatMap((statement) => Hir.statementExpressions(statement).flatMap(callTargets))
+
+const requirementBindingCallTargets = (
+  fn: Hir.HirFunction,
+  substitution: Type.Substitution,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<CallTarget> =>
+  (forwardedRequirementBinding(fn) === undefined ? requirementBindings(fn) : []).flatMap(
+    (binding) => {
+      const witness = requirementBindingWitness(binding, substitution, index)
+      return witness?._tag === 'SourceConformanceWitness' && witness.operation !== undefined
+        ? [Object.freeze({ declaration: witness.operation, typeArguments: Object.freeze([]) })]
+        : []
+    },
+  )
+
+const forwardedRequirementCallTargets = (
+  calls: ReadonlyArray<CallInstance>,
+  results: ReadonlyMap<string, Elaboration.Result>,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<CallTarget> =>
+  calls.flatMap((call) => {
+    const target = functionByKey(results, call.target)
+    const binding = target === undefined ? undefined : forwardedRequirementBinding(target)
+    if (target === undefined || binding === undefined) return []
+    const substitution = instanceSubstitution(target, call.target)
+    if (substitution === undefined) return []
+    const witness = requirementBindingWitness(binding, substitution, index)
+    return witness?._tag === 'SourceConformanceWitness' && witness.operation !== undefined
+      ? [Object.freeze({ declaration: witness.operation, typeArguments: Object.freeze([]) })]
+      : []
+  })
 
 const slotDropHookTargets = (
   fn: Hir.HirFunction,
@@ -682,7 +784,13 @@ const targetKeyOfCall = (
   for (const ordinal of effectParameterOrdinals(target, targetSubstitution)) {
     const argument = expression.arguments.at(ordinal)
     const identity = argument === undefined ? undefined : effectOriginOf(argument, context)
-    if (identity === undefined) return undefined
+    if (identity === undefined) {
+      // An exact requirement-forwarding wrapper is specialized into its protected recipe before
+      // lowering. Compiler recipes therefore do not need a reified Effect identity merely to
+      // make the concrete provider specialization discoverable.
+      if (forwardedRequirementBinding(target) !== undefined) continue
+      return undefined
+    }
     hiddenArguments.push(Type.effectIdentityArgument(identity))
   }
   for (const ordinal of callableParameterOrdinals(target, targetSubstitution)) {
@@ -937,6 +1045,26 @@ const callableCallTargets = (
   return Object.freeze(targets)
 }
 
+const forwardedRequirementTargets = (
+  targets: ReadonlyArray<CallTarget>,
+  results: ReadonlyMap<string, Elaboration.Result>,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<CallTarget> =>
+  targets.flatMap((target) => {
+    const fn = targetFunction(results, target.declaration)
+    const binding = fn === undefined ? undefined : forwardedRequirementBinding(fn)
+    if (fn === undefined || binding === undefined) return []
+    const substitution = Type.substitution(
+      fn.declaration.typeParameters.map((parameter) => parameter.type),
+      target.typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument)),
+    )
+    if (substitution === undefined) return []
+    const witness = requirementBindingWitness(binding, substitution, index)
+    return witness?._tag === 'SourceConformanceWitness' && witness.operation !== undefined
+      ? [Object.freeze({ declaration: witness.operation, typeArguments: Object.freeze([]) })]
+      : []
+  })
+
 export const callableIdentity = (self: CallableInstance): string =>
   `${keyText(self.owner)}\u0001${self.site.function.sourceId}:${self.site.function.ordinal}:${self.site.span.start}:${self.site.span.end}\u0001${self.typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
 
@@ -1148,6 +1276,7 @@ export const discover = (
       .flatMap(hookCalls)
     const calls = new Map<string, CallTarget>()
     const directCalls = directCallInstances(fn, key, substitution, results)
+    const callableTargets = callableCallTargets(fn, results)
     for (const call of directCalls) {
       recordedCalls.set(
         `${keyText(call.owner)}\u0005${call.span.sourceId}:${call.span.start}:${call.span.end}`,
@@ -1156,12 +1285,15 @@ export const discover = (
     }
     for (const call of [
       ...bodyCallTargets(fn),
+      ...requirementBindingCallTargets(fn, substitution, index),
       ...directCalls.map((call) => ({
         declaration: call.target.declaration,
         typeArguments: call.target.typeArguments,
       })),
+      ...forwardedRequirementCallTargets(directCalls, results, index),
       ...slotDropHookTargets(fn, index, substitution),
-      ...callableCallTargets(fn, results),
+      ...callableTargets,
+      ...forwardedRequirementTargets(callableTargets, results, index),
       ...cleanupHooks,
       ...(entry.kind === 'Effect' && keyText(key) === keyText(entry.key)
         ? entry.failures.flatMap((failure) => hookCalls(Ownership.cleanupPlan(index, failure.type)))

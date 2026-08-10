@@ -45,7 +45,7 @@ const layoutExtract = `effect fn store() -> i32 ! OutOfMemory {
     Layout value => value
     LayoutOverflow overflow => trapLayout()
   }
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 3)
@@ -69,7 +69,7 @@ struct Full { storage: Allocation }
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   let cell = Full { storage: move allocation }
   let widened = wrap(move cell)

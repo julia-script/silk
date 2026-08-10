@@ -4723,9 +4723,18 @@ const analyzeEffectBindRequirement = (
     )
   if (
     providerAccess === 'Exclusive' &&
-    (providerReference?._tag !== 'BindingFact' || providerReference.mutability !== 'Mutable')
+    !(
+      (providerReference?._tag === 'BindingFact' && providerReference.mutability === 'Mutable') ||
+      (providerReference?._tag === 'ParameterDeclaration' &&
+        providerResult?.type !== undefined &&
+        Type.isReference(providerResult.type) &&
+        providerResult.type.access === 'Exclusive')
+    )
   )
-    reject('exclusive provision requires a mutable local binding', providerNode?.span)
+    reject(
+      'exclusive provision requires a mutable local binding or exclusive reference parameter',
+      providerNode?.span,
+    )
   const candidates =
     effect?.requirements.filter((requirement) => {
       if (explicitRole !== undefined && requirement.role !== explicitRole) return false
@@ -4733,6 +4742,8 @@ const analyzeEffectBindRequirement = (
       if (requirement.access === 'Exclusive' && providerAccess === 'Shared') return false
       return (
         Type.equals(providerValueType, requirement.capability) ||
+        Type.isParameter(providerValueType) ||
+        Type.isParameter(requirement.capability) ||
         (Type.isNominal(providerValueType) &&
           Type.isNominal(requirement.capability) &&
           DeclarationIndex.witness(resolution.index, providerValueType, requirement.capability) !==
@@ -4756,6 +4767,8 @@ const analyzeEffectBindRequirement = (
   if (
     capability !== undefined &&
     providerValueType !== undefined &&
+    Type.isNominal(capability) &&
+    Type.isNominal(providerValueType) &&
     !Type.equals(providerValueType, capability) &&
     selectedWitness === undefined
   )

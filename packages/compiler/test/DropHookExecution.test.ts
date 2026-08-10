@@ -28,7 +28,7 @@ impl Drop for Guard {
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: 5, storage: move allocation }
   return 42
@@ -51,7 +51,7 @@ impl Drop for Guard {
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: 5, storage: move allocation }
   drop guard
@@ -84,11 +84,11 @@ effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut empty = ExhaustedAllocator { tag: 0 }
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: 5, storage: move allocation }
   let second = Layout.of<[i32; 2]>()
-  let refused = Allocator.allocate(move second) |> Allocator.provide(&mut empty)
+  let refused = Allocator.allocate(move second) |> Effect.provideMut(&mut empty)
   let never = run refused
   drop never
   return 42
@@ -111,7 +111,7 @@ impl Drop for Guard {
 effect fn recurse(remaining: i32) -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: remaining, storage: move allocation }
   if remaining == 0 { return 42 }
@@ -188,7 +188,7 @@ impl<T> Drop for Guard<T> {
 effect fn hold<T>(value: T) -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   let guard = Guard<T> { value: move value, storage: move allocation }
   return 21

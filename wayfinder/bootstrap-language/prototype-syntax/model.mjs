@@ -36,11 +36,11 @@ let fileSystem = NativeFileSystem.make()
 let virtualFileSystem = MemoryFileSystem.make()
 
 let fsCompilation = FileSystem.provide(
-  Allocator.provide(Compiler.compile(move diskRequest), &mut scratch, @Scratch),
+  Effect.provideMut(Compiler.compile(move diskRequest), &mut scratch, @Scratch),
   &fileSystem,
 )
 let memoryCompilation = FileSystem.provide(
-  Allocator.provide(Compiler.compile(move memoryRequest), &mut scratch, @Scratch),
+  Effect.provideMut(Compiler.compile(move memoryRequest), &mut scratch, @Scratch),
   &virtualFileSystem,
 )
 
@@ -83,7 +83,7 @@ return run compilation`,
     note:
       'provideWith acquires and drops a fresh provider owner for each execution. Allocation results remain self-contained.',
     source: `let promoted = Effect.map(Compiler.compile, Artifact.promote)
-let withScratch = Allocator.provideWith(
+let withScratch = Effect.provideMutWith(
   promoted,
   Scratch.acquire,
   @Scratch,
@@ -151,11 +151,11 @@ return run computation`,
     note:
       'The requests construct two Effects; the following callable sections specialize each value without pipeline-only argument insertion.',
     source: `let fsCompilation = Compiler.compile(move diskRequest)
-  |> Allocator.provide(&mut scratch, @Scratch)
+  |> Effect.provideMut(&mut scratch, @Scratch)
   |> FileSystem.provide(&fileSystem)
 
 let memoryCompilation = Compiler.compile(move memoryRequest)
-  |> Allocator.provide(&mut scratch, @Scratch)
+  |> Effect.provideMut(&mut scratch, @Scratch)
   |> FileSystem.provide(&virtualFileSystem)
 
 let diskArtifact = run fsCompilation
@@ -195,7 +195,7 @@ return run compilation`,
       'This chain is a reusable recipe. Provider acquisition and Drop occur independently on every run.',
     source: `let compilation = Compiler.compile(move request)
   |> Effect.map(Artifact.promote)
-  |> Allocator.provideWith(Scratch.acquire, @Scratch)
+  |> Effect.provideMutWith(Scratch.acquire, @Scratch)
 
 return run compilation`,
   },

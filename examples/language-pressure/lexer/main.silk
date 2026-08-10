@@ -424,5 +424,5 @@ pub effect fn main() -> () ! OutOfMemory {
   return run lex(source)
     |> Effect.map(fingerprint)
     |> Effect.map(verify)
-    |> Allocator.provide(&mut allocator)
+    |> Effect.provideMut(&mut allocator)
 }

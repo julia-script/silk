@@ -175,7 +175,7 @@ effect fn produce() -> Payload ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout)
-    |> Allocator.provide(&mut allocator)
+    |> Effect.provideMut(&mut allocator)
   return Payload { storage: move storage, value: 42 }
 }
 effect fn program() -> i32 ! OutOfMemory {
@@ -197,7 +197,7 @@ effect fn produce() -> Payload ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout)
-    |> Allocator.provide(&mut allocator)
+    |> Effect.provideMut(&mut allocator)
   return Payload { storage: move storage, value: 42 }
 }
 effect fn program() -> i32 ! OutOfMemory {
