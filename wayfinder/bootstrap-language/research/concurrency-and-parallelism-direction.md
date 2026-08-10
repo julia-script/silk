@@ -78,8 +78,12 @@ through `Effect.result`. That operation and propagating `run` are the suspension
 future lowering may park and later resume the current execution before either produces its value,
 without exposing a pending constructor to `map`, `flatMap`, or `catch`. Requirements remain erased
 type rows plus compiler-selected provider arguments; no runtime environment record is part of the
-public model. The synchronous cost spike measures this actual library/core boundary before any
-complete-or-suspended representation or optimizer is selected.
+public model. The completed [synchronous cost spike](synchronous-effect-cost-spike.md) measures this
+actual library/core boundary. Clang erases composition from every measured native entry, direct
+Wasm retains avoidable calls and module size, and neither path contains scheduler, fiber, or
+suspension machinery. The evidence selects a guarded shared MIR normalization for today's
+synchronous shapes; it does not select a complete-or-suspended representation. A genuine
+suspension control remains a required addition when suspension becomes expressible.
 
 The smallest plausible runtime seam is correspondingly narrow: schedule or resume a frame, park it
 on a wait condition, wake that condition, track structured children, and interrupt with deterministic

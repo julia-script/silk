@@ -95,6 +95,11 @@ and editor tooling together with the language surface so no second vocabulary su
 
 ## Changelog
 
+- 2026-08-10: Added a deterministic nine-pair synchronous Effect cost corpus, including generic
+  provision, stored composition, traps, and allocator-backed affine cleanup. Native `silk_main`
+  shapes match their imperative baselines after Clang `-O2`; direct Wasm retains composition calls
+  and code size, selecting a guarded shared MIR normalization for separate proposal work.
+
 - 2026-08-10: Migrated the lexer, stack VM, and allocation-bearing algorithm entry points to
   direct Effect pipelines. Data-first, piped, grouped, and stored compositions now agree across
   evaluator, native LLVM, and direct Wasm; the final implementation goes through visible

@@ -35,10 +35,12 @@ requirement binding operation. Canonical `Result`, `mapBoth`, `map`, `mapError`,
 whole-channel `catch`, `retry`, `provide`, and `provideWith` are navigable `.silk` source with no
 combinator-name branches in HIR, MIR, the evaluator, LLVM, or direct Wasm.
 
-The next bounded step is evidence, not an optimizer commitment: compare source-defined synchronous
-pipelines with matched imperative/Result programs across MIR, optimized native output, and direct
-Wasm, then decide whether backend optimization is sufficient or a separately proposed compiler
-normalization is justified.
+The synchronous cost spike is complete. Clang `-O2` reduces every measured native entry—including
+stored, failing, generic-provider, trapping, and allocation-backed affine pipelines—to the same
+entry control shape as its imperative baseline. Direct Wasm retains source-combinator calls and
+substantially larger modules. The next bounded change is therefore a separately proposed shared MIR
+normalization with static runner, non-escape, synchronous, failure, requirement, trap, ownership,
+and cleanup guards; it is not a pipe rewrite or a suspension ABI.
 
 ### Add typed scalar constants from repeated program evidence
 
@@ -294,6 +296,11 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   `@silk-effect/compiler`?
 
 ## Changelog
+
+- 2026-08-10: Completed the synchronous Effect cost spike. Pipe spelling is absent by HIR/MIR,
+  Clang removes composition from every measured native entry, and direct Wasm retains avoidable
+  calls and code size. Selected a guarded shared MIR normalization as a separate follow-up; no
+  scheduler, fiber, continuation runtime, or suspension ABI was introduced.
 
 - 2026-08-10: Replaced privileged Effect combinator recipes with visible source-defined `Result`
   and Effect modules. Added erased channel-row generics, ordinary higher-order Effect values,
