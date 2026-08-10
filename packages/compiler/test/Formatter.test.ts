@@ -6,8 +6,10 @@ import * as Result from 'effect/Result'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Formatter from '../src/Formatter.js'
 import * as Lexer from '../src/Lexer.js'
+import * as LiteralForm from '../src/LiteralForm.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as StaticText from '../src/StaticText.js'
 import type * as SyntaxFile from '../src/SyntaxFile.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 
@@ -55,6 +57,17 @@ const comments = (syntax: SyntaxFile.SyntaxFile): ReadonlyArray<string> =>
         token.kind === 'ModuleDocComment',
     )
     .map((token) => decoder.decode(Option.getOrThrow(SourceFile.slice(syntax.source, token.span))))
+
+const staticValues = (syntax: SyntaxFile.SyntaxFile): ReadonlyArray<ReadonlyArray<number>> =>
+  syntax.tokens.flatMap((token) => {
+    if (token.kind !== 'TextLiteral' && token.kind !== 'ByteStringLiteral') return []
+    const spelling = Option.getOrThrow(SourceFile.slice(syntax.source, token.span))
+    const form = LiteralForm.recognize(spelling)
+    if (form === undefined) throw new Error('literal token has no recognized form')
+    const result = StaticText.decode(Array.from(spelling), form)
+    if (result._tag === 'Invalid') throw new Error(result.detail)
+    return [result.data.bytes]
+  })
 
 const nodeKinds = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.NodeKind> => [
   node.kind,
@@ -620,6 +633,42 @@ pub fn inspect(event: Token) -> i32 {
 
     assert.strictEqual(formattedText(first), expected)
     const second = yield* Formatter.format(parse('memory://match-format.silk', expected))
+    assert.deepEqual(second.bytes, first.bytes)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
+it.effect('preserves multiline literal bodies while normalizing surrounding source and CRLF', () =>
+  Effect.gen(function* () {
+    const source = `pub fn main()->i32{
+let value="""\r\n  first  \r\n second\n"""
+let bytes=b"""left\n    right"""
+let indexed="""x\ny"""[0]
+return 0
+}`
+    const original = parse('memory://multiline-format.silk', source)
+    assert.deepEqual(original.lexicalDiagnostics, [])
+    assert.deepEqual(original.parserDiagnostics, [])
+    const first = yield* Formatter.format(original)
+    const trailingSpaces = '  '
+    const expected = `pub fn main() -> i32 {
+  let value = """
+  first${trailingSpaces}
+ second
+"""
+  let bytes = b"""left
+    right"""
+  let indexed = """x
+y"""[0]
+  return 0
+}
+`
+    assert.strictEqual(formattedText(first), expected)
+    const reparsed = parse('memory://multiline-format.silk', expected)
+    assert.deepEqual(reparsed.lexicalDiagnostics, [])
+    assert.deepEqual(reparsed.parserDiagnostics, [])
+    assert.deepEqual(staticValues(reparsed), staticValues(original))
+    const second = yield* Formatter.format(reparsed)
     assert.deepEqual(second.bytes, first.bytes)
     assert.strictEqual(second.changed, false)
   }),

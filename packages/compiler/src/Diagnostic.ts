@@ -16,6 +16,12 @@ const phaseRank: Readonly<Record<Phase, number>> = Object.freeze({
 /** Stable diagnostic code for a maximal unsupported byte region. */
 export const unsupportedBytesCode = 'LEX0001' as const
 
+/** Stable code for an identifier-like modifier outside the closed literal vocabulary. */
+export const unknownLiteralModifierCode = 'LEX0002' as const
+
+/** Stable code for a literal whose matching closing delimiter is absent. */
+export const unterminatedStaticLiteralCode = 'LEX0003' as const
+
 /** Stable code for one required token that is absent at its insertion position. */
 export const missingTokenCode = 'PAR0001' as const
 
@@ -183,6 +189,8 @@ export const usizeTargetOutOfRangeCode = 'LAY0001' as const
 /** Every stable diagnostic code any phase can produce. */
 export type Code =
   | typeof unsupportedBytesCode
+  | typeof unknownLiteralModifierCode
+  | typeof unterminatedStaticLiteralCode
   | typeof missingTokenCode
   | typeof unexpectedTokensCode
   | typeof reservedTemplateSyntaxCode
@@ -312,6 +320,12 @@ export type ParserContext = 'syntax' | 'statement' | 'expression' | 'parameter' 
 /** Structured per-code data explaining why the originating phase diagnosed. */
 export type Reason =
   | { readonly _tag: 'UnsupportedBytes' }
+  | { readonly _tag: 'UnknownLiteralModifier'; readonly modifier: string }
+  | {
+      readonly _tag: 'UnterminatedStaticLiteral'
+      readonly modifier: string
+      readonly delimiterWidth: 1 | 3
+    }
   | { readonly _tag: 'MissingToken'; readonly expected: Token.TokenKind }
   | {
       readonly _tag: 'UnexpectedTokens'
@@ -726,6 +740,34 @@ export const unsupportedBytes = (span: SourceSpan.SourceSpan): Diagnostic =>
     severity: 'error',
     message: 'Unsupported byte sequence',
     reason: Object.freeze({ _tag: 'UnsupportedBytes' }),
+    span,
+  })
+
+/** Creates the lexical diagnostic for one reserved but unrecognized literal modifier. */
+export const unknownLiteralModifier = (modifier: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'lexical',
+    code: unknownLiteralModifierCode,
+    severity: 'error',
+    message: `Unknown static-literal modifier: ${modifier}`,
+    reason: Object.freeze({ _tag: 'UnknownLiteralModifier', modifier }),
+    span,
+  })
+
+/** Creates the lexical diagnostic for one deterministic unterminated-literal recovery range. */
+export const unterminatedStaticLiteral = (
+  modifier: string,
+  delimiterWidth: 1 | 3,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'lexical',
+    code: unterminatedStaticLiteralCode,
+    severity: 'error',
+    message: `Unterminated ${delimiterWidth === 3 ? 'multiline ' : ''}static literal`,
+    reason: Object.freeze({ _tag: 'UnterminatedStaticLiteral', modifier, delimiterWidth }),
     span,
   })
 

@@ -87,6 +87,33 @@ it('describes reserved template syntax with a stable parser diagnostic', () => {
   )
 })
 
+it('publishes stable lexical identities for modifier and delimiter failures', () => {
+  const span = spanAt(8, 24)
+  const diagnostics = [
+    Diagnostic.unknownLiteralModifier('future', span),
+    Diagnostic.unterminatedStaticLiteral('b', 3, span),
+  ]
+  assert.deepEqual(
+    diagnostics.map(({ phase, code, reason }) => ({ phase, code, reason })),
+    [
+      {
+        phase: 'lexical',
+        code: 'LEX0002',
+        reason: { _tag: 'UnknownLiteralModifier', modifier: 'future' },
+      },
+      {
+        phase: 'lexical',
+        code: 'LEX0003',
+        reason: { _tag: 'UnterminatedStaticLiteral', modifier: 'b', delimiterWidth: 3 },
+      },
+    ],
+  )
+  assert.deepEqual(
+    Diagnostic.merge(diagnostics).map((diagnostic) => diagnostic.code),
+    ['LEX0002', 'LEX0003'],
+  )
+})
+
 it('describes missing tokens with source-language spelling', () => {
   const keyword = Diagnostic.missingToken('ReturnKeyword', spanAt(4, 4))
   const punctuation = Diagnostic.missingToken('Equals', spanAt(8, 8))

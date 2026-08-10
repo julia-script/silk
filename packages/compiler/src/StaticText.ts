@@ -1,3 +1,5 @@
+import type * as LiteralForm from './LiteralForm.js'
+
 /** Compiler-owned immutable data decoded from one static text or byte-string literal. */
 export interface Data {
   readonly _tag: 'StaticData'
@@ -40,16 +42,35 @@ const utf8 = (scalar: number): ReadonlyArray<number> =>
   Object.freeze(Array.from(new TextEncoder().encode(String.fromCodePoint(scalar))))
 
 /** Decodes a complete literal token once, preserving exact bytes for all later phases. */
-export const decode = (token: ReadonlyArray<number>, byteString: boolean): DecodeResult => {
-  const contentStart = byteString ? 2 : 1
-  if (token.at(contentStart - 1) !== 0x22 || token.at(-1) !== 0x22)
+export const decode = (
+  token: ReadonlyArray<number>,
+  form: LiteralForm.LiteralForm,
+): DecodeResult => {
+  const contentStart = form.modifier.length + form.delimiterWidth
+  const end = token.length - form.delimiterWidth
+  const openingIsValid = Array.from(
+    { length: form.delimiterWidth },
+    (_, index) => token[form.modifier.length + index] === 0x22,
+  ).every(Boolean)
+  const closingIsValid = Array.from(
+    { length: form.delimiterWidth },
+    (_, index) => token[end + index] === 0x22,
+  ).every(Boolean)
+  if (!openingIsValid || !closingIsValid || end < contentStart)
     return invalid('unterminated literal', Math.max(0, token.length - 1))
+  const byteString = form.category === 'Bytes'
   const output: Array<number> = []
   let index = contentStart
-  const end = token.length - 1
   while (index < end) {
     const byte = token[index]
     if (byte !== 0x5c) {
+      if (form.delimiterWidth === 3 && byte === 0x0d) {
+        if (token[index + 1] !== 0x0a)
+          return invalid('isolated carriage return in multiline literal', index)
+        output.push(0x0a)
+        index += 2
+        continue
+      }
       if (byte !== undefined) output.push(byte)
       index += 1
       continue
@@ -57,6 +78,8 @@ export const decode = (token: ReadonlyArray<number>, byteString: boolean): Decod
     const escapeOffset = index
     index += 1
     const escaped = token[index]
+    if (escaped === 0x0a || escaped === 0x0d)
+      return invalid('backslash cannot continue a physical line', escapeOffset)
     index += 1
     if (escaped === 0x6e) output.push(0x0a)
     else if (escaped === 0x72) output.push(0x0d)

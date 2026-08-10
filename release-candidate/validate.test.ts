@@ -265,6 +265,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Intrinsic',
       './Layout',
       './Lexer',
+      './LiteralForm',
       './Lower',
       './Mir',
       './ModuleClosure',
@@ -667,6 +668,7 @@ console.log(
       'Intrinsic',
       'Layout',
       'Lexer',
+      'LiteralForm',
       'Lower',
       'Match',
       'Mir',
@@ -711,6 +713,7 @@ console.log(
         expect(api.rootNamespaces[path]).toEqual(exports)
     }
     expect(api.deep['./Lexer']).toContain('lex')
+    expect(api.deep['./LiteralForm']).toContain('forms')
     expect(api.deep['./BootstrapEvaluation']).toContain('evaluate')
     expect(api.deep['./Parser']).toContain('parse')
     expect(api.deep['./Elaboration']).toContain('elaborateModule')

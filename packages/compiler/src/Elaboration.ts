@@ -5,6 +5,7 @@ import * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
+import * as LiteralForm from './LiteralForm.js'
 import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
 import * as Operator from './Operator.js'
@@ -5137,10 +5138,11 @@ function analyzeExpression(
     const token = directToken(node, 'TextLiteral') ?? directToken(node, 'ByteStringLiteral')
     const bytes =
       token === undefined ? undefined : Option.getOrUndefined(SourceFile.slice(source, token.span))
+    const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
     const result =
-      bytes === undefined
+      bytes === undefined || form === undefined
         ? undefined
-        : StaticText.decode(Array.from(bytes), token?.kind === 'ByteStringLiteral')
+        : StaticText.decode(Array.from(bytes), form)
     const diagnostic =
       result?._tag === 'Invalid'
         ? Diagnostic.invalidStaticLiteral(result.detail, node.span)

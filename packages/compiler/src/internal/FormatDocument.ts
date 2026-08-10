@@ -2,6 +2,7 @@
 export type Document =
   | { readonly _tag: 'Empty' }
   | { readonly _tag: 'Text'; readonly bytes: ReadonlyArray<number> }
+  | { readonly _tag: 'VerbatimMultiline'; readonly bytes: ReadonlyArray<number> }
   | { readonly _tag: 'HardLine' }
   | { readonly _tag: 'SoftLine' }
   | { readonly _tag: 'Concat'; readonly documents: ReadonlyArray<Document> }
@@ -23,6 +24,12 @@ const bytesOf = (value: TextValue): ReadonlyArray<number> =>
 export const text = (value: TextValue): Document => {
   const bytes = bytesOf(value)
   return bytes.length === 0 ? empty : Object.freeze({ _tag: 'Text', bytes })
+}
+
+/** Protected token content that may contain physical line endings and semantic whitespace. */
+export const verbatimMultiline = (value: TextValue): Document => {
+  const bytes = bytesOf(value)
+  return bytes.length === 0 ? empty : Object.freeze({ _tag: 'VerbatimMultiline', bytes })
 }
 
 export const concat = (...documents: ReadonlyArray<Document>): Document => {
@@ -76,6 +83,16 @@ const fits = (remainingWidth: number, initial: ReadonlyArray<Command>): boolean 
       case 'Text':
         remaining -= document.bytes.length
         break
+      case 'VerbatimMultiline': {
+        let width = 0
+        for (let index = 0; index < document.bytes.length; index += 1) {
+          const byte = document.bytes[index]
+          if (byte === 0x0a || (byte === 0x0d && document.bytes[index + 1] === 0x0a)) return false
+          width += 1
+        }
+        remaining -= width
+        break
+      }
       case 'HardLine':
         return false
       case 'SoftLine':
@@ -131,6 +148,22 @@ export const render = (document: Document, width = 100): Uint8Array => {
       case 'Text':
         output.push(...current.bytes)
         column += current.bytes.length
+        break
+      case 'VerbatimMultiline':
+        for (let index = 0; index < current.bytes.length; index += 1) {
+          const byte = current.bytes[index]
+          if (byte === 0x0d && current.bytes[index + 1] === 0x0a) {
+            output.push(0x0a)
+            column = 0
+            index += 1
+          } else if (byte === 0x0a) {
+            output.push(byte)
+            column = 0
+          } else if (byte !== undefined) {
+            output.push(byte)
+            column += 1
+          }
+        }
         break
       case 'HardLine':
         trimHorizontalWhitespace(output)

@@ -1,5 +1,6 @@
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
+import * as LiteralForm from './LiteralForm.js'
 import type * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Token from './Token.js'
@@ -30,7 +31,7 @@ const isLineCommentStart = (bytes: ReadonlyArray<number>, index: number): boolea
   bytes[index] === 0x2f && bytes[index + 1] === 0x2f
 
 const isLiteralStart = (bytes: ReadonlyArray<number>, index: number): boolean =>
-  bytes[index] === 0x22 || (bytes[index] === 0x62 && bytes[index + 1] === 0x22)
+  LiteralForm.recognize(bytes, index) !== undefined
 
 const isPunctuation = (byte: number | undefined): boolean =>
   byte === 0x28 ||
@@ -281,18 +282,31 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
       continue
     }
 
-    if (isLiteralStart(bytes, index)) {
-      const byteString = byte === 0x62
-      index += byteString ? 2 : 1
-      while (index < bytes.length && bytes[index] !== 0x0a && bytes[index] !== 0x0d) {
-        if (bytes[index] === 0x22) {
-          index += 1
-          break
-        }
-        if (bytes[index] === 0x5c && index + 1 < bytes.length) index += 2
-        else index += 1
+    const form = LiteralForm.recognize(bytes, index)
+    const unknown = form === undefined ? LiteralForm.recognizeUnknown(bytes, index) : undefined
+    if (form !== undefined || unknown !== undefined) {
+      const modifierWidth = form?.modifier.length ?? unknown?.modifierWidth ?? 0
+      const delimiterWidth = form?.delimiterWidth ?? unknown?.delimiterWidth ?? 1
+      const boundary = LiteralForm.scanBoundary(
+        bytes,
+        start + modifierWidth + delimiterWidth,
+        delimiterWidth,
+      )
+      index = boundary.end
+      const span = pushToken(
+        form !== undefined && boundary.terminated
+          ? LiteralForm.tokenKind(form)
+          : 'InvalidStaticLiteral',
+        start,
+        index,
+      )
+      if (unknown !== undefined) {
+        diagnostics.push(Diagnostic.unknownLiteralModifier(unknown.modifier, span))
+      } else if (!boundary.terminated && form !== undefined) {
+        diagnostics.push(
+          Diagnostic.unterminatedStaticLiteral(form.modifier, form.delimiterWidth, span),
+        )
       }
-      pushToken(byteString ? 'ByteStringLiteral' : 'TextLiteral', start, index)
       continue
     }
 

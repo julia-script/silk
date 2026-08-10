@@ -8,6 +8,7 @@ const asciiLineFeed: u8 = 10
 const asciiCarriageReturn: u8 = 13
 const tokenIdentifier: u8 = 4
 const tokenConst: u8 = 67
+const tokenInvalidStaticLiteral: u8 = 68
 
 struct Token {
   kind: u8
@@ -80,6 +81,12 @@ fn isLineCommentStart(source: &[u8], index: usize) -> bool {
 fn isLiteralStart(source: &[u8], index: usize) -> bool {
   if byteAtOrZero(source, index) == 34 { return true }
   return hasPair(source, index, 98, 34)
+}
+
+fn hasTripleQuote(source: &[u8], index: usize) -> bool {
+  if byteAtOrZero(source, index) != 34 { return false }
+  if byteAtOrZero(source, index + 1) != 34 { return false }
+  return byteAtOrZero(source, index + 2) == 34
 }
 
 fn isPunctuation(byte: u8) -> bool {
@@ -237,21 +244,49 @@ fn commentKind(source: &[u8], start: usize) -> u8 {
   return 1
 }
 
-fn scanLiteral(source: &[u8], start: usize) -> usize {
-  let mut index = start + 1
-  if byteAtOrZero(source, start) == 98 { index = start + 2 }
+fn scanLiteral(
+  source: &[u8],
+  start: usize,
+  modifierWidth: usize,
+  delimiterWidth: usize,
+  kind: u8,
+  alwaysInvalid: bool
+) -> Decision {
+  let mut index = start + modifierWidth + delimiterWidth
   while index < source.length {
     let byte = source[index]
-    if byte == 10 { return index }
-    if byte == 13 { return index }
-    if byte == 34 { return index + 1 }
+    if delimiterWidth == 1 {
+      if byte == 10 { return Decision { kind: tokenInvalidStaticLiteral, end: index, invalid: true } }
+      if byte == 13 { return Decision { kind: tokenInvalidStaticLiteral, end: index, invalid: true } }
+    }
+    if byte == 34 {
+      if delimiterWidth == 1 {
+        if alwaysInvalid {
+          return Decision { kind: tokenInvalidStaticLiteral, end: index + 1, invalid: true }
+        }
+        return Decision { kind: kind, end: index + 1, invalid: false }
+      }
+      if hasTripleQuote(source, index) {
+        if alwaysInvalid {
+          return Decision { kind: tokenInvalidStaticLiteral, end: index + 3, invalid: true }
+        }
+        return Decision { kind: kind, end: index + 3, invalid: false }
+      }
+    }
     if byte == 92 {
-      if index + 1 < source.length { index = index + 2 } else { index = index + 1 }
+      if index + 1 < source.length {
+        let escaped = source[index + 1]
+        if delimiterWidth == 1 {
+          if escaped == 10 { index = index + 1 } else {
+            if escaped == 13 { index = index + 1 } else { index = index + 2 }
+          }
+        } else { index = index + 2 }
+      } else { index = index + 1 }
     } else {
       index = index + 1
     }
   }
-  return index
+  return Decision { kind: tokenInvalidStaticLiteral, end: index, invalid: true }
 }
 
 fn scanIdentifier(source: &[u8], start: usize) -> usize {
@@ -320,11 +355,30 @@ fn nextToken(source: &[u8], start: usize) -> Decision {
   }
   if isLiteralStart(source, start) {
     let mut kind = u8.add(7, 0)
-    if byte == 98 { kind = u8.add(8, 0) }
-    return Decision { kind: kind, end: scanLiteral(source, start), invalid: false }
+    let mut modifierWidth = usize.add(0, 0)
+    if byte == 98 {
+      kind = u8.add(8, 0)
+      modifierWidth = usize.add(1, 0)
+    }
+    let quoteStart = start + modifierWidth
+    let mut delimiterWidth = usize.add(1, 0)
+    if hasTripleQuote(source, quoteStart) { delimiterWidth = usize.add(3, 0) }
+    return scanLiteral(source, start, modifierWidth, delimiterWidth, kind, false)
   }
   if isIdentifierStart(byte) {
     let end = scanIdentifier(source, start)
+    if byteAtOrZero(source, end) == 34 {
+      let mut delimiterWidth = usize.add(1, 0)
+      if hasTripleQuote(source, end) { delimiterWidth = usize.add(3, 0) }
+      return scanLiteral(
+        source,
+        start,
+        end - start,
+        delimiterWidth,
+        tokenInvalidStaticLiteral,
+        true
+      )
+    }
     return Decision { kind: keywordKind(source, start, end), end: end, invalid: false }
   }
   if isDecimalDigit(byte) { return scanNumber(source, start) }

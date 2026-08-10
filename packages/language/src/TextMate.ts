@@ -1,3 +1,4 @@
+import * as LiteralForm from '@silk-effect/compiler/LiteralForm'
 import type * as Token from '@silk-effect/compiler/Token'
 
 /** Every keyword token kind the compiler defines. */
@@ -79,6 +80,35 @@ export interface Grammar {
   readonly patterns: ReadonlyArray<GrammarPattern>
 }
 
+const literalPatterns: ReadonlyArray<GrammarPattern> = LiteralForm.forms.map((form) => {
+  const delimiter = '"'.repeat(form.delimiterWidth)
+  const byte = form.category === 'Bytes'
+  const width = form.delimiterWidth === 3 ? 'triple' : 'double'
+  const begin = form.modifier.length === 0 ? `(${delimiter})` : `(${form.modifier})(${delimiter})`
+  const delimiterCapture = form.modifier.length === 0 ? '1' : '2'
+  return {
+    name: `string.quoted.${width}${byte ? '.byte' : ''}.silk`,
+    begin,
+    end:
+      form.delimiterWidth === 3
+        ? `(?<!\\\\)(?:\\\\\\\\)*(${delimiter})`
+        : '(?<!\\\\)(?:\\\\\\\\)*(")|$',
+    beginCaptures: {
+      ...(form.modifier.length === 0 ? {} : { '1': { name: 'storage.modifier.byte.silk' } }),
+      [delimiterCapture]: { name: 'punctuation.definition.string.begin.silk' },
+    },
+    endCaptures: {
+      '1': { name: 'punctuation.definition.string.end.silk' },
+    },
+    patterns: [
+      {
+        name: 'constant.character.escape.silk',
+        match: '\\\\(?:[nrt0"\\\\]|x[0-9A-Fa-f]{2}|u\\{[0-9A-Fa-f]{1,6}\\})',
+      },
+    ],
+  }
+})
+
 /**
  * The Silk TextMate grammar. Keyword alternations are built from `keywords`, so the grammar cannot
  * drift from the compiler without failing the typecheck. `name` doubles as the Shiki language id.
@@ -88,6 +118,7 @@ export const grammar: Grammar = {
   scopeName: 'source.silk',
   fileTypes: ['silk'],
   patterns: [
+    ...literalPatterns,
     {
       name: 'comment.block.documentation.silk',
       begin: '^\\s*(///)\\s*(```)(silk)\\s*$',

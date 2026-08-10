@@ -4,6 +4,7 @@ import * as Option from 'effect/Option'
 import type * as Diagnostic from './Diagnostic.js'
 import * as FormattedDocument from './FormattedDocument.js'
 import * as FormatDocument from './internal/FormatDocument.js'
+import * as LiteralForm from './LiteralForm.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
@@ -140,11 +141,19 @@ const printToken = (
   token: Token.Token,
   prefix: FormatDocument.Document = FormatDocument.empty,
   preserveBlank = false,
-): FormatDocument.Document =>
-  FormatDocument.concat(
+): FormatDocument.Document => {
+  const spelling = bytes(context, token)
+  const form =
+    token.kind === 'TextLiteral' || token.kind === 'ByteStringLiteral'
+      ? LiteralForm.recognize(spelling)
+      : undefined
+  return FormatDocument.concat(
     commentLeading(context, token, prefix, preserveBlank),
-    FormatDocument.text(bytes(context, token)),
+    form?.delimiterWidth === 3
+      ? FormatDocument.verbatimMultiline(spelling)
+      : FormatDocument.text(spelling),
   )
+}
 
 const directTokens = (node: SyntaxTree.Node): ReadonlyArray<Token.Token> =>
   node.children.filter(

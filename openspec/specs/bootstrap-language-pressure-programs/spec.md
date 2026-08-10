@@ -29,8 +29,10 @@ lexer-specific or token-specific operations, layouts, or branches.
 
 The Silk lexer SHALL be differentially checked against the TypeScript lexer, which remains the
 canonical implementation. The corpus SHALL cover whitespace, comments, identifiers, every current
-keyword, decimal integer and float forms, text and byte-string literals with escapes, every current
-single and compound punctuation token, end of file, and unsupported byte runs.
+keyword, decimal integer and float forms, single-line and multiline text and byte literals with
+valid and malformed escapes, recognized and unknown literal modifiers, physical LF and CRLF,
+terminated and unterminated delimiters, every current single and compound punctuation token,
+end-of-file, and unsupported byte runs.
 
 #### Scenario: Valid source agrees token by token
 
@@ -39,8 +41,13 @@ single and compound punctuation token, end of file, and unsupported byte runs.
 
 #### Scenario: Invalid source agrees on diagnostics
 
-- **WHEN** source contains one or more unsupported byte runs
-- **THEN** both implementations produce identical invalid-token spans and lexical-diagnostic spans while continuing with later supported tokens
+- **WHEN** source contains unsupported byte runs, unknown literal modifiers, or unterminated literal delimiters
+- **THEN** both implementations produce identical token spans and lexical diagnostic identities and spans while applying the committed recovery boundary
+
+#### Scenario: Multiline literal forms agree
+
+- **WHEN** the differential corpus exercises escaped `"""` and `b"""` literals containing quotes, LF, CRLF, indentation, code-like content, and pipeline punctuation
+- **THEN** both lexers agree on literal category, complete token boundaries, exact source spans, and following tokens
 
 ### Requirement: Execution and ownership evidence is cross-engine and deterministic
 

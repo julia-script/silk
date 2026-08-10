@@ -89,6 +89,7 @@ const tokenKinds = [
   'Invalid',
   'EndOfFile',
   'ConstKeyword',
+  'InvalidStaticLiteral',
 ] as const satisfies ReadonlyArray<Token.TokenKind>
 
 const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
@@ -160,6 +161,7 @@ const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
   Invalid: 65,
   EndOfFile: 66,
   ConstKeyword: 67,
+  InvalidStaticLiteral: 68,
 })
 
 interface ExpectedToken {
@@ -257,7 +259,11 @@ const corpus = [
       'pub struct effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false const name _x2',
   }),
   Object.freeze({ id: 'numbers', input: '0 42 1.25 2e3 3E+4 4e- 5..6' }),
-  Object.freeze({ id: 'literals', input: '"text\\"tail" b"\\x41" "unterminated\nnext' }),
+  Object.freeze({
+    id: 'literals',
+    input:
+      '"text\\"tail" b"\\x41" """line 1\r\n// body\n\\"\\"\\"""" b"""bytes\n""" future"value" "unterminated\nnext',
+  }),
   Object.freeze({
     id: 'punctuation',
     input: '( ) { } [ ] : ; , = == => - + * / % ! != ? @ < <= > >= | |> & . .. ->',
@@ -356,7 +362,7 @@ it.effect('publishes only general MIR operations for the pressure program', () =
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-lexer-pressure-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
-for (const representative of [corpus[1], corpus[5]]) {
+for (const representative of [corpus[1], corpus[3], corpus[5]]) {
   it.effect(
     `keeps ${representative.id} evaluation, native, and Wasm execution in parity`,
     () =>
@@ -413,7 +419,7 @@ it.effect(
   'rolls back every token and diagnostic allocation failure on all three engines',
   () =>
     Effect.gen(function* () {
-      const representative = corpus[5]
+      const representative = corpus[3]
       const baseline = sourceFor(representative.input, 'lexer-pressure/quota/baseline')
       const baselineSnapshot = yield* Analysis.ofSourceRealized(
         'lexer-pressure/quota/baseline',

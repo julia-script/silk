@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Lexer from '../src/Lexer.js'
+import * as LiteralForm from '../src/LiteralForm.js'
 import * as Mir from '../src/Mir.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -11,14 +12,22 @@ import * as SyntaxTree from '../src/SyntaxTree.js'
 const encoder = new TextEncoder()
 
 const source = `pub fn main() -> i32 {
-  let text = "hé\\n"
-  let bytes = b"life\\n"
+  let text = """hé
+"""
+  let bytes = b"""life
+"""
   let repeated = "hé\\n"
   if text.length != 4 { return 0 }
   if bytes.length != 5 { return 1 }
   if repeated.length != text.length { return 2 }
   return 42
 }`
+
+const formOf = (value: string): LiteralForm.LiteralForm => {
+  const form = LiteralForm.recognize(encoder.encode(value))
+  if (form === undefined) throw new Error(`expected a recognized literal form: ${value}`)
+  return form
+}
 
 it('lexes and parses literal spelling losslessly', () => {
   const file = SourceFile.make('static/lossless', encoder.encode('"hé\\n" b"life\\x0a"'))
@@ -49,27 +58,83 @@ it('lexes and parses literal spelling losslessly', () => {
 })
 
 it('decodes UTF-8 and exact bytes atomically', () => {
-  const text = StaticText.decode(Array.from(encoder.encode('"hé\\n\\u{1f642}"')), false)
+  const textSpelling = '"hé\\n\\u{1f642}"'
+  const text = StaticText.decode(Array.from(encoder.encode(textSpelling)), formOf(textSpelling))
   assert.strictEqual(text._tag, 'Decoded')
   if (text._tag === 'Decoded') {
     assert.deepEqual(text.data.bytes, Array.from(encoder.encode('hé\n🙂')))
     assert.strictEqual(text.data.utf8, true)
   }
-  assert.deepEqual(StaticText.decode(Array.from(encoder.encode('b"\\x00\\xff"')), true), {
-    _tag: 'Decoded',
-    data: {
-      _tag: 'StaticData',
-      id: 'bytes:00ff',
-      kind: 'Bytes',
-      bytes: [0, 255],
-      utf8: false,
+  const byteSpelling = 'b"\\x00\\xff"'
+  assert.deepEqual(
+    StaticText.decode(Array.from(encoder.encode(byteSpelling)), formOf(byteSpelling)),
+    {
+      _tag: 'Decoded',
+      data: {
+        _tag: 'StaticData',
+        id: 'bytes:00ff',
+        kind: 'Bytes',
+        bytes: [0, 255],
+        utf8: false,
+      },
     },
-  })
+  )
   assert.strictEqual(
-    StaticText.decode(Array.from(encoder.encode('b"\\u{100}"')), true)._tag,
+    StaticText.decode(Array.from(encoder.encode('b"\\u{100}"')), formOf('b"\\u{100}"'))._tag,
     'Invalid',
   )
-  assert.strictEqual(StaticText.decode(Array.from(encoder.encode('"\\q"')), false)._tag, 'Invalid')
+  assert.strictEqual(
+    StaticText.decode(Array.from(encoder.encode('"\\q"')), formOf('"\\q"'))._tag,
+    'Invalid',
+  )
+})
+
+it('decodes multiline content exactly without dedenting and normalizes only physical CRLF', () => {
+  const spelling = '"""\r\n  first  \r\n second\n"""'
+  const decoded = StaticText.decode(Array.from(encoder.encode(spelling)), formOf(spelling))
+  assert.strictEqual(decoded._tag, 'Decoded')
+  if (decoded._tag === 'Decoded') {
+    assert.deepEqual(decoded.data.bytes, Array.from(encoder.encode('\n  first  \n second\n')))
+  }
+
+  const explicit = 'b"""\\r\\n"""'
+  const explicitDecoded = StaticText.decode(Array.from(encoder.encode(explicit)), formOf(explicit))
+  assert.strictEqual(explicitDecoded._tag, 'Decoded')
+  if (explicitDecoded._tag === 'Decoded') assert.deepEqual(explicitDecoded.data.bytes, [13, 10])
+
+  const continuation = '"""before\\\nafter"""'
+  assert.strictEqual(
+    StaticText.decode(Array.from(encoder.encode(continuation)), formOf(continuation))._tag,
+    'Invalid',
+  )
+})
+
+it('parses all four literal forms as pipeline operands', () => {
+  const parsed = Parser.parse(
+    Lexer.lex(
+      SourceFile.make(
+        'static/pipelines',
+        encoder.encode(`pub fn main() -> i32 {
+  let a = "abc" |> String.uppercase
+  let b = b"abc" |> String.uppercase
+  let c = """abc""" |> String.uppercase
+  let d = b"""abc""" |> String.uppercase
+  return 0
+}`),
+      ),
+    ),
+  )
+  const nodes = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
+    Object.freeze([
+      node,
+      ...node.children.flatMap((child) => (SyntaxTree.isNode(child) ? nodes(child) : [])),
+    ])
+  assert.strictEqual(
+    nodes(parsed.root).filter((node) => node.kind === 'PipelineExpression').length,
+    4,
+  )
+  assert.deepEqual(parsed.lexicalDiagnostics, [])
+  assert.deepEqual(parsed.parserDiagnostics, [])
 })
 
 it.effect('recovers malformed escapes before the following declaration', () =>
@@ -84,6 +149,23 @@ pub fn main() -> i32 { return 42 }`),
       ['SEM0085'],
     )
     assert.strictEqual(Analysis.hirOf(snapshot, 'static/recovery')?.functions.length, 2)
+  }),
+)
+
+it.effect('keeps lexical literal sentinels out of parser and semantic diagnostic cascades', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'static/lexical-sentinel',
+      encoder.encode(`pub fn main() -> i32 {
+  let bad = future"value"
+  return 42
+}`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['LEX0002'],
+    )
+    assert.strictEqual(Analysis.hirOf(snapshot, 'static/lexical-sentinel')?.functions.length, 1)
   }),
 )
 

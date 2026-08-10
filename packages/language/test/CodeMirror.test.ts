@@ -46,6 +46,22 @@ it('marks invalid bytes', () => {
   assert.deepStrictEqual(spellings('let ^', 'invalid'), ['^'])
 })
 
+it('highlights every single-line and multiline literal from compiler token ranges', () => {
+  const doc = '"one" b"two" """line é\n// still text\n""" b"""bytes\n""" tail'
+  assert.deepStrictEqual(spellings(doc, 'string'), [
+    '"one"',
+    'b"two"',
+    '"""line é\n// still text\n"""',
+    'b"""bytes\n"""',
+  ])
+  assert.include(spellings(doc, 'identifier'), 'tail')
+})
+
+it('marks reserved and unterminated literal introductions as invalid ranges', () => {
+  assert.deepStrictEqual(spellings('future"value"', 'invalid'), ['future"value"'])
+  assert.deepStrictEqual(spellings('"""unterminated\nbody', 'invalid'), ['"""unterminated\nbody'])
+})
+
 it('booleans are their own category', () => {
   assert.deepStrictEqual(spellings('let ok = true', 'boolean'), ['true'])
 })

@@ -67,6 +67,88 @@ it('recognizes keywords only as complete identifiers', () => {
   )
 })
 
+it('recognizes all static-literal forms with exact multiline boundaries', () => {
+  const text = '"one" b"two" """line 1\r\n// still text\nline 3""" b"""a \\"b\\" c""" tail'
+  const source = SourceFile.make('memory://literal-forms.silk', ascii(text))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'TextLiteral', start: 0, end: 5, slice: '"one"' },
+      { kind: 'ByteStringLiteral', start: 6, end: 12, slice: 'b"two"' },
+      {
+        kind: 'TextLiteral',
+        start: 13,
+        end: 47,
+        slice: '"""line 1\r\n// still text\nline 3"""',
+      },
+      { kind: 'ByteStringLiteral', start: 48, end: 64, slice: 'b"""a \\"b\\" c"""' },
+      { kind: 'Identifier', start: 65, end: 69, slice: 'tail' },
+      { kind: 'EndOfFile', start: 69, end: 69, slice: '' },
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('diagnoses reserved modifiers and unterminated delimiters once with committed recovery', () => {
+  const unknown = Lexer.lex(
+    SourceFile.make('memory://unknown-modifiers.silk', ascii('future"value" br"""value"""')),
+  )
+  assert.deepEqual(
+    unknown.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['InvalidStaticLiteral', 'InvalidStaticLiteral', 'EndOfFile'],
+  )
+  assert.deepEqual(
+    unknown.diagnostics.map(({ code, reason }) => ({ code, reason })),
+    [
+      {
+        code: 'LEX0002',
+        reason: { _tag: 'UnknownLiteralModifier', modifier: 'future' },
+      },
+      { code: 'LEX0002', reason: { _tag: 'UnknownLiteralModifier', modifier: 'br' } },
+    ],
+  )
+
+  const single = Lexer.lex(
+    SourceFile.make('memory://unterminated-single.silk', ascii('"broken\r\nnext')),
+  )
+  assert.deepEqual(
+    single.tokens.map((token) => token.kind),
+    ['InvalidStaticLiteral', 'Whitespace', 'Identifier', 'EndOfFile'],
+  )
+  assert.deepEqual(
+    single.diagnostics.map((diagnostic) => diagnostic.code),
+    ['LEX0003'],
+  )
+  assert.deepEqual(
+    single.tokens.map((token) => [token.span.start, token.span.end]),
+    [
+      [0, 7],
+      [7, 9],
+      [9, 13],
+      [13, 13],
+    ],
+  )
+
+  const multiline = Lexer.lex(
+    SourceFile.make(
+      'memory://unterminated-multiline.silk',
+      ascii('"""code-like\nfn apparent() { return 1 }'),
+    ),
+  )
+  assert.deepEqual(
+    multiline.tokens.map((token) => token.kind),
+    ['InvalidStaticLiteral', 'EndOfFile'],
+  )
+  assert.deepEqual(
+    multiline.diagnostics.map((diagnostic) => diagnostic.code),
+    ['LEX0003'],
+  )
+  assert.strictEqual(multiline.tokens[0]?.span.end, multiline.source.bytes.length)
+})
+
 it('retains decimal fractions and exponent spellings as exact float tokens', () => {
   const source = SourceFile.make('memory://floats.silk', ascii('1.25e-3 2E+4 3.0 4'))
   const result = Lexer.lex(source)
