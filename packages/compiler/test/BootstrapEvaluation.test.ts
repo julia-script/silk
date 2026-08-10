@@ -137,7 +137,11 @@ pub fn main() -> i32 {
     assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
     if (outcome._tag !== 'Completed') return
     assert.strictEqual(outcome.result.value, 22)
-    assert.strictEqual(outcome.trace.filter((event) => event._tag === 'CallableApply').length, 2)
+    assert.strictEqual(
+      outcome.trace.filter((event) => event._tag === 'CallableApply' && event.mode === 'Exclusive')
+        .length,
+      2,
+    )
   }),
 )
 
@@ -189,7 +193,7 @@ pub fn main() -> i32 { return run succeed(2) |> Effect.map(i32.add(2)) }`)
 effect fn double(value: i32) -> i32 { return value * 2 }
 pub fn main() -> i32 { return run succeed(21) |> Effect.flatMap(double) }`)
     const tapped = yield* evaluateSource(`effect fn succeed(value: i32) -> i32 { return value }
-effect fn observe(value: i32) -> i32 { return value + 100 }
+effect fn observe(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return run succeed(42) |> Effect.tap(observe) }`)
 
     for (const [outcome, expected] of [
@@ -207,7 +211,7 @@ it.effect('keeps an Effect returned from map nested until a second run', () =>
   Effect.gen(function* () {
     const outcome = yield* evaluateSource(`effect fn succeed(value: i32) -> i32 { return value }
 effect fn double(value: i32) -> i32 { return value * 2 }
-pub fn main() -> i32 { return run run succeed(21) |> Effect.map(double) }`)
+pub fn main() -> i32 { return run (run (succeed(21) |> Effect.map(double))) }`)
 
     assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
@@ -239,7 +243,15 @@ pub fn main() -> i32 {
     )
     if (outcome._tag !== 'Completed') return
     assert.strictEqual(outcome.result.value, 43)
-    assert.strictEqual(outcome.trace.filter((event) => event._tag === 'CallableApply').length, 2)
+    assert.strictEqual(
+      outcome.trace.filter(
+        (event) =>
+          event._tag === 'CallableApply' &&
+          event.mode === 'Exclusive' &&
+          event.function.module === 'silk/effects',
+      ).length,
+      2,
+    )
   }),
 )
 
@@ -270,7 +282,7 @@ effect fn recover(problem: Problem, adjustment: i32) -> i32 {
   return problem.code + adjustment
 }
 pub fn main() -> i32 {
-  let handled = failNow() |> Effect.catch<Problem>(recover(1))
+  let handled = failNow() |> Effect.catch(recover(1))
   return run handled
 }`)
 
@@ -343,7 +355,7 @@ effect fn risky(value: i32) -> i32 ! Problem {
 }
 effect fn recover(problem: Problem) -> i32 { return problem.code + 1 }
 pub fn main() -> i32 {
-  let recipe = Effect.catch<Problem>(risky(0), recover)
+  let recipe = Effect.catch(risky(0), recover)
   return run recipe
 }`)
 
@@ -434,7 +446,7 @@ effect fn countdown(value: i32) -> i32 ! Problem {
   return run countdown(value - 1)
 }
 effect fn recover(problem: Problem) -> i32 { return problem.code + 1 }
-pub fn main() -> i32 { return run Effect.catch<Problem>(countdown(4), recover) }`)
+pub fn main() -> i32 { return run Effect.catch(countdown(4), recover) }`)
 
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return

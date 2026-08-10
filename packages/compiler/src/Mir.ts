@@ -461,7 +461,7 @@ export type Operation =
       readonly _tag: 'Call'
       readonly destination: LocalId
       readonly target: DeclarationIndex.CanonicalId
-      readonly typeArguments: ReadonlyArray<SilkType.Type>
+      readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly arguments: ReadonlyArray<LocalId>
       readonly type: Type
       readonly provenance: Provenance
@@ -470,7 +470,7 @@ export type Operation =
       readonly _tag: 'MakeEffect'
       readonly destination: LocalId
       readonly runner: DeclarationIndex.CanonicalId
-      readonly runnerTypeArguments: ReadonlyArray<SilkType.Type>
+      readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly captures: ReadonlyArray<{
         readonly source: LocalId
         readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
@@ -482,7 +482,7 @@ export type Operation =
       readonly _tag: 'MakeCallable'
       readonly destination: LocalId
       readonly target: Hir.CallableTarget
-      readonly typeArguments: ReadonlyArray<SilkType.Type>
+      readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly captures: ReadonlyArray<{
         readonly ordinal: number
         readonly parameterOrdinal: number
@@ -497,7 +497,7 @@ export type Operation =
       readonly destination: LocalId
       readonly callable?: LocalId
       readonly target?: Hir.CallableTarget
-      readonly typeArguments: ReadonlyArray<SilkType.Type>
+      readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly captures: ReadonlyArray<{
         readonly ordinal: number
         readonly parameterOrdinal: number
@@ -521,6 +521,16 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Dynamically packs one member of an ordinary failure union into the Effect E channel. */
+      readonly _tag: 'PackEffectFailureUnion'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly sourceType: Extract<Type, { readonly _tag: 'Union' }>
+      readonly mappings: ReadonlyArray<{ readonly source: number; readonly target: number }>
+      readonly type: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'UnpackEffectSuccess'
       readonly destination: LocalId
       readonly source: LocalId
@@ -528,60 +538,11 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
-      readonly _tag: 'CatchEffect'
-      readonly destination: LocalId
-      readonly protectedValue: LocalId
-      readonly protectedOutcome: LocalId
-      readonly handlerValue: LocalId
-      readonly handlerOutcome: LocalId
-      readonly protectedTarget?: DeclarationIndex.CanonicalId
-      readonly protectedTypeArguments: ReadonlyArray<SilkType.Type>
-      readonly protectedArguments: ReadonlyArray<LocalId>
-      readonly protectedValueType: Extract<Type, { readonly _tag: 'EffectValue' }>
-      readonly protectedRunner: DeclarationIndex.CanonicalId
-      readonly protectedRunnerArguments: ReadonlyArray<LocalId>
-      readonly protectedType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
-      readonly handledTag: number
-      readonly handledLaneCount: number
-      readonly handlerCallable: LocalId
-      readonly handlerCallableType: Extract<Type, { readonly _tag: 'CallableValue' }>
-      readonly handlerTarget: DeclarationIndex.CanonicalId
-      readonly handlerTypeArguments: ReadonlyArray<SilkType.Type>
-      readonly handlerValueType: Extract<Type, { readonly _tag: 'EffectValue' }>
-      readonly handlerRunner: DeclarationIndex.CanonicalId
-      readonly handlerType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
-      readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
-      readonly provenance: Provenance
-    }
-  | {
-      readonly _tag: 'RetryEffect'
-      readonly destination: LocalId
-      readonly protectedValue: LocalId
-      readonly protectedOutcome: LocalId
-      readonly protectedTarget?: DeclarationIndex.CanonicalId
-      readonly protectedTypeArguments: ReadonlyArray<SilkType.Type>
-      readonly protectedArguments: ReadonlyArray<LocalId>
-      readonly protectedValueType: Extract<Type, { readonly _tag: 'EffectValue' }>
-      readonly protectedRunner: DeclarationIndex.CanonicalId
-      readonly protectedType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
-      readonly retries: LocalId
-      readonly propagationType?: Extract<Type, { readonly _tag: 'EffectOutcome' }>
-      readonly tagMappings: ReadonlyArray<{ readonly source: number; readonly target: number }>
-      readonly propagationLaneCount: number
-      /** Owners still live at this site, released before a failure outcome propagates. */
-      readonly releases?: ReadonlyArray<DropOperation>
-      readonly type: Exclude<
-        Type,
-        { readonly _tag: 'EffectOutcome' | 'EffectValue' | 'EffectBorrow' }
-      >
-      readonly provenance: Provenance
-    }
-  | {
       readonly _tag: 'RunEffect'
       readonly destination: LocalId
       readonly outcome: LocalId
       readonly target: DeclarationIndex.CanonicalId
-      readonly typeArguments: ReadonlyArray<SilkType.Type>
+      readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly arguments: ReadonlyArray<LocalId>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly propagationType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
@@ -601,7 +562,7 @@ export type Operation =
       readonly outcome: LocalId
       readonly effect: LocalId
       readonly runner: DeclarationIndex.CanonicalId
-      readonly runnerTypeArguments: ReadonlyArray<SilkType.Type>
+      readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
       /** Statically selected service-provider references appended after the Effect captures. */
       readonly arguments: ReadonlyArray<LocalId>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
@@ -613,7 +574,33 @@ export type Operation =
       readonly propagationLaneCount: number
       /** Owners still live at this site, released before a failure outcome propagates. */
       readonly releases?: ReadonlyArray<DropOperation>
-      readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' | 'EffectValue' }>
+      readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** Runs one Effect and materializes only its completed typed channel as silk/result data. */
+      readonly _tag: 'ReifyEffect'
+      readonly destination: LocalId
+      readonly outcome: LocalId
+      readonly effect: LocalId
+      readonly runner: DeclarationIndex.CanonicalId
+      readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+      readonly arguments: ReadonlyArray<LocalId>
+      readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly resultType: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly resultField: DeclarationIndex.FieldId
+      readonly resultUnion: SilkType.StructuralUnion
+      readonly successType: SilkType.Nominal
+      readonly successField: DeclarationIndex.FieldId
+      readonly successTag: number
+      readonly failureType: SilkType.Nominal
+      readonly failureField: DeclarationIndex.FieldId
+      readonly failureTag: number
+      readonly failureValueType: SilkType.Type
+      readonly resultShape: Layout.CallingShape
+      readonly outcomeShape: Layout.CallingShape
+      readonly failureValueShape: Layout.CallingShape
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
       readonly provenance: Provenance
     }
   | {
@@ -624,7 +611,7 @@ export type Operation =
       readonly outcome: LocalId
       readonly target: DeclarationIndex.CanonicalId
       readonly runner: DeclarationIndex.CanonicalId
-      readonly typeArguments: ReadonlyArray<SilkType.Type>
+      readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly effectType: Extract<Type, { readonly _tag: 'EffectValue' }>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly failures: ReadonlyArray<{
@@ -858,14 +845,17 @@ export const machineEntry = (self: Module): Instances.InstanceKey => {
 export const matchesInstance = (
   fn: MirFunction,
   declaration: DeclarationIndex.CanonicalId,
-  typeArguments: ReadonlyArray<SilkType.Type>,
+  typeArguments: ReadonlyArray<SilkType.GenericArgument>,
 ): boolean =>
   fn.id.module === declaration.module &&
   fn.id.name === declaration.name &&
   fn.instance.typeArguments.length === typeArguments.length &&
   fn.instance.typeArguments.every((argument, index) => {
     const expected = typeArguments.at(index)
-    return expected !== undefined && SilkType.equals(argument, expected)
+    return (
+      expected !== undefined &&
+      SilkType.genericArgumentKey(argument) === SilkType.genericArgumentKey(expected)
+    )
   })
 
 /** Tests exact concrete instance identity, including the resolved contract row. */
@@ -986,9 +976,7 @@ const operationChildren = (operation: Operation): ReadonlyArray<Operation> =>
         ...(arm.guard?.operations ?? []),
         ...arm.selected.operations,
       ])
-    : operation._tag === 'RunEffect' ||
-        operation._tag === 'RunEffectValue' ||
-        operation._tag === 'RetryEffect'
+    : operation._tag === 'RunEffect' || operation._tag === 'RunEffectValue'
       ? (operation.releases ?? [])
       : []
 
@@ -1093,29 +1081,14 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
         ...operation.arguments,
       ]
     case 'PackEffectOutcome':
+    case 'PackEffectFailureUnion':
     case 'UnpackEffectSuccess':
       return [operation.destination, operation.source]
-    case 'CatchEffect':
-      return [
-        operation.destination,
-        operation.protectedValue,
-        operation.protectedOutcome,
-        operation.handlerValue,
-        operation.handlerOutcome,
-        ...operation.protectedArguments,
-        ...operation.protectedRunnerArguments,
-      ]
-    case 'RetryEffect':
-      return [
-        operation.destination,
-        operation.protectedValue,
-        operation.protectedOutcome,
-        operation.retries,
-        ...operation.protectedArguments,
-      ]
     case 'RunEffect':
       return [operation.destination, operation.outcome, ...operation.arguments]
     case 'RunEffectValue':
+      return [operation.destination, operation.outcome, operation.effect, ...operation.arguments]
+    case 'ReifyEffect':
       return [operation.destination, operation.outcome, operation.effect, ...operation.arguments]
     case 'CloseEffectEntry':
       return [
@@ -1283,7 +1256,7 @@ const borrowKey = (borrow: Hir.BorrowId): string =>
 
 const instanceText = (self: Instances.InstanceKey): string =>
   `${self.declaration.module}\u0000${self.declaration.name}\u0000${self.typeArguments
-    .map(SilkType.key)
+    .map(SilkType.genericArgumentKey)
     .join('\u0000')}\u0000${self.contractRow.join('\u0000')}`
 
 const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Type> => {
@@ -1303,6 +1276,7 @@ const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Ty
     case 'UnionCleanup':
       return [cleanup.type, ...cleanup.cases.flatMap((entry) => cleanupTypes(entry.cleanup))]
     case 'CallableCleanup':
+    case 'EffectCleanup':
       return [cleanup.type, ...cleanup.slots.flatMap((slot) => cleanupTypes(slot.cleanup))]
   }
 }
@@ -1353,41 +1327,36 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'EndLoan':
       return []
     case 'Call':
-      return [semanticType(operation.type), ...operation.typeArguments]
+      return [
+        semanticType(operation.type),
+        ...operation.typeArguments.filter(SilkType.isTypeArgument),
+      ]
     case 'MakeEffect':
-      return [semanticType(operation.type), ...operation.runnerTypeArguments]
+      return [
+        semanticType(operation.type),
+        ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
+      ]
     case 'MakeCallable':
-      return [semanticType(operation.type), ...operation.typeArguments]
+      return [
+        semanticType(operation.type),
+        ...operation.typeArguments.filter(SilkType.isTypeArgument),
+      ]
     case 'ApplyCallable':
-      return [operation.callableType, semanticType(operation.type), ...operation.typeArguments]
+      return [
+        operation.callableType,
+        semanticType(operation.type),
+        ...operation.typeArguments.filter(SilkType.isTypeArgument),
+      ]
     case 'PackEffectOutcome':
+    case 'PackEffectFailureUnion':
     case 'UnpackEffectSuccess':
       return [semanticType(operation.type)]
-    case 'CatchEffect':
-      return [
-        semanticType(operation.protectedValueType),
-        semanticType(operation.protectedType),
-        semanticType(operation.handlerValueType),
-        semanticType(operation.handlerType),
-        semanticType(operation.type),
-        ...operation.protectedTypeArguments,
-      ]
-    case 'RetryEffect':
-      return [
-        semanticType(operation.protectedValueType),
-        semanticType(operation.protectedType),
-        ...(operation.propagationType === undefined
-          ? []
-          : [semanticType(operation.propagationType)]),
-        semanticType(operation.type),
-        ...operation.protectedTypeArguments,
-      ]
     case 'RunEffect':
       return [
         semanticType(operation.outcomeType),
         semanticType(operation.propagationType),
         semanticType(operation.type),
-        ...operation.typeArguments,
+        ...operation.typeArguments.filter(SilkType.isTypeArgument),
       ]
     case 'RunEffectValue':
       return [
@@ -1396,14 +1365,24 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
           ? []
           : [semanticType(operation.propagationType)]),
         semanticType(operation.type),
-        ...operation.runnerTypeArguments,
+        ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
+      ]
+    case 'ReifyEffect':
+      return [
+        semanticType(operation.outcomeType),
+        operation.resultType.type,
+        operation.resultUnion,
+        operation.successType,
+        operation.failureType,
+        operation.failureValueType,
+        ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
       ]
     case 'CloseEffectEntry':
       return [
         semanticType(operation.effectType),
         semanticType(operation.outcomeType),
         semanticType(operation.type),
-        ...operation.typeArguments,
+        ...operation.typeArguments.filter(SilkType.isTypeArgument),
         ...operation.failures.flatMap((failure) => [
           failure.type,
           ...cleanupTypes(failure.cleanup),
@@ -1495,15 +1474,14 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
         ...operation.arguments,
       ]
     case 'PackEffectOutcome':
+    case 'PackEffectFailureUnion':
     case 'UnpackEffectSuccess':
       return [operation.source]
-    case 'CatchEffect':
-      return operation.protectedArguments
-    case 'RetryEffect':
-      return [operation.retries, ...operation.protectedArguments]
     case 'RunEffect':
       return operation.arguments
     case 'RunEffectValue':
+      return [operation.effect, ...operation.arguments]
+    case 'ReifyEffect':
       return [operation.effect, ...operation.arguments]
     case 'CloseEffectEntry':
       return []
@@ -1790,7 +1768,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
   for (const fn of self.functions) {
     const currentInstance = instanceText(fn.instance)
     const concreteTypes = [
-      ...fn.instance.typeArguments,
+      ...fn.instance.typeArguments.filter(SilkType.isTypeArgument),
       ...fn.localTypes.map(semanticType),
       semanticType(fn.result),
       ...fn.regions.flatMap(operationsOf).flatMap(operationTree).flatMap(operationTypes),
@@ -2610,7 +2588,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             const resultType = fn.localTypes.at(arm.selected.result.ordinal)
             if (
               resultType === undefined ||
-              !SilkType.equals(semanticType(resultType), semanticType(operation.type))
+              (resultType._tag !== 'Bottom' &&
+                !SilkType.equals(semanticType(resultType), semanticType(operation.type)))
             ) {
               violations.push(
                 Object.freeze({
@@ -2939,18 +2918,27 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               return (
                 actual !== undefined &&
                 expected !== undefined &&
-                SilkType.equals(semanticType(actual), semanticType(expected))
+                TypeCompatibility.isCompatible(
+                  TypeCompatibility.check(semanticType(actual), semanticType(expected)),
+                )
               )
             }) &&
             SilkType.equals(semanticType(operation.type), semanticType(target.result))
           if (!valid) {
+            const argumentsDetail = operation.arguments
+              .map((argument, ordinal) => {
+                const actual = fn.localTypes.at(argument.ordinal)
+                const expected = target?.localTypes.at(ordinal)
+                return `${ordinal}:${actual === undefined ? 'missing' : SilkType.encode(semanticType(actual))}->${expected === undefined ? 'missing' : SilkType.encode(semanticType(expected))}`
+              })
+              .join(', ')
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
                 rule: 'InvalidCallShape',
                 function: fn.id,
                 region: region.id,
-                detail: `call ${targetText(operation.target)} does not match its logical contract`,
+                detail: `call ${targetText(operation.target)} does not match its logical contract (${argumentsDetail || 'no arguments'}; result=${SilkType.encode(semanticType(operation.type))}->${target === undefined ? 'missing' : SilkType.encode(semanticType(target.result))})`,
               }),
             )
           }
@@ -2978,7 +2966,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(destination.type, operation.type.type) &&
             sameCallableTarget(destination.target, operation.target) &&
             sameCallableTarget(operation.type.target, operation.target) &&
-            operation.typeArguments.every(SilkType.isConcrete) &&
+            operation.typeArguments.every(SilkType.isConcreteGenericArgument) &&
             (environment === undefined
               ? operation.captures.length === 0
               : capturesValid &&
@@ -3010,7 +2998,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               return (
                 actual !== undefined &&
                 expected !== undefined &&
-                SilkType.equals(semanticType(actual), expected)
+                TypeCompatibility.isCompatible(
+                  TypeCompatibility.check(semanticType(actual), expected),
+                )
               )
             })
           const environmentForm =
@@ -3019,36 +3009,39 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             operation.target === undefined &&
             operation.captures.length === 0 &&
             source?._tag === 'CallableValue' &&
-            SilkType.equals(source.type, operation.callableType)
-          const directEnvironment = self.layout.callableEnvironments.find(
-            (candidate) =>
-              candidate._tag === 'CallableEnvironment' &&
-              operation.target !== undefined &&
-              sameCallableTarget(candidate.callable.target, operation.target) &&
-              SilkType.equals(candidate.callable.type, operation.callableType) &&
-              candidate.callable.typeArguments.length === operation.typeArguments.length &&
-              candidate.callable.typeArguments.every((argument, ordinal) => {
-                const actual = operation.typeArguments.at(ordinal)
-                return actual !== undefined && SilkType.equals(argument, actual)
-              }),
-          )
+            TypeCompatibility.isCompatible(
+              TypeCompatibility.check(source.type, operation.callableType),
+            )
+          const directDeclaration =
+            operation.target?._tag === 'DeclarationCallableTarget'
+              ? operation.target.declaration
+              : undefined
+          const directTarget =
+            directDeclaration === undefined
+              ? undefined
+              : self.functions.find((candidate) =>
+                  matchesInstance(candidate, directDeclaration, operation.typeArguments),
+                )
           const directCapturesValid =
             operation.captures.length === 0 ||
-            (directEnvironment?._tag === 'CallableEnvironment' &&
-              directEnvironment.fields.length === operation.captures.length &&
-              directEnvironment.fields.every((field, ordinal) => {
-                const capture = operation.captures.at(ordinal)
-                const sourceType =
-                  capture === undefined ? undefined : fn.localTypes.at(capture.source.ordinal)
-                return (
-                  capture !== undefined &&
-                  sourceType !== undefined &&
-                  capture.ordinal === field.ordinal &&
-                  capture.parameterOrdinal === field.parameterOrdinal &&
-                  capture.access === field.access &&
-                  SilkType.equals(semanticType(sourceType), field.type)
+            (operation.target?._tag === 'BuiltinCallableTarget'
+              ? operation.captures.every(
+                  (capture, ordinal, captures) =>
+                    fn.localTypes.at(capture.source.ordinal) !== undefined &&
+                    captures.findIndex(
+                      (candidate) => candidate.parameterOrdinal === capture.parameterOrdinal,
+                    ) === ordinal,
                 )
-              }))
+              : directTarget !== undefined &&
+                operation.captures.every((capture) => {
+                  const sourceType = fn.localTypes.at(capture.source.ordinal)
+                  const parameterType = directTarget.localTypes.at(capture.parameterOrdinal)
+                  return (
+                    sourceType !== undefined &&
+                    parameterType !== undefined &&
+                    SilkType.equals(semanticType(sourceType), semanticType(parameterType))
+                  )
+                }))
           const directForm =
             operation.realization === 'DirectErasedSection' &&
             operation.callable === undefined &&
@@ -3058,7 +3051,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             destination !== undefined &&
             SilkType.equals(semanticType(destination), semanticType(operation.type)) &&
             operation.access === operation.callableType.mode &&
-            operation.typeArguments.every(SilkType.isConcrete) &&
+            operation.typeArguments.every(SilkType.isConcreteGenericArgument) &&
             argumentsValid &&
             (environmentForm || directForm)
           if (!valid) {
@@ -3068,8 +3061,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidCallableOperation',
                 function: fn.id,
                 region: region.id,
-                detail:
-                  'callable application disagrees with its mode, arguments, realization, or result',
+                detail: `callable application disagrees with its mode, arguments, realization, or result (destination=${destination !== undefined && SilkType.equals(semanticType(destination), semanticType(operation.type))}, mode=${operation.access}/${operation.callableType.mode}:${operation.access === operation.callableType.mode}, source=${source?._tag === 'CallableValue' ? source.type.mode : 'none'}, types=${operation.typeArguments.every(SilkType.isConcreteGenericArgument)}, arguments=${argumentsValid}, environment=${environmentForm}, direct=${directForm}, captures=${directCapturesValid})`,
               }),
             )
           }
@@ -3086,7 +3078,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             source === undefined ||
             payload === undefined ||
             !SilkType.equals(destination.type, operation.type.type) ||
-            !SilkType.equals(semanticType(source), payload)
+            (source._tag !== 'Bottom' && !SilkType.equals(semanticType(source), payload))
           )
             violations.push(
               Object.freeze({
@@ -3095,6 +3087,37 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail: 'effect outcome tag, payload, or destination type is inconsistent',
+              }),
+            )
+        }
+        if (operation._tag === 'PackEffectFailureUnion') {
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const source = fn.localTypes.at(operation.source.ordinal)
+          const mappingsValid =
+            operation.mappings.length === operation.sourceType.type.members.length &&
+            operation.mappings.every((mapping) => {
+              const sourceMember = operation.sourceType.type.members.at(mapping.source)
+              const targetFailure = operation.type.type.failures.at(mapping.target - 1)
+              return (
+                sourceMember !== undefined &&
+                targetFailure !== undefined &&
+                SilkType.equals(sourceMember, targetFailure)
+              )
+            })
+          if (
+            destination?._tag !== 'EffectOutcome' ||
+            source?._tag !== 'Union' ||
+            !SilkType.equals(destination.type, operation.type.type) ||
+            !SilkType.equals(source.type, operation.sourceType.type) ||
+            !mappingsValid
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidEffectOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'effect failure-union mappings do not preserve E members',
               }),
             )
         }
@@ -3148,6 +3171,60 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 detail: 'run propagation does not preserve canonical outcome contracts',
               }),
             )
+        }
+        if (operation._tag === 'ReifyEffect') {
+          const runner = self.functions.find((candidate) =>
+            matchesInstance(candidate, operation.runner, operation.runnerTypeArguments),
+          )
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const effect = fn.localTypes.at(operation.effect.ordinal)
+          const outcome = fn.localTypes.at(operation.outcome.ordinal)
+          const expectedFailureValue = SilkType.failureValue(operation.outcomeType.type.failures)
+          const expectedResult = SilkType.result(
+            operation.outcomeType.type.success,
+            expectedFailureValue,
+          )
+          const expectedSuccess = SilkType.resultSuccess(operation.outcomeType.type.success)
+          const expectedFailure = SilkType.resultFailure(expectedFailureValue)
+          const tagsValid =
+            operation.resultUnion.members.at(operation.successTag) !== undefined &&
+            operation.resultUnion.members.at(operation.failureTag) !== undefined &&
+            SilkType.equals(
+              operation.resultUnion.members.at(operation.successTag) ?? expectedFailure,
+              expectedSuccess,
+            ) &&
+            SilkType.equals(
+              operation.resultUnion.members.at(operation.failureTag) ?? expectedSuccess,
+              expectedFailure,
+            )
+          if (
+            runner?.result._tag !== 'EffectOutcome' ||
+            effect?._tag !== 'EffectValue' ||
+            outcome?._tag !== 'EffectOutcome' ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.equals(runner.result.type, operation.outcomeType.type) ||
+            !SilkType.equals(effect.type, operation.outcomeType.type) ||
+            !SilkType.equals(outcome.type, operation.outcomeType.type) ||
+            !SilkType.equals(destination.type, expectedResult) ||
+            !SilkType.equals(operation.resultType.type, expectedResult) ||
+            !SilkType.equals(operation.failureValueType, expectedFailureValue) ||
+            !SilkType.equals(operation.successType, expectedSuccess) ||
+            !SilkType.equals(operation.failureType, expectedFailure) ||
+            !SilkType.equals(operation.resultShape.type, expectedResult) ||
+            !SilkType.equals(operation.outcomeShape.type, operation.outcomeType.type) ||
+            !SilkType.equals(operation.failureValueShape.type, expectedFailureValue) ||
+            !tagsValid
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidEffectOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'effect result runner, channel data, tags, or calling shapes disagree',
+              }),
+            )
+          }
         }
         if (operation._tag === 'CloseEffectEntry') {
           const target = self.functions.find((candidate) =>
@@ -3213,92 +3290,6 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               }),
             )
           }
-        }
-        if (operation._tag === 'CatchEffect') {
-          const protectedTargetId = operation.protectedTarget
-          const protectedTarget =
-            protectedTargetId === undefined
-              ? undefined
-              : self.functions.find((candidate) =>
-                  matchesInstance(candidate, protectedTargetId, operation.protectedTypeArguments),
-                )
-          const protectedRunner = self.functions.find((candidate) =>
-            matchesInstance(candidate, operation.protectedRunner, operation.protectedTypeArguments),
-          )
-          const handlerTarget = self.functions.find((candidate) =>
-            matchesInstance(candidate, operation.handlerTarget, operation.handlerTypeArguments),
-          )
-          const handlerRunner = self.functions.find((candidate) =>
-            matchesInstance(candidate, operation.handlerRunner, operation.handlerTypeArguments),
-          )
-          const handlerCallable = fn.localTypes.at(operation.handlerCallable.ordinal)
-          if (
-            (protectedTargetId !== undefined && protectedTarget === undefined) ||
-            protectedRunner?.result._tag !== 'EffectOutcome' ||
-            handlerTarget?.result._tag !== 'EffectValue' ||
-            handlerRunner?.result._tag !== 'EffectOutcome' ||
-            (protectedTarget !== undefined &&
-              (protectedTarget.result._tag !== 'EffectValue' ||
-                !SilkType.equals(
-                  protectedTarget.result.type,
-                  operation.protectedValueType.type,
-                ))) ||
-            !SilkType.equals(protectedRunner.result.type, operation.protectedType.type) ||
-            !SilkType.equals(handlerTarget.result.type, operation.handlerValueType.type) ||
-            !SilkType.equals(handlerRunner.result.type, operation.handlerType.type) ||
-            handlerCallable?._tag !== 'CallableValue' ||
-            !SilkType.equals(handlerCallable.type, operation.handlerCallableType.type) ||
-            operation.handledTag < 1 ||
-            operation.handledTag > operation.protectedType.type.failures.length ||
-            operation.protectedType.type.failures.at(operation.handledTag - 1) === undefined
-          )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'effect catch target, handler, or handled tag is inconsistent',
-              }),
-            )
-        }
-        if (operation._tag === 'RetryEffect') {
-          const protectedTargetId = operation.protectedTarget
-          const protectedTarget =
-            protectedTargetId === undefined
-              ? undefined
-              : self.functions.find((candidate) =>
-                  matchesInstance(candidate, protectedTargetId, operation.protectedTypeArguments),
-                )
-          const protectedRunner = self.functions.find((candidate) =>
-            matchesInstance(candidate, operation.protectedRunner, operation.protectedTypeArguments),
-          )
-          const retriesType = fn.localTypes.at(operation.retries.ordinal)
-          const mappingsValid = operation.tagMappings.every((mapping) => {
-            const source = operation.protectedType.type.failures.at(mapping.source - 1)
-            const target = operation.propagationType?.type.failures.at(mapping.target - 1)
-            return source !== undefined && target !== undefined && SilkType.equals(source, target)
-          })
-          if (
-            (protectedTargetId !== undefined && protectedTarget?.result._tag !== 'EffectValue') ||
-            protectedRunner?.result._tag !== 'EffectOutcome' ||
-            (protectedTargetId !== undefined &&
-              protectedTarget?.result._tag === 'EffectValue' &&
-              !SilkType.equals(protectedTarget.result.type, operation.protectedValueType.type)) ||
-            !SilkType.equals(protectedRunner.result.type, operation.protectedType.type) ||
-            retriesType?._tag !== 'i32' ||
-            (operation.protectedType.type.failures.length > 0 &&
-              (operation.propagationType === undefined || !mappingsValid))
-          )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'effect retry target, runner, retry count, or propagation is inconsistent',
-              }),
-            )
         }
       }
     }
@@ -3381,7 +3372,7 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = call ${targetText(operation.target)}${
         operation.typeArguments.length === 0
           ? ''
-          : `<${operation.typeArguments.map(SilkType.encode).join(', ')}>`
+          : `<${operation.typeArguments.map(SilkType.encodeGenericArgument).join(', ')}>`
       }(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'MakeEffect':
       return `${localText(operation.destination)} = make-effect ${targetText(operation.runner)} captures=${operation.captures.map((capture) => `${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
@@ -3391,16 +3382,16 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = apply-callable ${operation.callable === undefined ? (operation.target === undefined ? '?' : callableTargetText(operation.target)) : localText(operation.callable)}(${operation.arguments.map(localText).join(', ')}) captures=${operation.captures.map((capture) => `#${capture.ordinal}:${localText(capture.source)}`).join(',') || 'none'} access=${operation.access.toLowerCase()} evaluation=${operation.evaluation} realization=${operation.realization} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PackEffectOutcome':
       return `${localText(operation.destination)} = effect-outcome tag=${operation.tag} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'PackEffectFailureUnion':
+      return `${localText(operation.destination)} = effect-failure-union ${localText(operation.source)} mappings=${operation.mappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'UnpackEffectSuccess':
       return `${localText(operation.destination)} = effect-success ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'CatchEffect':
-      return `${localText(operation.destination)} = effect-catch tag=${operation.handledTag} ${operation.protectedTarget === undefined ? localText(operation.protectedValue) : targetText(operation.protectedTarget)} runner=${targetText(operation.protectedRunner)} arguments=${operation.protectedRunnerArguments.map(localText).join(',') || 'none'} -> ${targetText(operation.handlerTarget)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'RetryEffect':
-      return `${localText(operation.destination)} = effect-retry ${operation.protectedTarget === undefined ? localText(operation.protectedValue) : targetText(operation.protectedTarget)} retries=${localText(operation.retries)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'RunEffect':
       return `${localText(operation.destination)} = run-effect ${targetText(operation.target)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'RunEffectValue':
       return `${localText(operation.destination)} = run-effect-value ${localText(operation.effect)} runner=${targetText(operation.runner)} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
+    case 'ReifyEffect':
+      return `${localText(operation.destination)} = effect-result ${localText(operation.effect)} runner=${targetText(operation.runner)} arguments=${operation.arguments.map(localText).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'CloseEffectEntry':
       return `${localText(operation.destination)} = close-effect-entry ${targetText(operation.target)} effect=${localText(operation.effect)} runner=${targetText(operation.runner)} outcome=${localText(operation.outcome)} failures=${operation.failures.map((failure) => `${failure.tag}:${SilkType.encode(failure.type)}->${localText(failure.payload)}:${failure.cleanup._tag}`).join(',') || 'none'} : i32 ${provenanceText(operation.provenance)}`
     case 'Construct':
@@ -3515,7 +3506,7 @@ export const encode = (self: Module): string =>
       `fn ${targetText(fn.id)}${
         fn.instance.typeArguments.length === 0
           ? ''
-          : `<${fn.instance.typeArguments.map(SilkType.encode).join(', ')}>`
+          : `<${fn.instance.typeArguments.map(SilkType.encodeGenericArgument).join(', ')}>`
       } params=${fn.parameterCount} locals=${fn.localTypes.length} -> ${typeText(fn.result)} entry=${regionText(fn.entry)}`,
       ...topologicalRegions(fn).flatMap(regionLines),
     ]),

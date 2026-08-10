@@ -126,6 +126,16 @@ contracts may quantify over failure and access-qualified requirement rows so eff
 preserve their rows through finite monomorphization. The rows are not runtime values or general
 row-level programming.
 
+The canonical combinators are ordinary visible Silk declarations, not compiler-recognized recipe
+names. Their closed compiler core consists of lazy construction, propagating `run`, typed `fail`,
+`Effect.result` for reifying a completed typed outcome as `Result<A, E>`, and
+`Effect.bindRequirement` for satisfying one capability-role entry while preserving an inferred
+remainder. `mapBoth`, `map`, `mapError`, `flatMap`, `tap`, whole-channel `catch`, `retry`, `provide`,
+and `provideWith` are derived in `packages/compiler/stdlib/silk/effects.silk`. Failure and
+requirement row parameters specialize and erase; neither becomes a runtime record. Effect
+parameters use ordinary access bounds—`Effect`, `mut Effect`, and `once Effect`—so reusable APIs
+cannot accidentally accept a take-once computation.
+
 Service requirements lower to hidden slots in canonical capability-and-role order. Each slot is a
 non-owning opaque implementation pointer plus compiler-shaped conformance witness table. Capability
 operations dispatch through statically known offsets; roles have no runtime representation. Pure

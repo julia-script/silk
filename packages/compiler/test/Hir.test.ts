@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
 import type * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
@@ -18,6 +20,11 @@ pub fn main() -> i32 { return missing(2147483648) }`
 
 const elaborate = (id: string, text: string): Elaboration.Result =>
   elaborateSyntax(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text)))))
+
+const elaborateWithStdlib = Effect.fnUntraced(function* (id: string, text: string) {
+  const module = id.replace('://', '/').replace(/\.silk$/, '')
+  return Analysis.rootAnalysis(yield* Analysis.ofSource(module, ascii(text)))
+})
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
@@ -419,45 +426,50 @@ pub fn main() -> i32 {
   )
 })
 
-it('desugars effect functions to hidden effect blocks while retaining catches and runs', () => {
-  const result = elaborate(
-    'hir://effect.silk',
-    `struct Problem { code: i32 }
+it.effect('desugars effect functions and source-defined catch calls to hidden effect values', () =>
+  Effect.gen(function* () {
+    const result = yield* elaborateWithStdlib(
+      'hir://effect.silk',
+      `struct Problem { code: i32 }
 effect fn risky() -> i32 ! Problem { fail move Problem { code: 41 } }
 effect fn recover(problem: Problem) -> i32 { return problem.code + 1 }
 pub fn main() -> i32 {
-  let recipe = Effect.catch<Problem>(risky(), recover)
+  let recipe = Effect.catch(risky(), recover)
   return run recipe
 }`,
-  )
-  const risky = result.hir.functions.at(0)
-  const main = result.hir.functions.at(2)
-
-  assert.deepEqual(result.diagnostics, [])
-  assert.strictEqual(risky?.contract._tag, 'Contract')
-  if (risky?.contract._tag === 'Contract') {
-    assert.isUndefined(risky.contract.functionKind)
-    assert.strictEqual(
-      Type.encode(risky.contract.result),
-      'Effect<i32 ! hir://effect.silk.Problem>',
     )
-  }
-  assert.strictEqual(risky?.statements.at(0)?._tag, 'Return')
-  const riskyBody = risky?.statements.at(0)
-  assert.strictEqual(
-    riskyBody?._tag === 'Return' ? riskyBody.expression._tag : undefined,
-    'EffectBlock',
-  )
-  if (riskyBody?._tag === 'Return' && riskyBody.expression._tag === 'EffectBlock')
-    assert.strictEqual(riskyBody.expression.statements.at(0)?._tag, 'Fail')
-  assert.strictEqual(main?.statements.at(0)?._tag, 'Bind')
-  const binding = main?.statements.at(0)
-  assert.strictEqual(binding?._tag === 'Bind' ? binding.initializer._tag : undefined, 'EffectCatch')
-  if (binding?._tag === 'Bind' && binding.initializer._tag === 'EffectCatch')
-    assert.strictEqual(binding.initializer.protected._tag, 'EffectConstruct')
-  assert.strictEqual(main === undefined ? undefined : Hir.returned(main)._tag, 'Run')
-  assert.deepEqual(Hir.verify(result.hir), [])
-})
+    const risky = result.hir.functions.at(0)
+    const main = result.hir.functions.at(2)
+
+    assert.deepEqual(result.diagnostics, [])
+    assert.strictEqual(risky?.contract._tag, 'Contract')
+    if (risky?.contract._tag === 'Contract') {
+      assert.isUndefined(risky.contract.functionKind)
+      assert.strictEqual(Type.encode(risky.contract.result), 'Effect<i32 ! hir/effect.Problem>')
+    }
+    assert.strictEqual(risky?.statements.at(0)?._tag, 'Return')
+    const riskyBody = risky?.statements.at(0)
+    assert.strictEqual(
+      riskyBody?._tag === 'Return' ? riskyBody.expression._tag : undefined,
+      'EffectBlock',
+    )
+    if (riskyBody?._tag === 'Return' && riskyBody.expression._tag === 'EffectBlock')
+      assert.strictEqual(riskyBody.expression.statements.at(0)?._tag, 'Fail')
+    assert.strictEqual(main?.statements.at(0)?._tag, 'Bind')
+    const binding = main?.statements.at(0)
+    assert.strictEqual(
+      binding?._tag === 'Bind' ? binding.initializer._tag : undefined,
+      'EffectConstruct',
+    )
+    if (binding?._tag === 'Bind' && binding.initializer._tag === 'EffectConstruct') {
+      assert.strictEqual(binding.initializer.target.module, 'silk/effects')
+      assert.strictEqual(binding.initializer.target.name, 'catch')
+      assert.strictEqual(binding.initializer.arguments.at(0)?._tag, 'EffectConstruct')
+    }
+    assert.strictEqual(main === undefined ? undefined : Hir.returned(main)._tag, 'Run')
+    assert.deepEqual(Hir.verify(result.hir), [])
+  }),
+)
 
 it('retains effect blocks as lazy statement regions with canonical captures', () => {
   const result = elaborate(

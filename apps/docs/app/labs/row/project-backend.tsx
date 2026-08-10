@@ -9,7 +9,7 @@
  * returning nothing, which is what keeps a broken pipeline readable.
  */
 
-import { Mir } from '@silk-effect/compiler'
+import { Mir, Type } from '@silk-effect/compiler'
 import type {
   BootstrapEvaluation,
   Backend,
@@ -20,7 +20,6 @@ import type {
   ModuleClosure,
   NameResolution,
   Ownership,
-  Type,
 } from '@silk-effect/compiler'
 import type { RowModel, Span } from './row'
 
@@ -47,7 +46,9 @@ const typeText = (type: Type.Type): string =>
             ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
             : type._tag === 'ReferenceType'
               ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
-              : type.members.map(typeText).join(' | ')
+              : type._tag === 'FailureProjectionType'
+                ? `Row<!${type.parameter.name}>`
+                : type.members.map(typeText).join(' | ')
 
 const asSpan = (span: { readonly start: number; readonly end: number }): Span => ({
   start: span.start,
@@ -349,6 +350,10 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
       return `${typeText(cleanup.type)} captures ${cleanup.slots
         .map(({ ordinal, cleanup: slot }) => `#${ordinal}:${cleanupText(slot)}`)
         .join(' → ')}`
+    case 'EffectCleanup':
+      return `${typeText(cleanup.type)} captures ${cleanup.slots
+        .map(({ ordinal, cleanup: slot }) => `#${ordinal}:${cleanupText(slot)}`)
+        .join(' → ')}`
   }
 }
 
@@ -537,7 +542,7 @@ export const instanceRows = (
       label: `${instance.key.declaration.module}.${instance.key.declaration.name}${
         instance.key.typeArguments.length === 0
           ? ''
-          : `<${instance.key.typeArguments.map(typeText).join(', ')}>`
+          : `<${instance.key.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
       }`,
       detail: `${instance.substitution.size} substitution${instance.substitution.size === 1 ? '' : 's'} · instantiated once`,
       span,
@@ -568,7 +573,7 @@ export const instanceRows = (
       dot: 'warning',
       tone: 'warning',
       label: 'polymorphic recursion',
-      detail: `${violation.target.declaration.name}<${violation.target.typeArguments.map(typeText).join(', ')}> changes an ancestor specialization`,
+      detail: `${violation.target.declaration.name}<${violation.target.typeArguments.map(Type.encodeGenericArgument).join(', ')}> changes an ancestor specialization`,
       span,
       onActivate: () => onPick(span),
     })
@@ -752,16 +757,16 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = apply ${operation.callable === undefined ? 'erased section' : localText(operation.callable)}(${operation.arguments.map(localText).join(', ')}) · ${operation.access.toLowerCase()}`
     case 'PackEffectOutcome':
       return `${localText(operation.destination)} = effect outcome tag ${operation.tag} payload ${localText(operation.source)}`
+    case 'PackEffectFailureUnion':
+      return `${localText(operation.destination)} = effect failure union ${localText(operation.source)} · ${operation.mappings.map((mapping) => `${mapping.source}→${mapping.target}`).join(', ')}`
     case 'UnpackEffectSuccess':
       return `${localText(operation.destination)} = effect success ${localText(operation.source)}`
-    case 'CatchEffect':
-      return `${localText(operation.destination)} = catch tag ${operation.handledTag} from ${operation.protectedTarget?.name ?? localText(operation.protectedValue)} with ${operation.handlerTarget.name}`
-    case 'RetryEffect':
-      return `${localText(operation.destination)} = retry ${operation.protectedRunner.name} using ${localText(operation.retries)}`
     case 'RunEffect':
       return `${localText(operation.destination)} = run ${operation.target.name} · propagate ${operation.tagMappings.map((mapping) => `${mapping.source}→${mapping.target}`).join(', ') || 'none'}`
     case 'RunEffectValue':
       return `${localText(operation.destination)} = run ${localText(operation.effect)} with ${operation.runner.name}`
+    case 'ReifyEffect':
+      return `${localText(operation.destination)} = result ${localText(operation.effect)} with ${operation.runner.name}`
     case 'CloseEffectEntry':
       return `${localText(operation.destination)} = close ${operation.target.name} with ${operation.runner.name}`
     case 'Construct':
@@ -860,7 +865,7 @@ export const mirRows = (
     const instance =
       fn.instance.typeArguments.length === 0
         ? ''
-        : `<${fn.instance.typeArguments.map(typeText).join(', ')}>`
+        : `<${fn.instance.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
     const fnKey = `mir-${fn.id.name}${instance}`
     const operationCount = Mir.operations(fn).length
     rows.push({

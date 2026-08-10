@@ -3,17 +3,17 @@ export const vectorGrowthSource = `import silk.vector { Vector, make, append, ge
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut values = make<i32>()
-  let pending0 = append<i32>(&mut values, 10) |> Allocator.provide(&mut allocator)
+  let pending0 = append<i32>(&mut values, 10) |> Effect.bindRequirement(&mut allocator)
   let appended0 = run pending0
-  let pending1 = append<i32>(&mut values, 11) |> Allocator.provide(&mut allocator)
+  let pending1 = append<i32>(&mut values, 11) |> Effect.bindRequirement(&mut allocator)
   let appended1 = run pending1
-  let pending2 = append<i32>(&mut values, 12) |> Allocator.provide(&mut allocator)
+  let pending2 = append<i32>(&mut values, 12) |> Effect.bindRequirement(&mut allocator)
   let appended2 = run pending2
-  let pending3 = append<i32>(&mut values, 13) |> Allocator.provide(&mut allocator)
+  let pending3 = append<i32>(&mut values, 13) |> Effect.bindRequirement(&mut allocator)
   let appended3 = run pending3
-  let pending4 = append<i32>(&mut values, 14) |> Allocator.provide(&mut allocator)
+  let pending4 = append<i32>(&mut values, 14) |> Effect.bindRequirement(&mut allocator)
   let appended4 = run pending4
-  let pending5 = append<i32>(&mut values, 15) |> Allocator.provide(&mut allocator)
+  let pending5 = append<i32>(&mut values, 15) |> Effect.bindRequirement(&mut allocator)
   let appended5 = run pending5
   if length<i32>(&values) == 6 {} else { return 0 }
   if capacity<i32>(&values) == 8 {} else { return 1 }
@@ -24,7 +24,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }
 `
 
 export const vectorFailedGrowthSource = `import silk.vector { Vector, make, append, get, length, capacity }
@@ -35,7 +35,7 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! Ou
   if self.remaining == 0 { fail OutOfMemory {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
-  let pending = Allocator.allocate(move layout) |> Allocator.provide(&mut inner)
+  let pending = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut inner)
   let block = run pending
   return move block
 }
@@ -52,18 +52,17 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = QuotaAllocator { remaining: 1 }
   let mut values = make<i32>()
-  let pending0 = append<i32>(&mut values, 10) |> Allocator.provide(&mut allocator)
+  let pending0 = append<i32>(&mut values, 10) |> Effect.bindRequirement(&mut allocator)
   let appended0 = run pending0
-  let pending1 = append<i32>(&mut values, 11) |> Allocator.provide(&mut allocator)
+  let pending1 = append<i32>(&mut values, 11) |> Effect.bindRequirement(&mut allocator)
   let appended1 = run pending1
-  let pending2 = append<i32>(&mut values, 12) |> Allocator.provide(&mut allocator)
+  let pending2 = append<i32>(&mut values, 12) |> Effect.bindRequirement(&mut allocator)
   let appended2 = run pending2
-  let pending3 = append<i32>(&mut values, 13) |> Allocator.provide(&mut allocator)
+  let pending3 = append<i32>(&mut values, 13) |> Effect.bindRequirement(&mut allocator)
   let appended3 = run pending3
-  let marker = run Effect.catch<OutOfMemory>(
-    grow(&mut values) |> Allocator.provide(&mut allocator),
-    recover,
-  )
+  let marker = run grow(&mut values)
+    |> Effect.catch(recover)
+    |> Effect.bindRequirement(&mut allocator)
   if marker == 7 {} else { return 0 }
   if length<i32>(&values) == 4 {} else { return 1 }
   if capacity<i32>(&values) == 4 {} else { return 2 }
@@ -74,7 +73,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn outerRecover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), outerRecover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), outerRecover) }`
 
 export const vectorDestructionOrderSource = `import silk.vector { Vector, make, append, capacity }
 
@@ -95,13 +94,13 @@ effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut values = make<Entry>()
   let entry0 = Entry { value: 3, marker: make<i32>() }
-  let pending0 = append<Entry>(&mut values, move entry0) |> Allocator.provide(&mut allocator)
+  let pending0 = append<Entry>(&mut values, move entry0) |> Effect.bindRequirement(&mut allocator)
   let appended0 = run pending0
   let entry1 = Entry { value: 5, marker: make<i32>() }
-  let pending1 = append<Entry>(&mut values, move entry1) |> Allocator.provide(&mut allocator)
+  let pending1 = append<Entry>(&mut values, move entry1) |> Effect.bindRequirement(&mut allocator)
   let appended1 = run pending1
   let entry2 = Entry { value: 7, marker: make<i32>() }
-  let pending2 = append<Entry>(&mut values, move entry2) |> Allocator.provide(&mut allocator)
+  let pending2 = append<Entry>(&mut values, move entry2) |> Effect.bindRequirement(&mut allocator)
   let appended2 = run pending2
   if capacity<Entry>(&values) == 4 {} else { return 0 }
   return 42
@@ -109,7 +108,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 export const vectorEarlyDropSource = `import silk.vector { Vector, make, append }
 
@@ -135,10 +134,10 @@ effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut values = make<Entry>()
   let entry0 = Entry { value: 11, marker: make<i32>() }
-  let pending0 = append<Entry>(&mut values, move entry0) |> Allocator.provide(&mut allocator)
+  let pending0 = append<Entry>(&mut values, move entry0) |> Effect.bindRequirement(&mut allocator)
   let appended0 = run pending0
   let entry1 = Entry { value: 13, marker: make<i32>() }
-  let pending1 = append<Entry>(&mut values, move entry1) |> Allocator.provide(&mut allocator)
+  let pending1 = append<Entry>(&mut values, move entry1) |> Effect.bindRequirement(&mut allocator)
   let appended1 = run pending1
   let consumed = consume(move values)
   return consumed + 2
@@ -146,7 +145,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 export const scannerSource = `import silk.vector { Vector, make, append, get, length, capacity }
 
@@ -177,7 +176,7 @@ effect fn build() -> i32 ! OutOfMemory {
     U8 { value: 2 }, U8 { value: 3 }, U8 { value: 1 }, U8 { value: 2 },
     U8 { value: 3 }, U8 { value: 1 }
   ]
-  let pending = scan(&source) |> Allocator.provide(&mut allocator)
+  let pending = scan(&source) |> Effect.bindRequirement(&mut allocator)
   let mut tokens = run pending
   if length<Token>(&tokens) == 10 {} else { return 0 }
   if capacity<Token>(&tokens) == 16 {} else { return 1 }
@@ -206,5 +205,5 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }
 `

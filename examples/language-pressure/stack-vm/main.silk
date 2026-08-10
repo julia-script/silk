@@ -294,7 +294,8 @@ pub effect fn main() -> () ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   // PRESSURE_INPUT: the harness replaces this literal only.
   let bytecode = b"\x01\x00\x06\x06\x01\x63\x01\x06\x01\x07\x04\x00"
-  let pending = execute(bytecode) |> Allocator.provide(&mut allocator)
-  let executed = run pending
-  return fingerprint(move executed) |> verify
+  return run execute(bytecode)
+    |> Effect.map(fingerprint)
+    |> Effect.map(verify)
+    |> Effect.bindRequirement(&mut allocator)
 }

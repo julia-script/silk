@@ -137,7 +137,6 @@ export const effectIdentityErasureCode = 'SEM0069' as const
 /** Stable code for a non-concrete or non-nominal capability in a requirement row. */
 export const invalidRequirementTypeCode = 'SEM0070' as const
 export const unhandledEffectRequirementsCode = 'SEM0071' as const
-export const invalidEffectRetryCode = 'SEM0072' as const
 export const providerBackedFailureCode = 'SEM0073' as const
 export const invalidEffectProvisionCode = 'SEM0074' as const
 export const nonCallableApplicationCode = 'SEM0075' as const
@@ -159,6 +158,10 @@ export const invalidStaticLiteralCode = 'SEM0085' as const
 export const invalidConstantCode = 'SEM0086' as const
 /** Stable code for an expression statement whose result cannot be intentionally ignored. */
 export const expressionStatementResultCode = 'SEM0087' as const
+/** Stable code for using a generic binder in a value, failure-row, or requirement-row position of another kind. */
+export const genericParameterKindMismatchCode = 'SEM0088' as const
+/** Stable code for a failure or requirement row that cannot be finitely decomposed. */
+export const contractRowInferenceCode = 'SEM0089' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -259,7 +262,6 @@ export type Code =
   | typeof effectIdentityErasureCode
   | typeof invalidRequirementTypeCode
   | typeof unhandledEffectRequirementsCode
-  | typeof invalidEffectRetryCode
   | typeof providerBackedFailureCode
   | typeof invalidEffectProvisionCode
   | typeof nonCallableApplicationCode
@@ -275,6 +277,8 @@ export type Code =
   | typeof invalidStaticLiteralCode
   | typeof invalidConstantCode
   | typeof expressionStatementResultCode
+  | typeof genericParameterKindMismatchCode
+  | typeof contractRowInferenceCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -348,7 +352,6 @@ export type Reason =
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
   | { readonly _tag: 'UnhandledEffectRequirements'; readonly requirements: ReadonlyArray<string> }
-  | { readonly _tag: 'InvalidEffectRetry'; readonly detail: string }
   | { readonly _tag: 'ProviderBackedFailure'; readonly type: string }
   | { readonly _tag: 'InvalidEffectProvision'; readonly detail: string }
   | {
@@ -512,6 +515,46 @@ export type Reason =
       readonly target: string
     }
   | {
+      readonly _tag: 'GenericParameterKindMismatch'
+      readonly spelling: string
+      readonly expected: 'Value' | 'FailureRow' | 'RequirementRow'
+      readonly actual: 'Value' | 'FailureRow' | 'RequirementRow'
+    }
+  | {
+      readonly _tag: 'ContractRowInference'
+      readonly problem:
+        | { readonly _tag: 'AbsentFailureMember'; readonly member: string }
+        | {
+            readonly _tag: 'AmbiguousFailureRemainder'
+            readonly parameters: ReadonlyArray<string>
+          }
+        | {
+            readonly _tag: 'AbsentRequirementMember'
+            readonly capability: string
+            readonly role: string
+            readonly access: 'Shared' | 'Exclusive'
+          }
+        | {
+            readonly _tag: 'IncompatibleRequirementRole'
+            readonly capability: string
+            readonly expected: string
+            readonly actual: ReadonlyArray<string>
+          }
+        | {
+            readonly _tag: 'IncompatibleRequirementAccess'
+            readonly capability: string
+            readonly role: string
+            readonly expected: 'Shared' | 'Exclusive'
+            readonly actual: ReadonlyArray<'Shared' | 'Exclusive'>
+          }
+        | {
+            readonly _tag: 'AmbiguousRequirementRemainder'
+            readonly parameters: ReadonlyArray<string>
+          }
+        | { readonly _tag: 'NonFiniteFailureRow' }
+        | { readonly _tag: 'NonFiniteRequirementRow' }
+    }
+  | {
       readonly _tag: 'SliceTypePosition'
       readonly position: 'parameter' | 'return' | 'field' | 'type argument'
     }
@@ -603,6 +646,8 @@ export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagno
       diagnostic.code === duplicateTypeParameterCode ||
       diagnostic.code === typeArgumentArityCode ||
       diagnostic.code === typeArgumentInferenceCode ||
+      diagnostic.code === genericParameterKindMismatchCode ||
+      diagnostic.code === contractRowInferenceCode ||
       diagnostic.code === polymorphicRecursionCode,
   )
 
@@ -1289,17 +1334,6 @@ export const unhandledEffectRequirements = (
     span,
   })
 
-export const invalidEffectRetry = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: invalidEffectRetryCode,
-    severity: 'error',
-    message: `Invalid Effect.retry input: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidEffectRetry', detail }),
-    span,
-  })
-
 export const providerBackedFailure = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
@@ -1762,6 +1796,67 @@ export const duplicateTypeParameter = (
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'first declared here', span: originalSpan }),
     ]),
+  })
+
+export const genericParameterKindMismatch = (
+  spelling: string,
+  expected: 'Value' | 'FailureRow' | 'RequirementRow',
+  actual: 'Value' | 'FailureRow' | 'RequirementRow',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: genericParameterKindMismatchCode,
+    severity: 'error',
+    message: `Generic parameter ${spelling} has kind ${actual}, expected ${expected}`,
+    reason: Object.freeze({
+      _tag: 'GenericParameterKindMismatch',
+      spelling,
+      expected,
+      actual,
+    }),
+    span,
+  })
+
+type ContractRowInferenceProblem = Extract<
+  Reason,
+  { readonly _tag: 'ContractRowInference' }
+>['problem']
+
+const contractRowInferenceMessage = (problem: ContractRowInferenceProblem): string => {
+  switch (problem._tag) {
+    case 'AbsentFailureMember':
+      return `Failure row does not contain selected member ${problem.member}`
+    case 'AmbiguousFailureRemainder':
+      return `Failure row remainder is ambiguous across ${problem.parameters.join(', ')}`
+    case 'AbsentRequirementMember':
+      return `Requirement row does not contain ${problem.access === 'Exclusive' ? '&mut ' : '&'}${problem.capability}@${problem.role}`
+    case 'IncompatibleRequirementRole':
+      return `Requirement ${problem.capability} has role ${problem.actual.join(' or ')}, expected ${problem.expected}`
+    case 'IncompatibleRequirementAccess':
+      return `Requirement ${problem.capability}@${problem.role} has access ${problem.actual.join(' or ')}, expected ${problem.expected}`
+    case 'AmbiguousRequirementRemainder':
+      return `Requirement row remainder is ambiguous across ${problem.parameters.join(', ')}`
+    case 'NonFiniteFailureRow':
+      return 'Failure row specialization is not finite and concrete'
+    case 'NonFiniteRequirementRow':
+      return 'Requirement row specialization is not finite and concrete'
+  }
+}
+
+export const contractRowInference = (
+  problem: ContractRowInferenceProblem,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: contractRowInferenceCode,
+    severity: 'error',
+    message: contractRowInferenceMessage(problem),
+    reason: Object.freeze({ _tag: 'ContractRowInference', problem: Object.freeze(problem) }),
+    span,
   })
 
 export const typeArgumentArity = (

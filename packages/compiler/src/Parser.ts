@@ -1644,7 +1644,12 @@ const parseTypeArgumentList = (
   kind: 'TypeArgumentList' | 'CallTypeArgumentList',
   following: ReadonlyArray<Token.TokenKind>,
 ): NodeResult => {
-  const left = expect(initial, 'Less', [...typeStarts, 'Greater', ...following])
+  const left = expect(initial, 'Less', [
+    ...typeStarts,
+    ...(kind === 'TypeArgumentList' ? (['Bang', 'Question'] as const) : []),
+    'Greater',
+    ...following,
+  ])
   let state = left.state
   let children: ReadonlyArray<SyntaxTree.Element> = left.elements
   if (nextSignificantKind(state) === 'Greater') {
@@ -1655,6 +1660,8 @@ const parseTypeArgumentList = (
   while (
     nextSignificantKind(state) !== 'Greater' &&
     nextSignificantKind(state) !== 'EndOfFile' &&
+    !(kind === 'TypeArgumentList' && nextSignificantKind(state) === 'Bang') &&
+    !(kind === 'TypeArgumentList' && nextSignificantKind(state) === 'Question') &&
     !following.includes(nextSignificantKind(state) ?? 'EndOfFile')
   ) {
     const argument = parseType(state, ['Comma', 'Bang', 'Question', 'Greater', ...following])
@@ -1686,7 +1693,12 @@ const parseTypeParameterList = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
 ): NodeResult => {
-  const left = expect(initial, 'Less', ['Identifier', 'Greater', ...following])
+  const parameterStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
+    'Identifier',
+    'Bang',
+    'Question',
+  ])
+  const left = expect(initial, 'Less', [...parameterStarts, 'Greater', ...following])
   let state = left.state
   let children: ReadonlyArray<SyntaxTree.Element> = left.elements
   if (nextSignificantKind(state) === 'Greater') {
@@ -1699,11 +1711,19 @@ const parseTypeParameterList = (
     nextSignificantKind(state) !== 'EndOfFile' &&
     !following.includes(nextSignificantKind(state) ?? 'EndOfFile')
   ) {
-    const name = expect(state, 'Identifier', ['Comma', 'Greater', ...following])
-    children = Object.freeze([...children, syntaxNode(name.state, 'TypeParameter', name.elements)])
+    const markerKind = nextSignificantKind(state)
+    const marker =
+      markerKind === 'Bang' || markerKind === 'Question'
+        ? expect(state, markerKind, ['Identifier', 'Comma', 'Greater', ...following])
+        : undefined
+    const name = expect(marker?.state ?? state, 'Identifier', ['Comma', 'Greater', ...following])
+    children = Object.freeze([
+      ...children,
+      syntaxNode(name.state, 'TypeParameter', [...(marker?.elements ?? []), ...name.elements]),
+    ])
     state = name.state
     if (nextSignificantKind(state) !== 'Comma') break
-    const comma = expect(state, 'Comma', ['Identifier', 'Greater', ...following])
+    const comma = expect(state, 'Comma', [...parameterStarts, 'Greater', ...following])
     children = Object.freeze([...children, ...comma.elements])
     state = comma.state
   }
@@ -1720,6 +1740,20 @@ const parseTypePrimary = (
   preserveFieldStart = false,
 ): NodeResult => {
   const callableMode = nextSignificantKind(initial)
+  if (
+    (callableMode === 'MutKeyword' || callableMode === 'OnceKeyword') &&
+    significantKindAfter(initial, 1) === 'Identifier'
+  ) {
+    const mode = expect(initial, callableMode, typeStarts)
+    const subject = parseTypePrimary(mode.state, following, preserveFieldStart)
+    return Object.freeze({
+      state: subject.state,
+      node: syntaxNode(subject.state, subject.node.kind, [
+        ...mode.elements,
+        ...subject.node.children,
+      ]),
+    })
+  }
   if (
     callableMode === 'FnKeyword' ||
     callableMode === 'MutKeyword' ||
@@ -1939,18 +1973,23 @@ const parseRequirementRow = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
 ): NodeResult => {
-  const question = expect(initial, 'Question', ['Ampersand', ...following])
-  let requirement = parseRequirement(question.state, ['Pipe', ...following])
-  let state = requirement.state
+  const memberStarts: ReadonlyArray<Token.TokenKind> = Object.freeze(['Ampersand', 'Identifier'])
+  const question = expect(initial, 'Question', [...memberStarts, ...following])
+  const parseMember = (state: State): NodeResult =>
+    nextSignificantKind(state) === 'Ampersand'
+      ? parseRequirement(state, ['Pipe', ...following])
+      : parseTypePath(state, ['Pipe', ...following])
+  let member = parseMember(question.state)
+  let state = member.state
   let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
     ...question.elements,
-    requirement.node,
+    member.node,
   ])
   while (nextSignificantKind(state) === 'Pipe') {
-    const pipe = expect(state, 'Pipe', ['Ampersand', ...following])
-    requirement = parseRequirement(pipe.state, ['Pipe', ...following])
-    children = Object.freeze([...children, ...pipe.elements, requirement.node])
-    state = requirement.state
+    const pipe = expect(state, 'Pipe', [...memberStarts, ...following])
+    member = parseMember(pipe.state)
+    children = Object.freeze([...children, ...pipe.elements, member.node])
+    state = member.state
   }
   return Object.freeze({ state, node: syntaxNode(state, 'RequirementRow', children) })
 }

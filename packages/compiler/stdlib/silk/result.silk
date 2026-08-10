@@ -1,0 +1,22 @@
+// Canonical completed typed outcome data. Failure rows project to ordinary value sums through
+// Row<! E>; Result itself remains ordinary source-defined data with no runtime row descriptor.
+
+pub struct Success<A> {
+  value: A
+}
+
+pub struct Failure<F> {
+  error: F
+}
+
+pub struct Result<A, F> {
+  value: Success<A> | Failure<F>
+}
+
+pub fn succeed<A, F>(value: A) -> Result<A, F> {
+  return Result<A, F> { value: Success<A> { value: move value } }
+}
+
+pub fn failResult<A, F>(error: F) -> Result<A, F> {
+  return Result<A, F> { value: Failure<F> { error: move error } }
+}

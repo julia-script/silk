@@ -238,7 +238,7 @@ effect fn retrying() -> i32 ! Problem {
 effect fn recover(problem: Problem) -> i32 { return 99 }
 
 pub fn main() -> i32 {
-  return run retrying() |> Effect.catch<Problem>(recover)
+  return run retrying() |> Effect.catch(recover)
 }
 `,
   ),
@@ -254,7 +254,7 @@ effect fn read() -> i32 ? &Clock@Primary {
 pub fn main() -> i32 {
   let clock = Clock {}
   let pending = read()
-    |> Clock.provide(&clock, @Primary)
+    |> Effect.bindRequirement(&clock, @Primary)
   return run pending
 }
 `,
@@ -277,7 +277,7 @@ pub fn main() -> i32 {
     `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)
@@ -292,7 +292,7 @@ pub fn main() -> i32 {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
 pub fn main() -> i32 {
-  return run Effect.catch<OutOfMemory>(store(), recover)
+  return run Effect.catch(store(), recover)
 }
 `,
   ),
@@ -302,7 +302,7 @@ pub fn main() -> i32 {
     `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)
@@ -315,7 +315,7 @@ pub fn main() -> i32 {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
 pub fn main() -> i32 {
-  return run Effect.catch<OutOfMemory>(store(), recover)
+  return run Effect.catch(store(), recover)
 }
 `,
   ),
@@ -327,7 +327,7 @@ pub fn main() -> i32 {
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Empty; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<Empty>(move allocation, 2)
@@ -340,7 +340,7 @@ effect fn store() -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
 pub fn main() -> i32 {
-  return run Effect.catch<OutOfMemory>(store(), recover)
+  return run Effect.catch(store(), recover)
 }
 `,
   ),
@@ -350,7 +350,7 @@ pub fn main() -> i32 {
     `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   let mut buffer = RawBuffer.from<i32>(move allocation, 2)
   drop buffer
@@ -360,7 +360,7 @@ pub fn main() -> i32 {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
 pub fn main() -> i32 {
-  return run Effect.catch<OutOfMemory>(store(), recover)
+  return run Effect.catch(store(), recover)
 }
 `,
   ),
@@ -376,7 +376,7 @@ impl Drop for Guard {
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let buffer = RawBuffer.from<i32>(move allocation, 2)
@@ -390,7 +390,7 @@ effect fn store() -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
 pub fn main() -> i32 {
-  return run Effect.catch<OutOfMemory>(store(), recover)
+  return run Effect.catch(store(), recover)
 }
 `,
   ),
@@ -420,7 +420,7 @@ effect fn recover(problem: Problem) -> i32 {
 
 pub fn main() -> i32 {
   let recipe = relay(0)
-    |> Effect.catch<Problem>(recover)
+    |> Effect.catch(recover)
   return run recipe
 }
 `,
@@ -544,7 +544,7 @@ effect fn log(value: i32) -> i32 ? &Logger { return value }
 pub fn main() -> i32 {
   let logger = Logger {}
   let logged = succeed(42) |> Effect.tap(log)
-  let provided = logged |> Logger.provide(&logger)
+  let provided = logged |> Effect.provide(&logger)
   return run provided
 }
 `,

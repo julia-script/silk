@@ -32,11 +32,33 @@ process.stdout.write(
     ownership: Ownership.encode(Analysis.ownershipOf(native, 'fixture/Generic')),
     instances: Analysis.instancesOf(native).instances.map((instance) => ({
       declaration: instance.key.declaration,
-      arguments: instance.key.typeArguments.map(Type.key),
+      arguments: instance.key.typeArguments.map(Type.genericArgumentKey),
       substitution: [...instance.substitution].map(([parameter, type]) => [
         parameter,
-        Type.key(type),
+        Type.genericArgumentKey(type),
       ]),
+    })),
+    rowArguments: [
+      Type.failureRowArgument([
+        Type.nominal('fixture/Generic', 'Second'),
+        Type.nominal('fixture/Generic', 'First'),
+        Type.nominal('fixture/Generic', 'Second'),
+      ]),
+      Type.requirementRowArgument([
+        {
+          capability: Type.nominal('fixture/Generic', 'Clock'),
+          role: 'Primary',
+          access: 'Shared',
+        },
+        {
+          capability: Type.nominal('fixture/Generic', 'Clock'),
+          role: 'Primary',
+          access: 'Exclusive',
+        },
+      ]),
+    ].map((argument) => ({
+      key: Type.genericArgumentKey(argument),
+      encoding: Type.encodeGenericArgument(argument),
     })),
     layout: layout._tag === 'Available' ? Layout.encode(layout.value) : layout.error.message,
     mir: Mir.encode(Analysis.loweredMir(native)),

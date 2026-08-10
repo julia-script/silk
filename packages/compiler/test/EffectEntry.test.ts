@@ -30,7 +30,7 @@ impl Drop for SomeError {
 pub effect fn main() -> () ! SomeError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let storage = run recipe
   fail SomeError { storage: move storage }
 }`
@@ -56,11 +56,23 @@ effect fn stop() -> never ! SomeError { fail SomeError {} }
 pub effect fn main() -> () ! SomeError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
-  let storage = run Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let storage = run Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let guard = Guard { storage: move storage }
   run stop()
   drop guard
   return ()
+}`
+
+const providedMapSource = `struct Clock {}
+effect fn read() -> i32 ? &Clock { return 42 }
+fn verify(value: i32) -> () {
+  return ()
+}
+pub effect fn main() -> () {
+  let clock = Clock {}
+  return run read()
+    |> Effect.provide(&clock)
+    |> Effect.map(verify)
 }`
 
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-effect-entry-'))
@@ -83,6 +95,20 @@ it.effect('runs an effect entry once and retains deterministic unhandled-failure
     assert.strictEqual(outcome.tag, 1)
     assert.strictEqual(outcome.report, 'effect-entry/failure.SomeError')
     assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Call').length, 2)
+  }),
+)
+
+it.effect('composes capability provision and mapping in an effect entry', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'effect-entry/provided-map',
+      ascii(providedMapSource),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome))
   }),
 )
 

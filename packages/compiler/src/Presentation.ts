@@ -38,17 +38,28 @@ const declaredType = (fact: DeclarationIndex.DeclaredTypeFact): string =>
   fact._tag === 'Unavailable' ? '_' : fact.spelling
 
 const failureRow = (fact: DeclarationIndex.FailureRowFact): string =>
-  fact.members.length === 0 ? '' : ` ! ${fact.members.map(declaredType).join(' | ')}`
+  fact.members.length === 0 && fact.parameters.length === 0
+    ? ''
+    : ` ! ${[
+        ...fact.members.map(declaredType),
+        ...fact.parameters.map((parameter) => parameter.name),
+      ].join(' | ')}`
 
 const requirementRow = (fact: DeclarationIndex.RequirementRowFact): string =>
-  fact.entries.length === 0
+  fact.entries.length === 0 && fact.parameters.length === 0
     ? ''
-    : ` ? ${fact.entries
-        .map(
+    : ` ? ${[
+        ...fact.entries.map(
           (entry) =>
             `${entry.access === 'Exclusive' ? '&mut ' : '&'}${declaredType(entry.capability)}${entry.role === 'DefaultRole' ? '' : `@${entry.role}`}`,
-        )
-        .join(' | ')}`
+        ),
+        ...fact.parameters.map((parameter) => parameter.name),
+      ].join(' | ')}`
+
+const typeParameterName = (parameter: DeclarationIndex.TypeParameterFact): string => {
+  const name = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
+  return `${parameter.type.kind === 'FailureRow' ? '!' : parameter.type.kind === 'RequirementRow' ? '?' : ''}${name}`
+}
 
 /** Renders a declaration in its source-level callable form. */
 export const functionDeclaration = (self: DeclarationIndex.DeclarationFact): Presentation => {
@@ -58,9 +69,7 @@ export const functionDeclaration = (self: DeclarationIndex.DeclarationFact): Pre
   const typeParameters =
     self.typeParameters.length === 0
       ? ''
-      : `<${self.typeParameters
-          .map((parameter) => (parameter.name._tag === 'Present' ? parameter.name.spelling : '_'))
-          .join(', ')}>`
+      : `<${self.typeParameters.map(typeParameterName).join(', ')}>`
   const parameters = self.parameters
     .map((parameter) => {
       const parameterName = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
@@ -82,9 +91,7 @@ export const structDeclaration = (self: DeclarationIndex.StructFact): Presentati
   const typeParameters =
     self.typeParameters.length === 0
       ? ''
-      : `<${self.typeParameters
-          .map((parameter) => (parameter.name._tag === 'Present' ? parameter.name.spelling : '_'))
-          .join(', ')}>`
+      : `<${self.typeParameters.map(typeParameterName).join(', ')}>`
   return Object.freeze({
     _tag: 'StructPresentation',
     name,
@@ -114,7 +121,13 @@ export const parameter = (self: DeclarationIndex.ParameterFact): Presentation =>
 
 export const typeParameter = (self: DeclarationIndex.TypeParameterFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : self.type.name
-  return Object.freeze({ _tag: 'TypeParameterPresentation', name, text: `type ${name}` })
+  const kind =
+    self.type.kind === 'FailureRow'
+      ? 'failure row'
+      : self.type.kind === 'RequirementRow'
+        ? 'requirement row'
+        : 'type'
+  return Object.freeze({ _tag: 'TypeParameterPresentation', name, text: `${kind} ${name}` })
 }
 
 export const field = (self: DeclarationIndex.FieldFact): Presentation => {
@@ -173,6 +186,7 @@ export const type = (
       : `${base}<${self.arguments.map((argument) => type(argument, module, scope)).join(', ')}>`
   }
   if (Type.isParameter(self)) return self.name
+  if (Type.isFailureProjection(self)) return `Row<! ${self.parameter.name}>`
   if (Type.isFixedArray(self)) return `Array<${type(self.element, module, scope)}, ${self.length}>`
   if (Type.isSlice(self))
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}[${type(self.element, module, scope)}]`
@@ -183,23 +197,45 @@ export const type = (
     return `${mode}fn(${self.parameters.map((entry) => type(entry, module, scope)).join(', ')}) -> ${type(self.result, module, scope)}`
   }
   if (Type.isEffect(self)) {
-    const failures =
-      self.failures.length === 0
-        ? ''
-        : ` ! ${self.failures.map((failure) => type(failure, module, scope)).join(' | ')}`
+    const failureMembers = [
+      ...self.failures.map((failure) => type(failure, module, scope)),
+      ...self.failureParameters.map((parameter_) => parameter_.name),
+    ]
+    const failures = failureMembers.length === 0 ? '' : ` ! ${failureMembers.join(' | ')}`
+    const requirementMembers = [
+      ...self.requirements.map(
+        (requirement) =>
+          `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+      ),
+      ...self.requirementParameters.map((parameter_) => parameter_.name),
+    ]
     const requirements =
-      self.requirements.length === 0
-        ? ''
-        : ` ? ${self.requirements
-            .map(
-              (requirement) =>
-                `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
-            )
-            .join(' | ')}`
+      requirementMembers.length === 0 ? '' : ` ? ${requirementMembers.join(' | ')}`
     return `Effect<${type(self.success, module, scope)}${failures}${requirements}>`
   }
   return self.members.map((member) => type(member, module, scope)).join(' | ')
 }
+
+/** Renders one erased generic argument for tooling without exposing a runtime descriptor. */
+export const genericArgument = (
+  self: Type.GenericArgument,
+  module: string,
+  scope?: NameResolution.ModuleScope,
+): string =>
+  Type.isEffectIdentityArgument(self)
+    ? `effect@${self.identity}`
+    : Type.isCallableIdentityArgument(self)
+      ? `callable@${self.identity}`
+      : Type.isFailureRowArgument(self)
+        ? `! ${self.failures.map((failure) => type(failure, module, scope)).join(' | ') || 'never'}`
+        : Type.isRequirementRowArgument(self)
+          ? `? ${self.requirements
+              .map(
+                (requirement) =>
+                  `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+              )
+              .join(' | ')}`
+          : type(self, module, scope)
 
 export const binding = (
   self: Elaboration.BindingDeclarationFact,

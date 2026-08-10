@@ -9,7 +9,7 @@ struct Element { value: i32 }
 effect fn build(count: usize) -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Element; 4]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<Element>(move allocation, 4)
@@ -28,5 +28,5 @@ effect fn build(count: usize) -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
 pub fn main() -> i32 {
-  return run Effect.catch<OutOfMemory>(build(4), recover)
+  return run Effect.catch(build(4), recover)
 }

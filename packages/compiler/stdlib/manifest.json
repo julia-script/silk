@@ -1,7 +1,15 @@
 [
   {
+    "module": "silk/effects",
+    "path": "silk/effects.silk"
+  },
+  {
     "module": "silk/option",
     "path": "silk/option.silk"
+  },
+  {
+    "module": "silk/result",
+    "path": "silk/result.silk"
   },
   {
     "module": "silk/vector",

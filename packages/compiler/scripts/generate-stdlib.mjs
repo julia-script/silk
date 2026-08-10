@@ -11,6 +11,13 @@ const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
 const canonicalModule = /^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/
 const modules = []
 
+const sourceLiteral = (source) => {
+  const singleQuotes = [...source].filter((character) => character === "'").length
+  const doubleQuotes = [...source].filter((character) => character === '"').length
+  if (singleQuotes > doubleQuotes) return JSON.stringify(source)
+  return `'${JSON.stringify(source).slice(1, -1).replaceAll('\\"', '"').replaceAll("'", "\\'")}'`
+}
+
 for (const [index, entry] of manifest.entries()) {
   if (
     typeof entry?.module !== 'string' ||
@@ -32,7 +39,7 @@ const entries = modules
     module: '${entry.module}',
     path: '${entry.path}',
     source:
-      ${JSON.stringify(entry.source)},
+      ${sourceLiteral(entry.source)},
   },`,
   )
   .join('\n')

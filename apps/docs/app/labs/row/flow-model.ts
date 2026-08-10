@@ -23,7 +23,9 @@ const typeText = (type: Type.Type): string =>
             ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
             : type._tag === 'ReferenceType'
               ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
-              : type.members.map(typeText).join(' | ')
+              : type._tag === 'FailureProjectionType'
+                ? `Row<!${type.parameter.name}>`
+                : type.members.map(typeText).join(' | ')
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'
@@ -184,8 +186,6 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
     return `${expression.access === 'Exclusive' ? '&mut ' : '&'}${argumentLabel({ ...argument, expression: expression.subject })}`
   }
   if (expression._tag === 'Run') return 'run result'
-  if (expression._tag === 'EffectCatch')
-    return `catch ${expression.handled === undefined ? 'unavailable failure' : typeText(expression.handled)}`
   if (expression._tag !== 'Integer') return 'unavailable expression'
   if (expression.integer._tag === 'Available') return String(expression.integer.value)
   if (expression.integer._tag === 'OutOfRange') return expression.integer.spelling

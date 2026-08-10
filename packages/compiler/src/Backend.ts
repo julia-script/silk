@@ -65,7 +65,8 @@ const planReclaims = (plan: Ownership.CleanupPlan): boolean =>
   (plan._tag === 'StructCleanup' && plan.fields.some((field) => planReclaims(field.cleanup))) ||
   (plan._tag === 'ArrayCleanup' && planReclaims(plan.element)) ||
   (plan._tag === 'UnionCleanup' && plan.cases.some((entry) => planReclaims(entry.cleanup))) ||
-  (plan._tag === 'CallableCleanup' && plan.slots.some((slot) => planReclaims(slot.cleanup)))
+  ((plan._tag === 'CallableCleanup' || plan._tag === 'EffectCleanup') &&
+    plan.slots.some((slot) => planReclaims(slot.cleanup)))
 
 /**
  * Code generation as a nominal `Backend` service: one operation consuming the whole
@@ -224,7 +225,7 @@ export const symbolFor = (fn: Mir.MirFunction, entry: Instances.InstanceKey): st
     : `silk_${sanitize(fn.id.module)}_${sanitize(fn.id.name)}__${[
         fn.instance.declaration.module,
         fn.instance.declaration.name,
-        ...fn.instance.typeArguments.map(SilkType.key),
+        ...fn.instance.typeArguments.map(SilkType.genericArgumentKey),
         ...fn.instance.contractRow,
       ]
         .map(injectivePart)
@@ -314,11 +315,11 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'MakeCallable':
     case 'ApplyCallable':
     case 'PackEffectOutcome':
+    case 'PackEffectFailureUnion':
     case 'UnpackEffectSuccess':
-    case 'CatchEffect':
-    case 'RetryEffect':
     case 'RunEffect':
     case 'RunEffectValue':
+    case 'ReifyEffect':
     case 'CloseEffectEntry':
     case 'Construct':
     case 'ConstructArray':
@@ -353,10 +354,9 @@ const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'RawBufferFrom' ||
   operation._tag === 'RawBufferSlot' ||
   operation._tag === 'RawBufferRead' ||
-  operation._tag === 'CatchEffect' ||
-  operation._tag === 'RetryEffect' ||
   operation._tag === 'RunEffect' ||
   operation._tag === 'RunEffectValue' ||
+  operation._tag === 'ReifyEffect' ||
   operation._tag === 'CloseEffectEntry' ||
   (operation._tag === 'Binary' &&
     operation.operator !== 'Equals' &&
@@ -1066,8 +1066,13 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             entry.linear.flatMap((block) =>
               block.operations.flatMap((operation) =>
                 operation._tag === 'MakeEffect' || operation._tag === 'MakeCallable'
-                  ? operation.captures.flatMap((capture) =>
-                      capture.access === 'Shared' || capture.access === 'Exclusive'
+                  ? operation.captures.flatMap((capture, ordinal) =>
+                      (
+                        operation._tag === 'MakeEffect'
+                          ? operation.type.environment.fields.at(ordinal)?.representation ===
+                            'Borrow'
+                          : capture.access === 'Shared' || capture.access === 'Exclusive'
+                      )
                         ? [capture.source.ordinal]
                         : [],
                     )
@@ -1951,6 +1956,16 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               case 'NoCleanup':
               case 'ParameterCleanup':
               case 'CallableCleanup':
+                return
+              case 'EffectCleanup':
+                for (const slot of plan.slots) {
+                  if (!planReclaims(slot.cleanup) && slot.cleanup._tag !== 'HookCleanup') continue
+                  yield* dropThroughPlan(
+                    slot.cleanup,
+                    Object.freeze(values.slice(slot.laneOffset, slot.laneOffset + slot.laneCount)),
+                    `${tag}_effect${slot.ordinal}`,
+                  )
+                }
                 return
               case 'AllocationCleanup':
               case 'RawBufferCleanup': {
@@ -3015,9 +3030,24 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(operation.destination.ordinal, Object.freeze([]))
                   break
                 }
-                case 'Move':
+                case 'Move': {
+                  const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
+                  if (sourceType?._tag === 'Bottom') {
+                    const destinationType = entry.fn.localTypes.at(operation.destination.ordinal)
+                    if (destinationType === undefined)
+                      throw new RangeError('Bottom move lost its destination type')
+                    const placeholders: Array<Value.Input> = []
+                    for (const lane of lanesFor(destinationType)) {
+                      placeholders.push(
+                        yield* Constant.integerUnsigned(builder, laneType(lane), 0n),
+                      )
+                    }
+                    locals.set(operation.destination.ordinal, Object.freeze(placeholders))
+                    break
+                  }
                   locals.set(operation.destination.ordinal, readLocal(operation.source))
                   break
+                }
                 case 'BeginLoan': {
                   if (operation.sourceType._tag === 'Slice') {
                     locals.set(operation.destination.ordinal, readLocal(operation.root))
@@ -5086,7 +5116,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     const field = fields.at(ordinal)
                     if (field === undefined)
                       throw new RangeError('Effect capture lost its environment field')
-                    if (field.representation === 'Value') {
+                    if (field.representation !== 'Borrow') {
                       captured.push(...readLocal(capture.source))
                       continue
                     }
@@ -5112,6 +5142,50 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     const lane = lanes.at(values.length)
                     if (lane === undefined) break
                     values.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(values))
+                  break
+                }
+                case 'PackEffectFailureUnion': {
+                  const source = readLocal(operation.source)
+                  const sourceTag = source.at(0)
+                  if (sourceTag === undefined)
+                    throw new RangeError('Effect failure union lost its tag lane')
+                  let mappedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
+                  for (const [ordinal, mapping] of operation.mappings.entries()) {
+                    const matches = yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      sourceTag,
+                      yield* Constant.integerSigned(builder, i32, BigInt(mapping.source)),
+                      `effect_failure_union${operation.destination.ordinal}_${ordinal}`,
+                    )
+                    mappedTag = yield* FunctionBody.select(
+                      body,
+                      matches,
+                      yield* Constant.integerSigned(builder, i32, BigInt(mapping.target)),
+                      mappedTag,
+                      `effect_failure_union${operation.destination.ordinal}_${ordinal}_tag`,
+                    )
+                  }
+                  const sourceLanes = lanesFor(operation.sourceType)
+                  const targetLanes = lanesFor(operation.type)
+                  const values: Array<Value.Input> = [mappedTag]
+                  for (let ordinal = 1; ordinal < targetLanes.length; ordinal += 1) {
+                    const targetLane = targetLanes.at(ordinal)
+                    if (targetLane === undefined) break
+                    const input = source.at(ordinal)
+                    const sourceLane = sourceLanes.at(ordinal)
+                    values.push(
+                      input === undefined || sourceLane === undefined
+                        ? yield* Constant.integerUnsigned(builder, laneType(targetLane), 0n)
+                        : yield* coerceLane(
+                            input,
+                            sourceLane,
+                            targetLane,
+                            `effect_failure_union${operation.destination.ordinal}_${ordinal}_payload`,
+                          ),
+                    )
                   }
                   locals.set(operation.destination.ordinal, Object.freeze(values))
                   break
@@ -5265,7 +5339,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     ),
                   )
                   if (target === undefined)
-                    throw new RangeError('Backend cannot resolve Effect value runner')
+                    throw new RangeError(
+                      `Backend cannot resolve Effect value runner ${operation.runner.module}.${operation.runner.name}<${operation.runnerTypeArguments.map(SilkType.encodeGenericArgument).join(', ')}>`,
+                    )
                   const outcomeValues = yield* callValues(
                     target,
                     [
@@ -5395,6 +5471,131 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(operation.destination.ordinal, Object.freeze(loaded))
                   break
                 }
+                case 'ReifyEffect': {
+                  const target = declared.find((candidate) =>
+                    Mir.matchesInstance(
+                      candidate.fn,
+                      operation.runner,
+                      operation.runnerTypeArguments,
+                    ),
+                  )
+                  if (target === undefined)
+                    throw new RangeError('Backend cannot resolve Effect result runner')
+                  const outcomeValues = yield* callValues(
+                    target,
+                    [
+                      ...readLocal(operation.effect),
+                      ...operation.arguments.flatMap((argument) => [...readLocal(argument)]),
+                    ],
+                    `effect_result_run${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.outcome.ordinal, outcomeValues)
+                  const tag = outcomeValues.at(0)
+                  if (tag === undefined) throw new RangeError('Effect result lost its outcome tag')
+                  const zero = yield* Constant.integerSigned(builder, i32, 0n)
+                  const succeeded = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    tag,
+                    zero,
+                    `effect_result_success${operation.destination.ordinal}`,
+                  )
+                  const successBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_result${operation.destination.ordinal}_success`,
+                  )
+                  const failureBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_result${operation.destination.ordinal}_failure`,
+                  )
+                  const followingBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_result${operation.destination.ordinal}_following`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
+                  const destinationLanes = operation.resultShape.lanes
+                  const destinationPayloadLanes = destinationLanes.slice(1)
+                  const outcomeLanes = operation.outcomeShape.lanes
+                  const writeBranch = Effect.fnUntraced(function* (
+                    outerTag: number,
+                    values: ReadonlyArray<Value.Input>,
+                    lanes: ReadonlyArray<Layout.CallingLane>,
+                    label: string,
+                  ) {
+                    const branch: Array<Value.Input> = [
+                      yield* Constant.integerSigned(builder, i32, BigInt(outerTag)),
+                    ]
+                    for (const [ordinal, targetLane] of destinationPayloadLanes.entries()) {
+                      const input = values.at(ordinal)
+                      const sourceLane = lanes.at(ordinal)
+                      branch.push(
+                        input === undefined || sourceLane === undefined
+                          ? yield* Constant.integerUnsigned(builder, laneType(targetLane), 0n)
+                          : yield* coerceLane(input, sourceLane, targetLane, `${label}_${ordinal}`),
+                      )
+                    }
+                    yield* storeMutable(operation.destination, Object.freeze(branch))
+                  })
+                  yield* LlvmBlock.setInsertionPoint(body, successBlock)
+                  const successLaneCount =
+                    operation.outcomeShape.tree._tag === 'OutcomeShape'
+                      ? operation.outcomeShape.tree.success.laneCount
+                      : 0
+                  yield* writeBranch(
+                    operation.successTag,
+                    Object.freeze(outcomeValues.slice(1, 1 + successLaneCount)),
+                    Object.freeze(outcomeLanes.slice(1, 1 + successLaneCount)),
+                    `effect_result${operation.destination.ordinal}_success`,
+                  )
+                  yield* FunctionBody.branch(body, followingBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, failureBlock)
+                  if (operation.outcomeType.type.failures.length === 0) {
+                    if (trapBlock === undefined)
+                      trapBlock = yield* LlvmBlock.make(body, 'effect_result_invalid_tag')
+                    yield* FunctionBody.branch(body, trapBlock)
+                  } else {
+                    const failureValues: Array<Value.Input> = []
+                    if (SilkType.isUnion(operation.failureValueType)) {
+                      failureValues.push(
+                        yield* FunctionBody.binary(
+                          body,
+                          'sub',
+                          tag,
+                          yield* Constant.integerSigned(builder, i32, 1n),
+                          `effect_result${operation.destination.ordinal}_failure_tag`,
+                        ),
+                      )
+                    }
+                    failureValues.push(...outcomeValues.slice(1))
+                    yield* writeBranch(
+                      operation.failureTag,
+                      Object.freeze(failureValues),
+                      operation.failureValueShape.lanes,
+                      `effect_result${operation.destination.ordinal}_failure`,
+                    )
+                    yield* FunctionBody.branch(body, followingBlock)
+                  }
+                  yield* LlvmBlock.setInsertionPoint(body, followingBlock)
+                  const storage = mutableStorage.get(operation.destination.ordinal)
+                  if (storage === undefined)
+                    throw new RangeError('Effect result destination is not materialized')
+                  const loaded: Array<Value.Input> = []
+                  for (const [ordinal, pointer] of storage.entries()) {
+                    const lane = destinationLanes.at(ordinal)
+                    if (lane === undefined)
+                      throw new RangeError('Effect result destination lost a lane')
+                    loaded.push(
+                      yield* FunctionBody.load(
+                        body,
+                        laneType(lane),
+                        pointer,
+                        `effect_result${operation.destination.ordinal}_${ordinal}`,
+                      ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(loaded))
+                  break
+                }
                 case 'CloseEffectEntry': {
                   const target = declared.find((candidate) =>
                     Mir.matchesInstance(candidate.fn, operation.target, operation.typeArguments),
@@ -5501,344 +5702,6 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   )
                   break
                 }
-                case 'RetryEffect': {
-                  const protectedTargetId = operation.protectedTarget
-                  const protectedTarget =
-                    protectedTargetId === undefined
-                      ? undefined
-                      : declared.find((candidate) =>
-                          Mir.matchesInstance(
-                            candidate.fn,
-                            protectedTargetId,
-                            operation.protectedTypeArguments,
-                          ),
-                        )
-                  const protectedRunner = declared.find((candidate) =>
-                    Mir.matchesInstance(
-                      candidate.fn,
-                      operation.protectedRunner,
-                      operation.protectedTypeArguments,
-                    ),
-                  )
-                  if (
-                    (operation.protectedTarget !== undefined && protectedTarget === undefined) ||
-                    protectedRunner === undefined
-                  )
-                    throw new RangeError('Backend cannot resolve Effect retry target or runner')
-                  const environment =
-                    protectedTarget === undefined
-                      ? readLocal(operation.protectedValue)
-                      : yield* callValues(
-                          protectedTarget,
-                          operation.protectedArguments.flatMap((argument) => [
-                            ...readLocal(argument),
-                          ]),
-                          `effect_retry_factory${operation.destination.ordinal}`,
-                        )
-                  locals.set(operation.protectedValue.ordinal, environment)
-                  const counter = yield* FunctionBody.alloca(
-                    body,
-                    i32,
-                    `effect_retry${operation.destination.ordinal}_remaining`,
-                  )
-                  yield* FunctionBody.store(body, readScalar(operation.retries), counter)
-                  const attemptBlock = yield* LlvmBlock.make(
-                    body,
-                    `effect_retry${operation.destination.ordinal}_attempt`,
-                  )
-                  const failedBlock = yield* LlvmBlock.make(
-                    body,
-                    `effect_retry${operation.destination.ordinal}_failed`,
-                  )
-                  const repeatBlock = yield* LlvmBlock.make(
-                    body,
-                    `effect_retry${operation.destination.ordinal}_repeat`,
-                  )
-                  const exhaustedBlock = yield* LlvmBlock.make(
-                    body,
-                    `effect_retry${operation.destination.ordinal}_exhausted`,
-                  )
-                  const successBlock = yield* LlvmBlock.make(
-                    body,
-                    `effect_retry${operation.destination.ordinal}_success`,
-                  )
-                  const followingBlock = yield* LlvmBlock.make(
-                    body,
-                    `effect_retry${operation.destination.ordinal}_following`,
-                  )
-                  yield* FunctionBody.branch(body, attemptBlock)
-                  yield* LlvmBlock.setInsertionPoint(body, attemptBlock)
-                  const outcomeValues = yield* callValues(
-                    protectedRunner,
-                    environment,
-                    `effect_retry_run${operation.destination.ordinal}`,
-                  )
-                  locals.set(operation.protectedOutcome.ordinal, outcomeValues)
-                  const tag = outcomeValues.at(0)
-                  if (tag === undefined) throw new RangeError('Effect retry outcome lost its tag')
-                  const zero = yield* Constant.integerSigned(builder, i32, 0n)
-                  const succeeded = yield* FunctionBody.integerCompare(
-                    body,
-                    'eq',
-                    tag,
-                    zero,
-                    `effect_retry${operation.destination.ordinal}_succeeded`,
-                  )
-                  yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failedBlock)
-                  yield* LlvmBlock.setInsertionPoint(body, successBlock)
-                  const resultLaneCount = lanesFor(operation.type).length
-                  yield* storeMutable(
-                    operation.destination,
-                    Object.freeze(outcomeValues.slice(1, 1 + resultLaneCount)),
-                  )
-                  yield* FunctionBody.branch(body, followingBlock)
-                  yield* LlvmBlock.setInsertionPoint(body, failedBlock)
-                  const remaining = yield* FunctionBody.load(
-                    body,
-                    i32,
-                    counter,
-                    `effect_retry${operation.destination.ordinal}_remaining_value`,
-                  )
-                  const canRetry = yield* FunctionBody.integerCompare(
-                    body,
-                    'sgt',
-                    remaining,
-                    zero,
-                    `effect_retry${operation.destination.ordinal}_can_retry`,
-                  )
-                  yield* FunctionBody.conditionalBranch(body, canRetry, repeatBlock, exhaustedBlock)
-                  yield* LlvmBlock.setInsertionPoint(body, repeatBlock)
-                  const one = yield* Constant.integerSigned(builder, i32, 1n)
-                  const decremented = yield* FunctionBody.binary(
-                    body,
-                    'sub',
-                    remaining,
-                    one,
-                    `effect_retry${operation.destination.ordinal}_decremented`,
-                  )
-                  yield* FunctionBody.store(body, decremented, counter)
-                  yield* FunctionBody.branch(body, attemptBlock)
-                  yield* LlvmBlock.setInsertionPoint(body, exhaustedBlock)
-                  if (operation.propagationType === undefined) {
-                    if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
-                    yield* FunctionBody.branch(body, trapBlock)
-                  } else {
-                    let mappedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
-                    for (const [ordinal, mapping] of operation.tagMappings.entries()) {
-                      const source = yield* Constant.integerSigned(
-                        builder,
-                        i32,
-                        BigInt(mapping.source),
-                      )
-                      const matches = yield* FunctionBody.integerCompare(
-                        body,
-                        'eq',
-                        tag,
-                        source,
-                        `effect_retry${operation.destination.ordinal}_tag${ordinal}`,
-                      )
-                      mappedTag = yield* FunctionBody.select(
-                        body,
-                        matches,
-                        yield* Constant.integerSigned(builder, i32, BigInt(mapping.target)),
-                        mappedTag,
-                        `effect_retry${operation.destination.ordinal}_mapped${ordinal}`,
-                      )
-                    }
-                    const propagationLanes = lanesFor(operation.propagationType)
-                    // See RunEffect: only positionally type-identical payload lanes are copied.
-                    const outcomeLanes = lanesFor(operation.protectedType)
-                    // Owners still live at this site release before the failure leaves the function
-                    // through their complete cleanup plans, matching the Drop lowering.
-                    for (const release of operation.releases ?? []) {
-                      if (!planReclaims(release.cleanup) && release.cleanup._tag !== 'HookCleanup')
-                        continue
-                      yield* dropThroughPlan(
-                        release.cleanup,
-                        readLocal(release.local),
-                        `propagation_release${release.local.ordinal}`,
-                      )
-                    }
-                    const returned: Array<Value.Input> = [mappedTag]
-                    while (returned.length < operation.propagationLaneCount) {
-                      const lane = propagationLanes.at(returned.length)
-                      if (lane === undefined) break
-                      const sourceLane = outcomeLanes.at(returned.length)
-                      const sourceValue = outcomeValues.at(returned.length)
-                      returned.push(
-                        sourceValue !== undefined &&
-                          sourceLane !== undefined &&
-                          laneType(sourceLane) === laneType(lane)
-                          ? sourceValue
-                          : yield* Constant.integerUnsigned(builder, laneType(lane), 0n),
-                      )
-                    }
-                    yield* FunctionBody.returnValue(
-                      body,
-                      returned.length === 1
-                        ? (returned.at(0) ?? mappedTag)
-                        : yield* FunctionBody.buildAggregate(
-                            body,
-                            entry.resultType,
-                            Object.freeze(returned.slice(0, operation.propagationLaneCount)),
-                            'propagated_effect_retry',
-                          ),
-                    )
-                  }
-                  yield* LlvmBlock.setInsertionPoint(body, followingBlock)
-                  const storage = mutableStorage.get(operation.destination.ordinal)
-                  if (storage === undefined)
-                    throw new RangeError('Effect retry destination is not materialized')
-                  const loaded: Array<Value.Input> = []
-                  for (const [lane, storagePointer] of storage.entries()) {
-                    const callingLane = lanesFor(operation.type).at(lane)
-                    if (callingLane === undefined) throw new RangeError('Effect retry lost a lane')
-                    loaded.push(
-                      yield* FunctionBody.load(
-                        body,
-                        laneType(callingLane),
-                        storagePointer,
-                        `effect_retry${operation.destination.ordinal}_${lane}`,
-                      ),
-                    )
-                  }
-                  locals.set(operation.destination.ordinal, Object.freeze(loaded))
-                  break
-                }
-                case 'CatchEffect': {
-                  const protectedTargetId = operation.protectedTarget
-                  const protectedTarget =
-                    protectedTargetId === undefined
-                      ? undefined
-                      : declared.find((candidate) =>
-                          Mir.matchesInstance(
-                            candidate.fn,
-                            protectedTargetId,
-                            operation.protectedTypeArguments,
-                          ),
-                        )
-                  const protectedRunner = declared.find((candidate) =>
-                    Mir.matchesInstance(
-                      candidate.fn,
-                      operation.protectedRunner,
-                      operation.protectedTypeArguments,
-                    ),
-                  )
-                  const handlerTarget = declared.find((candidate) =>
-                    Mir.matchesInstance(
-                      candidate.fn,
-                      operation.handlerTarget,
-                      operation.handlerTypeArguments,
-                    ),
-                  )
-                  const handlerRunner = declared.find((candidate) =>
-                    Mir.matchesInstance(
-                      candidate.fn,
-                      operation.handlerRunner,
-                      operation.handlerTypeArguments,
-                    ),
-                  )
-                  if (
-                    (protectedTargetId !== undefined && protectedTarget === undefined) ||
-                    protectedRunner === undefined ||
-                    handlerTarget === undefined ||
-                    handlerRunner === undefined
-                  )
-                    throw new RangeError('Backend cannot resolve effect catch target')
-                  const protectedEnvironment =
-                    protectedTarget === undefined
-                      ? readLocal(operation.protectedValue)
-                      : yield* callValues(
-                          protectedTarget,
-                          operation.protectedArguments.flatMap((argument) => [
-                            ...readLocal(argument),
-                          ]),
-                          `effect_protected_factory${operation.destination.ordinal}`,
-                        )
-                  locals.set(operation.protectedValue.ordinal, protectedEnvironment)
-                  const protectedValues = yield* callValues(
-                    protectedRunner,
-                    Object.freeze([
-                      ...protectedEnvironment,
-                      ...operation.protectedRunnerArguments.flatMap((argument) => [
-                        ...readLocal(argument),
-                      ]),
-                    ]),
-                    `effect_protected${operation.destination.ordinal}`,
-                  )
-                  locals.set(operation.protectedOutcome.ordinal, protectedValues)
-                  const tag = protectedValues.at(0)
-                  if (tag === undefined) throw new RangeError('Effect outcome lost its tag')
-                  const zero = yield* Constant.integerSigned(builder, i32, 0n)
-                  const succeeded = yield* FunctionBody.integerCompare(
-                    body,
-                    'eq',
-                    tag,
-                    zero,
-                    `effect_success${operation.destination.ordinal}`,
-                  )
-                  const successBlock = yield* LlvmBlock.make(
-                    body,
-                    `effect${operation.destination.ordinal}_success`,
-                  )
-                  const failureBlock = yield* LlvmBlock.make(
-                    body,
-                    `effect${operation.destination.ordinal}_failure`,
-                  )
-                  const followingBlock = yield* LlvmBlock.make(
-                    body,
-                    `effect${operation.destination.ordinal}_following`,
-                  )
-                  yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
-                  const resultLaneCount = lanesFor(operation.type).length
-                  yield* LlvmBlock.setInsertionPoint(body, successBlock)
-                  yield* storeMutable(
-                    operation.destination,
-                    Object.freeze(protectedValues.slice(1, 1 + resultLaneCount)),
-                  )
-                  yield* FunctionBody.branch(body, followingBlock)
-                  yield* LlvmBlock.setInsertionPoint(body, failureBlock)
-                  const handlerEnvironment = yield* callValues(
-                    handlerTarget,
-                    Object.freeze([
-                      ...protectedValues.slice(1, 1 + operation.handledLaneCount),
-                      ...readLocal(operation.handlerCallable),
-                    ]),
-                    `effect_handler_factory${operation.destination.ordinal}`,
-                  )
-                  locals.set(operation.handlerValue.ordinal, handlerEnvironment)
-                  const handlerValues = yield* callValues(
-                    handlerRunner,
-                    handlerEnvironment,
-                    `effect_handler${operation.destination.ordinal}`,
-                  )
-                  locals.set(operation.handlerOutcome.ordinal, handlerValues)
-                  yield* storeMutable(
-                    operation.destination,
-                    Object.freeze(handlerValues.slice(1, 1 + resultLaneCount)),
-                  )
-                  yield* FunctionBody.branch(body, followingBlock)
-                  yield* LlvmBlock.setInsertionPoint(body, followingBlock)
-                  const storage = mutableStorage.get(operation.destination.ordinal)
-                  if (storage === undefined)
-                    throw new RangeError('Effect catch destination is not materialized')
-                  const loaded: Array<Value.Input> = []
-                  for (const [lane, pointer] of storage.entries()) {
-                    const callingLane = lanesFor(operation.type).at(lane)
-                    if (callingLane === undefined)
-                      throw new RangeError('Effect catch destination lost a lane')
-                    loaded.push(
-                      yield* FunctionBody.load(
-                        body,
-                        laneType(callingLane),
-                        pointer,
-                        `effect${operation.destination.ordinal}_${lane}`,
-                      ),
-                    )
-                  }
-                  locals.set(operation.destination.ordinal, Object.freeze(loaded))
-                  break
-                }
                 case 'ApplyCallable': {
                   const sourceType =
                     operation.callable === undefined
@@ -5851,14 +5714,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     throw new RangeError('Backend callable application lost its hidden identity')
                   const captureValues: Array<Value.Input> = []
                   if (operation.callable !== undefined) {
-                    if (
-                      sourceType?._tag !== 'CallableValue' ||
-                      sourceType.environment === undefined
-                    )
-                      throw new RangeError('Stored callable application lost its environment')
+                    if (sourceType?._tag !== 'CallableValue')
+                      throw new RangeError('Stored callable application lost its identity')
                     const environmentValues = readLocal(operation.callable)
                     let cursor = 0
-                    for (const field of sourceType.environment.fields) {
+                    for (const field of sourceType.environment?.fields ?? []) {
                       const shape = Layout.callingShape(program.layout, field.type)
                       if (shape === undefined)
                         throw new RangeError('Callable capture lost its semantic calling shape')

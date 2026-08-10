@@ -32,10 +32,10 @@ const expression = (fact) => ({
             access: capture.access,
           })),
           mode: fact.mode,
-          typeArguments: fact.typeArguments.map(Type.key),
+          typeArguments: fact.typeArguments.map(Type.genericArgumentKey),
           substitution: [...fact.substitution].map(([parameter, type]) => [
             parameter,
-            Type.key(type),
+            Type.genericArgumentKey(type),
           ]),
         }
       : fact._tag === 'CallableApply'

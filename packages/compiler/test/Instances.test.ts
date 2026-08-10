@@ -74,14 +74,16 @@ pub fn main() -> i32 { let whenEnabled = select(true) return whenEnabled(42) }`)
     assert.deepEqual(
       generic.instances.map((instance) => ({
         name: instance.key.declaration.name,
-        arguments: instance.key.typeArguments.map(Type.encode),
+        arguments: instance.key.typeArguments.map(Type.encodeGenericArgument),
       })),
       [
         { name: 'main', arguments: [] },
         { name: 'select', arguments: ['i32'] },
       ],
     )
-    assert.deepEqual(generic.callables.at(0)?.typeArguments.map(Type.encode), ['i32'])
+    assert.deepEqual(generic.callables.at(0)?.typeArguments.map(Type.encodeGenericArgument), [
+      'i32',
+    ])
     assert.strictEqual(Type.encode(generic.callables.at(0)?.type ?? 'i32'), 'fn(i32) -> i32')
   }),
 )
@@ -99,9 +101,10 @@ pub fn main() -> i32 { return expand<i32>(0, 1) }`)
       ['SEM0053'],
     )
     assert.strictEqual(result.instances.violations.length, 1)
-    assert.deepEqual(result.instances.violations.at(0)?.target.typeArguments.map(Type.encode), [
-      'Array<i32, 1>',
-    ])
+    assert.deepEqual(
+      result.instances.violations.at(0)?.target.typeArguments.map(Type.encodeGenericArgument),
+      ['Array<i32, 1>'],
+    )
   }),
 )
 
@@ -340,7 +343,7 @@ pub fn main() -> i32 { return (run work()) |> i32.add(1) }`),
         composedMain === undefined
           ? []
           : Mir.operations(composedMain).map((operation) => operation._tag),
-        'RetryEffect',
+        'RunEffectValue',
       )
       assert.strictEqual(
         groupedMain === undefined ? undefined : Mir.operations(groupedMain).at(-1)?._tag,
@@ -526,7 +529,7 @@ pub fn main() -> i32 {
     assert.deepEqual(
       instances.map((instance) => ({
         name: instance.key.declaration.name,
-        arguments: instance.key.typeArguments.map(Type.encode),
+        arguments: instance.key.typeArguments.map(Type.encodeGenericArgument),
       })),
       [
         { name: 'main', arguments: [] },

@@ -114,7 +114,7 @@ export interface CallableValue {
   readonly ticket: number
   readonly type: Type.Callable
   readonly target: Hir.CallableTarget
-  readonly typeArguments: ReadonlyArray<Type.Type>
+  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly captures: ReadonlyArray<{
     readonly ordinal: number
     readonly parameterOrdinal: number
@@ -128,7 +128,7 @@ export interface EffectValue {
   readonly type: Type.Effect
   readonly site: Hir.EffectSiteId
   readonly runner: DeclarationIndex.CanonicalId
-  readonly runnerTypeArguments: ReadonlyArray<Type.Type>
+  readonly runnerTypeArguments: ReadonlyArray<Type.GenericArgument>
   readonly captures: ReadonlyArray<Value>
 }
 
@@ -562,7 +562,7 @@ const blockedStep = (reason: BlockedReason): Step =>
 const functionFor = (
   program: Mir.Module,
   id: DeclarationIndex.CanonicalId,
-  typeArguments: ReadonlyArray<Type.Type>,
+  typeArguments: ReadonlyArray<Type.GenericArgument>,
 ): Mir.MirFunction | undefined =>
   program.functions.find((fn) => Mir.matchesInstance(fn, id, typeArguments))
 
@@ -829,6 +829,17 @@ function* executeFunction(
         }
         return undefined
       }
+      case 'EffectCleanup': {
+        if (owner._tag !== 'EffectValue')
+          throw new RangeError('Effect cleanup lost its evaluator identity')
+        for (const slot of cleanup.slots) {
+          const capture = owner.captures.at(slot.ordinal)
+          if (capture === undefined) continue
+          const blocked = yield* releaseThroughPlan(slot.cleanup, capture, provenance, localOrdinal)
+          if (blocked !== undefined) return blocked
+        }
+        return undefined
+      }
       case 'HookCleanup': {
         const target = functionFor(program, cleanup.hook, cleanup.typeArguments)
         if (target === undefined) {
@@ -919,7 +930,7 @@ function* executeFunction(
 
   const invokeCallableTarget = function* (
     target: Hir.CallableTarget,
-    typeArguments: ReadonlyArray<Type.Type>,
+    typeArguments: ReadonlyArray<Type.GenericArgument>,
     arguments_: ReadonlyArray<Value>,
     span: SourceSpan.SourceSpan,
   ): FunctionExecution {
@@ -1365,69 +1376,6 @@ function* executeFunction(
     })
   }
 
-  const invokeCallableValue = function* (
-    callable: CallableValue,
-    supplied: ReadonlyArray<Value>,
-    span: SourceSpan.SourceSpan,
-  ): FunctionExecution {
-    const callableState = state.callables.get(callable.ticket)
-    if (callableState === undefined)
-      throw new RangeError('Callable application referenced a missing evaluator identity')
-    if (callableState.state !== 'Available') {
-      trace.push(
-        Object.freeze({
-          _tag: 'CallableRejected',
-          function: fn.id,
-          ticket: callable.ticket,
-          mode: callable.type.mode,
-          span,
-        }),
-      )
-      return blockedStep({
-        _tag: 'InvalidCallableReuse',
-        function: fn.id,
-        ticket: callable.ticket,
-        state: callableState.state,
-        span,
-      })
-    }
-    callableState.state = callable.type.mode === 'Take' ? 'Consumed' : 'Running'
-    const parameters = new Map<number, Value>()
-    supplied.forEach((argument, ordinal) => {
-      parameters.set(ordinal, argument)
-    })
-    for (const capture of callable.captures) {
-      const resolved =
-        capture.value._tag === 'CallableBorrowValue'
-          ? state.cells.get(cellKey(capture.value.frame, capture.value.cell))?.value
-          : capture.value
-      if (resolved === undefined)
-        throw new RangeError('Callable capture references a missing evaluator cell')
-      parameters.set(capture.parameterOrdinal, resolved)
-    }
-    trace.push(
-      Object.freeze({
-        _tag: 'CallableApply',
-        function: fn.id,
-        ticket: callable.ticket,
-        mode: callable.type.mode,
-        span,
-      }),
-    )
-    const result = yield* invokeCallableTarget(
-      callable.target,
-      callable.typeArguments,
-      Object.freeze(
-        [...parameters.entries()]
-          .sort(([left], [right]) => left - right)
-          .map(([, argument]) => argument),
-      ),
-      span,
-    )
-    if (callableState.state === 'Running') callableState.state = 'Available'
-    return result
-  }
-
   const cleanupMembers = (
     cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
     owner: Value,
@@ -1457,6 +1405,15 @@ function* executeFunction(
         cleanup.slots.flatMap((slot) => {
           const capture = owner.captures.find((candidate) => candidate.ordinal === slot.ordinal)
           return capture === undefined ? [] : cleanupMembers(slot.cleanup, capture.value)
+        }),
+      )
+    }
+    if (cleanup._tag === 'EffectCleanup') {
+      if (owner._tag !== 'EffectValue') return Object.freeze([])
+      return Object.freeze(
+        cleanup.slots.flatMap((slot) => {
+          const capture = owner.captures.at(slot.ordinal)
+          return capture === undefined ? [] : cleanupMembers(slot.cleanup, capture)
         }),
       )
     }
@@ -3183,7 +3140,9 @@ function* executeFunction(
               stored?.captures ??
               operation.captures.map((capture) => {
                 const captured: Value =
-                  capture.access === 'Copy' || capture.access === 'Take'
+                  operation.callable === undefined ||
+                  capture.access === 'Copy' ||
+                  capture.access === 'Take'
                     ? read(capture.source).value
                     : Object.freeze({
                         _tag: 'CallableBorrowValue' as const,
@@ -3235,8 +3194,14 @@ function* executeFunction(
             break
           }
           case 'MakeEffect': {
-            const captures = operation.captures.map((capture): Value => {
-              if (capture.access === 'Copy' || capture.access === 'Take')
+            const captures = operation.captures.map((capture, ordinal): Value => {
+              const field = operation.type.environment.fields.at(ordinal)
+              if (
+                capture.access === 'Copy' ||
+                capture.access === 'Take' ||
+                field?.representation === 'Callable' ||
+                field?.effectIdentity !== undefined
+              )
                 return read(capture.source).value
               const key = cellKey(frame, capture.source.ordinal)
               if (!state.cells.has(key)) state.cells.set(key, read(capture.source))
@@ -3281,6 +3246,37 @@ function* executeFunction(
             )
             break
           }
+          case 'PackEffectFailureUnion': {
+            const source = read(operation.source).value
+            if (source._tag !== 'UnionValue')
+              throw new RangeError('MIR attempted to fail with a non-union value')
+            const mapping = operation.mappings.find((candidate) =>
+              Type.equals(
+                operation.sourceType.type.members.at(candidate.source) ?? Type.unit,
+                source.member,
+              ),
+            )
+            if (mapping === undefined)
+              throw new RangeError('MIR failure union has no canonical E-channel mapping')
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'EffectOutcomeValue',
+                type: operation.type.type,
+                tag: mapping.target,
+                payload: source.payload,
+              }),
+              fromCall: false,
+            })
+            trace.push(
+              Object.freeze({
+                _tag: 'EffectFailure',
+                function: fn.id,
+                tag: mapping.target,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
           case 'UnpackEffectSuccess': {
             const outcome = read(operation.source)
             if (outcome.value._tag !== 'EffectOutcomeValue' || outcome.value.tag !== 0) {
@@ -3293,243 +3289,6 @@ function* executeFunction(
             }
             write(operation.destination, { value: outcome.value.payload, fromCall: true })
             break
-          }
-          case 'CatchEffect': {
-            const protectedTargetId = operation.protectedTarget
-            const protectedTarget =
-              protectedTargetId === undefined
-                ? undefined
-                : functionFor(program, protectedTargetId, operation.protectedTypeArguments)
-            if (protectedTargetId !== undefined && protectedTarget === undefined)
-              return blockedStep({
-                _tag: 'MissingFunction',
-                target: protectedTargetId,
-                span: operation.provenance.span,
-              })
-            const protectedArguments = operation.protectedArguments.map((argument) =>
-              read(argument),
-            )
-            if (protectedTarget !== undefined && protectedTargetId !== undefined) {
-              trace.push(
-                Object.freeze({
-                  _tag: 'Call',
-                  frame: activation.frame,
-                  depth: activation.depth,
-                  caller: fn.id,
-                  target: protectedTargetId,
-                  callerInstance: fn.instance,
-                  targetInstance: protectedTarget.instance,
-                  span: operation.provenance.span,
-                }),
-              )
-              protectedArguments.forEach((argument, ordinal) => {
-                trace.push(
-                  Object.freeze({
-                    _tag: 'Binding',
-                    frame: state.nextFrame,
-                    depth: activation.depth + 1,
-                    target: protectedTargetId,
-                    targetInstance: protectedTarget.instance,
-                    callSpan: operation.provenance.span,
-                    argumentOrdinal: ordinal,
-                    parameterOrdinal: ordinal,
-                    value: argument.value,
-                    fromCall: argument.fromCall,
-                    span: operation.provenance.span,
-                  }),
-                )
-              })
-            }
-            const protectedValue =
-              protectedTarget === undefined
-                ? read(operation.protectedValue).value
-                : yield* callFunction(
-                    protectedTarget,
-                    protectedArguments.map((argument) => argument.value),
-                    operation.provenance.span,
-                  )
-            if (protectedValue._tag === 'Blocked') return protectedValue
-            const protectedEffect =
-              protectedValue._tag === 'Value' ? protectedValue.value : protectedValue
-            if (protectedEffect._tag !== 'EffectValue')
-              throw new RangeError('MIR effect catch factory returned a non-Effect value')
-            write(operation.protectedValue, { value: protectedEffect, fromCall: true })
-            const protectedRunner = functionFor(
-              program,
-              operation.protectedRunner,
-              operation.protectedTypeArguments,
-            )
-            if (protectedRunner === undefined)
-              return blockedStep({
-                _tag: 'MissingFunction',
-                target: operation.protectedRunner,
-                span: operation.provenance.span,
-              })
-            const protectedExecution = yield* callFunction(
-              protectedRunner,
-              Object.freeze([
-                ...protectedEffect.captures,
-                ...operation.protectedRunnerArguments.map((argument) => read(argument).value),
-              ]),
-              operation.provenance.span,
-            )
-            if (protectedExecution._tag === 'Blocked') return protectedExecution
-            if (protectedExecution.value._tag !== 'EffectOutcomeValue')
-              throw new RangeError('MIR effect catch runner returned a non-outcome value')
-            const protectedOutcome = protectedExecution.value
-            write(operation.protectedOutcome, { value: protectedOutcome, fromCall: true })
-            if (protectedOutcome.tag === 0) {
-              write(operation.destination, {
-                value: protectedOutcome.payload,
-                fromCall: true,
-              })
-              break
-            }
-            if (protectedOutcome.tag !== operation.handledTag)
-              throw new RangeError('MIR effect catch reached an unmatched failure tag')
-            const handlerCallable = read(operation.handlerCallable).value
-            if (handlerCallable._tag !== 'CallableValue')
-              throw new RangeError('MIR catch handler lost its callable environment')
-            const handlerResult = yield* invokeCallableValue(
-              handlerCallable,
-              Object.freeze([protectedOutcome.payload]),
-              operation.provenance.span,
-            )
-            if (handlerResult._tag === 'Blocked') return handlerResult
-            if (handlerResult.value._tag !== 'EffectValue')
-              throw new RangeError('MIR catch handler factory returned a non-Effect value')
-            write(operation.handlerValue, { value: handlerResult.value, fromCall: true })
-            const handlerRunner = functionFor(
-              program,
-              operation.handlerRunner,
-              operation.handlerTypeArguments,
-            )
-            if (handlerRunner === undefined)
-              return blockedStep({
-                _tag: 'MissingFunction',
-                target: operation.handlerRunner,
-                span: operation.provenance.span,
-              })
-            const handlerExecution = yield* callFunction(
-              handlerRunner,
-              handlerResult.value.captures,
-              operation.provenance.span,
-            )
-            if (handlerExecution._tag === 'Blocked') return handlerExecution
-            if (
-              handlerExecution.value._tag !== 'EffectOutcomeValue' ||
-              handlerExecution.value.tag !== 0
-            )
-              throw new RangeError('MIR catch handler did not return an infallible effect outcome')
-            write(operation.handlerOutcome, { value: handlerExecution.value, fromCall: true })
-            write(operation.destination, { value: handlerExecution.value.payload, fromCall: true })
-            break
-          }
-          case 'RetryEffect': {
-            const protectedTarget =
-              operation.protectedTarget === undefined
-                ? undefined
-                : functionFor(program, operation.protectedTarget, operation.protectedTypeArguments)
-            const protectedRunner = functionFor(
-              program,
-              operation.protectedRunner,
-              operation.protectedTypeArguments,
-            )
-            if (
-              (operation.protectedTarget !== undefined && protectedTarget === undefined) ||
-              protectedRunner === undefined
-            )
-              return blockedStep({
-                _tag: 'MissingFunction',
-                target:
-                  operation.protectedTarget !== undefined && protectedTarget === undefined
-                    ? operation.protectedTarget
-                    : operation.protectedRunner,
-                span: operation.provenance.span,
-              })
-            const protectedArguments = operation.protectedArguments.map((argument) =>
-              read(argument),
-            )
-            const protectedValue =
-              protectedTarget === undefined
-                ? read(operation.protectedValue).value
-                : yield* callFunction(
-                    protectedTarget,
-                    protectedArguments.map((argument) => argument.value),
-                    operation.provenance.span,
-                  )
-            if ('_tag' in protectedValue && protectedValue._tag === 'Blocked') return protectedValue
-            const effectValue =
-              protectedTarget === undefined
-                ? protectedValue
-                : protectedValue._tag === 'Value'
-                  ? protectedValue.value
-                  : undefined
-            if (effectValue?._tag !== 'EffectValue')
-              throw new RangeError('MIR retry factory returned a non-Effect value')
-            write(operation.protectedValue, { value: effectValue, fromCall: true })
-            const retries = Math.max(0, readI32(operation.retries).value)
-            let last: EffectOutcomeValue | undefined
-            for (let attempt = 0; attempt <= retries; attempt += 1) {
-              trace.push(
-                Object.freeze({
-                  _tag: 'Call',
-                  frame: activation.frame,
-                  depth: activation.depth,
-                  caller: fn.id,
-                  target: operation.protectedRunner,
-                  callerInstance: fn.instance,
-                  targetInstance: protectedRunner.instance,
-                  span: operation.provenance.span,
-                }),
-              )
-              const execution = yield* callFunction(
-                protectedRunner,
-                effectValue.captures,
-                operation.provenance.span,
-              )
-              if (execution._tag === 'Blocked') return execution
-              if (execution.value._tag !== 'EffectOutcomeValue')
-                throw new RangeError('MIR retry runner returned a non-outcome value')
-              last = execution.value
-              write(operation.protectedOutcome, { value: last, fromCall: true })
-              if (last.tag === 0) {
-                write(operation.destination, { value: last.payload, fromCall: true })
-                break
-              }
-            }
-            if (last?.tag === 0) break
-            if (last === undefined || operation.propagationType === undefined)
-              throw new RangeError('MIR retry exhausted without a propagation contract')
-            const mapping = operation.tagMappings.find((candidate) => candidate.source === last.tag)
-            if (mapping === undefined)
-              throw new RangeError('MIR retry has no canonical failure-tag mapping')
-            const released = yield* executeOperations(operation.releases ?? [])
-            if (released !== undefined) return released
-            const propagated: EffectOutcomeValue = Object.freeze({
-              _tag: 'EffectOutcomeValue',
-              type: operation.propagationType.type,
-              tag: mapping.target,
-              payload: last.payload,
-            })
-            trace.push(
-              Object.freeze({
-                _tag: 'EffectFailure',
-                function: fn.id,
-                tag: mapping.target,
-                span: operation.provenance.span,
-              }),
-              Object.freeze({
-                _tag: 'Return',
-                frame: activation.frame,
-                depth: activation.depth,
-                function: fn.id,
-                instance: fn.instance,
-                value: propagated,
-                span: operation.provenance.span,
-              }),
-            )
-            return Object.freeze({ _tag: 'Value', value: propagated })
           }
           case 'RunEffect': {
             const target = functionFor(program, operation.target, operation.typeArguments)
@@ -3676,6 +3435,87 @@ function* executeFunction(
               payload: effectOutcome.payload,
             })
             return Object.freeze({ _tag: 'Value', value: propagated })
+          }
+          case 'ReifyEffect': {
+            const effect = read(operation.effect).value
+            if (effect._tag !== 'EffectValue')
+              throw new RangeError('MIR attempted to reify a non-Effect value')
+            const target = functionFor(program, operation.runner, operation.runnerTypeArguments)
+            if (target === undefined)
+              return blockedStep({
+                _tag: 'MissingFunction',
+                target: operation.runner,
+                span: operation.provenance.span,
+              })
+            trace.push(
+              Object.freeze({
+                _tag: 'Call',
+                frame: activation.frame,
+                depth: activation.depth,
+                caller: fn.id,
+                target: operation.runner,
+                callerInstance: fn.instance,
+                targetInstance: target.instance,
+                span: operation.provenance.span,
+              }),
+            )
+            const result = yield* callFunction(
+              target,
+              Object.freeze([
+                ...effect.captures,
+                ...operation.arguments.map((argument) => read(argument).value),
+              ]),
+              operation.provenance.span,
+            )
+            if (result._tag === 'Blocked') return result
+            if (result.value._tag !== 'EffectOutcomeValue')
+              throw new RangeError('MIR Effect result runner returned a non-outcome value')
+            const outcome = result.value
+            write(operation.outcome, { value: outcome, fromCall: true })
+            const branch: AggregateValue =
+              outcome.tag === 0
+                ? Object.freeze({
+                    _tag: 'AggregateValue',
+                    type: operation.successType,
+                    fields: Object.freeze([
+                      Object.freeze({ field: operation.successField, value: outcome.payload }),
+                    ]),
+                  })
+                : (() => {
+                    const failure = operation.outcomeType.type.failures.at(outcome.tag - 1)
+                    if (failure === undefined || outcome.payload._tag !== 'AggregateValue')
+                      throw new RangeError('MIR Effect result has an invalid failure tag')
+                    const failureValue: Value = Type.isUnion(operation.failureValueType)
+                      ? Object.freeze({
+                          _tag: 'UnionValue',
+                          type: operation.failureValueType,
+                          member: failure,
+                          payload: outcome.payload,
+                        })
+                      : outcome.payload
+                    return Object.freeze({
+                      _tag: 'AggregateValue' as const,
+                      type: operation.failureType,
+                      fields: Object.freeze([
+                        Object.freeze({ field: operation.failureField, value: failureValue }),
+                      ]),
+                    })
+                  })()
+            const outer: UnionValue = Object.freeze({
+              _tag: 'UnionValue',
+              type: operation.resultUnion,
+              member: outcome.tag === 0 ? operation.successType : operation.failureType,
+              payload: branch,
+            })
+            const completed: AggregateValue = Object.freeze({
+              _tag: 'AggregateValue',
+              type: operation.resultType.type,
+              fields: Object.freeze([
+                Object.freeze({ field: operation.resultField, value: outer }),
+              ]),
+            })
+            write(operation.destination, { value: completed, fromCall: true })
+            break
           }
           case 'CloseEffectEntry': {
             const target = functionFor(program, operation.target, operation.typeArguments)

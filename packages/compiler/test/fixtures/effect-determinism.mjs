@@ -17,7 +17,7 @@ effect fn relay(value: i32) -> i32 ! Problem {
 }
 effect fn recover(problem: Problem) -> i32 { return problem.code |> i32.add(1) }
 pub fn main() -> i32 {
-  let recipe = relay(0) |> Effect.catch<Problem>(recover)
+  let recipe = relay(0) |> Effect.catch(recover)
   return run recipe
 }`
 const bytes = new TextEncoder().encode(source)

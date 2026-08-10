@@ -15,6 +15,7 @@ import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as FloatingPoint from './FloatingPoint.js'
+import * as Instances from './Instances.js'
 import * as LayoutPlan from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -31,7 +32,8 @@ const planHasHook = (plan: Ownership.CleanupPlan): boolean =>
   (plan._tag === 'StructCleanup' && plan.fields.some((field) => planHasHook(field.cleanup))) ||
   (plan._tag === 'ArrayCleanup' && planHasHook(plan.element)) ||
   (plan._tag === 'UnionCleanup' && plan.cases.some((entry) => planHasHook(entry.cleanup))) ||
-  (plan._tag === 'CallableCleanup' && plan.slots.some((slot) => planHasHook(slot.cleanup))) ||
+  ((plan._tag === 'CallableCleanup' || plan._tag === 'EffectCleanup') &&
+    plan.slots.some((slot) => planHasHook(slot.cleanup))) ||
   (plan._tag === 'RawBufferCleanup' && planHasHook(plan.allocation))
 
 /**
@@ -121,8 +123,10 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
     ),
     ...Mir.operations(fn).flatMap((operation) =>
       operation._tag === 'MakeEffect' || operation._tag === 'MakeCallable'
-        ? operation.captures.flatMap((capture) =>
-            (capture.access === 'Shared' || capture.access === 'Exclusive') &&
+        ? operation.captures.flatMap((capture, ordinal) =>
+            (operation._tag === 'MakeEffect'
+              ? operation.type.environment.fields.at(ordinal)?.representation === 'Borrow'
+              : capture.access === 'Shared' || capture.access === 'Exclusive') &&
             fn.localTypes.at(capture.source.ordinal)?._tag !== 'EffectBorrow'
               ? [capture.source.ordinal]
               : [],
@@ -134,9 +138,7 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
       const dropped =
         operation._tag === 'Drop'
           ? [operation]
-          : operation._tag === 'RunEffect' ||
-              operation._tag === 'RunEffectValue' ||
-              operation._tag === 'RetryEffect'
+          : operation._tag === 'RunEffect' || operation._tag === 'RunEffectValue'
             ? (operation.releases ?? [])
             : []
       return [
@@ -156,19 +158,24 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
   let alignment = 1
   for (const local of [...rootOrdinals].sort((left, right) => left - right)) {
     const type = fn.localTypes.at(local)
-    const entry = type === undefined ? undefined : LayoutPlan.entry(plan, Mir.semanticType(type))
+    const storage =
+      type?._tag === 'EffectValue'
+        ? Object.freeze({ size: type.environment.size, alignment: type.environment.alignment })
+        : type === undefined
+          ? undefined
+          : LayoutPlan.entry(plan, Mir.semanticType(type))
     if (
       type === undefined ||
       type._tag === 'EffectBorrow' ||
       type._tag === 'EffectOutcome' ||
-      entry === undefined
+      storage === undefined
     ) {
       throw new RangeError(`Wasm frame lost address-taken root %${local}`)
     }
-    cursor = alignUp(cursor, entry.alignment)
+    cursor = alignUp(cursor, storage.alignment)
     roots.set(local, Object.freeze({ local, offset: cursor, type }))
-    cursor += entry.size
-    alignment = Math.max(alignment, entry.alignment)
+    cursor += storage.size
+    alignment = Math.max(alignment, storage.alignment)
   }
   return Object.freeze({
     roots,
@@ -1047,7 +1054,7 @@ const emitOperation = (
   plan: LayoutPlan.Plan,
   resolve: (
     target: DeclarationIndex.CanonicalId,
-    typeArguments: ReadonlyArray<SilkType.Type>,
+    typeArguments: ReadonlyArray<SilkType.GenericArgument>,
   ) => FuncActor.Func,
   memory: MemoryContext | undefined,
 ): ReadonlyArray<Instr.Instr> => {
@@ -1198,6 +1205,53 @@ const emitOperation = (
         default:
           return []
       }
+    }
+    const localType = layout.types.at(local.ordinal)
+    if (cleanup._tag === 'EffectCleanup' && localType?._tag === 'EffectValue') {
+      const environmentOffsets = (
+        environment: Extract<LayoutPlan.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
+        base = 0,
+      ): ReadonlyArray<number> =>
+        environment.fields.flatMap((field) => {
+          if (field.representation === 'Borrow') return [base + field.offset]
+          if (field.effectIdentity !== undefined) {
+            const nested = memory.plan.effectEnvironments.find(
+              (candidate) =>
+                candidate._tag === 'EffectEnvironment' &&
+                Instances.effectIdentity(candidate.instance, candidate.site) ===
+                  field.effectIdentity,
+            )
+            return nested?._tag === 'EffectEnvironment'
+              ? environmentOffsets(nested, base + field.offset)
+              : []
+          }
+          const shape = LayoutPlan.callingShape(memory.plan, field.type)
+          return (
+            shape?.lanes.flatMap((lane) => {
+              const offset = LayoutPlan.laneOffset(memory.plan, field.type, lane.path)
+              return offset === undefined ? [] : [base + field.offset + offset]
+            }) ?? []
+          )
+        })
+      const offsets = environmentOffsets(localType.environment)
+      const rootSlots = slots(local)
+      const rootLanes = layout.lanes.at(local.ordinal) ?? []
+      const stores = rootLanes.flatMap((lane, ordinal) => {
+        const offset = offsets.at(ordinal)
+        const source = rootSlots.at(ordinal)
+        if (offset === undefined || source === undefined)
+          throw new RangeError('Wasm Effect cleanup lost an environment lane')
+        return [
+          ...frameAddress(planned.offset + offset),
+          Instr.localGet(source),
+          Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
+        ]
+      })
+      const hooks = cleanup.slots.flatMap((slot) => {
+        const field = localType.environment.fields.at(slot.ordinal)
+        return field === undefined ? [] : walk(slot.cleanup, field.offset)
+      })
+      return [...stores, ...hooks]
     }
     return [...materializeRoot(local), ...walk(cleanup, 0), ...reloadRoot(local.ordinal)]
   }
@@ -1704,7 +1758,9 @@ const emitOperation = (
         })
         const selected = [
           ...emitMany(arm.selected.operations),
-          ...copy(slots(arm.selected.result), slots(operation.destination)),
+          ...(layout.types.at(arm.selected.result.ordinal)?._tag === 'Bottom'
+            ? []
+            : copy(slots(arm.selected.result), slots(operation.destination))),
         ]
         if (arm.guard === undefined) return [...bindings, ...selected]
         return [
@@ -2236,7 +2292,7 @@ const emitOperation = (
       for (const [ordinal, capture] of operation.captures.entries()) {
         const field = fields.at(ordinal)
         if (field === undefined) throw new RangeError('Wasm Effect capture lost its field')
-        if (field.representation === 'Value') {
+        if (field.representation !== 'Borrow') {
           const source = slots(capture.source)
           instructions.push(...copy(source, destination.slice(cursor, cursor + source.length)))
           cursor += source.length
@@ -2278,136 +2334,42 @@ const emitOperation = (
         }),
       ]
     }
+    case 'PackEffectFailureUnion': {
+      const source = slots(operation.source)
+      const destination = slots(operation.destination)
+      const sourceTag = source.at(0)
+      const destinationTag = destination.at(0)
+      if (sourceTag === undefined || destinationTag === undefined)
+        throw new RangeError('Wasm Effect failure union lost a tag lane')
+      return [
+        Instr.i32Const(-1),
+        Instr.localSet(layout.scratch),
+        ...operation.mappings.flatMap((mapping) => [
+          Instr.localGet(sourceTag),
+          Instr.i32Const(mapping.source),
+          Instr.op('i32.eq'),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
+            [],
+          ),
+        ]),
+        Instr.localGet(layout.scratch),
+        Instr.localSet(destinationTag),
+        ...destination.slice(1).flatMap((target, index) => {
+          const value = source.at(index + 1)
+          return [
+            ...(value === undefined ? [Instr.i32Const(0)] : [Instr.localGet(value)]),
+            Instr.localSet(target),
+          ]
+        }),
+      ]
+    }
     case 'UnpackEffectSuccess':
       return copy(
         slots(operation.source).slice(1, 1 + slots(operation.destination).length),
         slots(operation.destination),
       )
-    case 'CatchEffect': {
-      const protectedValueSlots = slots(operation.protectedValue)
-      const protectedSlots = slots(operation.protectedOutcome)
-      const handlerValueSlots = slots(operation.handlerValue)
-      const handlerSlots = slots(operation.handlerOutcome)
-      const destinationSlots = slots(operation.destination)
-      const tag = protectedSlots.at(0)
-      if (tag === undefined) throw new RangeError('Wasm effect catch lost its tag lane')
-      const success = copy(protectedSlots.slice(1, 1 + destinationSlots.length), destinationSlots)
-      const failure = [
-        Instr.localGet(tag),
-        Instr.i32Const(operation.handledTag),
-        Instr.op('i32.eq'),
-        Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
-        ...protectedSlots
-          .slice(1, 1 + operation.handledLaneCount)
-          .map((slot) => Instr.localGet(slot)),
-        ...slots(operation.handlerCallable).map((slot) => Instr.localGet(slot)),
-        Instr.call(resolve(operation.handlerTarget, operation.handlerTypeArguments)),
-        ...[...handlerValueSlots].reverse().map((slot) => Instr.localSet(slot)),
-        ...handlerValueSlots.map((slot) => Instr.localGet(slot)),
-        Instr.call(resolve(operation.handlerRunner, operation.handlerTypeArguments)),
-        ...[...handlerSlots].reverse().map((slot) => Instr.localSet(slot)),
-        ...copy(handlerSlots.slice(1, 1 + destinationSlots.length), destinationSlots),
-      ]
-      return [
-        ...(operation.protectedTarget === undefined
-          ? []
-          : [
-              ...operation.protectedArguments.flatMap((argument) =>
-                slots(argument).map((slot) => Instr.localGet(slot)),
-              ),
-              Instr.call(resolve(operation.protectedTarget, operation.protectedTypeArguments)),
-              ...[...protectedValueSlots].reverse().map((slot) => Instr.localSet(slot)),
-            ]),
-        ...protectedValueSlots.map((slot) => Instr.localGet(slot)),
-        ...operation.protectedRunnerArguments.flatMap((argument) =>
-          slots(argument).map((slot) => Instr.localGet(slot)),
-        ),
-        Instr.call(resolve(operation.protectedRunner, operation.protectedTypeArguments)),
-        ...[...protectedSlots].reverse().map((slot) => Instr.localSet(slot)),
-        Instr.localGet(tag),
-        Instr.op('i32.eqz'),
-        Instr.ifElse(Instr.emptyBlockType, success, failure),
-      ]
-    }
-    case 'RetryEffect': {
-      const valueSlots = slots(operation.protectedValue)
-      const outcomeSlots = slots(operation.protectedOutcome)
-      const destinationSlots = slots(operation.destination)
-      const tag = outcomeSlots.at(0)
-      if (tag === undefined) throw new RangeError('Wasm Effect retry lost its outcome tag')
-      const invokeRunner = [
-        ...valueSlots.map((slot) => Instr.localGet(slot)),
-        Instr.call(resolve(operation.protectedRunner, operation.protectedTypeArguments)),
-        ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
-      ]
-      const loop = Instr.block(Instr.emptyBlockType, [
-        Instr.loop(Instr.emptyBlockType, [
-          ...invokeRunner,
-          Instr.localGet(tag),
-          Instr.op('i32.eqz'),
-          Instr.brIf(1),
-          Instr.localGet(layout.scratch),
-          Instr.i32Const(0),
-          Instr.op('i32.le_s'),
-          Instr.brIf(1),
-          Instr.localGet(layout.scratch),
-          Instr.i32Const(1),
-          Instr.op('i32.sub'),
-          Instr.localSet(layout.scratch),
-          Instr.br(0),
-        ]),
-      ])
-      const success = [
-        ...copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots),
-        ...[...(memory?.frame.roots.keys() ?? [])]
-          .sort((left, right) => left - right)
-          .flatMap(reloadRoot),
-      ]
-      const failure =
-        operation.propagationType === undefined
-          ? [Instr.op('unreachable')]
-          : [
-              // Owners still live at this site run their Drop hooks before the failure leaves.
-              ...(operation.releases ?? []).flatMap((release) =>
-                hookReleaseInstructions(release.cleanup, release.local),
-              ),
-              Instr.i32Const(-1),
-              Instr.localSet(layout.scratch),
-              ...operation.tagMappings.flatMap((mapping) => [
-                Instr.localGet(tag),
-                Instr.i32Const(mapping.source),
-                Instr.op('i32.eq'),
-                Instr.ifElse(
-                  Instr.emptyBlockType,
-                  [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
-                  [],
-                ),
-              ]),
-              Instr.localGet(layout.scratch),
-              ...Array.from({ length: operation.propagationLaneCount - 1 }, (_, index) => {
-                const source = outcomeSlots.at(index + 1)
-                return source === undefined ? Instr.i32Const(0) : Instr.localGet(source)
-              }),
-              Instr.op('return'),
-            ]
-      return [
-        ...(operation.protectedTarget === undefined
-          ? []
-          : [
-              ...operation.protectedArguments.flatMap((argument) =>
-                slots(argument).map((slot) => Instr.localGet(slot)),
-              ),
-              Instr.call(resolve(operation.protectedTarget, operation.protectedTypeArguments)),
-              ...[...valueSlots].reverse().map((slot) => Instr.localSet(slot)),
-            ]),
-        Instr.localGet(scalar(operation.retries)),
-        Instr.localSet(layout.scratch),
-        loop,
-        Instr.localGet(tag),
-        Instr.op('i32.eqz'),
-        Instr.ifElse(Instr.emptyBlockType, success, failure),
-      ]
-    }
     case 'RunEffect': {
       const outcomeSlots = slots(operation.outcome)
       const destinationSlots = slots(operation.destination)
@@ -2509,6 +2471,73 @@ const emitOperation = (
         Instr.ifElse(Instr.emptyBlockType, success, failure),
       ]
     }
+    case 'ReifyEffect': {
+      const outcomeSlots = slots(operation.outcome)
+      const destinationSlots = slots(operation.destination)
+      const outcomeTag = outcomeSlots.at(0)
+      const resultTag = destinationSlots.at(0)
+      if (outcomeTag === undefined || resultTag === undefined)
+        throw new RangeError('Wasm Effect result lost an outcome or Result tag lane')
+      const invoke = [
+        ...slots(operation.effect).map((slot) => Instr.localGet(slot)),
+        ...operation.arguments.flatMap((argument) =>
+          slots(argument).map((slot) => Instr.localGet(slot)),
+        ),
+        Instr.call(resolve(operation.runner, operation.runnerTypeArguments)),
+        ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
+        ...[...(memory?.frame.roots.keys() ?? [])]
+          .sort((left, right) => left - right)
+          .flatMap(reloadRoot),
+      ]
+      const writePayload = (
+        source: ReadonlyArray<number>,
+        destination: ReadonlyArray<number>,
+      ): ReadonlyArray<Instr.Instr> =>
+        destination.flatMap((target, index) => {
+          const value = source.at(index)
+          return [
+            ...(value === undefined ? [Instr.i32Const(0)] : [Instr.localGet(value)]),
+            Instr.localSet(target),
+          ]
+        })
+      const resultPayload = destinationSlots.slice(1)
+      const successLaneCount =
+        operation.outcomeShape.tree._tag === 'OutcomeShape'
+          ? operation.outcomeShape.tree.success.laneCount
+          : 0
+      const success = [
+        Instr.i32Const(operation.successTag),
+        Instr.localSet(resultTag),
+        ...writePayload(outcomeSlots.slice(1, 1 + successLaneCount), resultPayload),
+      ]
+      const failure =
+        operation.outcomeType.type.failures.length === 0
+          ? [Instr.op('unreachable')]
+          : [
+              Instr.i32Const(operation.failureTag),
+              Instr.localSet(resultTag),
+              ...(SilkType.isUnion(operation.failureValueType)
+                ? (() => {
+                    const innerTag = resultPayload.at(0)
+                    if (innerTag === undefined)
+                      throw new RangeError('Wasm Effect Result failure lost its nested tag lane')
+                    return [
+                      Instr.localGet(outcomeTag),
+                      Instr.i32Const(1),
+                      Instr.op('i32.sub'),
+                      Instr.localSet(innerTag),
+                      ...writePayload(outcomeSlots.slice(1), resultPayload.slice(1)),
+                    ]
+                  })()
+                : writePayload(outcomeSlots.slice(1), resultPayload)),
+            ]
+      return [
+        ...invoke,
+        Instr.localGet(outcomeTag),
+        Instr.op('i32.eqz'),
+        Instr.ifElse(Instr.emptyBlockType, success, failure),
+      ]
+    }
     case 'CloseEffectEntry': {
       const outcomeSlots = slots(operation.outcome)
       const tag = outcomeSlots.at(0)
@@ -2579,11 +2608,11 @@ const emitOperation = (
         throw new RangeError('Wasm callable application lost its hidden identity')
       const captureOperands: Array<Instr.Instr> = []
       if (operation.callable !== undefined) {
-        if (sourceType?._tag !== 'CallableValue' || sourceType.environment === undefined)
-          throw new RangeError('Wasm stored callable lost its environment')
+        if (sourceType?._tag !== 'CallableValue')
+          throw new RangeError('Wasm stored callable lost its identity')
         const environmentSlots = slots(operation.callable)
         let cursor = 0
-        for (const field of sourceType.environment.fields) {
+        for (const field of sourceType.environment?.fields ?? []) {
           if (memory === undefined && field.representation === 'Borrow')
             throw new RangeError('Wasm borrowed callable capture requires private memory')
           const shape = LayoutPlan.callingShape(plan, field.type)
@@ -3512,7 +3541,7 @@ const emitBody = (
   plan: LayoutPlan.Plan,
   resolve: (
     target: DeclarationIndex.CanonicalId,
-    typeArguments: ReadonlyArray<SilkType.Type>,
+    typeArguments: ReadonlyArray<SilkType.GenericArgument>,
   ) => FuncActor.Func,
   memory: MemoryContext | undefined,
 ): ReadonlyArray<Instr.Instr> => {
@@ -3860,13 +3889,24 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
 
     const resolve = (
       targetId: DeclarationIndex.CanonicalId,
-      typeArguments: ReadonlyArray<SilkType.Type>,
+      typeArguments: ReadonlyArray<SilkType.GenericArgument>,
     ): FuncActor.Func => {
       const target = declared.find((candidate) =>
         Mir.matchesInstance(candidate.fn, targetId, typeArguments),
       )
       if (target === undefined) {
-        throw new RangeError(`Backend cannot resolve call target ${targetId.name}`)
+        const requested = typeArguments.map(SilkType.genericArgumentKey).join(', ')
+        const candidates = declared
+          .filter(
+            (candidate) =>
+              candidate.fn.id.module === targetId.module && candidate.fn.id.name === targetId.name,
+          )
+          .map((candidate) =>
+            candidate.fn.instance.typeArguments.map(SilkType.genericArgumentKey).join(', '),
+          )
+        throw new RangeError(
+          `Backend cannot resolve call target ${targetId.name}<${requested}>; candidates: ${candidates.join(' | ') || 'none'}`,
+        )
       }
       return target.handle
     }

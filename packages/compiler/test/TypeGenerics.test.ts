@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
+import * as Diagnostic from '../src/Diagnostic.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Formatter from '../src/Formatter.js'
 import * as Layout from '../src/Layout.js'
@@ -37,6 +38,183 @@ it('parses declaration parameters and explicit call specialization losslessly', 
   assert.include(kinds, 'TypeParameter')
   assert.include(kinds, 'CallTypeArgumentList')
   assert.deepEqual(syntax.parserDiagnostics, [])
+})
+
+it('parses channel-kinded generic binders losslessly', () => {
+  const channelSource = `effect fn transform<A, !E, ?R>(self: Effect<A ! E ? R>) -> Effect<A ! E ? R> {
+  return self
+}`
+  const syntax = Parser.parse(
+    Lexer.lex(SourceFile.make('generics/Channels', new TextEncoder().encode(channelSource))),
+  )
+  const parameters = descendants(syntax.root).filter((node) => node.kind === 'TypeParameter')
+
+  assert.deepEqual(
+    parameters.map((parameter) =>
+      SyntaxTree.tokens(parameter)
+        .filter((token) => token.kind !== 'Whitespace')
+        .map((token) => token.kind),
+    ),
+    [['Identifier'], ['Bang', 'Identifier'], ['Question', 'Identifier']],
+  )
+  assert.deepEqual(syntax.parserDiagnostics, [])
+})
+
+it('normalizes contract rows and infers selected-entry remainders', () => {
+  const owner = { module: 'generics/Rows', name: 'transform' }
+  const failureRemainder = Type.parameter(owner, 0, 'E', 'FailureRow')
+  const requirementRemainder = Type.parameter(owner, 1, 'R', 'RequirementRow')
+  const problem = Type.nominal('generics/Rows', 'Problem')
+  const other = Type.nominal('generics/Rows', 'Other')
+  const clock = Type.nominal('generics/Rows', 'Clock')
+  const allocator = Type.nominal('generics/Rows', 'Allocator')
+  const pattern = Type.effect(
+    'i32',
+    [problem],
+    'Shared',
+    [{ capability: clock, role: 'Primary', access: 'Shared' }],
+    [failureRemainder],
+    [requirementRemainder],
+  )
+  const actual = Type.effect('i32', [other, problem, other], 'Shared', [
+    { capability: allocator, role: 'DefaultRole', access: 'Shared' },
+    { capability: clock, role: 'Primary', access: 'Shared' },
+    { capability: allocator, role: 'DefaultRole', access: 'Exclusive' },
+  ])
+  const inferred = new Map<string, Type.GenericArgument>()
+
+  assert.strictEqual(Type.infer(pattern, actual, inferred), true)
+  assert.strictEqual(
+    Type.encodeGenericArgument(inferred.get(Type.key(failureRemainder)) ?? 'never'),
+    '! generics/Rows.Other',
+  )
+  assert.strictEqual(
+    Type.encodeGenericArgument(inferred.get(Type.key(requirementRemainder)) ?? 'never'),
+    '? &mut generics/Rows.Allocator',
+  )
+  assert.strictEqual(Type.encode(Type.substitute(pattern, inferred)), Type.encode(actual))
+})
+
+it('projects an erased failure row into its ordinary structural value sum', () => {
+  const owner = { module: 'generics/Rows', name: 'result' }
+  const failures = Type.parameter(owner, 0, 'E', 'FailureRow')
+  const projection = Type.failureProjection(failures)
+  const problem = Type.nominal('generics/Rows', 'Problem')
+  const other = Type.nominal('generics/Rows', 'Other')
+  const concrete = Type.union([problem, other])
+  assert.strictEqual(concrete._tag, 'Normalized')
+  if (concrete._tag !== 'Normalized') return
+
+  const inferred = new Map<string, Type.GenericArgument>()
+  assert.strictEqual(Type.infer(projection, concrete.type, inferred), true)
+  assert.strictEqual(
+    Type.encode(Type.substitute(projection, inferred)),
+    'generics/Rows.Other | generics/Rows.Problem',
+  )
+
+  const syntax = Parser.parse(
+    Lexer.lex(
+      SourceFile.make(
+        'generics/Projection',
+        new TextEncoder().encode('fn keep<!E>(value: Row<!E>) -> Row<!E> { return move value }'),
+      ),
+    ),
+  )
+  assert.deepEqual(syntax.parserDiagnostics, [])
+  assert.strictEqual(
+    descendants(syntax.root).filter((node) => node.kind === 'FailureRow').length,
+    2,
+  )
+})
+
+it('distinguishes row inference failure causes deterministically', () => {
+  const owner = { module: 'generics/Rows', name: 'diagnose' }
+  const firstFailure = Type.parameter(owner, 0, 'E', 'FailureRow')
+  const secondFailure = Type.parameter(owner, 1, 'F', 'FailureRow')
+  const firstRequirement = Type.parameter(owner, 2, 'R', 'RequirementRow')
+  const secondRequirement = Type.parameter(owner, 3, 'S', 'RequirementRow')
+  const problem = Type.nominal('generics/Rows', 'Problem')
+  const clock = Type.nominal('generics/Rows', 'Clock')
+  const requirement = { capability: clock, role: 'Primary', access: 'Shared' as const }
+  const closed = Type.effect('i32', [], 'Shared')
+  const absentFailure = Type.rowInferenceFailure(Type.effect('i32', [problem]), closed)
+
+  assert.strictEqual(absentFailure?._tag, 'AbsentFailureMember')
+  if (absentFailure !== undefined)
+    assert.deepEqual(
+      {
+        code: Diagnostic.contractRowInference(
+          absentFailure,
+          Parser.parse(Lexer.lex(file)).root.span,
+        ).code,
+        reason: Diagnostic.contractRowInference(
+          absentFailure,
+          Parser.parse(Lexer.lex(file)).root.span,
+        ).reason._tag,
+      },
+      { code: 'SEM0089', reason: 'ContractRowInference' },
+    )
+  assert.strictEqual(
+    Type.rowInferenceFailure(
+      Type.effect('i32', [], 'Shared', [], [firstFailure, secondFailure]),
+      closed,
+    )?._tag,
+    'AmbiguousFailureRemainder',
+  )
+  assert.strictEqual(
+    Type.rowInferenceFailure(Type.effect('i32', [], 'Shared', [requirement]), closed)?._tag,
+    'AbsentRequirementMember',
+  )
+  assert.strictEqual(
+    Type.rowInferenceFailure(
+      Type.effect('i32', [], 'Shared', [requirement]),
+      Type.effect('i32', [], 'Shared', [{ ...requirement, role: 'Secondary' }]),
+    )?._tag,
+    'IncompatibleRequirementRole',
+  )
+  assert.strictEqual(
+    Type.rowInferenceFailure(
+      Type.effect('i32', [], 'Shared', [requirement]),
+      Type.effect('i32', [], 'Shared', [{ ...requirement, access: 'Exclusive' }]),
+    )?._tag,
+    'IncompatibleRequirementAccess',
+  )
+  assert.strictEqual(
+    Type.rowInferenceFailure(
+      Type.effect('i32', [], 'Shared', [], [], [firstRequirement, secondRequirement]),
+      closed,
+    )?._tag,
+    'AmbiguousRequirementRemainder',
+  )
+  assert.strictEqual(
+    Type.rowInferenceFailure(
+      Type.effect('i32', [], 'Shared', [], [firstFailure]),
+      Type.effect('i32', [], 'Shared', [], [secondFailure]),
+    )?._tag,
+    'NonFiniteFailureRow',
+  )
+  assert.strictEqual(
+    Type.rowInferenceFailure(
+      Type.effect('i32', [], 'Shared', [], [], [firstRequirement]),
+      Type.effect('i32', [], 'Shared', [], [], [secondRequirement]),
+    )?._tag,
+    'NonFiniteRequirementRow',
+  )
+})
+
+it('orders Effect access bounds from reusable through take-capable', () => {
+  const shared = Type.effect('i32', [], 'Shared')
+  const exclusive = Type.effect('i32', [], 'Exclusive')
+  const take = Type.effect('i32', [], 'Take')
+
+  assert.isTrue(Type.infer(take, shared, new Map()))
+  assert.isTrue(Type.infer(take, exclusive, new Map()))
+  assert.isTrue(Type.infer(take, take, new Map()))
+  assert.isTrue(Type.infer(exclusive, shared, new Map()))
+  assert.isTrue(Type.infer(exclusive, exclusive, new Map()))
+  assert.isFalse(Type.infer(exclusive, take, new Map()))
+  assert.isFalse(Type.infer(shared, exclusive, new Map()))
+  assert.isFalse(Type.infer(shared, take, new Map()))
 })
 
 it('keeps generic angles contextual and recovers damaged lists deterministically', () => {
@@ -114,6 +292,36 @@ it.effect('formats generic declarations, applications, and calls idempotently', 
   }),
 )
 
+it.effect('formats channel-kinded generic binders idempotently', () =>
+  Effect.gen(function* () {
+    const syntax = Parser.parse(
+      Lexer.lex(
+        SourceFile.make(
+          'generics/channel-format',
+          new TextEncoder().encode(
+            'effect fn transform < A , ! E , ? R >(self:Effect<A ! E ? R>)->Effect<A ! E ? R>{return self}',
+          ),
+        ),
+      ),
+    )
+    const formatted = yield* Formatter.format(syntax)
+    const text = new TextDecoder().decode(FormattedDocument.toUint8Array(formatted))
+    assert.strictEqual(
+      text,
+      `effect fn transform<A, !E, ?R>(self: Effect<A ! E ? R>) -> Effect<A ! E ? R> {
+  return self
+}
+`,
+    )
+    const again = yield* Formatter.format(
+      Parser.parse(
+        Lexer.lex(SourceFile.make('generics/channel-format', new TextEncoder().encode(text))),
+      ),
+    )
+    assert.strictEqual(new TextDecoder().decode(FormattedDocument.toUint8Array(again)), text)
+  }),
+)
+
 it.effect('infers and explicitly selects finite concrete instances before MIR', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.makeRealized({ root: file }).pipe(
@@ -124,7 +332,7 @@ it.effect('infers and explicitly selects finite concrete instances before MIR', 
     assert.deepEqual(
       snapshot.instances.instances.map((instance) => ({
         name: instance.key.declaration.name,
-        arguments: instance.key.typeArguments.map(Type.encode),
+        arguments: instance.key.typeArguments.map(Type.encodeGenericArgument),
       })),
       [
         { name: 'main', arguments: [] },
@@ -143,7 +351,7 @@ it.effect('infers and explicitly selects finite concrete instances before MIR', 
       assert.deepEqual(
         outcome.trace.flatMap((event) =>
           event._tag === 'Call' && event.target.name === 'identity'
-            ? [event.targetInstance.typeArguments.map(Type.encode)]
+            ? [event.targetInstance.typeArguments.map(Type.encodeGenericArgument)]
             : [],
         ),
         [['bool'], ['i32']],
@@ -301,9 +509,10 @@ pub fn main() -> i32 { return expand<i32>(1) }`),
     )
 
     assert.strictEqual(snapshot.instances.violations.length, 1)
-    assert.deepEqual(snapshot.instances.violations.at(0)?.target.typeArguments.map(Type.encode), [
-      'Array<i32, 1>',
-    ])
+    assert.deepEqual(
+      snapshot.instances.violations.at(0)?.target.typeArguments.map(Type.encodeGenericArgument),
+      ['Array<i32, 1>'],
+    )
     assert.strictEqual(snapshot.instances.instances.length, 2)
     assert.deepEqual(
       snapshot.diagnostics.map((diagnostic) => diagnostic.code),
@@ -550,7 +759,7 @@ pub fn main() -> i32 {
     if (call === undefined) return
     assert.deepEqual(
       Analysis.instancesOfCall(snapshot, call).map((link) =>
-        link.target.key.typeArguments.map(Type.encode),
+        link.target.key.typeArguments.map(Type.encodeGenericArgument),
       ),
       [['bool'], ['i32']],
     )
@@ -631,7 +840,9 @@ pub fn main() -> i32 {
       wasmArtifact.symbols.map((entry) => entry.symbol),
     )
     assert.deepEqual(
-      wasmArtifact.symbols.map((entry) => entry.instance.typeArguments.map(Type.encode)),
+      wasmArtifact.symbols.map((entry) =>
+        entry.instance.typeArguments.map(Type.encodeGenericArgument),
+      ),
       [[], ['i32'], ['generics/Backend.Pair']],
     )
     assert.deepEqual(

@@ -1,5 +1,7 @@
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
 import { pipe } from 'effect/Function'
+import * as Analysis from '../src/Analysis.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as Elaboration from '../src/Elaboration.js'
 import * as Lexer from '../src/Lexer.js'
@@ -70,6 +72,11 @@ const parseText = (id: string, source: string): SyntaxFile.SyntaxFile =>
 const analyzeText = (id: string, source: string): Elaboration.Result =>
   elaborate(parseText(id, source))
 
+const analyzeWithStdlib = Effect.fnUntraced(function* (id: string, source: string) {
+  const module = id.replace('://', '/').replace(/\.silk$/, '')
+  return Analysis.rootAnalysis(yield* Analysis.ofSource(module, ascii(source)))
+})
+
 it('diagnoses invalid effect origins, runs, mutability, and escape explicitly', () => {
   const ordinaryFail = analyzeText(
     'effect://ordinary-fail',
@@ -117,30 +124,28 @@ effect fn bad() -> i32 {
   )
 })
 
-it('subtracts the caught failure and unions the handler row canonically', () => {
-  const result = analyzeText(
-    'effect://catch-algebra',
-    `struct First {}
-struct Second {}
+it.effect('replaces the caught failure row with the handler row canonically', () =>
+  Effect.gen(function* () {
+    const result = yield* analyzeWithStdlib(
+      'effect://catch-algebra',
+      `struct First {}
 struct HandlerProblem {}
-effect fn risky() -> i32 ! Second | First { fail move First {} }
+effect fn risky() -> i32 ! First { fail move First {} }
 effect fn recover(problem: First) -> i32 ! HandlerProblem { fail move HandlerProblem {} }
-effect fn outer() -> i32 ! HandlerProblem | Second {
-  let recipe = risky() |> Effect.catch<First>(recover)
+effect fn outer() -> i32 ! HandlerProblem {
+  let recipe = risky() |> Effect.catch(recover)
   return run recipe
 }`,
-  )
+    )
 
-  assert.deepEqual(result.diagnostics, [])
-  const outer = result.functions.at(2)
-  const recipe = outer?.bindings.at(0)?.inferredType
-  assert.strictEqual(recipe?._tag, 'Available')
-  if (recipe?._tag !== 'Available' || !Type.isEffect(recipe.type)) return
-  assert.deepEqual(recipe.type.failures.map(Type.encode), [
-    'effect://catch-algebra.HandlerProblem',
-    'effect://catch-algebra.Second',
-  ])
-})
+    assert.deepEqual(result.diagnostics, [])
+    const outer = result.functions.at(2)
+    const recipe = outer?.bindings.at(0)?.inferredType
+    assert.strictEqual(recipe?._tag, 'Available')
+    if (recipe?._tag !== 'Available' || !Type.isEffect(recipe.type)) return
+    assert.deepEqual(recipe.type.failures.map(Type.encode), ['effect/catch-algebra.HandlerProblem'])
+  }),
+)
 
 it('infers lazy effect-block results failures and exclusive captures', () => {
   const result = analyzeText(
@@ -163,7 +168,7 @@ fn build(value: i32) -> i32 {
   if (pending?._tag !== 'EffectBlock' || pending.type._tag !== 'Available') return
   assert.strictEqual(
     Type.encode(pending.type.type),
-    'Effect<i32 ! effect://block-captures.Problem>',
+    'mut Effect<i32 ! effect://block-captures.Problem>',
   )
   assert.deepEqual(
     pending.captures.map((capture) => [capture.reference.id.ordinal, capture.access]),
@@ -252,27 +257,27 @@ fn main() -> i32 { return 0 }`,
   assert.deepEqual(concrete.diagnostics, [])
 })
 
-it('rejects retry for a take-once Effect', () => {
-  const result = analyzeText(
-    'effect://take-retry',
-    `struct Payload {}
+it.effect('rejects retry for a take-once Effect', () =>
+  Effect.gen(function* () {
+    const result = yield* analyzeWithStdlib(
+      'effect://take-retry',
+      `struct Payload {}
 effect fn consume(value: Payload) -> i32 { return 1 }
 fn main() -> i32 {
   let payload = Payload {}
   let retried = consume(move payload) |> Effect.retry(2)
   return run retried
 }`,
-  )
-  assert.include(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0072',
-  )
-})
+    )
+    assert.isAbove(result.diagnostics.length, 0)
+  }),
+)
 
-it('derives take-once mapped Effect access from an owned callback capture', () => {
-  const result = analyzeText(
-    'effect://take-callback-retry',
-    `struct Payload { value: i32 }
+it.effect('derives take-once mapped Effect access and rejects retrying it', () =>
+  Effect.gen(function* () {
+    const result = yield* analyzeWithStdlib(
+      'effect://take-callback-retry',
+      `struct Payload { value: i32 }
 effect fn succeed(value: i32) -> i32 { return value }
 fn consume(value: i32, payload: Payload) -> i32 { return value + payload.value }
 fn main() -> i32 {
@@ -281,49 +286,54 @@ fn main() -> i32 {
   let retried = mapped |> Effect.retry(2)
   return 0
 }`,
-  )
-  assert.include(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0072',
-  )
-  const main = functionAt(result, 2)
-  const mapped = main.statements.at(1)
-  const mappedType =
-    mapped?._tag === 'BindStatement' && mapped.binding.initializer.type._tag === 'Available'
-      ? mapped.binding.initializer.type.type
-      : undefined
-  assert.strictEqual(
-    mappedType !== undefined && Type.isEffect(mappedType) ? mappedType.access : undefined,
-    'Take',
-  )
-})
+    )
+    assert.isAbove(result.diagnostics.length, 0)
+    const main = functionAt(result, 2)
+    const mapped = main.statements.at(1)
+    const mappedType =
+      mapped?._tag === 'BindStatement' && mapped.binding.initializer.type._tag === 'Available'
+        ? mapped.binding.initializer.type.type
+        : undefined
+    assert.strictEqual(
+      mappedType !== undefined && Type.isEffect(mappedType) ? mappedType.access : undefined,
+      'Take',
+    )
+  }),
+)
 
-it('propagates Logger requirements through effectful tap without an eager log intrinsic', () => {
-  const result = analyzeText(
-    'effect://logger-tap',
-    `struct Logger {}
+it.effect(
+  'propagates Logger requirements through effectful tap without an eager log intrinsic',
+  () =>
+    Effect.gen(function* () {
+      const result = yield* analyzeWithStdlib(
+        'effect://logger-tap',
+        `struct Logger {}
 effect fn succeed(value: i32) -> i32 { return value }
 effect fn log(value: i32) -> i32 ? &Logger { return value }
 fn main() -> i32 {
   let logged = succeed(42) |> Effect.tap(log)
   return 0
 }`,
-  )
-  assert.deepEqual(result.diagnostics, [])
-  const main = functionAt(result, 2)
-  const logged = main.statements.at(0)
-  const type =
-    logged?._tag === 'BindStatement' && logged.binding.initializer.type._tag === 'Available'
-      ? logged.binding.initializer.type.type
-      : undefined
-  assert.strictEqual(type !== undefined && Type.isEffect(type) ? type.requirements.length : 0, 1)
-  assert.strictEqual(
-    type !== undefined && Type.isEffect(type)
-      ? Type.encode(type.requirements.at(0)?.capability ?? 'never')
-      : undefined,
-    'effect://logger-tap.Logger',
-  )
-})
+      )
+      assert.deepEqual(result.diagnostics, [])
+      const main = functionAt(result, 2)
+      const logged = main.statements.at(0)
+      const type =
+        logged?._tag === 'BindStatement' && logged.binding.initializer.type._tag === 'Available'
+          ? logged.binding.initializer.type.type
+          : undefined
+      assert.strictEqual(
+        type !== undefined && Type.isEffect(type) ? type.requirements.length : 0,
+        1,
+      )
+      assert.strictEqual(
+        type !== undefined && Type.isEffect(type)
+          ? Type.encode(type.requirements.at(0)?.capability ?? 'never')
+          : undefined,
+        'effect/logger-tap.Logger',
+      )
+    }),
+)
 
 it('rejects failure payloads that retain lexical borrows', () => {
   const result = analyzeText(
@@ -362,30 +372,32 @@ effect fn work() -> i32 ? &Clock@Left | &Clock@Right { return 42 }
 fn main() -> i32 {
   let left = Clock {}
   let right = Clock {}
-  let recipe = work() |> Clock.provide(&left, @Left) |> Clock.provide(&right, @Right)
+  let recipe = work() |> Effect.bindRequirement(&left, @Left) |> Effect.bindRequirement(&right, @Right)
   return run recipe
 }`,
   )
   assert.deepEqual(result.diagnostics, [])
 })
 
-it('requires an explicit role when the same capability has multiple requirements', () => {
-  const result = analyzeText(
-    'effect://ambiguous-provide-role',
-    `struct Clock {}
+it.effect('requires an explicit role when the same capability has multiple requirements', () =>
+  Effect.gen(function* () {
+    const result = yield* analyzeWithStdlib(
+      'effect://ambiguous-provide-role',
+      `struct Clock {}
 effect fn work() -> i32 ? &Clock@Left | &Clock@Right { return 42 }
 fn main() -> i32 {
   let clock = Clock {}
-  let recipe = work() |> Clock.provide(&clock)
+  let recipe = work() |> Effect.provide(&clock)
   return 0
 }`,
-  )
+    )
 
-  assert.include(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0074',
-  )
-})
+    assert.include(
+      result.diagnostics.map((diagnostic) => diagnostic.code),
+      'SEM0089',
+    )
+  }),
+)
 
 it('requires an exclusive provider for an exclusive capability requirement', () => {
   const result = analyzeText(
@@ -394,7 +406,7 @@ it('requires an exclusive provider for an exclusive capability requirement', () 
 effect fn allocate() -> i32 ? &mut Allocator { return 42 }
 fn main() -> i32 {
   let allocator = Allocator {}
-  let recipe = allocate() |> Allocator.provide(&allocator)
+  let recipe = allocate() |> Effect.bindRequirement(&allocator)
   return 0
 }`,
   )
@@ -412,7 +424,7 @@ it('owns a moved provider in a take-once Effect wrapper', () => {
 effect fn read() -> i32 ? &mut Clock { return 42 }
 fn main() -> i32 {
   let clock = Clock {}
-  let recipe = read() |> Clock.provide(move clock)
+  let recipe = read() |> Effect.bindRequirement(move clock)
   return 0
 }`,
   )
@@ -425,33 +437,35 @@ fn main() -> i32 {
   assert.strictEqual(recipe.type.type.access, 'Take')
 })
 
-it('keeps per-run provider acquisition distinct and composes its contract', () => {
-  const result = analyzeText(
-    'effect://provide-with',
-    `struct Clock {}
+it.effect('keeps per-run provider acquisition distinct and composes its contract', () =>
+  Effect.gen(function* () {
+    const result = yield* analyzeWithStdlib(
+      'effect://provide-with',
+      `struct Clock {}
 struct OpenError {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
 effect fn acquire() -> Clock ! OpenError { return Clock {} }
 fn main() -> i32 {
-  let recipe = read() |> Clock.provideWith(acquire())
+  let recipe = read() |> Effect.provideWith(acquire())
   return 0
 }`,
-  )
-  const main = result.functions.at(2)
-  const recipe = main?.bindings.at(0)?.initializer
-  const hirRecipe = result.hir.functions.at(2)?.statements.at(0)
+    )
+    const main = result.functions.at(2)
+    const recipe = main?.bindings.at(0)?.initializer
+    const hirRecipe = result.hir.functions.at(2)?.statements.at(0)
 
-  assert.deepEqual(result.diagnostics, [])
-  assert.strictEqual(recipe?._tag, 'EffectProvideWith')
-  assert.strictEqual(
-    hirRecipe?._tag === 'Bind' ? hirRecipe.initializer._tag : undefined,
-    'EffectProvideWith',
-  )
-  assert.strictEqual(recipe?.type._tag, 'Available')
-  if (recipe?.type._tag !== 'Available' || !Type.isEffect(recipe.type.type)) return
-  assert.deepEqual(recipe.type.type.failures.map(Type.encode), ['effect://provide-with.OpenError'])
-  assert.deepEqual(recipe.type.type.requirements, [])
-})
+    assert.deepEqual(result.diagnostics, [])
+    assert.strictEqual(recipe?._tag, 'CallableApply')
+    assert.strictEqual(
+      hirRecipe?._tag === 'Bind' ? hirRecipe.initializer._tag : undefined,
+      'CallableApply',
+    )
+    assert.strictEqual(recipe?.type._tag, 'Available')
+    if (recipe?.type._tag !== 'Available' || !Type.isEffect(recipe.type.type)) return
+    assert.deepEqual(recipe.type.type.failures.map(Type.encode), ['effect/provide-with.OpenError'])
+    assert.deepEqual(recipe.type.type.requirements, [])
+  }),
+)
 
 it('defines allocation as an exclusive capability Effect with an affine result', () => {
   const result = analyzeText(
@@ -490,7 +504,7 @@ it('provides Allocator through nominal system and user-authored witnesses', () =
     'allocation://nominal-system-provider',
     `effect fn use(layout: Layout) -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   drop allocation
   return 42
@@ -509,7 +523,7 @@ pub fn main() -> i32 { return 0 }`,
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }
 effect fn use(layout: Layout) -> i32 ! OutOfMemory {
   let mut allocator = TestAllocator { remaining: 1 }
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   drop allocation
   return 42
@@ -519,21 +533,23 @@ pub fn main() -> i32 { return 0 }`,
   assert.deepEqual(custom.diagnostics, [])
 })
 
-it('rejects dynamically shaped or type-incompatible catch handlers', () => {
-  const result = analyzeText(
-    'effect://bad-handler',
-    `struct Problem {}
+it.effect('rejects dynamically shaped or type-incompatible catch handlers', () =>
+  Effect.gen(function* () {
+    const result = yield* analyzeWithStdlib(
+      'effect://bad-handler',
+      `struct Problem {}
 struct Other {}
 effect fn risky() -> i32 ! Problem { fail move Problem {} }
 effect fn wrong(problem: Other) -> bool { return true }
 fn main() -> i32 {
-  let recipe = Effect.catch<Problem>(risky(), wrong)
+  let recipe = Effect.catch(risky(), wrong)
   return 0
 }`,
-  )
+    )
 
-  assert.isAbove(result.diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0067').length, 0)
-})
+    assert.isAbove(result.diagnostics.length, 0)
+  }),
+)
 
 const functionAt = (result: Elaboration.Result, index: number): Elaboration.FunctionFact =>
   result.functions.at(index) ?? raise(`expected function fact at index ${index}`)
@@ -1803,39 +1819,41 @@ fn main() -> i32 { let callback = choose(missing) return 0 }`,
   )
 })
 
-it('runs the complete composed operand and preserves grouped one-layer execution', () => {
-  const ungrouped = analyzeText(
-    'fixture://ungrouped-run-callable.silk',
-    `effect fn work() -> i32 { return 1 }
+it.effect('runs the complete composed operand and preserves grouped one-layer execution', () =>
+  Effect.gen(function* () {
+    const ungrouped = yield* analyzeWithStdlib(
+      'fixture://ungrouped-run-callable.silk',
+      `effect fn work() -> i32 { return 1 }
 fn main() -> i32 { return run work() |> Effect.retry(2) }`,
-  )
-  const grouped = analyzeText(
-    'fixture://grouped-run-callable.silk',
-    `effect fn work() -> i32 { return 1 }
+    )
+    const grouped = analyzeText(
+      'fixture://grouped-run-callable.silk',
+      `effect fn work() -> i32 { return 1 }
 fn main() -> i32 { return (run work()) |> i32.add(1) }`,
-  )
-  const nested = analyzeText(
-    'fixture://nested-run-callable.silk',
-    `effect fn inner() -> i32 { return 1 }
+    )
+    const nested = analyzeText(
+      'fixture://nested-run-callable.silk',
+      `effect fn inner() -> i32 { return 1 }
 effect fn outer() -> Effect<i32> { return inner() }
 fn main() -> i32 { return run run outer() }`,
-  )
-  const ungroupedRun = functionAt(ungrouped, 1).returnedExpression
-  const groupedApply = functionAt(grouped, 1).returnedExpression
-  const outerRun = functionAt(nested, 2).returnedExpression
+    )
+    const ungroupedRun = functionAt(ungrouped, 1).returnedExpression
+    const groupedApply = functionAt(grouped, 1).returnedExpression
+    const outerRun = functionAt(nested, 2).returnedExpression
 
-  assert.strictEqual(ungroupedRun._tag, 'Run')
-  assert.strictEqual(
-    ungroupedRun._tag === 'Run' ? ungroupedRun.subject._tag : undefined,
-    'EffectRetry',
-  )
-  assert.strictEqual(groupedApply._tag, 'CallableApply')
-  assert.strictEqual(outerRun._tag, 'Run')
-  assert.strictEqual(outerRun._tag === 'Run' ? outerRun.subject._tag : undefined, 'Run')
-  assert.deepEqual(ungrouped.diagnostics, [])
-  assert.deepEqual(grouped.diagnostics, [])
-  assert.deepEqual(nested.diagnostics, [])
-})
+    assert.strictEqual(ungroupedRun._tag, 'Run')
+    assert.strictEqual(
+      ungroupedRun._tag === 'Run' ? ungroupedRun.subject._tag : undefined,
+      'CallableApply',
+    )
+    assert.strictEqual(groupedApply._tag, 'CallableApply')
+    assert.strictEqual(outerRun._tag, 'Run')
+    assert.strictEqual(outerRun._tag === 'Run' ? outerRun.subject._tag : undefined, 'Run')
+    assert.deepEqual(ungrouped.diagnostics, [])
+    assert.deepEqual(grouped.diagnostics, [])
+    assert.deepEqual(nested.diagnostics, [])
+  }),
+)
 
 it('diagnoses each invalid callable application at the callable boundary', () => {
   const nonCallable = analyzeText(

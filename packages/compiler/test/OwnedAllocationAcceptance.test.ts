@@ -81,7 +81,7 @@ const ascii = (value: string): Uint8Array =>
 const guarded = (body: string): string => `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)
@@ -90,7 +90,7 @@ ${body}
   return 0
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
 
 /**
  * The substrate is only sound if the frontend keeps rejecting the programs that would violate
@@ -106,14 +106,14 @@ it.effect('rejects every prohibited allocation shape before lowering', () =>
         `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   let mut buffer = RawBuffer.from<i32>(move allocation, 2)
   drop buffer
   return 1
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`,
+pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
         'SEM0082',
       ],
       [

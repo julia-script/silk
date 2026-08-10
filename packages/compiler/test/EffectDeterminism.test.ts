@@ -17,7 +17,7 @@ it('keeps typed-effect phases and artifacts byte-identical across fresh processe
     readonly native: string
     readonly wasm: string
   }
-  assert.include(encoded.hir, 'effect-catch')
+  assert.include(encoded.hir, 'target=silk/effects.catch')
   assert.include(encoded.ownership, 'loan')
   assert.strictEqual(encoded.native.length, 64)
   assert.strictEqual(encoded.wasm.length, 64)

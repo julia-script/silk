@@ -28,7 +28,7 @@ impl Drop for Guard {
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: 5, storage: move allocation }
   return 42
@@ -36,7 +36,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 /** Early drop: explicit drop releases at that statement and block cleanup does not repeat it. */
 const earlyDrop = `struct Guard {
@@ -51,7 +51,7 @@ impl Drop for Guard {
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: 5, storage: move allocation }
   drop guard
@@ -60,7 +60,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 /** Typed failure: a guard live at a failing run releases through its hook before propagating. */
 const failurePropagation = `struct Guard {
@@ -84,11 +84,11 @@ effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut empty = ExhaustedAllocator { tag: 0 }
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: 5, storage: move allocation }
   let second = Layout.of<[i32; 2]>()
-  let refused = Allocator.allocate(move second) |> Allocator.provide(&mut empty)
+  let refused = Allocator.allocate(move second) |> Effect.bindRequirement(&mut empty)
   let never = run refused
   drop never
   return 42
@@ -96,7 +96,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 /** Recursive return: every suspended activation releases its own guard exactly once. */
 const recursiveReturn = `struct Guard {
@@ -111,7 +111,7 @@ impl Drop for Guard {
 effect fn recurse(remaining: i32) -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: remaining, storage: move allocation }
   if remaining == 0 { return 42 }
@@ -120,7 +120,7 @@ effect fn recurse(remaining: i32) -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(recurse(2), recover) }`
+pub fn main() -> i32 { return run Effect.catch(recurse(2), recover) }`
 
 const hookCallsOf = (run: ReturnType<typeof Analysis.evaluate>) =>
   run._tag === 'Completed'
@@ -188,7 +188,7 @@ impl<T> Drop for Guard<T> {
 effect fn hold<T>(value: T) -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let recipe = Allocator.allocate(move layout) |> Effect.bindRequirement(&mut allocator)
   let allocation = run recipe
   let guard = Guard<T> { value: move value, storage: move allocation }
   return 21
@@ -197,8 +197,8 @@ effect fn hold<T>(value: T) -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 {
-  let first = run Effect.catch<OutOfMemory>(hold<i32>(1), recover)
-  let second = run Effect.catch<OutOfMemory>(hold<bool>(true), recover)
+  let first = run Effect.catch(hold<i32>(1), recover)
+  let second = run Effect.catch(hold<bool>(true), recover)
   return first + second
 }`
 

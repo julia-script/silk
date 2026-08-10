@@ -288,7 +288,13 @@ it.effect(
         )
         assert.deepEqual(Analysis.diagnostics(native), [], manifest.id)
         const evaluated = Analysis.evaluate(native)
-        assert.strictEqual(evaluated._tag, 'Completed', manifest.id)
+        assert.strictEqual(
+          evaluated._tag,
+          'Completed',
+          `${manifest.id}: ${JSON.stringify(evaluated, (_, value) =>
+            typeof value === 'bigint' ? value.toString() : value,
+          )}`,
+        )
         if (evaluated._tag !== 'Completed') continue
         assert.strictEqual(evaluated.result._tag, 'I32Value', manifest.id)
         if (evaluated.result._tag !== 'I32Value') continue

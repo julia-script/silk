@@ -527,11 +527,24 @@ const printNode = (
         prefix,
       )
     case 'TypeParameter':
-      return printToken(context, tokenOf(node, 'Identifier'), prefix, preserveBlank)
+      return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
     case 'AppliedType': {
       const nodes = directNodes(node)
+      const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
+      const once = directTokens(node).find((token) => token.kind === 'OnceKeyword')
       return FormatDocument.concat(
-        printNode(context, nodes[0] ?? nodeOf(node, 'TypePath'), prefix, preserveBlank),
+        ...(mut === undefined
+          ? []
+          : [printToken(context, mut, prefix, preserveBlank), FormatDocument.text(' ')]),
+        ...(once === undefined
+          ? []
+          : [printToken(context, once, prefix, preserveBlank), FormatDocument.text(' ')]),
+        printNode(
+          context,
+          nodes[0] ?? nodeOf(node, 'TypePath'),
+          mut === undefined && once === undefined ? prefix : FormatDocument.empty,
+          preserveBlank,
+        ),
         printNode(context, nodes[1] ?? nodeOf(node, 'TypeArgumentList')),
       )
     }
@@ -712,13 +725,15 @@ const printNode = (
         ),
       )
     case 'RequirementRow': {
-      const requirements = directNodes(node).filter((child) => child.kind === 'Requirement')
+      const members = directNodes(node).filter(
+        (child) => child.kind === 'Requirement' || child.kind === 'TypePath',
+      )
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'Question'), prefix, preserveBlank),
-        ...requirements.map((requirement, ordinal) =>
+        ...members.map((member, ordinal) =>
           printNode(
             context,
-            requirement,
+            member,
             ordinal === 0 ? FormatDocument.text(' ') : FormatDocument.text(' | '),
           ),
         ),

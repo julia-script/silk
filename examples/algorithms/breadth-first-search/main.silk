@@ -76,6 +76,7 @@ fn verifyShortestDistance(distance: usize) -> () {
 
 pub effect fn main() -> () ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let pending = search() |> Allocator.provide(&mut allocator)
-  return (run pending) |> verifyShortestDistance
+  return run search()
+    |> Effect.map(verifyShortestDistance)
+    |> Effect.bindRequirement(&mut allocator)
 }
