@@ -670,6 +670,7 @@ console.log(
       'Lower',
       'Match',
       'Mir',
+      'MirNormalization',
       'ModuleClosure',
       'ModuleSemantics',
       'ModuleSurface',

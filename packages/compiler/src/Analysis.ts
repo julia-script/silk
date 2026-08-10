@@ -134,8 +134,9 @@ export const make = Effect.fn('Analysis.make')(function* (
 export const realize = (
   self: SingleRootFrontendSnapshot,
   target: string | undefined = self.requestedTarget,
+  options: Pipeline.Options = {},
 ): Snapshot => {
-  const realization = Pipeline.realize(self, target)
+  const realization = Pipeline.realize(self, target, options)
   return Object.freeze({
     ...self,
     ...realization,
@@ -169,7 +170,9 @@ export const ofSourceRealized = (
   sourceId: string,
   bytes: Uint8Array,
   target?: string,
-): Effect.Effect<Snapshot> => Effect.map(ofSource(sourceId, bytes, target), realize)
+  options: Pipeline.Options = {},
+): Effect.Effect<Snapshot> =>
+  Effect.map(ofSource(sourceId, bytes, target), (self) => realize(self, target, options))
 
 /** Returns every loaded module of the snapshot in canonical identity order. */
 export const modules = (self: FrontendSnapshot): ReadonlyArray<ModuleClosure.Module> =>
@@ -976,6 +979,12 @@ export const loweredMir = (self: Snapshot): Mir.Module => {
   if (self.mir._tag === 'Available') return self.mir.value
   throw new RangeError(self.mir.error.message)
 }
+
+/** Returns deterministic shared-MIR Effect normalization decisions for tooling and cost gates. */
+export const effectNormalizationOf = (self: Snapshot): ReadonlyArray<Mir.NormalizationVerdict> =>
+  self.mir._tag === 'Available'
+    ? (self.mir.value.normalization ?? Object.freeze([]))
+    : Object.freeze([])
 
 /** Looks up one declaration name within one module. */
 export const declarationByName = (

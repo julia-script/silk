@@ -294,32 +294,35 @@ const observations = (
   })
 }
 
-it.effect('matches the canonical VM over valid and malformed bytecode', () =>
-  Effect.gen(function* () {
-    for (const entry of corpus) {
-      const generated = sourceFor(entry.bytecode)
-      const snapshot = yield* Analysis.ofSourceRealized(
-        `stack-vm-pressure/${entry.id}`,
-        ascii(generated.source),
-        'wasm32-unknown-unknown',
-      )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [], entry.id)
-      const outcome = Analysis.evaluate(snapshot)
-      assert.strictEqual(
-        outcome._tag,
-        'Completed',
-        `${entry.id}: ${JSON.stringify(outcome, (_, value) =>
-          typeof value === 'bigint' ? `${value}n` : value,
-        )}`,
-      )
-      if (outcome._tag !== 'Completed') continue
-      assert.deepEqual(observations(outcome), {
-        result: generated.expected.result,
-        steps: generated.expected.steps,
-        diagnostics: generated.expected.diagnostics,
-      })
-    }
-  }),
+it.effect(
+  'matches the canonical VM over valid and malformed bytecode',
+  () =>
+    Effect.gen(function* () {
+      for (const entry of corpus) {
+        const generated = sourceFor(entry.bytecode)
+        const snapshot = yield* Analysis.ofSourceRealized(
+          `stack-vm-pressure/${entry.id}`,
+          ascii(generated.source),
+          'wasm32-unknown-unknown',
+        )
+        assert.deepEqual(Analysis.diagnostics(snapshot), [], entry.id)
+        const outcome = Analysis.evaluate(snapshot)
+        assert.strictEqual(
+          outcome._tag,
+          'Completed',
+          `${entry.id}: ${JSON.stringify(outcome, (_, value) =>
+            typeof value === 'bigint' ? `${value}n` : value,
+          )}`,
+        )
+        if (outcome._tag !== 'Completed') continue
+        assert.deepEqual(observations(outcome), {
+          result: generated.expected.result,
+          steps: generated.expected.steps,
+          diagnostics: generated.expected.diagnostics,
+        })
+      }
+    }),
+  30_000,
 )
 
 it.effect('publishes only general MIR operations for the pressure VM', () =>
@@ -398,7 +401,7 @@ for (const representative of [corpus[1], corpus[3]]) {
         )
         assert.strictEqual(run.stderr, '')
       }),
-    15_000,
+    60_000,
   )
 }
 

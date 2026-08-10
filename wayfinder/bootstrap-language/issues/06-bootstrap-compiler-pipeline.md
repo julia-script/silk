@@ -175,9 +175,14 @@ binding and type provenance must remain available to add it without replacing MI
 DWARF metadata is the source-map mechanism; bootstrap does not create a separate JavaScript-style
 source-map artifact.
 
-MIR performs no general optimization. It may remove lowering-created unreachable regions, fold
-conditions whose values are already constant, share mechanically identical cleanup regions, and
-verify its invariants while preserving provenance. LLVM owns optimization through three bootstrap
+MIR performs no general optimization. One shared normalization may fold a direct, single-operation
+Effect constructor and replace an immediately consumed local Copy/shared Effect environment with a
+`RunStaticEffect`; deterministic verdicts expose every accepted shape and first rejection reason.
+The rule is based on MIR body shape rather than library names, and it does not inline runner CFGs,
+scalarize completed outcomes, or transfer affine captures. MIR may also remove lowering-created
+unreachable regions, fold conditions whose values are already constant, share mechanically
+identical cleanup regions, and verify its invariants while preserving provenance. LLVM owns
+optimization through three bootstrap
 profiles: debug uses `-O0` with debug metadata, release uses `-O2` and strips debug metadata by
 default, and release-with-debug uses `-O2` with line information. Bootstrap excludes a Silk SSA
 optimizer, custom inlining, `-O3`, and a configurable LLVM pass pipeline. Correctness, cleanup, and

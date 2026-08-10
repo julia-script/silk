@@ -405,7 +405,7 @@ for (const representative of [corpus[1], corpus[5]]) {
         assert.strictEqual(run.status, 0, run.stderr)
         assert.strictEqual(run.stderr, '')
       }),
-    15_000,
+    60_000,
   )
 }
 

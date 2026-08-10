@@ -35,12 +35,12 @@ requirement binding operation. Canonical `Result`, `mapBoth`, `map`, `mapError`,
 whole-channel `catch`, `retry`, `provide`, and `provideWith` are navigable `.silk` source with no
 combinator-name branches in HIR, MIR, the evaluator, LLVM, or direct Wasm.
 
-The synchronous cost spike is complete. Clang `-O2` reduces every measured native entry—including
-stored, failing, generic-provider, trapping, and allocation-backed affine pipelines—to the same
-entry control shape as its imperative baseline. Direct Wasm retains source-combinator calls and
-substantially larger modules. The next bounded change is therefore a separately proposed shared MIR
-normalization with static runner, non-escape, synchronous, failure, requirement, trap, ownership,
-and cleanup guards; it is not a pipe rewrite or a suspension ABI.
+The synchronous cost spike and its first shared MIR normalization are complete. Clang `-O2` already
+reduces every measured native entry to its imperative shape. Shared constructor folding now removes
+two or three direct-Wasm entry calls from eligible Effect cases, and local single-use Copy/shared
+environments dispatch through `RunStaticEffect`. Stored/provider shapes conservatively stop after
+constructor folding; affine captures and unknown suspension remain explicit. The remaining runner
+call requires a distinct guarded CFG-inlining proposal, not a pipe rewrite or suspension ABI.
 
 ### Add typed scalar constants from repeated program evidence
 
@@ -296,6 +296,11 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   `@silk-effect/compiler`?
 
 ## Changelog
+
+- 2026-08-10: Shipped shared static Effect representation normalization. Direct single-region
+  constructors fold by body shape, local Copy/shared environments become `RunStaticEffect`, and
+  evaluator, LLVM, direct Wasm, MIR verification, fresh-process cost evidence, and the labs consume
+  the same deterministic verdict-bearing MIR. Runner CFG inlining remains separate.
 
 - 2026-08-10: Completed the synchronous Effect cost spike. Pipe spelling is absent by HIR/MIR,
   Clang removes composition from every measured native entry, and direct Wasm retains avoidable

@@ -100,6 +100,11 @@ and editor tooling together with the language surface so no second vocabulary su
   shapes match their imperative baselines after Clang `-O2`; direct Wasm retains composition calls
   and code size, selecting a guarded shared MIR normalization for separate proposal work.
 
+- 2026-08-10: Extended that corpus with normalized-versus-raw evaluator and direct-Wasm entry
+  comparisons. Shared constructor folding cuts eligible Effect entries from three or four calls to
+  one (two for the guarded provider case), while preserving trap and allocation-backed Drop
+  observations. Stored and provider programs expose the next cross-region boundary explicitly.
+
 - 2026-08-10: Migrated the lexer, stack VM, and allocation-bearing algorithm entry points to
   direct Effect pipelines. Data-first, piped, grouped, and stored compositions now agree across
   evaluator, native LLVM, and direct Wasm; the final implementation goes through visible

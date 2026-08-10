@@ -20,8 +20,18 @@ interface CostCase {
   readonly expected: number | 'trap'
   readonly behavior: {
     readonly evaluator: number | 'trap'
+    readonly unnormalizedEvaluator: number | 'trap'
     readonly wasm: number | 'trap'
+    readonly unnormalizedWasm: number | 'trap'
     readonly dropCalls: number
+    readonly unnormalizedDropCalls: number
+  }
+  readonly applicability: 'DirectStaticRun' | 'ConstructorOnly' | 'None'
+  readonly normalization: {
+    readonly accepted: number
+    readonly rejected: number
+    readonly foldedConstructors: number
+    readonly directStaticRuns: number
   }
   readonly pipeTokens: { readonly hir: number; readonly mir: number }
   readonly mir: Structure
@@ -30,6 +40,9 @@ interface CostCase {
   readonly assembly: Structure
   readonly assemblyEntry: Structure
   readonly wasm: Structure & { readonly binaryBytes: number }
+  readonly wasmEntry: Structure
+  readonly unnormalizedWasm: Structure & { readonly binaryBytes: number }
+  readonly unnormalizedWasmEntry: Structure
 }
 
 interface CostReport {
@@ -71,7 +84,9 @@ it('captures synchronous Effect costs deterministically in fresh processes', () 
 
   for (const sample of report.cases) {
     assert.strictEqual(sample.behavior.evaluator, sample.expected, sample.id)
+    assert.strictEqual(sample.behavior.unnormalizedEvaluator, sample.expected, sample.id)
     assert.strictEqual(sample.behavior.wasm, sample.expected, sample.id)
+    assert.strictEqual(sample.behavior.unnormalizedWasm, sample.expected, sample.id)
     assert.strictEqual(sample.pipeTokens.hir, 0, sample.id)
     assert.strictEqual(sample.pipeTokens.mir, 0, sample.id)
     assert.strictEqual(sample.mir.suspensionTerms, 0, sample.id)
@@ -80,13 +95,31 @@ it('captures synchronous Effect costs deterministically in fresh processes', () 
     assert.strictEqual(sample.assembly.suspensionTerms, 0, sample.id)
     assert.strictEqual(sample.assemblyEntry.suspensionTerms, 0, sample.id)
     assert.strictEqual(sample.wasm.suspensionTerms, 0, sample.id)
+    assert.strictEqual(sample.wasmEntry.suspensionTerms, 0, sample.id)
+    assert.strictEqual(sample.unnormalizedWasm.suspensionTerms, 0, sample.id)
+    assert.strictEqual(sample.unnormalizedWasmEntry.suspensionTerms, 0, sample.id)
     assert.isAbove(sample.wasm.binaryBytes, 0, sample.id)
+    assert.isAbove(sample.unnormalizedWasm.binaryBytes, 0, sample.id)
+    if (sample.applicability === 'DirectStaticRun') {
+      assert.isAbove(sample.normalization.foldedConstructors, 0, sample.id)
+      assert.isAbove(sample.normalization.directStaticRuns, 0, sample.id)
+      assert.isBelow(sample.wasmEntry.calls, sample.unnormalizedWasmEntry.calls, sample.id)
+    } else if (sample.applicability === 'ConstructorOnly') {
+      assert.isAbove(sample.normalization.foldedConstructors, 0, sample.id)
+      assert.strictEqual(sample.normalization.directStaticRuns, 0, sample.id)
+      assert.isBelow(sample.wasmEntry.calls, sample.unnormalizedWasmEntry.calls, sample.id)
+    } else {
+      assert.strictEqual(sample.normalization.directStaticRuns, 0, sample.id)
+    }
   }
 
   const affine = report.cases.filter((sample) => sample.pair === 'affine')
   assert.strictEqual(affine.length, 2)
   assert.isAbove(affine[0]?.behavior.dropCalls ?? 0, 0)
   assert.strictEqual(affine[0]?.behavior.dropCalls, affine[1]?.behavior.dropCalls)
+  for (const sample of affine) {
+    assert.strictEqual(sample.behavior.dropCalls, sample.behavior.unnormalizedDropCalls, sample.id)
+  }
 
   for (const pair of new Set(report.cases.map((sample) => sample.pair))) {
     const samples = report.cases.filter((sample) => sample.pair === pair)

@@ -327,11 +327,6 @@ pub fn main() -> i32 {
       [
         'Entry',
         'RegionEntry',
-        'Call',
-        'Binding',
-        'Entry',
-        'RegionEntry',
-        'Return',
         'RegionEntry',
         'Call',
         'Entry',

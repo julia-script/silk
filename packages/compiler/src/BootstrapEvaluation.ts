@@ -3374,10 +3374,17 @@ function* executeFunction(
             )
             return Object.freeze({ _tag: 'Value', value: propagated })
           }
-          case 'RunEffectValue': {
-            const effect = read(operation.effect).value
-            if (effect._tag !== 'EffectValue')
-              throw new RangeError('MIR attempted to run a non-Effect value')
+          case 'RunEffectValue':
+          case 'RunStaticEffect': {
+            const captures =
+              operation._tag === 'RunEffectValue'
+                ? (() => {
+                    const effect = read(operation.effect).value
+                    if (effect._tag !== 'EffectValue')
+                      throw new RangeError('MIR attempted to run a non-Effect value')
+                    return effect.captures
+                  })()
+                : operation.captures.map((capture) => read(capture.source).value)
             const target = functionFor(program, operation.runner, operation.runnerTypeArguments)
             if (target === undefined)
               return blockedStep({
@@ -3400,7 +3407,7 @@ function* executeFunction(
             const result = yield* callFunction(
               target,
               Object.freeze([
-                ...effect.captures,
+                ...captures,
                 ...operation.arguments.map((argument) => read(argument).value),
               ]),
               operation.provenance.span,

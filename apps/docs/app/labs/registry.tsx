@@ -442,10 +442,13 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const regions = mir.value.functions.reduce((total, fn) => total + fn.regions.length, 0)
       const conversions = Analysis.mirUnionConversionsOf(snapshot)
       const matches = Analysis.mirMatchesOf(snapshot)
+      const normalization = Analysis.effectNormalizationOf(snapshot)
+      const normalized = normalization.filter((verdict) => verdict._tag === 'Normalized')
+      const rejected = normalization.length - normalized.length
       return {
         rows: mirRows(mir.value, (span) => onSelectSpan(span)),
         facts:
-          conversions.length === 0 && matches.length === 0
+          conversions.length === 0 && matches.length === 0 && normalization.length === 0
             ? undefined
             : [
                 ...(matches.length === 0
@@ -454,8 +457,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
                 ...(conversions.length === 0
                   ? []
                   : [{ text: `${conversions.length} ConvertUnion`, tone: 'symbol' as const }]),
+                ...(normalized.length === 0
+                  ? []
+                  : [{ text: `${normalized.length} Effect normalization`, tone: 'symbol' as const }]),
+                ...(rejected === 0
+                  ? []
+                  : [{ text: `${rejected} normalization guard`, tone: 'warning' as const }]),
               ],
-        meta: `${mir.value.functions.length} fn · ${regions} region${regions === 1 ? '' : 's'}${matches.length === 0 ? '' : ` · ${matches.length} match`}${conversions.length === 0 ? '' : ` · ${conversions.length} union`}`,
+        meta: `${mir.value.functions.length} fn · ${regions} region${regions === 1 ? '' : 's'}${matches.length === 0 ? '' : ` · ${matches.length} match`}${conversions.length === 0 ? '' : ` · ${conversions.length} union`}${normalized.length === 0 ? '' : ` · ${normalized.length} normalized`}`,
       }
     },
   },
