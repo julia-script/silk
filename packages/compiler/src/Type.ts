@@ -583,8 +583,20 @@ export const isEffect = (self: Type): self is Effect =>
 export const isUnion = (self: Type): self is StructuralUnion =>
   typeof self !== 'string' && self._tag === 'StructuralUnionType'
 
+const keyCache = new WeakMap<Exclude<Type, string>, string>()
+
 /** Returns the canonical deterministic key used for equality and ordering. */
 export const key = (self: Type): string => {
+  if (typeof self === 'string') return computeKey(self)
+  let cached = keyCache.get(self)
+  if (cached === undefined) {
+    cached = computeKey(self)
+    keyCache.set(self, cached)
+  }
+  return cached
+}
+
+const computeKey = (self: Type): string => {
   if (isBuiltin(self)) return `builtin:${self}`
   if (isNever(self)) return 'union:'
   if (isNominal(self))
