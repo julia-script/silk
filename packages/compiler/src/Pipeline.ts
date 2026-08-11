@@ -6,6 +6,7 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as Instances from './Instances.js'
+import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
 import type * as Mir from './Mir.js'
@@ -619,6 +620,15 @@ export const prepare = (
             reason: { _tag: 'UnsupportedTarget', target: selection.target.id },
           }),
         })
+      const availability = IntrinsicAvailability.select(
+        discovery.intrinsics,
+        IntrinsicAvailability.backendTarget(backend.id),
+      )
+      if (availability._tag === 'Unavailable')
+        return Object.freeze({
+          _tag: 'IntrinsicUnavailable' as const,
+          diagnostics: availability.diagnostics,
+        })
       const catalog = Layout.catalog(selection.target, self.index, discovery)
       return Object.freeze({
         _tag: 'Available' as const,
@@ -635,6 +645,12 @@ export const prepare = (
       _tag: 'BackendFailed',
       error: targetAndLayout.error,
       diagnostics,
+      report: Object.freeze(report),
+    })
+  if (targetAndLayout._tag === 'IntrinsicUnavailable')
+    return Object.freeze({
+      _tag: 'Rejected',
+      diagnostics: Diagnostic.merge(diagnostics, targetAndLayout.diagnostics),
       report: Object.freeze(report),
     })
   if (targetAndLayout._tag === 'Unavailable')

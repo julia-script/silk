@@ -83,6 +83,9 @@ Reserve approximately 20% of initiative capacity when pressure work resumes.
 
 ## Changelog
 
+- 2026-08-11: Recorded reachable-only target availability as shipped. Pressure work now waits only
+  for the confined native provider before selecting a file-using program with both OS and ordinary
+  user-defined provider evidence.
 - 2026-08-11: Recorded portable FileSystem as shipped with ordinary user-provider parity and kept
   pressure work paused behind reachable-only target availability and the confined native provider.
 - 2026-08-11: Synchronized the paused initiative with the five-change FileSystem plan. The next

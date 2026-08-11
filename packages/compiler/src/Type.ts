@@ -99,7 +99,12 @@ export interface CallableIdentityArgument {
   readonly identity: string
   readonly target:
     | { readonly _tag: 'Declaration'; readonly module: string; readonly name: string }
-    | { readonly _tag: 'Builtin'; readonly actor: string; readonly operation: string }
+    | {
+        readonly _tag: 'Builtin'
+        readonly actor: string
+        readonly operation: string
+        readonly intrinsic: { readonly actor: string; readonly name: string }
+      }
   readonly typeArguments: ReadonlyArray<GenericArgument>
   readonly environment?: string
 }

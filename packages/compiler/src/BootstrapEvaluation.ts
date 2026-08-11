@@ -1,7 +1,9 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
+import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import type * as Ownership from './Ownership.js'
@@ -443,6 +445,10 @@ export type BlockedReason =
       readonly span: SourceSpan.SourceSpan
     }
   | { readonly _tag: 'MissingStandardStreams' }
+  | {
+      readonly _tag: 'IntrinsicTargetUnavailable'
+      readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+    }
 
 /** A completed exact bootstrap result. */
 export interface Completed {
@@ -4017,6 +4023,18 @@ export const evaluate = (
     options.maxCallDepth,
     defaultMaxCallDepth,
   )
+  const availability = IntrinsicAvailability.select(program.intrinsics, 'Evaluator')
+  if (availability._tag === 'Unavailable') {
+    return Object.freeze({
+      _tag: 'Blocked',
+      entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
+      reason: Object.freeze({
+        _tag: 'IntrinsicTargetUnavailable',
+        diagnostics: availability.diagnostics,
+      }),
+      trace: Object.freeze([]),
+    })
+  }
   if (discovery.entry._tag !== 'Resolved') {
     return Object.freeze({
       _tag: 'Blocked',

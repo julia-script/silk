@@ -35,6 +35,22 @@ export type AdmissionCategory =
   | 'Platform'
   | 'Language'
 
+/** Closed execution surfaces against which intrinsic availability is validated. */
+export type ExecutionTarget = 'Evaluator' | 'LLVM' | 'Wasm'
+
+/** Canonical deterministic order for intrinsic execution targets. */
+export const executionTargets: ReadonlyArray<ExecutionTarget> = Object.freeze([
+  'Evaluator',
+  'LLVM',
+  'Wasm',
+])
+
+/** Normalizes an availability set to the compiler-owned target order. */
+export const normalizeExecutionTargets = (
+  targets: ReadonlyArray<ExecutionTarget>,
+): ReadonlyArray<ExecutionTarget> =>
+  Object.freeze(executionTargets.filter((target) => targets.includes(target)))
+
 /** The elaboration rule selected by an intrinsic operation identity. */
 export type Rule =
   | {
@@ -61,7 +77,7 @@ export interface Operation {
   readonly unsafe: boolean
   readonly admission?: AdmissionCategory
   readonly consumer?: string
-  readonly targets?: ReadonlyArray<'Evaluator' | 'LLVM' | 'Wasm'>
+  readonly targets: ReadonlyArray<ExecutionTarget>
   readonly invariant?: string
   readonly hostImport?: string
   readonly returnedBorrowParameter?: number
@@ -97,6 +113,7 @@ const builtin = (options: {
   readonly result: string
   readonly semanticResult: Type.Type
   readonly unsafe?: boolean
+  readonly targets?: ReadonlyArray<ExecutionTarget>
   readonly returnedBorrowParameter?: number
 }): Operation =>
   Object.freeze({
@@ -107,6 +124,7 @@ const builtin = (options: {
     parameters: Object.freeze(Array.from(options.parameters)),
     result: options.result,
     unsafe: options.unsafe ?? false,
+    targets: normalizeExecutionTargets(options.targets ?? executionTargets),
     ...(options.returnedBorrowParameter === undefined
       ? {}
       : { returnedBorrowParameter: options.returnedBorrowParameter }),
@@ -134,6 +152,7 @@ const effect = (options: {
     parameters: Object.freeze(Array.from(options.parameters)),
     result: options.result,
     unsafe: false,
+    targets: executionTargets,
     rule: Object.freeze({ _tag: 'EffectRule', operation: options.operation }),
   })
 
@@ -461,6 +480,7 @@ const legacyActors = Object.freeze([
         ]),
         result: 'T',
         unsafe: false,
+        targets: executionTargets,
         rule: Object.freeze({ _tag: 'PlaceRule', operation: 'Replace' }),
       }),
     ]),
@@ -511,7 +531,7 @@ const flatOperations = Object.freeze(
         spelling,
         admission,
         consumer,
-        targets: Object.freeze(['Evaluator', 'LLVM', 'Wasm'] as const),
+        targets: operation.targets,
         ...(operation.unsafe
           ? {
               invariant:
@@ -546,6 +566,15 @@ export const findOperation = (actor_: string, spelling: string): Operation | und
       )
     : undefined)
 
+/** Finds one sealed operation by its canonical compiler identity. */
+export const findOperationById = (id: OperationId): Operation | undefined =>
+  flatOperations.find(
+    (candidate) => candidate.id.actor === id.actor && candidate.id.name === id.name,
+  )
+
+/** Stable textual form of one sealed operation identity. */
+export const operationText = (id: OperationId): string => `${id.actor}.${id.name}`
+
 /** One deterministic audit record spanning source identity and execution surfaces. */
 export interface InventoryEntry {
   readonly operation: string
@@ -557,7 +586,7 @@ export interface InventoryEntry {
   readonly hir: string
   readonly mir: string
   readonly evaluator: string
-  readonly targets: ReadonlyArray<'Evaluator' | 'LLVM' | 'Wasm'>
+  readonly targets: ReadonlyArray<ExecutionTarget>
   readonly hostImport?: string
 }
 
@@ -568,9 +597,15 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
       if (
         operation.admission === undefined ||
         operation.consumer === undefined ||
-        operation.targets === undefined
+        operation.targets.length === 0
       )
         throw new RangeError(`Intrinsic ${operation.spelling} is missing admission metadata`)
+      const normalizedTargets = normalizeExecutionTargets(operation.targets)
+      if (
+        normalizedTargets.length !== operation.targets.length ||
+        normalizedTargets.some((target, index) => operation.targets.at(index) !== target)
+      )
+        throw new RangeError(`Intrinsic ${operation.spelling} has non-normalized target metadata`)
       const identity =
         operation.rule._tag === 'BuiltinRule'
           ? operation.rule.operation
@@ -585,7 +620,7 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
         hir: identity,
         mir: identity,
         evaluator: identity,
-        targets: operation.targets,
+        targets: normalizedTargets,
         ...(operation.hostImport === undefined ? {} : { hostImport: operation.hostImport }),
       })
     }),

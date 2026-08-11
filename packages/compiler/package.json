@@ -118,6 +118,10 @@
       "types": "./dist/Intrinsic.d.ts",
       "import": "./dist/Intrinsic.js"
     },
+    "./IntrinsicAvailability": {
+      "types": "./dist/IntrinsicAvailability.d.ts",
+      "import": "./dist/IntrinsicAvailability.js"
+    },
     "./Layout": {
       "types": "./dist/Layout.d.ts",
       "import": "./dist/Layout.js"

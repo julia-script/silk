@@ -1,5 +1,6 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
+import type * as Intrinsic from './Intrinsic.js'
 import * as Match from './Match.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -73,6 +74,7 @@ export type CallableTarget =
       readonly _tag: 'BuiltinCallableTarget'
       readonly actor: string
       readonly operation: BuiltinOperation
+      readonly intrinsic: Intrinsic.OperationId
     }
 
 /** A canonical lexical loop identity local to one function. */
@@ -459,6 +461,7 @@ export type Expression =
   | {
       readonly _tag: 'BuiltinCall'
       readonly operation: BuiltinOperation
+      readonly intrinsic: Intrinsic.OperationId
       readonly typeArguments: ReadonlyArray<Type.Type>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
