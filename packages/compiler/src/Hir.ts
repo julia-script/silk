@@ -85,14 +85,9 @@ export interface LoopId {
 /** The closed built-in operation vocabulary of the compiler-known actors. */
 export type BuiltinOperation =
   | Scalar.OperationCode
-  | 'LayoutMake'
   | 'LayoutOf'
-  | 'LayoutRepeat'
-  | 'SystemAllocatorMake'
-  | 'AllocatorAllocate'
-  | 'StandardStreamsStdout'
-  | 'StandardStreamsStderr'
-  | 'StandardStreamsWriteAll'
+  | 'StorageAcquire'
+  | 'HostWrite'
   | 'RawBufferFrom'
   | 'RawBufferSlot'
   | 'RawBufferCount'
@@ -404,6 +399,18 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'ServiceEffectConstruct'
+      readonly service: Type.Nominal
+      readonly operation: string
+      readonly role: string
+      readonly access: 'Shared' | 'Exclusive'
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+      readonly arguments: ReadonlyArray<Expression>
+      readonly loanEnds: ReadonlyArray<BorrowId>
+      readonly type: Type.Effect
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'EffectBlock'
       readonly site: EffectSiteId
       readonly statements: ReadonlyArray<Statement>
@@ -623,6 +630,7 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
         return expression.elements
       case 'Call':
       case 'EffectConstruct':
+      case 'ServiceEffectConstruct':
       case 'BuiltinCall':
         return expression.arguments
       case 'CallableSection':
@@ -683,6 +691,7 @@ export const hasUnavailable = (self: HirFunction): boolean => {
         return expression.elements.some(walk)
       case 'Call':
       case 'EffectConstruct':
+      case 'ServiceEffectConstruct':
       case 'BuiltinCall':
         return expression.arguments.some(walk)
       case 'CallableSection':
@@ -748,6 +757,7 @@ export const firstUnavailable = (
       }
       case 'Call':
       case 'EffectConstruct':
+      case 'ServiceEffectConstruct':
       case 'BuiltinCall': {
         for (const argument of expression.arguments) {
           const found = walk(argument)
@@ -1228,6 +1238,11 @@ const encodeExpression = (expression: Expression, depth: number): string => {
             ? ''
             : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
         } : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
+        ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
+      ].join('\n')
+    case 'ServiceEffectConstruct':
+      return [
+        `${indent}service-call ${Type.encode(expression.service)}.${expression.operation}@${expression.role}:${expression.access.toLowerCase()} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'BuiltinCall': {

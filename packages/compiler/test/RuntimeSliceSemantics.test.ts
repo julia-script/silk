@@ -119,11 +119,11 @@ pub fn main() -> i32 { return 0 }`)
 
 it('types slice length and runtime-bounded borrowed places with preserved access', () => {
   const result = analyze(`struct Token { pub kind: i32 }
-fn length(values: &[i32]) -> i32 { return usize.toI32(values.length) }
+fn length(values: &[i32]) -> i32 { return Intrinsic.usizeToI32(values.length) }
 fn inspect(values: &[Token], index: usize) -> i32 { return values[index].kind }
 fn replace(values: &mut [i32], index: usize) -> i32 {
   values[index] = 42
-  return usize.toI32(values.length)
+  return Intrinsic.usizeToI32(values.length)
 }
 pub fn main() -> i32 { return 0 }`)
 

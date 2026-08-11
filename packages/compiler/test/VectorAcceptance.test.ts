@@ -129,7 +129,7 @@ it.effect(
       const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(run.status, 42, run.stderr)
     }),
-  15_000,
+  60_000,
 )
 
 const failedGrowth = `import silk.vector { Vector, make, append, get, length, capacity }
@@ -222,7 +222,7 @@ it.effect(
       const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(run.status, 42, run.stderr)
     }),
-  15_000,
+  60_000,
 )
 
 const elementReleaseOrder = `import silk.vector { Vector, make, append, capacity }

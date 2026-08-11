@@ -1,9 +1,13 @@
 # `@silk-effect/compiler`
 
-`@silk-effect/compiler` contains the bootstrap layer of the Silk Effect compiler: immutable
-source bytes and source-owned spans, the lossless per-module `SyntaxFile` artifact, module
-closure loading, the canonical declaration index, HIR elaboration with unified diagnostics, and
-the closed bootstrap evaluator — all reachable through one supported analysis facade.
+`@silk-effect/compiler` is the Effect-native stage-0 compiler for Silk. It accepts arbitrary source
+bytes, preserves lossless syntax and recovery facts, resolves a complete module closure, and
+realizes valid programs through HIR, ownership, specialization, target layout, MIR, evaluation, and
+backend emission.
+
+The package deliberately exposes one supported consumer surface: `Analysis`. Individual phase
+actors remain importable where their immutable data types are part of an answer, but tools should
+not assemble a second compiler by invoking phases directly.
 
 ```ts
 import { Analysis } from '@silk-effect/compiler'
@@ -16,270 +20,92 @@ const program = Effect.gen(function* () {
 pub fn main() -> i32 { return identity(42) }`),
   )
   const snapshot = Analysis.realize(frontend)
-  const result = Analysis.rootAnalysis(snapshot)
 
-  console.log(result.syntax.root.kind) // SourceFile
-  console.log(result.functions.length) // 2
-  console.log(Analysis.declarationByName(snapshot, 'memory/example', 'main')) // Resolved
   console.log(Analysis.diagnostics(snapshot)) // []
   console.log(Analysis.evaluate(snapshot)._tag) // Completed
 })
 ```
 
-## Source resolution and recovery
+## Compiler pipeline
 
-Compilation requests carry one explicit root `SourceFile`. Reachable imports are loaded through
-the `SourceResolver` Effect service by canonical, extensionless identity. `compiler/Syntax` is a
-logical identity—not an operating-system path. Browser and editor tooling can provide
-`SourceResolver.memory(sources)`; the compiler package never depends on a host filesystem.
+A realized analysis snapshot makes these deterministic artifacts available:
 
-`Analysis.make` is Effectful, frontend-only, and resilient. An absent source becomes an ordinary missing-module
-diagnostic, while an operational resolver failure remains typed data available through
-`Analysis.resolutionFailures`. Successfully loaded modules and unrelated facts remain queryable.
-Call `Analysis.realize` when evaluation, layout, MIR, or code generation is required. Realization
-derives a new immutable snapshot without changing the frontend input. `Analysis.codegen` and
-`Driver.compile` are strict boundaries: they refuse any snapshot containing
-an error diagnostic or resolver failure before invoking a backend or toolchain.
+1. source files, tokens, lossless syntax, and unified diagnostics;
+2. module closure, declaration index, visibility, and name resolution;
+3. typed HIR and semantic occurrences for editor tooling;
+4. ownership, borrow, move, and cleanup facts;
+5. reachable generic/callable instances and target-aware layouts;
+6. backend-neutral structured MIR;
+7. logical evaluation traces; and
+8. LLVM or direct WebAssembly output.
 
-## Shared project analysis
+`Analysis.make` and `Analysis.ofSource` stop after the resilient frontend. Missing or damaged source
+becomes queryable diagnostics while unrelated facts remain available. `Analysis.realize` derives a
+new immutable runtime snapshot. Evaluation and code generation reject snapshots with source errors
+before invoking a backend or toolchain.
 
-Editor hosts with several synchronized roots can analyze their union closure once through
-`ProjectAnalysis`. Each requested root receives an immutable `Analysis.FrontendSnapshot` view with
-its own root identity while source, syntax, declaration, resolution, elaboration, ownership,
-tooling-index, diagnostic, and phase-report values remain structurally shared.
+The MIR evaluator is the semantic oracle used by differential tests. It is not the production
+runtime: native builds use deterministic LLVM bitcode and a pinned Clang toolchain, while the direct
+WebAssembly backend emits instantiable modules without external tools.
 
-```ts
-import { ProjectAnalysis, SourceFile } from '@silk-effect/compiler'
+## Implemented language surface
 
-const project = yield* ProjectAnalysis.make([
-  SourceFile.make('app/Main', mainBytes),
-  SourceFile.make('app/Tool', toolBytes),
-])
-const main = ProjectAnalysis.view(project, 'app/Main')
-```
+The bootstrap language currently includes:
 
-When a project has a prior accepted revision, revise it to reuse byte- and origin-identical module
-syntax while producing a complete new semantic frontend:
+- canonical modules, imports, visibility, and project source roots;
+- boolean, signed and unsigned integer, `usize`, and floating scalar families;
+- literal-only explicitly typed scalar constants;
+- nominal structs, fixed arrays, runtime-sized borrowed slices, structural unions, and exhaustive
+  matching;
+- ordinary and effectful functions, first-class callables, automatic data-first sections, and
+  pipelines;
+- generics and finite kinded failure/requirement rows;
+- mutable bindings, transactional place replacement, structured loops, and runtime recursion;
+- affine values, moves, shared and exclusive borrows, restricted deterministic `Drop`, allocator
+  capabilities, raw storage, and lexical slots;
+- static text and byte literals, including escaped triple-quoted multiline forms; and
+- lazy typed `Effect` computations with failure recovery, retry, shared/exclusive/owned service
+  provision, and ordinary source-defined combinators.
 
-```ts
-const revised = yield* ProjectAnalysis.revise(project, nextRoots)
-const shared = revised.syntaxRevisions.get('app/Shared')
+The compiler-shipped standard library lives as canonical `.silk` files under [`stdlib/silk`](stdlib/silk).
+`Result`, Effect transformations, Option, and the generic growable `Vector<T>` compile through the
+same declaration, ownership, specialization, and lowering paths as user code.
 
-if (shared?._tag === 'Changed') {
-  // Canonical SyntaxIds remain revision-local; correspondence relates exact unchanged subtrees.
-  const pairs = shared.correspondence.identities
-}
-```
+This remains an unreleased subset. It does not yet commit to an owning String, enums, concurrency,
+networking, a general FFI, a package registry, or self-hosting.
 
-Changed modules are reparsed normally. Their `SyntaxCorrespondence` is conservative: it relates
-only exact structurally unique sibling subtrees and leaves ambiguous duplicates unmatched. Semantic
-facts are recomputed for the complete current project in either case.
+## Source resolution and project analysis
 
-Project analysis is frontend-only. Cross-revision caching and runtime realization remain explicit,
-separate concerns.
+Compilation requests carry one explicit root `SourceFile`. Imports use canonical, extensionless,
+case-sensitive module identities relative to a compiler-provided source root. `SourceResolver` is
+an Effect service: browser and editor tools may provide `SourceResolver.memory`, while filesystem
+access belongs to the host boundary rather than the compiler core.
 
-## The facade is the supported consumer surface
+`ProjectAnalysis` analyzes the union closure of synchronized roots once and returns immutable root
+views that share syntax, declaration, semantic, tooling, and diagnostic facts. Revising a project
+reuses byte-identical syntax and publishes conservative `SyntaxCorrespondence` for structurally
+unique unchanged subtrees; semantic facts are recomputed for the complete current revision.
 
-Tooling consumes compiler phases exclusively through `Analysis`: build a frontend snapshot from a
-compilation request (or one source), then query immutable facts — sources, syntax, imports and
-cycles, declarations, references, types, contracts, HIR, and the compilation's
-diagnostics merged in deterministic driver order. Runtime consumers explicitly realize that
-frontend snapshot before evaluation, layout, MIR, or code generation. The immutable data-model vocabularies
-(`SyntaxTree`, `SourceFile`, `SourceSpan`, `Token`, `Diagnostic`, `Hir`, and the fact type
-namespaces) are part of the facade's answers and remain importable, including as type-only
-imports. Running phase modules directly (`Lexer`, `Parser`, `ModuleClosure`,
-`DeclarationIndex`, `Elaboration`, `BootstrapEvaluation`) is not a supported consumer surface.
-Bootstrap does not implement every future editor query, but its identities, recovery states,
-provenance, and phase boundaries let the facade grow without reimplementing Silk semantics in a
-separate tool.
+## Editor and documentation facts
 
-## Editor intelligence
+The frontend snapshot owns editor semantics as compiler data rather than LSP protocol values.
+Semantic occurrences, hover subjects, completion candidates, definitions, document symbols, and
+inferred type hints use the same canonical identities as compilation. Standard-library navigation
+points to the shipped `.silk` source rather than virtual intrinsic files.
 
-`Analysis.FrontendSnapshot` owns editor semantics as immutable compiler data. `SemanticOccurrence` indexes
-each meaningful identifier token separately: declarations, values, types, fields, imported
-namespaces, intrinsic actors, and intrinsic operations. An occurrence carries an explicit
-resolution state and an exact source declaration only when one exists. Compiler-provided
-intrinsics remain hoverable without inventing virtual definition files.
-
-`Analysis.hoverSubjectAt` selects an occurrence before considering a cached anonymous-expression
-type. Available occurrences render through `Presentation`, which preserves source concepts such as
-parameter names, mutable bindings, generic parameters, and `effect fn` declarations. This is why a
-reference to `effect fn recover(error: OutOfMemory) -> i32` is not displayed as a lowered anonymous
-`fn(OutOfMemory) -> Effect<i32>` type.
-
-`Analysis.completionAt` classifies recovered source positions and returns semantic candidates with
-an exact replacement span. Intrinsic member candidates come from the same `Intrinsic` catalog used
-by elaboration and hover. `Analysis.typeHints` projects available inferred local-binding types over
-a byte range. These actors contain no LSP protocol types; clients translate their structured data
-at the boundary.
-
-## Documentation source facts
-
-The lexer distinguishes declaration documentation (`///`) and leading module documentation (`//!`)
-from ordinary `//` comments; `////` remains ordinary. `DocBlock` and the `Analysis` facade expose
-attached raw comment tokens and exact byte spans for modules, declarations, type parameters,
-parameters, struct fields, implementations, and implementation operations. A blank line or an
-ordinary comment breaks declaration attachment.
-
-The compiler deliberately does not parse Markdown. Ordinary compilation pays only for lossless
-comment retention and cheap attachment queries. `@silk-effect/documentation` owns lazy CommonMark
-interpretation, examples, semantic links, hover rendering, and generated documentation models.
-
-The occurrence index has an explicit interactive budget: one numeric prefix-maximum entry per
-semantic occurrence, no retained syntax nodes, tokens, or source text, and under 512 serialized
-bytes per occurrence on the representative multi-module fixture. The same fixture must complete
-five full passes of exact-token lookups in under one second. These are regression ceilings rather
-than performance targets; lookup uses a binary search followed only by the locally overlapping
-spans.
+`///` declaration documentation and leading `//!` module documentation remain lossless source
+tokens. `DocBlock` attaches them to modules, declarations, type parameters, parameters, fields,
+implementations, and implementation operations. Markdown parsing and generated documentation
+models belong to `@silk-effect/documentation` so ordinary compilation does not pay that cost.
 
 ## Byte and span conventions
 
-- Source input is an arbitrary byte sequence, not assumed to be valid UTF-8.
+- Source is arbitrary bytes and need not be valid UTF-8.
 - `SourceFile.make` copies its input and attaches a caller-provided logical identity.
-- A `SourceSpan` is an owner-qualified half-open byte range `[start, end)`.
+- `SourceSpan` is an owner-qualified half-open byte range `[start, end)`.
 - Empty spans represent positions; EOF is `[sourceLength, sourceLength)`.
 - A source only returns bytes for a span with the same identity and in-bounds offsets.
 
-## Bootstrap lexer vocabulary
-
-The lexer recognizes ASCII identifiers, the Silk keyword and punctuation vocabulary, decimal
-integers, whitespace, ordinary `//` line comments, `///` declaration documentation, and `//!`
-module documentation. Trivia is retained as tokens.
-Unsupported bytes form maximal `Invalid` tokens and ordered `LEX0001` diagnostics, so lexing always
-makes progress and every input byte can be reconstructed from the non-EOF token spans.
-
-## Bootstrap concrete grammar
-
-The parser recognizes exactly this grammatical slice, with whitespace and `//` line comments
-allowed between its elements:
-
-```text
-File                → TopLevelDeclaration* EOF
-FunctionDeclaration → pub fn Identifier(ParameterList?) -> Identifier { return ReturnExpression }
-ParameterList       → Parameter ( , Parameter )*
-Parameter           → Identifier : Identifier
-ReturnExpression    → DecimalInteger | Identifier | CallExpression
-CallExpression      → Identifier ( ArgumentList? )
-ArgumentList        → Argument ( , Argument )*
-Argument            → DecimalInteger | Identifier | CallExpression
-```
-
-The result is a concrete syntax tree (CST), not a semantic AST. An empty module contains only EOF;
-otherwise its nodes group direct declarations in source order. Each function contains a parameter list,
-return type, block, return statement, and an integer, bare-identifier, or call expression. Typed
-parameter declarations and integer, identifier, or recursively nested call arguments retain their
-own ordered concrete nodes, separators, and trivia. Nested calls reserve the closing tokens required
-by their enclosing calls, so one missing inner `)` does not consume the outer call's delimiter.
-Unexpected tokens inside lists remain explicit error regions. Every lexer token—including trivia,
-invalid tokens, and EOF—remains the same object in the tree and appears exactly once in source order.
-A following `pub` bounds both block and damaged-call recovery so the next declaration remains
-separate.
-
-Ordinary source mistakes remain data. A required absent token becomes a `MissingToken` leaf with an
-empty span and normally one `PAR0001` diagnostic whose message uses the token's Silk spelling.
-Multiple leaves introduced for one wholly absent return statement share one `PAR0004` diagnostic.
-Unexpected concrete input becomes a lossless block-owned `ErrorStatement` and a `PAR0002`
-diagnostic whose structured reason records the encountered token kinds, parser context, and
-source-language expectations. Identifier-led statements become assignments only when their
-complete place is followed by `=`; every other expression start becomes an `ExpressionStatement`.
-Semantic analysis permits its result to be ignored only when it is `()` or `never`, and reports a
-non-unit result with guidance to bind, return, or explicitly consume it. A missing terminal return
-is recovered separately instead of reinterpreting the preceding expression. Lexical diagnostics
-remain separate on the retained lexical result; `Parser.parse` does not throw or fail an Effect for
-these mistakes.
-
-## Bootstrap semantic facts
-
-`SemanticAnalysis.analyze` retains the exact parse result and publishes an immutable ordered
-`functions` collection. Each `FunctionFact` groups one declaration, a closed integer, identifier, or call
-`returnedExpression`, and return compatibility. Declaration identities combine the source identity with the function's
-zero-based concrete-source ordinal; missing names do not change later ordinals. Each declaration
-also retains public visibility, its exact concrete parameter count, a present or unavailable name, and a resolved,
-unresolved, or unavailable declared return type.
-
-Each declaration publishes its ordered parameter facts. A parameter identity nests its concrete
-ordinal under the owning function identity, so same-spelled parameters in different functions stay
-independent. Parameter names and declared types retain exact concrete provenance. The exact `i32`
-type resolves through the same type rule as function returns; unknown present types produce
-`SEM0001`, while parser-damaged names and types remain unavailable without duplicate diagnostics.
-
-`SemanticAnalysis.parameterByName` performs function-local lookup with closed `Resolved`, `Missing`,
-and `Ambiguous` outcomes. It never sees parameters from another function or top-level function
-names. Every later duplicate present parameter name produces `SEM0005` at its declaration while all
-matches remain available in source order.
-
-`SemanticAnalysis.declarationByName` supports data-first and pipeable lookup with closed `Resolved`,
-`Missing`, and `Ambiguous` outcomes. It never silently selects the first duplicate. Missing recovered
-names do not enter lookup, while every present duplicate after the first produces `SEM0003` at the
-later name span and retains the original name span in its reason data.
-
-This slice recognizes only the exact ASCII type spelling `i32` and positive decimal values from
-`0` through `2147483647`. It interprets token bytes without host-number precision loss. A present
-unknown type produces `SEM0001`; a present integer above the boundary produces `SEM0002`. Every
-function is analyzed independently. Missing or damaged syntax remains unavailable and belongs to
-parser diagnostics, so lexical, parser, and semantic diagnostics remain separate ordered
-collections.
-
-Analysis collects every declaration header before resolving calls, so backward, forward, and self
-references follow the same rule. A call reference is `Resolved`, `Missing`, `Ambiguous`, or
-syntax-unavailable and retains exact call-site and target provenance. Resolution never silently
-selects the first duplicate. A missing target produces `SEM0004`; an ambiguous target relies on the
-declaration-owned `SEM0003` diagnostics without adding a redundant call-site error.
-
-A uniquely resolved call uses its target declaration's resolved return type. That type is available
-even when the target body has its own compatibility error, because this phase records a declaration
-relationship rather than executing the function. Missing, ambiguous, syntax-damaged, or
-unresolved-target-type calls remain unavailable. Integer returned expressions keep their existing
-exact value and compatibility behavior.
-
-Every usable bare identifier expression resolves against the preceding local bindings, in-scope
-pattern bindings, and parameter collection of its enclosing function. A unique match retains its
-exact declaration identity and supplies its type to the expression; a missing match produces
-`SEM0006` with unknown-value terminology; duplicate matches stay ambiguous and rely on the
-declaration-owned diagnostic. Missing or damaged reference syntax remains parser-owned and
-unavailable. The same rule applies to returned identifiers and identifier call arguments.
-
-Each usable call argument has a source-local identity, zero-based concrete ordinal, expression,
-type, and exact syntax provenance. A uniquely resolved call maps argument ordinal `n` to target
-parameter ordinal `n`. Its separate call contract is `Compatible` when counts match and every mapped
-type is available, `ArityMismatch` when available counts differ, or `Unavailable` when syntax,
-target resolution, or a mapped type is unavailable. Partial mappings remain visible across arity
-mismatches. `SEM0007` reports the expected and actual counts at the complete call span without
-changing the call's expression type or the caller's return compatibility.
-
-`ExpressionFact` is recursive: integer literals, parameter references, and calls use the same
-discriminated fact shape at returned and argument positions. Each nested call retains its own span,
-target resolution, ordered argument identities, positional mappings, contract, and result type.
-Analysis proceeds from nested leaves outward, so an unavailable inner type stops only the dependent
-outer contract while all known inner facts remain inspectable. Argument identities combine the
-enclosing function, owning call span, and concrete ordinal without introducing cyclic object
-references.
-
-These are direct semantic facts over the concrete tree—not a semantic AST or a general type
-checker. The package intentionally does not yet contain an AST, HIR, MIR, LLVM lowering, or native
-compilation. Top-level call resolution and positional contract checking exist, but conversions, a
-general scope graph, and dependency scheduling remain deferred.
-
-## Bootstrap evaluation is not compilation
-
-`BootstrapEvaluation.evaluate` is a pure, direct interpreter over the existing semantic facts. It
-selects one zero-parameter `main: i32`, follows only reachable decimal literals, resolved parameter
-reads, and compatible calls, and returns either an exact `Completed` value or closed `Blocked`
-reason. Its immutable trace records entry, call, positional binding, parameter read, and return
-events with existing semantic provenance. Arguments, including nested calls, are evaluated fully
-from left to right before their values are bound to the enclosing target. The trace records the
-enclosing call first, then every nested argument event, then the enclosing bindings and target body.
-An inner blocked reason propagates unchanged without claiming enclosing bindings or returns that did
-not happen. Unreachable broken declarations do not block a valid entry path, and direct, mutual, or
-nested-argument recursion runs through independent activation frames. Evaluation is bounded by
-configurable operation and active-frame limits reported as structured `EvaluationLimit` data;
-emitted native and WebAssembly recursion has no evaluator-only budget.
-
-This bootstrap evaluator proves that the frontend facts compose into one source-to-result vertical
-slice. It is not lowering, bytecode, LLVM, native compilation, a process runtime, a general
-interpreter, or a promise about future execution semantics. It performs no I/O and creates no AST,
-HIR, MIR, runtime service, or persistent state.
-
-Token families deliberately deferred with those later grammar decisions include string and
-character literals, floating-point numbers, general operators, separators, attributes, and any
-additional keywords. Until specified, their bytes recover predictably as `Invalid` regions.
+Ordinary source errors remain typed facts. Lexer and parser recovery always make progress, preserve
+the original token stream, and keep later declarations independently analyzable. Operational
+resolver, backend, and toolchain failures stay in Effect's typed error channel.

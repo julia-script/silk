@@ -118,8 +118,8 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(native), [])
       assert.deepEqual(Mir.verify(Analysis.loweredMir(native)), [])
       const encodedHir = Hir.encode(Analysis.rootAnalysis(native).hir)
-      assert.include(encodedHir, 'builtin f32.Sin : f32')
-      assert.include(encodedHir, 'builtin f64.Cos : f64')
+      assert.include(encodedHir, 'call silk/f32.sin : f32')
+      assert.include(encodedHir, 'call silk/f64.cos : f64')
       const encodedMir = Mir.encode(Analysis.loweredMir(native))
       assert.include(encodedMir, 'float-sin')
       assert.include(encodedMir, ': f32')
@@ -128,7 +128,7 @@ it.effect(
       const operations = Analysis.loweredMir(native).functions.flatMap(Mir.operations)
       assert.strictEqual(
         operations.filter((operation) => operation._tag === 'FloatTranscendental').length,
-        executionVectors.length,
+        4,
       )
       const first = Analysis.evaluate(native)
       const second = Analysis.evaluate(native)

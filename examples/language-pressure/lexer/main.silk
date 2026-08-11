@@ -9,6 +9,8 @@ const asciiCarriageReturn: u8 = 13
 const tokenIdentifier: u8 = 4
 const tokenConst: u8 = 67
 const tokenInvalidStaticLiteral: u8 = 68
+const tokenService: u8 = 69
+const tokenInterface: u8 = 70
 
 struct Token {
   kind: u8
@@ -174,6 +176,8 @@ fn keywordKind(source: &[u8], start: usize, end: usize) -> u8 {
   if matches(source, start, end, b"true") { return 32 }
   if matches(source, start, end, b"false") { return 33 }
   if matches(source, start, end, b"const") { return tokenConst }
+  if matches(source, start, end, b"service") { return tokenService }
+  if matches(source, start, end, b"interface") { return tokenInterface }
   return tokenIdentifier
 }
 

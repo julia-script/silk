@@ -36,13 +36,13 @@ const run = (label: string, text: string) =>
     }
   })
 
-// Whole-member binding on a Copy member (Layout out of Layout.repeat's union).
+// Whole-member binding on a source-defined Layout value from Layout.repeat's union.
 const layoutExtract = `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let element = Layout.of<i32>()
-  let plan = Layout.repeat(element, 3)
+  let plan = Layout.repeat(move element, 3)
   let layout = match move plan {
-    Layout value => value
+    Layout value => move value
     LayoutOverflow overflow => trapLayout()
   }
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)

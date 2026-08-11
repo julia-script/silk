@@ -340,6 +340,75 @@ const printStructDeclaration = (
   )
 }
 
+const printServiceOperation = (
+  context: Context,
+  node: SyntaxTree.Node,
+  prefix: FormatDocument.Document,
+): FormatDocument.Document => {
+  const effectKeyword = directTokens(node).find((token) => token.kind === 'EffectKeyword')
+  const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
+  const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
+  const requirementRow = directNodes(node).find((child) => child.kind === 'RequirementRow')
+  const body = directNodes(node).find((child) => child.kind === 'Block')
+  return FormatDocument.concat(
+    ...(effectKeyword === undefined
+      ? []
+      : [printToken(context, effectKeyword, prefix), FormatDocument.text(' ')]),
+    printToken(
+      context,
+      tokenOf(node, 'FnKeyword'),
+      effectKeyword === undefined ? prefix : FormatDocument.empty,
+    ),
+    printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+    ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
+    printNode(context, nodeOf(node, 'ParameterList')),
+    ...(directNodes(node).find((child) => child.kind === 'ReturnType') === undefined
+      ? []
+      : [printNode(context, nodeOf(node, 'ReturnType'), FormatDocument.text(' '))]),
+    ...(failureRow === undefined ? [] : [printNode(context, failureRow, FormatDocument.text(' '))]),
+    ...(requirementRow === undefined
+      ? []
+      : [printNode(context, requirementRow, FormatDocument.text(' '))]),
+    ...(body === undefined ? [] : [printNode(context, body, FormatDocument.text(' '))]),
+  )
+}
+
+const printServiceDeclaration = (
+  context: Context,
+  node: SyntaxTree.Node,
+  prefix: FormatDocument.Document,
+): FormatDocument.Document => {
+  const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
+  const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
+  const operations = directNodes(node).filter((child) => child.kind === 'ServiceOperation')
+  const head = FormatDocument.concat(
+    ...(publicKeyword === undefined
+      ? []
+      : [printToken(context, publicKeyword, prefix), FormatDocument.text(' ')]),
+    printToken(
+      context,
+      tokenOf(node, node.kind === 'InterfaceDeclaration' ? 'InterfaceKeyword' : 'ServiceKeyword'),
+      publicKeyword === undefined ? prefix : FormatDocument.empty,
+    ),
+    printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+    ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
+    printToken(context, tokenOf(node, 'LeftBrace'), FormatDocument.text(' ')),
+  )
+  if (operations.length === 0)
+    return FormatDocument.concat(head, printToken(context, tokenOf(node, 'RightBrace')))
+  return FormatDocument.concat(
+    head,
+    FormatDocument.indent(
+      FormatDocument.concat(
+        ...operations.map((operation) =>
+          printServiceOperation(context, operation, FormatDocument.hardLine),
+        ),
+      ),
+    ),
+    printToken(context, tokenOf(node, 'RightBrace'), FormatDocument.hardLine),
+  )
+}
+
 const printConstantDeclaration = (
   context: Context,
   node: SyntaxTree.Node,
@@ -580,6 +649,13 @@ const printNode = (
     }
     case 'StructDeclaration':
       return printStructDeclaration(context, node, prefix)
+    case 'ServiceDeclaration':
+    case 'InterfaceDeclaration':
+      return printServiceDeclaration(context, node, prefix)
+    case 'ServiceOperation':
+      return printServiceOperation(context, node, prefix)
+    case 'ServiceInvalidMember':
+      throw new FormatterImplementationError('Damaged service member reached the syntax printer')
     case 'ConstantDeclaration':
       return printConstantDeclaration(context, node, prefix)
     case 'ImplDeclaration':

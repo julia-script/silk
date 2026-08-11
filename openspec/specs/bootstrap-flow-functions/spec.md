@@ -148,9 +148,11 @@ SHALL release the stored callback exactly once.
 
 ### Requirement: Logging remains effectful
 
-Semantic logging SHALL remain an Effect operation with its declared Logger requirement. Ordinary
+Semantic logging SHALL remain an Effect operation with its declared Logger requirement. A log call
+SHALL dispatch one complete semantic event rather than append byte fragments to a process stream,
+so native, in-memory, browser, and telemetry providers can implement the same contract. Ordinary
 functions that add logging MUST return or execute an Effect through the existing effect model; this
-change MUST NOT introduce an eager non-effect trace or debugging intrinsic.
+requirement MUST NOT introduce an eager non-effect trace, debugging intrinsic, or stdout shortcut.
 
 #### Scenario: Propagate a temporary semantic log honestly
 
@@ -260,3 +262,21 @@ suspendable Effects without changing library combinator contracts.
 
 - **WHEN** suspension is added later
 - **THEN** existing source-defined combinators continue to compose through `run` and outcome reification without matching a scheduler-private pending state
+
+### Requirement: Effects use source-defined services generically
+
+An Effect requirement MAY name any visible source-declared service and role. Requirement
+normalization, service-slot shaping, witness dispatch, and `Effect.provide`, `Effect.provideMut`,
+and acquisition-based provision SHALL operate from declaration and conformance facts rather than a
+compiler-known capability list. `Effect.result` and requirement binding MAY remain source wrappers
+over minimal `Intrinsic` machinery.
+
+#### Scenario: Compose an arbitrary service requirement
+
+- **WHEN** an Effect calling a user-declared service is mapped, tapped, stored, and provided
+- **THEN** every combinator preserves or discharges the service requirement by the ordinary row rules
+
+#### Scenario: Avoid a service-specific Effect intrinsic
+
+- **WHEN** Logger or FileSystem is added after this change
+- **THEN** no new Effect intrinsic, compiler recipe kind, or name-based lowering rule is required

@@ -3,7 +3,7 @@ export type Destination = 'Stdout' | 'Stderr'
 
 /** One complete immutable write retained by deterministic and in-memory providers. */
 export interface WriteEvent {
-  readonly _tag: 'StandardStreamWrite'
+  readonly _tag: 'HostWrite'
   readonly destination: Destination
   readonly bytes: ReadonlyArray<number>
 }
@@ -48,7 +48,7 @@ export const memory = (options: { readonly failAt?: number } = {}): Memory => {
       }
       recorded.push(
         Object.freeze({
-          _tag: 'StandardStreamWrite',
+          _tag: 'HostWrite',
           destination,
           bytes: Object.freeze(Array.from(bytes)),
         }),

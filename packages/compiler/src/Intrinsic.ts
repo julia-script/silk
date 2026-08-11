@@ -26,6 +26,15 @@ export interface ValueParameter {
   readonly type: string
 }
 
+/** Structural reason one source-callable primitive remains compiler-owned. */
+export type AdmissionCategory =
+  | 'Representation'
+  | 'Scalar'
+  | 'Ownership'
+  | 'Effect'
+  | 'Platform'
+  | 'Language'
+
 /** The elaboration rule selected by an intrinsic operation identity. */
 export type Rule =
   | {
@@ -50,6 +59,11 @@ export interface Operation {
   readonly parameters: ReadonlyArray<ValueParameter>
   readonly result: string
   readonly unsafe: boolean
+  readonly admission?: AdmissionCategory
+  readonly consumer?: string
+  readonly targets?: ReadonlyArray<'Evaluator' | 'LLVM' | 'Wasm'>
+  readonly invariant?: string
+  readonly hostImport?: string
   readonly rule: Rule
 }
 
@@ -134,11 +148,6 @@ const actor = (
 const rawElement = Type.parameter({ module: 'silk/core', name: '$RawStorage' }, 0, 'T')
 const rawTypeParameters = Object.freeze([rawElement])
 
-const normalizedUnion = (members: ReadonlyArray<Type.Nominal>): Type.Type => {
-  const normalized = Type.union(members)
-  return normalized._tag === 'Normalized' ? normalized.type : 'never'
-}
-
 const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Operation => {
   const concreteResult =
     operation.result === 'Self'
@@ -179,7 +188,7 @@ const scalarActor = (scalar: Scalar.Scalar): Actor =>
     scalar.operations.map((operation) => scalarOperation(scalar, operation)),
   )
 
-const operations = Object.freeze([
+const legacyActors = Object.freeze([
   ...Scalar.all().map(scalarActor),
   actor(
     'Layout',
@@ -196,116 +205,47 @@ const operations = Object.freeze([
         result: 'Layout',
         semanticResult: Type.layout,
       }),
-      builtin({
-        actor: 'Layout',
-        name: 'make',
-        operation: 'LayoutMake',
-        parameters: Object.freeze([
-          valueParameter('size', 'usize'),
-          valueParameter('alignment', 'usize'),
-        ]),
-        semanticParameters: Object.freeze(['usize', 'usize']),
-        result: 'Layout | InvalidAlignment',
-        semanticResult: normalizedUnion([Type.layout, Type.invalidAlignment]),
-      }),
-      builtin({
-        actor: 'Layout',
-        name: 'repeat',
-        operation: 'LayoutRepeat',
-        parameters: Object.freeze([
-          valueParameter('layout', 'Layout'),
-          valueParameter('count', 'usize'),
-        ]),
-        semanticParameters: Object.freeze([Type.layout, 'usize']),
-        result: 'Layout | LayoutOverflow',
-        semanticResult: normalizedUnion([Type.layout, Type.layoutOverflow]),
-      }),
     ]),
   ),
   actor(
-    'SystemAllocator',
-    'Type',
+    'Storage',
+    'Namespace',
     Object.freeze([
       builtin({
-        actor: 'SystemAllocator',
-        name: 'make',
-        operation: 'SystemAllocatorMake',
-        parameters: Object.freeze([]),
-        semanticParameters: Object.freeze([]),
-        result: 'SystemAllocator',
-        semanticResult: Type.systemAllocator,
-      }),
-    ]),
-  ),
-  actor(
-    'Allocator',
-    'Type',
-    Object.freeze([
-      builtin({
-        actor: 'Allocator',
-        name: 'allocate',
-        operation: 'AllocatorAllocate',
+        actor: 'Storage',
+        name: 'acquire',
+        operation: 'StorageAcquire',
         parameters: Object.freeze([valueParameter('layout', 'Layout')]),
         semanticParameters: Object.freeze([Type.layout]),
-        result: 'Effect<Allocation ! OutOfMemory ? &mut Allocator>',
+        result: 'Effect<Allocation ! OutOfMemory>',
         semanticResult: Type.effect(
           Type.allocation,
           Object.freeze([Type.outOfMemory]),
-          'Exclusive',
-          Object.freeze([
-            Object.freeze({
-              capability: Type.allocator,
-              role: 'DefaultRole',
-              access: 'Exclusive',
-            }),
-          ]),
+          undefined,
+          Object.freeze([]),
         ),
       }),
     ]),
   ),
   actor(
-    'StandardStreams',
-    'Type',
+    'Host',
+    'Namespace',
     Object.freeze([
       builtin({
-        actor: 'StandardStreams',
-        name: 'stdout',
-        operation: 'StandardStreamsStdout',
-        parameters: Object.freeze([]),
-        semanticParameters: Object.freeze([]),
-        result: 'bool',
-        semanticResult: 'bool',
-      }),
-      builtin({
-        actor: 'StandardStreams',
-        name: 'stderr',
-        operation: 'StandardStreamsStderr',
-        parameters: Object.freeze([]),
-        semanticParameters: Object.freeze([]),
-        result: 'bool',
-        semanticResult: 'bool',
-      }),
-      builtin({
-        actor: 'StandardStreams',
-        name: 'writeAll',
-        operation: 'StandardStreamsWriteAll',
+        actor: 'Host',
+        name: 'write',
+        operation: 'HostWrite',
         parameters: Object.freeze([
           valueParameter('destination', 'bool'),
           valueParameter('bytes', '&[u8]'),
         ]),
         semanticParameters: Object.freeze(['bool', Type.slice('Shared', 'u8')]),
-        result: 'Effect<() ! StreamWriteFailure ? &StandardStreams>',
+        result: 'Effect<() ! StreamWriteFailure>',
         semanticResult: Type.effect(
           Type.unit,
           Object.freeze([Type.streamWriteFailure]),
-          'Shared',
-          Object.freeze([
-            Object.freeze({
-              capability: Type.standardStreams,
-              role: 'DefaultRole',
-              access: 'Shared',
-            }),
-          ]),
+          undefined,
+          Object.freeze([]),
         ),
       }),
     ]),
@@ -480,6 +420,69 @@ const operations = Object.freeze([
   ),
 ])
 
+const upperInitial = (value: string): string =>
+  `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
+
+const flatSpelling = (actor_: string, operation: string): string => {
+  if (Scalar.isSpelling(actor_)) return `${actor_}${upperInitial(operation)}`
+  if (actor_ === 'Effect' && operation === 'bindRequirement') return 'bindRequirement'
+  if (actor_ === 'Place' && operation === 'replace') return 'replace'
+  if (actor_ === 'Storage' && operation === 'acquire') return 'systemAllocationAcquire'
+  if (actor_ === 'Host' && operation === 'write') return 'standardStreamWrite'
+  return `${actor_.slice(0, 1).toLowerCase()}${actor_.slice(1)}${upperInitial(operation)}`
+}
+
+const flatOperations = Object.freeze(
+  legacyActors.flatMap((actor_) =>
+    actor_.operations.map((operation) => {
+      const spelling = flatSpelling(actor_.spelling, operation.spelling)
+      const admission: AdmissionCategory = Scalar.isSpelling(actor_.spelling)
+        ? 'Scalar'
+        : actor_.spelling === 'Effect'
+          ? 'Effect'
+          : actor_.spelling === 'Host' || actor_.spelling === 'Storage'
+            ? 'Platform'
+            : actor_.spelling === 'Layout'
+              ? 'Representation'
+              : actor_.spelling === 'RawBuffer' || actor_.spelling === 'Slot'
+                ? 'Ownership'
+                : 'Language'
+      const consumer = Scalar.isSpelling(actor_.spelling)
+        ? `silk/${actor_.spelling}.${operation.spelling}`
+        : actor_.spelling === 'Effect'
+          ? `silk/effects.${operation.spelling}`
+          : actor_.spelling === 'Storage'
+            ? 'silk/core.allocate'
+            : actor_.spelling === 'Host'
+              ? 'silk/core.writeAll'
+              : actor_.spelling === 'Place'
+                ? 'language:place-replacement'
+                : `silk/${actor_.spelling.replaceAll(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}.${operation.spelling}`
+      return Object.freeze({
+        ...operation,
+        id: operationId('Intrinsic', spelling),
+        spelling,
+        admission,
+        consumer,
+        targets: Object.freeze(['Evaluator', 'LLVM', 'Wasm'] as const),
+        ...(operation.unsafe
+          ? {
+              invariant:
+                actor_.spelling === 'RawBuffer'
+                  ? 'caller proves raw-buffer bounds, ownership, and initializedness required by the operation'
+                  : 'caller proves the selected slot is in bounds and has the initializedness state required by the operation',
+            }
+          : {}),
+        ...(actor_.spelling === 'Host' && operation.spelling === 'write'
+          ? { hostImport: 'silk_standard_stream_write_v1' }
+          : {}),
+      })
+    }),
+  ),
+)
+
+const operations = Object.freeze([actor('Intrinsic', 'Namespace', flatOperations)])
+
 /** Every intrinsic actor in stable presentation and completion order. */
 export const all = (): ReadonlyArray<Actor> => operations
 
@@ -489,7 +492,57 @@ export const findActor = (spelling: string): Actor | undefined =>
 
 /** Finds an intrinsic operation by actor and member source spelling. */
 export const findOperation = (actor_: string, spelling: string): Operation | undefined =>
-  findActor(actor_)?.operations.find((candidate) => candidate.spelling === spelling)
+  findActor(actor_)?.operations.find((candidate) => candidate.spelling === spelling) ??
+  (Scalar.isSpelling(actor_)
+    ? findActor('Intrinsic')?.operations.find(
+        (candidate) => candidate.spelling === `${actor_}${upperInitial(spelling)}`,
+      )
+    : undefined)
+
+/** One deterministic audit record spanning source identity and execution surfaces. */
+export interface InventoryEntry {
+  readonly operation: string
+  readonly signature: string
+  readonly unsafe: boolean
+  readonly invariant?: string
+  readonly admission: AdmissionCategory
+  readonly consumer: string
+  readonly hir: string
+  readonly mir: string
+  readonly evaluator: string
+  readonly targets: ReadonlyArray<'Evaluator' | 'LLVM' | 'Wasm'>
+  readonly hostImport?: string
+}
+
+/** Publishes the closed intrinsic inventory used by verification and release review. */
+export const inventory = (): ReadonlyArray<InventoryEntry> =>
+  Object.freeze(
+    flatOperations.map((operation) => {
+      if (
+        operation.admission === undefined ||
+        operation.consumer === undefined ||
+        operation.targets === undefined
+      )
+        throw new RangeError(`Intrinsic ${operation.spelling} is missing admission metadata`)
+      const identity =
+        operation.rule._tag === 'BuiltinRule'
+          ? operation.rule.operation
+          : `${operation.rule._tag}.${operation.rule.operation}`
+      return Object.freeze({
+        operation: `Intrinsic.${operation.spelling}`,
+        signature: signature(operation),
+        unsafe: operation.unsafe,
+        ...(operation.invariant === undefined ? {} : { invariant: operation.invariant }),
+        admission: operation.admission,
+        consumer: operation.consumer,
+        hir: identity,
+        mir: identity,
+        evaluator: identity,
+        targets: operation.targets,
+        ...(operation.hostImport === undefined ? {} : { hostImport: operation.hostImport }),
+      })
+    }),
+  )
 
 /** Renders the source-like signature shared by hover and completion detail. */
 export const signature = (self: Operation): string => {

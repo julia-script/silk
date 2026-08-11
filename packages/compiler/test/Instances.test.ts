@@ -153,7 +153,7 @@ pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
       yield* snapshot('pub effect fn main() -> i32 { return 0 }'),
     )
     const requirements = Analysis.instancesOf(
-      yield* snapshot('pub effect fn main() -> () ? &mut Allocator { return () }'),
+      yield* snapshot('struct Clock {}\npub effect fn main() -> () ? &mut Clock { return () }'),
     )
     const unreportable = Analysis.instancesOf(
       yield* snapshot(`struct SomeError { code: i32 }
@@ -332,7 +332,7 @@ pub fn main() -> i32 { return run work() |> Effect.retry(2) }`),
       )
       const grouped = Analysis.loweredMir(
         yield* snapshot(`effect fn work() -> i32 { return 41 }
-pub fn main() -> i32 { return (run work()) |> i32.add(1) }`),
+pub fn main() -> i32 { return (run work()) |> Intrinsic.i32Add(1) }`),
       )
       const composedMain = composed.functions.at(0)
       const groupedMain = grouped.functions.at(0)
@@ -365,7 +365,7 @@ pub fn main() -> i32 {
   return callback(40)
 }`,
       `effect fn work() -> i32 { return 41 }
-pub fn main() -> i32 { return (run work()) |> i32.add(1) }`,
+pub fn main() -> i32 { return (run work()) |> Intrinsic.i32Add(1) }`,
     ]
     for (const source of sources) {
       const first = Analysis.loweredMir(yield* snapshot(source))
@@ -383,7 +383,7 @@ pub fn main() -> i32 { let value = identity(42) let extra = 1 return value }`
 
 const nestedMatchSource = `pub struct Token { kind: i32 }
 pub struct Box { token: Token }
-pub fn adjust(value: i32) -> i32 { return i32.add(value, 1) }
+pub fn adjust(value: i32) -> i32 { return value + 1 }
 pub fn main() -> i32 {
   let boxed = Box { token: Token { kind: 41 } }
   return match move boxed {
@@ -421,7 +421,9 @@ pub fn main() -> i32 { let value = 42 return choose(move value, value) }`),
 it.effect('lowers built-ins and unavailable bodies to explicit trapping MIR', () =>
   Effect.gen(function* () {
     const builtins = Analysis.loweredMir(
-      yield* snapshot('pub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }'),
+      yield* snapshot(
+        'pub fn main() -> i32 { return Intrinsic.i32Subtract(Intrinsic.i32Multiply(6, 7), 0) }',
+      ),
     )
     const builtinFunction = builtins.functions.at(0)
     assert.deepEqual(
@@ -504,7 +506,7 @@ it.effect('rejects hand-built match decisions before evaluation or emission', ()
 )
 
 const branchProgram =
-  'pub fn main() -> i32 { let base = 40 if i32.equals(base, 40) { let bonus = 2 return i32.add(base, bonus) } return 0 }'
+  'pub fn main() -> i32 { let base = 40 if base == 40 { let bonus = 2 return base + bonus } return 0 }'
 
 it.effect('lowers branch diamonds identically across runs', () =>
   Effect.gen(function* () {

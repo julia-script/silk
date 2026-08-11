@@ -1,15 +1,117 @@
 [
   {
+    "module": "silk/bool",
+    "path": "silk/bool.silk",
+    "namespace": "bool"
+  },
+  {
+    "module": "silk/core",
+    "path": "silk/core.silk",
+    "namespace": "Allocator",
+    "aliases": [
+      "AllocationFailure",
+      "NativeStandardStreams",
+      "OutOfMemory",
+      "StandardStream",
+      "StandardStreams",
+      "StreamWriteFailure",
+      "SystemAllocator"
+    ]
+  },
+  {
     "module": "silk/effects",
-    "path": "silk/effects.silk"
+    "path": "silk/effects.silk",
+    "namespace": "Effect"
+  },
+  {
+    "module": "silk/f32",
+    "path": "silk/f32.silk",
+    "namespace": "f32"
+  },
+  {
+    "module": "silk/f64",
+    "path": "silk/f64.silk",
+    "namespace": "f64"
+  },
+  {
+    "module": "silk/i16",
+    "path": "silk/i16.silk",
+    "namespace": "i16"
+  },
+  {
+    "module": "silk/i32",
+    "path": "silk/i32.silk",
+    "namespace": "i32"
+  },
+  {
+    "module": "silk/i64",
+    "path": "silk/i64.silk",
+    "namespace": "i64"
+  },
+  {
+    "module": "silk/i8",
+    "path": "silk/i8.silk",
+    "namespace": "i8"
+  },
+  {
+    "module": "silk/isize",
+    "path": "silk/isize.silk",
+    "namespace": "isize"
+  },
+  {
+    "module": "silk/layout",
+    "path": "silk/layout.silk",
+    "namespace": "Layout",
+    "aliases": ["InvalidAlignment", "LayoutOverflow"]
+  },
+  {
+    "module": "silk/numeric",
+    "path": "silk/numeric.silk",
+    "namespace": "Integer"
   },
   {
     "module": "silk/option",
-    "path": "silk/option.silk"
+    "path": "silk/option.silk",
+    "aliases": ["None", "Some"]
+  },
+  {
+    "module": "silk/raw-buffer",
+    "path": "silk/raw-buffer.silk",
+    "namespace": "RawBuffer"
   },
   {
     "module": "silk/result",
     "path": "silk/result.silk"
+  },
+  {
+    "module": "silk/slot",
+    "path": "silk/slot.silk",
+    "namespace": "Slot"
+  },
+  {
+    "module": "silk/u16",
+    "path": "silk/u16.silk",
+    "namespace": "u16"
+  },
+  {
+    "module": "silk/u32",
+    "path": "silk/u32.silk",
+    "namespace": "u32"
+  },
+  {
+    "module": "silk/u64",
+    "path": "silk/u64.silk",
+    "namespace": "u64"
+  },
+  {
+    "module": "silk/u8",
+    "path": "silk/u8.silk",
+    "namespace": "u8"
+  },
+  {
+    "module": "silk/usize",
+    "path": "silk/usize.silk",
+    "namespace": "usize"
   },
   {
     "module": "silk/vector",

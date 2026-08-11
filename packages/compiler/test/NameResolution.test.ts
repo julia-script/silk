@@ -160,7 +160,7 @@ it.effect(
         self.instances.instances.map(
           (instance) => `${instance.key.declaration.module}.${instance.key.declaration.name}`,
         ),
-        ['root.main', 'left/Api.left', 'right/Api.right', 'shared/Value.value'],
+        ['root.main', 'silk/i32.add', 'left/Api.left', 'right/Api.right', 'shared/Value.value'],
       )
       assert.strictEqual(
         self.instances.instances.some((instance) => instance.key.declaration.name === 'unused'),

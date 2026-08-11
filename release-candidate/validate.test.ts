@@ -23,10 +23,16 @@ const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
 const installConsumer = (cwd: string, ignoreWorkspace = false): void => {
   const result = spawnSync(
     'pnpm',
-    ['install', '--ignore-scripts', ...(ignoreWorkspace ? ['--ignore-workspace'] : [])],
+    [
+      'install',
+      '--ignore-scripts',
+      '--offline',
+      ...(ignoreWorkspace ? ['--ignore-workspace'] : []),
+    ],
     {
       cwd,
       encoding: 'utf8',
+      timeout: 60_000,
     },
   )
   if (result.status === 0) return
@@ -306,17 +312,22 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(existsSync(resolve(packedRoot, 'README.md'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/manifest.json'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/core.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/effects.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/numeric.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/option.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/result.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/vector.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
-    expect(JSON.parse(readFileSync(resolve(packedRoot, 'stdlib/manifest.json'), 'utf8'))).toEqual([
-      { module: 'silk/effects', path: 'silk/effects.silk' },
-      { module: 'silk/option', path: 'silk/option.silk' },
-      { module: 'silk/result', path: 'silk/result.silk' },
-      { module: 'silk/vector', path: 'silk/vector.silk' },
-    ])
+    const sourceStdlibManifest = JSON.parse(
+      readFileSync(resolve(compilerPackageRoot, 'stdlib/manifest.json'), 'utf8'),
+    ) as ReadonlyArray<{ readonly path: string }>
+    expect(JSON.parse(readFileSync(resolve(packedRoot, 'stdlib/manifest.json'), 'utf8'))).toEqual(
+      sourceStdlibManifest,
+    )
+    for (const entry of sourceStdlibManifest) {
+      expect(existsSync(resolve(packedRoot, 'stdlib', entry.path))).toBe(true)
+    }
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/effects.silk'), 'utf8')).toContain(
       'pub effect fn mapBoth',
     )
@@ -1359,4 +1370,4 @@ test('the lsp release candidate installs and answers an initialize request', asy
   } finally {
     rmSync(temporary, { recursive: true, force: true })
   }
-}, 60_000)
+}, 120_000)

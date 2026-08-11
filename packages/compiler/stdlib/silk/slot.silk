@@ -1,0 +1,19 @@
+/// Initializes one selected raw slot exactly once.
+pub fn write<T>(slot: Slot<T>, value: T) -> () {
+  unsafe { return Intrinsic.slotWrite<T>(move slot, move value) }
+}
+
+/// Moves an initialized value out of one selected raw slot.
+pub fn take<T>(slot: Slot<T>) -> T {
+  unsafe { return Intrinsic.slotTake<T>(move slot) }
+}
+
+/// Copies an initialized Copy value out of one selected raw slot.
+pub fn copy<T>(slot: Slot<T>) -> T {
+  unsafe { return Intrinsic.slotCopy<T>(move slot) }
+}
+
+/// Drops an initialized value in one selected raw slot.
+pub fn dropValue<T>(slot: Slot<T>) -> () {
+  unsafe { return Intrinsic.slotDrop<T>(move slot) }
+}

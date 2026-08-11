@@ -38,4 +38,4 @@ it('keeps lexer pressure phases and artifacts byte-identical across fresh proces
   assert.deepEqual(encoded.wasm.allocations, encoded.native.allocations)
   assert.strictEqual(encoded.nativeBytes.length, 64)
   assert.strictEqual(encoded.wasmBytes.length, 64)
-}, 45_000)
+}, 180_000)

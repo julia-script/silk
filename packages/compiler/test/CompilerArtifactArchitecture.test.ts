@@ -62,7 +62,7 @@ struct Clock {}
 effect fn read() -> i32 ? &Clock { return 42 }
 pub fn main() -> i32 {
   let clock = Clock {}
-  let closed = Effect.bindRequirement(read(), &clock)
+  let closed = Intrinsic.bindRequirement(read(), &clock)
   let completed = run Effect.result(closed)
   return match move completed {
     Result<i32, never> { value: outcome } => match move outcome {

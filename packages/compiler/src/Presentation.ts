@@ -16,6 +16,8 @@ export type Presentation =
       readonly functionKind: DeclarationIndex.DeclarationFact['functionKind']
     })
   | (Base & { readonly _tag: 'StructPresentation'; readonly name: string })
+  | (Base & { readonly _tag: 'ServicePresentation'; readonly name: string })
+  | (Base & { readonly _tag: 'ServiceOperationPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ConstantPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ParameterPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'TypeParameterPresentation'; readonly name: string })
@@ -96,6 +98,44 @@ export const structDeclaration = (self: DeclarationIndex.StructFact): Presentati
     _tag: 'StructPresentation',
     name,
     text: `${visibility}struct ${name}${typeParameters}`,
+  })
+}
+
+/** Renders one nominal service contract without expanding its operation list. */
+export const serviceDeclaration = (
+  self: DeclarationIndex.ServiceFact | DeclarationIndex.InterfaceFact,
+): Presentation => {
+  const name = self.name._tag === 'Present' ? self.name.spelling : '_'
+  const visibility = self.visibility === 'Public' ? 'pub ' : ''
+  const typeParameters =
+    self.typeParameters.length === 0
+      ? ''
+      : `<${self.typeParameters.map(typeParameterName).join(', ')}>`
+  return Object.freeze({
+    _tag: 'ServicePresentation',
+    name,
+    text: `${visibility}${self._tag === 'ServiceDeclaration' ? 'service' : 'interface'} ${name}${typeParameters}`,
+  })
+}
+
+/** Renders a complete operation contract nested beneath a service. */
+export const serviceOperation = (self: DeclarationIndex.ServiceOperationFact): Presentation => {
+  const name = self.name._tag === 'Present' ? self.name.spelling : '_'
+  const kind = self.functionKind === 'Effect' ? 'effect fn' : 'fn'
+  const typeParameters =
+    self.typeParameters.length === 0
+      ? ''
+      : `<${self.typeParameters.map(typeParameterName).join(', ')}>`
+  const parameters = self.parameters
+    .map((parameter) => {
+      const parameterName = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
+      return `${parameterName}: ${declaredType(parameter.declaredType)}`
+    })
+    .join(', ')
+  return Object.freeze({
+    _tag: 'ServiceOperationPresentation',
+    name,
+    text: `${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}`,
   })
 }
 

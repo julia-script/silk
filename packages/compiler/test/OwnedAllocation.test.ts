@@ -224,7 +224,7 @@ it.effect('reads initialized Copy storage repeatedly through shared RawBuffer bo
     const operations = mir.functions.flatMap(Mir.operations)
     assert.strictEqual(
       operations.filter((operation) => operation._tag === 'RawBufferRead').length,
-      2,
+      1,
     )
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')

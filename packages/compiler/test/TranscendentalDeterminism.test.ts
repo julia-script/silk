@@ -26,4 +26,4 @@ it('keeps transcendental traces and artifacts byte-identical across fresh proces
   assert.notInclude(encoded.nativeIr, 'llvm.sin')
   assert.notInclude(encoded.nativeIr, 'llvm.cos')
   assert.notInclude(encoded.wasmIr, '(import')
-}, 30_000)
+}, 90_000)

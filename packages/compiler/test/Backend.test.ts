@@ -77,7 +77,7 @@ it.effect('emits target-correct LLVM bitcode for wasm32 while retaining silk_mai
   }),
 )
 
-it.effect('realizes stored declaration and builtin callable sections in LLVM and Wasm', () =>
+it.effect('realizes stored declaration and scalar wrapper sections in LLVM and Wasm', () =>
   Effect.gen(function* () {
     const programs = [
       `fn add(value: i32, adjustment: i32) -> i32 { return value + adjustment }
@@ -106,7 +106,7 @@ pub fn main() -> i32 { let plusTwo = add(2) return plusTwo(40) }`,
       if (typeof main !== 'function') return
       assert.strictEqual(main(), 42)
       assert.strictEqual(Analysis.evaluate(native)._tag, 'Completed')
-      assert.include(nativeArtifact.ir, ordinal === 0 ? 'callable' : 'callable_arith')
+      assert.include(nativeArtifact.ir, ordinal === 0 ? 'callable' : '@silk_silk_i32_add')
     }
   }),
 )

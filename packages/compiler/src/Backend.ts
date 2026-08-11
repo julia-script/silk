@@ -329,7 +329,7 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'ValidateLayout':
     case 'RepeatLayout':
     case 'Allocate':
-    case 'StandardStreamWrite':
+    case 'HostWrite':
     case 'RawBufferFrom':
     case 'RawBufferCount':
     case 'RawBufferSlot':
@@ -351,7 +351,7 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
 
 const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'Allocate' ||
-  operation._tag === 'StandardStreamWrite' ||
+  operation._tag === 'HostWrite' ||
   operation._tag === 'RawBufferFrom' ||
   operation._tag === 'RawBufferSlot' ||
   operation._tag === 'RawBufferRead' ||
@@ -922,11 +922,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           ]),
         )
       : undefined
-    const needsStandardStreams = program.functions.some((fn) =>
-      Mir.operations(fn).some((operation) => operation._tag === 'StandardStreamWrite'),
+    const needsHostWrite = program.functions.some((fn) =>
+      Mir.operations(fn).some((operation) => operation._tag === 'HostWrite'),
     )
     const standardWrite =
-      needsStandardStreams && usizeType !== undefined
+      needsHostWrite && usizeType !== undefined
         ? yield* FunctionActor.declare(
             builder,
             'silk_standard_stream_write_v1',
@@ -1830,10 +1830,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             return field.offset
           }
           const emitHostFailure = Effect.fnUntraced(function* (
-            operation: Extract<
-              Mir.Operation,
-              { readonly _tag: 'Allocate' | 'StandardStreamWrite' }
-            >,
+            operation: Extract<Mir.Operation, { readonly _tag: 'Allocate' | 'HostWrite' }>,
           ) {
             const lanes = lanesFor(operation.propagationType)
             const values: Array<Value.Input> = []
@@ -2384,7 +2381,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   )
                   break
                 }
-                case 'StandardStreamWrite': {
+                case 'HostWrite': {
                   const stream = readLocal(operation.stream).at(0)
                   const [address, length] = readLocal(operation.bytes)
                   if (
@@ -5911,10 +5908,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     const second = supplied.at(1)
                     if (
                       second === undefined ||
-                      target.operation === 'LayoutMake' ||
-                      target.operation === 'LayoutRepeat' ||
-                      target.operation === 'SystemAllocatorMake' ||
-                      target.operation === 'AllocatorAllocate' ||
+                      target.operation === 'StorageAcquire' ||
                       !Mir.isBinaryOperator(target.operation)
                     ) {
                       throw new RangeError(

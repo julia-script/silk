@@ -592,6 +592,11 @@ const checkExpression = (
         checkExpression(state, live, argument, argumentConsumes(argument), guard, escaping)
       return
     }
+    case 'ServiceEffectConstruct': {
+      for (const argument of expression.arguments)
+        checkExpression(state, live, argument, argumentConsumes(argument), guard, escaping)
+      return
+    }
     case 'EffectBlock': {
       for (const capture of expression.captures) {
         const site: BindingSite | undefined =

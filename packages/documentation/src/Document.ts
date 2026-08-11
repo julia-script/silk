@@ -20,7 +20,7 @@ export interface LinkTarget {
   readonly id: string
   readonly module: string
   readonly name: string
-  readonly kind: 'Function' | 'Struct' | 'Constant'
+  readonly kind: 'Function' | 'Struct' | 'Service' | 'Interface' | 'Constant'
 }
 
 export type Inline =

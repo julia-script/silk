@@ -61,7 +61,7 @@ const providerSource = `struct Clock {}
 effect fn read() -> i32 ? &Clock@Primary { return 42 }
 pub fn main() -> i32 {
   let clock = Clock {}
-  let provided = read() |> Effect.bindRequirement(&clock, @Primary)
+  let provided = read() |> Intrinsic.bindRequirement(&clock, @Primary)
   return run provided
 }`
 const callableMapSource = `effect fn succeed(value: i32) -> i32 { return value }
@@ -159,7 +159,9 @@ const retryMapSource = `${retrySource.replace(
   'let handled = retrying() |> Effect.catch(recover)',
   'let handled = retrying() |> Effect.catch(recover) |> Effect.map(i32.add(39))',
 )}`
-const outOfMemorySource = `effect fn exhaust() -> i32 ! OutOfMemory {
+const outOfMemorySource = `import silk.core { OutOfMemory }
+
+effect fn exhaust() -> i32 ! OutOfMemory {
   fail OutOfMemory {}
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 42 }
@@ -415,7 +417,7 @@ it.effect('keeps callable Effect mapping in evaluator, LLVM, and Wasm parity', (
 
     assert.strictEqual(logical._tag, 'Completed')
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42)
-    assert.include(llvm.ir, 'callable_arith')
+    assert.include(llvm.ir, '@silk_silk_i32_add')
     assert.isFunction(main)
     if (typeof main === 'function') assert.strictEqual(main(), 42)
   }),

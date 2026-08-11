@@ -1,0 +1,261 @@
+import silk.option { Option }
+
+/// Calls the concrete u16 toU8 primitive.
+pub fn toU8(value: u16) -> u8 {
+  return Intrinsic.u16ToU8(value)
+}
+
+/// Calls the concrete u16 checkedToU8 primitive.
+pub fn checkedToU8(value: u16) -> Option<u8> {
+  return Intrinsic.u16CheckedToU8(value)
+}
+
+/// Calls the concrete u16 toU16 primitive.
+pub fn toU16(value: u16) -> u16 {
+  return Intrinsic.u16ToU16(value)
+}
+
+/// Calls the concrete u16 checkedToU16 primitive.
+pub fn checkedToU16(value: u16) -> Option<u16> {
+  return Intrinsic.u16CheckedToU16(value)
+}
+
+/// Calls the concrete u16 toU32 primitive.
+pub fn toU32(value: u16) -> u32 {
+  return Intrinsic.u16ToU32(value)
+}
+
+/// Calls the concrete u16 checkedToU32 primitive.
+pub fn checkedToU32(value: u16) -> Option<u32> {
+  return Intrinsic.u16CheckedToU32(value)
+}
+
+/// Calls the concrete u16 toU64 primitive.
+pub fn toU64(value: u16) -> u64 {
+  return Intrinsic.u16ToU64(value)
+}
+
+/// Calls the concrete u16 checkedToU64 primitive.
+pub fn checkedToU64(value: u16) -> Option<u64> {
+  return Intrinsic.u16CheckedToU64(value)
+}
+
+/// Calls the concrete u16 toUsize primitive.
+pub fn toUsize(value: u16) -> usize {
+  return Intrinsic.u16ToUsize(value)
+}
+
+/// Calls the concrete u16 checkedToUsize primitive.
+pub fn checkedToUsize(value: u16) -> Option<usize> {
+  return Intrinsic.u16CheckedToUsize(value)
+}
+
+/// Calls the concrete u16 toI8 primitive.
+pub fn toI8(value: u16) -> i8 {
+  return Intrinsic.u16ToI8(value)
+}
+
+/// Calls the concrete u16 checkedToI8 primitive.
+pub fn checkedToI8(value: u16) -> Option<i8> {
+  return Intrinsic.u16CheckedToI8(value)
+}
+
+/// Calls the concrete u16 toI16 primitive.
+pub fn toI16(value: u16) -> i16 {
+  return Intrinsic.u16ToI16(value)
+}
+
+/// Calls the concrete u16 checkedToI16 primitive.
+pub fn checkedToI16(value: u16) -> Option<i16> {
+  return Intrinsic.u16CheckedToI16(value)
+}
+
+/// Calls the concrete u16 toI32 primitive.
+pub fn toI32(value: u16) -> i32 {
+  return Intrinsic.u16ToI32(value)
+}
+
+/// Calls the concrete u16 checkedToI32 primitive.
+pub fn checkedToI32(value: u16) -> Option<i32> {
+  return Intrinsic.u16CheckedToI32(value)
+}
+
+/// Calls the concrete u16 toI64 primitive.
+pub fn toI64(value: u16) -> i64 {
+  return Intrinsic.u16ToI64(value)
+}
+
+/// Calls the concrete u16 checkedToI64 primitive.
+pub fn checkedToI64(value: u16) -> Option<i64> {
+  return Intrinsic.u16CheckedToI64(value)
+}
+
+/// Calls the concrete u16 toIsize primitive.
+pub fn toIsize(value: u16) -> isize {
+  return Intrinsic.u16ToIsize(value)
+}
+
+/// Calls the concrete u16 checkedToIsize primitive.
+pub fn checkedToIsize(value: u16) -> Option<isize> {
+  return Intrinsic.u16CheckedToIsize(value)
+}
+
+/// Calls the concrete u16 toF32 primitive.
+pub fn toF32(value: u16) -> f32 {
+  return Intrinsic.u16ToF32(value)
+}
+
+/// Calls the concrete u16 toF64 primitive.
+pub fn toF64(value: u16) -> f64 {
+  return Intrinsic.u16ToF64(value)
+}
+
+/// Calls the concrete u16 add primitive.
+pub fn add(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16Add(left, right)
+}
+
+/// Calls the concrete u16 subtract primitive.
+pub fn subtract(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16Subtract(left, right)
+}
+
+/// Calls the concrete u16 multiply primitive.
+pub fn multiply(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16Multiply(left, right)
+}
+
+/// Calls the concrete u16 divide primitive.
+pub fn divide(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16Divide(left, right)
+}
+
+/// Calls the concrete u16 remainder primitive.
+pub fn remainder(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16Remainder(left, right)
+}
+
+/// Calls the concrete u16 bitAnd primitive.
+pub fn bitAnd(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16BitAnd(left, right)
+}
+
+/// Calls the concrete u16 bitOr primitive.
+pub fn bitOr(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16BitOr(left, right)
+}
+
+/// Calls the concrete u16 bitXor primitive.
+pub fn bitXor(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16BitXor(left, right)
+}
+
+/// Calls the concrete u16 bitNot primitive.
+pub fn bitNot(value: u16) -> u16 {
+  return Intrinsic.u16BitNot(value)
+}
+
+/// Calls the concrete u16 shiftLeft primitive.
+pub fn shiftLeft(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16ShiftLeft(left, right)
+}
+
+/// Calls the concrete u16 shiftRight primitive.
+pub fn shiftRight(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16ShiftRight(left, right)
+}
+
+/// Calls the concrete u16 rotateLeft primitive.
+pub fn rotateLeft(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16RotateLeft(left, right)
+}
+
+/// Calls the concrete u16 rotateRight primitive.
+pub fn rotateRight(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16RotateRight(left, right)
+}
+
+/// Calls the concrete u16 wrappingAdd primitive.
+pub fn wrappingAdd(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16WrappingAdd(left, right)
+}
+
+/// Calls the concrete u16 wrappingSubtract primitive.
+pub fn wrappingSubtract(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16WrappingSubtract(left, right)
+}
+
+/// Calls the concrete u16 wrappingMultiply primitive.
+pub fn wrappingMultiply(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16WrappingMultiply(left, right)
+}
+
+/// Calls the concrete u16 saturatingAdd primitive.
+pub fn saturatingAdd(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16SaturatingAdd(left, right)
+}
+
+/// Calls the concrete u16 saturatingSubtract primitive.
+pub fn saturatingSubtract(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16SaturatingSubtract(left, right)
+}
+
+/// Calls the concrete u16 saturatingMultiply primitive.
+pub fn saturatingMultiply(left: u16, right: u16) -> u16 {
+  return Intrinsic.u16SaturatingMultiply(left, right)
+}
+
+/// Calls the concrete u16 checkedAdd primitive.
+pub fn checkedAdd(left: u16, right: u16) -> Option<u16> {
+  return Intrinsic.u16CheckedAdd(left, right)
+}
+
+/// Calls the concrete u16 checkedSubtract primitive.
+pub fn checkedSubtract(left: u16, right: u16) -> Option<u16> {
+  return Intrinsic.u16CheckedSubtract(left, right)
+}
+
+/// Calls the concrete u16 checkedMultiply primitive.
+pub fn checkedMultiply(left: u16, right: u16) -> Option<u16> {
+  return Intrinsic.u16CheckedMultiply(left, right)
+}
+
+/// Calls the concrete u16 checkedDivide primitive.
+pub fn checkedDivide(left: u16, right: u16) -> Option<u16> {
+  return Intrinsic.u16CheckedDivide(left, right)
+}
+
+/// Calls the concrete u16 checkedRemainder primitive.
+pub fn checkedRemainder(left: u16, right: u16) -> Option<u16> {
+  return Intrinsic.u16CheckedRemainder(left, right)
+}
+
+/// Calls the concrete u16 equals primitive.
+pub fn equals(left: u16, right: u16) -> bool {
+  return Intrinsic.u16Equals(left, right)
+}
+
+/// Calls the concrete u16 notEquals primitive.
+pub fn notEquals(left: u16, right: u16) -> bool {
+  return Intrinsic.u16NotEquals(left, right)
+}
+
+/// Calls the concrete u16 lessThan primitive.
+pub fn lessThan(left: u16, right: u16) -> bool {
+  return Intrinsic.u16LessThan(left, right)
+}
+
+/// Calls the concrete u16 lessOrEqual primitive.
+pub fn lessOrEqual(left: u16, right: u16) -> bool {
+  return Intrinsic.u16LessOrEqual(left, right)
+}
+
+/// Calls the concrete u16 greaterThan primitive.
+pub fn greaterThan(left: u16, right: u16) -> bool {
+  return Intrinsic.u16GreaterThan(left, right)
+}
+
+/// Calls the concrete u16 greaterOrEqual primitive.
+pub fn greaterOrEqual(left: u16, right: u16) -> bool {
+  return Intrinsic.u16GreaterOrEqual(left, right)
+}

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -74,18 +75,23 @@ const acceptedSources = Object.freeze([
   let recipe = Effect.provideMut(Allocator.allocate(move layout), &mut allocator)
   let allocation = run recipe
   let coreLayout = Layout.of<i32>()
-  let coreRecipe = Allocator.allocate(move coreLayout) |> Effect.bindRequirement(&mut allocator)
+  let coreRecipe = Allocator.allocate(move coreLayout) |> Intrinsic.bindRequirement(&mut allocator)
   let coreAllocation = run coreRecipe
   drop coreAllocation
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)
     let count = RawBuffer.count(&buffer)
-    let firstWrite = Slot.write(RawBuffer.slot(&mut buffer, 0), 21)
-    let secondWrite = Slot.write(RawBuffer.slot(&mut buffer, 1), 21)
+    let firstSlot = RawBuffer.slot(&mut buffer, 0)
+    let firstWrite = Slot.write(move firstSlot, 21)
+    let secondSlot = RawBuffer.slot(&mut buffer, 1)
+    let secondWrite = Slot.write(move secondSlot, 21)
     let read = RawBuffer.read<i32>(&buffer, 0)
-    let copied = Slot.copy(RawBuffer.slot(&mut buffer, 0))
-    let taken = Slot.take(RawBuffer.slot(&mut buffer, 0))
-    let dropped = Slot.drop(RawBuffer.slot(&mut buffer, 1))
+    let copySlot = RawBuffer.slot(&mut buffer, 0)
+    let copied = Slot.copy(move copySlot)
+    let takeSlot = RawBuffer.slot(&mut buffer, 0)
+    let taken = Slot.take(move takeSlot)
+    let dropSlot = RawBuffer.slot(&mut buffer, 1)
+    let dropped = Slot.dropValue(move dropSlot)
     drop buffer
     return read + copied + taken
   }
@@ -118,7 +124,7 @@ pub fn main() -> i32 {
   return retriedValue + handledValue + providedValue + acquiredValue
 }`,
   `struct Counter { value: i32 }
-fn replace(self: &mut Counter) -> i32 { return Place.replace(self.value, 42) }
+fn replace(self: &mut Counter) -> i32 { return Intrinsic.replace(self.value, 42) }
 pub fn main() -> i32 {
   let mut counter = Counter { value: 1 }
   return replace(&mut counter)
@@ -135,11 +141,12 @@ pub effect fn main() -> i32 {
     }
   }
 }`,
-  `pub effect fn main() -> () ! StreamWriteFailure ? &StandardStreams {
-  let stdout = StandardStreams.stdout()
-  let stderr = StandardStreams.stderr()
-  let first = run StandardStreams.writeAll(stdout, "out")
-  let second = run StandardStreams.writeAll(stderr, "error")
+  `pub effect fn main() -> () ! StreamWriteFailure {
+  let mut native = NativeStandardStreams.native()
+  let stdout = StandardStream.stdout()
+  let stderr = StandardStream.stderr()
+  let first = run Effect.provideMut(StandardStream.send(stdout, "out"), &mut native)
+  let second = run Effect.provideMut(StandardStream.send(stderr, "error"), &mut native)
   return ()
 }`,
 ])
@@ -167,7 +174,10 @@ it.effect('keeps every intrinsic identifiable and presentable in rejected calls'
     for (const actor of Intrinsic.all())
       for (const operation of actor.operations) {
         const arguments_ = operation.parameters.length === 0 ? '0' : ''
-        const source = `pub fn main() -> i32 { let rejected = ${actor.spelling}.${operation.spelling}(${arguments_}) return 0 }`
+        const source =
+          operation.rule._tag === 'PlaceRule'
+            ? `pub fn main() -> i32 { let mut value = 0 let rejected = Intrinsic.replace(value) return 0 }`
+            : `pub fn main() -> i32 { let rejected = ${actor.spelling}.${operation.spelling}(${arguments_}) return 0 }`
         const snapshot = yield* Analysis.ofSourceRealized(
           `intrinsic/rejected-${actor.spelling}-${operation.spelling}`,
           encoder.encode(source),
@@ -190,3 +200,48 @@ it('keeps catalog ordering stable across fresh reads', () => {
   }))
   assert.deepEqual(second, first)
 })
+
+it('matches the checked intrinsic inventory and records every unsafe invariant', () => {
+  const fixture: unknown = JSON.parse(
+    readFileSync(new URL('./fixtures/intrinsic-inventory.json', import.meta.url), 'utf8'),
+  )
+  const entries = Intrinsic.inventory().map((entry) => ({
+    operation: entry.operation,
+    signature: entry.signature,
+    unsafe: entry.unsafe,
+    admission: entry.admission,
+    consumer: entry.consumer,
+    identity: entry.hir,
+    ...(entry.invariant === undefined ? {} : { invariant: entry.invariant }),
+    ...(entry.hostImport === undefined ? {} : { hostImport: entry.hostImport }),
+  }))
+  assert.deepEqual(fixture, { targets: ['Evaluator', 'LLVM', 'Wasm'], entries })
+  assert.deepEqual(
+    Intrinsic.all().map((actor) => actor.spelling),
+    ['Intrinsic'],
+  )
+  assert.isTrue(entries.every((entry) => entry.consumer.length > 0))
+  assert.isTrue(entries.filter((entry) => entry.unsafe).every((entry) => 'invariant' in entry))
+})
+
+it.effect(
+  'resolves former scalar actor spellings to source wrappers, not compiler identities',
+  () =>
+    Effect.gen(function* () {
+      const source = 'pub fn main() -> i32 { return i32.add(20, 22) }'
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'intrinsic/source-wrapper',
+        encoder.encode(source),
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const occurrence = Analysis.semanticOccurrenceAt(
+        snapshot,
+        'intrinsic/source-wrapper',
+        source.indexOf('add'),
+      )
+      assert.strictEqual(occurrence?.resolution._tag, 'Available')
+      if (occurrence?.resolution._tag === 'Available')
+        assert.strictEqual(occurrence.resolution.identity._tag, 'DeclarationIdentity')
+      assert.strictEqual(occurrence?.declaration?.module, 'silk/i32')
+    }),
+)

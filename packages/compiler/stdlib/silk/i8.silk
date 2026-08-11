@@ -1,0 +1,276 @@
+import silk.option { Option }
+
+/// Calls the concrete i8 negate primitive.
+pub fn negate(value: i8) -> i8 {
+  return Intrinsic.i8Negate(value)
+}
+
+/// Calls the concrete i8 wrappingNegate primitive.
+pub fn wrappingNegate(value: i8) -> i8 {
+  return Intrinsic.i8WrappingNegate(value)
+}
+
+/// Calls the concrete i8 saturatingNegate primitive.
+pub fn saturatingNegate(value: i8) -> i8 {
+  return Intrinsic.i8SaturatingNegate(value)
+}
+
+/// Calls the concrete i8 toU8 primitive.
+pub fn toU8(value: i8) -> u8 {
+  return Intrinsic.i8ToU8(value)
+}
+
+/// Calls the concrete i8 checkedToU8 primitive.
+pub fn checkedToU8(value: i8) -> Option<u8> {
+  return Intrinsic.i8CheckedToU8(value)
+}
+
+/// Calls the concrete i8 toU16 primitive.
+pub fn toU16(value: i8) -> u16 {
+  return Intrinsic.i8ToU16(value)
+}
+
+/// Calls the concrete i8 checkedToU16 primitive.
+pub fn checkedToU16(value: i8) -> Option<u16> {
+  return Intrinsic.i8CheckedToU16(value)
+}
+
+/// Calls the concrete i8 toU32 primitive.
+pub fn toU32(value: i8) -> u32 {
+  return Intrinsic.i8ToU32(value)
+}
+
+/// Calls the concrete i8 checkedToU32 primitive.
+pub fn checkedToU32(value: i8) -> Option<u32> {
+  return Intrinsic.i8CheckedToU32(value)
+}
+
+/// Calls the concrete i8 toU64 primitive.
+pub fn toU64(value: i8) -> u64 {
+  return Intrinsic.i8ToU64(value)
+}
+
+/// Calls the concrete i8 checkedToU64 primitive.
+pub fn checkedToU64(value: i8) -> Option<u64> {
+  return Intrinsic.i8CheckedToU64(value)
+}
+
+/// Calls the concrete i8 toUsize primitive.
+pub fn toUsize(value: i8) -> usize {
+  return Intrinsic.i8ToUsize(value)
+}
+
+/// Calls the concrete i8 checkedToUsize primitive.
+pub fn checkedToUsize(value: i8) -> Option<usize> {
+  return Intrinsic.i8CheckedToUsize(value)
+}
+
+/// Calls the concrete i8 toI8 primitive.
+pub fn toI8(value: i8) -> i8 {
+  return Intrinsic.i8ToI8(value)
+}
+
+/// Calls the concrete i8 checkedToI8 primitive.
+pub fn checkedToI8(value: i8) -> Option<i8> {
+  return Intrinsic.i8CheckedToI8(value)
+}
+
+/// Calls the concrete i8 toI16 primitive.
+pub fn toI16(value: i8) -> i16 {
+  return Intrinsic.i8ToI16(value)
+}
+
+/// Calls the concrete i8 checkedToI16 primitive.
+pub fn checkedToI16(value: i8) -> Option<i16> {
+  return Intrinsic.i8CheckedToI16(value)
+}
+
+/// Calls the concrete i8 toI32 primitive.
+pub fn toI32(value: i8) -> i32 {
+  return Intrinsic.i8ToI32(value)
+}
+
+/// Calls the concrete i8 checkedToI32 primitive.
+pub fn checkedToI32(value: i8) -> Option<i32> {
+  return Intrinsic.i8CheckedToI32(value)
+}
+
+/// Calls the concrete i8 toI64 primitive.
+pub fn toI64(value: i8) -> i64 {
+  return Intrinsic.i8ToI64(value)
+}
+
+/// Calls the concrete i8 checkedToI64 primitive.
+pub fn checkedToI64(value: i8) -> Option<i64> {
+  return Intrinsic.i8CheckedToI64(value)
+}
+
+/// Calls the concrete i8 toIsize primitive.
+pub fn toIsize(value: i8) -> isize {
+  return Intrinsic.i8ToIsize(value)
+}
+
+/// Calls the concrete i8 checkedToIsize primitive.
+pub fn checkedToIsize(value: i8) -> Option<isize> {
+  return Intrinsic.i8CheckedToIsize(value)
+}
+
+/// Calls the concrete i8 toF32 primitive.
+pub fn toF32(value: i8) -> f32 {
+  return Intrinsic.i8ToF32(value)
+}
+
+/// Calls the concrete i8 toF64 primitive.
+pub fn toF64(value: i8) -> f64 {
+  return Intrinsic.i8ToF64(value)
+}
+
+/// Calls the concrete i8 add primitive.
+pub fn add(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8Add(left, right)
+}
+
+/// Calls the concrete i8 subtract primitive.
+pub fn subtract(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8Subtract(left, right)
+}
+
+/// Calls the concrete i8 multiply primitive.
+pub fn multiply(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8Multiply(left, right)
+}
+
+/// Calls the concrete i8 divide primitive.
+pub fn divide(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8Divide(left, right)
+}
+
+/// Calls the concrete i8 remainder primitive.
+pub fn remainder(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8Remainder(left, right)
+}
+
+/// Calls the concrete i8 bitAnd primitive.
+pub fn bitAnd(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8BitAnd(left, right)
+}
+
+/// Calls the concrete i8 bitOr primitive.
+pub fn bitOr(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8BitOr(left, right)
+}
+
+/// Calls the concrete i8 bitXor primitive.
+pub fn bitXor(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8BitXor(left, right)
+}
+
+/// Calls the concrete i8 bitNot primitive.
+pub fn bitNot(value: i8) -> i8 {
+  return Intrinsic.i8BitNot(value)
+}
+
+/// Calls the concrete i8 shiftLeft primitive.
+pub fn shiftLeft(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8ShiftLeft(left, right)
+}
+
+/// Calls the concrete i8 shiftRight primitive.
+pub fn shiftRight(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8ShiftRight(left, right)
+}
+
+/// Calls the concrete i8 rotateLeft primitive.
+pub fn rotateLeft(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8RotateLeft(left, right)
+}
+
+/// Calls the concrete i8 rotateRight primitive.
+pub fn rotateRight(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8RotateRight(left, right)
+}
+
+/// Calls the concrete i8 wrappingAdd primitive.
+pub fn wrappingAdd(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8WrappingAdd(left, right)
+}
+
+/// Calls the concrete i8 wrappingSubtract primitive.
+pub fn wrappingSubtract(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8WrappingSubtract(left, right)
+}
+
+/// Calls the concrete i8 wrappingMultiply primitive.
+pub fn wrappingMultiply(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8WrappingMultiply(left, right)
+}
+
+/// Calls the concrete i8 saturatingAdd primitive.
+pub fn saturatingAdd(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8SaturatingAdd(left, right)
+}
+
+/// Calls the concrete i8 saturatingSubtract primitive.
+pub fn saturatingSubtract(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8SaturatingSubtract(left, right)
+}
+
+/// Calls the concrete i8 saturatingMultiply primitive.
+pub fn saturatingMultiply(left: i8, right: i8) -> i8 {
+  return Intrinsic.i8SaturatingMultiply(left, right)
+}
+
+/// Calls the concrete i8 checkedAdd primitive.
+pub fn checkedAdd(left: i8, right: i8) -> Option<i8> {
+  return Intrinsic.i8CheckedAdd(left, right)
+}
+
+/// Calls the concrete i8 checkedSubtract primitive.
+pub fn checkedSubtract(left: i8, right: i8) -> Option<i8> {
+  return Intrinsic.i8CheckedSubtract(left, right)
+}
+
+/// Calls the concrete i8 checkedMultiply primitive.
+pub fn checkedMultiply(left: i8, right: i8) -> Option<i8> {
+  return Intrinsic.i8CheckedMultiply(left, right)
+}
+
+/// Calls the concrete i8 checkedDivide primitive.
+pub fn checkedDivide(left: i8, right: i8) -> Option<i8> {
+  return Intrinsic.i8CheckedDivide(left, right)
+}
+
+/// Calls the concrete i8 checkedRemainder primitive.
+pub fn checkedRemainder(left: i8, right: i8) -> Option<i8> {
+  return Intrinsic.i8CheckedRemainder(left, right)
+}
+
+/// Calls the concrete i8 equals primitive.
+pub fn equals(left: i8, right: i8) -> bool {
+  return Intrinsic.i8Equals(left, right)
+}
+
+/// Calls the concrete i8 notEquals primitive.
+pub fn notEquals(left: i8, right: i8) -> bool {
+  return Intrinsic.i8NotEquals(left, right)
+}
+
+/// Calls the concrete i8 lessThan primitive.
+pub fn lessThan(left: i8, right: i8) -> bool {
+  return Intrinsic.i8LessThan(left, right)
+}
+
+/// Calls the concrete i8 lessOrEqual primitive.
+pub fn lessOrEqual(left: i8, right: i8) -> bool {
+  return Intrinsic.i8LessOrEqual(left, right)
+}
+
+/// Calls the concrete i8 greaterThan primitive.
+pub fn greaterThan(left: i8, right: i8) -> bool {
+  return Intrinsic.i8GreaterThan(left, right)
+}
+
+/// Calls the concrete i8 greaterOrEqual primitive.
+pub fn greaterOrEqual(left: i8, right: i8) -> bool {
+  return Intrinsic.i8GreaterOrEqual(left, right)
+}

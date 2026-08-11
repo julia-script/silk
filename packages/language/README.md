@@ -11,6 +11,10 @@ Editor language support for Silk Effect.
   configuration, including distinct `///` / `//!` scopes, documentation markup, and nested Silk
   fenced-code scopes. It is consumed by Shiki and VS Code-compatible editors.
 
+Both paths classify the compiler's single-line and triple-quoted text/byte literal forms,
+modifiers, delimiters, bodies, and escapes. CodeMirror consumes compiler tokens directly; the
+TextMate grammar is generated and behaviorally checked against the same literal-form vocabulary.
+
 ```ts
 import * as SilkCodeMirror from '@silk-effect/language/CodeMirror'
 

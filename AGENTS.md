@@ -30,6 +30,18 @@ live under visible `wayfinder/<effort>/` directories. See `docs/agents/issue-tra
 - Do not describe changes as complete when a required check was not run. Report the exact failure
   and whether it predates the change.
 
+## Minimal compiler privilege
+
+- All source-callable compiler operations belong to the sealed `Intrinsic` namespace. Do not add a
+  compiler-known standard-library actor or recognize a library declaration by spelling in semantic
+  analysis, HIR, MIR, evaluation, or a backend.
+- A new compiler feature exposes only the smallest target-neutral primitive needed to build its
+  public API in ordinary Silk source. Keep validation, policy, generic selection, provider types,
+  and safe reusable wrappers in the standard library.
+- Use `service` for runtime-provided Effect contracts and lexical provider replacement. Use
+  `interface` for compile-time conformance and specialization only; interfaces never create
+  requirement rows, service slots, or runtime dispatch.
+
 ## Collaborative decision sessions
 
 When a task requires a multi-decision interview, grilling session, or other branching design

@@ -1,0 +1,261 @@
+import silk.option { Option }
+
+/// Calls the concrete u64 toU8 primitive.
+pub fn toU8(value: u64) -> u8 {
+  return Intrinsic.u64ToU8(value)
+}
+
+/// Calls the concrete u64 checkedToU8 primitive.
+pub fn checkedToU8(value: u64) -> Option<u8> {
+  return Intrinsic.u64CheckedToU8(value)
+}
+
+/// Calls the concrete u64 toU16 primitive.
+pub fn toU16(value: u64) -> u16 {
+  return Intrinsic.u64ToU16(value)
+}
+
+/// Calls the concrete u64 checkedToU16 primitive.
+pub fn checkedToU16(value: u64) -> Option<u16> {
+  return Intrinsic.u64CheckedToU16(value)
+}
+
+/// Calls the concrete u64 toU32 primitive.
+pub fn toU32(value: u64) -> u32 {
+  return Intrinsic.u64ToU32(value)
+}
+
+/// Calls the concrete u64 checkedToU32 primitive.
+pub fn checkedToU32(value: u64) -> Option<u32> {
+  return Intrinsic.u64CheckedToU32(value)
+}
+
+/// Calls the concrete u64 toU64 primitive.
+pub fn toU64(value: u64) -> u64 {
+  return Intrinsic.u64ToU64(value)
+}
+
+/// Calls the concrete u64 checkedToU64 primitive.
+pub fn checkedToU64(value: u64) -> Option<u64> {
+  return Intrinsic.u64CheckedToU64(value)
+}
+
+/// Calls the concrete u64 toUsize primitive.
+pub fn toUsize(value: u64) -> usize {
+  return Intrinsic.u64ToUsize(value)
+}
+
+/// Calls the concrete u64 checkedToUsize primitive.
+pub fn checkedToUsize(value: u64) -> Option<usize> {
+  return Intrinsic.u64CheckedToUsize(value)
+}
+
+/// Calls the concrete u64 toI8 primitive.
+pub fn toI8(value: u64) -> i8 {
+  return Intrinsic.u64ToI8(value)
+}
+
+/// Calls the concrete u64 checkedToI8 primitive.
+pub fn checkedToI8(value: u64) -> Option<i8> {
+  return Intrinsic.u64CheckedToI8(value)
+}
+
+/// Calls the concrete u64 toI16 primitive.
+pub fn toI16(value: u64) -> i16 {
+  return Intrinsic.u64ToI16(value)
+}
+
+/// Calls the concrete u64 checkedToI16 primitive.
+pub fn checkedToI16(value: u64) -> Option<i16> {
+  return Intrinsic.u64CheckedToI16(value)
+}
+
+/// Calls the concrete u64 toI32 primitive.
+pub fn toI32(value: u64) -> i32 {
+  return Intrinsic.u64ToI32(value)
+}
+
+/// Calls the concrete u64 checkedToI32 primitive.
+pub fn checkedToI32(value: u64) -> Option<i32> {
+  return Intrinsic.u64CheckedToI32(value)
+}
+
+/// Calls the concrete u64 toI64 primitive.
+pub fn toI64(value: u64) -> i64 {
+  return Intrinsic.u64ToI64(value)
+}
+
+/// Calls the concrete u64 checkedToI64 primitive.
+pub fn checkedToI64(value: u64) -> Option<i64> {
+  return Intrinsic.u64CheckedToI64(value)
+}
+
+/// Calls the concrete u64 toIsize primitive.
+pub fn toIsize(value: u64) -> isize {
+  return Intrinsic.u64ToIsize(value)
+}
+
+/// Calls the concrete u64 checkedToIsize primitive.
+pub fn checkedToIsize(value: u64) -> Option<isize> {
+  return Intrinsic.u64CheckedToIsize(value)
+}
+
+/// Calls the concrete u64 toF32 primitive.
+pub fn toF32(value: u64) -> f32 {
+  return Intrinsic.u64ToF32(value)
+}
+
+/// Calls the concrete u64 toF64 primitive.
+pub fn toF64(value: u64) -> f64 {
+  return Intrinsic.u64ToF64(value)
+}
+
+/// Calls the concrete u64 add primitive.
+pub fn add(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64Add(left, right)
+}
+
+/// Calls the concrete u64 subtract primitive.
+pub fn subtract(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64Subtract(left, right)
+}
+
+/// Calls the concrete u64 multiply primitive.
+pub fn multiply(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64Multiply(left, right)
+}
+
+/// Calls the concrete u64 divide primitive.
+pub fn divide(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64Divide(left, right)
+}
+
+/// Calls the concrete u64 remainder primitive.
+pub fn remainder(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64Remainder(left, right)
+}
+
+/// Calls the concrete u64 bitAnd primitive.
+pub fn bitAnd(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64BitAnd(left, right)
+}
+
+/// Calls the concrete u64 bitOr primitive.
+pub fn bitOr(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64BitOr(left, right)
+}
+
+/// Calls the concrete u64 bitXor primitive.
+pub fn bitXor(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64BitXor(left, right)
+}
+
+/// Calls the concrete u64 bitNot primitive.
+pub fn bitNot(value: u64) -> u64 {
+  return Intrinsic.u64BitNot(value)
+}
+
+/// Calls the concrete u64 shiftLeft primitive.
+pub fn shiftLeft(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64ShiftLeft(left, right)
+}
+
+/// Calls the concrete u64 shiftRight primitive.
+pub fn shiftRight(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64ShiftRight(left, right)
+}
+
+/// Calls the concrete u64 rotateLeft primitive.
+pub fn rotateLeft(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64RotateLeft(left, right)
+}
+
+/// Calls the concrete u64 rotateRight primitive.
+pub fn rotateRight(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64RotateRight(left, right)
+}
+
+/// Calls the concrete u64 wrappingAdd primitive.
+pub fn wrappingAdd(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64WrappingAdd(left, right)
+}
+
+/// Calls the concrete u64 wrappingSubtract primitive.
+pub fn wrappingSubtract(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64WrappingSubtract(left, right)
+}
+
+/// Calls the concrete u64 wrappingMultiply primitive.
+pub fn wrappingMultiply(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64WrappingMultiply(left, right)
+}
+
+/// Calls the concrete u64 saturatingAdd primitive.
+pub fn saturatingAdd(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64SaturatingAdd(left, right)
+}
+
+/// Calls the concrete u64 saturatingSubtract primitive.
+pub fn saturatingSubtract(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64SaturatingSubtract(left, right)
+}
+
+/// Calls the concrete u64 saturatingMultiply primitive.
+pub fn saturatingMultiply(left: u64, right: u64) -> u64 {
+  return Intrinsic.u64SaturatingMultiply(left, right)
+}
+
+/// Calls the concrete u64 checkedAdd primitive.
+pub fn checkedAdd(left: u64, right: u64) -> Option<u64> {
+  return Intrinsic.u64CheckedAdd(left, right)
+}
+
+/// Calls the concrete u64 checkedSubtract primitive.
+pub fn checkedSubtract(left: u64, right: u64) -> Option<u64> {
+  return Intrinsic.u64CheckedSubtract(left, right)
+}
+
+/// Calls the concrete u64 checkedMultiply primitive.
+pub fn checkedMultiply(left: u64, right: u64) -> Option<u64> {
+  return Intrinsic.u64CheckedMultiply(left, right)
+}
+
+/// Calls the concrete u64 checkedDivide primitive.
+pub fn checkedDivide(left: u64, right: u64) -> Option<u64> {
+  return Intrinsic.u64CheckedDivide(left, right)
+}
+
+/// Calls the concrete u64 checkedRemainder primitive.
+pub fn checkedRemainder(left: u64, right: u64) -> Option<u64> {
+  return Intrinsic.u64CheckedRemainder(left, right)
+}
+
+/// Calls the concrete u64 equals primitive.
+pub fn equals(left: u64, right: u64) -> bool {
+  return Intrinsic.u64Equals(left, right)
+}
+
+/// Calls the concrete u64 notEquals primitive.
+pub fn notEquals(left: u64, right: u64) -> bool {
+  return Intrinsic.u64NotEquals(left, right)
+}
+
+/// Calls the concrete u64 lessThan primitive.
+pub fn lessThan(left: u64, right: u64) -> bool {
+  return Intrinsic.u64LessThan(left, right)
+}
+
+/// Calls the concrete u64 lessOrEqual primitive.
+pub fn lessOrEqual(left: u64, right: u64) -> bool {
+  return Intrinsic.u64LessOrEqual(left, right)
+}
+
+/// Calls the concrete u64 greaterThan primitive.
+pub fn greaterThan(left: u64, right: u64) -> bool {
+  return Intrinsic.u64GreaterThan(left, right)
+}
+
+/// Calls the concrete u64 greaterOrEqual primitive.
+pub fn greaterOrEqual(left: u64, right: u64) -> bool {
+  return Intrinsic.u64GreaterOrEqual(left, right)
+}

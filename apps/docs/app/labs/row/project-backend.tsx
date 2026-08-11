@@ -127,6 +127,8 @@ const memberSignature = (member: DeclarationIndex.MemberFact): string => {
     return `struct${parameters} · ${member.fields.length} field${member.fields.length === 1 ? '' : 's'}`
   if (member._tag === 'ConstantDeclaration')
     return `${member.visibility === 'Public' ? 'pub ' : ''}const · ${declaredTypeText(member.declaredType)}`
+  if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration')
+    return `${member.visibility === 'Public' ? 'pub ' : ''}${member._tag === 'ServiceDeclaration' ? 'service' : 'interface'}${parameters} · ${member.operations.length} operation${member.operations.length === 1 ? '' : 's'}`
   const values = member.parameters
     .map(
       (parameter) =>
@@ -246,6 +248,8 @@ const bindingDetail = (binding: NameResolution.Binding): string => {
       return `LocalDeclaration · ${binding.declaration.module}.${binding.declaration.name}`
     case 'IntrinsicActor':
       return 'IntrinsicActor · language intrinsic'
+    case 'StdlibNamespace':
+      return `StdlibNamespace · ${binding.module}`
     case 'ModuleNamespace':
       return `ModuleNamespace · ${binding.module}`
     case 'ImportedMember':
@@ -797,7 +801,7 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = repeat layout ${localText(operation.layout)} × ${localText(operation.count)}`
     case 'Allocate':
       return `${localText(operation.destination)} = allocate ${localText(operation.layout)} ! ${operation.failure.name}`
-    case 'StandardStreamWrite':
+    case 'HostWrite':
       return `${localText(operation.destination)} = write all ${localText(operation.bytes)} to stream ${localText(operation.stream)} ! ${operation.failure.name}`
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw buffer from ${localText(operation.allocation)} × ${localText(operation.count)} · stride ${operation.stride}`
@@ -1148,7 +1152,7 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `drop slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'AllocationRelease':
       return `release allocation #${event.ticket}`
-    case 'StandardStreamWrite':
+    case 'HostWrite':
       return `${event.destination.toLowerCase()} write ${event.bytes.length} bytes · ${event.outcome.toLowerCase()}`
   }
 }
@@ -1199,7 +1203,7 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'RawBufferRead':
     case 'SlotDrop':
     case 'AllocationRelease':
-    case 'StandardStreamWrite':
+    case 'HostWrite':
       return 2
   }
 }

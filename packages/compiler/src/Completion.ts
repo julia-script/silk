@@ -5,6 +5,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as NameResolution from './NameResolution.js'
 import type * as Presentation from './Presentation.js'
 import * as PresentationRenderer from './Presentation.js'
+import * as Scalar from './Scalar.js'
 import type * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -205,6 +206,26 @@ const actorCandidates = (actor: Intrinsic.Actor): ReadonlyArray<Candidate> =>
     }),
   )
 
+const serviceCandidates = (service: DeclarationIndex.ServiceFact): ReadonlyArray<Candidate> =>
+  Object.freeze(
+    service.operations.flatMap(
+      (operation): ReadonlyArray<Candidate> =>
+        operation.name._tag !== 'Present' || operation.state._tag !== 'Unique'
+          ? []
+          : [
+              candidate({
+                identity: semantic(
+                  Object.freeze({ _tag: 'ServiceOperationIdentity', id: operation.state.id }),
+                ),
+                kind: 'Operation',
+                label: operation.name.spelling,
+                detail: PresentationRenderer.serviceOperation(operation),
+                sortGroup: 0,
+              }),
+            ],
+    ),
+  )
+
 const namespaceCandidates = (
   index: DeclarationIndex.Index,
   module: string,
@@ -228,7 +249,10 @@ const namespaceCandidates = (
                   ? PresentationRenderer.functionDeclaration(declaration)
                   : declaration._tag === 'ConstantDeclaration'
                     ? PresentationRenderer.constantDeclaration(declaration)
-                    : PresentationRenderer.structDeclaration(declaration),
+                    : declaration._tag === 'ServiceDeclaration' ||
+                        declaration._tag === 'InterfaceDeclaration'
+                      ? PresentationRenderer.serviceDeclaration(declaration)
+                      : PresentationRenderer.structDeclaration(declaration),
               sortGroup: 0,
             }),
           ],
@@ -313,6 +337,20 @@ const typeCandidates = (
   fn: Elaboration.FunctionFact | undefined,
 ): ReadonlyArray<Candidate> => {
   const candidates: Array<Candidate> = []
+  for (const scalar of Scalar.all())
+    candidates.push(
+      candidate({
+        identity: syntax(scalar.spelling),
+        kind: 'Type',
+        label: scalar.spelling,
+        detail: Object.freeze({
+          _tag: 'IntrinsicActorPresentation',
+          name: scalar.spelling,
+          text: `builtin type ${scalar.spelling}`,
+        }),
+        sortGroup: 1,
+      }),
+    )
   for (const actor of Intrinsic.all())
     if (actor.kind === 'Type')
       candidates.push(
@@ -324,15 +362,21 @@ const typeCandidates = (
           sortGroup: 1,
         }),
       )
-  for (const declaration of index.modules.find((headers) => headers.module === module)?.structs ??
-    [])
+  for (const declaration of [
+    ...(index.modules.find((headers) => headers.module === module)?.structs ?? []),
+    ...(index.modules.find((headers) => headers.module === module)?.services ?? []),
+    ...(index.modules.find((headers) => headers.module === module)?.interfaces ?? []),
+  ])
     if (declaration.name._tag === 'Present')
       candidates.push(
         candidate({
           identity: semantic(declarationIdentity(declaration)),
           kind: 'Type',
           label: declaration.name.spelling,
-          detail: PresentationRenderer.structDeclaration(declaration),
+          detail:
+            declaration._tag === 'ServiceDeclaration' || declaration._tag === 'InterfaceDeclaration'
+              ? PresentationRenderer.serviceDeclaration(declaration)
+              : PresentationRenderer.structDeclaration(declaration),
           sortGroup: 0,
         }),
       )
@@ -350,13 +394,21 @@ const typeCandidates = (
   for (const binding of scope?.bindings ?? []) {
     if (binding._tag !== 'ImportedMember') continue
     const declaration = DeclarationIndex.byCanonical(index, binding.declaration)
-    if (declaration?._tag !== 'StructDeclaration') continue
+    if (
+      declaration?._tag !== 'StructDeclaration' &&
+      declaration?._tag !== 'ServiceDeclaration' &&
+      declaration?._tag !== 'InterfaceDeclaration'
+    )
+      continue
     candidates.push(
       candidate({
         identity: semantic(declarationIdentity(declaration)),
         kind: 'Type',
         label: binding.spelling,
-        detail: PresentationRenderer.structDeclaration(declaration),
+        detail:
+          declaration._tag === 'ServiceDeclaration' || declaration._tag === 'InterfaceDeclaration'
+            ? PresentationRenderer.serviceDeclaration(declaration)
+            : PresentationRenderer.structDeclaration(declaration),
         sortGroup: 2,
       }),
     )
@@ -424,14 +476,20 @@ const expressionCandidates = (
               ? 'Function'
               : declaration._tag === 'ConstantDeclaration'
                 ? 'Constant'
-                : 'Constructor',
+                : declaration._tag === 'ServiceDeclaration' ||
+                    declaration._tag === 'InterfaceDeclaration'
+                  ? 'Type'
+                  : 'Constructor',
           label: declaration.name.spelling,
           detail:
             declaration._tag === 'FunctionDeclaration'
               ? PresentationRenderer.functionDeclaration(declaration)
               : declaration._tag === 'ConstantDeclaration'
                 ? PresentationRenderer.constantDeclaration(declaration)
-                : PresentationRenderer.structDeclaration(declaration),
+                : declaration._tag === 'ServiceDeclaration' ||
+                    declaration._tag === 'InterfaceDeclaration'
+                  ? PresentationRenderer.serviceDeclaration(declaration)
+                  : PresentationRenderer.structDeclaration(declaration),
           sortGroup: 2,
         }),
       )
@@ -447,14 +505,20 @@ const expressionCandidates = (
               ? 'Function'
               : declaration._tag === 'ConstantDeclaration'
                 ? 'Constant'
-                : 'Constructor',
+                : declaration._tag === 'ServiceDeclaration' ||
+                    declaration._tag === 'InterfaceDeclaration'
+                  ? 'Type'
+                  : 'Constructor',
           label: binding.spelling,
           detail:
             declaration._tag === 'FunctionDeclaration'
               ? PresentationRenderer.functionDeclaration(declaration)
               : declaration._tag === 'ConstantDeclaration'
                 ? PresentationRenderer.constantDeclaration(declaration)
-                : PresentationRenderer.structDeclaration(declaration),
+                : declaration._tag === 'ServiceDeclaration' ||
+                    declaration._tag === 'InterfaceDeclaration'
+                  ? PresentationRenderer.serviceDeclaration(declaration)
+                  : PresentationRenderer.structDeclaration(declaration),
           sortGroup: 3,
         }),
       )
@@ -579,6 +643,19 @@ export const complete = (options: {
         context: Object.freeze({ _tag: 'ActorMemberContext', actor: lookup.module }),
         replacement: replacement.span,
         candidates: stable(namespaceCandidates(options.index, lookup.module)),
+      })
+    if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'ServiceDeclaration')
+      return Object.freeze({
+        _tag: 'CompletionResult',
+        context: Object.freeze({
+          _tag: 'ActorMemberContext',
+          actor:
+            lookup.declaration.name._tag === 'Present'
+              ? lookup.declaration.name.spelling
+              : (qualifier ?? 'service'),
+        }),
+        replacement: replacement.span,
+        candidates: stable(serviceCandidates(lookup.declaration)),
       })
     return Object.freeze({
       _tag: 'CompletionResult',

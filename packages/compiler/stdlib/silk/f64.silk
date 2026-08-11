@@ -1,0 +1,174 @@
+/// Calls the concrete f64 negate primitive.
+pub fn negate(value: f64) -> f64 {
+  return Intrinsic.f64Negate(value)
+}
+
+/// Calls the concrete f64 add primitive.
+pub fn add(left: f64, right: f64) -> f64 {
+  return Intrinsic.f64Add(left, right)
+}
+
+/// Calls the concrete f64 subtract primitive.
+pub fn subtract(left: f64, right: f64) -> f64 {
+  return Intrinsic.f64Subtract(left, right)
+}
+
+/// Calls the concrete f64 multiply primitive.
+pub fn multiply(left: f64, right: f64) -> f64 {
+  return Intrinsic.f64Multiply(left, right)
+}
+
+/// Calls the concrete f64 divide primitive.
+pub fn divide(left: f64, right: f64) -> f64 {
+  return Intrinsic.f64Divide(left, right)
+}
+
+/// Calls the concrete f64 remainder primitive.
+pub fn remainder(left: f64, right: f64) -> f64 {
+  return Intrinsic.f64Remainder(left, right)
+}
+
+/// Calls the concrete f64 equals primitive.
+pub fn equals(left: f64, right: f64) -> bool {
+  return Intrinsic.f64Equals(left, right)
+}
+
+/// Calls the concrete f64 notEquals primitive.
+pub fn notEquals(left: f64, right: f64) -> bool {
+  return Intrinsic.f64NotEquals(left, right)
+}
+
+/// Calls the concrete f64 lessThan primitive.
+pub fn lessThan(left: f64, right: f64) -> bool {
+  return Intrinsic.f64LessThan(left, right)
+}
+
+/// Calls the concrete f64 lessOrEqual primitive.
+pub fn lessOrEqual(left: f64, right: f64) -> bool {
+  return Intrinsic.f64LessOrEqual(left, right)
+}
+
+/// Calls the concrete f64 greaterThan primitive.
+pub fn greaterThan(left: f64, right: f64) -> bool {
+  return Intrinsic.f64GreaterThan(left, right)
+}
+
+/// Calls the concrete f64 greaterOrEqual primitive.
+pub fn greaterOrEqual(left: f64, right: f64) -> bool {
+  return Intrinsic.f64GreaterOrEqual(left, right)
+}
+
+/// Calls the concrete f64 isNaN primitive.
+pub fn isNaN(value: f64) -> bool {
+  return Intrinsic.f64IsNaN(value)
+}
+
+/// Calls the concrete f64 isInfinite primitive.
+pub fn isInfinite(value: f64) -> bool {
+  return Intrinsic.f64IsInfinite(value)
+}
+
+/// Calls the concrete f64 isFinite primitive.
+pub fn isFinite(value: f64) -> bool {
+  return Intrinsic.f64IsFinite(value)
+}
+
+/// Calls the concrete f64 isNormal primitive.
+pub fn isNormal(value: f64) -> bool {
+  return Intrinsic.f64IsNormal(value)
+}
+
+/// Calls the concrete f64 isSubnormal primitive.
+pub fn isSubnormal(value: f64) -> bool {
+  return Intrinsic.f64IsSubnormal(value)
+}
+
+/// Calls the concrete f64 isSignNegative primitive.
+pub fn isSignNegative(value: f64) -> bool {
+  return Intrinsic.f64IsSignNegative(value)
+}
+
+/// Calls the concrete f64 totalOrder primitive.
+pub fn totalOrder(left: f64, right: f64) -> bool {
+  return Intrinsic.f64TotalOrder(left, right)
+}
+
+/// Calls the concrete f64 toBits primitive.
+pub fn toBits(value: f64) -> u64 {
+  return Intrinsic.f64ToBits(value)
+}
+
+/// Calls the concrete f64 fromBits primitive.
+pub fn fromBits(value: u64) -> f64 {
+  return Intrinsic.f64FromBits(value)
+}
+
+/// Calls the concrete f64 sin primitive.
+pub fn sin(value: f64) -> f64 {
+  return Intrinsic.f64Sin(value)
+}
+
+/// Calls the concrete f64 cos primitive.
+pub fn cos(value: f64) -> f64 {
+  return Intrinsic.f64Cos(value)
+}
+
+/// Calls the concrete f64 toF32 primitive.
+pub fn toF32(value: f64) -> f32 {
+  return Intrinsic.f64ToF32(value)
+}
+
+/// Calls the concrete f64 toF64 primitive.
+pub fn toF64(value: f64) -> f64 {
+  return Intrinsic.f64ToF64(value)
+}
+
+/// Calls the concrete f64 toU8 primitive.
+pub fn toU8(value: f64) -> u8 {
+  return Intrinsic.f64ToU8(value)
+}
+
+/// Calls the concrete f64 toU16 primitive.
+pub fn toU16(value: f64) -> u16 {
+  return Intrinsic.f64ToU16(value)
+}
+
+/// Calls the concrete f64 toU32 primitive.
+pub fn toU32(value: f64) -> u32 {
+  return Intrinsic.f64ToU32(value)
+}
+
+/// Calls the concrete f64 toU64 primitive.
+pub fn toU64(value: f64) -> u64 {
+  return Intrinsic.f64ToU64(value)
+}
+
+/// Calls the concrete f64 toUsize primitive.
+pub fn toUsize(value: f64) -> usize {
+  return Intrinsic.f64ToUsize(value)
+}
+
+/// Calls the concrete f64 toI8 primitive.
+pub fn toI8(value: f64) -> i8 {
+  return Intrinsic.f64ToI8(value)
+}
+
+/// Calls the concrete f64 toI16 primitive.
+pub fn toI16(value: f64) -> i16 {
+  return Intrinsic.f64ToI16(value)
+}
+
+/// Calls the concrete f64 toI32 primitive.
+pub fn toI32(value: f64) -> i32 {
+  return Intrinsic.f64ToI32(value)
+}
+
+/// Calls the concrete f64 toI64 primitive.
+pub fn toI64(value: f64) -> i64 {
+  return Intrinsic.f64ToI64(value)
+}
+
+/// Calls the concrete f64 toIsize primitive.
+pub fn toIsize(value: f64) -> isize {
+  return Intrinsic.f64ToIsize(value)
+}

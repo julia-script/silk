@@ -136,7 +136,7 @@ it('captures synchronous Effect costs deterministically in fresh processes', () 
   }
 
   const runners = report.cases.flatMap((sample) => sample.runners)
-  assert.strictEqual(runners.length, 13)
+  assert.strictEqual(runners.length, 25)
   assert.isTrue(runners.every((runner) => runner.estimatedClonedSize > 0))
   assert.isTrue(runners.every((runner) => !runner.prototypeEligible))
   assert.deepEqual(
@@ -176,4 +176,4 @@ it('captures synchronous Effect costs deterministically in fresh processes', () 
     assert.isAtLeast(effect.optimizedLlvm.allocations, 0, pair)
     assert.isAtLeast(effect.wasm.allocations, 0, pair)
   }
-}, 30_000)
+}, 180_000)

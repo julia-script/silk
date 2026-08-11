@@ -4,6 +4,7 @@ import * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as SourceFile from './SourceFile.js'
+import * as Stdlib from './Stdlib.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
@@ -17,6 +18,7 @@ export type Binding =
       readonly declaration: DeclarationIndex.CanonicalId
     }
   | { readonly _tag: 'IntrinsicActor'; readonly spelling: IntrinsicActor }
+  | { readonly _tag: 'StdlibNamespace'; readonly spelling: string; readonly module: string }
   | {
       readonly _tag: 'ModuleNamespace'
       readonly spelling: string
@@ -132,6 +134,19 @@ const canonicalDeclaration = (
     : undefined
 }
 
+const bindingTarget = (binding: Exclude<Binding, { readonly _tag: 'Unavailable' }>): string => {
+  switch (binding._tag) {
+    case 'IntrinsicActor':
+      return `intrinsic:${binding.spelling}`
+    case 'StdlibNamespace':
+    case 'ModuleNamespace':
+      return `module:${binding.module}`
+    case 'LocalDeclaration':
+    case 'ImportedMember':
+      return `declaration:${binding.declaration.module}.${binding.declaration.name}`
+  }
+}
+
 export const resolve = (
   closure: ModuleClosure.Facts,
   index: DeclarationIndex.Index,
@@ -142,6 +157,36 @@ export const resolve = (
     const candidates: Array<Binding> = Intrinsic.all().map((intrinsic) =>
       Object.freeze({ _tag: 'IntrinsicActor', spelling: intrinsic.spelling }),
     )
+    for (const candidate of closure.modules) {
+      const standard = Stdlib.find(candidate.name)
+      if (standard === undefined || candidate.name === module.name) continue
+      for (const namespace of [standard.namespace, ...(standard.aliases ?? [])]) {
+        if (namespace === undefined) continue
+        const declared = DeclarationIndex.member(index, standard.module, namespace)
+        if (
+          declared._tag === 'Resolved' &&
+          (declared.declaration._tag === 'ServiceDeclaration' ||
+            declared.declaration._tag === 'InterfaceDeclaration' ||
+            declared.declaration._tag === 'StructDeclaration') &&
+          declared.declaration.canonical._tag === 'Canonical'
+        )
+          candidates.push(
+            Object.freeze({
+              _tag: 'LocalDeclaration',
+              spelling: namespace,
+              declaration: declared.declaration.canonical.id,
+            }),
+          )
+        else
+          candidates.push(
+            Object.freeze({
+              _tag: 'StdlibNamespace',
+              spelling: namespace,
+              module: standard.module,
+            }),
+          )
+      }
+    }
     const headers = index.modules.find((value) => value.module === module.name)
     for (const declaration of headers?.members ?? [])
       if (declaration.canonical._tag === 'Canonical')
@@ -301,7 +346,13 @@ export const resolve = (
       if (binding._tag === 'Unavailable') continue
       const group = grouped.get(binding.spelling)
       if (group === undefined) grouped.set(binding.spelling, [binding])
-      else group.push(binding)
+      else if (
+        !group.some(
+          (candidate) =>
+            candidate._tag !== 'Unavailable' && bindingTarget(candidate) === bindingTarget(binding),
+        )
+      )
+        group.push(binding)
     }
     const conflicts: Array<Conflict> = []
     for (const [spelling, bindings] of grouped)
@@ -372,7 +423,7 @@ export const lookup = (
       ...(declaration === undefined ? {} : { declaration }),
     })
   }
-  if (binding._tag === 'ModuleNamespace')
+  if (binding._tag === 'ModuleNamespace' || binding._tag === 'StdlibNamespace')
     return Object.freeze({ _tag: 'Namespace', spelling, module: binding.module })
   const declaration = DeclarationIndex.byCanonical(index, binding.declaration)
   return declaration === undefined
@@ -492,7 +543,10 @@ const resolvedType = (
 }
 
 const nominalOf = (declaration: DeclarationIndex.MemberFact): Type.Nominal | undefined =>
-  declaration._tag === 'StructDeclaration' && declaration.canonical._tag === 'Canonical'
+  (declaration._tag === 'StructDeclaration' ||
+    declaration._tag === 'ServiceDeclaration' ||
+    declaration._tag === 'InterfaceDeclaration') &&
+  declaration.canonical._tag === 'Canonical'
     ? Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name)
     : undefined
 
@@ -520,12 +574,6 @@ export const resolveType = (
       ? lookup(scope, index, first.spelling)
       : lookupQualified(scope, index, first.spelling, second.spelling, second.token)
   if (result._tag === 'Intrinsic') {
-    if (result.actor === 'Layout') return resolvedType(path, Type.layout)
-    if (result.actor === 'Allocator') return resolvedType(path, Type.allocator)
-    if (result.actor === 'SystemAllocator') return resolvedType(path, Type.systemAllocator)
-    if (result.actor === 'RawBuffer')
-      return resolvedType(path, Type.nominal('silk/core', 'RawBuffer'))
-    if (result.actor === 'Slot') return resolvedType(path, Type.nominal('silk/core', 'Slot'))
     if (Type.isBuiltin(result.actor)) return resolvedType(path, result.actor)
     return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))
   }

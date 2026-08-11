@@ -186,7 +186,7 @@ it('matches the binding ownership golden encoding byte-for-byte', () => {
   )
 })
 
-const branchSource = `pub fn main() -> i32 { let outer = 2 if i32.equals(outer, 2) { let inner = 1 return inner } return outer }`
+const branchSource = `pub fn main() -> i32 { let outer = 2 if outer == 2 { let inner = 1 return inner } return outer }`
 
 it('scopes arm bindings to their arm with per-return exits', () => {
   const facts = check('golden://arms.silk', branchSource)
@@ -209,7 +209,7 @@ it('scopes arm bindings to their arm with per-return exits', () => {
 it('releases an unmoved arm binding at the arm end when the arm falls through', () => {
   const facts = check(
     'golden://arm-end.silk',
-    'pub fn main() -> i32 { if i32.equals(1, 1) { let side = 5 } return 0 }',
+    'pub fn main() -> i32 { if 1 == 1 { let side = 5 } return 0 }',
   )
   const main = facts.functions.at(0)
   const armEnd = main?.exits.find((exit) => exit.kind === 'ArmEnd')
@@ -225,7 +225,7 @@ it('keeps a value live when the only arm that moves it returns', () => {
   const facts = check(
     'golden://conditional-move.silk',
     `pub fn identity(value: i32) -> i32 { return value }
-pub fn main() -> i32 { let value = 1 if i32.equals(1, 1) { return identity(move value) } return value }`,
+pub fn main() -> i32 { let value = 1 if 1 == 1 { return identity(move value) } return value }`,
   )
   const main = facts.functions.at(1)
 
@@ -316,7 +316,7 @@ it('keeps an existing borrowed provider live until its last run', () => {
 effect fn read() -> i32 ? &Clock { return 42 }
 pub fn main() -> i32 {
   let mut clock = Clock { tick: 0 }
-  let recipe = read() |> Effect.bindRequirement(&clock)
+  let recipe = read() |> Intrinsic.bindRequirement(&clock)
   clock.tick = 1
   return run recipe
 }`,
@@ -336,7 +336,7 @@ it('moves an owned provider into a take-once Effect wrapper', () => {
 effect fn read() -> i32 ? &mut Clock { return 42 }
 pub fn main() -> i32 {
   let clock = Clock { tick: 0 }
-  let recipe = read() |> Effect.bindRequirement(move clock)
+  let recipe = read() |> Intrinsic.bindRequirement(move clock)
   let first = run recipe
   return first + run recipe
 }`,
@@ -538,18 +538,20 @@ pub fn main() -> i32 { return 0 }`,
   })
 })
 
-it('ends exclusive allocator access when allocation returns, not when Allocation drops', () => {
+it('ends exclusive service access when a provided operation returns', () => {
   const facts = check(
-    'ownership://allocation-provider-loan.silk',
-    `effect fn allocateTwice(firstLayout: Layout, secondLayout: Layout, provider: Allocator) -> i32 ! OutOfMemory {
+    'ownership://service-provider-loan.silk',
+    `service Counter { effect fn next() -> i32 ? &mut Counter }
+struct Provider { value: i32 }
+effect fn next(self: &mut Provider) -> i32 { return self.value }
+impl Counter for Provider { next: Provider.next }
+effect fn readTwice(provider: Provider) -> i32 {
   let mut allocator = move provider
-  let firstRecipe = Allocator.allocate(move firstLayout) |> Effect.provideMut(&mut allocator)
+  let firstRecipe = Counter.next() |> Intrinsic.bindRequirement(&mut allocator)
   let first = run firstRecipe
-  let secondRecipe = Allocator.allocate(move secondLayout) |> Effect.provideMut(&mut allocator)
+  let secondRecipe = Counter.next() |> Intrinsic.bindRequirement(&mut allocator)
   let second = run secondRecipe
-  drop second
-  drop first
-  return 42
+  return first + second
 }
 pub fn main() -> i32 { return 0 }`,
   )
@@ -575,9 +577,9 @@ it('keeps a Slot loan active until the lexical Slot is consumed', () => {
     `fn misuse(buffer: RawBuffer<i32>) -> i32 {
   let mut owner = move buffer
   unsafe {
-    let slot = RawBuffer.slot(&mut owner, 0)
+    let slot = Intrinsic.rawBufferSlot(&mut owner, 0)
     drop owner
-    let value = Slot.take(move slot)
+    let value = Intrinsic.slotTake(move slot)
     return value
   }
   return 0

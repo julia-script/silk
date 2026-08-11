@@ -1,7 +1,7 @@
 // A growable owned sequence over the allocation substrate. Ordinary Silk: no compiler phase
 // knows this type, and every capability it uses is available to user code.
 //
-// The storage union keeps the empty vector allocation-free; Place.replace moves it out and back
+// The storage union keeps the empty vector allocation-free; Intrinsic.replace moves it out and back
 // through &mut self without a partial move, and the Drop hook destroys exactly the
 // initialized elements before the backing buffer releases.
 
@@ -42,8 +42,8 @@ pub fn capacity<T>(self: &Vector<T>) -> usize {
 
 impl<T> Drop for Vector<T> {
   fn drop(self: &mut Vector<T>) -> () {
-    let storage = Place.replace(self.storage, Empty {})
-    let count = Place.replace(self.length, counted(0))
+    let storage = Intrinsic.replace(self.storage, Empty {})
+    let count = Intrinsic.replace(self.length, counted(0))
     return match move storage {
       Empty nothing => ()
       Full<T> full => releaseFull<T>(move full, count)
@@ -62,7 +62,8 @@ fn releaseBuffer<T>(buffer: RawBuffer<T>, length: usize) -> () {
     let mut owned = move buffer
     let mut index = counted(0)
     while index < length {
-      let cleared = Slot.drop(RawBuffer.slot(&mut owned, index))
+      let selected = RawBuffer.slot(&mut owned, index)
+      let cleared = Slot.dropValue(move selected)
       index = index + counted(1)
     }
     drop owned
@@ -79,14 +80,14 @@ pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &m
       next = counted(4)
     }
     let element = Layout.of<T>()
-    let plan = Layout.repeat(element, next)
+    let plan = Layout.repeat(move element, next)
     let layout = match move plan {
       Layout ready => ready
       LayoutOverflow overflow => run overflowed()
     }
     let recipe = Allocator.allocate(move layout)
     let allocation = run recipe
-    let storage = Place.replace(self.storage, Empty {})
+    let storage = Intrinsic.replace(self.storage, Empty {})
     let moved = match move storage {
       Empty nothing => Full<T> { buffer: freshBuffer<T>(move allocation, next) }
       Full<T> full => Full<T> { buffer: migrate<T>(move full, move allocation, self.length, next) }
@@ -94,7 +95,7 @@ pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &m
     self.storage = move moved
     self.capacity = next
   }
-  let storage = Place.replace(self.storage, Empty {})
+  let storage = Intrinsic.replace(self.storage, Empty {})
   let stored = match move storage {
     Empty nothing => absurd<Full<T>>()
     Full<T> full => writeAt<T>(move full, self.length, move value)
@@ -105,7 +106,7 @@ pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &m
 }
 
 effect fn overflowed() -> Layout ! OutOfMemory {
-  fail OutOfMemory {}
+  return run AllocationFailure.outOfMemory()
 }
 
 fn freshBuffer<T>(allocation: Allocation, count: usize) -> RawBuffer<T> {
@@ -128,8 +129,10 @@ fn migrateBuffer<T>(old: RawBuffer<T>, allocation: Allocation, length: usize, co
     let mut source = move old
     let mut index = counted(0)
     while index < length {
-      let element = Slot.take(RawBuffer.slot(&mut source, index))
-      let written = Slot.write(RawBuffer.slot(&mut target, index), move element)
+      let sourceSlot = RawBuffer.slot(&mut source, index)
+      let element = Slot.take(move sourceSlot)
+      let targetSlot = RawBuffer.slot(&mut target, index)
+      let written = Slot.write(move targetSlot, move element)
       index = index + counted(1)
     }
     drop source
@@ -146,7 +149,8 @@ fn writeAt<T>(full: Full<T>, index: usize, value: T) -> Full<T> {
 fn writeSlot<T>(buffer: RawBuffer<T>, index: usize, value: T) -> RawBuffer<T> {
   unsafe {
     let mut owned = move buffer
-    let written = Slot.write(RawBuffer.slot(&mut owned, index), move value)
+    let selected = RawBuffer.slot(&mut owned, index)
+    let written = Slot.write(move selected, move value)
     return move owned
   }
   return absurd<RawBuffer<T>>()

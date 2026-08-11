@@ -11,6 +11,8 @@ export const isReserved = (module: string): boolean =>
 export interface Module {
   readonly module: string
   readonly path: string
+  readonly namespace?: string
+  readonly aliases?: ReadonlyArray<string>
   readonly sourceUrl: URL
   readonly bytes: Uint8Array
 }
@@ -23,6 +25,8 @@ export const manifest: ReadonlyArray<Module> = Object.freeze(
     Object.freeze({
       module: entry.module,
       path: entry.path,
+      ...('namespace' in entry ? { namespace: entry.namespace } : {}),
+      ...('aliases' in entry ? { aliases: entry.aliases } : {}),
       sourceUrl: new URL(`../stdlib/${entry.path}`, import.meta.url),
       bytes: encoder.encode(entry.source),
     }),
@@ -31,8 +35,33 @@ export const manifest: ReadonlyArray<Module> = Object.freeze(
 
 const byModule = new Map(manifest.map((entry) => [entry.module, entry] as const))
 
+const byNamespace = new Map(
+  manifest.flatMap((entry) =>
+    [entry.namespace, ...(entry.aliases ?? [])].flatMap((namespace) =>
+      namespace === undefined ? [] : [[namespace, entry] as const],
+    ),
+  ),
+)
+
 /** Returns the generated manifest entry for one standard-library module identity. */
 export const find = (module: string): Module | undefined => byModule.get(module)
+
+/** Resolves one canonical source-backed prelude namespace. */
+export const findNamespace = (namespace: string): Module | undefined => byNamespace.get(namespace)
+
+/** Finds source-backed namespaces referenced as qualified actors in one source file. */
+export const requiredModules = (source: Uint8Array): ReadonlyArray<string> => {
+  const text = Array.from(source, (byte) => String.fromCharCode(byte)).join('')
+  return Object.freeze(
+    manifest.flatMap((entry) =>
+      [entry.namespace, ...(entry.aliases ?? [])].some(
+        (namespace) => namespace !== undefined && new RegExp(`\\b${namespace}\\.`).test(text),
+      )
+        ? [entry.module]
+        : [],
+    ),
+  )
+}
 
 /** Every standard-library module's exact source bytes by canonical identity. */
 export const sources: ReadonlyMap<string, Uint8Array> = new Map(

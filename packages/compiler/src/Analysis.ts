@@ -290,11 +290,29 @@ const declarationForIdentity = (
     .find((member) => member.id.sourceId === local.sourceId && member.id.ordinal === local.ordinal)
 }
 
+const serviceOperationForIdentity = (
+  self: FrontendSnapshot,
+  identity: Extract<SemanticOccurrence.Identity, { readonly _tag: 'ServiceOperationIdentity' }>,
+): DeclarationIndex.ServiceOperationFact | undefined =>
+  self.index.modules
+    .flatMap((module) => module.services)
+    .find(
+      (service) =>
+        service.id.sourceId === identity.id.service.sourceId &&
+        service.id.ordinal === identity.id.service.ordinal,
+    )
+    ?.operations.find(
+      (operation) =>
+        operation.name._tag === 'Present' && operation.name.spelling === identity.id.name,
+    )
+
 const syntaxForIdentity = (
   self: FrontendSnapshot,
   identity: SemanticOccurrence.Identity,
 ): SyntaxTree.Node | undefined => {
   if (identity._tag === 'DeclarationIdentity') return declarationForIdentity(self, identity)?.syntax
+  if (identity._tag === 'ServiceOperationIdentity')
+    return serviceOperationForIdentity(self, identity)?.syntax
   if (identity._tag === 'TypeParameterIdentity') {
     for (const headers of self.index.modules)
       for (const member of headers.members) {
@@ -302,12 +320,22 @@ const syntaxForIdentity = (
           Type.equals(candidate.type, identity.id),
         )
         if (parameter !== undefined) return parameter.syntax
+        if (member._tag === 'ServiceDeclaration')
+          for (const operation of member.operations) {
+            const operationParameter = operation.typeParameters.find((candidate) =>
+              Type.equals(candidate.type, identity.id),
+            )
+            if (operationParameter !== undefined) return operationParameter.syntax
+          }
       }
     return undefined
   }
   if (identity._tag === 'ParameterIdentity') {
     for (const headers of self.index.modules)
-      for (const declaration of headers.declarations) {
+      for (const declaration of [
+        ...headers.declarations,
+        ...headers.services.flatMap((service) => service.operations),
+      ]) {
         const parameter = declaration.parameters.find(
           (candidate) =>
             candidate.id.function.sourceId === identity.id.function.sourceId &&
@@ -366,9 +394,11 @@ const presentationOfIdentity = (
       ? Presentation.functionDeclaration(declaration)
       : declaration?._tag === 'StructDeclaration'
         ? Presentation.structDeclaration(declaration)
-        : declaration?._tag === 'ConstantDeclaration'
-          ? Presentation.constantDeclaration(declaration)
-          : undefined
+        : declaration?._tag === 'ServiceDeclaration'
+          ? Presentation.serviceDeclaration(declaration)
+          : declaration?._tag === 'ConstantDeclaration'
+            ? Presentation.constantDeclaration(declaration)
+            : undefined
   }
   if (identity._tag === 'TypeParameterIdentity') {
     for (const headers of self.index.modules)
@@ -377,12 +407,23 @@ const presentationOfIdentity = (
           Type.equals(candidate.type, identity.id),
         )
         if (parameter !== undefined) return Presentation.typeParameter(parameter)
+        if (member._tag === 'ServiceDeclaration')
+          for (const operation of member.operations) {
+            const operationParameter = operation.typeParameters.find((candidate) =>
+              Type.equals(candidate.type, identity.id),
+            )
+            if (operationParameter !== undefined)
+              return Presentation.typeParameter(operationParameter)
+          }
       }
     return undefined
   }
   if (identity._tag === 'ParameterIdentity') {
     for (const headers of self.index.modules)
-      for (const declaration of headers.declarations) {
+      for (const declaration of [
+        ...headers.declarations,
+        ...headers.services.flatMap((service) => service.operations),
+      ]) {
         const parameter = declaration.parameters.find(
           (candidate) =>
             candidate.id.function.sourceId === identity.id.function.sourceId &&
@@ -438,6 +479,10 @@ const presentationOfIdentity = (
   }
   if (identity._tag === 'ImportNamespaceIdentity')
     return Presentation.importBinding(identity.spelling, identity.module)
+  if (identity._tag === 'ServiceOperationIdentity') {
+    const operation = serviceOperationForIdentity(self, identity)
+    return operation === undefined ? undefined : Presentation.serviceOperation(operation)
+  }
   if (identity._tag === 'IntrinsicActorIdentity') {
     const intrinsic = Intrinsic.findActor(identity.id.name)
     return intrinsic === undefined ? undefined : Presentation.intrinsicActor(intrinsic)
@@ -709,7 +754,13 @@ export const fixedArrayTypesOf = (
       for (const field of member.fields) {
         if (field.declaredType._tag === 'Resolved') add(field.declaredType.type)
       }
-    } else if (member.declaredType._tag === 'Resolved') {
+    } else if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
+      for (const operation of member.operations) {
+        for (const parameter of operation.parameters)
+          if (parameter.declaredType._tag === 'Resolved') add(parameter.declaredType.type)
+        if (operation.returnType._tag === 'Resolved') add(operation.returnType.type)
+      }
+    } else if (member._tag === 'ConstantDeclaration' && member.declaredType._tag === 'Resolved') {
       add(member.declaredType.type)
     }
   }

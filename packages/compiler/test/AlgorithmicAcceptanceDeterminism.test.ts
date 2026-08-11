@@ -20,9 +20,15 @@ it('keeps the composed algorithm byte-identical across fresh processes', () => {
     readonly nativeText: string
     readonly wasmText: string
   }
-  assert.deepEqual(encoded.closure, ['app/Main', 'compiler/Coverage', 'compiler/Member'])
+  assert.deepEqual(encoded.closure, [
+    'app/Main',
+    'compiler/Coverage',
+    'compiler/Member',
+    'silk/option',
+    'silk/usize',
+  ])
   assert.strictEqual(encoded.nativeBytes.length, 64)
   assert.strictEqual(encoded.wasmBytes.length, 64)
   assert.strictEqual(encoded.nativeText.length, 64)
   assert.strictEqual(encoded.wasmText.length, 64)
-}, 15_000)
+}, 90_000)

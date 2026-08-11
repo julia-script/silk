@@ -149,6 +149,13 @@ export type CallReferenceFact =
       readonly result: SemanticType
     }
   | {
+      readonly _tag: 'ResolvedServiceOperation'
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly service: DeclarationIndex.ServiceFact
+      readonly operation: DeclarationIndex.ServiceOperationFact
+    }
+  | {
       readonly _tag: 'Missing'
       readonly spelling: string
       readonly token: Token.Token
@@ -921,6 +928,15 @@ const unavailableExpressionType: ExpressionTypeFact = Object.freeze({ _tag: 'Una
 
 const typesCompatible = (source: SemanticType, target: SemanticType): boolean =>
   TypeCompatibility.isCompatible(TypeCompatibility.check(source, target))
+
+const contextualIntegerCompatible = (expression: ExpressionFact, target: SemanticType): boolean => {
+  if (expression._tag !== 'Integer' || expression.integer._tag !== 'Available') return false
+  if (typeof target !== 'string' || !Scalar.isIntegerSpelling(target)) return false
+  const scalar = Scalar.find(target)
+  if (scalar?.category !== 'Integer') return false
+  const range = Scalar.range(scalar, 64)
+  return expression.integer.value >= range.minimum && expression.integer.value <= range.maximum
+}
 
 const unionConversionDiagnostic = (
   source: SemanticType,
@@ -3038,8 +3054,27 @@ const hasAvailableCallSyntax = (call: SyntaxTree.Node): boolean => {
   return callHeadAvailable && listStructureAvailable
 }
 
+type SourceCallable = DeclarationFact | DeclarationIndex.ServiceOperationFact
+
+const sourceCallable = (reference: CallReferenceFact): SourceCallable | undefined =>
+  reference._tag === 'Resolved'
+    ? reference.declaration
+    : reference._tag === 'ResolvedServiceOperation'
+      ? reference.operation
+      : undefined
+
+const sourceCallableTypeParameters = (
+  reference: Extract<CallReferenceFact, { readonly _tag: 'Resolved' | 'ResolvedServiceOperation' }>,
+): ReadonlyArray<DeclarationIndex.TypeParameterFact> =>
+  reference._tag === 'Resolved'
+    ? reference.declaration.typeParameters
+    : [...reference.service.typeParameters, ...reference.operation.typeParameters]
+
 const callArityDiagnostic = (
-  reference: Extract<CallReferenceFact, { readonly _tag: 'Resolved' | 'ResolvedBuiltin' }>,
+  reference: Extract<
+    CallReferenceFact,
+    { readonly _tag: 'Resolved' | 'ResolvedBuiltin' | 'ResolvedServiceOperation' }
+  >,
   expectedCount: number,
   actualCount: number,
   span: SourceSpan.SourceSpan,
@@ -3055,7 +3090,9 @@ const callArityDiagnostic = (
           actor: reference.actor,
           operation: reference.operation,
         })
-      : reference.declaration.id,
+      : reference._tag === 'Resolved'
+        ? reference.declaration.id
+        : reference.operation.id,
     expectedCount,
     actualCount,
     span,
@@ -3150,7 +3187,7 @@ const analyzeCallContract = (
     })
   }
 
-  if (reference._tag !== 'Resolved') {
+  if (reference._tag !== 'Resolved' && reference._tag !== 'ResolvedServiceOperation') {
     const cause =
       reference._tag === 'Missing' || reference._tag === 'Ambiguous' ? reference.cause : undefined
     return Object.freeze({
@@ -3164,7 +3201,9 @@ const analyzeCallContract = (
     })
   }
 
-  const parameters = reference.declaration.parameters
+  const callable = sourceCallable(reference)
+  if (callable === undefined) throw new RangeError('resolved source call lost its callable')
+  const parameters = callable.parameters
   const mappings = Object.freeze(
     argumentsList.flatMap((argument, ordinal): ReadonlyArray<ArgumentMappingFact> => {
       const parameter = parameters.at(ordinal)
@@ -3222,7 +3261,7 @@ const analyzeCallContract = (
       diagnostics: Object.freeze([diagnostic]),
     })
   }
-  const declaredTypeParameters = reference.declaration.typeParameters.map(
+  const declaredTypeParameters = sourceCallableTypeParameters(reference).map(
     (parameter) => parameter.type,
   )
   let substitution: Type.Substitution
@@ -3323,7 +3362,10 @@ const analyzeCallContract = (
       continue
     }
     const expected = Type.substitute(mapping.parameter.declaredType.type, substitution)
-    if (!typesCompatible(mapping.argument.type.type, expected)) {
+    if (
+      !typesCompatible(mapping.argument.type.type, expected) &&
+      !contextualIntegerCompatible(mapping.argument.expression, expected)
+    ) {
       const mismatch =
         Type.isCallable(expected) && Type.isCallable(mapping.argument.type.type)
           ? Diagnostic.incompatibleCallableSignature(
@@ -3384,6 +3426,53 @@ const analyzeCallContract = (
   })
 }
 
+const interfaceConstraintDiagnostics = (
+  reference: CallReferenceFact,
+  contract: CallContractResult,
+  index: DeclarationIndex.Index,
+  span: SourceSpan.SourceSpan,
+): ReadonlyArray<Diagnostic.Diagnostic> => {
+  if (reference._tag !== 'Resolved' || contract.fact._tag !== 'Compatible') return Object.freeze([])
+  const substitution = contract.fact.substitution
+  const module =
+    reference.declaration.canonical._tag === 'Canonical'
+      ? reference.declaration.canonical.id.module
+      : reference.declaration.id.sourceId
+  return Object.freeze(
+    reference.declaration.typeParameters.flatMap((parameter) => {
+      if (parameter.bound === undefined) return []
+      const provider = substitution.get(Type.key(parameter.type))
+      if (provider === undefined || !Type.isTypeArgument(provider)) return []
+      const interface_ = index.modules
+        .find((candidate) => candidate.module === module)
+        ?.interfaces.find(
+          (candidate) =>
+            candidate.name._tag === 'Present' && candidate.name.spelling === parameter.bound,
+        )
+      if (interface_?.canonical._tag !== 'Canonical')
+        return [
+          Diagnostic.invalidConformance(
+            `unknown interface constraint ${parameter.bound}`,
+            parameter.syntax.span,
+          ),
+        ]
+      const capability = Type.nominal(
+        interface_.canonical.id.module,
+        interface_.canonical.id.name,
+        [provider],
+      )
+      return DeclarationIndex.conforms(index, provider, capability)
+        ? []
+        : [
+            Diagnostic.invalidConformance(
+              `${Type.encode(provider)} does not implement ${parameter.bound}`,
+              span,
+            ),
+          ]
+    }),
+  )
+}
+
 interface BuiltinSignature {
   readonly operation: Hir.BuiltinOperation
   readonly typeParameters?: ReadonlyArray<Type.Parameter>
@@ -3404,7 +3493,7 @@ const builtinSignature = (actor: string, operation: string): BuiltinSignature | 
   })
 }
 
-const callableResultType = (declaration: DeclarationFact): SemanticType | undefined => {
+const callableResultType = (declaration: SourceCallable): SemanticType | undefined => {
   if (declaration.returnType._tag !== 'Resolved') return undefined
   if (declaration.functionKind === 'Ordinary') return declaration.returnType.type
   return Type.effect(
@@ -3420,15 +3509,27 @@ const callableResultType = (declaration: DeclarationFact): SemanticType | undefi
 const callableTypeOfReference = (reference: CallReferenceFact): Type.Callable | undefined => {
   if (reference._tag === 'ResolvedBuiltin')
     return Type.callable(reference.parameters, reference.result)
-  if (reference._tag !== 'Resolved') return undefined
-  const parameters = reference.declaration.parameters.flatMap((parameter) =>
+  const callable = sourceCallable(reference)
+  if (callable === undefined) return undefined
+  const parameters = callable.parameters.flatMap((parameter) =>
     parameter.declaredType._tag === 'Resolved' ? [parameter.declaredType.type] : [],
   )
-  const result = callableResultType(reference.declaration)
-  return parameters.length === reference.declaration.parameters.length && result !== undefined
+  const result = callableResultType(callable)
+  return parameters.length === callable.parameters.length && result !== undefined
     ? Type.callable(parameters, result)
     : undefined
 }
+
+const serviceOperation = (
+  service: DeclarationIndex.ServiceFact,
+  spelling_: string,
+): DeclarationIndex.ServiceOperationFact | undefined =>
+  service.operations.find(
+    (operation) =>
+      operation.state._tag === 'Unique' &&
+      operation.name._tag === 'Present' &&
+      operation.name.spelling === spelling_,
+  )
 
 const resolvedFunctionReference = (
   source: SourceFile.SourceFile,
@@ -4379,6 +4480,30 @@ const analyzeOperatorExpression = (
     )
   }
   const selectedFirstType = argumentsResult.facts.at(0)?.type
+  const genericInterface =
+    selectedFirstType?._tag === 'Available' && Type.isParameter(selectedFirstType.type)
+      ? declaration.typeParameters.some((parameter) => {
+          if (!Type.equals(parameter.type, selectedFirstType.type) || parameter.bound === undefined)
+            return false
+          const module =
+            declaration.canonical._tag === 'Canonical'
+              ? declaration.canonical.id.module
+              : declaration.id.sourceId
+          const interface_ = resolution.index.modules
+            .find((candidate) => candidate.module === module)
+            ?.interfaces.find(
+              (candidate) =>
+                candidate.name._tag === 'Present' && candidate.name.spelling === parameter.bound,
+            )
+          const operationName = `${operator.slice(0, 1).toLowerCase()}${operator.slice(1)}`
+          return (
+            interface_?.operations.some(
+              (candidate) =>
+                candidate.name._tag === 'Present' && candidate.name.spelling === operationName,
+            ) ?? false
+          )
+        })
+      : false
   const selectedActor: Operator.Actor =
     selectedFirstType?._tag === 'Available' && Scalar.isSpelling(selectedFirstType.type)
       ? selectedFirstType.type
@@ -4386,14 +4511,19 @@ const analyzeOperatorExpression = (
   const target = Operator.target(operator, selectedActor)
   const signature = builtinSignature(target.actor, target.operation)
   if (signature === undefined) throw new RangeError('Compiler operator table is inconsistent')
+  const genericType = selectedFirstType?._tag === 'Available' ? selectedFirstType.type : undefined
+  const operatorParameters = genericInterface
+    ? Object.freeze(operandNodes.map(() => genericType ?? signature.result))
+    : signature.parameters
+  const operatorResult = genericInterface ? (genericType ?? signature.result) : signature.result
   const reference: CallReferenceFact = Object.freeze({
     _tag: 'ResolvedBuiltin',
     spelling: `${target.actor}.${target.operation}`,
     token: operatorToken,
     actor: target.actor,
     operation: signature.operation,
-    parameters: signature.parameters,
-    result: signature.result,
+    parameters: operatorParameters,
+    result: operatorResult,
   })
   const contract = analyzeCallContract(
     node,
@@ -4403,7 +4533,7 @@ const analyzeOperatorExpression = (
   )
   const expressionType =
     contract.fact._tag === 'Compatible'
-      ? availableExpressionType(signature.result)
+      ? availableExpressionType(operatorResult)
       : unavailableExpressionType
   return Object.freeze({
     fact: Object.freeze({
@@ -5378,7 +5508,7 @@ function analyzeExpression(
       return analyzeBuiltinCall(source, node, argumentsResult, callTypeArguments, resolution)
     const qualifier = spelling(source, qualifierToken)
     const member = spelling(source, memberToken)
-    if (qualifier === 'Place' && member === 'replace') {
+    if (intrinsicOperationTarget(source, node)?.rule._tag === 'PlaceRule') {
       return analyzePlaceReplace(source, node, declarations, declaration, scope, resolution)
     }
     const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
@@ -5394,8 +5524,80 @@ function analyzeExpression(
           argumentsResult,
           callTypeArguments,
           undefined,
+          resolution.index,
         )
       return analyzeBuiltinCall(source, node, argumentsResult, callTypeArguments, resolution)
+    }
+    if (
+      qualifierLookup._tag === 'Resolved' &&
+      qualifierLookup.declaration._tag === 'ServiceDeclaration'
+    ) {
+      const operation = serviceOperation(qualifierLookup.declaration, member)
+      const diagnostic =
+        operation === undefined
+          ? Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
+          : undefined
+      const reference: CallReferenceFact =
+        operation === undefined
+          ? Object.freeze({
+              _tag: 'Missing',
+              spelling: `${qualifier}.${member}`,
+              token: memberToken,
+              ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
+            })
+          : Object.freeze({
+              _tag: 'ResolvedServiceOperation',
+              spelling: `${qualifier}.${member}`,
+              token: memberToken,
+              service: qualifierLookup.declaration,
+              operation,
+            })
+      return finishDeclarationCall(
+        node,
+        reference,
+        argumentsResult,
+        callTypeArguments,
+        diagnostic,
+        resolution.index,
+      )
+    }
+    if (
+      qualifierLookup._tag === 'Resolved' &&
+      (qualifierLookup.declaration._tag === 'StructDeclaration' ||
+        qualifierLookup.declaration._tag === 'InterfaceDeclaration') &&
+      qualifierLookup.declaration.canonical._tag === 'Canonical'
+    ) {
+      const actorModule = qualifierLookup.declaration.canonical.id.module
+      const memberLookup = DeclarationIndex.lookup(resolution.index, actorModule, member)
+      const candidate = memberLookup._tag === 'Resolved' ? memberLookup.declaration : undefined
+      const diagnostic =
+        candidate === undefined
+          ? Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
+          : candidate.visibility === 'Private'
+            ? Diagnostic.inaccessibleImportedMember(actorModule, member, memberToken.span)
+            : undefined
+      const reference: CallReferenceFact =
+        candidate !== undefined && candidate.visibility === 'Public'
+          ? Object.freeze({
+              _tag: 'Resolved',
+              spelling: `${qualifier}.${member}`,
+              token: memberToken,
+              declaration: candidate,
+            })
+          : Object.freeze({
+              _tag: 'Missing',
+              spelling: `${qualifier}.${member}`,
+              token: memberToken,
+              ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
+            })
+      return finishDeclarationCall(
+        node,
+        reference,
+        argumentsResult,
+        callTypeArguments,
+        diagnostic,
+        resolution.index,
+      )
     }
     if (qualifierLookup._tag === 'Namespace') {
       const memberLookup = DeclarationIndex.lookup(resolution.index, qualifierLookup.module, member)
@@ -5424,7 +5626,14 @@ function analyzeExpression(
               token: memberToken,
               ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
             })
-      return finishDeclarationCall(node, reference, argumentsResult, callTypeArguments, diagnostic)
+      return finishDeclarationCall(
+        node,
+        reference,
+        argumentsResult,
+        callTypeArguments,
+        diagnostic,
+        resolution.index,
+      )
     }
     const diagnostic =
       qualifierLookup._tag === 'Missing' || qualifierLookup._tag === 'Resolved'
@@ -5446,7 +5655,14 @@ function analyzeExpression(
           ? {}
           : { cause: inheritedCause }),
     })
-    return finishDeclarationCall(node, reference, argumentsResult, callTypeArguments, diagnostic)
+    return finishDeclarationCall(
+      node,
+      reference,
+      argumentsResult,
+      callTypeArguments,
+      diagnostic,
+      resolution.index,
+    )
   }
 
   const token = identifiers.at(0)
@@ -5553,11 +5769,18 @@ function analyzeExpression(
     hasAvailableCallSyntax(node),
     callTypeArguments,
   )
+  const constraintDiagnostics = interfaceConstraintDiagnostics(
+    reference,
+    callContract,
+    resolution.index,
+    node.span,
+  )
   const syntaxAvailable = hasAvailableCallSyntax(node)
   const expressionType =
     syntaxAvailable &&
     reference._tag === 'Resolved' &&
-    reference.declaration.returnType._tag === 'Resolved'
+    reference.declaration.returnType._tag === 'Resolved' &&
+    constraintDiagnostics.length === 0
       ? availableExpressionType(
           (() => {
             const substitution =
@@ -5615,6 +5838,7 @@ function analyzeExpression(
       ...argumentsResult.diagnostics,
       ...callTypeArguments.diagnostics,
       ...callContract.diagnostics,
+      ...constraintDiagnostics,
     ]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
   })
@@ -5626,6 +5850,7 @@ const finishDeclarationCall = (
   argumentsResult: ArgumentsResult,
   callTypeArguments: CallTypeArgumentsResult,
   diagnostic: Diagnostic.Diagnostic | undefined,
+  index: DeclarationIndex.Index,
 ): ExpressionResult => {
   if (
     reference._tag === 'Resolved' &&
@@ -5647,18 +5872,26 @@ const finishDeclarationCall = (
     hasAvailableCallSyntax(node),
     callTypeArguments,
   )
+  const constraintDiagnostics = interfaceConstraintDiagnostics(
+    reference,
+    callContract,
+    index,
+    node.span,
+  )
+  const callable = sourceCallable(reference)
   const expressionType =
     hasAvailableCallSyntax(node) &&
-    reference._tag === 'Resolved' &&
-    reference.declaration.returnType._tag === 'Resolved'
+    callable !== undefined &&
+    callable.returnType._tag === 'Resolved' &&
+    constraintDiagnostics.length === 0
       ? availableExpressionType(
           (() => {
             const substitution =
               callContract.fact._tag === 'Compatible'
                 ? callContract.fact.substitution
                 : new Map<string, Type.GenericArgument>()
-            const success = Type.substitute(reference.declaration.returnType.type, substitution)
-            if (reference.declaration.functionKind !== 'Effect')
+            const success = Type.substitute(callable.returnType.type, substitution)
+            if (callable.functionKind !== 'Effect')
               return Type.isEffect(success)
                 ? Type.effect(
                     success.success,
@@ -5672,19 +5905,19 @@ const finishDeclarationCall = (
             return Type.substitute(
               Type.effect(
                 success,
-                reference.declaration.failureRow.failures.flatMap((failure) => {
+                callable.failureRow.failures.flatMap((failure) => {
                   const specialized = Type.substitute(failure, substitution)
                   return Type.isNominal(specialized) ? [specialized] : []
                 }),
                 effectCaptureAccess(argumentsResult.facts),
-                reference.declaration.requirementRow.requirements.flatMap((requirement) => {
+                callable.requirementRow.requirements.flatMap((requirement) => {
                   const capability = Type.substitute(requirement.capability, substitution)
                   return Type.isNominal(capability)
                     ? [Object.freeze({ ...requirement, capability })]
                     : []
                 }),
-                reference.declaration.failureRow.parameters,
-                reference.declaration.requirementRow.parameters,
+                callable.failureRow.parameters,
+                callable.requirementRow.parameters,
               ),
               substitution,
             )
@@ -5708,6 +5941,7 @@ const finishDeclarationCall = (
       ...argumentsResult.diagnostics,
       ...callTypeArguments.diagnostics,
       ...callContract.diagnostics,
+      ...constraintDiagnostics,
     ]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
   })
@@ -6295,20 +6529,19 @@ const analyzeFunctionBody = (
     Object.freeze({ parameters: declaration.parameters, bindings: [], patternBindings: [] }),
   )
 
-  const trailing = [...statements]
-    .reverse()
-    .find(
-      (statement): statement is Extract<StatementFact, { _tag: 'ReturnStatement' }> =>
-        statement._tag === 'ReturnStatement',
-    )
-  const terminal =
-    trailing ??
-    [...statements]
-      .reverse()
-      .find(
-        (statement): statement is Extract<StatementFact, { _tag: 'FailStatement' }> =>
-          statement._tag === 'FailStatement',
-      )
+  type Terminal = Extract<StatementFact, { _tag: 'ReturnStatement' | 'FailStatement' }>
+  const terminalOf = (body: ReadonlyArray<StatementFact>): Terminal | undefined => {
+    for (const statement of [...body].reverse()) {
+      if (statement._tag === 'ReturnStatement' || statement._tag === 'FailStatement')
+        return statement
+      if (statement._tag === 'UnsafeStatement') {
+        const nested = terminalOf(statement.statements)
+        if (nested !== undefined) return nested
+      }
+    }
+    return undefined
+  }
+  const terminal = terminalOf(statements)
   if (terminal === undefined)
     throw new RangeError('Semantic analysis expected a terminal statement')
   const expression = terminal.expression
@@ -7138,6 +7371,80 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
     })
   }
   if (
+    fact.reference._tag === 'ResolvedServiceOperation' &&
+    fact.reference.service.canonical._tag === 'Canonical' &&
+    fact.reference.operation.name._tag === 'Present' &&
+    fact.contract._tag === 'Compatible' &&
+    fact.type._tag === 'Available' &&
+    Type.isEffect(fact.type.type)
+  ) {
+    const serviceArguments = fact.contract.typeArguments
+      .slice(0, fact.reference.service.typeParameters.length)
+      .filter(Type.isTypeArgument)
+    const service = Type.nominal(
+      fact.reference.service.canonical.id.module,
+      fact.reference.service.canonical.id.name,
+      serviceArguments,
+    )
+    const requirement = fact.type.type.requirements.find((candidate) =>
+      Type.equals(candidate.capability, service),
+    )
+    if (requirement === undefined)
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    const substitution = fact.contract.substitution
+    const target = fact.reference.operation
+    return Object.freeze({
+      _tag: 'ServiceEffectConstruct',
+      service,
+      operation: fact.reference.operation.name.spelling,
+      role: requirement.role,
+      access: requirement.access,
+      typeArguments: fact.contract.typeArguments,
+      arguments: Object.freeze(
+        fact.arguments.map((argument, ordinal) => {
+          const parameter = target.parameters.at(ordinal)
+          const borrowId: Hir.BorrowId | undefined =
+            argument.expression._tag === 'Borrow' &&
+            argument.expression.formation._tag !== 'Unavailable'
+              ? Object.freeze({
+                  _tag: 'BorrowId',
+                  function: argument.id.function,
+                  callSpan: argument.id.callSpan,
+                  ordinal,
+                })
+              : undefined
+          return parameter?.declaredType._tag === 'Resolved'
+            ? hirExpectedExpression(
+                argument.expression,
+                Type.substitute(parameter.declaredType.type, substitution),
+                'Argument',
+                parameter.syntax.span,
+                borrowId,
+              )
+            : hirExpression(argument.expression, borrowId)
+        }),
+      ),
+      loanEnds: Object.freeze(
+        fact.arguments.flatMap(
+          (argument, ordinal): ReadonlyArray<Hir.BorrowId> =>
+            argument.expression._tag === 'Borrow' &&
+            argument.expression.formation._tag !== 'Unavailable'
+              ? [
+                  Object.freeze({
+                    _tag: 'BorrowId',
+                    function: argument.id.function,
+                    callSpan: argument.id.callSpan,
+                    ordinal,
+                  }),
+                ]
+              : [],
+        ),
+      ),
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (
     fact.reference._tag === 'Resolved' &&
     fact.reference.declaration.canonical._tag === 'Canonical' &&
     fact.contract._tag === 'Compatible' &&
@@ -7217,6 +7524,19 @@ const hirExpectedExpression = (
   expectedAt: SourceSpan.SourceSpan,
   borrow?: Hir.BorrowId,
 ): Hir.Expression => {
+  if (
+    fact._tag === 'Integer' &&
+    fact.integer._tag === 'Available' &&
+    contextualIntegerCompatible(fact, target) &&
+    typeof target === 'string' &&
+    Scalar.isIntegerSpelling(target)
+  )
+    return Object.freeze({
+      _tag: 'IntegerLiteral',
+      value: fact.integer.value,
+      type: target,
+      span: fact.syntax.span,
+    })
   const source = hirExpression(fact, borrow)
   if (source._tag === 'Unavailable') return source
   const compatibility = TypeCompatibility.check(source.type, target)

@@ -180,21 +180,31 @@ failure or requirement row and has an allocation-free emergency reporting path.
 _Avoid_: fallible main, runtime launcher
 
 **Path**:
-A nominal owned platform-native filesystem path, distinct from both `String` and source-module
-identity. Bootstrap Unix paths preserve arbitrary non-NUL bytes; rendering a path as text uses an
-explicit deterministic escape rather than silent replacement, and filesystem operations never
-consult a hidden current directory.
-_Avoid_: path string, implicit working-directory path
+A nominal owned portable filesystem path, distinct from both `String`, source-module identity, and
+any host-native path. Its normalized component model and explicit root semantics have the same
+meaning for native providers, deterministic in-memory providers, and browser virtual file systems.
+File-system operations never consult a hidden current directory. Converting to a host-native path
+is a provider responsibility and may fail when the portable path cannot be represented honestly.
+_Avoid_: path string, OS path, implicit working-directory path
 
 **Path slice**:
-A lexical borrowed view of a `Path` used by path-component operations without claiming its bytes
-are UTF-8 text.
+A lexical borrowed view of a `Path` used by normalized path-component operations without treating
+the value as an arbitrary String.
 _Avoid_: path substring
 
+**Platform path**:
+A nominal host-specific path value exposed only by a lower-level platform file-system service.
+Native Unix providers may preserve arbitrary non-NUL bytes and other providers may use a different
+representation. Rendering uses deterministic escaping rather than silent replacement. Portable
+programs use `Path`; `PlatformPath` is an explicit loss of cross-host portability.
+_Avoid_: ordinary path, portable path
+
 **Path resolution**:
-Structured host facts for an explicit path: its exact absolute spelling, final entry kind, and
-whether resolution traversed a symbolic link. The file-system service reports these facts; callers
-such as the source loader impose their own canonicality and admissibility policy.
+Structured provider facts for an explicit portable path: its normalized resolved path, final entry
+kind, and whether resolution crossed a provider-defined indirection such as a symbolic link. The
+portable file-system service reports only facts with stable cross-provider meaning. A lower-level
+platform service may expose exact host spelling and richer native metadata; callers such as the
+source loader impose their own canonicality and admissibility policy.
 _Avoid_: canonical source path, implicit realpath policy
 
 **Vector**:
@@ -279,20 +289,29 @@ The private compiler-versioned C boundary beneath bootstrap host-service impleme
 uses fixed-width scalars, raw pointers with explicit lengths, transient integer handles, caller-
 owned output buffers, and numeric status codes; it never retains Silk pointers, returns C-owned
 objects, calls arbitrary Silk callbacks, unwinds across the boundary, or exposes a public FFI.
-Its surface is limited to aligned allocation, path and whole-file primitives, unique temporary
+Its surface is limited to aligned allocation, host-path and whole-file primitives, unique temporary
 directories, redirected synchronous child execution, standard-stream writes, monotonic time, and
-startup handoff; higher-level values and typed semantics remain in Silk. Each required host compiles
-a matching implementation of the same semantic ABI into a toolchain-bundled runtime object, with
-private compiler-versioned symbols and no independent compatibility promise.
+startup handoff; higher-level portable values and typed semantics remain in Silk. It is one native
+implementation boundary, not the definition of `FileSystem` or `Logger`. Each required host
+compiles a matching implementation of the same semantic ABI into a toolchain-bundled runtime
+object, with private compiler-versioned symbols and no independent compatibility promise.
 _Avoid_: C runtime library, platform SDK
 
 **File-system service**:
-The narrow bootstrap host capability for explicit path-based file, directory, and temporary-
-artifact operations. Public bootstrap I/O reads and writes whole-file `Bytes`; native handles,
-seeking, streaming, mapping, buffering, and locking remain private or deferred. The capability does
-not imply child-process execution, terminal output, a hidden working directory, or environment
-lookup.
-_Avoid_: platform service, ambient filesystem
+The portable capability for explicit path-based file and directory operations. Public I/O reads and
+writes complete `Bytes` values and exposes only semantics that a native provider, an in-memory test
+provider, and a browser virtual file system can implement honestly. It has no native handles,
+implicit current directory, process environment, terminal behavior, mapping, locking, or
+platform-specific metadata. Programs require it explicitly and remain unchanged when a different
+provider is selected.
+_Avoid_: ambient filesystem, native filesystem, process filesystem
+
+**Platform file-system service**:
+The optional lower-level host capability for programs that deliberately need native paths, handles,
+seeking, mapping, locking, platform metadata, or other behavior without a portable contract. A
+portable `FileSystem` provider may be implemented over it, but ordinary programs and standard-
+library APIs do not require it. Depending on this service is an explicit portability decision.
+_Avoid_: default filesystem, FileSystem implementation detail exposed as the common API
 
 **File error**:
 The owned typed failure for a file-system operation, retaining its operation, explicit path, a
@@ -323,6 +342,22 @@ offers only blocking all-or-failure byte writes, with broken pipes represented b
 failure. Formatting and diagnostic presentation happen above the boundary; the service does not
 imply terminal control, color detection, flushing, logging, or interactive input.
 _Avoid_: console service, terminal service
+
+**Log event**:
+One complete semantic observability message submitted atomically to a Logger. It carries structured
+meaning owned by the logging API rather than a sequence of stream fragments. The first bootstrap
+surface may be intentionally small, but its boundary must admit later level, annotation, span, and
+OpenTelemetry context without treating rendered bytes as the canonical event.
+_Avoid_: stdout bytes, log line fragment, stream chunk
+
+**Logger service**:
+The portable explicit capability consumed by `Effect.log`. A Logger receives complete `LogEvent`
+values in call order and decides whether to render them to standard output, retain them in memory,
+forward them to browser or OpenTelemetry facilities, fan them out, or discard them according to an
+explicit provider policy. Logging is not `StandardStreams.writeAll`, does not expose byte-at-a-time
+appends, and remains an Effect requirement until provided. The first live provider renders complete
+events through `StandardStreams`; an in-memory provider proves host independence.
+_Avoid_: stdout logger intrinsic, console service, ambient global logger
 
 **Monotonic-clock service**:
 The narrow bootstrap host capability for measuring elapsed compiler-phase time without exposing
@@ -554,6 +589,15 @@ behavior. A conforming operation may have smaller failure and requirement rows o
 needs than the interface operation, but never stronger ones.
 _Avoid_: extension implementation, orphan conformance, method injection
 
+**Intrinsic**:
+One irreducible compiler operation exposed only through the sealed `Intrinsic` namespace. An
+intrinsic is the smallest target-neutral mechanism needed to build a feature in ordinary Silk
+source: concrete scalar operations, representation queries, ownership state transitions, Effect
+substrate, language-only place operations, or audited platform crossings. Public policy,
+validation, generic selection, services, and safe reusable APIs are never intrinsic merely for
+convenience.
+_Avoid_: standard-library builtin, privileged actor, compiler-known service
+
 **Raw pointer**:
 A typed, non-null, non-owning machine address whose existence alone grants no lifetime or access
 right. Holding one is inert in safe code; interpreting or manipulating its address requires an
@@ -565,13 +609,14 @@ An `if` condition that borrows a value, tests a refutable pattern, and binds the
 member without treating the value as truthy.
 _Avoid_: truthiness test, implicit case check
 
-**Service capability**:
-A nominal compile-time interface named in a function's requirement row. Implementations declare
+**Service**:
+A nominal source-defined contract named in a function's requirement row. Implementations declare
 conformance explicitly; provisioning supplies a runtime value through statically known arguments or
 environment slots rather than runtime tag lookup. A lexical environment has at most one current
-implementation of each capability-role pair. Capability-and-role-qualified operation calls use
-that implementation implicitly; allocation is an ordinary service capability.
-_Avoid_: global service, injected object
+implementation of each service-role pair. Service-and-role-qualified operation calls use that
+implementation implicitly; allocation is an ordinary service. Unlike an ordinary interface, a
+service creates Effect requirements and can be replaced lexically at runtime.
+_Avoid_: capability declaration, ordinary interface, global service, injected object
 
 **Service role**:
 A nominal compile-time marker distinguishing one statically known use of a service capability from

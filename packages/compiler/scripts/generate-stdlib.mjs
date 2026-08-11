@@ -18,10 +18,24 @@ const sourceLiteral = (source) => {
   return `'${JSON.stringify(source).slice(1, -1).replaceAll('\\"', '"').replaceAll("'", "\\'")}'`
 }
 
+const aliasesLiteral = (aliases) => {
+  const quoted = aliases.map((alias) => `'${alias}'`)
+  const inline = `[${quoted.join(', ')}]`
+  if (inline.length <= 80) return inline
+  return `[\n${quoted.map((alias) => `      ${alias},`).join('\n')}\n    ]`
+}
+
 for (const [index, entry] of manifest.entries()) {
   if (
     typeof entry?.module !== 'string' ||
     typeof entry?.path !== 'string' ||
+    (entry.namespace !== undefined && typeof entry.namespace !== 'string') ||
+    (entry.namespace !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.namespace)) ||
+    (entry.aliases !== undefined &&
+      (!Array.isArray(entry.aliases) ||
+        entry.aliases.some(
+          (alias) => typeof alias !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias),
+        ))) ||
     !canonicalModule.test(entry.module) ||
     entry.path !== `${entry.module}.silk`
   ) {
@@ -38,7 +52,7 @@ const entries = modules
     (entry) => `  {
     module: '${entry.module}',
     path: '${entry.path}',
-    source:
+    ${entry.namespace === undefined ? '' : `namespace: '${entry.namespace}',\n    `}${entry.aliases === undefined ? '' : `aliases: ${aliasesLiteral(entry.aliases)},\n    `}source:
       ${sourceLiteral(entry.source)},
   },`,
   )

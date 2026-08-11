@@ -4,6 +4,7 @@ import { pipe } from 'effect/Function'
 import * as Analysis from '../src/Analysis.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as Elaboration from '../src/Elaboration.js'
+import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -226,8 +227,8 @@ it('rejects heterogeneous callable joins and unknown-sized owned callable return
 struct Second {}
 fn choose(input: First | Second) -> fn(i32) -> i32 {
   return match move input {
-    First {} => i32.add(1)
-    Second {} => i32.add(2)
+    First {} => Intrinsic.i32Add(1)
+    Second {} => Intrinsic.i32Add(2)
   }
 }`,
   )
@@ -372,7 +373,7 @@ effect fn work() -> i32 ? &Clock@Left | &Clock@Right { return 42 }
 fn main() -> i32 {
   let left = Clock {}
   let right = Clock {}
-  let recipe = work() |> Effect.bindRequirement(&left, @Left) |> Effect.bindRequirement(&right, @Right)
+  let recipe = work() |> Intrinsic.bindRequirement(&left, @Left) |> Intrinsic.bindRequirement(&right, @Right)
   return run recipe
 }`,
   )
@@ -406,7 +407,7 @@ it('requires an exclusive provider for an exclusive capability requirement', () 
 effect fn allocate() -> i32 ? &mut Allocator { return 42 }
 fn main() -> i32 {
   let allocator = Allocator {}
-  let recipe = allocate() |> Effect.bindRequirement(&allocator)
+  let recipe = allocate() |> Intrinsic.bindRequirement(&allocator)
   return 0
 }`,
   )
@@ -466,7 +467,7 @@ it('owns a moved provider in a take-once Effect wrapper', () => {
 effect fn read() -> i32 ? &mut Clock { return 42 }
 fn main() -> i32 {
   let clock = Clock {}
-  let recipe = read() |> Effect.bindRequirement(move clock)
+  let recipe = read() |> Intrinsic.bindRequirement(move clock)
   return 0
 }`,
   )
@@ -509,37 +510,39 @@ fn main() -> i32 {
   }),
 )
 
-it('defines allocation as an exclusive capability Effect with an affine result', () => {
-  const result = analyzeText(
-    'allocation://capability-contract',
-    `fn allocate(layout: Layout) -> Effect<Allocation ! OutOfMemory ? &mut Allocator> {
+it.effect('defines allocation as an exclusive service Effect with an affine result', () =>
+  Effect.gen(function* () {
+    const result = yield* analyzeWithStdlib(
+      'allocation://capability-contract',
+      `fn allocate(layout: Layout) -> Effect<Allocation ! OutOfMemory ? &mut Allocator> {
   return Allocator.allocate(move layout)
 }
 fn main() -> i32 {
   let allocator = SystemAllocator.make()
   return 42
 }`,
-  )
-  const allocation = result.functions.at(0)?.declaration.returnType
-  const operation = result.functions.at(0)?.returnedExpression.type
+    )
+    const allocation = result.functions.at(0)?.declaration.returnType
+    const operation = result.functions.at(0)?.returnedExpression.type
 
-  assert.deepEqual(result.diagnostics, [])
-  assert.strictEqual(allocation?._tag, 'Resolved')
-  if (allocation?._tag !== 'Resolved' || !Type.isEffect(allocation.type)) return
-  assert.ok(Type.equals(allocation.type.success, Type.allocation))
-  assert.deepEqual(allocation.type.failures.map(Type.encode), ['silk/core.OutOfMemory'])
-  assert.deepEqual(
-    allocation.type.requirements.map((requirement) => ({
-      capability: Type.encode(requirement.capability),
-      role: requirement.role,
-      access: requirement.access,
-    })),
-    [{ capability: 'silk/core.Allocator', role: 'DefaultRole', access: 'Exclusive' }],
-  )
-  assert.strictEqual(operation?._tag, 'Available')
-  if (operation?._tag === 'Available' && Type.isEffect(operation.type))
-    assert.strictEqual(operation.type.access, 'Exclusive')
-})
+    assert.deepEqual(result.diagnostics, [])
+    assert.strictEqual(allocation?._tag, 'Resolved')
+    if (allocation?._tag !== 'Resolved' || !Type.isEffect(allocation.type)) return
+    assert.ok(Type.equals(allocation.type.success, Type.allocation))
+    assert.deepEqual(allocation.type.failures.map(Type.encode), ['silk/core.OutOfMemory'])
+    assert.deepEqual(
+      allocation.type.requirements.map((requirement) => ({
+        capability: Type.encode(requirement.capability),
+        role: requirement.role,
+        access: requirement.access,
+      })),
+      [{ capability: 'silk/core.Allocator', role: 'DefaultRole', access: 'Exclusive' }],
+    )
+    assert.strictEqual(operation?._tag, 'Available')
+    if (operation?._tag === 'Available' && Type.isEffect(operation.type))
+      assert.strictEqual(operation.type.access, 'Take')
+  }),
+)
 
 it.effect('provides Allocator through nominal system and user-authored witnesses', () =>
   Effect.gen(function* () {
@@ -563,6 +566,9 @@ pub fn main() -> i32 { return 0 }`,
     const custom = yield* analyzeWithStdlib(
       'allocation://custom-provider',
       `struct TestAllocator { remaining: i32 }
+effect fn allocate(self: &mut TestAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+  return run Intrinsic.systemAllocationAcquire(move layout)
+}
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }
 effect fn use(layout: Layout) -> i32 ! OutOfMemory {
   let mut allocator = TestAllocator { remaining: 1 }
@@ -1704,7 +1710,7 @@ it('canonicalizes operator facts with typed builtin operand mappings', () => {
 it('applies pipeline callables left-to-right without inserted call arguments', () => {
   const result = analyzeText(
     'fixture://pipeline.silk',
-    'pub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }',
+    'pub fn main() -> i32 { return 2 |> Intrinsic.i32Add(3) |> Intrinsic.i32Multiply(4) }',
   )
   const returned = functionAt(result, 0).returnedExpression
 
@@ -1731,7 +1737,7 @@ it('resolves named function values, stored sections, and callable bindings', () 
     `fn identity(value: i32) -> i32 { return value }
 fn main() -> i32 {
   let named = identity
-  let plusTwo = i32.add(2)
+  let plusTwo = Intrinsic.i32Add(2)
   return named(plusTwo(40))
 }`,
   )
@@ -1873,7 +1879,7 @@ fn main() -> i32 { return run work() |> Effect.retry(2) }`,
     const grouped = analyzeText(
       'fixture://grouped-run-callable.silk',
       `effect fn work() -> i32 { return 1 }
-fn main() -> i32 { return (run work()) |> i32.add(1) }`,
+fn main() -> i32 { return (run work()) |> Intrinsic.i32Add(1) }`,
     )
     const nested = analyzeText(
       'fixture://nested-run-callable.silk',
@@ -1966,17 +1972,17 @@ it('specializes raw storage operations and requires lexical unsafe authority', (
   const accepted = analyzeText(
     'fixture://raw-storage-accepted.silk',
     `fn build(allocation: Allocation, count: usize) -> RawBuffer<i32> {
-  unsafe { return RawBuffer.from<i32>(move allocation, count) }
+  unsafe { return Intrinsic.rawBufferFrom<i32>(move allocation, count) }
 }
 fn destroy(buffer: RawBuffer<i32>) -> () {
   let mut owner = move buffer
-  unsafe { return Slot.drop(RawBuffer.slot(&mut owner, 0)) }
+  unsafe { return Intrinsic.slotDrop(Intrinsic.rawBufferSlot(&mut owner, 0)) }
 }`,
   )
   const rejected = analyzeText(
     'fixture://raw-storage-safe.silk',
     `fn build(allocation: Allocation, count: usize) -> RawBuffer<i32> {
-  return RawBuffer.from<i32>(move allocation, count)
+  return Intrinsic.rawBufferFrom<i32>(move allocation, count)
 }`,
   )
 
@@ -1993,7 +1999,7 @@ it('allows a shared value reborrow from a shared pattern field', () => {
     'fixture://shared-pattern-field.silk',
     `struct Box { buffer: RawBuffer<i32> }
 fn read(buffer: &RawBuffer<i32>) -> i32 {
-  unsafe { return RawBuffer.read<i32>(buffer, 0) }
+  unsafe { return Intrinsic.rawBufferRead<i32>(buffer, 0) }
 }
 fn inspect(input: Box) -> i32 {
   return match &input { Box { buffer } => read(&buffer) }
@@ -2058,5 +2064,27 @@ fn main() -> () { make() return () }`,
   assert.deepEqual(
     unavailable.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0004'],
+  )
+})
+
+it('elaborates source service operations as declaration-shaped effect requirements', () => {
+  const result = analyzeText(
+    'service://call',
+    `service Logger {
+  effect fn value() -> i32 ? &Logger
+}
+effect fn main() -> i32 ? &Logger { return run Logger.value() }`,
+  )
+
+  assert.deepEqual(result.diagnostics, [])
+  const returned = functionAt(result, 0).returnedExpression
+  assert.strictEqual(returned._tag, 'Run')
+  if (returned._tag !== 'Run') return
+  assert.strictEqual(returned.subject._tag, 'Call')
+  if (returned.subject._tag !== 'Call') return
+  assert.strictEqual(returned.subject.reference._tag, 'ResolvedServiceOperation')
+  assert.include(
+    Hir.encode(result.hir),
+    'service-call service://call.Logger.value@DefaultRole:shared',
   )
 })

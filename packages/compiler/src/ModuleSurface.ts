@@ -234,6 +234,43 @@ const struct = (value: DeclarationIndex.StructFact): string =>
     structDependency(value.dependency),
   ])
 
+const serviceOperationState = (value: DeclarationIndex.ServiceOperationState): string => {
+  switch (value._tag) {
+    case 'Unique':
+      return record('UniqueServiceOperation', [value.id.name])
+    case 'Duplicate':
+      return record('DuplicateServiceOperation', [value.original.name])
+    case 'Unidentified':
+      return record('UnidentifiedServiceOperation')
+    default:
+      return exhaustive(value)
+  }
+}
+
+const serviceOperation = (value: DeclarationIndex.ServiceOperationFact): string =>
+  record('ServiceOperation', [
+    declarationIdOrdinal(value.id),
+    serviceOperationState(value.state),
+    value.functionKind,
+    array(value.typeParameters.map(typeParameter)),
+    number(value.parameterCount),
+    array(value.parameters.map(parameter)),
+    name(value.name),
+    declaredType(value.returnType),
+    failureRow(value.failureRow),
+    requirementRow(value.requirementRow),
+  ])
+
+const service = (value: DeclarationIndex.ServiceFact | DeclarationIndex.InterfaceFact): string =>
+  record(value._tag, [
+    declarationIdOrdinal(value.id),
+    canonicalState(value.canonical),
+    value.visibility,
+    array(value.typeParameters.map(typeParameter)),
+    name(value.name),
+    array(value.operations.map(serviceOperation)),
+  ])
+
 const constantLiteral = (value: DeclarationIndex.ConstantLiteralFact): string => {
   switch (value._tag) {
     case 'BooleanLiteral':
@@ -266,6 +303,10 @@ const member = (value: DeclarationIndex.MemberFact): string => {
       return declaration(value)
     case 'StructDeclaration':
       return struct(value)
+    case 'ServiceDeclaration':
+      return service(value)
+    case 'InterfaceDeclaration':
+      return service(value)
     case 'ConstantDeclaration':
       return constant(value)
     default:

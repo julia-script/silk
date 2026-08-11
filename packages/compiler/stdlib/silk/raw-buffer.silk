@@ -1,0 +1,19 @@
+/// Adopts an allocation as typed raw storage. The caller proves the count fits the allocation.
+pub fn from<T>(allocation: Allocation, count: usize) -> RawBuffer<T> {
+  unsafe { return Intrinsic.rawBufferFrom<T>(move allocation, count) }
+}
+
+/// Selects one unchecked storage slot. The caller proves the index is in bounds.
+pub fn slot<T>(buffer: &mut RawBuffer<T>, index: usize) -> Slot<T> {
+  unsafe { return Intrinsic.rawBufferSlot<T>(buffer, index) }
+}
+
+/// Returns the element capacity recorded by a raw buffer.
+pub fn count<T>(buffer: &RawBuffer<T>) -> usize {
+  return Intrinsic.rawBufferCount<T>(buffer)
+}
+
+/// Reads an unchecked initialized element. The caller proves initialization and bounds.
+pub fn read<T>(buffer: &RawBuffer<T>, index: usize) -> T {
+  unsafe { return Intrinsic.rawBufferRead<T>(buffer, index) }
+}

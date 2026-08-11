@@ -1,0 +1,276 @@
+import silk.option { Option }
+
+/// Calls the concrete i32 negate primitive.
+pub fn negate(value: i32) -> i32 {
+  return Intrinsic.i32Negate(value)
+}
+
+/// Calls the concrete i32 wrappingNegate primitive.
+pub fn wrappingNegate(value: i32) -> i32 {
+  return Intrinsic.i32WrappingNegate(value)
+}
+
+/// Calls the concrete i32 saturatingNegate primitive.
+pub fn saturatingNegate(value: i32) -> i32 {
+  return Intrinsic.i32SaturatingNegate(value)
+}
+
+/// Calls the concrete i32 toU8 primitive.
+pub fn toU8(value: i32) -> u8 {
+  return Intrinsic.i32ToU8(value)
+}
+
+/// Calls the concrete i32 checkedToU8 primitive.
+pub fn checkedToU8(value: i32) -> Option<u8> {
+  return Intrinsic.i32CheckedToU8(value)
+}
+
+/// Calls the concrete i32 toU16 primitive.
+pub fn toU16(value: i32) -> u16 {
+  return Intrinsic.i32ToU16(value)
+}
+
+/// Calls the concrete i32 checkedToU16 primitive.
+pub fn checkedToU16(value: i32) -> Option<u16> {
+  return Intrinsic.i32CheckedToU16(value)
+}
+
+/// Calls the concrete i32 toU32 primitive.
+pub fn toU32(value: i32) -> u32 {
+  return Intrinsic.i32ToU32(value)
+}
+
+/// Calls the concrete i32 checkedToU32 primitive.
+pub fn checkedToU32(value: i32) -> Option<u32> {
+  return Intrinsic.i32CheckedToU32(value)
+}
+
+/// Calls the concrete i32 toU64 primitive.
+pub fn toU64(value: i32) -> u64 {
+  return Intrinsic.i32ToU64(value)
+}
+
+/// Calls the concrete i32 checkedToU64 primitive.
+pub fn checkedToU64(value: i32) -> Option<u64> {
+  return Intrinsic.i32CheckedToU64(value)
+}
+
+/// Calls the concrete i32 toUsize primitive.
+pub fn toUsize(value: i32) -> usize {
+  return Intrinsic.i32ToUsize(value)
+}
+
+/// Calls the concrete i32 checkedToUsize primitive.
+pub fn checkedToUsize(value: i32) -> Option<usize> {
+  return Intrinsic.i32CheckedToUsize(value)
+}
+
+/// Calls the concrete i32 toI8 primitive.
+pub fn toI8(value: i32) -> i8 {
+  return Intrinsic.i32ToI8(value)
+}
+
+/// Calls the concrete i32 checkedToI8 primitive.
+pub fn checkedToI8(value: i32) -> Option<i8> {
+  return Intrinsic.i32CheckedToI8(value)
+}
+
+/// Calls the concrete i32 toI16 primitive.
+pub fn toI16(value: i32) -> i16 {
+  return Intrinsic.i32ToI16(value)
+}
+
+/// Calls the concrete i32 checkedToI16 primitive.
+pub fn checkedToI16(value: i32) -> Option<i16> {
+  return Intrinsic.i32CheckedToI16(value)
+}
+
+/// Calls the concrete i32 toI32 primitive.
+pub fn toI32(value: i32) -> i32 {
+  return Intrinsic.i32ToI32(value)
+}
+
+/// Calls the concrete i32 checkedToI32 primitive.
+pub fn checkedToI32(value: i32) -> Option<i32> {
+  return Intrinsic.i32CheckedToI32(value)
+}
+
+/// Calls the concrete i32 toI64 primitive.
+pub fn toI64(value: i32) -> i64 {
+  return Intrinsic.i32ToI64(value)
+}
+
+/// Calls the concrete i32 checkedToI64 primitive.
+pub fn checkedToI64(value: i32) -> Option<i64> {
+  return Intrinsic.i32CheckedToI64(value)
+}
+
+/// Calls the concrete i32 toIsize primitive.
+pub fn toIsize(value: i32) -> isize {
+  return Intrinsic.i32ToIsize(value)
+}
+
+/// Calls the concrete i32 checkedToIsize primitive.
+pub fn checkedToIsize(value: i32) -> Option<isize> {
+  return Intrinsic.i32CheckedToIsize(value)
+}
+
+/// Calls the concrete i32 toF32 primitive.
+pub fn toF32(value: i32) -> f32 {
+  return Intrinsic.i32ToF32(value)
+}
+
+/// Calls the concrete i32 toF64 primitive.
+pub fn toF64(value: i32) -> f64 {
+  return Intrinsic.i32ToF64(value)
+}
+
+/// Calls the concrete i32 add primitive.
+pub fn add(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32Add(left, right)
+}
+
+/// Calls the concrete i32 subtract primitive.
+pub fn subtract(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32Subtract(left, right)
+}
+
+/// Calls the concrete i32 multiply primitive.
+pub fn multiply(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32Multiply(left, right)
+}
+
+/// Calls the concrete i32 divide primitive.
+pub fn divide(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32Divide(left, right)
+}
+
+/// Calls the concrete i32 remainder primitive.
+pub fn remainder(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32Remainder(left, right)
+}
+
+/// Calls the concrete i32 bitAnd primitive.
+pub fn bitAnd(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32BitAnd(left, right)
+}
+
+/// Calls the concrete i32 bitOr primitive.
+pub fn bitOr(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32BitOr(left, right)
+}
+
+/// Calls the concrete i32 bitXor primitive.
+pub fn bitXor(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32BitXor(left, right)
+}
+
+/// Calls the concrete i32 bitNot primitive.
+pub fn bitNot(value: i32) -> i32 {
+  return Intrinsic.i32BitNot(value)
+}
+
+/// Calls the concrete i32 shiftLeft primitive.
+pub fn shiftLeft(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32ShiftLeft(left, right)
+}
+
+/// Calls the concrete i32 shiftRight primitive.
+pub fn shiftRight(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32ShiftRight(left, right)
+}
+
+/// Calls the concrete i32 rotateLeft primitive.
+pub fn rotateLeft(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32RotateLeft(left, right)
+}
+
+/// Calls the concrete i32 rotateRight primitive.
+pub fn rotateRight(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32RotateRight(left, right)
+}
+
+/// Calls the concrete i32 wrappingAdd primitive.
+pub fn wrappingAdd(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32WrappingAdd(left, right)
+}
+
+/// Calls the concrete i32 wrappingSubtract primitive.
+pub fn wrappingSubtract(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32WrappingSubtract(left, right)
+}
+
+/// Calls the concrete i32 wrappingMultiply primitive.
+pub fn wrappingMultiply(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32WrappingMultiply(left, right)
+}
+
+/// Calls the concrete i32 saturatingAdd primitive.
+pub fn saturatingAdd(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32SaturatingAdd(left, right)
+}
+
+/// Calls the concrete i32 saturatingSubtract primitive.
+pub fn saturatingSubtract(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32SaturatingSubtract(left, right)
+}
+
+/// Calls the concrete i32 saturatingMultiply primitive.
+pub fn saturatingMultiply(left: i32, right: i32) -> i32 {
+  return Intrinsic.i32SaturatingMultiply(left, right)
+}
+
+/// Calls the concrete i32 checkedAdd primitive.
+pub fn checkedAdd(left: i32, right: i32) -> Option<i32> {
+  return Intrinsic.i32CheckedAdd(left, right)
+}
+
+/// Calls the concrete i32 checkedSubtract primitive.
+pub fn checkedSubtract(left: i32, right: i32) -> Option<i32> {
+  return Intrinsic.i32CheckedSubtract(left, right)
+}
+
+/// Calls the concrete i32 checkedMultiply primitive.
+pub fn checkedMultiply(left: i32, right: i32) -> Option<i32> {
+  return Intrinsic.i32CheckedMultiply(left, right)
+}
+
+/// Calls the concrete i32 checkedDivide primitive.
+pub fn checkedDivide(left: i32, right: i32) -> Option<i32> {
+  return Intrinsic.i32CheckedDivide(left, right)
+}
+
+/// Calls the concrete i32 checkedRemainder primitive.
+pub fn checkedRemainder(left: i32, right: i32) -> Option<i32> {
+  return Intrinsic.i32CheckedRemainder(left, right)
+}
+
+/// Calls the concrete i32 equals primitive.
+pub fn equals(left: i32, right: i32) -> bool {
+  return Intrinsic.i32Equals(left, right)
+}
+
+/// Calls the concrete i32 notEquals primitive.
+pub fn notEquals(left: i32, right: i32) -> bool {
+  return Intrinsic.i32NotEquals(left, right)
+}
+
+/// Calls the concrete i32 lessThan primitive.
+pub fn lessThan(left: i32, right: i32) -> bool {
+  return Intrinsic.i32LessThan(left, right)
+}
+
+/// Calls the concrete i32 lessOrEqual primitive.
+pub fn lessOrEqual(left: i32, right: i32) -> bool {
+  return Intrinsic.i32LessOrEqual(left, right)
+}
+
+/// Calls the concrete i32 greaterThan primitive.
+pub fn greaterThan(left: i32, right: i32) -> bool {
+  return Intrinsic.i32GreaterThan(left, right)
+}
+
+/// Calls the concrete i32 greaterOrEqual primitive.
+pub fn greaterOrEqual(left: i32, right: i32) -> bool {
+  return Intrinsic.i32GreaterOrEqual(left, right)
+}

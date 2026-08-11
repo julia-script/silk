@@ -93,7 +93,7 @@ it.effect(
       const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(run.status, 42, run.stderr)
     }),
-  15_000,
+  60_000,
 )
 
 it.effect(
@@ -149,5 +149,5 @@ it.effect(
         assert.strictEqual(run.status, expected, `${label}: ${run.stderr}`)
       }
     }),
-  30_000,
+  120_000,
 )

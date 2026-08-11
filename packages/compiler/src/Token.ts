@@ -14,6 +14,8 @@ export type TokenKind =
   | 'InvalidStaticLiteral'
   | 'PubKeyword'
   | 'StructKeyword'
+  | 'ServiceKeyword'
+  | 'InterfaceKeyword'
   | 'EffectKeyword'
   | 'FnKeyword'
   | 'RunKeyword'
@@ -85,6 +87,8 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   InvalidStaticLiteral: 'invalid static literal',
   PubKeyword: '`pub`',
   StructKeyword: '`struct`',
+  ServiceKeyword: '`service`',
+  InterfaceKeyword: '`interface`',
   EffectKeyword: '`effect`',
   FnKeyword: '`fn`',
   RunKeyword: '`run`',

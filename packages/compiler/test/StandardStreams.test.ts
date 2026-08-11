@@ -15,26 +15,24 @@ const encoder = new TextEncoder()
 const outputRoot = mkdtempSync(join(tmpdir(), 'silk-standard-streams-'))
 afterAll(() => rmSync(outputRoot, { recursive: true, force: true }))
 
-const source = `pub effect fn main() -> () ! StreamWriteFailure ? &StandardStreams {
-  let first = run StandardStreams.writeAll(StandardStreams.stdout(), "heading\\n")
-  let second = run StandardStreams.writeAll(StandardStreams.stderr(), b"warning\\n")
-  let third = run StandardStreams.writeAll(StandardStreams.stdout(), "row\\n")
+const source = `pub effect fn main() -> () ! StreamWriteFailure {
+  let mut native = NativeStandardStreams.native()
+  let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), "heading\\n"), &mut native)
+  let second = run Effect.provideMut(StandardStream.send(StandardStream.stderr(), b"warning\\n"), &mut native)
+  let third = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), "row\\n"), &mut native)
   return ()
 }`
 
 const snapshot = (target = 'aarch64-apple-darwin') =>
   Analysis.ofSourceRealized('standard-streams/main', encoder.encode(source), target)
 
-it.effect('retains the explicit requirement and reports a missing evaluator provider', () =>
+it.effect('dispatches through the source service and reports a missing host boundary', () =>
   Effect.gen(function* () {
     const self = yield* snapshot()
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(self.instances.entry._tag, 'Resolved')
     if (self.instances.entry._tag === 'Resolved' && self.instances.entry.kind === 'Effect') {
-      assert.deepEqual(
-        self.instances.entry.requirements.map((requirement) => requirement.capability.name),
-        ['StandardStreams'],
-      )
+      assert.deepEqual(self.instances.entry.requirements, [])
     }
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Blocked')
@@ -51,22 +49,22 @@ it.effect('records complete ordered writes and typed provider failure determinis
     assert.strictEqual(completed._tag, 'Completed')
     assert.deepEqual(memory.events(), [
       {
-        _tag: 'StandardStreamWrite',
+        _tag: 'HostWrite',
         destination: 'Stdout',
         bytes: Array.from(encoder.encode('heading\n')),
       },
       {
-        _tag: 'StandardStreamWrite',
+        _tag: 'HostWrite',
         destination: 'Stderr',
         bytes: Array.from(encoder.encode('warning\n')),
       },
       {
-        _tag: 'StandardStreamWrite',
+        _tag: 'HostWrite',
         destination: 'Stdout',
         bytes: Array.from(encoder.encode('row\n')),
       },
     ])
-    const writes = completed.trace.filter((event) => event._tag === 'StandardStreamWrite')
+    const writes = completed.trace.filter((event) => event._tag === 'HostWrite')
     assert.deepEqual(
       writes.map((event) => [event.destination, event.outcome]),
       [
@@ -90,10 +88,9 @@ it.effect('lowers target-neutral writes through native and hosted Wasm boundarie
     const mir = Analysis.loweredMir(native)
     assert.deepEqual(Mir.verify(mir), [])
     assert.strictEqual(
-      mir.functions
-        .flatMap(Mir.operations)
-        .filter((operation) => operation._tag === 'StandardStreamWrite').length,
-      3,
+      mir.functions.flatMap(Mir.operations).filter((operation) => operation._tag === 'HostWrite')
+        .length,
+      1,
     )
     const llvm = yield* Analysis.codegen(native, { mode: 'release' })
     assert.include(llvm.ir, '@silk_standard_stream_write_v1')
@@ -150,5 +147,39 @@ it.effect('lowers target-neutral writes through native and hosted Wasm boundarie
     assert.strictEqual(run.status, 0, run.stderr)
     assert.strictEqual(run.stdout, 'heading\nrow\n')
     assert.strictEqual(run.stderr, 'warning\n')
+  }),
+)
+
+it.effect('replaces the host provider with a pure source in-memory implementation', () =>
+  Effect.gen(function* () {
+    const replaced = yield* Analysis.ofSourceRealized(
+      'standard-streams/memory',
+      encoder.encode(`struct MemoryStreams { writes: i32 }
+effect fn record(
+  self: &mut MemoryStreams,
+  destination: bool,
+  bytes: &[u8]
+) -> () {
+  self.writes = self.writes + 1
+  return ()
+}
+impl StandardStreams for MemoryStreams { writeAll: MemoryStreams.record }
+pub effect fn main() -> () ! StreamWriteFailure {
+  let mut memory = MemoryStreams { writes: 0 }
+  let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), "one"), &mut memory)
+  let second = run Effect.provideMut(StandardStream.send(StandardStream.stderr(), "two"), &mut memory)
+  if memory.writes != 2 { let boom = 1 / 0 }
+  return ()
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(replaced), [])
+    const outcome = Analysis.evaluate(replaced)
+    assert.strictEqual(outcome._tag, 'Completed')
+    assert.strictEqual(
+      Analysis.loweredMir(replaced)
+        .functions.flatMap(Mir.operations)
+        .some((operation) => operation._tag === 'HostWrite'),
+      false,
+    )
   }),
 )

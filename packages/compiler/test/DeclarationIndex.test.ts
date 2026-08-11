@@ -50,6 +50,210 @@ it.effect('assigns distinct canonical identities to same-named declarations acro
   }),
 )
 
+it.effect('indexes source services and their operation contracts as distinct canonical facts', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `pub struct WriteFailure {}
+pub service Logger<T> {
+  effect fn log(message: &[u8], value: T) -> () ! WriteFailure ? &mut Logger<T>
+  fn enabled() -> bool
+}`,
+      ],
+    ])
+    const service = index.modules.at(0)?.services.at(0)
+
+    assert.strictEqual(service?._tag, 'ServiceDeclaration')
+    assert.deepEqual(service?.canonical, {
+      _tag: 'Canonical',
+      id: { _tag: 'CanonicalDeclarationId', module: 'root', name: 'Logger' },
+    })
+    assert.deepEqual(
+      service?.operations.map((operation) => ({
+        name: operation.name._tag === 'Present' ? operation.name.spelling : 'Unavailable',
+        state: operation.state._tag,
+        kind: operation.functionKind,
+        parameters: operation.parameters.map((parameter) =>
+          parameter.declaredType._tag === 'Resolved'
+            ? Type.encode(parameter.declaredType.type)
+            : parameter.declaredType._tag,
+        ),
+        result:
+          operation.returnType._tag === 'Resolved'
+            ? Type.encode(operation.returnType.type)
+            : operation.returnType._tag,
+        failures: operation.failureRow.failures.map(Type.encode),
+        requirements: operation.requirementRow.requirements.map((requirement) => ({
+          type: Type.encode(requirement.capability),
+          access: requirement.access,
+        })),
+      })),
+      [
+        {
+          name: 'log',
+          state: 'Unique',
+          kind: 'Effect',
+          parameters: ['&[u8]', 'T'],
+          result: '()',
+          failures: ['root.WriteFailure'],
+          requirements: [{ type: 'root.Logger<T>', access: 'Exclusive' }],
+        },
+        {
+          name: 'enabled',
+          state: 'Unique',
+          kind: 'Ordinary',
+          parameters: [],
+          result: 'bool',
+          failures: [],
+          requirements: [],
+        },
+      ],
+    )
+    assert.deepEqual(index.diagnostics, [])
+  }),
+)
+
+it.effect('rejects service operation bodies in semantic declaration analysis', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      ['root', 'service Logger { fn enabled() -> bool { return true } }'],
+    ])
+
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        reason: diagnostic.reason._tag,
+      })),
+      [{ code: 'SEM0090', reason: 'InvalidServiceDeclaration' }],
+    )
+  }),
+)
+
+it.effect('validates arbitrary source service conformances without recognizing service names', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `pub struct Problem {}
+pub service Logger {
+  effect fn log(message: i32) -> i32 ! Problem ? &mut Logger
+  fn enabled() -> bool ? &Logger
+}
+pub struct Console {}
+effect fn log(self: &mut Console, message: i32) -> i32 ! Problem { return message }
+fn enabled(self: &Console) -> bool { return true }
+impl Logger for Console { enabled: Console.enabled log: Console.log }`,
+      ],
+    ])
+    const logger = Type.nominal('root', 'Logger')
+    const console = Type.nominal('root', 'Console')
+    const witness = DeclarationIndex.witness(index, console, logger)
+
+    assert.strictEqual(witness?._tag, 'SourceConformanceWitness')
+    assert.deepEqual(witness?._tag === 'SourceConformanceWitness' ? witness.operations : [], [
+      {
+        name: 'log',
+        implementation: {
+          _tag: 'CanonicalDeclarationId',
+          module: 'root',
+          name: 'log',
+        },
+      },
+      {
+        name: 'enabled',
+        implementation: {
+          _tag: 'CanonicalDeclarationId',
+          module: 'root',
+          name: 'enabled',
+        },
+      },
+    ])
+    assert.deepEqual(index.diagnostics, [])
+  }),
+)
+
+it.effect('rejects incomplete and stronger source service operation mappings', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `pub struct Problem {}
+pub struct Extra {}
+pub service Logger {
+  effect fn log(message: i32) -> i32 ! Problem ? &Logger
+  fn enabled() -> bool
+}
+pub struct Console {}
+effect fn log(self: &mut Console, message: i32) -> i32 ! Problem | Extra { return message }
+impl Logger for Console { log: Console.log unknown: Console.unknown }`,
+      ],
+    ])
+
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.reason._tag),
+      ['InvalidConformance'],
+    )
+    assert.include(index.diagnostics.at(0)?.message ?? '', 'missing enabled')
+    assert.include(index.diagnostics.at(0)?.message ?? '', 'unknown unknown')
+  }),
+)
+
+it.effect('substitutes concrete generic service contracts during conformance', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `pub service Store<T> {
+  effect fn load(fallback: T) -> T ? &Store<T>
+}
+pub struct IntStore {}
+effect fn load(self: &IntStore, fallback: i32) -> i32 { return fallback }
+impl Store<i32> for IntStore { load: IntStore.load }`,
+      ],
+    ])
+    const store = Type.nominal('root', 'Store', ['i32'])
+    const provider = Type.nominal('root', 'IntStore')
+    const witness = DeclarationIndex.witness(index, provider, store)
+
+    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(witness?._tag === 'SourceConformanceWitness' ? witness.operations : [], [
+      {
+        name: 'load',
+        implementation: {
+          _tag: 'CanonicalDeclarationId',
+          module: 'root',
+          name: 'load',
+        },
+      },
+    ])
+  }),
+)
+
+it.effect('rejects a mapped service implementation with stronger access and failure rows', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `pub struct Problem {}
+pub struct Extra {}
+pub service Logger {
+  effect fn log(message: i32) -> i32 ! Problem ? &Logger
+}
+pub struct Console {}
+effect fn log(self: &mut Console, message: i32) -> i32 ! Problem | Extra { return message }
+impl Logger for Console { log: Console.log }`,
+      ],
+    ])
+
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.reason._tag),
+      ['InvalidConformance'],
+    )
+    assert.include(index.diagnostics.at(0)?.message ?? '', 'incompatible with Logger.log')
+  }),
+)
+
 it.effect('marks later duplicates as caused duplicates of the first occurrence', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
@@ -342,8 +546,8 @@ effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator@Scratch { retur
         access: requirement.access,
       })),
       [
-        { capability: 'FileSystem', role: 'DefaultRole', access: 'Shared' },
         { capability: 'Allocator', role: 'Scratch', access: 'Exclusive' },
+        { capability: 'FileSystem', role: 'DefaultRole', access: 'Shared' },
       ],
     )
     assert.deepEqual(work?.requirementRow.requirements, laterType.requirements)
@@ -534,12 +738,14 @@ it.effect('resolves direct generic slice parameters and rejects borrowed storage
   }),
 )
 
-it.effect('indexes nominal allocator conformance without erasing the provider type', () =>
+it.effect('indexes nominal service conformance without erasing the provider type', () =>
   Effect.gen(function* () {
     const index = yield* collect('allocator', [
       [
         'allocator',
-        `struct TestAllocator { remaining: i32 }
+        `service Allocator { effect fn allocate(layout: i32) -> i32 ? &mut Allocator }
+struct TestAllocator { remaining: i32 }
+effect fn allocate(self: &mut TestAllocator, layout: i32) -> i32 { return layout }
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }
 pub fn main() -> i32 { return 0 }`,
       ],
@@ -552,19 +758,23 @@ pub fn main() -> i32 { return 0 }`,
       ['Present'],
     )
     assert.isTrue(
-      DeclarationIndex.conforms(index, Type.nominal('allocator', 'TestAllocator'), Type.allocator),
+      DeclarationIndex.conforms(
+        index,
+        Type.nominal('allocator', 'TestAllocator'),
+        Type.nominal('allocator', 'Allocator'),
+      ),
     )
-    assert.isTrue(DeclarationIndex.conforms(index, Type.systemAllocator, Type.allocator))
   }),
 )
 
-it.effect('validates allocator mappings and rejects duplicate or foreign witnesses', () =>
+it.effect('validates service mappings and rejects duplicate or foreign witnesses', () =>
   Effect.gen(function* () {
     const valid = yield* collect('allocator-valid', [
       [
         'allocator-valid',
-        `struct TestAllocator { remaining: i32 }
-effect fn allocate(self: &mut TestAllocator, layout: Layout) -> Allocation ! OutOfMemory { return 0 }
+        `service Allocator { effect fn allocate(layout: i32) -> i32 ? &mut Allocator }
+struct TestAllocator { remaining: i32 }
+effect fn allocate(self: &mut TestAllocator, layout: i32) -> i32 { return layout }
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
       ],
     ])
@@ -573,14 +783,15 @@ impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
       DeclarationIndex.conforms(
         valid,
         Type.nominal('allocator-valid', 'TestAllocator'),
-        Type.allocator,
+        Type.nominal('allocator-valid', 'Allocator'),
       ),
     )
 
     const invalid = yield* collect('allocator-invalid', [
       [
         'allocator-invalid',
-        `struct TestAllocator { remaining: i32 }
+        `service Allocator { effect fn allocate(layout: i32) -> i32 ? &mut Allocator }
+struct TestAllocator { remaining: i32 }
 fn allocate(self: &TestAllocator) -> i32 { return 0 }
 impl Allocator for TestAllocator { allocate: Foreign.allocate }
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
@@ -596,7 +807,7 @@ impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
       DeclarationIndex.conforms(
         invalid,
         Type.nominal('allocator-invalid', 'TestAllocator'),
-        Type.allocator,
+        Type.nominal('allocator-invalid', 'Allocator'),
       ),
     )
   }),

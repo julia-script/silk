@@ -27,6 +27,10 @@ export type Identity =
   | { readonly _tag: 'BindingIdentity'; readonly id: Hir.BindingId }
   | { readonly _tag: 'PatternBindingIdentity'; readonly id: Match.BindingId }
   | { readonly _tag: 'FieldIdentity'; readonly id: DeclarationIndex.FieldId }
+  | {
+      readonly _tag: 'ServiceOperationIdentity'
+      readonly id: DeclarationIndex.ServiceOperationId
+    }
   | { readonly _tag: 'ImportNamespaceIdentity'; readonly module: string; readonly spelling: string }
   | { readonly _tag: 'IntrinsicActorIdentity'; readonly id: Intrinsic.ActorId }
   | { readonly _tag: 'IntrinsicOperationIdentity'; readonly id: Intrinsic.OperationId }
@@ -106,6 +110,13 @@ const locationOfParameter = (
 ): DeclarationLocation | undefined =>
   parameter.name._tag === 'Present'
     ? location(parameter.name.token.span.sourceId, parameter.syntax.span, parameter.name.token.span)
+    : undefined
+
+const locationOfServiceOperation = (
+  operation: DeclarationIndex.ServiceOperationFact,
+): DeclarationLocation | undefined =>
+  operation.name._tag === 'Present'
+    ? location(operation.name.token.span.sourceId, operation.syntax.span, operation.name.token.span)
     : undefined
 
 const locationOfTypeParameter = (
@@ -455,6 +466,21 @@ const callResolution = (
           : available(Object.freeze({ _tag: 'IntrinsicOperationIdentity', id: operation.id })),
     })
   }
+  if (reference._tag === 'ResolvedServiceOperation') {
+    const declaration = locationOfServiceOperation(reference.operation)
+    return Object.freeze({
+      resolution:
+        reference.operation.state._tag === 'Unique'
+          ? available(
+              Object.freeze({
+                _tag: 'ServiceOperationIdentity',
+                id: reference.operation.state.id,
+              }),
+            )
+          : Object.freeze({ _tag: 'Unavailable' }),
+      ...(declaration === undefined ? {} : { declaration }),
+    })
+  }
   if (reference._tag === 'Missing')
     return Object.freeze({
       resolution: Object.freeze({
@@ -496,7 +522,9 @@ const collectCallReference = (
   push(
     pending,
     selected?.span,
-    reference._tag === 'ResolvedBuiltin' ? 'Operation' : 'Value',
+    reference._tag === 'ResolvedBuiltin' || reference._tag === 'ResolvedServiceOperation'
+      ? 'Operation'
+      : 'Value',
     resolved.resolution,
     resolved.declaration,
   )
@@ -810,6 +838,47 @@ const collectMember = (
     collectDeclaredType(member.declaredType, index, scope, pending)
     return
   }
+  if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
+    for (const operation of member.operations) {
+      for (const typeParameter of operation.typeParameters) {
+        const parameterLocation = locationOfTypeParameter(typeParameter)
+        if (typeParameter.name._tag === 'Present')
+          push(
+            pending,
+            typeParameter.name.token.span,
+            'Declaration',
+            available(Object.freeze({ _tag: 'TypeParameterIdentity', id: typeParameter.type })),
+            parameterLocation,
+          )
+      }
+      const operationLocation = locationOfServiceOperation(operation)
+      if (operation.name._tag === 'Present' && operation.state._tag === 'Unique')
+        push(
+          pending,
+          operation.name.token.span,
+          'Declaration',
+          available(Object.freeze({ _tag: 'ServiceOperationIdentity', id: operation.state.id })),
+          operationLocation,
+        )
+      for (const parameter of operation.parameters) {
+        if (parameter.name._tag === 'Present')
+          push(
+            pending,
+            parameter.name.token.span,
+            'Declaration',
+            available(Object.freeze({ _tag: 'ParameterIdentity', id: parameter.id })),
+            locationOfParameter(parameter),
+          )
+        collectDeclaredType(parameter.declaredType, index, scope, pending)
+      }
+      collectDeclaredType(operation.returnType, index, scope, pending)
+      for (const failure of operation.failureRow.members)
+        collectDeclaredType(failure, index, scope, pending)
+      for (const requirement of operation.requirementRow.entries)
+        collectDeclaredType(requirement.capability, index, scope, pending)
+    }
+    return
+  }
   for (const field of member.fields) {
     if (field.name._tag === 'Present')
       push(
@@ -1046,6 +1115,8 @@ export const identityKey = (identity: Identity): string => {
       return `pattern:${JSON.stringify(identity.id)}`
     case 'FieldIdentity':
       return `field:${identity.id.struct.sourceId}:${identity.id.struct.ordinal}:${identity.id.ordinal}`
+    case 'ServiceOperationIdentity':
+      return `service-operation:${identity.id.service.sourceId}:${identity.id.service.ordinal}:${identity.id.name}`
     case 'ImportNamespaceIdentity':
       return `namespace:${identity.module}:${identity.spelling}`
     case 'IntrinsicActorIdentity':
