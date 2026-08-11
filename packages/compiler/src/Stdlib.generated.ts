@@ -9,6 +9,13 @@ export const modules = [
       '/// Calls the concrete bool equals primitive.\npub fn equals(left: bool, right: bool) -> bool {\n  return Intrinsic.boolEquals(left, right)\n}\n\n/// Calls the concrete bool notEquals primitive.\npub fn notEquals(left: bool, right: bool) -> bool {\n  return Intrinsic.boolNotEquals(left, right)\n}\n\n/// Calls the concrete bool not primitive.\npub fn not(value: bool) -> bool {\n  return Intrinsic.boolNot(value)\n}\n',
   },
   {
+    module: 'silk/bytes',
+    path: 'silk/bytes.silk',
+    namespace: 'Bytes',
+    source:
+      'import silk.vector {\n  Vector,\n  make as vectorMake,\n  append as vectorAppend,\n  length as vectorLength,\n  asSlice as vectorAsSlice,\n  asMutSlice as vectorAsMutSlice\n}\n\n/// An owned encoding-neutral sequence of arbitrary octets.\npub struct Bytes {\n  values: Vector<u8>\n}\n\nfn counted(value: usize) -> usize {\n  return value\n}\n\n/// Constructs empty Bytes without allocating.\npub fn make() -> Bytes {\n  return Bytes { values: vectorMake<u8>() }\n}\n\n/// Returns the initialized byte count.\npub fn length(self: &Bytes) -> usize {\n  return vectorLength<u8>(&self.values)\n}\n\n/// Copies one borrowed byte sequence into independently owned storage.\npub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemory ? &mut Allocator {\n  let mut result = make()\n  let appended = run append(&mut result, values)\n  return move result\n}\n\n/// Appends one complete borrowed byte sequence in source order.\npub effect fn append(self: &mut Bytes, values: &[u8]) -> () ! OutOfMemory ? &mut Allocator {\n  let mut index = counted(0)\n  while index < values.length {\n    let appended = run vectorAppend<u8>(&mut self.values, values[index])\n    index = index + counted(1)\n  }\n  return ()\n}\n\n/// Borrows the initialized octets as one shared lexical slice.\npub fn asSlice(self: &Bytes) -> &[u8] {\n  return vectorAsSlice<u8>(&self.values)\n}\n\n/// Borrows the initialized octets as one exclusive lexical slice.\npub fn asMutSlice(self: &mut Bytes) -> &mut [u8] {\n  return vectorAsMutSlice<u8>(&mut self.values)\n}\n',
+  },
+  {
     module: 'silk/core',
     path: 'silk/core.silk',
     namespace: 'Allocator',

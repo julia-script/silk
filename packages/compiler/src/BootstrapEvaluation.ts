@@ -81,6 +81,7 @@ export interface ReferenceValue {
   readonly _tag: 'ReferenceValue'
   readonly frame: number
   readonly cell: number
+  readonly selectors: ReadonlyArray<Extract<Mir.PlaceSelector, { readonly _tag: 'FieldSelector' }>>
 }
 
 export interface UnionValue {
@@ -703,7 +704,20 @@ function* executeFunction(
     const found = state.cells.get(cellKey(reference.frame, reference.cell))
     if (found === undefined)
       throw new RangeError('MIR reference points at a missing evaluator cell')
-    return found
+    let selected = found.value
+    for (const selector of reference.selectors) {
+      if (selected._tag !== 'AggregateValue')
+        throw new RangeError('MIR reference selector points at a non-struct value')
+      const field = selected.fields.find(
+        (candidate) =>
+          candidate.field.ordinal === selector.field.ordinal &&
+          candidate.field.struct.sourceId === selector.field.struct.sourceId &&
+          candidate.field.struct.ordinal === selector.field.struct.ordinal,
+      )
+      if (field === undefined) throw new RangeError('MIR reference selector lost its field')
+      selected = field.value
+    }
+    return Object.freeze({ value: selected, fromCall: found.fromCall })
   }
 
   const readI32 = (local: Mir.LocalId): I32Value => {
@@ -876,6 +890,7 @@ function* executeFunction(
           _tag: 'ReferenceValue' as const,
           frame,
           cell: localOrdinal,
+          selectors: Object.freeze([]),
         })
         const result = yield* callFunction(target, [reference], provenance.span)
         if (result._tag === 'Blocked') return result
@@ -1473,15 +1488,17 @@ function* executeFunction(
       }
     | { readonly _tag: 'Blocked'; readonly step: Step } => {
     let selected = read(root).value
+    let effectiveSelectors = selectors
     const indexes: Array<number> = []
     // A reference root reads through the borrow: the place lives on the referenced cell.
-    if (selected._tag === 'ReferenceValue' && selectors.length > 0) {
+    if (selected._tag === 'ReferenceValue') {
       const target = state.cells.get(cellKey(selected.frame, selected.cell))
       if (target === undefined)
         throw new RangeError('MIR reference points at a missing evaluator cell')
+      effectiveSelectors = Object.freeze([...selected.selectors, ...selectors])
       selected = target.value
     }
-    for (const selector of selectors) {
+    for (const selector of effectiveSelectors) {
       if (selector._tag === 'FieldSelector') {
         if (selected._tag !== 'AggregateValue') {
           throw new RangeError('MIR verifier allowed a field selector on a non-struct value')
@@ -1878,13 +1895,23 @@ function* executeFunction(
           case 'BeginLoan': {
             const source = read(operation.root)
             if (operation.type._tag === 'Reference') {
-              const key = cellKey(frame, operation.root.ordinal)
+              const inherited =
+                source.value._tag === 'ReferenceValue'
+                  ? source.value
+                  : Object.freeze({
+                      _tag: 'ReferenceValue' as const,
+                      frame,
+                      cell: operation.root.ordinal,
+                      selectors: Object.freeze([]),
+                    })
+              const key = cellKey(inherited.frame, inherited.cell)
               if (!state.cells.has(key)) state.cells.set(key, source)
               write(operation.destination, {
                 value: Object.freeze({
                   _tag: 'ReferenceValue' as const,
-                  frame,
-                  cell: operation.root.ordinal,
+                  frame: inherited.frame,
+                  cell: inherited.cell,
+                  selectors: Object.freeze([...inherited.selectors, ...operation.selectors]),
                 }),
                 fromCall: source.fromCall,
               })
@@ -2896,14 +2923,16 @@ function* executeFunction(
           }
           case 'ReadPlace': {
             let selected = read(operation.root).value
+            let effectiveSelectors = operation.selectors
             const selectors: Array<PlaceReadTraceEvent['selectors'][number]> = []
-            if (selected._tag === 'ReferenceValue' && operation.selectors.length > 0) {
+            if (selected._tag === 'ReferenceValue') {
               const target = state.cells.get(cellKey(selected.frame, selected.cell))
               if (target === undefined)
                 throw new RangeError('MIR reference points at a missing evaluator cell')
+              effectiveSelectors = Object.freeze([...selected.selectors, ...operation.selectors])
               selected = target.value
             }
-            for (const selector of operation.selectors) {
+            for (const selector of effectiveSelectors) {
               if (selector._tag === 'FieldSelector') {
                 if (selected._tag !== 'AggregateValue') {
                   throw new RangeError(
@@ -3065,8 +3094,12 @@ function* executeFunction(
               const target = state.cells.get(key)
               if (target === undefined)
                 throw new RangeError('MIR reference points at a missing evaluator cell')
+              const effectiveSelectors = Object.freeze([
+                ...root.value.selectors,
+                ...operation.selectors,
+              ])
               state.cells.set(key, {
-                value: replacePlace(target.value, operation.selectors, indexes, replacement.value),
+                value: replacePlace(target.value, effectiveSelectors, indexes, replacement.value),
                 fromCall: replacement.fromCall,
               })
               checkedPlaces.delete(operation.selectors)

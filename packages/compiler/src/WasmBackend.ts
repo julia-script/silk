@@ -119,7 +119,10 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
   )
   const rootOrdinals = new Set([
     ...formations.flatMap((operation) =>
-      operation.sourceType._tag === 'Slice' ? [] : [operation.root.ordinal],
+      operation.sourceType._tag === 'Slice' ||
+      fn.localTypes.at(operation.root.ordinal)?._tag === 'Reference'
+        ? []
+        : [operation.root.ordinal],
     ),
     ...Mir.operations(fn).flatMap((operation) =>
       operation._tag === 'MakeEffect' || operation._tag === 'MakeCallable'
@@ -1868,15 +1871,43 @@ const emitOperation = (
       if (operation.sourceType._tag === 'Slice') {
         return copy(slots(operation.root), slots(operation.destination))
       } else {
+        const rootType = layout.types.at(operation.root.ordinal)
+        const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
+        const staticSelectors = operation.selectors.map((selector) => selector.field)
+        if (rootSemantic !== undefined && SilkType.isReference(rootSemantic)) {
+          const rootAddress = scalar(operation.root)
+          const [address, length] = slots(operation.destination)
+          const offset = LayoutPlan.laneOffset(plan, rootSemantic.target, staticSelectors)
+          if (address === undefined || offset === undefined) {
+            throw new RangeError('Wasm projected borrow lost its reference address')
+          }
+          if (operation.type._tag !== 'Reference') {
+            throw new RangeError('Wasm projected reference borrow produced a non-reference')
+          }
+          return [
+            Instr.localGet(rootAddress),
+            Instr.i32Const(offset),
+            Instr.op('i32.add'),
+            Instr.localSet(address),
+            ...(length === undefined ? [] : [Instr.i32Const(0), Instr.localSet(length)]),
+          ]
+        }
         const planned = memory?.frame.roots.get(operation.root.ordinal)
         const [address, length] = slots(operation.destination)
+        const rootOffset =
+          rootSemantic === undefined
+            ? undefined
+            : LayoutPlan.laneOffset(plan, rootSemantic, staticSelectors)
         if (planned === undefined || address === undefined) {
           throw new RangeError('Wasm borrow formation lost its frame root or address lane')
+        }
+        if (rootOffset === undefined) {
+          throw new RangeError('Wasm borrow formation lost its projected root offset')
         }
         if (operation.type._tag === 'Reference') {
           return [
             ...materializeRoot(operation.root),
-            ...frameAddress(planned.offset),
+            ...frameAddress(planned.offset + rootOffset),
             Instr.localSet(address),
           ]
         }
@@ -1885,7 +1916,7 @@ const emitOperation = (
         }
         return [
           ...materializeRoot(operation.root),
-          ...frameAddress(planned.offset),
+          ...frameAddress(planned.offset + rootOffset),
           Instr.localSet(address),
           Instr.i32Const(operation.sourceType.type.length),
           Instr.localSet(length),
@@ -2235,7 +2266,7 @@ const emitOperation = (
             Instr.op('i32.add'),
             ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
             Instr.localGet(source),
-            Instr.memoryAccess('i32.store', memory.memory),
+            Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
           ]
         })
       }

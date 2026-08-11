@@ -51,6 +51,13 @@ consume and return bytes without changing their meaning.
 not copy or allocate, and the ownership checker ties them to the `Bytes` owner. This is why returned
 lexical borrows are a hard prerequisite rather than a convenience.
 
+Implementation exposed one missing part of that prerequisite: forwarding a view through a nominal
+wrapper must preserve the stable field path from the wrapper reference to its `Vector<u8>` field.
+The compiler therefore retains field selectors on the existing value-borrow operation and realizes
+the same projected address in evaluation, native LLVM, and direct Wasm. This adds no source syntax,
+intrinsic, layout privilege, or Bytes-specific recognition; it completes the general lexical-borrow
+mechanism needed by any ordinary source-defined wrapper.
+
 ## Risks / Trade-offs
 
 - Wrapping Vector adds nominal API surface and may initially duplicate a few forwarding functions.

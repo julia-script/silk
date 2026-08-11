@@ -465,6 +465,7 @@ export type Operation =
       readonly borrow: Hir.BorrowId
       readonly destination: LocalId
       readonly root: LocalId
+      readonly selectors: ReadonlyArray<Extract<PlaceSelector, { readonly _tag: 'FieldSelector' }>>
       readonly sourceType: Extract<Type, { readonly _tag: 'Nominal' | 'FixedArray' | 'Slice' }>
       readonly type: Extract<Type, { readonly _tag: 'Slice' | 'Reference' }>
       readonly access: SilkType.Slice['access']
@@ -1631,6 +1632,11 @@ const loanViolations = (
         const source = fn.localTypes.at(operation.root.ordinal)
         const destination = fn.localTypes.at(operation.destination.ordinal)
         const sourceSemantic = semanticType(operation.sourceType)
+        const rootSemantic = source === undefined ? undefined : semanticType(source)
+        const rootMatchesSource =
+          operation.selectors.length === 0
+            ? rootSemantic !== undefined && SilkType.equals(rootSemantic, sourceSemantic)
+            : rootSemantic !== undefined && SilkType.isReference(rootSemantic)
         const borrowed = operation.type.type
         const sourceElement =
           operation.sourceType._tag === 'FixedArray' || operation.sourceType._tag === 'Slice'
@@ -1654,7 +1660,7 @@ const loanViolations = (
           completed.has(key) ||
           source === undefined ||
           destination === undefined ||
-          !SilkType.equals(semanticType(source), sourceSemantic) ||
+          !rootMatchesSource ||
           (destination._tag !== 'Slice' && destination._tag !== 'Reference') ||
           !SilkType.equals(destination.type, borrowed) ||
           borrowed.access !== operation.access ||
@@ -3572,7 +3578,7 @@ const operationText = (operation: Operation): string => {
     case 'Move':
       return `${localText(operation.destination)} = move ${localText(operation.source)} ${provenanceText(operation.provenance)}`
     case 'BeginLoan':
-      return `${localText(operation.destination)} = begin-loan l${operation.borrow.ordinal} ${operation.access.toLowerCase()} ${localText(operation.root)} source=${typeText(operation.sourceType)} : ${typeText(operation.type)} reborrow=${operation.reborrow} suspended=${operation.suspendsParent} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = begin-loan l${operation.borrow.ordinal} ${operation.access.toLowerCase()} ${localText(operation.root)}${operation.selectors.length === 0 ? '' : ` path=${operation.selectors.map((selector) => `f${selector.field.ordinal}`).join('.')}`} source=${typeText(operation.sourceType)} : ${typeText(operation.type)} reborrow=${operation.reborrow} suspended=${operation.suspendsParent} ${provenanceText(operation.provenance)}`
     case 'EndLoan':
       return `end-loan l${operation.borrow.ordinal} ${localText(operation.slice)} ${provenanceText(operation.provenance)}`
     case 'SliceLength':

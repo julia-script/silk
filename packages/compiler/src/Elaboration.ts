@@ -226,14 +226,17 @@ export type BorrowRootFact =
   | {
       readonly _tag: 'BindingRoot'
       readonly binding: BindingDeclarationFact
+      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
     }
   | {
       readonly _tag: 'ParameterRoot'
       readonly parameter: ParameterFact
+      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
     }
   | {
       readonly _tag: 'PatternRoot'
       readonly binding: PatternBindingFact
+      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
     }
 
 export type BorrowFormationFact =
@@ -1473,18 +1476,46 @@ const analyzeMove = (
 }
 
 const borrowRoot = (subject: ExpressionFact): BorrowRootFact | undefined => {
+  if (subject._tag === 'Grouped') return borrowRoot(subject.expression)
+  if (subject._tag === 'FieldProjection' && subject.state._tag === 'Resolved') {
+    const root = borrowRoot(subject.subject)
+    return root === undefined
+      ? undefined
+      : Object.freeze({ ...root, path: Object.freeze([...root.path, subject.state.field.id]) })
+  }
   if (subject._tag !== 'Identifier') return undefined
   if (subject.reference._tag === 'ResolvedBinding') {
-    return Object.freeze({ _tag: 'BindingRoot', binding: subject.reference.binding })
+    return Object.freeze({
+      _tag: 'BindingRoot',
+      binding: subject.reference.binding,
+      path: Object.freeze([]),
+    })
   }
   if (subject.reference._tag === 'Resolved') {
-    return Object.freeze({ _tag: 'ParameterRoot', parameter: subject.reference.parameter })
+    return Object.freeze({
+      _tag: 'ParameterRoot',
+      parameter: subject.reference.parameter,
+      path: Object.freeze([]),
+    })
   }
   if (subject.reference._tag === 'ResolvedPattern') {
-    return Object.freeze({ _tag: 'PatternRoot', binding: subject.reference.binding })
+    return Object.freeze({
+      _tag: 'PatternRoot',
+      binding: subject.reference.binding,
+      path: Object.freeze([]),
+    })
   }
   return undefined
 }
+
+const exclusiveBorrowRoot = (root: BorrowRootFact): boolean =>
+  (root._tag === 'BindingRoot' && root.binding.mutability === 'Mutable') ||
+  (root._tag === 'PatternRoot' && root.binding.access === 'Exclusive') ||
+  (root._tag === 'ParameterRoot' &&
+    root.path.length > 0 &&
+    root.parameter.declaredType._tag === 'Resolved' &&
+    Type.isReference(root.parameter.declaredType.type) &&
+    root.parameter.declaredType.type.access === 'Exclusive')
 
 const unavailableBorrow = (
   node: SyntaxTree.Node,
@@ -1562,13 +1593,7 @@ const analyzeBorrow = (
         Diagnostic.invalidBorrowOperand(subjectNode?.span ?? node.span),
       )
     }
-    if (
-      access === 'Exclusive' &&
-      !(
-        (root._tag === 'BindingRoot' && root.binding.mutability === 'Mutable') ||
-        (root._tag === 'PatternRoot' && root.binding.access === 'Exclusive')
-      )
-    ) {
+    if (access === 'Exclusive' && !exclusiveBorrowRoot(root)) {
       const name =
         subject._tag === 'Identifier' && 'spelling' in subject.reference
           ? subject.reference.spelling
@@ -1605,13 +1630,7 @@ const analyzeBorrow = (
     })
   }
   if (Type.isFixedArray(sourceType)) {
-    if (
-      access === 'Exclusive' &&
-      !(
-        (root._tag === 'BindingRoot' && root.binding.mutability === 'Mutable') ||
-        (root._tag === 'PatternRoot' && root.binding.access === 'Exclusive')
-      )
-    ) {
+    if (access === 'Exclusive' && !exclusiveBorrowRoot(root)) {
       const name =
         subject._tag === 'Identifier' && 'spelling' in subject.reference
           ? subject.reference.spelling
@@ -7326,6 +7345,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
         _tag: 'ValueBorrow',
         borrow,
         root,
+        path: fact.formation.root.path,
         source: fact.formation.source,
         access: fact.access,
         type: fact.type.type,

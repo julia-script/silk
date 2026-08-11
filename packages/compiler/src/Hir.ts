@@ -327,6 +327,7 @@ export type Expression =
       readonly _tag: 'ValueBorrow'
       readonly borrow: BorrowId
       readonly root: SliceRoot
+      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
       readonly source: Type.Type
       readonly access: Type.Reference['access']
       readonly type: Type.Reference

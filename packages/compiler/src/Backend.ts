@@ -1090,7 +1090,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           const addressRoots = new Set([
             ...entry.linear.flatMap((block) =>
               block.operations.flatMap((operation) =>
-                operation._tag === 'BeginLoan' && operation.sourceType._tag !== 'Slice'
+                operation._tag === 'BeginLoan' &&
+                operation.sourceType._tag !== 'Slice' &&
+                entry.fn.localTypes.at(operation.root.ordinal)?._tag !== 'Reference'
                   ? [operation.root.ordinal]
                   : [],
               ),
@@ -3149,12 +3151,61 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     locals.set(operation.destination.ordinal, readLocal(operation.root))
                     break
                   }
+                  const rootType = entry.fn.localTypes.at(operation.root.ordinal)
+                  const rootSemantic =
+                    rootType === undefined ? undefined : Mir.semanticType(rootType)
+                  const staticSelectors = operation.selectors.map((selector) => selector.field)
+                  if (rootSemantic !== undefined && SilkType.isReference(rootSemantic)) {
+                    const address = readLocal(operation.root).at(0)
+                    const offset = Layout.laneOffset(
+                      program.layout,
+                      rootSemantic.target,
+                      staticSelectors,
+                    )
+                    if (address === undefined || offset === undefined) {
+                      throw new RangeError('LLVM projected borrow lost its reference address')
+                    }
+                    if (operation.type._tag !== 'Reference') {
+                      throw new RangeError(
+                        'LLVM projected reference borrow produced a non-reference',
+                      )
+                    }
+                    const base = yield* FunctionBody.cast(
+                      body,
+                      'inttoptr',
+                      address,
+                      pointer,
+                      `borrow${operation.destination.ordinal}_base`,
+                    )
+                    locals.set(
+                      operation.destination.ordinal,
+                      Object.freeze([
+                        yield* constantBytePointer(
+                          base,
+                          offset,
+                          `borrow${operation.destination.ordinal}_projected`,
+                        ),
+                      ]),
+                    )
+                    break
+                  }
                   yield* materializeAddressRoot(operation.root)
                   const base = addressStorage.get(operation.root.ordinal)
                   if (base === undefined)
                     throw new RangeError('LLVM borrow formation lost its root')
+                  const rootOffset =
+                    rootSemantic === undefined
+                      ? undefined
+                      : Layout.laneOffset(program.layout, rootSemantic, staticSelectors)
+                  if (rootOffset === undefined)
+                    throw new RangeError('LLVM borrow formation lost its projected root offset')
+                  const projected = yield* constantBytePointer(
+                    base,
+                    rootOffset,
+                    `borrow${operation.destination.ordinal}_projected`,
+                  )
                   if (operation.type._tag === 'Reference') {
-                    locals.set(operation.destination.ordinal, Object.freeze([base]))
+                    locals.set(operation.destination.ordinal, Object.freeze([projected]))
                     break
                   }
                   if (operation.sourceType._tag !== 'FixedArray') {
@@ -3163,7 +3214,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(
                     operation.destination.ordinal,
                     Object.freeze([
-                      base,
+                      projected,
                       yield* Constant.integerUnsigned(
                         builder,
                         usizeType ?? i32,

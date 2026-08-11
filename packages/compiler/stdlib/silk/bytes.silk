@@ -1,0 +1,54 @@
+import silk.vector {
+  Vector,
+  make as vectorMake,
+  append as vectorAppend,
+  length as vectorLength,
+  asSlice as vectorAsSlice,
+  asMutSlice as vectorAsMutSlice
+}
+
+/// An owned encoding-neutral sequence of arbitrary octets.
+pub struct Bytes {
+  values: Vector<u8>
+}
+
+fn counted(value: usize) -> usize {
+  return value
+}
+
+/// Constructs empty Bytes without allocating.
+pub fn make() -> Bytes {
+  return Bytes { values: vectorMake<u8>() }
+}
+
+/// Returns the initialized byte count.
+pub fn length(self: &Bytes) -> usize {
+  return vectorLength<u8>(&self.values)
+}
+
+/// Copies one borrowed byte sequence into independently owned storage.
+pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemory ? &mut Allocator {
+  let mut result = make()
+  let appended = run append(&mut result, values)
+  return move result
+}
+
+/// Appends one complete borrowed byte sequence in source order.
+pub effect fn append(self: &mut Bytes, values: &[u8]) -> () ! OutOfMemory ? &mut Allocator {
+  let mut index = counted(0)
+  while index < values.length {
+    let appended = run vectorAppend<u8>(&mut self.values, values[index])
+    index = index + counted(1)
+  }
+  return ()
+}
+
+/// Borrows the initialized octets as one shared lexical slice.
+pub fn asSlice(self: &Bytes) -> &[u8] {
+  return vectorAsSlice<u8>(&self.values)
+}
+
+/// Borrows the initialized octets as one exclusive lexical slice.
+pub fn asMutSlice(self: &mut Bytes) -> &mut [u8] {
+  return vectorAsMutSlice<u8>(&mut self.values)
+}

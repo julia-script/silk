@@ -287,6 +287,58 @@ pub fn main() -> i32 {
   )
 })
 
+it.effect('navigates and presents the source-defined owned Bytes surface', () => {
+  const source = `import silk.bytes { Bytes as OwnedBytes, make, copy, append, length, asSlice, asMutSlice }
+pub fn main() -> i32 {
+  let bytes = Bytes.make()
+  return usize.toI32(length(&bytes))
+}`
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      for (const [name, documentation] of [
+        ['make', '/// Constructs empty Bytes without allocating.'],
+        ['copy', '/// Copies one borrowed byte sequence into independently owned storage.'],
+        ['append', '/// Appends one complete borrowed byte sequence in source order.'],
+        ['length', '/// Returns the initialized byte count.'],
+        ['asSlice', '/// Borrows the initialized octets as one shared lexical slice.'],
+        ['asMutSlice', '/// Borrows the initialized octets as one exclusive lexical slice.'],
+      ] as const) {
+        const occurrence = occurrenceAt(snapshot, source, name, 0)
+        assert.strictEqual(occurrence?.resolution._tag, 'Available')
+        assert.strictEqual(occurrence?.declaration?.module, 'silk/bytes')
+        assert.isDefined(occurrence?.declaration?.selectionSpan)
+        assert.include(
+          occurrence === undefined
+            ? ''
+            : (Analysis.occurrencePresentation(snapshot, 'main', occurrence)?.text ?? ''),
+          `fn ${name}`,
+        )
+        assert.strictEqual(
+          documentationText(
+            snapshot,
+            Analysis.documentationAt(snapshot, 'main', source.indexOf(name)),
+          ),
+          documentation,
+        )
+      }
+      const bytesSource = Analysis.syntaxOf(snapshot, 'silk/bytes')?.source
+      assert.isDefined(bytesSource)
+      const text =
+        bytesSource === undefined ? '' : decoder.decode(SourceFile.toUint8Array(bytesSource))
+      assert.include(text, 'pub struct Bytes')
+      assert.include(text, 'values: Vector<u8>')
+      assert.notInclude(text, 'FileSystem')
+      const completionOffset = source.indexOf('Bytes.') + 'Bytes.'.length
+      const labels = Analysis.completionAt(snapshot, 'main', completionOffset)?.candidates.map(
+        (candidate) => candidate.label,
+      )
+      for (const name of ['make', 'copy', 'append', 'length', 'asSlice', 'asMutSlice'])
+        assert.include(labels ?? [], name)
+      return undefined
+    }),
+  )
+})
+
 it.effect('completes and navigates the source-defined logging surface', () => {
   const source = `import silk.logging { Logger }
 effect fn pending() -> () ! LogError ? &mut Logger {

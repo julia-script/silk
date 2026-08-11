@@ -68,11 +68,11 @@ program record remains in [real programs](real-programs.md).
 - **Outcome & done-when:** canonical `Bytes` is an encoding-neutral nominal wrapper over
   `Vector<u8>` with minimal construction, copy, append, length, lexical views, ownership, allocation,
   cleanup, tooling, and three-engine parity.
-- **Status:** proposal complete and strictly validated; returned borrows are shipped, so this is the
-  next implementation dependency.
+- **Status:** shipped, synchronized, and archived; portable FileSystem is now the next dependency.
 - **Appetite:** one ordinary standard-library actor with no new compiler primitive.
 - **Boundary:** no String, UTF-8 promise, formatting, filesystem policy, or broad byte algorithms.
-- **Links:** change: [`add-owned-bytes`](../openspec/changes/add-owned-bytes/proposal.md) ·
+- **Links:** change:
+  [`add-owned-bytes`](../openspec/changes/archive/2026-08-11-add-owned-bytes/proposal.md) ·
   [standard library spec](../openspec/specs/bootstrap-silk-stdlib/spec.md)
 
 ### Enforce target availability only for reachable intrinsics
@@ -188,6 +188,10 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-11: Shipped, synced, and archived source-defined owned `Bytes`, including stable
+  field-projected returned borrows, ordinary `Vector<u8>` storage, move-only cleanup, mutable and
+  shared slice views, editor navigation, allocation failure coverage, and evaluator/native/direct-
+  Wasm parity. Promoted portable FileSystem to the next implementation item.
 - 2026-08-11: Shipped, synced, and archived conservative returned lexical borrows, including
   last-use ownership, unsafe generic RawBuffer views, ordinary Vector slice accessors, tooling,
   and evaluator/native/direct-Wasm parity. Promoted owned Bytes to the next implementation item.
