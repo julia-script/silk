@@ -96,6 +96,54 @@ pub fn main() -> i32 { return 0 }`)
   )
 })
 
+it('admits one-source ordinary returned views and rejects ambiguous or strengthened headers', () => {
+  const result = analyze(`fn identity(values: &[i32]) -> &[i32] { return values }
+fn share(values: &mut [i32]) -> &[i32] { return &values }
+fn ambiguous(left: &[i32], right: &[i32]) -> &[i32] { return left }
+fn strengthen(values: &[i32]) -> &mut [i32] { return &mut values }
+pub fn main() -> i32 { return 0 }`)
+
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0091', 'SEM0091', 'SEM0055'],
+  )
+  assert.strictEqual(result.functions.at(0)?.returnedBorrow?.parameter.id.ordinal, 0)
+  assert.strictEqual(result.functions.at(1)?.returnedBorrow?.access, 'Shared')
+})
+
+it('rejects a returned view whose body does not preserve the declared source', () => {
+  const result = analyze(`fn invalid(values: &[i32]) -> &[i32] {
+  let local = [1, 2]
+  return &local
+}
+pub fn main() -> i32 { return 0 }`)
+
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0092'],
+  )
+})
+
+it('keeps returned views out of effects, services, captures, and owned storage', () => {
+  const result = analyze(`service Reader {
+  fn read(values: &[i32]) -> &[i32]
+}
+effect fn delayed(values: &[i32]) -> &[i32] { return values }
+fn captured(values: &[i32]) -> once fn() -> &[i32] {
+  return fn() -> &[i32] { return values }
+}
+struct Stored { view: &[i32] }
+fn array(values: &[i32]) -> i32 {
+  let stored = [values]
+  return 0
+}
+pub fn main() -> i32 { return 0 }`)
+
+  const codes = result.diagnostics.map((diagnostic) => diagnostic.code)
+  assert.isAtLeast(codes.filter((code) => code === 'SEM0091').length, 2)
+  assert.include(codes, 'SEM0054')
+})
+
 it('rejects decay, immutable exclusive roots, standalone borrows, and subplaces', () => {
   const result = analyze(`fn read(values: &[i32]) -> i32 { return 1 }
 fn edit(values: &mut [i32]) -> i32 { return 2 }

@@ -65,6 +65,8 @@ export interface SliceValue {
   readonly cell: number
   readonly base: number
   readonly length: number
+  /** Present only for a zero-copy RawBuffer-backed slice. */
+  readonly ticket?: number
 }
 
 /** Allocation-free immutable view of one compiler-owned static-data entry. */
@@ -277,6 +279,13 @@ export interface PlaceReadTraceEvent {
     | {
         readonly _tag: 'StaticElement'
         readonly data: string
+        readonly index: number
+        readonly bounds: 'Checked'
+        readonly span: SourceSpan.SourceSpan
+      }
+    | {
+        readonly _tag: 'RawBufferElement'
+        readonly ticket: number
         readonly index: number
         readonly bounds: 'Checked'
         readonly span: SourceSpan.SourceSpan
@@ -1515,6 +1524,16 @@ function* executeFunction(
           selected = scalarIntegerValue('u8', BigInt(byte))
           continue
         }
+        if (selected.ticket !== undefined) {
+          const allocation = state.allocations.get(selected.ticket)
+          const element = allocation?.values.get(String(selected.base + index))
+          if (allocation === undefined || !allocation.active || element === undefined) {
+            throw new RangeError('MIR RawBuffer slice selected uninitialized storage')
+          }
+          indexes.push(index)
+          selected = element
+          continue
+        }
         const backing = cell(selected).value
         if (backing._tag !== 'ArrayValue') {
           throw new RangeError('MIR slice cell does not contain an array value')
@@ -1584,6 +1603,19 @@ function* executeFunction(
     }
     if (selector._tag === 'SliceElementSelector') {
       if (current._tag !== 'SliceValue') throw new RangeError('Invalid slice replacement')
+      if (current.ticket !== undefined) {
+        const allocation = state.allocations.get(current.ticket)
+        const absolute = current.base + ordinal
+        const previous = allocation?.values.get(String(absolute))
+        if (allocation === undefined || !allocation.active || previous === undefined) {
+          throw new RangeError('Invalid RawBuffer slice replacement')
+        }
+        allocation.values.set(
+          String(absolute),
+          replacePlace(previous, selectors, indexes, replacement, depth + 1),
+        )
+        return current
+      }
       const backing = cell(current)
       if (backing.value._tag !== 'ArrayValue') {
         throw new RangeError('Invalid slice backing cell replacement')
@@ -2205,6 +2237,39 @@ function* executeFunction(
               throw new RangeError('MIR verifier allowed RawBuffer.count on another value')
             }
             write(operation.destination, { value: usizeValue(buffer.count), fromCall: false })
+            break
+          }
+          case 'RawBufferView': {
+            const buffer = referenced(operation.buffer).value
+            const offset = readUsize(operation.offset).value
+            const length = readUsize(operation.length).value
+            if (buffer._tag !== 'RawBufferValue') {
+              throw new RangeError('MIR verifier allowed RawBuffer.view on another value')
+            }
+            if (
+              offset > buffer.count ||
+              length > buffer.count - offset ||
+              offset > BigInt(Number.MAX_SAFE_INTEGER) ||
+              length > BigInt(Number.MAX_SAFE_INTEGER)
+            ) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'RawBuffer view range is out of bounds',
+                span: operation.provenance.span,
+              })
+            }
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'SliceValue',
+                frame: -1,
+                cell: -1,
+                base: Number(offset),
+                length: Number(length),
+                ticket: buffer.ticket,
+              }),
+              fromCall: false,
+            })
             break
           }
           case 'RawBufferRead': {
@@ -2887,6 +2952,25 @@ function* executeFunction(
                     }),
                   )
                   selected = scalarIntegerValue('u8', BigInt(byte))
+                  continue
+                }
+                if (selected.ticket !== undefined) {
+                  const allocation = state.allocations.get(selected.ticket)
+                  const absolute = selected.base + index
+                  const element = allocation?.values.get(String(absolute))
+                  if (allocation === undefined || !allocation.active || element === undefined) {
+                    throw new RangeError('MIR RawBuffer slice selected uninitialized storage')
+                  }
+                  selectors.push(
+                    Object.freeze({
+                      _tag: 'RawBufferElement',
+                      ticket: selected.ticket,
+                      index: absolute,
+                      bounds: 'Checked',
+                      span: selector.provenance.span,
+                    }),
+                  )
+                  selected = element
                   continue
                 }
                 const backing = cell(selected).value

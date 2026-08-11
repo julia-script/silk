@@ -355,14 +355,14 @@ MUST NOT become runtime fields.
 - **WHEN** source attempts to move, replace, mutate, or clean an owner while a conflicting slice loan is live
 - **THEN** ownership diagnoses the owner operation and preserves the original loan and cleanup state
 
-### Requirement: Slice loans remain call-scoped and non-escaping
+### Requirement: Slice loans remain lexical and non-escaping
 
 An explicit borrow argument SHALL begin before its argument value is supplied and end only after the
 ordinary callee returns. A function slice parameter SHALL remain borrowed for the complete function
-body. Slice types MUST be rejected recursively from return types, struct or union fields, fixed
-arrays, owned generic wrappers, lazy flow environments, and other escaping captures. Standalone
-slice local bindings and borrows of temporaries or subplaces MUST be rejected in this bootstrap
-capability.
+body. A returned one-source view MAY extend its call loan through a lexical local's last use. Slice
+types MUST be rejected recursively from struct or union fields, fixed arrays, owned generic
+wrappers, lazy flow environments, and other escaping captures. Direct standalone borrow bindings
+and borrows of temporaries or subplaces MUST remain rejected.
 
 #### Scenario: End a temporary loan after an ordinary call
 
@@ -378,6 +378,34 @@ capability.
 
 - **WHEN** a lazy computation or callback would retain a slice after call construction
 - **THEN** ownership rejects the capture rather than ending the source loan prematurely
+
+### Requirement: Returned views preserve source provenance through their live range
+
+Ownership facts SHALL identify the single source owner of every accepted returned view and carry
+that provenance through assignments and compatible reborrows. While a shared returned view is live,
+the owner MUST NOT be mutated, moved, or dropped. While an exclusive returned view is live, the owner
+MUST NOT be otherwise read, mutated, moved, or dropped. Conflicting access MAY resume after the
+view's last use.
+
+#### Scenario: Suspend mutation for a shared returned view
+
+- **WHEN** a caller keeps a shared returned view live and attempts to mutate its source owner
+- **THEN** ownership rejects the mutation and relates it to the live view's origin
+
+#### Scenario: Suspend every competing access for an exclusive returned view
+
+- **WHEN** a caller keeps an exclusive returned view live and attempts a second access to its source owner
+- **THEN** ownership rejects the competing access until the exclusive view's last use
+
+#### Scenario: Move the owner after the view ends
+
+- **WHEN** a returned view's last use precedes a whole-owner move
+- **THEN** the view no longer suspends the owner and the ordinary move succeeds
+
+#### Scenario: Reject dropping a borrowed owner
+
+- **WHEN** a structured exit would drop an owner while a returned view derived from it remains live
+- **THEN** ownership rejects the exit rather than emitting cleanup that invalidates the view
 
 ### Requirement: Structured exits end loans before owner cleanup
 

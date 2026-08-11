@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Ownership from '../src/Ownership.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -68,6 +69,99 @@ pub fn main() -> i32 { return 0 }`)
     assert.strictEqual(loan?.parent?._tag, 'Parameter')
     assert.strictEqual(loan?.suspendsParent, true)
     assert.strictEqual(loan?.startRegion.ordinal, loan?.endRegion.ordinal)
+  }),
+)
+
+it.effect('keeps a returned shared view live through its last use and then restores mutation', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`fn identity(values: &[i32]) -> &[i32] { return values }
+fn conflict() -> i32 {
+  let mut values = [1, 2]
+  let view = identity(&values)
+  values[0] = 3
+  return usize.toI32(view.length)
+}
+fn restored() -> i32 {
+  let mut values = [1, 2]
+  let view = identity(&values)
+  let length = usize.toI32(view.length)
+  values[0] = 3
+  return length
+}
+pub fn main() -> i32 { return restored() }`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['OWN0011'],
+    )
+    const conflict = Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(1)
+    const returned = conflict?.loans.find((loan) => loan.origin === 'ReturnedView')
+    assert.strictEqual(returned?.root._tag, 'Let')
+    assert.strictEqual(returned?.access, 'Shared')
+    assert.strictEqual(
+      returned === undefined ? false : returned.endSpan.end > returned.startSpan.end,
+      true,
+    )
+    const restored = Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(2)
+    assert.strictEqual(
+      restored?.loans.some((loan) => loan.origin === 'ReturnedView'),
+      true,
+    )
+  }),
+)
+
+it.effect('suspends all owner access for an exclusive returned view until its last use', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`fn identity(values: &mut [i32]) -> &mut [i32] { return values }
+fn conflict() -> i32 {
+  let mut values = [1, 2]
+  let mut view = identity(&mut values)
+  let ownerRead = values[0]
+  view[1] = 3
+  return ownerRead
+}
+fn restored() -> i32 {
+  let mut values = [1, 2]
+  let mut view = identity(&mut values)
+  view[1] = 3
+  return values[1]
+}
+pub fn main() -> i32 { return restored() }`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['OWN0011'],
+    )
+    const conflict = Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(1)
+    assert.strictEqual(conflict?.loans.at(0)?.access, 'Exclusive')
+    assert.strictEqual(conflict?.loans.at(0)?.origin, 'ReturnedView')
+    const ownership = Analysis.ownershipOf(self, 'slices/Ownership')
+    assert.include(ownership === undefined ? '' : Ownership.encode(ownership), 'returned-view')
+  }),
+)
+
+it.effect('rejects moving or dropping an owner while a returned view is live', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`struct Token { value: i32 }
+fn identity(values: &[Token]) -> &[Token] { return values }
+fn moved() -> i32 {
+  let values = [Token { value: 1 }]
+  let view = identity(&values)
+  let consumed = move values
+  return view[0].value
+}
+fn dropped() -> i32 {
+  let values = [Token { value: 1 }]
+  let view = identity(&values)
+  drop values
+  return view[0].value
+}
+pub fn main() -> i32 { return 0 }`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['OWN0011', 'OWN0011'],
+    )
   }),
 )
 

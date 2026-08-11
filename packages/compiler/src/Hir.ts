@@ -92,6 +92,8 @@ export type BuiltinOperation =
   | 'RawBufferSlot'
   | 'RawBufferCount'
   | 'RawBufferRead'
+  | 'RawBufferView'
+  | 'RawBufferViewMut'
   | 'SlotWrite'
   | 'SlotTake'
   | 'SlotCopy'
@@ -147,7 +149,7 @@ export type BorrowedWriteSelector =
 
 export interface BorrowedWritePlace {
   readonly _tag: 'BorrowedWritePlace'
-  readonly root: DeclarationIndex.ParameterId
+  readonly root: Extract<SliceRoot, { readonly _tag: 'BindingSliceRoot' | 'ParameterSliceRoot' }>
   /** The borrowed root: an exclusive slice, or an exclusive reference written through. */
   readonly slice: Type.Slice | Type.Reference
   readonly selectors: ReadonlyArray<BorrowedWriteSelector>
@@ -351,6 +353,8 @@ export type Expression =
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
+      /** Direct argument loans deliberately retained by a returned lexical view. */
+      readonly heldLoans: ReadonlyArray<BorrowId>
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -915,10 +919,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
                 candidate.borrow.callSpan.end === expression.span.end)),
         )
         .map((candidate) => borrowKey(candidate.borrow))
-      const ends = [
-        ...expression.loanEnds,
-        ...(expression._tag === 'BuiltinCall' ? expression.heldLoans : []),
-      ].map(borrowKey)
+      const ends = [...expression.loanEnds, ...expression.heldLoans].map(borrowKey)
       if (
         begins.length !== ends.length ||
         begins.some((begin, ordinal) => begin !== ends.at(ordinal)) ||
@@ -1281,7 +1282,7 @@ const encodeStatement = (statement: Statement, depth: number): string => {
       ].join('\n')
     case 'Write':
       return [
-        `${indent}write ${statement.place._tag === 'WritePlace' ? `b${statement.place.root.ordinal}` : `slice-p${statement.place.root.ordinal}`}${statement.place.selectors
+        `${indent}write ${statement.place._tag === 'WritePlace' ? `b${statement.place.root.ordinal}` : statement.place.root._tag === 'BindingSliceRoot' ? `slice-b${statement.place.root.binding.ordinal}` : `slice-p${statement.place.root.parameter.ordinal}`}${statement.place.selectors
           .map((selector) =>
             selector._tag === 'Field'
               ? `.#${selector.field.ordinal}`

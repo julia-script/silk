@@ -776,7 +776,23 @@ const endRunLoans = (fn: FunctionLowering, span: SourceSpan.SourceSpan): void =>
   // records that end site, so every lowering path for run must release them here.
   for (const loan of fn.ownership?.loans ?? []) {
     if (loan.origin !== 'EffectCapture' && loan.origin !== 'ValueBorrow') continue
-    if (loan.endSpan.start !== span.start || loan.endSpan.end !== span.end) continue
+    if (loan.endSpan.sourceId !== span.sourceId || loan.endSpan.end > span.end) {
+      continue
+    }
+    endLoans(fn, [loan.id], span)
+  }
+}
+
+const endReturnedViewLoans = (fn: FunctionLowering, span: SourceSpan.SourceSpan): void => {
+  for (const loan of fn.ownership?.loans ?? []) {
+    if (loan.origin !== 'ReturnedView') continue
+    if (
+      loan.endSpan.sourceId !== span.sourceId ||
+      loan.endSpan.start < span.start ||
+      loan.endSpan.end > span.end
+    ) {
+      continue
+    }
     endLoans(fn, [loan.id], span)
   }
 }
@@ -799,6 +815,14 @@ const retainedEffectLoans = (
   }
   return Object.freeze([...retained.values()])
 }
+
+const borrowedWriteRoot = (
+  fn: FunctionLowering,
+  root: Hir.BorrowedWritePlace['root'],
+): Mir.LocalId | undefined =>
+  root._tag === 'ParameterSliceRoot'
+    ? fn.parameterLocals.get(root.parameter.ordinal)
+    : fn.bindingLocals.get(root.binding.ordinal)
 
 const lowerEffectExecution = (
   fn: FunctionLowering,
@@ -997,6 +1021,15 @@ function lowerExpression(
   fn: FunctionLowering,
   expression: Hir.Expression,
 ): LoweredExpression | undefined {
+  const lowered = lowerExpressionInner(fn, expression)
+  endReturnedViewLoans(fn, expression.span)
+  return lowered
+}
+
+function lowerExpressionInner(
+  fn: FunctionLowering,
+  expression: Hir.Expression,
+): LoweredExpression | undefined {
   switch (expression._tag) {
     case 'IntegerLiteral': {
       const type = fn.type(expression.type)
@@ -1094,7 +1127,7 @@ function lowerExpression(
       const place = expression.place
       const root =
         place._tag === 'BorrowedWritePlace'
-          ? local(place.root.ordinal)
+          ? borrowedWriteRoot(fn, place.root)
           : fn.bindingLocals.get(place.root.ordinal)
       const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
       const type = fn.type(place.type)
@@ -2435,6 +2468,41 @@ function lowerExpression(
         )
         return finishBuiltin(destination)
       }
+      if (expression.operation === 'RawBufferView' || expression.operation === 'RawBufferViewMut') {
+        const [buffer, offset, length] = argumentLocals
+        const type = fn.type(expression.type)
+        const element = Type.isSlice(expression.type) ? expression.type.element : undefined
+        const semanticElement = element === undefined ? undefined : fn.semantic(element)
+        const elementLayout =
+          semanticElement === undefined ? undefined : Layout.entry(fn.layout, semanticElement)
+        if (
+          buffer === undefined ||
+          offset === undefined ||
+          length === undefined ||
+          type?._tag !== 'Slice' ||
+          semanticElement === undefined ||
+          elementLayout === undefined
+        ) {
+          return undefined
+        }
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'RawBufferView' as const,
+            destination,
+            buffer,
+            offset,
+            length,
+            element: semanticElement,
+            stride:
+              Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
+            access: expression.operation === 'RawBufferView' ? 'Shared' : 'Exclusive',
+            type,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
       if (expression.operation === 'RawBufferSlot') {
         const [buffer, index] = argumentLocals
         const type = fn.type(expression.type)
@@ -3287,7 +3355,7 @@ const lowerSequence = (
     const place = statement.place
     const root =
       place._tag === 'BorrowedWritePlace'
-        ? local(place.root.ordinal)
+        ? borrowedWriteRoot(fn, place.root)
         : fn.bindingLocals.get(place.root.ordinal)
     const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
     const type = fn.type(place.type)
@@ -3323,6 +3391,7 @@ const lowerSequence = (
           provenance: authored(statement.span),
         }),
       )
+      endReturnedViewLoans(fn, statement.span)
       return true
     })
     if (!written) return undefined

@@ -1700,6 +1700,41 @@ const emitOperation = (
         }),
       ]
     }
+    case 'RawBufferView': {
+      const address = scalar(operation.buffer)
+      const offset = scalar(operation.offset)
+      const length = scalar(operation.length)
+      const destination = slots(operation.destination)
+      const destinationAddress = destination.at(0)
+      const destinationLength = destination.at(1)
+      const rawBuffer = SilkType.rawBuffer(operation.element)
+      const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
+      const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+      const countOffset = aggregateFieldOffset(rawBuffer, 'count')
+      if (destinationAddress === undefined || destinationLength === undefined) {
+        throw new RangeError('Wasm RawBuffer view lost its slice lanes')
+      }
+      return [
+        Instr.localGet(offset),
+        ...loadAt(address, countOffset),
+        Instr.op('i32.gt_u'),
+        Instr.localGet(length),
+        ...loadAt(address, countOffset),
+        Instr.localGet(offset),
+        Instr.op('i32.sub'),
+        Instr.op('i32.gt_u'),
+        Instr.op('i32.or'),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        ...loadAt(address, baseOffset),
+        Instr.localGet(offset),
+        Instr.i32Const(operation.stride),
+        Instr.op('i32.mul'),
+        Instr.op('i32.add'),
+        Instr.localSet(destinationAddress),
+        Instr.localGet(length),
+        Instr.localSet(destinationLength),
+      ]
+    }
     case 'SlotWrite': {
       const address = scalar(operation.slot)
       const shape = LayoutPlan.callingShape(plan, operation.element)
@@ -3774,6 +3809,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           operation._tag === 'RawBufferCount' ||
           operation._tag === 'RawBufferSlot' ||
           operation._tag === 'RawBufferRead' ||
+          operation._tag === 'RawBufferView' ||
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
           operation._tag === 'SlotCopy' ||

@@ -13,7 +13,7 @@ compare evaluation/native/direct-Wasm behavior, sweep allocation failures, prese
 artifacts, and promote only repeated general walls.
 
 **Current objective:** no active pressure program. The first initiative and portable Logging are
-complete; the project roadmap now owns the returned-borrow, Bytes, portable FileSystem,
+complete; returned borrows have shipped, and the project roadmap now owns the Bytes, portable FileSystem,
 target-availability, and native-provider sequence. After that sequence exists, another recognizable
 program should exercise Logging and FileSystem together before any compiler port or broader I/O
 family is selected.

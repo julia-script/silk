@@ -334,6 +334,7 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'RawBufferCount':
     case 'RawBufferSlot':
     case 'RawBufferRead':
+    case 'RawBufferView':
     case 'SlotWrite':
     case 'SlotTake':
     case 'SlotCopy':
@@ -355,6 +356,7 @@ const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'RawBufferFrom' ||
   operation._tag === 'RawBufferSlot' ||
   operation._tag === 'RawBufferRead' ||
+  operation._tag === 'RawBufferView' ||
   operation._tag === 'RunEffect' ||
   operation._tag === 'RunEffectValue' ||
   operation._tag === 'RunStaticEffect' ||
@@ -800,6 +802,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             operation._tag === 'RawBufferCount' ||
             operation._tag === 'RawBufferSlot' ||
             operation._tag === 'RawBufferRead' ||
+            operation._tag === 'RawBufferView' ||
             operation._tag === 'SlotWrite' ||
             operation._tag === 'SlotTake' ||
             operation._tag === 'SlotCopy' ||
@@ -894,6 +897,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           operation._tag === 'RawBufferCount' ||
           operation._tag === 'RawBufferSlot' ||
           operation._tag === 'RawBufferRead' ||
+          operation._tag === 'RawBufferView' ||
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
           operation._tag === 'SlotCopy' ||
@@ -2665,6 +2669,99 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     )
                   }
                   locals.set(operation.destination.ordinal, Object.freeze(values))
+                  break
+                }
+                case 'RawBufferView': {
+                  const address = readLocal(operation.buffer).at(0)
+                  const offset = readLocal(operation.offset).at(0)
+                  const length = readLocal(operation.length).at(0)
+                  if (
+                    address === undefined ||
+                    offset === undefined ||
+                    length === undefined ||
+                    usizeType === undefined
+                  ) {
+                    throw new RangeError('LLVM RawBuffer.view lost its storage provenance')
+                  }
+                  const bufferType = SilkType.rawBuffer(operation.element)
+                  const count = yield* FunctionBody.load(
+                    body,
+                    usizeType,
+                    yield* constantBytePointer(
+                      address,
+                      aggregateFieldOffset(bufferType, 'count'),
+                      `raw_view${operation.destination.ordinal}_count_ptr`,
+                    ),
+                    `raw_view${operation.destination.ordinal}_count`,
+                  )
+                  const offsetOutOfBounds = yield* FunctionBody.integerCompare(
+                    body,
+                    'ugt',
+                    offset,
+                    count,
+                    `raw_view${operation.destination.ordinal}_offset_bounds`,
+                  )
+                  const remaining = yield* FunctionBody.binary(
+                    body,
+                    'sub',
+                    count,
+                    offset,
+                    `raw_view${operation.destination.ordinal}_remaining`,
+                  )
+                  const lengthOutOfBounds = yield* FunctionBody.integerCompare(
+                    body,
+                    'ugt',
+                    length,
+                    remaining,
+                    `raw_view${operation.destination.ordinal}_length_bounds`,
+                  )
+                  const invalid = yield* FunctionBody.binary(
+                    body,
+                    'or',
+                    offsetOutOfBounds,
+                    lengthOutOfBounds,
+                    `raw_view${operation.destination.ordinal}_invalid`,
+                  )
+                  if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'raw_trap')
+                  const accepted = yield* LlvmBlock.make(
+                    body,
+                    `raw_view${operation.destination.ordinal}_accepted`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
+                  yield* LlvmBlock.setInsertionPoint(body, accepted)
+                  const allocationOffset = aggregateFieldOffset(bufferType, '$allocation')
+                  const baseAddress = yield* FunctionBody.load(
+                    body,
+                    usizeType,
+                    yield* constantBytePointer(
+                      address,
+                      allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base'),
+                      `raw_view${operation.destination.ordinal}_base_ptr`,
+                    ),
+                    `raw_view${operation.destination.ordinal}_base`,
+                  )
+                  const byteOffset = yield* FunctionBody.binary(
+                    body,
+                    'mul',
+                    offset,
+                    yield* Constant.integerUnsigned(builder, usizeType, BigInt(operation.stride)),
+                    `raw_view${operation.destination.ordinal}_byte_offset`,
+                  )
+                  const selected = yield* FunctionBody.binary(
+                    body,
+                    'add',
+                    baseAddress,
+                    byteOffset,
+                    `raw_view${operation.destination.ordinal}_address`,
+                  )
+                  const base = yield* FunctionBody.cast(
+                    body,
+                    'inttoptr',
+                    selected,
+                    pointer,
+                    `raw_view${operation.destination.ordinal}_ptr`,
+                  )
+                  locals.set(operation.destination.ordinal, Object.freeze([base, length]))
                   break
                 }
                 case 'SlotWrite': {

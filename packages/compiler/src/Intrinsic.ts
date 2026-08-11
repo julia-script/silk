@@ -64,6 +64,7 @@ export interface Operation {
   readonly targets?: ReadonlyArray<'Evaluator' | 'LLVM' | 'Wasm'>
   readonly invariant?: string
   readonly hostImport?: string
+  readonly returnedBorrowParameter?: number
   readonly rule: Rule
 }
 
@@ -96,6 +97,7 @@ const builtin = (options: {
   readonly result: string
   readonly semanticResult: Type.Type
   readonly unsafe?: boolean
+  readonly returnedBorrowParameter?: number
 }): Operation =>
   Object.freeze({
     _tag: 'IntrinsicOperation',
@@ -105,6 +107,9 @@ const builtin = (options: {
     parameters: Object.freeze(Array.from(options.parameters)),
     result: options.result,
     unsafe: options.unsafe ?? false,
+    ...(options.returnedBorrowParameter === undefined
+      ? {}
+      : { returnedBorrowParameter: options.returnedBorrowParameter }),
     rule: Object.freeze({
       _tag: 'BuiltinRule',
       operation: options.operation,
@@ -269,6 +274,48 @@ const legacyActors = Object.freeze([
         result: 'RawBuffer<T>',
         semanticResult: Type.rawBuffer(rawElement),
         unsafe: true,
+      }),
+      builtin({
+        actor: 'RawBuffer',
+        name: 'view',
+        operation: 'RawBufferView',
+        typeParameters: Object.freeze(['T']),
+        semanticTypeParameters: rawTypeParameters,
+        parameters: Object.freeze([
+          valueParameter('buffer', '&RawBuffer<T>'),
+          valueParameter('offset', 'usize'),
+          valueParameter('length', 'usize'),
+        ]),
+        semanticParameters: Object.freeze([
+          Type.reference('Shared', Type.rawBuffer(rawElement)),
+          'usize',
+          'usize',
+        ]),
+        result: '&[T]',
+        semanticResult: Type.slice('Shared', rawElement),
+        unsafe: true,
+        returnedBorrowParameter: 0,
+      }),
+      builtin({
+        actor: 'RawBuffer',
+        name: 'viewMut',
+        operation: 'RawBufferViewMut',
+        typeParameters: Object.freeze(['T']),
+        semanticTypeParameters: rawTypeParameters,
+        parameters: Object.freeze([
+          valueParameter('buffer', '&mut RawBuffer<T>'),
+          valueParameter('offset', 'usize'),
+          valueParameter('length', 'usize'),
+        ]),
+        semanticParameters: Object.freeze([
+          Type.reference('Exclusive', Type.rawBuffer(rawElement)),
+          'usize',
+          'usize',
+        ]),
+        result: '&mut [T]',
+        semanticResult: Type.slice('Exclusive', rawElement),
+        unsafe: true,
+        returnedBorrowParameter: 0,
       }),
       builtin({
         actor: 'RawBuffer',

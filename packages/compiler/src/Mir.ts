@@ -407,6 +407,19 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Allocation-free view over a caller-proven initialized RawBuffer range. */
+      readonly _tag: 'RawBufferView'
+      readonly destination: LocalId
+      readonly buffer: LocalId
+      readonly offset: LocalId
+      readonly length: LocalId
+      readonly element: DeclarationIndex.SemanticType
+      readonly stride: number
+      readonly access: SilkType.Slice['access']
+      readonly type: Extract<Type, { readonly _tag: 'Slice' }>
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'SlotWrite'
       readonly destination: LocalId
       readonly slot: LocalId
@@ -1104,6 +1117,8 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination, operation.buffer, operation.index]
     case 'RawBufferRead':
       return [operation.destination, operation.buffer, operation.index]
+    case 'RawBufferView':
+      return [operation.destination, operation.buffer, operation.offset, operation.length]
     case 'SlotWrite':
       return [operation.destination, operation.slot, operation.value]
     case 'SlotTake':
@@ -1375,6 +1390,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
       return [semanticType(operation.type)]
     case 'RawBufferSlot':
     case 'RawBufferRead':
+    case 'RawBufferView':
     case 'SlotWrite':
     case 'SlotTake':
     case 'SlotCopy':
@@ -1521,6 +1537,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.buffer, operation.index]
     case 'RawBufferRead':
       return [operation.buffer, operation.index]
+    case 'RawBufferView':
+      return [operation.buffer, operation.offset, operation.length]
     case 'SlotWrite':
       return [operation.slot, operation.value]
     case 'SlotTake':
@@ -2469,6 +2487,44 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   'RawBuffer.read lost its shared buffer, bounds, Copy element, or result provenance',
               }),
             )
+        }
+        if (operation._tag === 'RawBufferView') {
+          const buffer = fn.localTypes.at(operation.buffer.ordinal)
+          const offset = fn.localTypes.at(operation.offset.ordinal)
+          const length = fn.localTypes.at(operation.length.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const bufferElement =
+            buffer?._tag === 'Reference' && SilkType.isRawBuffer(buffer.type.target)
+              ? buffer.type.target.arguments[0]
+              : undefined
+          const elementLayout = Layout.entry(self.layout, operation.element)
+          const expectedStride =
+            elementLayout === undefined
+              ? undefined
+              : Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment
+          if (
+            buffer?._tag !== 'Reference' ||
+            buffer.type.access !== operation.access ||
+            offset?._tag !== 'usize' ||
+            length?._tag !== 'usize' ||
+            destination?._tag !== 'Slice' ||
+            destination.type.access !== operation.access ||
+            bufferElement === undefined ||
+            !SilkType.equals(bufferElement, operation.element) ||
+            !SilkType.equals(destination.type.element, operation.element) ||
+            operation.stride !== expectedStride
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidRawStorageOperation',
+                function: fn.id,
+                region: region.id,
+                detail:
+                  'RawBuffer view lost its borrowed buffer, initialized range, element, access, or layout provenance',
+              }),
+            )
+          }
         }
         if (
           operation._tag === 'SlotWrite' ||
@@ -3503,6 +3559,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = raw-buffer-slot ${localText(operation.buffer)}[${localText(operation.index)}] element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferRead':
       return `${localText(operation.destination)} = raw-buffer-read ${localText(operation.buffer)}[${localText(operation.index)}] element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'RawBufferView':
+      return `${localText(operation.destination)} = raw-buffer-view ${localText(operation.buffer)} offset=${localText(operation.offset)} length=${localText(operation.length)} element=${SilkType.encode(operation.element)} access=${operation.access.toLowerCase()} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SlotWrite':
       return `${localText(operation.destination)} = slot-write ${localText(operation.slot)}, ${localText(operation.value)} element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SlotTake':

@@ -811,6 +811,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = slot ${localText(operation.buffer)}[${localText(operation.index)}]`
     case 'RawBufferRead':
       return `${localText(operation.destination)} = read ${localText(operation.buffer)}[${localText(operation.index)}]`
+    case 'RawBufferView':
+      return `${localText(operation.destination)} = ${operation.access.toLowerCase()} view ${localText(operation.buffer)}[${localText(operation.offset)}..+${localText(operation.length)}]`
     case 'SlotWrite':
       return `${localText(operation.destination)} = write ${localText(operation.slot)} = ${localText(operation.value)}`
     case 'SlotTake':
@@ -1093,7 +1095,9 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
             ? `#${selector.field.ordinal}`
             : selector._tag === 'StaticElement'
               ? `${selector.data}[${selector.index}] ${selector.bounds.toLowerCase()}`
-              : `${typeText(selector.array)}[${selector.index}] ${selector.bounds.toLowerCase()}`,
+              : selector._tag === 'RawBufferElement'
+                ? `allocation #${selector.ticket}[${selector.index}] ${selector.bounds.toLowerCase()}`
+                : `${typeText(selector.array)}[${selector.index}] ${selector.bounds.toLowerCase()}`,
         )
         .join(' → ')} = ${valueText(event.value)}`
     case 'Cleanup':

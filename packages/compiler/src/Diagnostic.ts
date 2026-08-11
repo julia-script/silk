@@ -170,6 +170,8 @@ export const genericParameterKindMismatchCode = 'SEM0088' as const
 export const contractRowInferenceCode = 'SEM0089' as const
 /** Stable code for storage, bodies, or defaults inside a source service contract. */
 export const invalidServiceDeclarationCode = 'SEM0090' as const
+export const invalidReturnedBorrowSignatureCode = 'SEM0091' as const
+export const invalidReturnedBorrowOriginCode = 'SEM0092' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -290,6 +292,8 @@ export type Code =
   | typeof genericParameterKindMismatchCode
   | typeof contractRowInferenceCode
   | typeof invalidServiceDeclarationCode
+  | typeof invalidReturnedBorrowSignatureCode
+  | typeof invalidReturnedBorrowOriginCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -364,6 +368,8 @@ export type Reason =
   | { readonly _tag: 'MissingUnsafeBoundary'; readonly operation: string }
   | { readonly _tag: 'InvalidConformance'; readonly detail: string }
   | { readonly _tag: 'InvalidServiceDeclaration'; readonly detail: string }
+  | { readonly _tag: 'InvalidReturnedBorrowSignature' }
+  | { readonly _tag: 'InvalidReturnedBorrowOrigin' }
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
@@ -1962,6 +1968,29 @@ export const sliceTypePosition = (
         ? 'A slice must be the complete type of an ordinary function parameter'
         : `A slice cannot appear in a ${position} type`,
     reason: Object.freeze({ _tag: 'SliceTypePosition', position }),
+    span,
+  })
+
+export const invalidReturnedBorrowSignature = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidReturnedBorrowSignatureCode,
+    severity: 'error',
+    message:
+      'A returned slice must belong to an ordinary function with exactly one borrowed parameter; an exclusive result requires an exclusive parameter',
+    reason: Object.freeze({ _tag: 'InvalidReturnedBorrowSignature' }),
+    span,
+  })
+
+export const invalidReturnedBorrowOrigin = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidReturnedBorrowOriginCode,
+    severity: 'error',
+    message: "The returned slice does not originate from the function's single borrowed parameter",
+    reason: Object.freeze({ _tag: 'InvalidReturnedBorrowOrigin' }),
     span,
   })
 

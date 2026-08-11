@@ -17,3 +17,13 @@ pub fn count<T>(buffer: &RawBuffer<T>) -> usize {
 pub fn read<T>(buffer: &RawBuffer<T>, index: usize) -> T {
   unsafe { return Intrinsic.rawBufferRead<T>(buffer, index) }
 }
+
+/// Forms a shared view over caller-proven initialized elements in the selected range.
+pub fn view<T>(buffer: &RawBuffer<T>, offset: usize, length: usize) -> &[T] {
+  unsafe { return Intrinsic.rawBufferView<T>(buffer, offset, length) }
+}
+
+/// Forms an exclusive view over caller-proven initialized elements in the selected range.
+pub fn viewMut<T>(buffer: &mut RawBuffer<T>, offset: usize, length: usize) -> &mut [T] {
+  unsafe { return Intrinsic.rawBufferViewMut<T>(buffer, offset, length) }
+}

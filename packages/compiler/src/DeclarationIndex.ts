@@ -251,6 +251,45 @@ export interface DeclarationFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** The single borrowed parameter an ordinary slice result is lexically tied to. */
+export interface ReturnedBorrowFact {
+  readonly _tag: 'ReturnedBorrow'
+  readonly parameter: ParameterFact
+  readonly access: Type.Slice['access']
+}
+
+/**
+ * Derives the deliberately conservative returned-view contract from an ordinary function header.
+ * No lifetime names are inferred: a valid header has one, and only one, possible borrowed source.
+ */
+export const returnedBorrow = (declaration: DeclarationFact): ReturnedBorrowFact | undefined => {
+  if (
+    declaration.functionKind !== 'Ordinary' ||
+    declaration.returnType._tag !== 'Resolved' ||
+    !Type.isSlice(declaration.returnType.type)
+  ) {
+    return undefined
+  }
+  const borrowed = declaration.parameters.filter(
+    (parameter) =>
+      parameter.declaredType._tag === 'Resolved' &&
+      (Type.isSlice(parameter.declaredType.type) || Type.isReference(parameter.declaredType.type)),
+  )
+  const parameter = borrowed.length === 1 ? borrowed[0] : undefined
+  if (parameter?.declaredType._tag !== 'Resolved') return undefined
+  const source = parameter.declaredType.type
+  const sourceAccess = Type.isSlice(source) || Type.isReference(source) ? source.access : undefined
+  if (sourceAccess === undefined) return undefined
+  if (declaration.returnType.type.access === 'Exclusive' && sourceAccess !== 'Exclusive') {
+    return undefined
+  }
+  return Object.freeze({
+    _tag: 'ReturnedBorrow',
+    parameter,
+    access: declaration.returnType.type.access,
+  })
+}
+
 /** The source-retained literal carried by one compile-time constant header. */
 export type ConstantLiteralFact =
   | { readonly _tag: 'BooleanLiteral'; readonly value: boolean; readonly token: Token.Token }
@@ -3428,9 +3467,14 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           member.returnType._tag === 'Resolved' &&
           Type.containsBorrow(member.returnType.type) &&
           (!Type.isSlot(member.returnType.type) ||
-            Type.containsBorrow(member.returnType.type.arguments.at(0) ?? 'never'))
+            Type.containsBorrow(member.returnType.type.arguments.at(0) ?? 'never')) &&
+          (!Type.isSlice(member.returnType.type) || returnedBorrow(member) === undefined)
         ) {
-          diagnostics.push(Diagnostic.sliceTypePosition('return', member.returnType.syntax.span))
+          diagnostics.push(
+            Type.isSlice(member.returnType.type)
+              ? Diagnostic.invalidReturnedBorrowSignature(member.returnType.syntax.span)
+              : Diagnostic.sliceTypePosition('return', member.returnType.syntax.span),
+          )
         }
         continue
       }

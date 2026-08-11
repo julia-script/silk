@@ -60,6 +60,7 @@ export interface LoanFact {
     | 'ValueBorrow'
     | 'EffectCapture'
     | 'CallableCapture'
+    | 'ReturnedView'
   readonly parent?: BindingSite
   readonly suspendsParent: boolean
   readonly startRegion: Hir.RegionId
@@ -315,6 +316,13 @@ const useSite = (expression: Hir.Expression): BindingSite | undefined => {
     default:
       return undefined
   }
+}
+
+const placeSite = (expression: Hir.Expression): BindingSite | undefined => {
+  if (expression._tag === 'Project' || expression._tag === 'IndexPlace') {
+    return placeSite(expression.subject)
+  }
+  return useSite(expression)
 }
 
 const checkUse = (
@@ -633,7 +641,7 @@ const checkExpression = (
       return
     }
     case 'Match': {
-      const scrutineeSite = useSite(expression.scrutinee)
+      const scrutineeSite = placeSite(expression.scrutinee)
       const scrutineeType =
         expression.scrutinee._tag === 'Unavailable' ? undefined : expression.scrutinee.type
       const scrutineeBinding =
@@ -762,7 +770,9 @@ const checkExpression = (
       const rootSite: BindingSite =
         expression.place._tag === 'WritePlace'
           ? Object.freeze({ _tag: 'Let', binding: expression.place.root })
-          : Object.freeze({ _tag: 'Parameter', parameter: expression.place.root })
+          : expression.place.root._tag === 'BindingSliceRoot'
+            ? Object.freeze({ _tag: 'Let', binding: expression.place.root.binding })
+            : Object.freeze({ _tag: 'Parameter', parameter: expression.place.root.parameter })
       const rootKey = siteKey(rootSite)
       const root = state.bindings.get(rootKey)
       const wasLive = live.has(rootKey)
@@ -898,6 +908,10 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
     number,
     { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
   >()
+  const viewEnds = new Map<
+    number,
+    { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
+  >()
   const scanRunEnds = (expression: Elaboration.ExpressionFact, region: Hir.RegionId): void => {
     switch (expression._tag) {
       case 'Run': {
@@ -972,6 +986,16 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
           if (previous === undefined || previous.span.end < expression.syntax.span.end)
             slotEnds.set(site.binding.ordinal, { region, span: expression.syntax.span })
         }
+        if (
+          site?._tag === 'Let' &&
+          expression.type._tag === 'Available' &&
+          Type.isSlice(expression.type.type)
+        ) {
+          const previous = viewEnds.get(site.binding.ordinal)
+          if (previous === undefined || previous.span.end < expression.syntax.span.end) {
+            viewEnds.set(site.binding.ordinal, { region, span: expression.syntax.span })
+          }
+        }
         return
       }
     }
@@ -1023,6 +1047,46 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
     }
   }
   scanStatementRunEnds(fn.statements)
+
+  const returnedArgumentOrdinal = (expression: Elaboration.ExpressionFact): number | undefined => {
+    if (expression._tag !== 'Call') return undefined
+    if (expression.reference._tag === 'ResolvedBuiltin') {
+      return expression.reference.returnedBorrowParameter
+    }
+    if (expression.reference._tag !== 'Resolved') return undefined
+    return DeclarationIndex.returnedBorrow(expression.reference.declaration)?.parameter.id.ordinal
+  }
+
+  const viewRoots = new Map<number, BindingSite>()
+  const sourceSite = (expression: Elaboration.ExpressionFact): BindingSite | undefined => {
+    if (expression._tag === 'Grouped') return sourceSite(expression.expression)
+    if (expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable') {
+      const site = borrowSite(expression.formation.root)
+      return site._tag === 'Let' ? (viewRoots.get(site.binding.ordinal) ?? site) : site
+    }
+    const direct = directSite(expression)?.site
+    if (direct !== undefined) {
+      return direct._tag === 'Let' ? (viewRoots.get(direct.binding.ordinal) ?? direct) : direct
+    }
+    const ordinal = returnedArgumentOrdinal(expression)
+    if (ordinal !== undefined && expression._tag === 'Call') {
+      const argument = expression.arguments.at(ordinal)
+      return argument === undefined ? undefined : sourceSite(argument.expression)
+    }
+    return undefined
+  }
+
+  for (const binding of fn.bindings) {
+    if (
+      binding.inferredType._tag !== 'Available' ||
+      !Type.isSlice(binding.inferredType.type) ||
+      returnedArgumentOrdinal(binding.initializer) === undefined
+    ) {
+      continue
+    }
+    const root = sourceSite(binding.initializer)
+    if (root !== undefined) viewRoots.set(binding.id.ordinal, root)
+  }
 
   const delayedLoansAt = (span: SourceSpan.SourceSpan): ReadonlyArray<LoanFact> =>
     loans.filter(
@@ -1219,6 +1283,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
             expression.reference.operation === 'SlotDrop')
         for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
           const candidate = argument.expression
+          const returnedOrdinal = returnedArgumentOrdinal(expression)
           if (candidate._tag !== 'Borrow' || candidate.formation._tag === 'Unavailable') {
             const preservesEffectLifetime =
               argument.type._tag === 'Available' && Type.isEffect(argument.type.type)
@@ -1229,13 +1294,19 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
               naturalAccess(candidate),
               preservesEffectLifetime
                 ? delayedEnd
-                : consumesSlot
-                  ? Object.freeze({ region, span: expression.syntax.span })
-                  : undefined,
+                : returnedOrdinal === argumentOrdinal
+                  ? (delayedEnd ?? Object.freeze({ region, span: expression.syntax.span }))
+                  : consumesSlot
+                    ? Object.freeze({ region, span: expression.syntax.span })
+                    : undefined,
             )
             continue
           }
-          const root = borrowSite(candidate.formation.root)
+          const directRoot = borrowSite(candidate.formation.root)
+          const root =
+            directRoot._tag === 'Let'
+              ? (viewRoots.get(directRoot.binding.ordinal) ?? directRoot)
+              : directRoot
           const conflict = callActive.find(
             (loan) =>
               sameSite(loan.root, root) &&
@@ -1261,7 +1332,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
             }),
             root,
             access: candidate.access,
-            origin: candidate.formation._tag,
+            origin: returnedOrdinal === argumentOrdinal ? 'ReturnedView' : candidate.formation._tag,
             ...(candidate.formation._tag === 'SliceReborrow'
               ? { parent: root, suspendsParent: candidate.formation.suspendsParent }
               : { suspendsParent: false }),
@@ -1407,7 +1478,12 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
                       region: statement.region,
                       span: fn.declaration.syntax.span,
                     })
-                  : undefined,
+                  : initializerType._tag === 'Available' && Type.isSlice(initializerType.type)
+                    ? (viewEnds.get(statement.binding.id.ordinal) ?? {
+                        region: statement.region,
+                        span: statement.binding.initializer.syntax.span,
+                      })
+                    : undefined,
           )
           break
         }
@@ -1517,6 +1593,7 @@ export const cleanupPlan = (
       }),
     })
   if (Type.isFixedArray(type)) {
+    if (type.length === 0) return Object.freeze({ _tag: 'NoCleanup', type })
     return Object.freeze({
       _tag: 'ArrayCleanup',
       type,
@@ -1812,7 +1889,12 @@ const checkFunction = (
     const binding: MutableBinding = {
       site: Object.freeze({ _tag: 'Parameter', parameter: parameter.id }),
       name: parameter.name._tag === 'Present' ? parameter.name.spelling : undefined,
-      mutability: 'Immutable',
+      mutability:
+        type !== undefined &&
+        (Type.isSlice(type) || Type.isReference(type)) &&
+        type.access === 'Exclusive'
+          ? 'Mutable'
+          : 'Immutable',
       liveFrom: parameter.syntax.span,
       liveTo: declaration.syntax.span,
       category: categoryOf(type),
@@ -2013,7 +2095,9 @@ const checkFunction = (
         const rootSite: BindingSite =
           statement.place._tag === 'WritePlace'
             ? Object.freeze({ _tag: 'Let', binding: statement.place.root })
-            : Object.freeze({ _tag: 'Parameter', parameter: statement.place.root })
+            : statement.place.root._tag === 'BindingSliceRoot'
+              ? Object.freeze({ _tag: 'Let', binding: statement.place.root.binding })
+              : Object.freeze({ _tag: 'Parameter', parameter: statement.place.root.parameter })
         const rootKey = siteKey(rootSite)
         const root = state.bindings.get(rootKey)
         const wasLive = live.has(rootKey)
@@ -2122,7 +2206,11 @@ const checkFunction = (
       if (statement._tag === 'UnavailableStatement') {
         continue
       }
-      checkExpression(state, live, statement.expression, true)
+      const returnsBorrow =
+        statement._tag === 'Return' &&
+        fn.contract._tag === 'Contract' &&
+        Type.isSlice(fn.contract.result)
+      checkExpression(state, live, statement.expression, !returnsBorrow)
       exits.push(
         Object.freeze({
           kind: 'Return' as const,
@@ -2370,7 +2458,7 @@ export const encode = (self: ModuleOwnership): string =>
       }),
       ...fn.loans.map(
         (loan) =>
-          `  loan l${loan.id.ordinal} ${loan.access.toLowerCase()} ${siteText(loan.root)} ${loan.origin === 'SliceReborrow' ? `reborrow parent=${loan.parent === undefined ? '?' : siteText(loan.parent)} suspended=${loan.suspendsParent}` : 'array'} region=${loan.startRegion.ordinal}->${loan.endRegion.ordinal} ${spanText(loan.startSpan)}..${spanText(loan.endSpan)}`,
+          `  loan l${loan.id.ordinal} ${loan.access.toLowerCase()} ${siteText(loan.root)} ${loan.origin === 'SliceReborrow' ? `reborrow parent=${loan.parent === undefined ? '?' : siteText(loan.parent)} suspended=${loan.suspendsParent}` : loan.origin === 'ReturnedView' ? 'returned-view' : 'array'} region=${loan.startRegion.ordinal}->${loan.endRegion.ordinal} ${spanText(loan.startSpan)}..${spanText(loan.endSpan)}`,
       ),
       ...fn.borrowedReplacements.map(
         (replacement) =>

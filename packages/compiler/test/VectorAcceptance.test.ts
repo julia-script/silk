@@ -75,7 +75,13 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
       const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(evaluated._tag, 'Completed')
+      assert.strictEqual(
+        evaluated._tag,
+        'Completed',
+        JSON.stringify(evaluated, (_, value) =>
+          typeof value === 'bigint' ? value.toString() : value,
+        ),
+      )
       if (evaluated._tag !== 'Completed') return
       assert.strictEqual(evaluated.result.value, 42)
       // Two growths acquire two buffers; the migration and the final Drop hook release both,
@@ -123,6 +129,72 @@ it.effect(
         toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
         profile: 'release',
         destination: join(destinationRoot, 'growth'),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(compiled._tag, 'Compiled')
+      if (compiled._tag !== 'Compiled') return
+      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      assert.strictEqual(run.status, 42, run.stderr)
+    }),
+  60_000,
+)
+
+const lexicalViews = `import silk.vector { make, append, asSlice, asMutSlice }
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut values = make<i32>()
+  let empty = asSlice<i32>(&values)
+  if empty.length == 0 {} else { return 1 }
+  let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
+  let appended0 = run pending0
+  let pending1 = append<i32>(&mut values, 12) |> Effect.provideMut(&mut allocator)
+  let appended1 = run pending1
+  let mut writable = asMutSlice<i32>(&mut values)
+  writable[1] = 32
+  let readable = asSlice<i32>(&values)
+  return readable[0] + readable[1]
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+
+it.effect(
+  'returns shared and exclusive Vector views on all three engines',
+  () =>
+    Effect.gen(function* () {
+      const wasmSnapshot = yield* Analysis.ofSourceRealized(
+        'vector-acceptance/lexical-views',
+        ascii(lexicalViews),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(wasmSnapshot), [])
+      const evaluated = Analysis.evaluate(wasmSnapshot)
+      assert.strictEqual(
+        evaluated._tag,
+        'Completed',
+        JSON.stringify(evaluated, (_, value) =>
+          typeof value === 'bigint' ? value.toString() : value,
+        ),
+      )
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42)
+      assert.isTrue(
+        Analysis.loweredMir(wasmSnapshot).functions.some((fn) =>
+          Mir.operations(fn).some((operation) => operation._tag === 'RawBufferView'),
+        ),
+      )
+      const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+
+      const compiled = yield* Driver.compile({
+        compilation: {
+          root: SourceFile.make('vector-acceptance/lexical-views', ascii(lexicalViews)),
+        },
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        profile: 'release',
+        destination: join(destinationRoot, 'lexical-views'),
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled')
       if (compiled._tag !== 'Compiled') return

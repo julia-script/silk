@@ -147,6 +147,7 @@ export type CallReferenceFact =
       readonly operation: Hir.BuiltinOperation
       readonly parameters: ReadonlyArray<SemanticType>
       readonly result: SemanticType
+      readonly returnedBorrowParameter?: number
     }
   | {
       readonly _tag: 'ResolvedServiceOperation'
@@ -869,6 +870,7 @@ export interface FunctionFact {
   readonly regionOrder: ReadonlyArray<Hir.RegionId>
   readonly returnedExpression: ExpressionFact
   readonly returnCompatibility: ReturnCompatibility
+  readonly returnedBorrow?: DeclarationIndex.ReturnedBorrowFact
 }
 
 /** Stable identity of one parent-linked lexical scope in an elaborated function. */
@@ -1562,7 +1564,10 @@ const analyzeBorrow = (
     }
     if (
       access === 'Exclusive' &&
-      (root._tag !== 'BindingRoot' || root.binding.mutability !== 'Mutable')
+      !(
+        (root._tag === 'BindingRoot' && root.binding.mutability === 'Mutable') ||
+        (root._tag === 'PatternRoot' && root.binding.access === 'Exclusive')
+      )
     ) {
       const name =
         subject._tag === 'Identifier' && 'spelling' in subject.reference
@@ -1602,7 +1607,10 @@ const analyzeBorrow = (
   if (Type.isFixedArray(sourceType)) {
     if (
       access === 'Exclusive' &&
-      (root._tag !== 'BindingRoot' || root.binding.mutability !== 'Mutable')
+      !(
+        (root._tag === 'BindingRoot' && root.binding.mutability === 'Mutable') ||
+        (root._tag === 'PatternRoot' && root.binding.access === 'Exclusive')
+      )
     ) {
       const name =
         subject._tag === 'Identifier' && 'spelling' in subject.reference
@@ -2135,6 +2143,7 @@ const analyzeMatch = (
   scope: Scope,
   resolution: ResolutionContext,
   expected?: SemanticType,
+  borrowAllowed = false,
 ): ExpressionResult => {
   const id: Match.MatchId = Object.freeze({
     _tag: 'MatchId',
@@ -2250,6 +2259,7 @@ const analyzeMatch = (
             armScope,
             resolution,
             expected,
+            borrowAllowed,
           )
     if (result !== undefined) diagnostics.push(...result.diagnostics)
     return Object.freeze({
@@ -3479,6 +3489,7 @@ interface BuiltinSignature {
   readonly parameters: ReadonlyArray<SemanticType>
   readonly result: SemanticType
   readonly unsafe?: boolean
+  readonly returnedBorrowParameter?: number
 }
 
 const builtinSignature = (actor: string, operation: string): BuiltinSignature | undefined => {
@@ -3490,6 +3501,9 @@ const builtinSignature = (actor: string, operation: string): BuiltinSignature | 
     parameters: catalog.rule.parameters,
     result: catalog.rule.result,
     unsafe: catalog.unsafe,
+    ...(catalog.returnedBorrowParameter === undefined
+      ? {}
+      : { returnedBorrowParameter: catalog.returnedBorrowParameter }),
   })
 }
 
@@ -3589,6 +3603,9 @@ const resolvedFunctionReference = (
           operation: signature.operation,
           parameters: signature.parameters,
           result: signature.result,
+          ...(signature.returnedBorrowParameter === undefined
+            ? {}
+            : { returnedBorrowParameter: signature.returnedBorrowParameter }),
         })
   }
   if (qualifierLookup._tag !== 'Namespace') return undefined
@@ -4287,6 +4304,9 @@ function analyzeBuiltinCall(
           operation: signature.operation,
           parameters: instantiatedParameters,
           result: instantiatedResult ?? signature.result,
+          ...(signature.returnedBorrowParameter === undefined
+            ? {}
+            : { returnedBorrowParameter: signature.returnedBorrowParameter }),
         })
       : Object.freeze({
           _tag: 'Missing',
@@ -5398,7 +5418,16 @@ function analyzeExpression(
   }
 
   if (node.kind === 'MatchExpression') {
-    return analyzeMatch(source, node, declarations, declaration, scope, resolution, expected)
+    return analyzeMatch(
+      source,
+      node,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      expected,
+      borrowAllowed,
+    )
   }
 
   if (node.kind === 'StructLiteralExpression') {
@@ -6367,6 +6396,7 @@ const analyzeStatements = (
         !context.effectBlock && context.declaration.returnType._tag === 'Resolved'
           ? context.declaration.returnType.type
           : undefined,
+        !context.effectBlock && DeclarationIndex.returnedBorrow(context.declaration) !== undefined,
       )
       if (expression === undefined) {
         throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
@@ -6528,6 +6558,104 @@ const analyzeFunctionBody = (
     blockNode,
     Object.freeze({ parameters: declaration.parameters, bindings: [], patternBindings: [] }),
   )
+  const returnedBorrow = DeclarationIndex.returnedBorrow(declaration)
+
+  const bindingOrigins = new Map<number, DeclarationIndex.ParameterFact | undefined>()
+  const originOf = (
+    expression: ExpressionFact,
+    patternOrigins: ReadonlyMap<string, DeclarationIndex.ParameterFact | undefined> = new Map(),
+  ): DeclarationIndex.ParameterFact | undefined => {
+    if (expression._tag === 'Grouped') return originOf(expression.expression, patternOrigins)
+    if (expression._tag === 'Identifier') {
+      if (expression.reference._tag === 'Resolved') return expression.reference.parameter
+      if (expression.reference._tag === 'ResolvedBinding') {
+        const ordinal = expression.reference.binding.id.ordinal
+        if (!bindingOrigins.has(ordinal)) {
+          bindingOrigins.set(
+            ordinal,
+            originOf(expression.reference.binding.initializer, patternOrigins),
+          )
+        }
+        return bindingOrigins.get(ordinal)
+      }
+      if (expression.reference._tag === 'ResolvedPattern') {
+        const id = expression.reference.binding.id
+        return patternOrigins.get(`${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`)
+      }
+      return undefined
+    }
+    if (expression._tag === 'Borrow') {
+      if (expression.formation._tag === 'Unavailable') return undefined
+      const root = expression.formation.root
+      if (root._tag === 'ParameterRoot') return root.parameter
+      if (root._tag === 'BindingRoot') return originOf(root.binding.initializer, patternOrigins)
+      const id = root.binding.id
+      return patternOrigins.get(`${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`)
+    }
+    if (expression._tag === 'FieldProjection' || expression._tag === 'IndexProjection') {
+      return originOf(expression.subject, patternOrigins)
+    }
+    if (expression._tag === 'Call' && expression.reference._tag === 'Resolved') {
+      const contract = DeclarationIndex.returnedBorrow(expression.reference.declaration)
+      const mapping =
+        contract === undefined
+          ? undefined
+          : expression.mappings.find(
+              (candidate) => candidate.parameter.id.ordinal === contract.parameter.id.ordinal,
+            )
+      return mapping === undefined
+        ? undefined
+        : originOf(mapping.argument.expression, patternOrigins)
+    }
+    if (expression._tag === 'Call' && expression.reference._tag === 'ResolvedBuiltin') {
+      const ordinal = expression.reference.returnedBorrowParameter
+      const argument = ordinal === undefined ? undefined : expression.arguments.at(ordinal)
+      return argument === undefined ? undefined : originOf(argument.expression, patternOrigins)
+    }
+    if (expression._tag === 'Match') {
+      const scrutinee = originOf(expression.scrutinee, patternOrigins)
+      const origins = expression.arms
+        .filter((arm) => arm.reachable)
+        .map((arm) => {
+          const armOrigins = new Map(patternOrigins)
+          for (const binding of arm.bindings) {
+            const id = binding.id
+            armOrigins.set(`${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`, scrutinee)
+          }
+          return originOf(arm.result, armOrigins)
+        })
+      if (origins.some((origin) => origin === undefined)) return undefined
+      const first = origins.at(0)
+      return first !== undefined &&
+        origins.every((origin) => origin?.id.ordinal === first.id.ordinal)
+        ? first
+        : undefined
+    }
+    return undefined
+  }
+
+  if (returnedBorrow !== undefined) {
+    const validateReturns = (body: ReadonlyArray<StatementFact>): void => {
+      for (const statement of body) {
+        if (statement._tag === 'ReturnStatement') {
+          const origin = originOf(statement.expression)
+          if (origin?.id.ordinal !== returnedBorrow.parameter.id.ordinal) {
+            context.diagnostics.push(
+              Diagnostic.invalidReturnedBorrowOrigin(statement.expression.syntax.span),
+            )
+          }
+        } else if (statement._tag === 'UnsafeStatement') {
+          validateReturns(statement.statements)
+        } else if (statement._tag === 'IfStatement') {
+          validateReturns(statement.taken)
+          validateReturns(statement.otherwise)
+        } else if (statement._tag === 'WhileStatement') {
+          validateReturns(statement.body)
+        }
+      }
+    }
+    validateReturns(statements)
+  }
 
   type Terminal = Extract<StatementFact, { _tag: 'ReturnStatement' | 'FailStatement' }>
   const terminalOf = (body: ReadonlyArray<StatementFact>): Terminal | undefined => {
@@ -6564,6 +6692,7 @@ const analyzeFunctionBody = (
       regionOrder: Object.freeze([...context.regions]),
       returnedExpression: expression,
       returnCompatibility,
+      ...(returnedBorrow === undefined ? {} : { returnedBorrow }),
     }),
     diagnostics: Object.freeze([...context.diagnostics]),
   })
@@ -6650,7 +6779,7 @@ const hirEffectStatements = (
       if (statement._tag === 'WriteStatement') {
         const place =
           statement.root?._tag === 'BindingFact'
-            ? hirWritePlace(statement.destination, statement.root)
+            ? hirAssignmentWritePlace(statement.destination, statement.root)
             : statement.root?._tag === 'ParameterDeclaration'
               ? hirBorrowedWritePlace(statement.destination, statement.root)
               : undefined
@@ -6864,7 +6993,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
   if (fact._tag === 'PlaceReplace') {
     const place =
       fact.root?._tag === 'BindingFact'
-        ? hirWritePlace(fact.destination, fact.root)
+        ? hirAssignmentWritePlace(fact.destination, fact.root)
         : fact.root?._tag === 'ParameterDeclaration'
           ? hirBorrowedWritePlace(fact.destination, fact.root)
           : undefined
@@ -7292,10 +7421,12 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
     fact.contract._tag === 'Compatible' &&
     fact.type._tag === 'Available'
   ) {
+    const returnedBorrowParameter = fact.reference.returnedBorrowParameter
     const directLoanEnds = fact.arguments.flatMap(
       (argument, ordinal): ReadonlyArray<Hir.BorrowId> =>
         argument.expression._tag === 'Borrow' &&
-        argument.expression.formation._tag !== 'Unavailable'
+        argument.expression.formation._tag !== 'Unavailable' &&
+        returnedBorrowParameter !== ordinal
           ? [
               Object.freeze({
                 _tag: 'BorrowId' as const,
@@ -7365,7 +7496,25 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
           ? []
           : [...directLoanEnds, ...nestedSlotLoanEnds],
       ),
-      heldLoans: Object.freeze(fact.reference.operation === 'RawBufferSlot' ? directLoanEnds : []),
+      heldLoans: Object.freeze(
+        fact.reference.operation === 'RawBufferSlot'
+          ? directLoanEnds
+          : fact.arguments.flatMap(
+              (argument, ordinal): ReadonlyArray<Hir.BorrowId> =>
+                argument.expression._tag === 'Borrow' &&
+                argument.expression.formation._tag !== 'Unavailable' &&
+                returnedBorrowParameter === ordinal
+                  ? [
+                      Object.freeze({
+                        _tag: 'BorrowId' as const,
+                        function: argument.id.function,
+                        callSpan: argument.id.callSpan,
+                        ordinal,
+                      }),
+                    ]
+                  : [],
+            ),
+      ),
       type: fact.type.type,
       span: fact.syntax.span,
     })
@@ -7483,7 +7632,25 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
         fact.arguments.flatMap(
           (argument, ordinal): ReadonlyArray<Hir.BorrowId> =>
             argument.expression._tag === 'Borrow' &&
-            argument.expression.formation._tag !== 'Unavailable'
+            argument.expression.formation._tag !== 'Unavailable' &&
+            DeclarationIndex.returnedBorrow(target)?.parameter.id.ordinal !== ordinal
+              ? [
+                  Object.freeze({
+                    _tag: 'BorrowId',
+                    function: argument.id.function,
+                    callSpan: argument.id.callSpan,
+                    ordinal,
+                  }),
+                ]
+              : [],
+        ),
+      ),
+      heldLoans: Object.freeze(
+        fact.arguments.flatMap(
+          (argument, ordinal): ReadonlyArray<Hir.BorrowId> =>
+            argument.expression._tag === 'Borrow' &&
+            argument.expression.formation._tag !== 'Unavailable' &&
+            DeclarationIndex.returnedBorrow(target)?.parameter.id.ordinal === ordinal
               ? [
                   Object.freeze({
                     _tag: 'BorrowId',
@@ -7627,14 +7794,22 @@ const hirWritePlace = (
   })
 }
 
+const assignmentRootType = (root: AssignmentRootFact): SemanticType | undefined => {
+  if (root._tag === 'ParameterDeclaration') {
+    return root.declaredType._tag === 'Resolved' ? root.declaredType.type : undefined
+  }
+  return root.inferredType._tag === 'Available' ? root.inferredType.type : undefined
+}
+
 const hirBorrowedWritePlace = (
   fact: ExpressionFact,
-  root: ParameterFact,
+  root: AssignmentRootFact,
 ): Hir.BorrowedWritePlace | undefined => {
+  const rootType = assignmentRootType(root)
   if (
-    root.declaredType._tag !== 'Resolved' ||
-    !(Type.isSlice(root.declaredType.type) || Type.isReference(root.declaredType.type)) ||
-    root.declaredType.type.access !== 'Exclusive'
+    rootType === undefined ||
+    !(Type.isSlice(rootType) || Type.isReference(rootType)) ||
+    rootType.access !== 'Exclusive'
   ) {
     return undefined
   }
@@ -7642,10 +7817,11 @@ const hirBorrowedWritePlace = (
   const walk = (current: ExpressionFact): boolean => {
     if (current._tag === 'Grouped') return walk(current.expression)
     if (current._tag === 'Identifier') {
-      return (
-        current.reference._tag === 'Resolved' &&
-        current.reference.parameter.id.ordinal === root.id.ordinal
-      )
+      return root._tag === 'ParameterDeclaration'
+        ? current.reference._tag === 'Resolved' &&
+            current.reference.parameter.id.ordinal === root.id.ordinal
+        : current.reference._tag === 'ResolvedBinding' &&
+            current.reference.binding.id.ordinal === root.id.ordinal
     }
     if (current._tag === 'FieldProjection') {
       if (
@@ -7694,12 +7870,27 @@ const hirBorrowedWritePlace = (
   if (!walk(fact) || fact.type._tag !== 'Available') return undefined
   return Object.freeze({
     _tag: 'BorrowedWritePlace',
-    root: root.id,
-    slice: root.declaredType.type,
+    root:
+      root._tag === 'ParameterDeclaration'
+        ? Object.freeze({ _tag: 'ParameterSliceRoot' as const, parameter: root.id })
+        : Object.freeze({ _tag: 'BindingSliceRoot' as const, binding: root.id }),
+    slice: rootType,
     selectors: Object.freeze(selectors),
     type: fact.type.type,
     span: fact.syntax.span,
   })
+}
+
+const hirAssignmentWritePlace = (
+  fact: ExpressionFact,
+  root: BindingDeclarationFact,
+): Hir.WritePlace | undefined => {
+  const rootType = assignmentRootType(root)
+  return rootType !== undefined &&
+    (Type.isSlice(rootType) || Type.isReference(rootType)) &&
+    rootType.access === 'Exclusive'
+    ? hirBorrowedWritePlace(fact, root)
+    : hirWritePlace(fact, root)
 }
 
 const statementSpan = (statement: StatementFact): SourceSpan.SourceSpan =>
@@ -7949,7 +8140,7 @@ export const elaborateModule = (input: Input): Result => {
         if (statement._tag === 'WriteStatement') {
           const place =
             statement.root?._tag === 'BindingFact'
-              ? hirWritePlace(statement.destination, statement.root)
+              ? hirAssignmentWritePlace(statement.destination, statement.root)
               : statement.root?._tag === 'ParameterDeclaration'
                 ? hirBorrowedWritePlace(statement.destination, statement.root)
                 : undefined

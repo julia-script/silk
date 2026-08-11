@@ -237,6 +237,56 @@ pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
   )
 })
 
+it.effect('navigates and presents the source-defined Vector lexical view accessors', () => {
+  const source = `import silk.vector { make, asSlice, asMutSlice }
+pub fn main() -> i32 {
+  let mut values = make<i32>()
+  let shared = asSlice<i32>(&values)
+  let exclusive = asMutSlice<i32>(&mut values)
+  return usize.toI32(shared.length + exclusive.length)
+}`
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      for (const [name, documentation] of [
+        ['asSlice', '/// Borrows the initialized elements as one shared lexical slice.'],
+        ['asMutSlice', '/// Borrows the initialized elements as one exclusive lexical slice.'],
+      ] as const) {
+        const occurrence = occurrenceAt(snapshot, source, name, 1)
+        assert.strictEqual(occurrence?.resolution._tag, 'Available')
+        assert.strictEqual(occurrence?.declaration?.module, 'silk/vector')
+        assert.isDefined(occurrence?.declaration?.selectionSpan)
+        assert.include(
+          occurrence === undefined
+            ? ''
+            : (Analysis.occurrencePresentation(snapshot, 'main', occurrence)?.text ?? ''),
+          `fn ${name}<T>`,
+        )
+        assert.strictEqual(
+          documentationText(
+            snapshot,
+            Analysis.documentationAt(snapshot, 'main', source.lastIndexOf(name)),
+          ),
+          documentation,
+        )
+      }
+      const vectorSource = Analysis.syntaxOf(snapshot, 'silk/vector')?.source
+      assert.isDefined(vectorSource)
+      assert.include(
+        vectorSource === undefined ? '' : decoder.decode(SourceFile.toUint8Array(vectorSource)),
+        'RawBuffer.view<T>',
+      )
+      const rawBufferSource = Analysis.syntaxOf(snapshot, 'silk/raw-buffer')?.source
+      assert.include(
+        rawBufferSource === undefined
+          ? ''
+          : decoder.decode(SourceFile.toUint8Array(rawBufferSource)),
+        'return Intrinsic.rawBufferView<T>',
+      )
+      return undefined
+    }),
+  )
+})
+
 it.effect('completes and navigates the source-defined logging surface', () => {
   const source = `import silk.logging { Logger }
 effect fn pending() -> () ! LogError ? &mut Logger {

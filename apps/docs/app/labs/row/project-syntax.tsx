@@ -394,10 +394,16 @@ export const hirRows = (
       return
     }
     if (node._tag === 'Write') {
+      const root =
+        node.place._tag === 'WritePlace'
+          ? `b${node.place.root.ordinal}`
+          : node.place.root._tag === 'BindingSliceRoot'
+            ? `slice-b${node.place.root.binding.ordinal}`
+            : `slice-p${node.place.root.parameter.ordinal}`
       rows.push({
         key: `${path}-write-${span.start}`,
         depth,
-        label: `write b${node.place.root.ordinal}${node.place.selectors
+        label: `write ${root}${node.place.selectors
           .map((selector) =>
             selector._tag === 'Field' ? `.#${selector.field.ordinal}` : '[index]',
           )
@@ -407,7 +413,8 @@ export const hirRows = (
         onActivate: () => onPick(span),
       })
       for (const [index, selector] of node.place.selectors.entries()) {
-        if (selector._tag === 'Index') expression(selector.index, depth + 1, `${path}.s${index}`)
+        if (selector._tag === 'Index' || selector._tag === 'SliceIndex')
+          expression(selector.index, depth + 1, `${path}.s${index}`)
       }
       expression(node.value, depth + 1, `${path}.v`)
       return

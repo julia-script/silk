@@ -731,7 +731,7 @@ it.effect('resolves direct generic slice parameters and rejects borrowed storage
       })),
       [
         { code: 'SEM0054', position: 'parameter' },
-        { code: 'SEM0054', position: 'return' },
+        { code: 'SEM0091', position: undefined },
         { code: 'SEM0054', position: 'field' },
       ],
     )

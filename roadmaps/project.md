@@ -51,13 +51,13 @@ program record remains in [real programs](real-programs.md).
 - **Outcome & done-when:** an ordinary function may return a shared or exclusive lexical view from
   exactly one borrowed parameter. Multiple origins, effect/service results, captures, and stored
   borrows remain rejected; ownership suspends conflicting owner access through the view's last use.
-- **Status:** proposal complete and strictly validated; first implementation dependency.
+- **Status:** shipped, synced, and archived on 2026-08-11.
 - **Appetite:** one conservative borrow-provenance slice plus minimal unsafe RawBuffer view
   intrinsics and ordinary `Vector.asSlice`/`asMutSlice` wrappers.
 - **Boundary:** no lifetime syntax, borrow-polymorphic results, stored references, or compiler-known
   Vector policy.
 - **Links:** change:
-  [`add-returned-lexical-borrows`](../openspec/changes/add-returned-lexical-borrows/proposal.md) ·
+  [`add-returned-lexical-borrows`](../openspec/changes/archive/2026-08-11-add-returned-lexical-borrows/proposal.md) ·
   [slice spec](../openspec/specs/bootstrap-runtime-slices/spec.md) ·
   [ownership spec](../openspec/specs/bootstrap-ownership/spec.md)
 
@@ -68,7 +68,8 @@ program record remains in [real programs](real-programs.md).
 - **Outcome & done-when:** canonical `Bytes` is an encoding-neutral nominal wrapper over
   `Vector<u8>` with minimal construction, copy, append, length, lexical views, ownership, allocation,
   cleanup, tooling, and three-engine parity.
-- **Status:** proposal complete and strictly validated; blocked only by returned lexical borrows.
+- **Status:** proposal complete and strictly validated; returned borrows are shipped, so this is the
+  next implementation dependency.
 - **Appetite:** one ordinary standard-library actor with no new compiler primitive.
 - **Boundary:** no String, UTF-8 promise, formatting, filesystem policy, or broad byte algorithms.
 - **Links:** change: [`add-owned-bytes`](../openspec/changes/add-owned-bytes/proposal.md) ·
@@ -187,6 +188,9 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-11: Shipped, synced, and archived conservative returned lexical borrows, including
+  last-use ownership, unsafe generic RawBuffer views, ordinary Vector slice accessors, tooling,
+  and evaluator/native/direct-Wasm parity. Promoted owned Bytes to the next implementation item.
 - 2026-08-11: Split the former all-in-one FileSystem plan into five strictly validated changes.
   Returned lexical borrows unlock source-defined owned Bytes; Bytes unlocks the portable seven-
   operation FileSystem contract; generic reachable-only intrinsic availability proceeds independently;

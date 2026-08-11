@@ -4900,6 +4900,24 @@
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
     {
+      "operation": "Intrinsic.rawBufferView",
+      "signature": "unsafe fn Intrinsic.rawBufferView<T>(buffer: &RawBuffer<T>, offset: usize, length: usize) -> &[T]",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/raw-buffer.view",
+      "identity": "RawBufferView",
+      "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
+    },
+    {
+      "operation": "Intrinsic.rawBufferViewMut",
+      "signature": "unsafe fn Intrinsic.rawBufferViewMut<T>(buffer: &mut RawBuffer<T>, offset: usize, length: usize) -> &mut [T]",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/raw-buffer.viewMut",
+      "identity": "RawBufferViewMut",
+      "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
+    },
+    {
       "operation": "Intrinsic.rawBufferSlot",
       "signature": "unsafe fn Intrinsic.rawBufferSlot<T>(buffer: &mut RawBuffer<T>, index: usize) -> Slot<T>",
       "unsafe": true,

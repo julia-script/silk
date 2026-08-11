@@ -5,14 +5,16 @@
 // through &mut self without a partial move, and the Drop hook destroys exactly the
 // initialized elements before the backing buffer releases.
 
-pub struct Empty {}
+pub struct Empty<T> {
+  anchor: [T; 0]
+}
 
 pub struct Full<T> {
   buffer: RawBuffer<T>
 }
 
 pub struct Vector<T> {
-  storage: Empty | Full<T>
+  storage: Empty<T> | Full<T>
   length: usize
   capacity: usize
 }
@@ -29,7 +31,7 @@ fn absurd<T>() -> T {
 }
 
 pub fn make<T>() -> Vector<T> {
-  return Vector<T> { storage: Empty {}, length: counted(0), capacity: counted(0) }
+  return Vector<T> { storage: Empty<T> { anchor: [] }, length: counted(0), capacity: counted(0) }
 }
 
 pub fn length<T>(self: &Vector<T>) -> usize {
@@ -40,12 +42,36 @@ pub fn capacity<T>(self: &Vector<T>) -> usize {
   return self.capacity
 }
 
+fn emptySlice<T>(anchor: &[T]) -> &[T] {
+  return anchor
+}
+
+fn emptyMutSlice<T>(anchor: &mut [T]) -> &mut [T] {
+  return anchor
+}
+
+/// Borrows the initialized elements as one shared lexical slice.
+pub fn asSlice<T>(self: &Vector<T>) -> &[T] {
+  return match &self.storage {
+    Empty<T> { anchor } => emptySlice<T>(&anchor)
+    Full<T> { buffer } => RawBuffer.view<T>(&buffer, counted(0), self.length)
+  }
+}
+
+/// Borrows the initialized elements as one exclusive lexical slice.
+pub fn asMutSlice<T>(self: &mut Vector<T>) -> &mut [T] {
+  return match &mut self.storage {
+    Empty<T> { anchor } => emptyMutSlice<T>(&mut anchor)
+    Full<T> { buffer } => RawBuffer.viewMut<T>(&mut buffer, counted(0), self.length)
+  }
+}
+
 impl<T> Drop for Vector<T> {
   fn drop(self: &mut Vector<T>) -> () {
-    let storage = Intrinsic.replace(self.storage, Empty {})
+    let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
     let count = Intrinsic.replace(self.length, counted(0))
     return match move storage {
-      Empty nothing => ()
+      Empty<T> nothing => ()
       Full<T> full => releaseFull<T>(move full, count)
     }
   }
@@ -87,17 +113,17 @@ pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &m
     }
     let recipe = Allocator.allocate(move layout)
     let allocation = run recipe
-    let storage = Intrinsic.replace(self.storage, Empty {})
+    let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
     let moved = match move storage {
-      Empty nothing => Full<T> { buffer: freshBuffer<T>(move allocation, next) }
+      Empty<T> nothing => Full<T> { buffer: freshBuffer<T>(move allocation, next) }
       Full<T> full => Full<T> { buffer: migrate<T>(move full, move allocation, self.length, next) }
     }
     self.storage = move moved
     self.capacity = next
   }
-  let storage = Intrinsic.replace(self.storage, Empty {})
+  let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
   let stored = match move storage {
-    Empty nothing => absurd<Full<T>>()
+    Empty<T> nothing => absurd<Full<T>>()
     Full<T> full => writeAt<T>(move full, self.length, move value)
   }
   self.storage = move stored
@@ -166,7 +192,7 @@ pub fn get<T>(self: &Vector<T>, index: usize) -> T {
     let boom = 1 / 0
   }
   let read = match &self.storage {
-    Empty nothing => absurd<Read<T>>()
+    Empty<T> nothing => absurd<Read<T>>()
     Full<T> { buffer } => Read<T> { value: readAt<T>(&buffer, index) }
   }
   return match move read {
