@@ -65,11 +65,14 @@ The bootstrap language currently includes:
   capabilities, raw storage, and lexical slots;
 - static text and byte literals, including escaped triple-quoted multiline forms; and
 - lazy typed `Effect` computations with failure recovery, retry, shared/exclusive/owned service
-  provision, and ordinary source-defined combinators.
+  provision, ordinary source-defined combinators, and complete-message semantic logging through an
+  explicit replaceable `Logger` service.
 
 The compiler-shipped standard library lives as canonical `.silk` files under [`stdlib/silk`](stdlib/silk).
 `Result`, Effect transformations, Option, and the generic growable `Vector<T>` compile through the
-same declaration, ownership, specialization, and lowering paths as user code.
+same declaration, ownership, specialization, and lowering paths as user code. `Logger`,
+`Effect.log`, `StdoutLogger`, and `InMemoryLogger` use those same paths: callers submit complete
+borrowed UTF-8 messages, while providers own formatting, retention, and physical output strategy.
 
 This remains an unreleased subset. It does not yet commit to an owning String, enums, concurrency,
 networking, a general FFI, a package registry, or self-hosting.

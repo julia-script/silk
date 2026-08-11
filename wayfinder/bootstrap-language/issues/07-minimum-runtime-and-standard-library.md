@@ -189,8 +189,8 @@ than one ambient platform object:
   colors, cursor control, flushing, logging, and locking are separate concerns. The later concurrency and
   Stream/Sink constraints are recorded as a non-binding
   [direction](../research/concurrency-and-parallelism-direction.md).
-- `Logger` receives one complete semantic `LogEvent` per call through `Effect.log`. It does not
-  expose stream fragments or make stdout part of logging semantics. A provider may render events to
+- `Logger` receives a closed severity and one complete borrowed message per call through
+  `Effect.log`. It does not expose stream fragments or make stdout part of logging semantics. A provider may render events to
   `StandardStreams`, retain them for tests, forward them to a browser console or OpenTelemetry, fan
   them out, or discard them under explicit policy. The first live provider renders complete events
   to stdout; an in-memory provider proves that the contract is host-independent. Logging remains an

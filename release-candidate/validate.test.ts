@@ -315,6 +315,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(existsSync(resolve(packedRoot, 'stdlib/manifest.json'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/core.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/effects.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/logging.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/numeric.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/option.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/result.silk'))).toBe(true)
@@ -331,6 +332,9 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     }
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/effects.silk'), 'utf8')).toContain(
       'pub effect fn mapBoth',
+    )
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/logging.silk'), 'utf8')).toContain(
+      'pub service Logger',
     )
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/option.silk'), 'utf8')).toContain(
       'pub struct Option<T>',

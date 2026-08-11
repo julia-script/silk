@@ -237,6 +237,76 @@ pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
   )
 })
 
+it.effect('completes and navigates the source-defined logging surface', () => {
+  const source = `import silk.logging { Logger }
+effect fn pending() -> () ! LogError ? &mut Logger {
+  return run Effect.logAt(LogLevel.warning(), "ready")
+}
+effect fn direct() -> () ! LogError ? &mut Logger {
+  return run Logger.log(LogLevel.info(), "direct")
+}
+pub fn main() -> i32 {
+  let memory = InMemoryLogger.memory()
+  let output = StdoutLogger.stdout()
+  return 42
+}`
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const logger = occurrenceAt(snapshot, source, 'Logger', 1)
+      assert.strictEqual(logger?.role, 'Type')
+      assert.strictEqual(logger?.declaration?.module, 'silk/logging')
+
+      for (const [spelling, module, ordinal] of [
+        ['logAt', 'silk/effects', 0],
+        ['log(', 'silk/logging', 0],
+        ['warning', 'silk/logging', 0],
+        ['memory', 'silk/logging', 1],
+        ['stdout', 'silk/logging', 0],
+      ] as const) {
+        const occurrence = occurrenceAt(snapshot, source, spelling, ordinal)
+        assert.isDefined(occurrence, spelling)
+        assert.strictEqual(occurrence?.declaration?.module, module, spelling)
+        assert.isDefined(
+          occurrence === undefined
+            ? undefined
+            : Analysis.occurrencePresentation(snapshot, 'main', occurrence),
+          spelling,
+        )
+      }
+
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', source.indexOf('logAt')),
+        ),
+        '/// Dispatches one complete message at the selected level through the provided Logger.',
+      )
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', source.indexOf('warning')),
+        ),
+        '/// Selects Warning severity.',
+      )
+
+      for (const [prefix, expected] of [
+        ['Effect.', ['log', 'logAt']],
+        ['Logger.', ['log']],
+        ['LogLevel.', ['trace', 'debug', 'info', 'warning', 'error']],
+        ['InMemoryLogger.', ['memory', 'memoryFailAt', 'length', 'messageByteAt']],
+        ['StdoutLogger.', ['stdout']],
+      ] as const) {
+        const offset = source.indexOf(prefix) + prefix.length
+        const labels = Analysis.completionAt(snapshot, 'main', offset)?.candidates.map(
+          (candidate) => candidate.label,
+        )
+        for (const label of expected) assert.include(labels ?? [], label, prefix)
+      }
+      return undefined
+    }),
+  )
+})
+
 it.effect('indexes declaration and nominal type reference locations', () =>
   Analysis.ofSourceRealized(
     'main',
@@ -656,42 +726,44 @@ pub fn main(value: i32) -> i32 { return Library. }`
       'hidden',
     )
 
-    const serviceSource = `service Logger { fn enabled() -> bool }
-pub fn main() -> i32 { return Logger. }`
+    const serviceSource = `service LocalLogger { fn enabled() -> bool }
+pub fn main() -> i32 { return LocalLogger. }`
     const serviceSnapshot = yield* Analysis.ofSourceRealized('main', encoder.encode(serviceSource))
     const serviceResult = Analysis.completionAt(
       serviceSnapshot,
       'main',
-      serviceSource.indexOf('Logger.') + 'Logger.'.length,
+      serviceSource.indexOf('LocalLogger.') + 'LocalLogger.'.length,
     )
     assert.deepEqual(serviceResult?.context, {
       _tag: 'ActorMemberContext',
-      actor: 'Logger',
+      actor: 'LocalLogger',
     })
     assert.deepEqual(
       serviceResult?.candidates.map((candidate) => candidate.label),
       ['enabled'],
     )
 
-    const importedServiceSource = `import contracts { Logger }
-pub fn main() -> i32 { return Logger. }`
+    const importedServiceSource = `import contracts { ContractLogger }
+pub fn main() -> i32 { return ContractLogger. }`
     const importedService = yield* Analysis.makeRealized({
       root: SourceFile.make('main', encoder.encode(importedServiceSource)),
     }).pipe(
       Effect.provide(
         SourceResolver.memory(
-          new Map([['contracts', encoder.encode('pub service Logger { fn enabled() -> bool }')]]),
+          new Map([
+            ['contracts', encoder.encode('pub service ContractLogger { fn enabled() -> bool }')],
+          ]),
         ),
       ),
     )
     const importedServiceResult = Analysis.completionAt(
       importedService,
       'main',
-      importedServiceSource.indexOf('Logger.') + 'Logger.'.length,
+      importedServiceSource.indexOf('ContractLogger.') + 'ContractLogger.'.length,
     )
     assert.deepEqual(importedServiceResult?.context, {
       _tag: 'ActorMemberContext',
-      actor: 'Logger',
+      actor: 'ContractLogger',
     })
     assert.deepEqual(
       importedServiceResult?.candidates.map((candidate) => candidate.label),

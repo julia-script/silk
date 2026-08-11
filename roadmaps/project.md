@@ -12,10 +12,10 @@ control with typed failures, explicit replaceable services, deterministic cleanu
 tooling-friendly semantics. Portable program intent should remain stable across native and browser
 hosts; lower-level platform facilities are explicit escape hatches rather than the default API.
 
-**Current objective:** establish a minimal explicit Intrinsic boundary and general source-defined
-services, then use that foundation for semantic Logging and whole-file FileSystem interaction. The
-compiler supplies only irreducible primitives; public service contracts, implementations, generic
-interfaces, and safe abstractions remain ordinary navigable Silk source.
+**Current objective:** build portable whole-file FileSystem interaction on the completed minimal
+Intrinsic, source-defined service, and semantic Logging foundation. The compiler supplies only
+irreducible primitives; public service contracts, implementations, generic interfaces, and safe
+abstractions remain ordinary navigable Silk source.
 
 ## Current baseline
 
@@ -53,8 +53,7 @@ program record remains in [real programs](real-programs.md).
   Allocator, SystemAllocator, StandardStreams, layout policy, Effect wrappers, and safe storage APIs
   are navigable source over those primitives, with no runtime generic dispatch or name-based
   compiler branches.
-- **Status:** implemented — source, tooling, evaluator, LLVM, and direct-Wasm work is complete;
-  final repository gates and OpenSpec archival are the remaining handoff steps.
+- **Status:** complete — implemented, validated, archived, and merged to main.
 - **Appetite:** one breaking foundation change delivered by catalog family, with differential
   evaluator/native/direct-Wasm evidence after services, scalars, Effect, allocation/storage, and
   standard streams migrate.
@@ -68,15 +67,15 @@ program record remains in [real programs](real-programs.md).
 - **Problem:** Silk can write complete bytes to process stdout/stderr, but raw standard streams do
   not express semantic logging. Defining `Effect.log` as stdout would prevent tests, browsers,
   OpenTelemetry, fan-out, and alternative presentation from supplying honest implementations.
-- **Outcome & done-when:** Ordinary Silk code dispatches one complete `LogEvent` through
-  `Effect.log`, retaining an explicit `Logger` requirement until a provider is supplied. The first
+- **Outcome & done-when:** Ordinary Silk code dispatches a closed severity and one complete borrowed
+  message through `Effect.log`, retaining an explicit `Logger` requirement until a provider is supplied. The first
   live provider renders complete events to stdout through `StandardStreams`; an in-memory provider
   proves deterministic capture without process output. Evaluator, native LLVM, and direct Wasm
   agree on event order, typed failures, provider replacement, and composed Effect behavior.
-- **Status:** blocked only on archival — its artifacts are reconciled with the implemented
-  source-defined service, static interface, and sealed Intrinsic contracts; no logging code starts
-  until `establish-minimal-intrinsic-boundary` archives.
-- **Appetite:** one focused OpenSpec change covering the event boundary, Logger capability,
+- **Status:** complete — canonical source, providers, tooling, Labs, pressure evidence,
+  differential tests, repository-wide checks, and release-candidate validation all pass. The
+  OpenSpec change is synchronized and archived.
+- **Appetite:** one focused OpenSpec change covering the invocation boundary, Logger service,
   `Effect.log`, stdout-backed provider, in-memory provider, tooling navigation, and three-engine
   acceptance. Rich tracing, filtering policy, asynchronous export, and a complete OpenTelemetry
   schema remain outside this slice.
@@ -84,7 +83,8 @@ program record remains in [real programs](real-programs.md).
   `StandardStreams` remains raw process output. Browser console and OpenTelemetry providers are
   compatible future implementations, not special behavior in `Effect.log`.
 - **Links:** [language context](../CONTEXT.md) ·
-  change: [`add-portable-logging`](../openspec/changes/add-portable-logging/proposal.md) ·
+  archived change:
+  [`add-portable-logging`](../openspec/changes/archive/2026-08-10-add-portable-logging/proposal.md) ·
   [standard streams spec](../openspec/specs/bootstrap-standard-streams/spec.md) ·
   [Effect model](../openspec/specs/bootstrap-flow-functions/spec.md)
 
@@ -94,14 +94,14 @@ program record remains in [real programs](real-programs.md).
   native handles, host path bytes, seeking, or implicit process state cannot run unchanged against a
   browser virtual file system. Conversely, hiding every platform distinction would make genuinely
   native requirements dishonest.
-- **Outcome & done-when:** A portable `FileSystem` capability exposes explicit-path whole-file and
+- **Outcome & done-when:** A portable `FileSystem` service exposes explicit-path whole-file and
   directory operations with complete owned values, portable errors, deterministic ordering, and no
   hidden current directory. The same program runs against native and deterministic in-memory
   providers; direct Wasm can use a host-supplied virtual provider with no source change. A separate
   lower-level `PlatformFileSystem` boundary is available for native paths, handles, mapping,
   locking, and metadata that have no portable contract.
-- **Status:** blocked — follows the intrinsic boundary and Logging changes so both services exercise
-  one consistent source-defined service, requirement, and provider vocabulary.
+- **Status:** queued — follows Logging archival so both services exercise one consistent
+  source-defined service, requirement, and provider vocabulary.
 - **Appetite:** one focused OpenSpec change for the smallest complete-file slice, portable Path and
   FileError semantics, native and in-memory providers, browser-host compatibility, tooling, and
   differential acceptance. Open handles, streaming, mapping, watchers, locking, and broad native
@@ -119,13 +119,12 @@ program record remains in [real programs](real-programs.md).
 - **Resume recognizable pressure programs** — after Logging and FileSystem exist, select a program
   that uses both and promote only repeated language, library, compiler, tooling, or cost walls. Do
   not automatically port another compiler module.
+- **Add owning String and formatting** — turn borrowed static UTF-8 messages into a practical
+  application logging surface with ordinary standard-library ownership and formatting APIs; keep
+  formatting separate from Logger dispatch and provider presentation policy.
 - **Revisit general default providers** — decide whether application-boundary defaults are useful
   only after several explicit services exist. Defaults must apply uniformly; Logger and FileSystem
   receive no ambient exception.
-- **Characterize full-suite timeout reliability** — the latest local `pnpm check` completed Biome,
-  typechecks, and 879 compiler tests, but 20 compiler cases expired at their configured timeouts.
-  Determine whether this is cold/concurrent execution pressure or a regression before changing
-  budgets or claiming the checkout is fully green.
 
 ## Later
 
@@ -163,8 +162,7 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 - A package registry, dependency solver, production build system, or compatibility layer for
   unreleased APIs.
 - Selecting a parser port or self-hosting sequence merely because file access becomes available.
-- Implementing Logger or FileSystem before the minimal Intrinsic boundary and source-defined
-  service mechanism are archived.
+- Adding another portable host service before the current FileSystem change is validated and archived.
 
 ## Open questions
 
@@ -173,6 +171,12 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-10: Implemented the portable Logger slice in ordinary Silk source: complete borrowed
+  messages with separate severity, explicit service requirements, bounded in-memory and direct
+  stdout providers, typed failure, evaluator/native/direct-Wasm parity, editor navigation,
+  determinism, Labs, and stack-VM pressure evidence. All typecheck, formatting, full-suite,
+  repository, release-candidate, and strict OpenSpec gates pass. The change is synchronized and
+  archived; FileSystem is next.
 - 2026-08-10: Promoted `establish-minimal-intrinsic-boundary` ahead of portable services. Logging
   and FileSystem are now blocked until compiler-known operations move under one sealed namespace,
   the minimal intrinsic rule is enforced, and ordinary Silk source can declare service contracts.

@@ -18,7 +18,9 @@ generics, first-class callables and pipelines, mutation, structured loops, recur
 ownership, shared and exclusive borrowing, deterministic `Drop`, explicit allocation, static text
 and byte data, and typed `Effect` computations with explicit service requirements. Canonical
 `Result`, `Effect`, and `Vector` operations are ordinary navigable Silk source rather than
-compiler-recognized library names.
+compiler-recognized library names. Portable semantic logging is likewise source-defined:
+`Effect.log` submits one complete borrowed message through an explicit replaceable `Logger`, with
+stdout and deterministic in-memory providers supplied by the standard library.
 
 This is still an alpha language. APIs may break freely, an owning String has not been selected, and
 concurrency, networking, a package registry, broad FFI, and self-hosting remain future work chosen

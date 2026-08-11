@@ -1,0 +1,212 @@
+import silk.core {
+  NativeStandardStreams,
+  StreamWriteFailure,
+  send
+}
+import silk.result { Failure, Result, Success }
+
+/// A closed bootstrap logging severity.
+pub struct LogLevel {
+  code: i32
+}
+
+/// Selects Trace severity.
+pub fn trace() -> LogLevel { return LogLevel { code: 0 } }
+
+/// Selects Debug severity.
+pub fn debug() -> LogLevel { return LogLevel { code: 1 } }
+
+/// Selects Info severity.
+pub fn info() -> LogLevel { return LogLevel { code: 2 } }
+
+/// Selects Warning severity.
+pub fn warning() -> LogLevel { return LogLevel { code: 3 } }
+
+/// Selects Error severity.
+pub fn error() -> LogLevel { return LogLevel { code: 4 } }
+
+/// Returns the stable bootstrap ordinal for one logging severity.
+pub fn levelCode(level: LogLevel) -> i32 { return level.code }
+
+/// A typed failure reported by a Logger provider.
+pub struct LogError {
+  code: i32
+}
+
+impl Report for LogError {}
+
+/// Returns the provider-defined bootstrap failure code.
+pub fn errorCode(error: LogError) -> i32 { return error.code }
+
+effect fn reject(code: i32) -> never ! LogError {
+  fail LogError { code: code }
+}
+
+/// Receives one complete semantic message per invocation.
+pub service Logger {
+  effect fn log(
+    level: LogLevel,
+    message: &[u8]
+  ) -> () ! LogError ? &mut Logger
+}
+
+/// A process-output Logger provider with no mandatory formatting or allocation.
+pub struct StdoutLogger {}
+
+/// Constructs a Logger that forwards complete messages to process stdout.
+pub fn stdout() -> StdoutLogger { return StdoutLogger {} }
+
+effect fn writeStdoutCounted(
+  streams: &mut NativeStandardStreams,
+  message: &[u8]
+) -> i32 ! StreamWriteFailure {
+  let written = run Intrinsic.bindRequirement(send(false, message), streams)
+  return 0
+}
+
+effect fn writeStdout(
+  self: &mut StdoutLogger,
+  level: LogLevel,
+  message: &[u8]
+) -> () ! LogError {
+  let mut streams = NativeStandardStreams.native()
+  let completed = run Intrinsic.effectResult(writeStdoutCounted(&mut streams, message))
+  return match move completed {
+    Result<i32, StreamWriteFailure> { value: outcome } => match move outcome {
+      Success<i32> { value: success } => ()
+      Failure<StreamWriteFailure> { error: failure } => run reject(3)
+    }
+  }
+}
+
+impl Logger for StdoutLogger {
+  log: StdoutLogger.writeStdout
+}
+
+/// A deterministic retaining Logger provider implemented entirely in Silk.
+pub struct InMemoryLogger {
+  levels: [i32; 8]
+  offsets: [usize; 8]
+  lengths: [usize; 8]
+  messages: [i32; 64]
+  count: usize
+  messageLength: usize
+  attempts: usize
+  failEnabled: bool
+  failAt: usize
+}
+
+fn emptyLevels() -> [i32; 8] { return [0, 0, 0, 0, 0, 0, 0, 0] }
+
+fn emptyIndexes() -> [usize; 8] { return [0, 0, 0, 0, 0, 0, 0, 0] }
+
+fn emptyMessages() -> [i32; 64] {
+  return [
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+}
+
+/// Constructs a bounded in-memory Logger for up to eight events and 64 message bytes.
+pub fn memory() -> InMemoryLogger {
+  return InMemoryLogger {
+    levels: emptyLevels(),
+    offsets: emptyIndexes(),
+    lengths: emptyIndexes(),
+    messages: emptyMessages(),
+    count: usize.add(0, 0),
+    messageLength: usize.add(0, 0),
+    attempts: usize.add(0, 0),
+    failEnabled: false,
+    failAt: usize.add(0, 0),
+  }
+}
+
+/// Constructs an in-memory Logger that rejects one zero-based invocation ordinal.
+pub fn memoryFailAt(failAt: usize) -> InMemoryLogger {
+  let mut logger = memory()
+  logger.failEnabled = true
+  logger.failAt = failAt
+  return move logger
+}
+
+effect fn record(
+  self: &mut InMemoryLogger,
+  level: LogLevel,
+  message: &[u8]
+) -> () ! LogError {
+  let ordinal = self.attempts
+  self.attempts = self.attempts + usize.add(0, 1)
+  if self.failEnabled {
+    if ordinal == self.failAt { return run reject(1) }
+  }
+
+  if self.count == usize.add(0, 8) { return run reject(2) }
+  if message.length > usize.add(0, 64) - self.messageLength { return run reject(2) }
+
+  let offset = self.messageLength
+  let mut messages = Intrinsic.replace(self.messages, emptyMessages())
+  let mut index = usize.add(0, 0)
+  while index < message.length {
+    messages[offset + index] = u8.toI32(message[index])
+    index = index + usize.add(0, 1)
+  }
+  let mut levels = Intrinsic.replace(self.levels, emptyLevels())
+  let mut offsets = Intrinsic.replace(self.offsets, emptyIndexes())
+  let mut lengths = Intrinsic.replace(self.lengths, emptyIndexes())
+  levels[self.count] = levelCode(move level)
+  offsets[self.count] = offset
+  lengths[self.count] = message.length
+  self.messages = move messages
+  self.levels = move levels
+  self.offsets = move offsets
+  self.lengths = move lengths
+  self.count = self.count + usize.add(0, 1)
+  self.messageLength = self.messageLength + message.length
+  return ()
+}
+
+impl Logger for InMemoryLogger {
+  log: InMemoryLogger.record
+}
+
+/// Returns the number of committed Logger invocations.
+pub fn length(self: &InMemoryLogger) -> usize {
+  return self.count
+}
+
+/// Returns the severity of one committed invocation.
+pub fn levelAt(self: &InMemoryLogger, index: usize) -> LogLevel {
+  let levels = self.levels
+  return LogLevel { code: levels[index] }
+}
+
+/// Returns the byte length of one committed message.
+pub fn messageLengthAt(self: &InMemoryLogger, index: usize) -> usize {
+  let lengths = self.lengths
+  return lengths[index]
+}
+
+/// Returns one byte from a committed message.
+pub fn messageByteAt(
+  self: &InMemoryLogger,
+  eventIndex: usize,
+  byteIndex: usize
+) -> u8 {
+  let lengths = self.lengths
+  let length = lengths[eventIndex]
+  if length <= byteIndex { let boom = 1 / 0 }
+  let offsets = self.offsets
+  let offset = offsets[eventIndex]
+  let messages = self.messages
+  return i32.toU8(messages[offset + byteIndex])
+}
+
+/// Returns the number of attempted Logger invocations.
+pub fn attempts(self: &InMemoryLogger) -> usize { return self.attempts }

@@ -81,6 +81,10 @@ Reserve approximately 20% of initiative capacity when pressure work resumes.
 
 ## Changelog
 
+- 2026-08-10: Added one semantic completion observation to the bounded stack VM through
+  `Effect.log` and an in-memory Logger while preserving its ordered VM event vector as program
+  data. This supplies real-program pressure evidence for the complete-message service boundary
+  without turning logging into raw output.
 - 2026-08-10: Marked the first real-program initiative complete and removed its finished items from
   Now. Recorded multiline static literals from `5da21fd`. Moved semantic Logger from Later to the
   project-level Now horizon alongside portable FileSystem, because both establish reusable service

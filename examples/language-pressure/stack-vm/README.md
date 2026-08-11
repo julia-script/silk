@@ -11,4 +11,6 @@ lexer's pressure for named closed values before designing that feature.
 
 The checked-in program branches around a dead path and computes `6 * 7`. Tests replace only the
 marked bytecode and fingerprint literals to run valid, malformed, allocation-failure, and
-determinism corpora.
+determinism corpora. Its final semantic verification is observed through `Effect.log` and an
+in-memory Logger; the VM's owned event stream remains program data rather than being replaced by
+logging.

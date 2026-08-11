@@ -343,20 +343,22 @@ failure. Formatting and diagnostic presentation happen above the boundary; the s
 imply terminal control, color detection, flushing, logging, or interactive input.
 _Avoid_: console service, terminal service
 
-**Log event**:
-One complete semantic observability message submitted atomically to a Logger. It carries structured
-meaning owned by the logging API rather than a sequence of stream fragments. The first bootstrap
-surface may be intentionally small, but its boundary must admit later level, annotation, span, and
-OpenTelemetry context without treating rendered bytes as the canonical event.
+**Log invocation**:
+One complete semantic observability message submitted to a Logger with a separate closed severity.
+It is one provider call rather than a sequence of stream fragments. The bootstrap message is a
+borrowed immutable UTF-8 view consumed during the call; providers that retain it copy the bytes.
+Later annotations, span context, and OpenTelemetry data may enrich this boundary without treating
+rendered bytes or one provider's physical writes as the canonical event.
 _Avoid_: stdout bytes, log line fragment, stream chunk
 
 **Logger service**:
-The portable explicit capability consumed by `Effect.log`. A Logger receives complete `LogEvent`
-values in call order and decides whether to render them to standard output, retain them in memory,
-forward them to browser or OpenTelemetry facilities, fan them out, or discard them according to an
-explicit provider policy. Logging is not `StandardStreams.writeAll`, does not expose byte-at-a-time
-appends, and remains an Effect requirement until provided. The first live provider renders complete
-events through `StandardStreams`; an in-memory provider proves host independence.
+The portable explicit service consumed by `Effect.log`. A Logger receives a severity and one
+complete borrowed message in call order and decides whether to render it to standard output, retain
+it in memory, forward it to browser or OpenTelemetry facilities, fan it out, or discard it according
+to explicit provider policy. Logging is not `StandardStreams.writeAll`, does not expose
+byte-at-a-time appends, and remains an Effect requirement until provided. The first stdout provider
+forwards complete messages through `StandardStreams`; a bounded in-memory provider proves host
+independence and deterministic failure.
 _Avoid_: stdout logger intrinsic, console service, ambient global logger
 
 **Monotonic-clock service**:
