@@ -1,145 +1,233 @@
 ## Purpose
 
-Define a portable explicit filesystem service whose whole-file and directory semantics work across
-native hosts, deterministic tests, and browser virtual file systems, with platform APIs separate.
+Define a portable explicit whole-file service and provider-rooted path model that applications can
+implement without depending on operating-system filesystem mechanisms.
 
 ## ADDED Requirements
 
-### Requirement: Portable paths have provider-independent meaning
+### Requirement: Path is provider-absolute and normalized
 
-`Path` SHALL be a nominal owned normalized UTF-8 path within an explicit provider namespace. Its
-canonical separator SHALL be `/`; it SHALL distinguish the provider root from relative fragments,
-reject NUL, empty interior components, `.` and `..`, and never consult a process current directory.
-Joining and parent/component operations MUST preserve normalization. `Path` SHALL remain distinct
-from String, source-module identity, OS strings, and host-native paths.
+`Path` SHALL be a nominal owned normalized UTF-8 path whose leading `/` denotes the root of the
+selected provider, not the host operating system. `Path.make` SHALL accept only absolute input and
+reject NUL, invalid UTF-8, empty interior components, `.`, `..`, and missing leading `/`.
+`Path.root` SHALL construct `/`. Path construction and use MUST NOT consult an ambient current
+directory or host path syntax.
 
-#### Scenario: Reject traversal syntax
+#### Scenario: Construct a provider-absolute path
 
-- **WHEN** a program attempts to construct or join a portable path containing `..`
-- **THEN** Path validation returns an invalid-path result before any FileSystem provider is invoked
+- **WHEN** source constructs `/project/src/Main.silk`
+- **THEN** every provider receives the same normalized components relative to its own root
 
-#### Scenario: Resolve from an explicit provider root
+#### Scenario: Reject a relative Path construction
 
-- **WHEN** a program reads `/project/src/Main.silk`
-- **THEN** every provider interprets the same normalized components within its configured namespace without consulting a hidden current directory
+- **WHEN** `Path.make` receives `src/Main.silk`
+- **THEN** it returns invalid-path failure before any FileSystem provider is invoked
 
-### Requirement: Whole-file data uses an owned Bytes actor
+#### Scenario: Reject traversal in an owned Path
 
-The portable standard library SHALL expose nominal owned `Bytes` backed by ordinary Silk allocation
-and sequence behavior. `FileSystem.readFile` SHALL return complete owned Bytes; write operations
-SHALL accept an immutable byte view without requiring callers to expose the Bytes representation.
-Bytes MUST NOT assert UTF-8 validity or become a filesystem-specific compiler primitive.
+- **WHEN** `Path.make` receives an absolute spelling containing `.` or `..`
+- **THEN** it rejects the spelling rather than preserving a traversal-bearing owned value
 
-#### Scenario: Read arbitrary bytes
+### Requirement: Relative input is resolved immediately against an explicit base
 
-- **WHEN** a provider contains a file with invalid UTF-8 and zero bytes
-- **THEN** readFile returns the exact complete byte sequence without text decoding or loss
+`Path.resolve(base, relative)` SHALL process `.` and `..` lexically against one explicit absolute
+base and return a new normalized owned `Path`. Resolution MUST fail if `..` would escape the provider
+root. `Path.join(base, fragment)` SHALL be the stricter operation for an already normalized non-empty
+relative fragment and MUST reject absolute input, `.`, `..`, NUL, invalid UTF-8, and empty
+components. The first cut SHALL NOT expose an owned `RelativePath` or unresolved path value.
 
-### Requirement: FileSystem is explicit and replaceable
+#### Scenario: Resolve dot components with an explicit base
 
-`FileSystem` SHALL be a nominal service capability. Every operation SHALL retain its FileSystem
-requirement until supplied through ordinary Effect provision. The bootstrap portable surface SHALL
-include complete-file read, replace, and create-new writes; entry inspection; lexically ordered
-directory listing; single-directory and recursive-parent creation; rename; file removal; and
-non-recursive empty-directory removal. Missing provision MUST NOT select an ambient OS filesystem.
+- **WHEN** source resolves `../assets/./logo.bin` against `/project/src`
+- **THEN** it receives owned path `/project/assets/logo.bin` without consulting process state
 
-#### Scenario: Replace native storage with memory
+#### Scenario: Reject root escape
 
-- **WHEN** the same program is provided with a native-rooted FileSystem and an in-memory FileSystem
-- **THEN** its source, paths, operation results, and Effect contract remain unchanged
+- **WHEN** source resolves `../../outside` against `/project`
+- **THEN** resolution fails because the second parent step would leave the provider namespace
+
+#### Scenario: Join a normalized child
+
+- **WHEN** source joins `/project` with `src/Main.silk`
+- **THEN** it receives `/project/src/Main.silk`
+
+### Requirement: Path exposes only minimal owned and borrowed operations
+
+The first Path API SHALL include `make`, `root`, `join`, `resolve`, `asBytes`, `isRoot`, `name`, and
+`parent`. `asBytes` and a non-root `name` SHALL return shared lexical byte views tied to the Path
+owner without allocating. `name` SHALL return `None` for root. `parent` SHALL return an allocated
+owned `Option<Path>`, with `None` for root. The API MUST NOT introduce `PathSlice` or store a borrow
+inside another value.
+
+#### Scenario: Borrow a path name
+
+- **WHEN** source asks for the name of `/project/Main.silk`
+- **THEN** it receives a shared lexical view of `Main.silk` tied to the original Path
+
+#### Scenario: Own a parent independently
+
+- **WHEN** source asks for the parent of `/project/Main.silk`
+- **THEN** it receives owned `/project` through the ordinary allocation contract and may later move the original Path
+
+#### Scenario: Inspect root
+
+- **WHEN** source calls `isRoot`, `name`, and `parent` on `Path.root`
+- **THEN** it observes `true`, `None`, and `None` respectively
+
+### Requirement: FileSystem has seven mutable whole-file primitives
+
+`FileSystem` SHALL be a source-defined runtime service with exactly these primitive operation
+contracts:
+
+```silk
+readFile(&Path)
+  -> Bytes ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+writeFile(&Path, &[u8])
+  -> () ! FileError ? &mut FileSystem
+stat(&Path)
+  -> FileInfo | DirectoryInfo ! FileError ? &mut FileSystem
+listDirectory(&Path)
+  -> Vector<DirectoryEntry> ! FileError | OutOfMemory
+     ? &mut FileSystem | &mut Allocator
+createDirectory(&Path)
+  -> () ! FileError ? &mut FileSystem
+removeFile(&Path)
+  -> () ! FileError ? &mut FileSystem
+removeDirectory(&Path)
+  -> () ! FileError ? &mut FileSystem
+```
+
+Every operation SHALL use `&mut FileSystem`, including observations, so a conforming provider may
+record calls, update caches, or inject deterministic failures. Missing provision MUST NOT select an
+ambient OS filesystem.
+
+#### Scenario: Provide a user filesystem lexically
+
+- **WHEN** a program supplies an ordinary user-defined `FileSystem` service implementation
+- **THEN** every primitive dispatches to that provider with the declared failure and requirement rows
 
 #### Scenario: Reject a missing provider
 
-- **WHEN** a closed entry requires FileSystem and no provider is supplied
-- **THEN** analysis or execution reports the unsatisfied requirement without touching host storage
+- **WHEN** a closed entry retains `&mut FileSystem` without provision
+- **THEN** analysis or execution reports the unsatisfied service requirement without touching host storage
 
-### Requirement: Complete writes are atomic at the portable boundary
+#### Scenario: Record an observational call
 
-`writeFileReplace` SHALL either replace the destination with the complete supplied bytes or fail
-while preserving the previous destination. `writeFileCreateNew` SHALL fail with AlreadyExists
-without modifying an existing entry. A successful write SHALL become completely visible to later
-operations in service order. The portable contract MUST NOT expose partial writes, flushes, open
-handles, or provider buffering state.
+- **WHEN** a mutable test provider records a successful `stat` request
+- **THEN** the call is valid even though its portable result does not otherwise mutate filesystem contents
 
-#### Scenario: Preserve a file after failed replacement
+### Requirement: Whole-file operations do not specify physical atomicity
 
-- **WHEN** a provider fails a replacement write after receiving its input
-- **THEN** a later read observes the complete previous file and the write returns FileError
+`writeFile` SHALL receive one complete immutable byte view through one service operation, create a
+missing file, and truncate an existing file. A provider MAY perform any number of physical writes.
+After success, a later ordered read SHALL observe the complete supplied bytes. After failure, the
+destination contents SHALL be unspecified. The portable contract MUST NOT require transactional
+replacement, rollback, previous-content preservation, or one physical write and MUST NOT expose
+streaming or public file handles.
 
-#### Scenario: Create a new file exactly once
+#### Scenario: Implement a write in chunks
 
-- **WHEN** create-new is called twice for one path
-- **THEN** the first call creates the complete file and the second fails with AlreadyExists without changing it
+- **WHEN** a provider writes one supplied byte view through several lower-level operations and succeeds
+- **THEN** the caller observes one successful service operation and a later read returns the complete supplied bytes
 
-### Requirement: Directory observations are deterministic
+#### Scenario: Fail after partial physical progress
 
-`listDirectory` SHALL return owned entries sorted by normalized UTF-8 name bytes, independent of
-provider enumeration order. Each entry SHALL expose only its portable name and kind: file or
-directory. The portable service SHALL NOT expose symlink creation, inode identity, ownership,
-permissions bits, timestamps, extended attributes, device entries, or host-specific metadata.
+- **WHEN** a provider fails after changing some destination bytes
+- **THEN** it returns `FileError` and portable callers make no assumption about the resulting contents
 
-#### Scenario: Normalize provider enumeration
+#### Scenario: Create or truncate
 
-- **WHEN** a provider enumerates children in different physical orders
-- **THEN** listDirectory returns the same lexically ordered portable entries
+- **WHEN** `writeFile` targets a missing path and later an existing file
+- **THEN** the first call creates it and the second replaces its visible contents after success
 
-#### Scenario: Encounter unsupported host entry metadata
+### Requirement: Portable metadata and directory entries are small owned values
 
-- **WHEN** a portable operation reaches an entry that cannot be represented as a portable file or directory
-- **THEN** it fails with Unsupported rather than inventing portable semantics
+`stat` SHALL return `FileInfo { byteLength: usize }` for a file or `DirectoryInfo` for a directory.
+`DirectoryEntry` SHALL own the complete normalized child `Path` and its file-or-directory kind.
+`listDirectory` SHALL return only immediate children sorted by complete portable path bytes,
+independent of provider enumeration order. The portable API MUST NOT expose links, inode identity,
+permissions, timestamps, ownership, devices, or host-native metadata.
 
-### Requirement: File errors expose portable recovery reasons
+#### Scenario: Stat a file
 
-`FileError` SHALL retain the operation, an owned portable Path, one closed semantic reason, and
-optional provider detail. Reasons SHALL include NotFound, AlreadyExists, PermissionDenied,
-InvalidPath, WrongType, NotEmpty, NoSpace, TooLarge, Unsupported, and Other. Provider-native codes
-MUST remain diagnostic detail rather than control-flow tags. Allocation exhaustion SHALL remain a
-separate failure channel.
+- **WHEN** a provider stats a regular file containing 42 bytes
+- **THEN** it returns `FileInfo` with `byteLength` 42
 
-#### Scenario: Translate a native missing-file code
+#### Scenario: List owned full paths deterministically
 
-- **WHEN** a native provider reports its platform-specific missing-file condition
-- **THEN** FileSystem fails with NotFound and may retain the native code only as provider detail
+- **WHEN** a provider enumerates `/project/b` before `/project/a`
+- **THEN** `listDirectory(/project)` returns owned entries for `/project/a` then `/project/b`
 
-#### Scenario: Fail in a virtual provider
+#### Scenario: Reject an unrepresentable entry
 
-- **WHEN** an in-memory provider rejects an operation with PermissionDenied
-- **THEN** it returns the same portable reason without inventing a native code
+- **WHEN** a provider encounters an entry that is neither a portable file nor directory
+- **THEN** the operation fails with `Unsupported` rather than inventing metadata
 
-### Requirement: PlatformFileSystem is an explicit portability escape hatch
+### Requirement: FileError is allocation-free and portable
 
-`PlatformFileSystem` SHALL be a distinct lower-level service for host-native paths, handles,
-seeking, mapping, locking, host metadata, links, and other behavior without a portable contract.
-Portable standard-library operations MUST NOT require it directly. A native FileSystem provider MAY
-use it internally. Depending on PlatformFileSystem SHALL be visible in a function's Effect
-requirements and MUST NOT be satisfied by a portable FileSystem provider.
+`FileError` SHALL contain the `FileOperation`, one closed portable `FileReason`, and an optional
+numeric provider/native code. It MUST NOT own or borrow a `Path`, text message, provider object, or
+other allocation. Reasons SHALL include `NotFound`, `AlreadyExists`, `PermissionDenied`,
+`InvalidPath`, `WrongType`, `NotEmpty`, `NoSpace`, `TooLarge`, `Unsupported`, and `Other`.
+Allocation exhaustion SHALL remain the separate `OutOfMemory` failure.
 
-#### Scenario: Require native mapping explicitly
+#### Scenario: Translate a missing entry
 
-- **WHEN** a function opens a mapped native file through PlatformFileSystem
-- **THEN** its contract exposes the platform requirement and the function cannot run against only a browser virtual FileSystem
+- **WHEN** a provider cannot find the requested path
+- **THEN** it returns `FileError` naming the attempted operation and `NotFound`, optionally retaining a numeric provider code
 
-### Requirement: Native and browser-capable providers preserve one service contract
+#### Scenario: Keep allocation failure separate
 
-The native provider SHALL map one explicitly configured provider root onto host storage and
-translate lower-level failures into portable values. The in-memory provider SHALL implement the
-same behavior deterministically without host access. Direct WebAssembly SHALL support a versioned
-host-provider boundary capable of implementing the service over a browser virtual file system; it
-MUST NOT require Unix file descriptors, process streams, or host-native paths.
+- **WHEN** `readFile` obtains file bytes but cannot allocate the owned `Bytes` result
+- **THEN** it fails with `OutOfMemory` rather than wrapping allocation exhaustion in `FileError`
 
-#### Scenario: Read the same fixture on three providers
+### Requirement: Recursive and convenience behavior is ordinary source composition
 
-- **WHEN** native, in-memory, and hosted-Wasm providers expose the same portable tree
-- **THEN** one Silk program observes identical bytes, entry kinds, directory order, and portable failures
+Canonical source SHALL define `createDirectoriesRecursively`, `writeFileWithParents`, and `exists`
+as ordinary functions above the seven service primitives. Recursive parent creation and owned parent
+paths SHALL retain `OutOfMemory ? &mut Allocator` in addition to `&mut FileSystem` and `FileError`.
+`exists` SHALL return `false` only for `NotFound` and MUST propagate every other failure. The service
+MUST NOT add recursive creation, recursive removal, or parent-writing primitives.
 
-### Requirement: FileSystem behavior agrees across execution engines
+#### Scenario: Create missing parents recursively
 
-Equivalent provided programs SHALL preserve operation order, success values, FileError reasons,
-owned-byte cleanup, and provider mutations through logical evaluation, native LLVM execution, and
-direct WebAssembly. Backend artifacts and provider observations SHALL remain deterministic for
-equivalent inputs.
+- **WHEN** `createDirectoriesRecursively` receives `/a/b/c` and only `/a` exists as a directory
+- **THEN** it creates `/a/b` and `/a/b/c` using ordinary `stat` and `createDirectory` calls
 
-#### Scenario: Replace and reread a file
+#### Scenario: Write with missing parents
 
-- **WHEN** one Effect writes complete bytes and then reads the same path
-- **THEN** evaluation, native execution, and direct WebAssembly observe the complete replacement exactly once
+- **WHEN** `writeFileWithParents` receives a file whose parent directories are absent
+- **THEN** it creates the parents recursively and then delegates the complete bytes to `writeFile`
+
+#### Scenario: Propagate an exists permission failure
+
+- **WHEN** `exists` calls `stat` and receives `PermissionDenied`
+- **THEN** it propagates that `FileError` rather than returning `false`
+
+#### Scenario: Remove only an empty directory
+
+- **WHEN** `removeDirectory` targets a non-empty directory
+- **THEN** the primitive returns `NotEmpty` and performs no recursive removal
+
+### Requirement: Portable filesystem use remains provider- and target-neutral
+
+Equivalent programs supplied with conforming providers SHALL preserve service call order, success
+values, portable failures, byte ownership, directory ordering, and provider mutations through MIR
+evaluation, native LLVM execution, and direct Wasm. A program that does not use `FileSystem`, and a
+direct-Wasm program supplied with a pure user-defined implementation, MUST NOT require OS filesystem
+imports or runtime support.
+
+#### Scenario: Run a pure provider on direct Wasm
+
+- **WHEN** a direct-Wasm program supplies its own ordinary `FileSystem` and reaches no target-specific intrinsic
+- **THEN** it executes the portable service with no OS filesystem imports
+
+#### Scenario: Emit a program with no filesystem use
+
+- **WHEN** executable closure contains no FileSystem operations or OS filesystem intrinsics
+- **THEN** its artifact contains no filesystem host import or runtime symbol
+
+#### Scenario: Compare conforming providers
+
+- **WHEN** two providers expose the same logical tree and receive the same ordered portable operations
+- **THEN** callers observe the same bytes, metadata, entry ordering, and portable reasons

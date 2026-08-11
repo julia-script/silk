@@ -1,31 +1,41 @@
 ## ADDED Requirements
 
-### Requirement: Portable filesystem actors are canonical visible Silk source
+### Requirement: Portable filesystem actors are canonical ordinary Silk source
 
-The standard library SHALL ship canonical `.silk` declarations for Bytes, Path, PathSlice,
-DirectoryEntry, FileError, FileSystem, and the PlatformFileSystem boundary. The portable operations
-and provider-facing contracts SHALL participate in the deterministic standard-library manifest,
-retain ordinary source spans in diagnostics and editor facts, and receive no compiler privilege
-from their names or module origin.
+The standard library SHALL ship canonical `.silk` declarations for `Path`, `FileInfo`,
+`DirectoryInfo`, `DirectoryEntry`, `FileOperation`, `FileReason`, `FileError`, and `FileSystem` plus
+the ordinary helpers `createDirectoriesRecursively`, `writeFileWithParents`, and `exists`. These
+actors SHALL participate in the deterministic standard-library manifest, retain ordinary source
+spans in diagnostics and editor facts, and receive no compiler privilege from names or module origin.
+`Bytes` SHALL be consumed from the separate owned-bytes foundation rather than reimplemented here.
 
-#### Scenario: Navigate to readFile
+#### Scenario: Navigate to a primitive operation
 
-- **WHEN** editor tooling resolves a FileSystem read operation
-- **THEN** go-to-definition opens canonical shipped Silk source rather than a generated host signature
+- **WHEN** editor tooling resolves `FileSystem.readFile`
+- **THEN** go-to-definition opens canonical shipped Silk source rather than a compiler-generated host signature
 
-#### Scenario: Define a user filesystem capability
+#### Scenario: Navigate to a helper
 
-- **WHEN** a user module defines an equivalent whole-file service under another legal name
-- **THEN** it receives ordinary conformance, Effect requirement, ownership, and lowering behavior without intrinsic registration
+- **WHEN** editor tooling resolves `writeFileWithParents`
+- **THEN** go-to-definition opens its ordinary source composition over parent creation and `writeFile`
 
-### Requirement: Portable APIs prefer FileSystem over PlatformFileSystem
+#### Scenario: Define a user service implementation
 
-Canonical standard-library modules that can express their behavior through portable paths and
-complete values SHALL require FileSystem rather than PlatformFileSystem. PlatformFileSystem SHALL be
-imported only by provider implementations or APIs whose documented contract is deliberately
-host-specific.
+- **WHEN** a user value satisfies the source-defined `FileSystem` contract
+- **THEN** it receives ordinary service provision, ownership, and lowering behavior without intrinsic registration
 
-#### Scenario: Inspect a portable standard-library operation
+### Requirement: Portable source has no platform provider dependency
 
-- **WHEN** a user navigates to a standard operation that reads a complete file
-- **THEN** its source contract requires FileSystem and contains no native handle or platform path type
+Portable filesystem actors and helpers MUST NOT import an OS provider, native path or handle type,
+host target selector, hosted-Wasm ABI, or built-in virtual provider. Applications SHALL select and
+provide implementations at their outer boundary.
+
+#### Scenario: Load portable source on direct Wasm
+
+- **WHEN** a direct-Wasm application imports portable Path and FileSystem declarations
+- **THEN** module closure requires no operating-system filesystem implementation or host import
+
+#### Scenario: Supply an application-specific provider
+
+- **WHEN** an application defines a virtual provider in ordinary Silk source
+- **THEN** it can satisfy FileSystem without depending on any standard-library platform implementation

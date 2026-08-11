@@ -1,52 +1,43 @@
-## 1. Owned Bytes Foundation
+## 1. Prerequisites and Portable Path
 
-- [ ] 1.1 Add canonical Bytes as a nominal ordinary Silk owner over Vector<u8> with construction, length, shared/exclusive slices, move, and Drop behavior
-- [ ] 1.2 Add Bytes ownership, allocation-failure, evaluator, native, direct-Wasm, and standard-library manifest tests without compiler collection privilege
-- [ ] 1.3 Add Bytes presentation, documentation, hover, completion, occurrences, and go-to-definition coverage
+- [ ] 1.1 Confirm `add-returned-lexical-borrows` and `add-owned-bytes` are complete before implementation begins.
+- [ ] 1.2 Add canonical owned `Path` source with absolute-only `make`, `root`, normalization, and rejection of invalid UTF-8, NUL, empty components, `.`, and `..`.
+- [ ] 1.3 Implement explicit-base `resolve` with lexical dot processing and root-escape rejection plus strict normalized-relative `join`.
+- [ ] 1.4 Implement `asBytes`, `isRoot`, lexical borrowed `name`, and allocated owned `parent` without adding `PathSlice`.
+- [ ] 1.5 Add accepted and rejected Path fixtures covering root, nested paths, relative resolution, normalization, escape, and absence of ambient cwd.
 
-## 2. Portable Path Model
+## 2. Portable Values and Errors
 
-- [ ] 2.1 Add canonical Path and PathSlice values with provider-rooted UTF-8 normalization and explicit root semantics
-- [ ] 2.2 Implement checked construction, relative-fragment joining, parent, name, extension, and component operations
-- [ ] 2.3 Add rejection and determinism coverage for NUL, empty components, `.`, `..`, separator normalization, and hidden-current-directory assumptions
-- [ ] 2.4 Add a distinct PlatformPath type and prohibit implicit interchange with portable Path
+- [ ] 2.1 Add canonical `FileInfo`, `DirectoryInfo`, entry kind, and `DirectoryEntry` with owned complete child Paths.
+- [ ] 2.2 Add closed `FileOperation` and portable `FileReason` values covering every primitive and specified recovery reason.
+- [ ] 2.3 Add allocation-free `FileError` containing operation, reason, and optional numeric provider code with no Path, text, or owned diagnostic data.
+- [ ] 2.4 Add ownership, Drop, layout, and allocation-failure tests for Path, directory entries, metadata, and errors across evaluation and both backends.
 
-## 3. FileSystem Contracts and Values
+## 3. Seven-Operation FileSystem Service
 
-- [ ] 3.1 Add DirectoryEntry, portable entry kind and inspection values, FileOperation, FileReason, and FileError canonical Silk declarations
-- [ ] 3.2 Add the FileSystem capability for readFile, replace/create-new writes, inspect, sorted listing, directory creation, rename, and non-recursive removals
-- [ ] 3.3 Verify explicit FileSystem requirement/provision, portable error rows, allocation failure separation, and no FileSystem-specific HIR or MIR operation
-- [ ] 3.4 Add all new modules to the canonical standard-library manifest and generated embedded-source verification
+- [ ] 3.1 Add the source-defined `FileSystem` runtime service with exact `readFile`, `writeFile`, `stat`, `listDirectory`, `createDirectory`, `removeFile`, and `removeDirectory` signatures.
+- [ ] 3.2 Verify every operation retains `&mut FileSystem`, exact `FileError`/`OutOfMemory` rows, and `&mut Allocator` only for owned result allocation.
+- [ ] 3.3 Add conformance and lexical provision fixtures for mutable recording, deterministic failure injection, and replacement by an application-defined provider.
+- [ ] 3.4 Verify no actor name receives special semantic, HIR, MIR, evaluation, or backend handling and missing provision never selects ambient storage.
 
-## 4. Deterministic In-Memory Provider
+## 4. Primitive Semantics and Helpers
 
-- [ ] 4.1 Implement an ordinary Silk in-memory tree provider with complete owned Bytes and canonical Path keys
-- [ ] 4.2 Implement atomic replace/create-new writes, file/directory kind checks, sorted listings, rename, and non-recursive removal semantics
-- [ ] 4.3 Add configurable operation failures and verify portable FileError reasons, unchanged destinations, event ordering, and cleanup
-- [ ] 4.4 Prove evaluator and direct-Wasm execution with the pure Silk provider and no filesystem host imports
+- [ ] 4.1 Add contract fixtures for complete reads, create-or-truncate writes, chunked provider writes, successful later reads, and unspecified destination contents after failure.
+- [ ] 4.2 Add stat and listing fixtures for file length, directory identity, owned full child paths, deterministic byte ordering, wrong kinds, and unsupported entries.
+- [ ] 4.3 Add create-one-directory, remove-file, and empty-only remove-directory fixtures including NotFound, AlreadyExists, WrongType, and NotEmpty.
+- [ ] 4.4 Implement `createDirectoriesRecursively` in ordinary source with explicit parent allocation, allocator requirement, and no recursive service primitive.
+- [ ] 4.5 Implement `writeFileWithParents` and `exists` in ordinary source, ensuring `exists` returns false only for NotFound and propagates every other failure.
 
-## 5. Lower-Level Platform Boundary
+## 5. Standard Library, Tooling, and Target Parity
 
-- [ ] 5.1 Define the narrow PlatformFileSystem service and provider-only operations required by the native portable adapter
-- [ ] 5.2 Implement the stage-0 external boundary with typed wrapping for host paths, complete reads, atomic writes, directories, rename, and removal
-- [ ] 5.3 Implement a native FileSystem provider rooted at one explicit host directory and reject traversal or indirection that escapes it
-- [ ] 5.4 Translate native outcomes to portable FileError reasons while retaining native codes only as diagnostic detail
+- [ ] 5.1 Add portable actors and helpers to the deterministic canonical standard-library manifest without importing any platform provider or ABI.
+- [ ] 5.2 Add hover, completion, occurrences, presentation, and go-to-definition tests for every portable value, primitive, helper, failure, and requirement row.
+- [ ] 5.3 Add evaluator, native LLVM, and direct-Wasm parity fixtures using pure ordinary-source user providers.
+- [ ] 5.4 Add artifact tests proving programs with no filesystem use and direct-Wasm programs with pure providers emit no OS filesystem imports or runtime symbols.
+- [ ] 5.5 Add architecture tests proving there are no FileSystem-shaped HIR/MIR operations, compiler-known actor names, platform types, hosted-Wasm ABI, or built-in providers in this change.
 
-## 6. Hosted WebAssembly Provider
+## 6. Documentation and Verification
 
-- [ ] 6.1 Define a private versioned complete-operation Wasm import ABI with caller-owned buffers and numeric statuses
-- [ ] 6.2 Implement a hosted provider adapter that maps the private ABI to ordinary FileSystem values and errors
-- [ ] 6.3 Add a browser-virtual fixture host and prove parity with the in-memory and native provider trees without Unix handles or path semantics
-
-## 7. Tooling, Labs, and Architecture Gates
-
-- [ ] 7.1 Add completion, hover, occurrences, go-to-definition, and documentation tests for Bytes, Path, FileSystem, and PlatformFileSystem
-- [ ] 7.2 Add facade-only Labs presets for path validation, whole-file success/failure, requirement rows, Bytes cleanup, provider observations, and backend artifacts
-- [ ] 7.3 Add architecture tests proving portable standard-library modules never depend on PlatformFileSystem and backends contain no filesystem-named MIR operations
-- [ ] 7.4 Add fresh-process determinism for standard-library imports, directory ordering, errors, MIR, native artifacts, and direct-Wasm bytes
-
-## 8. Acceptance and Documentation
-
-- [ ] 8.1 Add one readable example that runs unchanged against native, in-memory, and hosted-Wasm virtual providers
-- [ ] 8.2 Update public standard-library, path, service, browser-hosting, and platform-escape-hatch documentation
-- [ ] 8.3 Run `pnpm typecheck`, `pnpm exec biome check .`, focused filesystem tests, `pnpm test`, `pnpm check`, and `pnpm release:candidate`
+- [ ] 6.1 Add one readable example showing explicit Path resolution, service provision, complete read/write, helpers, and portable failure recovery with a user provider.
+- [ ] 6.2 Update public Path, FileSystem, service, allocation, failed-write, and provider-authoring documentation while linking platform implementation to its separate proposal.
+- [ ] 6.3 Regenerate committed manifests and goldens, run `pnpm check`, and run `pnpm release:candidate` because standard-library package contents change.

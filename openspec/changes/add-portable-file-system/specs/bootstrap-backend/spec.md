@@ -1,30 +1,39 @@
 ## ADDED Requirements
 
-### Requirement: Backends preserve portable FileSystem service boundaries
+### Requirement: Backends preserve ordinary FileSystem service lowering
 
-Backends SHALL lower FileSystem requirements and provided implementations through the ordinary
-service model without adding FileSystem-shaped MIR operations or selecting one platform provider.
-Native execution MAY reach a private platform adapter through the selected native provider. Direct
-WebAssembly MAY expose versioned host imports for a hosted provider, but those imports MUST use
-complete operation requests/results and MUST NOT become the public Silk FileSystem contract.
+Backends SHALL lower `FileSystem` requirements, provision, calls, values, failures, and user-defined
+implementations through the ordinary service, Effect, ownership, and call model. They MUST NOT add
+FileSystem-shaped HIR or MIR operations, select a provider, or recognize portable actor names.
 
-#### Scenario: Compile an in-memory filesystem without host imports
+#### Scenario: Lower a user-defined provider
 
-- **WHEN** a closed program supplies an ordinary Silk in-memory FileSystem implementation
-- **THEN** direct WebAssembly lowers it without adding native-filesystem host imports
+- **WHEN** a closed program supplies an ordinary source-defined `FileSystem`
+- **THEN** native LLVM and direct Wasm lower its service calls through the same generic machinery used by other services
 
-#### Scenario: Compile a hosted WebAssembly provider
+#### Scenario: Keep actor names unprivileged
 
-- **WHEN** a direct-Wasm entry intentionally leaves the hosted FileSystem adapter at its application boundary
-- **THEN** the artifact records the versioned imports needed by that provider without exposing Unix handles or paths in Silk source
+- **WHEN** a user declares another legal service and values with equivalent shapes under different names
+- **THEN** backends apply the same lowering behavior without requiring intrinsic inventory entries
 
-### Requirement: Filesystem provider observations remain deterministic
+### Requirement: Portable filesystem support is pay-for-use
 
-Equivalent MIR, target, provider contract, and codegen request SHALL produce deterministic native
-and WebAssembly artifacts. Provider enumeration order and native error codes MUST NOT affect
-portable result ordering, semantic FileError reasons, or symbol identities.
+Packaging canonical portable FileSystem source MUST NOT add filesystem runtime symbols or host imports
+to an artifact. A direct-Wasm program using no filesystem or supplying a pure user-defined
+implementation SHALL emit no OS filesystem import. Equivalent target, executable closure, and
+provider source SHALL produce deterministic artifacts.
 
-#### Scenario: Emit repeated directory-listing programs
+#### Scenario: Emit direct Wasm with a pure provider
 
-- **WHEN** the same portable filesystem program is emitted in fresh processes
-- **THEN** backend artifacts are byte-identical and runtime entry ordering remains provider-independent
+- **WHEN** a program supplies a pure ordinary-source FileSystem and reaches no platform intrinsic
+- **THEN** direct Wasm contains no OS filesystem imports
+
+#### Scenario: Emit a program with no filesystem use
+
+- **WHEN** canonical filesystem declarations are packaged but absent from executable closure
+- **THEN** native and Wasm artifacts contain no filesystem runtime symbols or host imports
+
+#### Scenario: Repeat portable emission
+
+- **WHEN** the same portable filesystem program is emitted repeatedly for one target
+- **THEN** its artifacts and service-call identities are byte-for-byte deterministic

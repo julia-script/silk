@@ -1,52 +1,47 @@
 ## Why
 
-Silk needs file interaction for real applications and eventual compiler work, but defining the
-common service in terms of Unix paths, native handles, or process state would make ordinary programs
-non-portable to browser-hosted WebAssembly. The portable whole-file contract and the deliberate
-platform-specific escape hatch must be separated before filesystem mechanisms leak into language
-semantics.
+Silk needs a portable filesystem contract that applications can satisfy with native, Wasm-hosted,
+virtual, test, or application-specific providers without changing calling source. Platform
+mechanisms and provider implementations must remain separate so merely packaging the standard
+library does not contaminate portable programs.
 
 ## What Changes
 
-- Add a portable normalized `Path` value distinct from String, source-module identity, and
-  host-native path values.
-- Add an owned `Bytes` actor over ordinary Silk storage so whole-file reads return a domain value
-  rather than exposing Vector as the permanent filesystem API.
-- Add an explicit `FileSystem` service for the smallest path-based whole-file and directory slice,
-  using complete owned values, deterministic ordering, and no hidden working directory.
-- Add a closed portable `FileError` reason model with optional provider-native diagnostic detail.
-- Add native and deterministic in-memory providers and a direct-Wasm host-provider contract
-  suitable for a browser virtual file system without changing calling Silk source.
-- Add an explicitly lower-level `PlatformFileSystem` service boundary for native paths, handles,
-  mapping, locking, and metadata that have no honest portable semantics; ordinary standard-library
-  APIs do not depend on it.
-- Integrate FileSystem values and operations with canonical standard-library source, Effect
-  requirement/provision, editor tooling, labs, and evaluator/native/direct-Wasm acceptance.
-- Keep open handles, streaming, watchers, mapping, locking, broad native metadata, implicit current
-  directories, and process environment access outside the portable slice.
+- Add provider-absolute normalized `Path` with explicit-base relative resolution and no ambient
+  current directory.
+- Add owned `FileInfo`, `DirectoryInfo`, and `DirectoryEntry` values plus an allocation-free
+  `FileError` carrying a closed portable reason and optional numeric provider detail.
+- Add the seven-operation whole-file `FileSystem` service: `readFile`, `writeFile`, `stat`,
+  `listDirectory`, `createDirectory`, `removeFile`, and `removeDirectory`.
+- Make every operation require `&mut FileSystem`, allowing recording, caching, and failure-injection
+  providers while keeping provider replacement lexical and ordinary.
+- Add source-defined helpers `createDirectoriesRecursively`, `writeFileWithParents`, and `exists`
+  above the narrow service primitives.
+- Specify complete-message write input without requiring atomic replacement, rollback, one physical
+  write, or a portable public file handle.
+- Preserve direct-Wasm pay-for-use: a program that uses no filesystem or supplies a pure user-defined
+  service implementation requires no OS filesystem import.
+- Require `add-returned-lexical-borrows` and `add-owned-bytes` before implementation.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `bootstrap-file-system`: Portable Path and FileError values, whole-file and directory operations,
-  native/in-memory/hosted-Wasm providers, deterministic semantics, and the lower-level
-  PlatformFileSystem boundary.
+- `bootstrap-file-system`: Provider-absolute Path values, portable filesystem values and errors,
+  the seven-operation service, helper semantics, and provider-independent behavior.
 
 ### Modified Capabilities
 
-- `bootstrap-silk-stdlib`: Ship canonical navigable Path and FileSystem source and provider-facing
-  contracts without compiler-known filesystem actor names.
-- `bootstrap-backend`: Carry portable filesystem operations through native and direct-Wasm host
-  boundaries without embedding one platform implementation in MIR.
+- `bootstrap-silk-stdlib`: Ship the portable actors as canonical ordinary Silk source with precise
+  ownership, allocation, Effect, and tooling contracts.
+- `bootstrap-backend`: Preserve ordinary service lowering and prove filesystem support is pay-for-use
+  without FileSystem-shaped MIR or implicit Wasm imports.
 
 ## Impact
 
-The change affects canonical Silk standard-library sources, value/type/layout and service
-elaboration, evaluator providers, native runtime shims, direct-Wasm imports, test providers,
-tooling presentation/navigation, labs, and differential acceptance. It does not migrate the
-TypeScript stage-0 source resolver, select a self-hosting module, add general FFI, or expose native
-file handles through the portable API. The artifacts are reconciled with source-defined `service`
-contracts, static `interface` conformances, and the sealed `Intrinsic` namespace. Implementation
-waits for `establish-minimal-intrinsic-boundary` to archive and adds no FileSystem-named intrinsic
-or MIR operation.
+The change affects canonical standard-library source and manifests, ordinary nominal value and
+service elaboration, ownership and allocation rows, evaluator/native/direct-Wasm acceptance fixtures,
+tooling, examples, and documentation. It adds no compiler intrinsic, platform provider, hosted-Wasm
+ABI, built-in virtual filesystem, public file handle, native path type, implicit cwd, String policy,
+or backend filesystem operation. A separate `add-os-file-system-provider` change supplies the first
+native implementation after this contract and generic target-restricted intrinsics exist.
