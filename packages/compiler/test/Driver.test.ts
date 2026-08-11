@@ -8,7 +8,7 @@ import * as Layer from 'effect/Layer'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as Driver from '../src/Driver.js'
-import type * as NativeToolchain from '../src/NativeToolchain.js'
+import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as WasmBackend from '../src/WasmBackend.js'
@@ -21,7 +21,11 @@ const clang =
     : existsSync('/usr/local/opt/llvm/bin/clang')
       ? '/usr/local/opt/llvm/bin/clang'
       : 'clang')
-const toolchain: NativeToolchain.Toolchain = Object.freeze({ _tag: 'Toolchain', clang })
+const toolchain: NativeToolchain.Toolchain = Object.freeze({
+  _tag: 'Toolchain',
+  clang,
+  shimCache: NativeToolchain.makeShimCache(),
+})
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -326,56 +330,6 @@ it.effect('rejects invalid generic specialization before layout and MIR', () =>
       }
     }
   }),
-)
-
-it.effect(
-  'keeps the interpreter and native execution in agreement across the corpus',
-  () =>
-    Effect.gen(function* () {
-      for (const program of corpus) {
-        const interpreted = Analysis.evaluate(
-          yield* Analysis.ofSourceRealized('memory/driver', ascii(program.source)),
-        )
-        const outcome = yield* compileSource(`corpus-${program.name}`, program.source)
-
-        if (program.expected._tag === 'UnavailableEntry') {
-          assert.strictEqual(outcome._tag, 'NoEntry', program.name)
-          continue
-        }
-
-        if (outcome._tag === 'Rejected') {
-          assert.strictEqual(program.expected._tag, 'Trap', program.name)
-          assert.strictEqual(outcome.diagnostics.length > 0, true, program.name)
-          continue
-        }
-
-        assert.strictEqual(outcome._tag, 'Compiled', program.name)
-        if (outcome._tag !== 'Compiled') continue
-
-        if (program.expected._tag === 'Completes') {
-          assert.strictEqual(interpreted._tag, 'Completed', program.name)
-          const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
-          assert.strictEqual(
-            run.status,
-            interpreted._tag === 'Completed' ? interpreted.result.value : -1,
-            `differential divergence on ${program.name}: interpreter ${
-              interpreted._tag === 'Completed' ? interpreted.result.value : interpreted._tag
-            }, native ${run.status}`,
-          )
-          continue
-        }
-
-        if (program.expected._tag === 'Trap') {
-          const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
-          assert.strictEqual(
-            run.signal !== null || (run.status !== null && run.status !== 0),
-            true,
-            `differential divergence on ${program.name}: interpreter trapped, native exited ${run.status}`,
-          )
-        }
-      }
-    }),
-  180_000,
 )
 
 it.effect('keeps direct WebAssembly in agreement across recursive corpus fixtures', () =>

@@ -258,7 +258,9 @@
     "lexer:bench": "pnpm build && node scripts/lexer-benchmark.mjs",
     "stdlib:check": "node scripts/generate-stdlib.mjs --check",
     "stdlib:generate": "node scripts/generate-stdlib.mjs",
-    "test": "pnpm stdlib:check && vitest run --passWithNoTests",
+    "test": "pnpm stdlib:check && pnpm test:parallel && pnpm test:native-acceptance",
+    "test:native-acceptance": "vitest run test/DriverNativeAcceptance.test.ts --passWithNoTests --maxWorkers=1",
+    "test:parallel": "vitest run --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts",
     "typecheck": "pnpm stdlib:check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {

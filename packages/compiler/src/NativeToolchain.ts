@@ -27,7 +27,46 @@ import * as ToolchainPlan from './ToolchainPlan.js'
 export interface Toolchain {
   readonly _tag: 'Toolchain'
   readonly clang: string
+  readonly shimCache?: ShimCache
 }
+
+/** Process-local compiled shim bytes shared explicitly across independent build scopes. */
+export interface ShimCache {
+  readonly _tag: 'ShimCache'
+  readonly get: (key: string) => Uint8Array | undefined
+  readonly set: (key: string, bytes: Uint8Array) => void
+  readonly stats: () => ShimCacheStats
+}
+
+/** Operational counters for observing whether a shared shim cache is effective. */
+export interface ShimCacheStats {
+  readonly entries: number
+  readonly hits: number
+  readonly misses: number
+}
+
+/** Makes an explicitly owned, process-local cache of path-independent shim object bytes. */
+export const makeShimCache = (): ShimCache => {
+  const objects = new Map<string, Uint8Array>()
+  let hits = 0
+  let misses = 0
+  return Object.freeze({
+    _tag: 'ShimCache',
+    get: (key: string) => {
+      const bytes = objects.get(key)
+      if (bytes === undefined) misses += 1
+      else hits += 1
+      return bytes
+    },
+    set: (key: string, bytes: Uint8Array) => {
+      objects.set(key, Uint8Array.from(bytes))
+    },
+    stats: () => Object.freeze({ entries: objects.size, hits, misses }),
+  })
+}
+
+/** Reads immutable counters from a shared shim cache. */
+export const shimCacheStats = (self: ShimCache): ShimCacheStats => self.stats()
 
 /** One owned, path-backed artifact tied to a build scope. */
 export interface PathArtifact {
@@ -225,13 +264,30 @@ export const compileShim = (
   target: Target.Target,
   termination: Backend.Termination,
 ): ObjectArtifact | ToolchainFailure => {
-  const source = writeArtifact(scope, target, 'silk_shim.c', ToolchainPlan.shimSource(termination))
+  const sourceText = ToolchainPlan.shimSource(termination)
+  const cacheKey = `${toolchain.clang}\u0000${target.id}\u0000${sourceText}`
   const objectPath = join(scope.root, 'silk_shim.o')
+  const source = writeArtifact(scope, target, 'silk_shim.c', sourceText)
   const planned = ToolchainPlan.shimCommand(toolchain.clang, target, source.path, objectPath)
+  const cached = toolchain.shimCache?.get(cacheKey)
+  if (cached !== undefined) {
+    writeArtifact(scope, target, 'silk_shim.o', cached)
+    return Object.freeze({
+      _tag: 'ObjectArtifact',
+      artifact: Object.freeze({
+        _tag: 'PathArtifact',
+        scope: scope.name,
+        path: objectPath,
+        target,
+      }),
+      planned,
+    })
+  }
   const result = runPlanned(planned)
   if (result.status !== 0 || !existsSync(objectPath)) {
     return failure(planned, result.status, result.output)
   }
+  toolchain.shimCache?.set(cacheKey, readFileSync(objectPath))
   return Object.freeze({
     _tag: 'ObjectArtifact',
     artifact: Object.freeze({

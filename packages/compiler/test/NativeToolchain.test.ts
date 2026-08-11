@@ -168,6 +168,49 @@ it.effect(
   15_000,
 )
 
+it.effect(
+  'reuses a compiled shim across build scopes without retaining a scope-owned path',
+  () =>
+    Effect.gen(function* () {
+      const target = yield* Target.host()
+      const shimCache = NativeToolchain.makeShimCache()
+      const cachedToolchain: NativeToolchain.Toolchain = Object.freeze({
+        ...toolchain,
+        shimCache,
+      })
+
+      NativeToolchain.withBuildScope('shim-cache-miss', (scope) => {
+        const outcome = NativeToolchain.compileShim(cachedToolchain, scope, target, {
+          _tag: 'PassThrough',
+        })
+        assert.strictEqual(outcome._tag, 'ObjectArtifact')
+        if (outcome._tag !== 'ObjectArtifact') return
+        assert.strictEqual(existsSync(outcome.artifact.path), true)
+      })
+      assert.deepEqual(NativeToolchain.shimCacheStats(shimCache), {
+        entries: 1,
+        hits: 0,
+        misses: 1,
+      })
+
+      NativeToolchain.withBuildScope('shim-cache-hit', (scope) => {
+        const outcome = NativeToolchain.compileShim(cachedToolchain, scope, target, {
+          _tag: 'PassThrough',
+        })
+        assert.strictEqual(outcome._tag, 'ObjectArtifact')
+        if (outcome._tag !== 'ObjectArtifact') return
+        assert.strictEqual(existsSync(outcome.artifact.path), true)
+        assert.strictEqual(outcome.artifact.scope, scope.name)
+      })
+      assert.deepEqual(NativeToolchain.shimCacheStats(shimCache), {
+        entries: 1,
+        hits: 1,
+        misses: 1,
+      })
+    }),
+  15_000,
+)
+
 it.effect('surfaces a failed process as data with command provenance', () =>
   Effect.gen(function* () {
     const target = yield* Target.host()
