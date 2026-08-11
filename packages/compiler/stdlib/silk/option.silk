@@ -10,3 +10,13 @@ pub struct None {}
 pub struct Option<T> {
   value: Some<T> | None
 }
+
+/// Constructs an absent optional value.
+pub fn none<T>() -> Option<T> {
+  return None {}
+}
+
+/// Constructs a present optional value.
+pub fn some<T>(value: T) -> Option<T> {
+  return Some<T> { value: move value }
+}

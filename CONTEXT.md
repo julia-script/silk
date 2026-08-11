@@ -120,6 +120,19 @@ without asserting that the contents are text; an exclusive borrow may expose mut
 syntax files retain source as `Bytes` even when UTF-8 is malformed.
 _Avoid_: byte string, unvalidated string
 
+**Path**:
+An owned normalized UTF-8 location rooted in the namespace of an explicitly selected filesystem
+provider. It is always absolute within that provider, never consults ambient process state, rejects
+NUL and lexical root escape, and is not interchangeable with a native OS path.
+_Avoid_: process path, ambient path
+
+**FileSystem service**:
+The portable source-defined seven-operation whole-file contract for complete reads and writes,
+minimal metadata and listings, one-directory creation, one-file removal, and empty-directory
+removal. Applications explicitly provide a mutable implementation; the contract contains no OS
+handle, current directory, platform ABI, or built-in provider.
+_Avoid_: platform filesystem, global filesystem
+
 **String**:
 A nominal owned growable sequence of valid UTF-8 text, distinct from `Bytes` even when both use the
 same physical storage shape. Exclusive mutation preserves UTF-8 and never exposes writable raw

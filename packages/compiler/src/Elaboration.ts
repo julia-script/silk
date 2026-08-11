@@ -2890,7 +2890,7 @@ function analyzeArguments(
   const identifiers = callReferenceTokens(call)
   const first = identifiers.at(0)
   const second = identifiers.at(1)
-  let target: DeclarationFact | undefined
+  let target: SourceCallable | undefined
   let builtinParameters: ReadonlyArray<SemanticType> = Object.freeze([])
   let builtinTypeParameters: ReadonlyArray<Type.Parameter> = Object.freeze([])
   if (first !== undefined && second === undefined) {
@@ -2925,7 +2925,15 @@ function analyzeArguments(
       }
     } else if (qualifier._tag === 'Namespace') {
       const member = DeclarationIndex.lookup(resolution.index, qualifier.module, memberSpelling)
-      target = member._tag === 'Resolved' ? member.declaration : undefined
+      target =
+        member._tag === 'Resolved' && member.declaration._tag === 'FunctionDeclaration'
+          ? member.declaration
+          : undefined
+    } else if (
+      qualifier._tag === 'Resolved' &&
+      qualifier.declaration._tag === 'ServiceDeclaration'
+    ) {
+      target = serviceOperation(qualifier.declaration, memberSpelling)
     }
   }
   const declaredTypeParameters =

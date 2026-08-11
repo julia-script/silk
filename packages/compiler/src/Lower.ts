@@ -824,6 +824,46 @@ const borrowedWriteRoot = (
     ? fn.parameterLocals.get(root.parameter.ordinal)
     : fn.bindingLocals.get(root.binding.ordinal)
 
+const lowerServiceEffectValue = (
+  fn: FunctionLowering,
+  subject: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
+  availableRequirements: ReadonlyArray<ProvidedRequirement>,
+): LoweredExpression | undefined => {
+  const provided = availableRequirements.find(
+    (requirement) =>
+      requirement.role === subject.role &&
+      Type.equals(requirement.capability, subject.service) &&
+      (subject.access === 'Shared' || requirement.access === 'Exclusive'),
+  )
+  if (provided?.witness._tag !== 'SourceConformanceWitness' || provided.local === undefined)
+    return undefined
+  const target = DeclarationIndex.witnessOperation(provided.witness, subject.operation)
+  if (target === undefined) return undefined
+  const loweredArguments = subject.arguments.map((argument) => lowerExpression(fn, argument))
+  if (loweredArguments.some((argument) => argument === undefined)) return undefined
+  const typeArguments = Object.freeze<ReadonlyArray<Type.GenericArgument>>([])
+  const effectResult = fn.effectResults.get(instanceText(target, typeArguments))
+  if (effectResult === undefined) return undefined
+  const effect = fn.alloc(effectResult)
+  fn.emit(
+    Object.freeze({
+      _tag: 'Call',
+      destination: effect,
+      target,
+      typeArguments,
+      arguments: Object.freeze([
+        provided.local,
+        ...loweredArguments.flatMap((argument) =>
+          argument === undefined ? [] : [argument.result],
+        ),
+      ]),
+      type: effectResult,
+      provenance: authored(subject.span),
+    }),
+  )
+  return Object.freeze({ result: effect })
+}
+
 const lowerEffectExecution = (
   fn: FunctionLowering,
   subject: Hir.Expression,
@@ -960,41 +1000,13 @@ const lowerEffectExecution = (
   }
 
   if (subject._tag === 'ServiceEffectConstruct') {
-    const provided = availableRequirements.find(
-      (requirement) =>
-        requirement.role === subject.role &&
-        Type.equals(requirement.capability, subject.service) &&
-        (subject.access === 'Shared' || requirement.access === 'Exclusive'),
-    )
-    if (provided?.witness._tag !== 'SourceConformanceWitness' || provided.local === undefined)
-      return undefined
-    const target = DeclarationIndex.witnessOperation(provided.witness, subject.operation)
-    if (target === undefined) return undefined
-    const loweredArguments = subject.arguments.map((argument) => lowerExpression(fn, argument))
-    if (loweredArguments.some((argument) => argument === undefined)) return undefined
-    const typeArguments = Object.freeze<ReadonlyArray<Type.GenericArgument>>([])
-    const effectResult = fn.effectResults.get(instanceText(target, typeArguments))
-    if (effectResult === undefined) return undefined
-    const effect = fn.alloc(effectResult)
-    fn.emit(
-      Object.freeze({
-        _tag: 'Call',
-        destination: effect,
-        target,
-        typeArguments,
-        arguments: Object.freeze([
-          provided.local,
-          ...loweredArguments.flatMap((argument) =>
-            argument === undefined ? [] : [argument.result],
-          ),
-        ]),
-        type: effectResult,
-        provenance: authored(subject.span),
-      }),
-    )
+    const lowered = lowerServiceEffectValue(fn, subject, availableRequirements)
+    const effectResult =
+      lowered === undefined ? undefined : fn.localTypes.at(lowered.result.ordinal)
+    if (lowered === undefined || effectResult?._tag !== 'EffectValue') return undefined
     const result = lowerRunEffectValue(
       fn,
-      effect,
+      lowered.result,
       effectResult,
       success,
       span,
@@ -1486,7 +1498,10 @@ function lowerExpressionInner(
           ? fn.effectRecipes.get(expression.subject.binding.ordinal)
           : expression.subject
       if (resultRecipe?._tag === 'EffectResult') {
-        const loweredProtected = lowerExpression(fn, resultRecipe.protected)
+        const loweredProtected =
+          resultRecipe.protected._tag === 'ServiceEffectConstruct'
+            ? lowerServiceEffectValue(fn, resultRecipe.protected, fn.providedRequirements)
+            : lowerExpression(fn, resultRecipe.protected)
         const protectedType =
           loweredProtected === undefined
             ? undefined
@@ -1588,7 +1603,10 @@ function lowerExpressionInner(
           }),
         )
         endRunLoans(fn, expression.span)
-        if (resultRecipe.protected._tag === 'EffectConstruct')
+        if (
+          resultRecipe.protected._tag === 'EffectConstruct' ||
+          resultRecipe.protected._tag === 'ServiceEffectConstruct'
+        )
           endLoans(fn, resultRecipe.protected.loanEnds, expression.span)
         return Object.freeze({ result: destination })
       }

@@ -1,0 +1,127 @@
+import silk.filesystem {
+  DirectoryEntry,
+  DirectoryInfo,
+  FileError,
+  FileInfo,
+  FileSystem,
+  Path,
+  directoryInfo,
+  error,
+  exists,
+  fileInfo,
+  make as path,
+  notFound,
+  readFileOperation,
+  statOperation,
+  writeFileOperation,
+  writeFileWithParents,
+}
+import silk.bytes { Bytes, asSlice, copy }
+import silk.vector { Vector, make as vector }
+
+impl Report for OutOfMemory {}
+
+/// A tiny application-owned provider. Browser code could replace this with a virtual filesystem.
+struct MemoryFileSystem {
+  bytes: [u8; 4]
+  present: bool
+}
+
+fn emptyBytes() -> [u8; 4] {
+  return [u8.toU8(0), u8.toU8(0), u8.toU8(0), u8.toU8(0)]
+}
+
+effect fn read(
+  self: &mut MemoryFileSystem,
+  target: &Path,
+) -> Bytes ! FileError | OutOfMemory ? &mut Allocator {
+  if self.present == false { fail error(readFileOperation(), notFound()) }
+  let snapshot = self.bytes
+  return run copy(&snapshot)
+}
+
+effect fn write(
+  self: &mut MemoryFileSystem,
+  target: &Path,
+  bytes: &[u8],
+) -> () ! FileError {
+  if bytes.length != usize.add(0, 4) { fail error(writeFileOperation(), notFound()) }
+  let mut stored = Intrinsic.replace(self.bytes, emptyBytes())
+  let mut index = usize.add(0, 0)
+  while index < bytes.length {
+    stored[index] = bytes[index]
+    index = index + usize.add(0, 1)
+  }
+  self.bytes = move stored
+  self.present = true
+}
+
+effect fn stat(
+  self: &mut MemoryFileSystem,
+  target: &Path,
+) -> FileInfo | DirectoryInfo ! FileError {
+  if self.present { return fileInfo(usize.add(0, 4)) }
+  return directoryInfo()
+}
+
+effect fn list(
+  self: &mut MemoryFileSystem,
+  target: &Path,
+) -> Vector<DirectoryEntry> ! FileError | OutOfMemory ? &mut Allocator {
+  return vector<DirectoryEntry>()
+}
+
+effect fn create(self: &mut MemoryFileSystem, target: &Path) -> () ! FileError { return () }
+
+effect fn removeFile(self: &mut MemoryFileSystem, target: &Path) -> () ! FileError {
+  if self.present == false { fail error(readFileOperation(), notFound()) }
+  self.present = false
+}
+
+effect fn removeDirectory(self: &mut MemoryFileSystem, target: &Path) -> () ! FileError {
+  return ()
+}
+
+impl FileSystem for MemoryFileSystem {
+  readFile: MemoryFileSystem.read
+  writeFile: MemoryFileSystem.write
+  stat: MemoryFileSystem.stat
+  listDirectory: MemoryFileSystem.list
+  createDirectory: MemoryFileSystem.create
+  removeFile: MemoryFileSystem.removeFile
+  removeDirectory: MemoryFileSystem.removeDirectory
+}
+
+fn checksum(bytes: &[u8]) -> i32 {
+  let mut total = 0
+  let mut index = usize.add(0, 0)
+  while index < bytes.length {
+    total = total + u8.toI32(bytes[index])
+    index = index + usize.add(0, 1)
+  }
+  return total
+}
+
+effect fn example() -> i32 ! FileError | OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut files = MemoryFileSystem {
+    bytes: emptyBytes(),
+    present: false,
+  }
+  let target = run path("/notes/todo.bin") |> Effect.provideMut(&mut allocator)
+  let message = [u8.toU8(10), u8.toU8(11), u8.toU8(12), u8.toU8(9)]
+  let written = run Intrinsic.bindRequirement(
+    Intrinsic.bindRequirement(writeFileWithParents(&target, &message), &mut files),
+    &mut allocator,
+  )
+  if run exists(&target) |> Effect.provideMut(&mut files) {} else { return 1 }
+  let owned = run Intrinsic.bindRequirement(
+    Intrinsic.bindRequirement(FileSystem.readFile(&target), &mut files),
+    &mut allocator,
+  )
+  return checksum(asSlice(&owned))
+}
+
+effect fn recover(error: FileError | OutOfMemory) -> i32 { return 2 }
+
+pub fn main() -> i32 { return run Effect.catch(example(), recover) }

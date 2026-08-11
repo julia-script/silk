@@ -1,0 +1,647 @@
+import silk.bytes {
+  Bytes,
+  make as bytesMake,
+  append as bytesAppend,
+  asSlice as bytesAsSlice
+}
+import silk.option { None, Option, Some, none, some }
+import silk.result { Failure, Result, Success }
+import silk.vector { Vector }
+
+/// A normalized path rooted in the selected FileSystem provider.
+pub struct Path {
+  bytes: Bytes
+  nameBytes: Bytes
+}
+
+/// Metadata for one portable regular file.
+pub struct FileInfo {
+  pub byteLength: usize
+}
+
+/// Metadata identifying one portable directory.
+pub struct DirectoryInfo {}
+
+/// The portable kind of one directory entry.
+pub struct DirectoryEntryKind {
+  pub code: i32
+}
+
+/// One immediate directory child with an independently owned complete Path.
+pub struct DirectoryEntry {
+  pub path: Path
+  pub kind: DirectoryEntryKind
+}
+
+/// The operation that produced one FileError.
+pub struct FileOperation {
+  pub code: i32
+}
+
+/// A closed portable filesystem recovery reason.
+pub struct FileReason {
+  pub code: i32
+}
+
+/// An allocation-free portable filesystem failure.
+pub struct FileError {
+  pub operation: FileOperation
+  pub reason: FileReason
+  providerCodeValue: i32
+  hasProviderCode: bool
+}
+
+impl Report for FileError {}
+
+/// Selects the regular-file directory-entry kind.
+pub fn file() -> DirectoryEntryKind { return DirectoryEntryKind { code: 0 } }
+
+/// Selects the directory directory-entry kind.
+pub fn directory() -> DirectoryEntryKind { return DirectoryEntryKind { code: 1 } }
+
+/// Returns the stable directory-entry kind code.
+pub fn entryKindCode(kind: DirectoryEntryKind) -> i32 { return kind.code }
+
+/// Constructs portable regular-file metadata.
+pub fn fileInfo(byteLength: usize) -> FileInfo {
+  return FileInfo { byteLength: byteLength }
+}
+
+/// Constructs portable directory metadata.
+pub fn directoryInfo() -> DirectoryInfo { return DirectoryInfo {} }
+
+/// Constructs one owned portable directory entry.
+pub fn directoryEntry(path: Path, kind: DirectoryEntryKind) -> DirectoryEntry {
+  return DirectoryEntry { path: move path, kind: move kind }
+}
+
+/// Selects the read-file operation.
+pub fn readFileOperation() -> FileOperation { return FileOperation { code: 0 } }
+
+/// Selects the write-file operation.
+pub fn writeFileOperation() -> FileOperation { return FileOperation { code: 1 } }
+
+/// Selects the stat operation.
+pub fn statOperation() -> FileOperation { return FileOperation { code: 2 } }
+
+/// Selects the list-directory operation.
+pub fn listDirectoryOperation() -> FileOperation { return FileOperation { code: 3 } }
+
+/// Selects the create-directory operation.
+pub fn createDirectoryOperation() -> FileOperation { return FileOperation { code: 4 } }
+
+/// Selects the remove-file operation.
+pub fn removeFileOperation() -> FileOperation { return FileOperation { code: 5 } }
+
+/// Selects the remove-directory operation.
+pub fn removeDirectoryOperation() -> FileOperation { return FileOperation { code: 6 } }
+
+/// Selects path construction and resolution.
+pub fn pathOperation() -> FileOperation { return FileOperation { code: 7 } }
+
+/// Returns the stable operation code.
+pub fn operationCode(operation: FileOperation) -> i32 { return operation.code }
+
+/// Selects NotFound.
+pub fn notFound() -> FileReason { return FileReason { code: 0 } }
+
+/// Selects AlreadyExists.
+pub fn alreadyExists() -> FileReason { return FileReason { code: 1 } }
+
+/// Selects PermissionDenied.
+pub fn permissionDenied() -> FileReason { return FileReason { code: 2 } }
+
+/// Selects InvalidPath.
+pub fn invalidPath() -> FileReason { return FileReason { code: 3 } }
+
+/// Selects WrongType.
+pub fn wrongType() -> FileReason { return FileReason { code: 4 } }
+
+/// Selects NotEmpty.
+pub fn notEmpty() -> FileReason { return FileReason { code: 5 } }
+
+/// Selects NoSpace.
+pub fn noSpace() -> FileReason { return FileReason { code: 6 } }
+
+/// Selects TooLarge.
+pub fn tooLarge() -> FileReason { return FileReason { code: 7 } }
+
+/// Selects Unsupported.
+pub fn unsupported() -> FileReason { return FileReason { code: 8 } }
+
+/// Selects Other.
+pub fn other() -> FileReason { return FileReason { code: 9 } }
+
+/// Returns the stable portable reason code.
+pub fn reasonCode(reason: FileReason) -> i32 { return reason.code }
+
+/// Constructs an allocation-free FileError for a provider without a numeric detail.
+pub fn error(operation: FileOperation, reason: FileReason) -> FileError {
+  return FileError {
+    operation: move operation,
+    reason: move reason,
+    providerCodeValue: 0,
+    hasProviderCode: false,
+  }
+}
+
+/// Constructs an allocation-free FileError retaining one provider-defined numeric detail.
+pub fn errorWithCode(operation: FileOperation, reason: FileReason, code: i32) -> FileError {
+  return FileError {
+    operation: move operation,
+    reason: move reason,
+    providerCodeValue: code,
+    hasProviderCode: true,
+  }
+}
+
+/// Returns the provider-defined numeric detail when one was retained.
+pub fn providerCode(error: &FileError) -> Option<i32> {
+  if error.hasProviderCode { return some<i32>(error.providerCodeValue) }
+  return none<i32>()
+}
+
+effect fn raise(error: FileError) -> never ! FileError { fail move error }
+
+effect fn rejectPath() -> never ! FileError {
+  fail error(pathOperation(), invalidPath())
+}
+
+fn counted(value: usize) -> usize { return value }
+
+fn byte(value: u8) -> i32 { return u8.toI32(value) }
+
+fn continuation(value: u8) -> bool {
+  if value < u8.toU8(128) { return false }
+  return value <= u8.toU8(191)
+}
+
+fn validUtf8(values: &[u8]) -> bool {
+  let mut index = counted(0)
+  while index < values.length {
+    let first = values[index]
+    if first == u8.toU8(0) { return false }
+    if first < u8.toU8(128) {
+      index = index + counted(1)
+    } else {
+      if first < u8.toU8(194) { return false }
+      if first <= u8.toU8(223) {
+        if values.length <= index + counted(1) { return false }
+        if continuation(values[index + counted(1)]) == false { return false }
+        index = index + counted(2)
+      } else {
+        if first <= u8.toU8(239) {
+          if values.length <= index + counted(2) { return false }
+          let second = values[index + counted(1)]
+          let third = values[index + counted(2)]
+          if continuation(third) == false { return false }
+          if first == u8.toU8(224) {
+            if second < u8.toU8(160) { return false }
+            if u8.toU8(191) < second { return false }
+          } else {
+            if first == u8.toU8(237) {
+              if second < u8.toU8(128) { return false }
+              if u8.toU8(159) < second { return false }
+            } else {
+              if continuation(second) == false { return false }
+            }
+          }
+          index = index + counted(3)
+        } else {
+          if u8.toU8(244) < first { return false }
+          if values.length <= index + counted(3) { return false }
+          let second = values[index + counted(1)]
+          if continuation(values[index + counted(2)]) == false { return false }
+          if continuation(values[index + counted(3)]) == false { return false }
+          if first == u8.toU8(240) {
+            if second < u8.toU8(144) { return false }
+            if u8.toU8(191) < second { return false }
+          } else {
+            if first == u8.toU8(244) {
+              if second < u8.toU8(128) { return false }
+              if u8.toU8(143) < second { return false }
+            } else {
+              if continuation(second) == false { return false }
+            }
+          }
+          index = index + counted(4)
+        }
+      }
+    }
+  }
+  return true
+}
+
+fn isDot(values: &[u8], start: usize, end: usize) -> bool {
+  if end - start != counted(1) { return false }
+  return byte(values[start]) == 46
+}
+
+fn isDotDot(values: &[u8], start: usize, end: usize) -> bool {
+  if end - start != counted(2) { return false }
+  if byte(values[start]) != 46 { return false }
+  return byte(values[start + counted(1)]) == 46
+}
+
+fn validAbsolute(values: &[u8]) -> bool {
+  if values.length == counted(0) { return false }
+  if byte(values[counted(0)]) != 47 { return false }
+  if validUtf8(values) == false { return false }
+  if values.length == counted(1) { return true }
+  let mut start = counted(1)
+  let mut index = counted(1)
+  while index <= values.length {
+    if index == values.length {
+      if start == index { return false }
+      if isDot(values, start, index) { return false }
+      if isDotDot(values, start, index) { return false }
+      return true
+    }
+    if byte(values[index]) == 47 {
+      if start == index { return false }
+      if isDot(values, start, index) { return false }
+      if isDotDot(values, start, index) { return false }
+      start = index + counted(1)
+    }
+    index = index + counted(1)
+  }
+  return false
+}
+
+fn validRelativeFragment(values: &[u8]) -> bool {
+  if values.length == counted(0) { return false }
+  if byte(values[counted(0)]) == 47 { return false }
+  if validUtf8(values) == false { return false }
+  let mut start = counted(0)
+  let mut index = counted(0)
+  while index <= values.length {
+    if index == values.length {
+      if start == index { return false }
+      if isDot(values, start, index) { return false }
+      if isDotDot(values, start, index) { return false }
+      return true
+    }
+    if byte(values[index]) == 47 {
+      if start == index { return false }
+      if isDot(values, start, index) { return false }
+      if isDotDot(values, start, index) { return false }
+      start = index + counted(1)
+    }
+    index = index + counted(1)
+  }
+  return false
+}
+
+effect fn appendRange(
+  target: Bytes,
+  source: &[u8],
+  start: usize,
+  end: usize
+) -> Bytes ! OutOfMemory ? &mut Allocator {
+  let mut result = move target
+  let mut index = start
+  while index < end {
+    let one = [source[index]]
+    let appended = run bytesAppend(&mut result, &one)
+    index = index + counted(1)
+  }
+  return move result
+}
+
+fn finalNameStart(values: &[u8]) -> usize {
+  if values.length == counted(1) { return counted(1) }
+  let mut index = values.length
+  while counted(0) < index {
+    index = index - counted(1)
+    if byte(values[index]) == 47 { return index + counted(1) }
+  }
+  return counted(0)
+}
+
+effect fn finishPath(bytes: Bytes) -> Path ! OutOfMemory ? &mut Allocator {
+  let view = bytesAsSlice(&bytes)
+  let start = finalNameStart(view)
+  let nameBytes = run appendRange(bytesMake(), view, start, view.length)
+  return Path { bytes: move bytes, nameBytes: move nameBytes }
+}
+
+/// Constructs an owned normalized provider-absolute Path.
+pub effect fn make(values: &[u8]) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+  if validAbsolute(values) == false { return run rejectPath() }
+  let copied = run appendRange(bytesMake(), values, counted(0), values.length)
+  return run finishPath(move copied)
+}
+
+/// Constructs the selected provider's root Path.
+pub effect fn root() -> Path ! OutOfMemory ? &mut Allocator {
+  let mut copied = bytesMake()
+  let appended = run bytesAppend(&mut copied, "/")
+  return run finishPath(move copied)
+}
+
+/// Borrows the complete normalized path bytes.
+pub fn asBytes(self: &Path) -> &[u8] { return bytesAsSlice(&self.bytes) }
+
+/// Reports whether this Path denotes the selected provider's root.
+pub fn isRoot(self: &Path) -> bool { return bytesAsSlice(&self.bytes).length == counted(1) }
+
+/// Borrows the final component. Root returns an empty view; use isRoot to distinguish absence.
+pub fn name(self: &Path) -> &[u8] { return bytesAsSlice(&self.nameBytes) }
+
+/// Joins one already-normalized relative fragment to an absolute Path.
+pub effect fn join(
+  base: &Path,
+  fragment: &[u8]
+) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+  if validRelativeFragment(fragment) == false { return run rejectPath() }
+  let baseBytes = asBytes(base)
+  let mut combined = run appendRange(bytesMake(), baseBytes, counted(0), baseBytes.length)
+  if isRoot(base) == false { let slash = run bytesAppend(&mut combined, "/") }
+  let beforeChild = Intrinsic.replace(combined, bytesMake())
+  combined = run appendRange(move beforeChild, fragment, counted(0), fragment.length)
+  return run finishPath(move combined)
+}
+
+fn componentCount(values: &[u8]) -> usize {
+  if values.length == counted(1) { return counted(0) }
+  let mut count = counted(1)
+  let mut index = counted(1)
+  while index < values.length {
+    if byte(values[index]) == 47 { count = count + counted(1) }
+    index = index + counted(1)
+  }
+  return count
+}
+
+fn survivingRelative(values: &[u8], after: usize) -> bool {
+  let mut depth = counted(1)
+  let mut start = after
+  let mut index = after
+  while index <= values.length {
+    let mut boundary = false
+    if index == values.length {
+      boundary = true
+    } else {
+      if byte(values[index]) == 47 { boundary = true }
+    }
+    if boundary {
+      if start < index {
+        if isDotDot(values, start, index) {
+          depth = depth - counted(1)
+          if depth == counted(0) { return false }
+        } else {
+          if isDot(values, start, index) == false { depth = depth + counted(1) }
+        }
+      }
+      start = index + counted(1)
+    }
+    index = index + counted(1)
+  }
+  return true
+}
+
+/// Resolves relative bytes lexically against one explicit absolute base.
+pub effect fn resolve(
+  base: &Path,
+  relative: &[u8]
+) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+  if validUtf8(relative) == false { return run rejectPath() }
+  if counted(0) < relative.length {
+    if byte(relative[counted(0)]) == 47 { return run rejectPath() }
+  }
+  let baseBytes = asBytes(base)
+  let mut keptBase = componentCount(baseBytes)
+  let mut relativeDepth = counted(0)
+  let mut start = counted(0)
+  let mut index = counted(0)
+  while index <= relative.length {
+    let mut boundary = false
+    if index == relative.length {
+      boundary = true
+    } else {
+      if byte(relative[index]) == 47 { boundary = true }
+    }
+    if boundary {
+      if start == index {
+        if index != relative.length { return run rejectPath() }
+      } else {
+        if isDotDot(relative, start, index) {
+          if counted(0) < relativeDepth {
+            relativeDepth = relativeDepth - counted(1)
+          } else {
+            if keptBase == counted(0) { return run rejectPath() }
+            keptBase = keptBase - counted(1)
+          }
+        } else {
+          if isDot(relative, start, index) == false {
+            relativeDepth = relativeDepth + counted(1)
+          }
+        }
+      }
+      start = index + counted(1)
+    }
+    index = index + counted(1)
+  }
+
+  let mut combined = bytesMake()
+  let rooted = run bytesAppend(&mut combined, "/")
+  let mut included = counted(0)
+  start = counted(1)
+  index = counted(1)
+  while index <= baseBytes.length {
+    let mut boundary = false
+    if index == baseBytes.length {
+      boundary = true
+    } else {
+      if byte(baseBytes[index]) == 47 { boundary = true }
+    }
+    if boundary {
+      if included < keptBase {
+        if counted(0) < included { let slash = run bytesAppend(&mut combined, "/") }
+        let beforeBaseComponent = Intrinsic.replace(combined, bytesMake())
+        combined = run appendRange(move beforeBaseComponent, baseBytes, start, index)
+        included = included + counted(1)
+      }
+      start = index + counted(1)
+    }
+    index = index + counted(1)
+  }
+
+  start = counted(0)
+  index = counted(0)
+  while index <= relative.length {
+    let mut boundary = false
+    if index == relative.length {
+      boundary = true
+    } else {
+      if byte(relative[index]) == 47 { boundary = true }
+    }
+    if boundary {
+      if start < index {
+        if isDot(relative, start, index) == false {
+          if isDotDot(relative, start, index) == false {
+            if survivingRelative(relative, index + counted(1)) {
+              if counted(0) < included { let slash = run bytesAppend(&mut combined, "/") }
+              let beforeRelativeComponent = Intrinsic.replace(combined, bytesMake())
+              combined = run appendRange(move beforeRelativeComponent, relative, start, index)
+              included = included + counted(1)
+            }
+          }
+        }
+      }
+      start = index + counted(1)
+    }
+    index = index + counted(1)
+  }
+  return run finishPath(move combined)
+}
+
+/// Allocates an independently owned parent Path, or None for root.
+pub effect fn parent(
+  self: &Path
+) -> Option<Path> ! OutOfMemory ? &mut Allocator {
+  if isRoot(self) { return none<Path>() }
+  let values = asBytes(self)
+  let nameStart = finalNameStart(values)
+  let mut end = counted(1)
+  if nameStart != counted(1) { end = nameStart - counted(1) }
+  let copied = run appendRange(bytesMake(), values, counted(0), end)
+  let owned = run finishPath(move copied)
+  return some<Path>(move owned)
+}
+
+/// Portable mutable whole-file service. Providers own implementation and platform policy.
+pub service FileSystem {
+  /// Reads one complete regular file into independently owned bytes.
+  effect fn readFile(
+    path: &Path
+  ) -> Bytes ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+  /// Writes one complete byte view with create-or-truncate semantics.
+  effect fn writeFile(path: &Path, bytes: &[u8]) -> () ! FileError ? &mut FileSystem
+  /// Returns minimal regular-file or directory metadata.
+  effect fn stat(path: &Path) -> FileInfo | DirectoryInfo ! FileError ? &mut FileSystem
+  /// Returns immediate owned child entries in deterministic path-byte order.
+  effect fn listDirectory(
+    path: &Path
+  ) -> Vector<DirectoryEntry> ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+  /// Creates exactly one missing directory.
+  effect fn createDirectory(path: &Path) -> () ! FileError ? &mut FileSystem
+  /// Removes exactly one regular file.
+  effect fn removeFile(path: &Path) -> () ! FileError ? &mut FileSystem
+  /// Removes exactly one empty directory.
+  effect fn removeDirectory(path: &Path) -> () ! FileError ? &mut FileSystem
+}
+
+struct DirectoryPresent {}
+struct DirectoryMissing {}
+struct DirectoryWrongType {}
+struct DirectoryStatFailure { error: FileError }
+
+fn classifyStatFailure(
+  failure: FileError
+) -> DirectoryMissing | DirectoryStatFailure {
+  if failure.reason.code == 0 { return DirectoryMissing {} }
+  return DirectoryStatFailure { error: move failure }
+}
+
+fn classifyDirectory(
+  outcome: Success<FileInfo | DirectoryInfo> | Failure<FileError>
+) -> DirectoryPresent | DirectoryMissing | DirectoryWrongType | DirectoryStatFailure {
+  return match move outcome {
+    Success<FileInfo | DirectoryInfo> { value: info } => match move info {
+      DirectoryInfo {} => DirectoryPresent {}
+      FileInfo { byteLength } => DirectoryWrongType {}
+    }
+    Failure<FileError> { error: failure } => classifyStatFailure(move failure)
+  }
+}
+
+/// Creates every missing directory component with ordinary stat/create composition.
+pub effect fn createDirectoriesRecursively(
+  path: &Path
+) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator {
+  let values = asBytes(path)
+  let mut index = counted(1)
+  while index <= values.length {
+    let mut boundary = false
+    if index == values.length {
+      boundary = true
+    } else {
+      if byte(values[index]) == 47 { boundary = true }
+    }
+    if boundary {
+      let prefixBytes = run appendRange(bytesMake(), values, counted(0), index)
+      let prefix = run finishPath(move prefixBytes)
+      let completed = run Intrinsic.effectResult(FileSystem.stat(&prefix))
+      let decision = match move completed {
+        Result<FileInfo | DirectoryInfo, FileError> { value: outcome } =>
+          classifyDirectory(move outcome)
+      }
+      let ensured = match move decision {
+        DirectoryPresent {} => ()
+        DirectoryMissing {} => run FileSystem.createDirectory(&prefix)
+        DirectoryWrongType {} => run raise(error(statOperation(), wrongType()))
+        DirectoryStatFailure { error: failure } => run raise(move failure)
+      }
+    }
+    index = index + counted(1)
+  }
+  return ()
+}
+
+/// Creates missing parent directories, then delegates one complete write operation.
+pub effect fn writeFileWithParents(
+  path: &Path,
+  bytes: &[u8]
+) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator {
+  if isRoot(path) { return run FileSystem.writeFile(path, bytes) }
+  let pathValues = asBytes(path)
+  let nameStart = finalNameStart(pathValues)
+  let mut parentEnd = counted(1)
+  if nameStart != counted(1) { parentEnd = nameStart - counted(1) }
+  let parentBytes = run appendRange(bytesMake(), pathValues, counted(0), parentEnd)
+  let ownedParent = run finishPath(move parentBytes)
+  let values = asBytes(&ownedParent)
+  let mut index = counted(1)
+  while index <= values.length {
+    let mut boundary = false
+    if index == values.length {
+      boundary = true
+    } else {
+      if byte(values[index]) == 47 { boundary = true }
+    }
+    if boundary {
+      let prefixBytes = run appendRange(bytesMake(), values, counted(0), index)
+      let prefix = run finishPath(move prefixBytes)
+      let completed = run Intrinsic.effectResult(FileSystem.stat(&prefix))
+      let decision = match move completed {
+        Result<FileInfo | DirectoryInfo, FileError> { value: outcome } =>
+          classifyDirectory(move outcome)
+      }
+      let ensured = match move decision {
+        DirectoryPresent {} => ()
+        DirectoryMissing {} => run FileSystem.createDirectory(&prefix)
+        DirectoryWrongType {} => run raise(error(statOperation(), wrongType()))
+        DirectoryStatFailure { error: failure } => run raise(move failure)
+      }
+    }
+    index = index + counted(1)
+  }
+  return run FileSystem.writeFile(path, bytes)
+}
+
+effect fn existsFailure(failure: FileError) -> bool ! FileError {
+  if failure.reason.code == 0 { return false }
+  return run raise(move failure)
+}
+
+/// Returns false only for NotFound and propagates every other provider failure.
+pub effect fn exists(path: &Path) -> bool ! FileError ? &mut FileSystem {
+  let completed = run Intrinsic.effectResult(FileSystem.stat(path))
+  return match move completed {
+    Result<FileInfo | DirectoryInfo, FileError> { value: outcome } => match move outcome {
+      Success<FileInfo | DirectoryInfo> { value: info } => true
+      Failure<FileError> { error: failure } => run existsFailure(move failure)
+    }
+  }
+}

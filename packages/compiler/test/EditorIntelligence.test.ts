@@ -409,6 +409,72 @@ pub fn main() -> i32 {
   )
 })
 
+it.effect('completes and navigates the portable Path and FileSystem surface', () => {
+  const source = `import silk.filesystem { FileError, FileSystem, Path, exists, resolve }
+effect fn inspect(path: &Path) -> bool ! FileError ? &mut FileSystem {
+  let info = run FileSystem.stat(path)
+  return run exists(path)
+}
+effect fn locate(base: &Path) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+  return run resolve(base, "child")
+}
+effect fn canonical() -> Path ! OutOfMemory ? &mut Allocator { return run Path.root() }
+fn code(error: &FileError) -> i32 { return FileError.operationCode(error.operation) }
+pub fn main() -> i32 { return 42 }`
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      for (const [spelling, ordinal, expected] of [
+        ['stat', 0, ['effect fn stat(', '! FileError ? &mut FileSystem']],
+        ['exists', 1, ['pub effect fn exists(', '-> bool ! FileError ? &mut FileSystem']],
+        ['resolve', 1, ['pub effect fn resolve(', '! FileError | OutOfMemory ? &mut Allocator']],
+      ] as const) {
+        const occurrence = occurrenceAt(snapshot, source, spelling, ordinal)
+        assert.strictEqual(occurrence?.declaration?.module, 'silk/filesystem', spelling)
+        const presentation =
+          occurrence === undefined
+            ? ''
+            : (Analysis.occurrencePresentation(snapshot, 'main', occurrence)?.text ?? '')
+        for (const fragment of expected) assert.include(presentation, fragment, spelling)
+        assert.isDefined(occurrence?.declaration?.selectionSpan, spelling)
+      }
+
+      const fileError = occurrenceAt(snapshot, source, 'FileError', 1)
+      assert.strictEqual(fileError?.declaration?.module, 'silk/filesystem')
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', source.indexOf('resolve(base')),
+        ),
+        '/// Resolves relative bytes lexically against one explicit absolute base.',
+      )
+
+      for (const [prefix, expected] of [
+        [
+          'FileSystem.',
+          [
+            'readFile',
+            'writeFile',
+            'stat',
+            'listDirectory',
+            'createDirectory',
+            'removeFile',
+            'removeDirectory',
+          ],
+        ],
+        ['Path.', ['make', 'root', 'join', 'resolve', 'asBytes', 'isRoot', 'name', 'parent']],
+        ['FileError.', ['error', 'errorWithCode', 'providerCode']],
+      ] as const) {
+        const offset = source.indexOf(prefix) + prefix.length
+        const labels = Analysis.completionAt(snapshot, 'main', offset)?.candidates.map(
+          (candidate) => candidate.label,
+        )
+        for (const label of expected) assert.include(labels ?? [], label, prefix)
+      }
+      return undefined
+    }),
+  )
+})
+
 it.effect('indexes declaration and nominal type reference locations', () =>
   Analysis.ofSourceRealized(
     'main',

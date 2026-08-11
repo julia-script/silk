@@ -39,6 +39,21 @@
     "namespace": "f64"
   },
   {
+    "module": "silk/filesystem",
+    "path": "silk/filesystem.silk",
+    "namespace": "FileSystem",
+    "aliases": [
+      "DirectoryEntry",
+      "DirectoryEntryKind",
+      "DirectoryInfo",
+      "FileError",
+      "FileInfo",
+      "FileOperation",
+      "FileReason",
+      "Path"
+    ]
+  },
+  {
     "module": "silk/i16",
     "path": "silk/i16.silk",
     "namespace": "i16"

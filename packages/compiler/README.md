@@ -73,6 +73,9 @@ The compiler-shipped standard library lives as canonical `.silk` files under [`s
 same declaration, ownership, specialization, and lowering paths as user code. `Logger`,
 `Effect.log`, `StdoutLogger`, and `InMemoryLogger` use those same paths: callers submit complete
 borrowed UTF-8 messages, while providers own formatting, retention, and physical output strategy.
+Owned `Bytes`, normalized provider-absolute `Path`, allocation-free `FileError`, and the seven-
+operation mutable `FileSystem` service are also ordinary source. No platform provider is selected by
+an import; native, browser, test, and Wasm applications explicitly provide their implementation.
 
 This remains an unreleased subset. It does not yet commit to an owning String, enums, concurrency,
 networking, a general FFI, a package registry, or self-hosting.

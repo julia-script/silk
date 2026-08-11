@@ -21,6 +21,9 @@ and byte data, and typed `Effect` computations with explicit service requirement
 compiler-recognized library names. Portable semantic logging is likewise source-defined:
 `Effect.log` submits one complete borrowed message through an explicit replaceable `Logger`, with
 stdout and deterministic in-memory providers supplied by the standard library.
+Portable whole-file interaction is source-defined as well: normalized provider-absolute `Path`
+values and a seven-operation mutable `FileSystem` service can be implemented by application-owned
+native, browser, Wasm, or test providers without introducing ambient storage or host imports.
 
 This is still an alpha language. APIs may break freely, an owning String has not been selected, and
 concurrency, networking, a package registry, broad FFI, and self-hosting remain future work chosen

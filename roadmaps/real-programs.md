@@ -12,9 +12,9 @@ alone. This initiative established the pressure-program method: build an honest 
 compare evaluation/native/direct-Wasm behavior, sweep allocation failures, preserve deterministic
 artifacts, and promote only repeated general walls.
 
-**Current objective:** no active pressure program. The first initiative and portable Logging are
-complete; returned borrows have shipped, and the project roadmap now owns the Bytes, portable FileSystem,
-target-availability, and native-provider sequence. After that sequence exists, another recognizable
+**Current objective:** no active pressure program. The first initiative, portable Logging, returned
+borrows, owned Bytes, and portable FileSystem are complete; the project roadmap now owns target-
+availability and the native-provider finish. After that sequence exists, another recognizable
 program should exercise Logging and FileSystem together before any compiler port or broader I/O
 family is selected.
 
@@ -83,6 +83,8 @@ Reserve approximately 20% of initiative capacity when pressure work resumes.
 
 ## Changelog
 
+- 2026-08-11: Recorded portable FileSystem as shipped with ordinary user-provider parity and kept
+  pressure work paused behind reachable-only target availability and the confined native provider.
 - 2026-08-11: Synchronized the paused initiative with the five-change FileSystem plan. The next
   pressure program now waits for returned lexical borrows, owned Bytes, the portable service,
   reachable-only intrinsic availability, and the confined native provider; its deterministic

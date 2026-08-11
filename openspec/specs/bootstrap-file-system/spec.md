@@ -1,9 +1,11 @@
+# bootstrap-file-system Specification
+
 ## Purpose
 
 Define a portable explicit whole-file service and provider-rooted path model that applications can
 implement without depending on operating-system filesystem mechanisms.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Path is provider-absolute and normalized
 
@@ -55,9 +57,10 @@ components. The first cut SHALL NOT expose an owned `RelativePath` or unresolved
 
 The first Path API SHALL include `make`, `root`, `join`, `resolve`, `asBytes`, `isRoot`, `name`, and
 `parent`. `asBytes` and a non-root `name` SHALL return shared lexical byte views tied to the Path
-owner without allocating. `name` SHALL return `None` for root. `parent` SHALL return an allocated
-owned `Option<Path>`, with `None` for root. The API MUST NOT introduce `PathSlice` or store a borrow
-inside another value.
+owner without allocating. Because the conservative returned-borrow subset cannot place a borrow
+inside `Option`, `name` SHALL return an empty lexical view for root; empty non-root components are
+invalid, and `isRoot` distinguishes absence. `parent` SHALL return an allocated owned `Option<Path>`,
+with `None` for root. The API MUST NOT introduce `PathSlice` or store a borrow inside another value.
 
 #### Scenario: Borrow a path name
 
@@ -72,7 +75,7 @@ inside another value.
 #### Scenario: Inspect root
 
 - **WHEN** source calls `isRoot`, `name`, and `parent` on `Path.root`
-- **THEN** it observes `true`, `None`, and `None` respectively
+- **THEN** it observes `true`, an empty lexical name view, and `None` respectively
 
 ### Requirement: FileSystem has seven mutable whole-file primitives
 

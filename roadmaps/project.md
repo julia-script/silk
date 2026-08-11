@@ -12,12 +12,11 @@ control with typed failures, explicit replaceable services, deterministic cleanu
 tooling-friendly semantics. Portable program intent should remain stable across native and browser
 hosts; lower-level platform facilities are explicit escape hatches rather than the default API.
 
-**Current objective:** build file interaction through five deliberately ordered changes rather than
-one platform-shaped feature. Returned lexical borrows unlock source-defined owned Bytes; Bytes unlock
-the portable whole-file FileSystem contract. Generic target-restricted intrinsics can proceed
-independently, and the OS provider joins both branches last. The compiler supplies only irreducible
-unsafe primitives; public services, providers, values, helpers, and safe policy remain ordinary
-navigable Silk source.
+**Current objective:** complete file interaction through five deliberately ordered changes rather
+than one platform-shaped feature. Returned lexical borrows, owned Bytes, and the portable whole-file
+FileSystem contract have shipped. Generic target-restricted intrinsics are next, and the confined OS
+provider joins both branches last. The compiler supplies only irreducible unsafe primitives; public
+services, providers, values, helpers, and safe policy remain ordinary navigable Silk source.
 
 ## Current baseline
 
@@ -29,8 +28,9 @@ loops, recursion, affine ownership, deterministic Drop, explicit allocation, sta
 typed service-requiring Effects. Every source-callable compiler primitive belongs to the sealed
 `Intrinsic` namespace, while services and provider mappings are ordinary Silk declarations.
 
-Canonical `Result`, Effect transformations, `Vector<T>`, semantic `Logger`, `Effect.log`, and its
-stdout and in-memory providers are navigable Silk source. Seven
+Canonical `Result`, Effect transformations, `Vector<T>`, owned `Bytes`, normalized provider-absolute
+`Path`, the seven-operation mutable `FileSystem`, semantic `Logger`, `Effect.log`, and its stdout and
+in-memory providers are navigable Silk source. Seven
 algorithm examples plus Silk-written lexer and bounded stack-VM pressure programs provide
 evaluator/native/direct-Wasm, failure-ordinal, and determinism evidence. The completed compiler
 realignment remains documented in [compiler-realignment](compiler-realignment.md); the pressure-
@@ -68,7 +68,7 @@ program record remains in [real programs](real-programs.md).
 - **Outcome & done-when:** canonical `Bytes` is an encoding-neutral nominal wrapper over
   `Vector<u8>` with minimal construction, copy, append, length, lexical views, ownership, allocation,
   cleanup, tooling, and three-engine parity.
-- **Status:** shipped, synchronized, and archived; portable FileSystem is now the next dependency.
+- **Status:** shipped, synchronized, and archived; portable FileSystem has now shipped on top of it.
 - **Appetite:** one ordinary standard-library actor with no new compiler primitive.
 - **Boundary:** no String, UTF-8 promise, formatting, filesystem policy, or broad byte algorithms.
 - **Links:** change:
@@ -82,7 +82,7 @@ program record remains in [real programs](real-programs.md).
 - **Outcome & done-when:** every intrinsic has an enforced supported-target set; validation runs over
   executable operation closure; unsupported reachable calls receive a stable diagnostic; unreachable
   calls contribute no runtime symbols, imports, or host adapters.
-- **Status:** proposal complete and strictly validated; independent of the borrow/Bytes chain and a
+- **Status:** proposal complete and strictly validated; now the active implementation item and a
   prerequisite for the OS provider.
 - **Appetite:** one generic catalog, closure, diagnostic, evaluator, and backend mechanism with
   pay-for-use artifact tests.
@@ -98,15 +98,14 @@ program record remains in [real programs](real-programs.md).
 - **Outcome & done-when:** provider-absolute `Path`, allocation-free `FileError`, owned metadata and
   entries, seven mutable whole-file service primitives, and ordinary recursive/existence helpers
   agree across evaluation, native LLVM, and direct Wasm with pure user providers.
-- **Status:** fully rescoped proposal complete and strictly validated; follows returned borrows and
-  owned Bytes.
+- **Status:** shipped, synchronized, and archived on 2026-08-11 after returned borrows and owned Bytes.
 - **Appetite:** one portable contract and canonical source slice. No provider implementation belongs
   in this change.
 - **Boundary:** writes receive a complete byte view but need not be physically atomic or transactional;
   there is no `PlatformFileSystem`, public handle, rename, recursive service primitive, implicit cwd,
   built-in in-memory provider, or hosted-Wasm ABI.
 - **Links:** change:
-  [`add-portable-file-system`](../openspec/changes/add-portable-file-system/proposal.md) ·
+  [`add-portable-file-system`](../openspec/changes/archive/2026-08-11-add-portable-file-system/proposal.md) ·
   [runtime and standard-library decision](../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md)
 
 ### Supply a confined native OS provider
@@ -188,6 +187,11 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-11: Shipped, synced, and archived portable whole-file interaction: normalized provider-
+  absolute Path values, allocation-free portable errors and metadata, seven mutable FileSystem
+  primitives, ordinary recursive/existence helpers, application-defined providers, editor tooling,
+  documented usage, evaluator/native/direct-Wasm parity, and no-use/pure-provider Wasm pay-for-use.
+  Promoted generic reachable-only intrinsic target availability as the next implementation item.
 - 2026-08-11: Shipped, synced, and archived source-defined owned `Bytes`, including stable
   field-projected returned borrows, ordinary `Vector<u8>` storage, move-only cleanup, mutable and
   shared slice views, editor navigation, allocation failure coverage, and evaluator/native/direct-

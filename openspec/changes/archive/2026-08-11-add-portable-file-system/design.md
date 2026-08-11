@@ -43,8 +43,10 @@ later if callers need to retain unresolved intent.
 
 ### Borrow path observations; own parent paths
 
-`asBytes` and `name` return lexical shared views and allocate nothing. `parent` returns an owned
-`Option<Path>`, which may allocate. Introducing `PathSlice` would require storing or propagating a
+`asBytes` and `name` return lexical shared views and allocate nothing. Root has an empty name view,
+which is unambiguous because empty path components are invalid and avoids wrapping a borrow in
+`Option` beyond the conservative returned-borrow subset. `parent` returns an owned `Option<Path>`,
+which may allocate. Introducing `PathSlice` would require storing or propagating a
 second lifetime-bearing domain type before there is evidence that its complexity is useful. The
 owned parent keeps APIs composable under the conservative returned-borrow model.
 

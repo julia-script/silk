@@ -20,3 +20,20 @@ buffering, and backpressure.
 `StandardStreams` and `Logger` remain explicit Effect requirements until a
 general default-provider mechanism exists; neither logging nor process output receives an ambient
 exception.
+
+`Path` and `FileSystem` are the portable whole-file boundary. A `Path` is owned, normalized UTF-8
+inside the selected provider namespace: it is always absolute, never consults a process working
+directory, rejects NUL and lexical root escape, and exposes lexical borrowed views plus an allocated
+owned parent. Root's name is an empty view because the conservative returned-borrow subset cannot
+wrap a borrow in `Option`; `Path.isRoot` distinguishes it unambiguously.
+
+`FileSystem` has seven mutable service operations: complete reads and writes, minimal metadata,
+deterministically ordered immediate listings, one-directory creation, one-file removal, and empty-
+directory removal. Writes receive one complete borrowed value but providers may use any internal
+chunking; physical atomic replacement and rollback are not promised. `FileError` is allocation-free
+and carries a closed operation/reason pair plus an optional numeric provider detail. `exists`,
+`createDirectoriesRecursively`, and `writeFileWithParents` are ordinary source composition.
+
+The portable module contains no provider or platform ABI. Native applications may later choose the
+separate confined `OsFileSystem`; browser and direct-Wasm programs can provide ordinary virtual
+implementations, and programs that never use FileSystem emit no filesystem imports.
