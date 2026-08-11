@@ -109,6 +109,39 @@ describe('preset catalog', () => {
     expect(new Set(labels).size).toBe(labels.length)
   })
 
+  it('gives every projected MIR row a unique React key', () => {
+    const mirView = viewById('mir')
+    expect(mirView).toBeDefined()
+    if (mirView === undefined) return
+
+    const collisions: Array<string> = []
+    for (const preset of presets) {
+      const snapshot = snapshotOf(preset, 'wasm32-unknown-unknown')
+      const keys = mirView
+        .project({
+          snapshot,
+          modules: preset.modules,
+          root: preset.root,
+          mode: 'release',
+          profile: 'release',
+          cursor: undefined,
+          onSelectSpan: () => undefined,
+          evaluation: undefined,
+          onEvaluate: () => undefined,
+          filter: '',
+          showTrivia: false,
+        })
+        .rows.map((row) => row.key)
+      const seen = new Set<string>()
+      for (const key of keys) {
+        if (seen.has(key)) collisions.push(`${preset.label}: ${key}`)
+        seen.add(key)
+      }
+    }
+
+    expect(collisions).toEqual([])
+  }, 60_000)
+
   it('prefixes every label with ok, fail, or trap so intent is visible in the picker', () => {
     for (const preset of presets) {
       expect(preset.label, preset.label).toMatch(/^(ok|fail|trap) · /)
