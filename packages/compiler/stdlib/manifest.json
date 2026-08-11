@@ -65,6 +65,12 @@
     "aliases": ["InvalidAlignment", "LayoutOverflow"]
   },
   {
+    "module": "silk/logging",
+    "path": "silk/logging.silk",
+    "namespace": "Logger",
+    "aliases": ["InMemoryLogger", "LogError", "LogLevel", "StdoutLogger"]
+  },
+  {
     "module": "silk/numeric",
     "path": "silk/numeric.silk",
     "namespace": "Integer"

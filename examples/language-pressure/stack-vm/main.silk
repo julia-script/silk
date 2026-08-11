@@ -1,4 +1,5 @@
 import silk.vector { Vector, make, append, get, length }
+import silk.logging { length as logLength }
 
 impl Report for OutOfMemory {}
 
@@ -290,12 +291,22 @@ fn verify(value: i32) -> () {
   return ()
 }
 
-pub effect fn main() -> () ! OutOfMemory {
+effect fn logVerified(value: ()) -> () ! LogError ? &mut Logger {
+  let logged = run Effect.log("stack VM verification complete")
+  return move value
+}
+
+pub effect fn main() -> () ! OutOfMemory | LogError {
   let mut allocator = SystemAllocator.make()
+  let mut logger = InMemoryLogger.memory()
   // PRESSURE_INPUT: the harness replaces this literal only.
   let bytecode = b"\x01\x00\x06\x06\x01\x63\x01\x06\x01\x07\x04\x00"
-  return run execute(bytecode)
+  let completed = run execute(bytecode)
     |> Effect.map(fingerprint)
     |> Effect.map(verify)
+    |> Effect.tap(logVerified)
     |> Effect.provideMut(&mut allocator)
+    |> Effect.provideMut(&mut logger)
+  if logLength(&logger) != 1 { let mismatch = 1 / 0 }
+  return ()
 }

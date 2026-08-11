@@ -23,6 +23,10 @@ it('keeps the generated manifest ordered and byte-identical to canonical Silk fi
     Stdlib.manifest.map((entry) => entry.module),
     [...Stdlib.manifest.map((entry) => entry.module)].sort(),
   )
+  assert.include(
+    Stdlib.manifest.map((entry) => entry.module),
+    'silk/logging',
+  )
   for (const entry of Stdlib.manifest) {
     assert.strictEqual(entry.path, `${entry.module}.silk`)
     assert.deepEqual(entry.bytes, new Uint8Array(readFileSync(entry.sourceUrl)))

@@ -10,6 +10,7 @@ import type * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SourceSpanFactory from './SourceSpan.js'
+import * as Stdlib from './Stdlib.js'
 import * as Type from './Type.js'
 
 export type Context =
@@ -643,6 +644,25 @@ export const complete = (options: {
         context: Object.freeze({ _tag: 'ActorMemberContext', actor: lookup.module }),
         replacement: replacement.span,
         candidates: stable(namespaceCandidates(options.index, lookup.module)),
+      })
+    if (
+      lookup?._tag === 'Resolved' &&
+      qualifier !== undefined &&
+      (lookup.declaration._tag === 'StructDeclaration' ||
+        lookup.declaration._tag === 'InterfaceDeclaration') &&
+      lookup.declaration.canonical._tag === 'Canonical' &&
+      Stdlib.findNamespace(qualifier)?.module === lookup.declaration.canonical.id.module
+    )
+      return Object.freeze({
+        _tag: 'CompletionResult',
+        context: Object.freeze({
+          _tag: 'ActorMemberContext',
+          actor: lookup.declaration.canonical.id.name,
+        }),
+        replacement: replacement.span,
+        candidates: stable(
+          namespaceCandidates(options.index, lookup.declaration.canonical.id.module),
+        ),
       })
     if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'ServiceDeclaration')
       return Object.freeze({

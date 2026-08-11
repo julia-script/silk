@@ -2,6 +2,22 @@
 // Effect into Result data and binds one typed requirement; everything here is ordinary Silk.
 
 import silk.result { Result, Success, Failure }
+import silk.logging { LogError, LogLevel, Logger }
+
+/// Dispatches one complete Info message through the explicitly provided Logger.
+pub effect fn log(
+  message: &[u8]
+) -> () ! LogError ? &mut Logger {
+  return run Logger.log(LogLevel.info(), message)
+}
+
+/// Dispatches one complete message at the selected level through the provided Logger.
+pub effect fn logAt(
+  level: LogLevel,
+  message: &[u8]
+) -> () ! LogError ? &mut Logger {
+  return run Logger.log(move level, message)
+}
 
 /// Reifies one Effect execution into Result data while preserving its requirements.
 pub effect fn result<A, !E, ?R>(

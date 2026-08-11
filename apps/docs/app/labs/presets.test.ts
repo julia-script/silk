@@ -37,6 +37,9 @@ const retryEffectPreset = presets.find(
 const providerEffectPreset = presets.find(
   (preset) => preset.label === 'ok · Existing provider capture',
 )
+const loggingPreset = presets.find(
+  (preset) => preset.label === 'ok · Portable Logger provider',
+)
 const layoutPreset = presets.find((preset) => preset.label === 'ok · Validated target Layout')
 const allocationPreset = presets.find(
   (preset) => preset.label === 'ok · Self-contained Allocation contract',
@@ -264,6 +267,26 @@ describe('preset catalog', () => {
     }
     for (const id of ['hir', 'ownership', 'layout', 'mir', 'evaluation', 'backend']) {
       expect(viewById(id)?.id, id).toBe(id)
+    }
+  })
+
+  it('exposes portable logging through the coordinated facade panes', () => {
+    expect(loggingPreset).toBeDefined()
+    if (loggingPreset === undefined) return
+    const native = snapshotOf(loggingPreset, 'aarch64-apple-darwin')
+    const wasm = snapshotOf(loggingPreset, 'wasm32-unknown-unknown')
+    expect(Analysis.diagnostics(native)).toEqual([])
+    expect(Analysis.modules(native).map((module) => module.name)).toContain('silk/logging')
+    expect(Analysis.hirOf(native, 'silk/effects')).toBeDefined()
+    expect(Analysis.mirOf(wasm)._tag).toBe('Available')
+    const evaluation = Analysis.evaluate(native)
+    expect(evaluation._tag).toBe('Completed')
+    if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42)
+    const context = acceptanceContext(loggingPreset, native)
+    for (const id of ['closure', 'index', 'hir', 'ownership', 'instances', 'mir', 'evaluation', 'backend']) {
+      const view = viewById(id)
+      expect(view, id).toBeDefined()
+      expect(() => view?.project(context), id).not.toThrow()
     }
   })
 

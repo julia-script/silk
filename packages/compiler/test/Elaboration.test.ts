@@ -303,14 +303,14 @@ fn main() -> i32 {
 )
 
 it.effect(
-  'propagates Logger requirements through effectful tap without an eager log intrinsic',
+  'propagates source-service requirements through effectful tap without eager dispatch',
   () =>
     Effect.gen(function* () {
       const result = yield* analyzeWithStdlib(
         'effect://logger-tap',
-        `struct Logger {}
+        `struct TapLogger {}
 effect fn succeed(value: i32) -> i32 { return value }
-effect fn log(value: i32) -> i32 ? &Logger { return value }
+effect fn log(value: i32) -> i32 ? &TapLogger { return value }
 fn main() -> i32 {
   let logged = succeed(42) |> Effect.tap(log)
   return 0
@@ -331,7 +331,7 @@ fn main() -> i32 {
         type !== undefined && Type.isEffect(type)
           ? Type.encode(type.requirements.at(0)?.capability ?? 'never')
           : undefined,
-        'effect/logger-tap.Logger',
+        'effect/logger-tap.TapLogger',
       )
     }),
 )

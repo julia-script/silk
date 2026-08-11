@@ -2,8 +2,9 @@
 
 ### Requirement: Logging is canonical visible Silk source
 
-The standard library SHALL ship canonical `.silk` declarations for LogLevel, LogEvent, Logger,
-`Effect.log`, the level-selecting logging operation, and the initial stdout and in-memory providers.
+The standard library SHALL ship canonical `.silk` declarations for LogLevel, LogError, Logger,
+`Effect.log`, the level-selecting logging operation, the initial stdout and in-memory providers,
+and provider-owned recorded observation values where needed.
 These declarations SHALL participate in the deterministic standard-library manifest, retain
 ordinary source spans in diagnostics and editor facts, and receive no semantic privilege from
 their module identity.

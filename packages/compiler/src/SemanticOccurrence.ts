@@ -180,14 +180,34 @@ const push = (
   )
 }
 
+const isNominalDeclaration = (
+  declaration: DeclarationIndex.MemberFact,
+): declaration is
+  | DeclarationIndex.StructFact
+  | DeclarationIndex.ServiceFact
+  | DeclarationIndex.InterfaceFact =>
+  declaration._tag === 'StructDeclaration' ||
+  declaration._tag === 'ServiceDeclaration' ||
+  declaration._tag === 'InterfaceDeclaration'
+
 const declarationByNominal = (
   index: DeclarationIndex.Index,
   nominal: Type.Nominal,
-): DeclarationIndex.StructFact | undefined =>
+):
+  | DeclarationIndex.StructFact
+  | DeclarationIndex.ServiceFact
+  | DeclarationIndex.InterfaceFact
+  | undefined =>
   index.modules
     .find((module) => module.module === nominal.module)
-    ?.structs.find(
-      (declaration) =>
+    ?.members.find(
+      (
+        declaration,
+      ): declaration is
+        | DeclarationIndex.StructFact
+        | DeclarationIndex.ServiceFact
+        | DeclarationIndex.InterfaceFact =>
+        isNominalDeclaration(declaration) &&
         declaration.canonical._tag === 'Canonical' &&
         declaration.canonical.id.name === nominal.name,
     )

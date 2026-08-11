@@ -22,3 +22,8 @@ Shared Vector reads and structural-union Copy provenance are now complete at the
 boundary. The lexer reads ordinary Copy records, while the VM reads one ordered union event vector;
 both retain evaluator/native/Wasm, allocation-failure, and determinism evidence. No next
 self-hosting module is implied—the next proposal should come from another repeated real-program wall.
+
+The completed VM verification now also emits one semantic observation through `Effect.log` and an
+in-memory Logger. This deliberately leaves the ordered `Step | VmDiagnostic` vector as program
+data: logging observes the completed verification boundary rather than replacing raw or structured
+output with a stream-shaped logging API.

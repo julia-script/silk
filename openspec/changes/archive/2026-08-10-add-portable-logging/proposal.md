@@ -6,13 +6,14 @@ should run unchanged under native, test, telemetry, and browser-hosted WebAssemb
 
 ## What Changes
 
-- Add one complete structured `LogEvent` value and an explicit `Logger` service capability.
-- Add ordinary source-defined `Effect.log` that dispatches one event and honestly retains the
+- Add a closed `LogLevel` and an explicit `Logger` service contract whose operation receives a
+  severity and one complete borrowed immutable UTF-8 message per invocation.
+- Add ordinary source-defined `Effect.log` that dispatches one complete message and honestly retains the
   Logger requirement through composition until a provider is supplied.
-- Add a stdout-backed Logger implementation over `StandardStreams`; stdout is one provider rather
-  than logging semantics.
+- Add a stdout-backed Logger implementation over `StandardStreams`; the initial provider may
+  forward the borrowed bytes directly, while formatting and physical writes remain provider policy.
 - Add a deterministic in-memory Logger implementation for tests and host-independent acceptance.
-- Preserve event order and complete-message boundaries across evaluator, native LLVM, and direct
+- Preserve invocation order and complete-message boundaries across evaluator, native LLVM, and direct
   WebAssembly execution.
 - Integrate Logger values and operations with standard-library source packaging, hover,
   completion, occurrences, and go-to-definition.
@@ -23,8 +24,8 @@ should run unchanged under native, test, telemetry, and browser-hosted WebAssemb
 
 ### New Capabilities
 
-- `bootstrap-logging`: Complete semantic log events, the Logger service contract, stdout and
-  in-memory providers, ordering, failures, and cross-engine behavior.
+- `bootstrap-logging`: Complete semantic log invocations, the Logger service contract, provider-owned
+  formatting and output strategy, stdout and in-memory providers, ordering, failures, and cross-engine behavior.
 
 ### Modified Capabilities
 
@@ -41,6 +42,5 @@ The change affects the canonical Silk standard library and embedded manifest, se
 elaboration, evaluator provider plumbing, native and direct-Wasm host boundaries, standard-stream
 integration, editor presentation/navigation, labs, and differential acceptance tests. It adds no
 ambient logger, byte-at-a-time logging API, scheduler, tracing runtime, or mandatory telemetry
-dependency. These artifacts are reconciled with the implemented source-defined service, static
-interface, and sealed Intrinsic contracts. Implementation remains postponed until
-`establish-minimal-intrinsic-boundary` is archived.
+dependency. These artifacts are reconciled with the implemented and archived source-defined
+service, static interface, and sealed Intrinsic contracts. The logging implementation is unblocked.

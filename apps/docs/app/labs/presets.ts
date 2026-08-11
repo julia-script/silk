@@ -260,6 +260,29 @@ pub fn main() -> i32 {
 `,
   ),
   one(
+    'effects',
+    'ok · Portable Logger provider',
+    `import silk.logging { length, messageByteAt }
+
+effect fn program() -> i32 ! LogError {
+  let mut logger = InMemoryLogger.memory()
+  let first = run Effect.provideMut(Effect.log("ready"), &mut logger)
+  let second = run Effect.provideMut(
+    Effect.logAt(LogLevel.warning(), "second\\nline"),
+    &mut logger
+  )
+  if length(&logger) != 2 { return 0 }
+  return u8.toI32(messageByteAt(&logger, 1, 6)) + 32
+}
+
+effect fn recover(error: LogError) -> i32 { return 0 }
+
+pub fn main() -> i32 {
+  return run Effect.catch(program(), recover)
+}
+`,
+  ),
+  one(
     'allocation',
     'ok · Validated target Layout',
     `pub fn main() -> i32 {
@@ -538,11 +561,11 @@ pub fn main() -> i32 { return run succeed(2) |> Effect.map(i32.add(40)) }
   one(
     'effects',
     'ok · Effectful Logger tap',
-    `struct Logger {}
+    `struct TapLogger {}
 effect fn succeed(value: i32) -> i32 { return value }
-effect fn log(value: i32) -> i32 ? &Logger { return value }
+effect fn log(value: i32) -> i32 ? &TapLogger { return value }
 pub fn main() -> i32 {
-  let logger = Logger {}
+  let logger = TapLogger {}
   let logged = succeed(42) |> Effect.tap(log)
   let provided = logged |> Effect.provide(&logger)
   return run provided

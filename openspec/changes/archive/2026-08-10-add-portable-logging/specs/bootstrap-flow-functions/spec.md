@@ -3,7 +3,8 @@
 ### Requirement: Logging remains effectful
 
 Semantic logging SHALL remain an Effect operation with its declared Logger requirement. A log call
-SHALL dispatch one complete semantic event rather than append byte fragments to a process stream,
+SHALL dispatch one complete semantic message in one Logger invocation rather than expose an API for
+incrementally appending byte fragments,
 so native, in-memory, browser, and telemetry providers can implement the same contract. Ordinary
 functions that add logging MUST return or execute an Effect through the existing effect model; this
 requirement MUST NOT introduce an eager non-effect trace, debugging intrinsic, or stdout shortcut.
@@ -24,7 +25,7 @@ requirement MUST NOT introduce an eager non-effect trace, debugging intrinsic, o
 
 `Effect.log` and its level-selecting sibling SHALL resolve to canonical ordinary Silk declarations.
 The compiler MUST NOT select logging behavior from their names, actor, or standard-library origin.
-Equivalent user code invoking the Logger capability SHALL receive the same typing, ownership,
+Equivalent user code invoking the Logger service SHALL receive the same typing, ownership,
 execution, and cleanup behavior.
 
 #### Scenario: Navigate to Effect.log
