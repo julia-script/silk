@@ -53,6 +53,14 @@ const ungroupedRunPreset = presets.find(
 const groupedRunPreset = presets.find(
   (preset) => preset.label === 'ok · Grouped run transforms result',
 )
+const pipedEffectLabels = [
+  'ok · Piped success composition',
+  'ok · Piped failure recovery',
+  'ok · Piped acquired provider',
+] as const
+const pipedEffectPresets = pipedEffectLabels.map((label) =>
+  presets.find((preset) => preset.label === label),
+)
 const ownedSequenceLabels = [
   'ok · Vector growing append',
   'ok · Vector failed growth preserves contents',
@@ -337,6 +345,19 @@ describe('preset catalog', () => {
       const evaluation = Analysis.evaluate(snapshot)
       expect(evaluation._tag, preset.label).toBe('Completed')
       if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(expected)
+    }
+  })
+
+  it('keeps the heavy Effect pipeline examples executable', () => {
+    for (const [index, label] of pipedEffectLabels.entries()) {
+      const preset = pipedEffectPresets.at(index)
+      expect(preset, label).toBeDefined()
+      if (preset === undefined) continue
+      const snapshot = snapshotOf(preset, 'aarch64-apple-darwin')
+      expect(Analysis.diagnostics(snapshot), label).toEqual([])
+      const evaluation = Analysis.evaluate(snapshot)
+      expect(evaluation._tag, label).toBe('Completed')
+      if (evaluation._tag === 'Completed') expect(evaluation.result.value, label).toBe(42)
     }
   })
 

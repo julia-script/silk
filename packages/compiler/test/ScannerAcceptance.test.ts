@@ -24,24 +24,36 @@ const quotaScannerSource = (quota: number): string =>
   scannerSource
     .replace(
       'let mut allocator = SystemAllocator.make()',
-      `let mut allocator = QuotaAllocator { remaining: ${quota} }`,
+      `let mut allocator = QuotaAllocator {remaining: ${quota}}`,
     )
     .replace(
-      'struct U8 { value: i32 }',
-      `struct QuotaAllocator { remaining: i32 }
+      `struct U8 {
+  value: i32
+}`,
+      `struct QuotaAllocator {
+  remaining: i32
+}
 
-effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  if self.remaining == 0 { fail OutOfMemory {} }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation
+! OutOfMemory {
+  if self.remaining == 0 {
+    fail OutOfMemory {}
+  }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
-  let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
+  let pending = Allocator.allocate(move layout)
+    |> Effect.provideMut(&mut inner)
   let allocation = run pending
   return move allocation
 }
 
-impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
+impl Allocator for QuotaAllocator {
+  allocate: QuotaAllocator.allocate
+}
 
-struct U8 { value: i32 }`,
+struct U8 {
+  value: i32
+}`,
     )
 
 it.effect(

@@ -35,6 +35,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
     "@silk-effect/llvm": "workspace:*",
     "@silk-effect/wasm": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",

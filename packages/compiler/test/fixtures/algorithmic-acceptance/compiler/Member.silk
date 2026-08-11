@@ -1,5 +1,7 @@
 pub struct First {}
+
 pub struct Second {}
+
 pub struct Third {}
 
 pub fn decode(code: i32) -> First | Second | Third {

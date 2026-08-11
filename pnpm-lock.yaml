@@ -96,6 +96,9 @@ importers:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
     devDependencies:
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
       '@silk-effect/llvm':
         specifier: workspace:*
         version: link:../../packages/llvm
