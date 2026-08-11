@@ -29,14 +29,17 @@
     "fumadocs-core": "^16.14.0",
     "fumadocs-mdx": "^15.2.2",
     "fumadocs-ui": "^16.14.0",
+    "mdast-util-from-markdown": "^2.0.3",
     "next": "16.2.12",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
     "@silk-effect/llvm": "workspace:*",
     "@silk-effect/wasm": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",
+    "@types/mdast": "^4.0.4",
     "@types/mdx": "^2.0.14",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.17",

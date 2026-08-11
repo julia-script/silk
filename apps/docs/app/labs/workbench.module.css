@@ -681,6 +681,11 @@
   color: var(--wb-violet);
 }
 
+.editor :global(.cm-silk-type),
+.editor :global(.cm-silk-type-punctuation) {
+  color: var(--wb-violet);
+}
+
 .editor :global(.cm-silk-identifier) {
   color: var(--wb-ink);
 }
@@ -692,6 +697,10 @@
 
 .editor :global(.cm-silk-doc-comment) {
   font-style: italic;
+}
+
+.editor :global(.cm-silk-string) {
+  color: var(--wb-green-ink);
 }
 
 .editor :global(.cm-silk-operator) {

@@ -1,36 +1,62 @@
-import silk.vector { Vector, make, append, get, length, capacity }
+import silk.vector {Vector, make, append, get, length, capacity}
 
-struct U8 { value: i32 }
-struct Token { kind: i32 }
+struct U8 {
+  value: i32
+}
 
-fn observe(kind: i32) -> i32 { return kind }
+struct Token {
+  kind: i32
+}
 
-effect fn scan(source: &[U8]) -> Vector<Token> ! OutOfMemory ? &mut Allocator {
+fn observe(kind: i32) -> i32 {
+  return kind
+}
+
+effect fn scan(source: &[U8]) -> Vector<Token>
+! OutOfMemory
+? &mut Allocator {
   let mut tokens = make<Token>()
   let mut index = usize.add(0, 0)
   while index < source.length {
     let byte = source[index].value
     let mut kind = 3
-    if byte == 1 { kind = 1 }
-    if byte == 2 { kind = 2 }
-    let token = Token { kind: kind }
+    if byte == 1 {
+      kind = 1
+    }
+    if byte == 2 {
+      kind = 2
+    }
+    let token = Token {kind: kind}
     let appended = run append<Token>(&mut tokens, move token)
     index = index + 1
   }
   return move tokens
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32
+! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let source = [
-    U8 { value: 1 }, U8 { value: 2 }, U8 { value: 3 }, U8 { value: 1 },
-    U8 { value: 2 }, U8 { value: 3 }, U8 { value: 1 }, U8 { value: 2 },
-    U8 { value: 3 }, U8 { value: 1 }
+    U8 {value: 1},
+    U8 {value: 2},
+    U8 {value: 3},
+    U8 {value: 1},
+    U8 {value: 2},
+    U8 {value: 3},
+    U8 {value: 1},
+    U8 {value: 2},
+    U8 {value: 3},
+    U8 {value: 1},
   ]
-  let pending = scan(&source) |> Effect.provideMut(&mut allocator)
+  let pending = scan(&source)
+    |> Effect.provideMut(&mut allocator)
   let mut tokens = run pending
-  if length<Token>(&tokens) == 10 {} else { return 0 }
-  if capacity<Token>(&tokens) == 16 {} else { return 1 }
+  if length<Token>(&tokens) == 10 {} else {
+    return 0
+  }
+  if capacity<Token>(&tokens) == 16 {} else {
+    return 1
+  }
   let token0 = get<Token>(&tokens, 0)
   let token1 = get<Token>(&tokens, 1)
   let token2 = get<Token>(&tokens, 2)
@@ -54,6 +80,10 @@ effect fn build() -> i32 ! OutOfMemory {
   return kind0 + kind1 + kind2 + kind3 + kind4 + kind5 + kind6 + kind7 + kind8 + kind9 + 23
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemory) -> i32 {
+  return 7
+}
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }
+pub fn main() -> i32 {
+  return run Effect.catch(build(), recover)
+}

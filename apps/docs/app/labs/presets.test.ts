@@ -53,6 +53,14 @@ const ungroupedRunPreset = presets.find(
 const groupedRunPreset = presets.find(
   (preset) => preset.label === 'ok · Grouped run transforms result',
 )
+const pipedEffectLabels = [
+  'ok · Piped success composition',
+  'ok · Piped failure recovery',
+  'ok · Piped acquired provider',
+] as const
+const pipedEffectPresets = pipedEffectLabels.map((label) =>
+  presets.find((preset) => preset.label === label),
+)
 const ownedSequenceLabels = [
   'ok · Vector growing append',
   'ok · Vector failed growth preserves contents',
@@ -108,6 +116,39 @@ describe('preset catalog', () => {
     const labels = presets.map((preset) => preset.label)
     expect(new Set(labels).size).toBe(labels.length)
   })
+
+  it('gives every projected MIR row a unique React key', () => {
+    const mirView = viewById('mir')
+    expect(mirView).toBeDefined()
+    if (mirView === undefined) return
+
+    const collisions: Array<string> = []
+    for (const preset of presets) {
+      const snapshot = snapshotOf(preset, 'wasm32-unknown-unknown')
+      const keys = mirView
+        .project({
+          snapshot,
+          modules: preset.modules,
+          root: preset.root,
+          mode: 'release',
+          profile: 'release',
+          cursor: undefined,
+          onSelectSpan: () => undefined,
+          evaluation: undefined,
+          onEvaluate: () => undefined,
+          filter: '',
+          showTrivia: false,
+        })
+        .rows.map((row) => row.key)
+      const seen = new Set<string>()
+      for (const key of keys) {
+        if (seen.has(key)) collisions.push(`${preset.label}: ${key}`)
+        seen.add(key)
+      }
+    }
+
+    expect(collisions).toEqual([])
+  }, 60_000)
 
   it('prefixes every label with ok, fail, or trap so intent is visible in the picker', () => {
     for (const preset of presets) {
@@ -304,6 +345,19 @@ describe('preset catalog', () => {
       const evaluation = Analysis.evaluate(snapshot)
       expect(evaluation._tag, preset.label).toBe('Completed')
       if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(expected)
+    }
+  })
+
+  it('keeps the heavy Effect pipeline examples executable', () => {
+    for (const [index, label] of pipedEffectLabels.entries()) {
+      const preset = pipedEffectPresets.at(index)
+      expect(preset, label).toBeDefined()
+      if (preset === undefined) continue
+      const snapshot = snapshotOf(preset, 'aarch64-apple-darwin')
+      expect(Analysis.diagnostics(snapshot), label).toEqual([])
+      const evaluation = Analysis.evaluate(snapshot)
+      expect(evaluation._tag, label).toBe('Completed')
+      if (evaluation._tag === 'Completed') expect(evaluation.result.value, label).toBe(42)
     }
   })
 

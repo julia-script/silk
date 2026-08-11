@@ -33,6 +33,9 @@ export const evaluationOptionsAtom = Atom.make<BootstrapEvaluation.Options>(
   initialPreset.evaluation ?? {},
 )
 
+/** Idle time before one editing burst becomes a new compiler input. */
+export const sourceUpdateDebounceMs = 250
+
 /**
  * Codegen's debug-info mode is derived from the profile rather than being its own control: the
  * profile already says whether debug info is wanted (`-g`), so a separate toggle only adds states
@@ -42,16 +45,26 @@ export const modeAtom = Atom.map(profileAtom, ToolchainPlan.codegenModeFor)
 
 const encoder = new TextEncoder()
 
-/** One snapshot per source edit, shared by every pane — what makes phases comparable. */
-export const snapshotAtom = Atom.make((get) =>
-  Snapshot.make({
-    rootModule: get(rootAtom),
+/** Root and sources settle together, so a preset/module switch can never expose a mismatched pair. */
+const snapshotInputAtom = Atom.make((get) => ({
+  rootModule: get(rootAtom),
+  modules: get(modulesAtom),
+}))
+
+/** Root and sources currently represented by analysis, behind one shared debounce timer. */
+export const analysisInputAtom = snapshotInputAtom.pipe(Atom.debounce(sourceUpdateDebounceMs))
+
+/** One snapshot per settled editing burst, shared by every pane. */
+export const snapshotAtom = Atom.make((get) => {
+  const input = get(analysisInputAtom)
+  return Snapshot.make({
+    rootModule: input.rootModule,
     sources: new Map(
-      Object.entries(get(modulesAtom)).map(([name, text]) => [name, encoder.encode(text)]),
+      Object.entries(input.modules).map(([name, text]) => [name, encoder.encode(text)]),
     ),
     target: get(targetAtom),
-  }),
-)
+  })
+})
 
 export const analysisAtom = Atom.map(snapshotAtom, Analysis.rootAnalysis)
 
@@ -69,12 +82,12 @@ export const countsAtom = Atom.make((get) => {
 /**
  * The workbench-level span cursor: one byte range, shared by every pane.
  *
- * The read depends on the snapshot, so a source edit rebuilds the node and clears the selection
- * by construction — a cursor cannot outlive the program it points into. This replaces the manual
- * "reset on snapshot change" effect, which had to be remembered.
+ * The read depends on live modules as well as the settled snapshot, so a source edit clears the
+ * selection immediately instead of keeping a stale span visible during the debounce window.
  */
 export const cursorAtom = Atom.writable<Span | undefined, Span | undefined>(
   (get) => {
+    get(modulesAtom)
     get(snapshotAtom)
     return undefined
   },
@@ -82,14 +95,15 @@ export const cursorAtom = Atom.writable<Span | undefined, Span | undefined>(
 )
 
 /**
- * An evaluation describes the program that produced it, so it cannot outlive that program: same
- * snapshot-keyed reset as the cursor. Evaluation is an explicit action, never implied by editing.
+ * An evaluation describes the program that produced it, so it cannot outlive that program. It
+ * uses the same immediate live-source reset as the cursor; editing never implies a new run.
  */
 export const evaluationAtom = Atom.writable<
   BootstrapEvaluation.Outcome | undefined,
   BootstrapEvaluation.Outcome | undefined
 >(
   (get) => {
+    get(modulesAtom)
     get(snapshotAtom)
     return undefined
   },
@@ -106,7 +120,8 @@ export interface TrailCell {
 export const trailAtom = Atom.make((get): ReadonlyArray<TrailCell> => {
   const cursor = get(cursorAtom)
   if (cursor === undefined) return []
-  const source = get(modulesAtom)[get(rootAtom)] ?? ''
+  const input = get(analysisInputAtom)
+  const source = input.modules[input.rootModule] ?? ''
   const analysis = get(analysisAtom)
   const snapshot = get(snapshotAtom)
 

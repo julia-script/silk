@@ -19,6 +19,7 @@ const compilerCliPackageRoot = resolve(workspaceRoot, 'packages/compiler-cli')
 const documentationPackageRoot = resolve(workspaceRoot, 'packages/documentation')
 const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
 const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
+const webContainerPackageRoot = resolve(workspaceRoot, 'packages/platform-webcontainer')
 
 const installConsumer = (cwd: string, ignoreWorkspace = false): void => {
   const result = spawnSync(
@@ -1375,3 +1376,85 @@ test('the lsp release candidate installs and answers an initialize request', asy
     rmSync(temporary, { recursive: true, force: true })
   }
 }, 120_000)
+
+test('the WebContainer release candidate exposes every SSR-safe actor subpath', () => {
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-effect-webcontainer-release-candidate-'))
+
+  try {
+    const archiveRoot = resolve(temporary, 'archives')
+    const unpackRoot = resolve(temporary, 'unpacked')
+    mkdirSync(archiveRoot)
+    mkdirSync(unpackRoot)
+
+    execFileSync('pnpm', ['pack', '--pack-destination', archiveRoot], {
+      cwd: webContainerPackageRoot,
+      stdio: 'pipe',
+    })
+
+    const archive = readdirSync(archiveRoot).find((file) => file.endsWith('.tgz'))
+    expect(archive).toBeDefined()
+    execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
+
+    const packedRoot = resolve(unpackRoot, 'package')
+    const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
+    const actorPaths = [
+      './WebContainer',
+      './WebContainerError',
+      './WebContainerEvent',
+      './WebContainerFileSystem',
+      './WebContainerProcess',
+    ]
+    expect(manifest.name).toBe('@silk-effect/platform-webcontainer')
+    expect(manifest.private).not.toBe(true)
+    expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual(['@webcontainer/api', 'effect'])
+    expect(Object.keys(manifest.exports).sort()).toEqual(['.', ...actorPaths])
+    expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'README.md'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
+    expect(existsSync(resolve(packedRoot, 'test'))).toBe(false)
+    for (const actorPath of actorPaths) {
+      const name = actorPath.slice(2)
+      expect(existsSync(resolve(packedRoot, `dist/${name}.js`))).toBe(true)
+      expect(existsSync(resolve(packedRoot, `dist/${name}.d.ts`))).toBe(true)
+    }
+
+    const consumerRoot = resolve(temporary, 'consumer')
+    mkdirSync(consumerRoot)
+    writeFileSync(
+      resolve(consumerRoot, 'package.json'),
+      JSON.stringify({
+        private: true,
+        type: 'module',
+        dependencies: {
+          '@silk-effect/platform-webcontainer': `file:${resolve(archiveRoot, archive ?? '')}`,
+        },
+      }),
+    )
+    execFileSync('pnpm', ['install', '--offline', '--ignore-workspace'], {
+      cwd: consumerRoot,
+      stdio: 'pipe',
+    })
+    const inspected = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `import * as api from '@silk-effect/platform-webcontainer'; const paths = ${JSON.stringify(actorPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silk-effect/platform-webcontainer/\${path.slice(2)}\`))); console.log(JSON.stringify({ root: Object.keys(api).sort(), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])) }));`,
+        ],
+        { cwd: consumerRoot, encoding: 'utf8' },
+      ),
+    )
+    expect(inspected.root).toEqual(actorPaths.map((path) => path.slice(2)).sort())
+    for (const actorPath of actorPaths) {
+      expect(inspected.deep[actorPath].length, `${actorPath} has no exports`).toBeGreaterThan(0)
+    }
+    expect(inspected.deep['./WebContainer']).toContain('layer')
+    expect(inspected.deep['./WebContainerFileSystem']).toContain('layer')
+    expect(inspected.deep['./WebContainerProcess']).toContain('fromWebStreams')
+  } finally {
+    rmSync(temporary, { recursive: true, force: true })
+  }
+})

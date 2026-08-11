@@ -1,4 +1,4 @@
-import compiler.Member { First, Second, Third, decode }
+import compiler.Member {First, Second, Third, decode}
 
 struct FoldState {
   remaining: i32

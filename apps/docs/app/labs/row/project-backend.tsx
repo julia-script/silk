@@ -867,12 +867,18 @@ export const mirRows = (
   const rows: Array<RowModel> = []
 
   for (const fn of module.functions) {
-    // Monomorphized instances share fn.id.name — type arguments make the identity unique.
+    // The module and concrete instance are both identity: different modules may declare the same
+    // function name, while one declaration may lower more than one specialization or contract row.
     const instance =
       fn.instance.typeArguments.length === 0
         ? ''
         : `<${fn.instance.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
-    const fnKey = `mir-${fn.id.name}${instance}`
+    const fnKey = `mir-${JSON.stringify([
+      fn.instance.declaration.module,
+      fn.instance.declaration.name,
+      fn.instance.typeArguments.map(Type.genericArgumentKey),
+      fn.instance.contractRow,
+    ])}`
     const operationCount = Mir.operations(fn).length
     rows.push({
       key: fnKey,

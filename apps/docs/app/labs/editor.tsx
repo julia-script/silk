@@ -14,19 +14,23 @@ import { setDiagnostics } from '@codemirror/lint'
 import { Annotation, EditorState, StateEffect, StateField } from '@codemirror/state'
 import type { DecorationSet } from '@codemirror/view'
 import { Decoration, EditorView, hoverTooltip, keymap } from '@codemirror/view'
-import type * as Analysis from '@silk-effect/compiler/Analysis'
+import * as Analysis from '@silk-effect/compiler/Analysis'
 import * as SilkCodeMirror from '@silk-effect/language/CodeMirror'
 import * as LspDocument from '@silk-effect/lsp/Document'
 import * as Effect from 'effect/Effect'
 import { type MutableRefObject, useEffect, useMemo, useRef } from 'react'
+import { createRoot } from 'react-dom/client'
+import * as Hover from './Hover'
 import type { Span } from './row/row'
 
 const encoder = new TextEncoder()
+const decoder = new TextDecoder()
 
 /** One language-server view of the active module, rebuilt with the shared snapshot. */
 interface LspSession {
   readonly document: LspDocument.Document
   readonly snapshot: Analysis.Snapshot
+  readonly source: string
 }
 
 /** Translates one protocol position into a clamped CodeMirror character offset. */
@@ -91,6 +95,43 @@ const theme = EditorView.theme({
   '.cm-tooltip-lint': { padding: '0' },
   '.cm-diagnostic': { borderLeft: 'none', padding: '3px 7px' },
   '.cm-diagnostic-error': { borderLeft: '2px solid var(--wb-error)' },
+  '.cm-silk-type-tooltip': {
+    boxSizing: 'border-box',
+    maxWidth: 'min(560px, calc(100vw - 24px))',
+    lineHeight: '1.45',
+  },
+  '.cm-silk-type-tooltip > *': { margin: '0' },
+  '.cm-silk-type-tooltip > * + *': { marginTop: '8px' },
+  '.cm-silk-type-tooltip pre': {
+    overflowX: 'auto',
+    padding: '2px 0 5px',
+    borderBottom: '1px solid var(--wb-hairline-strong)',
+    color: 'var(--wb-ink)',
+    whiteSpace: 'pre',
+  },
+  '.cm-silk-type-tooltip :not(pre) > code': {
+    padding: '1px 3px',
+    borderRadius: '2px',
+    backgroundColor: 'var(--wb-active-strong)',
+    color: 'var(--wb-ink)',
+  },
+  '.cm-silk-type-tooltip h1, .cm-silk-type-tooltip h2, .cm-silk-type-tooltip h3, .cm-silk-type-tooltip h4, .cm-silk-type-tooltip h5, .cm-silk-type-tooltip h6': {
+    color: 'var(--wb-ink)',
+    fontSize: 'inherit',
+    fontWeight: '600',
+  },
+  '.cm-silk-type-tooltip ul, .cm-silk-type-tooltip ol': {
+    marginBottom: '0',
+    paddingLeft: '20px',
+  },
+  '.cm-silk-type-tooltip li + li': { marginTop: '3px' },
+  '.cm-silk-type-tooltip blockquote': {
+    paddingLeft: '8px',
+    borderLeft: '2px solid var(--wb-hairline-strong)',
+    color: 'var(--wb-ink-3)',
+  },
+  '.cm-silk-type-tooltip a': { color: 'var(--wb-violet)', textDecoration: 'underline' },
+  '.cm-silk-type-tooltip hr': { border: '0', borderTop: '1px solid var(--wb-hairline)' },
 })
 
 export function SilkEditor(props: {
@@ -112,18 +153,26 @@ export function SilkEditor(props: {
 
   // The language-server session mirrors the snapshot the whole workbench shares.
   const session = useMemo<LspSession>(
-    () => ({
-      document: LspDocument.make({
-        uri: props.module,
-        version: 0,
-        workspace: `labs:${props.module}`,
-        module: props.module,
-        sourceRoot: '/',
-        bytes: encoder.encode(props.value),
-      }),
-      snapshot: props.snapshot,
-    }),
-    [props.module, props.value, props.snapshot],
+    () => {
+      const source = Analysis.sources(props.snapshot).get(props.module)
+      const bytes =
+        source === undefined ? encoder.encode(props.value) : Uint8Array.from(source.bytes)
+      return {
+        document: LspDocument.make({
+          uri: props.module,
+          version: 0,
+          workspace: `labs:${props.module}`,
+          module: props.module,
+          sourceRoot: '/',
+          // During a typing burst, the editor value is ahead of analysis. Keep LSP document bytes
+          // paired with their snapshot; the fallback covers a newly added module until it settles.
+          bytes,
+        }),
+        snapshot: props.snapshot,
+        source: decoder.decode(bytes),
+      }
+    },
+    [props.module, props.snapshot],
   )
   const sessionRef = useRef(session)
   sessionRef.current = session
@@ -135,6 +184,7 @@ export function SilkEditor(props: {
     const view = viewRef.current
     if (view === null) return false
     const { document: lspDocument, snapshot } = sessionRef.current
+    if (view.state.doc.toString() !== sessionRef.current.source) return false
     const edit = Effect.runSync(LspDocument.format(lspDocument, snapshot))[0]
     if (edit === undefined) return false
     view.dispatch({
@@ -171,6 +221,7 @@ export function SilkEditor(props: {
     // Hover asks the language server's Document actor for its structured compiler presentation.
     const typeHover = hoverTooltip((view, position) => {
       const { document: lspDocument, snapshot } = sessionRef.current
+      if (view.state.doc.toString() !== sessionRef.current.source) return null
       const line = view.state.doc.lineAt(position)
       const hover = LspDocument.hover(lspDocument, snapshot, {
         line: line.number - 1,
@@ -189,9 +240,9 @@ export function SilkEditor(props: {
         above: true,
         create: () => {
           const dom = document.createElement('div')
-          dom.className = 'cm-silk-type-tooltip'
-          dom.textContent = hoverText.replace(/^```silk\n/, '').replace(/\n```$/, '')
-          return { dom }
+          const root = createRoot(dom)
+          root.render(<Hover.Content markdown={hoverText} />)
+          return { dom, destroy: () => root.unmount() }
         },
       }
     })
@@ -248,7 +299,7 @@ export function SilkEditor(props: {
   // Runs after the sync effect above, so the view's doc always matches the linted value.
   useEffect(() => {
     const view = viewRef.current
-    if (view === null || view.state.doc.toString() !== props.value) return
+    if (view === null || view.state.doc.toString() !== session.source) return
     const diagnostics = LspDocument.diagnostics(session.document, session.snapshot, () => undefined)
     view.dispatch(
       setDiagnostics(
@@ -264,7 +315,7 @@ export function SilkEditor(props: {
         })),
       ),
     )
-  }, [session, props.value])
+  }, [session])
 
   // Reflect the shared span cursor, scrolling to it only when it came from another pane.
   const cursor = props.cursor
