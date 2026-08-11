@@ -13,6 +13,8 @@ skill and update this file rather than preserving an older convention.
 
 ## Agent skills
 
+Follow [ATOM-REACT-STYLEGUIDE.md](ATOM-REACT-STYLEGUIDE.md) for Effect Atom and `@effect/atom-react` code.
+
 ### Issue tracker
 
 Use the local Markdown tracker. General issues live under `.scratch/<feature>/`; Wayfinder maps

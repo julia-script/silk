@@ -14,7 +14,7 @@ import { setDiagnostics } from '@codemirror/lint'
 import { Annotation, EditorState, StateEffect, StateField } from '@codemirror/state'
 import type { DecorationSet } from '@codemirror/view'
 import { Decoration, EditorView, hoverTooltip, keymap } from '@codemirror/view'
-import type * as Analysis from '@silk-effect/compiler/Analysis'
+import * as Analysis from '@silk-effect/compiler/Analysis'
 import * as SilkCodeMirror from '@silk-effect/language/CodeMirror'
 import * as LspDocument from '@silk-effect/lsp/Document'
 import * as Effect from 'effect/Effect'
@@ -24,11 +24,13 @@ import * as Hover from './Hover'
 import type { Span } from './row/row'
 
 const encoder = new TextEncoder()
+const decoder = new TextDecoder()
 
 /** One language-server view of the active module, rebuilt with the shared snapshot. */
 interface LspSession {
   readonly document: LspDocument.Document
   readonly snapshot: Analysis.Snapshot
+  readonly source: string
 }
 
 /** Translates one protocol position into a clamped CodeMirror character offset. */
@@ -151,18 +153,26 @@ export function SilkEditor(props: {
 
   // The language-server session mirrors the snapshot the whole workbench shares.
   const session = useMemo<LspSession>(
-    () => ({
-      document: LspDocument.make({
-        uri: props.module,
-        version: 0,
-        workspace: `labs:${props.module}`,
-        module: props.module,
-        sourceRoot: '/',
-        bytes: encoder.encode(props.value),
-      }),
-      snapshot: props.snapshot,
-    }),
-    [props.module, props.value, props.snapshot],
+    () => {
+      const source = Analysis.sources(props.snapshot).get(props.module)
+      const bytes =
+        source === undefined ? encoder.encode(props.value) : Uint8Array.from(source.bytes)
+      return {
+        document: LspDocument.make({
+          uri: props.module,
+          version: 0,
+          workspace: `labs:${props.module}`,
+          module: props.module,
+          sourceRoot: '/',
+          // During a typing burst, the editor value is ahead of analysis. Keep LSP document bytes
+          // paired with their snapshot; the fallback covers a newly added module until it settles.
+          bytes,
+        }),
+        snapshot: props.snapshot,
+        source: decoder.decode(bytes),
+      }
+    },
+    [props.module, props.snapshot],
   )
   const sessionRef = useRef(session)
   sessionRef.current = session
@@ -174,6 +184,7 @@ export function SilkEditor(props: {
     const view = viewRef.current
     if (view === null) return false
     const { document: lspDocument, snapshot } = sessionRef.current
+    if (view.state.doc.toString() !== sessionRef.current.source) return false
     const edit = Effect.runSync(LspDocument.format(lspDocument, snapshot))[0]
     if (edit === undefined) return false
     view.dispatch({
@@ -210,6 +221,7 @@ export function SilkEditor(props: {
     // Hover asks the language server's Document actor for its structured compiler presentation.
     const typeHover = hoverTooltip((view, position) => {
       const { document: lspDocument, snapshot } = sessionRef.current
+      if (view.state.doc.toString() !== sessionRef.current.source) return null
       const line = view.state.doc.lineAt(position)
       const hover = LspDocument.hover(lspDocument, snapshot, {
         line: line.number - 1,
@@ -287,7 +299,7 @@ export function SilkEditor(props: {
   // Runs after the sync effect above, so the view's doc always matches the linted value.
   useEffect(() => {
     const view = viewRef.current
-    if (view === null || view.state.doc.toString() !== props.value) return
+    if (view === null || view.state.doc.toString() !== session.source) return
     const diagnostics = LspDocument.diagnostics(session.document, session.snapshot, () => undefined)
     view.dispatch(
       setDiagnostics(
@@ -303,7 +315,7 @@ export function SilkEditor(props: {
         })),
       ),
     )
-  }, [session, props.value])
+  }, [session])
 
   // Reflect the shared span cursor, scrolling to it only when it came from another pane.
   const cursor = props.cursor

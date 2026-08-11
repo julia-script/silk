@@ -34,6 +34,7 @@ import { EmptyState, RowList } from './row/row'
 import {
   activeModuleAtom,
   analysisAtom,
+  analysisInputAtom,
   countsAtom,
   cursorAtom,
   evaluationAtom,
@@ -160,8 +161,7 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
   const [showTrivia, setShowTrivia] = useState(false)
 
   const snapshot = useAtomValue(snapshotAtom)
-  const modules = useAtomValue(modulesAtom)
-  const root = useAtomValue(rootAtom)
+  const analysisInput = useAtomValue(analysisInputAtom)
   const mode = useAtomValue(modeAtom)
   const profile = useAtomValue(profileAtom)
   const cursor = useAtomValue(cursorAtom)
@@ -223,8 +223,8 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
 
   const context: ViewContext = {
     snapshot,
-    modules,
-    root,
+    modules: analysisInput.modules,
+    root: analysisInput.rootModule,
     mode,
     profile,
     cursor,

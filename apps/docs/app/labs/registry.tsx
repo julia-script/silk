@@ -76,7 +76,7 @@ export interface Fact {
 /** Everything a view needs to render. Built once per source edit and shared by every pane. */
 export interface ViewContext {
   readonly snapshot: Analysis.Snapshot
-  /** Every module of the compilation request, keyed by module name. */
+  /** Every module represented by `snapshot`, keyed by module name. */
   readonly modules: Readonly<Record<string, string>>
   /** Which module the request is rooted at — the entry the driver starts from. */
   readonly root: string
