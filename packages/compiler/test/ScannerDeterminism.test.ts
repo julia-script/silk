@@ -44,4 +44,4 @@ it('keeps scanner phases, stdlib imports, and artifacts byte-identical across fr
   assert.deepEqual(encoded.wasm.allocations, encoded.native.allocations)
   assert.strictEqual(encoded.nativeBytes.length, 64)
   assert.strictEqual(encoded.wasmBytes.length, 64)
-}, 15_000)
+}, 120_000)

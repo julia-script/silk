@@ -107,13 +107,15 @@ its growable owned counterpart. Only literals and compile-time constants create 
 general static references, mutable globals, lazy initialization, or user-controlled linker
 sections.
 
-`Path` is a nominal owned platform-native filesystem path and `PathSlice` is its lexical view. On
-the required Unix hosts, a path preserves arbitrary non-NUL bytes rather than claiming to be UTF-8.
-Path construction, joining, parent, extension, and component operations remain path operations.
-Rendering uses deterministic escaping and never silently substitutes invalid text. `OsString` is
-the corresponding nominal platform-boundary value for child arguments and environment entries;
-valid strings and paths convert without loss. Source-module identity remains a separate normalized,
-case-sensitive logical value relative to a source root rather than an OS path.
+`Path` is a nominal owned portable filesystem path and `PathSlice` is its lexical view. Its
+normalized component and root semantics are shared by native, in-memory, and browser virtual-file-
+system providers. Path construction, joining, parent, extension, and component operations remain
+path operations; no operation consults a hidden current directory. `PlatformPath` is a separate
+lower-level provider value for programs that deliberately require native path spellings, including
+arbitrary non-NUL Unix bytes. Conversion between the two is explicit and may fail when a portable
+path cannot be represented honestly. `OsString` remains the platform-boundary value for child
+arguments and environment entries. Source-module identity is still a distinct normalized,
+case-sensitive logical value relative to a source root rather than either path type.
 
 The associative collections are `HashMap<K, V>` and a nominal `HashSet<T>` built over the same
 machinery. Keys use one type-owned `HashKey` witness containing equivalence and a 64-bit hash under
@@ -153,15 +155,22 @@ call functions, loop, recurse, allocate, borrow runtime storage, create raw poin
 typed row, require services, perform I/O, inspect types, or own cleanup. String concatenation and
 general compile-time execution are deferred.
 
-Host access is split into four nominal services rather than one platform capability:
+Host access is layered into portable services and explicit lower-level platform capabilities rather
+than one ambient platform object:
 
 - `FileSystem` performs explicit path-based whole-file reads and writes, path inspection and
   resolution, directory creation, unique owned temporary-directory creation, rename, and removal.
-  It exposes no handles, seeking, streaming, mapping, buffering, locking, directory-discovery API,
-  implicit current directory, or environment lookup. `PathResolution` reports exact absolute host
-  spelling, final entry kind, and whether any traversed component was a symlink. The source loader,
-  not the service, applies the policy that a requested module path is normalized beneath its source
-  root, is a regular file, crosses no symlink, and matches physical casing byte-for-byte.
+  It exposes only semantics implementable by native, deterministic in-memory, and browser virtual-
+  file-system providers: complete owned byte values, portable paths and errors, stable entry kinds,
+  and explicit ordering. It exposes no native handles, seeking, streaming, mapping, buffering,
+  locking, implicit current directory, environment lookup, or host-only metadata. `PathResolution`
+  reports the normalized provider path, final entry kind, and whether provider-defined indirection
+  was traversed. The source loader, not the service, applies source-root containment and canonicality
+  policy.
+- `PlatformFileSystem` is an optional lower-level capability for native paths, handles, seeking,
+  mapping, locking, exact host metadata, and other operations without an honest cross-provider
+  contract. Native `FileSystem` providers may build on it; portable programs and standard-library
+  actors do not require it. Choosing it is an explicit portability decision.
 - `TemporaryDirectory` is an affine owned resource with an infallible best-effort `Drop` fallback.
   Deterministically named bitcode and object children live beneath it. An explicit consuming removal
   operation exposes cleanup failure when it matters. Saving an intermediate copies or renames it to
@@ -177,17 +186,25 @@ Host access is split into four nominal services rather than one platform capabil
   Effect completes only after the bytes are accepted or the write fails, without promising that a
   future execution adapter must block its operating-system thread. `StreamError` includes broken
   pipe as a typed failure. Formatting happens above this boundary; stdin, terminal detection,
-  colors, cursor control, flushing, logging, and locking are deferred. The later concurrency and
+  colors, cursor control, flushing, logging, and locking are separate concerns. The later concurrency and
   Stream/Sink constraints are recorded as a non-binding
   [direction](../research/concurrency-and-parallelism-direction.md).
+- `Logger` receives one complete semantic `LogEvent` per call through `Effect.log`. It does not
+  expose stream fragments or make stdout part of logging semantics. A provider may render events to
+  `StandardStreams`, retain them for tests, forward them to a browser console or OpenTelemetry, fan
+  them out, or discard them under explicit policy. The first live provider renders complete events
+  to stdout; an in-memory provider proves that the contract is host-independent. Logging remains an
+  explicit Effect requirement and ordinary source-defined API rather than a compiler or stdout
+  intrinsic.
 - `MonotonicClock.now` returns an opaque copyable `Instant` infallibly; subtracting ordered instants
   produces a nominal nanosecond `Duration`. Implementations are replaceable for deterministic
   tests. Calendar time, time zones, sleeping, deadlines, timers, and scheduling are absent.
 
-`FileError` retains the operation, owned path, portable reason, and any native code as diagnostic
-detail. Its closed bootstrap reasons are not found, already exists, permission denied, invalid
-path, wrong type, not empty, no space, too large, unsupported, and otherwise unclassified platform
-failure. Raw `errno` values do not become control-flow tags, and allocation failure remains
+`FileError` retains the operation, owned portable path, portable reason, and optional provider
+detail. Its closed bootstrap reasons are not found, already exists, permission denied, invalid path,
+wrong type, not empty, no space, too large, unsupported, and otherwise unclassified provider
+failure. Native providers may retain an OS code as presentation detail; virtual providers need not
+invent one. Raw `errno` values do not become control-flow tags, and allocation failure remains
 separate. Process and stream failures follow the same rule: stable semantic recovery branches own
 control flow while native codes remain presentation detail.
 
@@ -221,7 +238,8 @@ from one toolchain bundle. There is no stable runtime ABI, dynamic shim discover
 negotiation, user-facing FFI, LLVM API, or independently replaceable system runtime.
 
 Finally, the native entry adapter creates the approved provider owners, constructs `HostInput`,
-specializes the compiler-driver effect with the allocator roles and four host services,
+specializes the compiler-driver effect with allocator roles and the required portable services,
+including a stdout-backed Logger and native-backed FileSystem,
 and runs it. It closes three ordinary outcome classes: successful artifact production, source
 rejection with diagnostics, and operational failure. It deterministically renders the latter two,
 writes them to stderr, cleans up providers, and returns a class-specific platform status. If
@@ -234,9 +252,10 @@ The actor inventory is therefore intentionally finite: layouts and allocation me
 allocator implementation; `Allocation`, typed raw buffers and uninitialized slots; `Box`, arrays,
 slices, vectors, bytes, strings and their static
 forms, OS strings, paths, hash maps and sets, hash keys and seeds; scalar conversion operations;
-host input, instants and durations; the four host capabilities and their owned results/errors;
+host input, instants and durations; portable Logger and FileSystem capabilities, explicit lower-
+level host capabilities, and their owned results/errors;
 temporary directories; and pure diagnostic rendering. Concurrency, atomics, async scheduling,
-networking, serialization, observability, testing frameworks, general FFI, directory discovery,
+networking, serialization, tracing, testing frameworks, general FFI, directory discovery,
 open or streaming files, random entropy, wall-clock time, shared ownership, stored borrows, public
 finalizer registries, arena-backed escaping values, general iterators and formatting, richer
 allocators, and specialized collections remain

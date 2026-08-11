@@ -254,7 +254,7 @@ effect fn read() -> i32 ? &Clock@Primary {
 pub fn main() -> i32 {
   let clock = Clock {}
   let pending = read()
-    |> Effect.bindRequirement(&clock, @Primary)
+    |> Intrinsic.bindRequirement(&clock, @Primary)
   return run pending
 }
 `,
@@ -352,7 +352,7 @@ pub fn main() -> i32 {
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
-  let mut buffer = RawBuffer.from<i32>(move allocation, 2)
+  let mut buffer = Intrinsic.rawBufferFrom<i32>(move allocation, 2)
   drop buffer
   return 42
 }

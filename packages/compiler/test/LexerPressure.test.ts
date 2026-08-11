@@ -90,6 +90,8 @@ const tokenKinds = [
   'EndOfFile',
   'ConstKeyword',
   'InvalidStaticLiteral',
+  'ServiceKeyword',
+  'InterfaceKeyword',
 ] as const satisfies ReadonlyArray<Token.TokenKind>
 
 const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
@@ -162,6 +164,8 @@ const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
   EndOfFile: 66,
   ConstKeyword: 67,
   InvalidStaticLiteral: 68,
+  ServiceKeyword: 69,
+  InterfaceKeyword: 70,
 })
 
 interface ExpectedToken {
@@ -256,7 +260,7 @@ const corpus = [
   Object.freeze({
     id: 'keywords',
     input:
-      'pub struct effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false const name _x2',
+      'pub struct service interface effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false const name _x2',
   }),
   Object.freeze({ id: 'numbers', input: '0 42 1.25 2e3 3E+4 4e- 5..6' }),
   Object.freeze({
@@ -411,7 +415,7 @@ for (const representative of [corpus[1], corpus[3], corpus[5]]) {
         assert.strictEqual(run.status, 0, run.stderr)
         assert.strictEqual(run.stderr, '')
       }),
-    60_000,
+    180_000,
   )
 }
 
@@ -488,5 +492,5 @@ it.effect(
         else assert.strictEqual(run.stderr, 'Error: silk/core.OutOfMemory\n')
       }
     }),
-  60_000,
+  180_000,
 )

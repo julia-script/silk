@@ -45,7 +45,7 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(
       Analysis.modules(self).map((module) => module.name),
-      ['app/Main', 'compiler/Coverage', 'compiler/Member'],
+      ['app/Main', 'compiler/Coverage', 'compiler/Member', 'silk/option', 'silk/usize'],
     )
     for (const name of moduleNames) {
       assert.notStrictEqual(Analysis.syntaxOf(self, name), undefined)

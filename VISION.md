@@ -60,21 +60,24 @@ TypeScript can become direct language features.
 The goal is not to reproduce Effect's syntax. It is to preserve the way Effect programs fit
 together.
 
-## Bootstrap with Effect, then self-host
+## Bootstrap with Effect, then self-host from evidence
 
 The first compiler will be written in Effect. Yes, JavaScript will initially compile a low-level
 language.
 
-The first milestone is to build the smallest useful version of the language capable of compiling
-itself. As soon as self-hosting becomes practical, the compiler and tooling should be ported to the
-new language.
+The first milestone is to build the smallest coherent version of the language that survives real,
+recognizable programs. The TypeScript compiler should be replaced progressively once Silk is
+capable of expressing compiler modules without making self-hosting itself choose premature language
+features. Native fixed-point rebuilding is the acceptance gate when that work begins.
 
 That transition should be natural, given that most of the primitives are the same. To make the
 eventual port easier, the original implementation can deliberately avoid JavaScript patterns that
 do not translate cleanly into a low-level environment.
 
-The goal is not to build the entire language before using it. The goal is to reach self-hosting as
-early as possible and then develop the language using itself.
+The goal is not to build the entire language before using it, nor to port compiler files merely to
+claim progress. The goal is to make each Silk-written module pressure a language model that is
+already useful beyond the compiler, preserve equivalence with the stage-0 implementation, and then
+develop the language using itself.
 
 ## Designed for humans and AI
 
@@ -139,13 +142,33 @@ can write the ceremony. The compiler should not have to perform archaeology.
 
 ## Observability by default
 
-Tracing should be a language-level capability.
+Semantic logging and tracing should be first-class Effect capabilities, distinct from raw standard
+output. `Effect.log` should dispatch one complete structured event to an explicit `Logger` service;
+the selected provider may render it to standard output, retain it in memory, forward it to
+OpenTelemetry, write it to a browser console, or fan it out without changing the calling program.
+The event boundary must work in browsers and other hosts that do not expose byte-at-a-time process
+streams.
+
+Tracing should build on the same observability model.
 
 A function should be declarable as traceable, given a stable name, and automatically integrated
 with the language's logging and telemetry system. Developers should not have to manually thread
 tracing infrastructure through their programs.
 
 Observability should be part of the execution model, not a library added after the fact.
+
+## Portable services by default
+
+Common services should describe portable program intent rather than the operating system mechanism
+used to fulfill it. A program that reads a complete file or emits one log event should use the same
+capability whether its provider is a native host adapter, an in-memory test implementation, or a
+browser virtual file system.
+
+Lower-level platform-specific services still matter for programs that need native paths, handles,
+mapping, locking, terminal behavior, or another host facility that has no honest portable contract.
+They should sit beneath or beside the common service instead of leaking platform details into it.
+The standard library and documentation should lead developers toward the portable capability and
+make the platform-specific escape hatch explicit.
 
 ## Serialization as a first-class capability
 

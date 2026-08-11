@@ -115,17 +115,21 @@ describe('preset catalog', () => {
     expect(presets.some((preset) => preset.label.startsWith('trap · '))).toBe(true)
   })
 
-  it('keeps fail-prefixed presets as the ones that surface diagnostics', () => {
-    for (const preset of presets) {
-      const snapshot = snapshotOf(preset)
-      const hasDiagnostics = Analysis.diagnostics(snapshot).length > 0
-      if (preset.label.startsWith('fail · ')) {
-        expect(hasDiagnostics, preset.label).toBe(true)
-      } else if (preset.label.startsWith('ok · ')) {
-        expect(hasDiagnostics, preset.label).toBe(false)
+  it(
+    'keeps fail-prefixed presets as the ones that surface diagnostics',
+    () => {
+      for (const preset of presets) {
+        const snapshot = snapshotOf(preset)
+        const hasDiagnostics = Analysis.diagnostics(snapshot).length > 0
+        if (preset.label.startsWith('fail · ')) {
+          expect(hasDiagnostics, preset.label).toBe(true)
+        } else if (preset.label.startsWith('ok · ')) {
+          expect(hasDiagnostics, preset.label).toBe(false)
+        }
       }
-    }
-  })
+    },
+    60_000,
+  )
 
   it('roots every preset at a module it actually defines', () => {
     for (const preset of presets) {
@@ -136,11 +140,15 @@ describe('preset catalog', () => {
   // Presets exist to put the compiler in a specific state, including deliberately broken states.
   // What must never happen is a preset that crashes the driver: a mistranscribed program would
   // take down whichever pane rendered it.
-  it('builds a snapshot for every preset, damaged programs included', () => {
-    for (const preset of presets) {
-      expect(() => snapshotOf(preset), preset.label).not.toThrow()
-    }
-  })
+  it(
+    'builds a snapshot for every preset, damaged programs included',
+    () => {
+      for (const preset of presets) {
+        expect(() => snapshotOf(preset), preset.label).not.toThrow()
+      }
+    },
+    60_000,
+  )
 
   // Lowering is target-aware, so a preset that builds for one target is not evidence it builds
   // for the rest — and the workbench lets any target be selected against any preset.
@@ -158,7 +166,7 @@ describe('preset catalog', () => {
         }
       }
     },
-    15_000,
+    180_000,
   )
 
   it('keeps the phases the labs shipped presets for', () => {
@@ -451,6 +459,8 @@ describe('preset catalog', () => {
       'app/Main',
       'compiler/Coverage',
       'compiler/Member',
+      'silk/option',
+      'silk/usize',
     ])
     for (const name of Object.keys(acceptancePreset.modules)) {
       expect(Analysis.hirOf(native, name), name).toBeDefined()

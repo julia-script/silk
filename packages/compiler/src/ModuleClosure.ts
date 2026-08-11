@@ -297,13 +297,6 @@ const resolvedTargets = (module: Module): ReadonlyArray<string> =>
     ].sort(),
   )
 
-const needsEffectLibrary = (source: SourceFile.SourceFile): boolean => {
-  const text = Array.from(SourceFile.toUint8Array(source), (byte) =>
-    String.fromCharCode(byte),
-  ).join('')
-  return /\bEffect\./.test(text)
-}
-
 /** Computes strongly connected components of size > 1 over resolved imports, deterministically. */
 const cycleFacts = (modules: ReadonlyArray<Module>): ReadonlyArray<ReadonlyArray<string>> => {
   const names = modules.map((module) => module.name)
@@ -430,13 +423,10 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
     )
     loaded.set(name, analysis.module)
     diagnostics.push(analysis.diagnostics)
-    if (
-      !Stdlib.isReserved(name) &&
-      needsEffectLibrary(analysis.module.syntax.source) &&
-      !loaded.has('silk/effects') &&
-      !pending.includes('silk/effects')
-    )
-      pending.push('silk/effects')
+    for (const required of Stdlib.requiredModules(
+      SourceFile.toUint8Array(analysis.module.syntax.source),
+    ))
+      if (!loaded.has(required) && !pending.includes(required)) pending.push(required)
     for (const target of resolvedTargets(analysis.module)) {
       if (!loaded.has(target) && !pending.includes(target)) pending.push(target)
     }

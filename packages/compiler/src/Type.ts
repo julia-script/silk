@@ -201,9 +201,9 @@ export const nominal = (
 
 /** Canonical allocation-free failure used by every allocator implementation. */
 export const outOfMemory: Nominal = nominal('silk/core', 'OutOfMemory')
-export const layout: Nominal = nominal('silk/core', 'Layout')
-export const invalidAlignment: Nominal = nominal('silk/core', 'InvalidAlignment')
-export const layoutOverflow: Nominal = nominal('silk/core', 'LayoutOverflow')
+export const layout: Nominal = nominal('silk/layout', 'Layout')
+export const invalidAlignment: Nominal = nominal('silk/layout', 'InvalidAlignment')
+export const layoutOverflow: Nominal = nominal('silk/layout', 'LayoutOverflow')
 /** The implementation-erased allocation capability requested by allocation Effects. */
 export const allocator: Nominal = nominal('silk/core', 'Allocator')
 /** Explicit host capability for complete stdout and stderr byte writes. */
@@ -271,17 +271,9 @@ export const isSlot = (
   self.arguments.length === 1
 
 export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
-  [outOfMemory.name, outOfMemory],
-  [layout.name, layout],
-  [invalidAlignment.name, invalidAlignment],
-  [layoutOverflow.name, layoutOverflow],
-  [allocator.name, allocator],
-  [standardStreams.name, standardStreams],
-  [streamWriteFailure.name, streamWriteFailure],
   [allocation.name, allocation],
   [dropCapability.name, dropCapability],
   [reportCapability.name, reportCapability],
-  [systemAllocator.name, systemAllocator],
   ['RawBuffer', nominal('silk/core', 'RawBuffer')],
   ['Slot', nominal('silk/core', 'Slot')],
 ])
@@ -295,10 +287,7 @@ export const intrinsicNominalOrdinal = (self: Nominal): number =>
   )
 
 /** Compiler-shipped nominal capability witnesses; user declarations extend this in the index. */
-export const intrinsicConformances: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['nominal:silk/core.SystemAllocator<>', new Set(['nominal:silk/core.Allocator<>'])],
-  ['nominal:silk/core.StreamWriteFailure<>', new Set(['nominal:silk/core.Report<>'])],
-])
+export const intrinsicConformances: ReadonlyMap<string, ReadonlySet<string>> = new Map([])
 
 /** Tests one compiler-shipped nominal capability witness without inspecting provider kinds. */
 export const intrinsicallyConforms = (provider: Type, capability: Nominal): boolean =>

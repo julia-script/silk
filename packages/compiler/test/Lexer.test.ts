@@ -67,6 +67,31 @@ it('recognizes keywords only as complete identifiers', () => {
   )
 })
 
+it('reserves service only as a complete declaration keyword', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://service-keyword.silk', ascii('service services serviceLogger')),
+  )
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['ServiceKeyword', 'Identifier', 'Identifier', 'EndOfFile'],
+  )
+})
+
+it('reserves interface only as a complete declaration keyword', () => {
+  const result = Lexer.lex(
+    SourceFile.make(
+      'memory://interface-keyword.silk',
+      ascii('interface interfaces interfaceValue'),
+    ),
+  )
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['InterfaceKeyword', 'Identifier', 'Identifier', 'EndOfFile'],
+  )
+})
+
 it('recognizes all static-literal forms with exact multiline boundaries', () => {
   const text = '"one" b"two" """line 1\r\n// still text\nline 3""" b"""a \\"b\\" c""" tail'
   const source = SourceFile.make('memory://literal-forms.silk', ascii(text))

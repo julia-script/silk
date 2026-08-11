@@ -369,7 +369,7 @@ export interface AllocationTraceEvent {
 
 /** One complete attempted host write, including its deterministic typed outcome. */
 export interface StandardStreamTraceEvent {
-  readonly _tag: 'StandardStreamWrite'
+  readonly _tag: 'HostWrite'
   readonly function: DeclarationIndex.CanonicalId
   readonly destination: StandardStreams.Destination
   readonly bytes: ReadonlyArray<number>
@@ -2085,7 +2085,7 @@ function* executeFunction(
             )
             break
           }
-          case 'StandardStreamWrite': {
+          case 'HostWrite': {
             const stream = readI32(operation.stream)
             const viewed = read(operation.bytes).value
             const bytes = (() => {
@@ -2125,7 +2125,7 @@ function* executeFunction(
             if (result === undefined) return blockedStep({ _tag: 'MissingStandardStreams' })
             trace.push(
               Object.freeze({
-                _tag: 'StandardStreamWrite',
+                _tag: 'HostWrite',
                 function: fn.id,
                 destination,
                 bytes: Object.freeze(Array.from(bytes)),
@@ -3914,20 +3914,6 @@ export const evaluate = (
       _tag: 'Blocked',
       entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
       reason: Object.freeze({ _tag: 'InvalidMir', violations }),
-      trace: Object.freeze([]),
-    })
-  }
-  if (
-    program.entry._tag === 'EffectEntry' &&
-    program.entry.requirements.some((requirement) =>
-      Type.equals(requirement.capability, Type.standardStreams),
-    ) &&
-    options.standardStreams === undefined
-  ) {
-    return Object.freeze({
-      _tag: 'Blocked',
-      entry: discovery.entry.key.declaration,
-      reason: Object.freeze({ _tag: 'MissingStandardStreams' }),
       trace: Object.freeze([]),
     })
   }

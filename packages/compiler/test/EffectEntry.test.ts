@@ -199,7 +199,7 @@ it.effect('executes Evaluate effects in order and halts on failure across every 
       assert.strictEqual(
         evaluated._tag,
         expected === 0 ? 'Completed' : 'UnhandledFailure',
-        JSON.stringify(evaluated),
+        JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? `${value}n` : value)),
       )
       if (name === 'evaluate-failure') {
         assert.strictEqual(

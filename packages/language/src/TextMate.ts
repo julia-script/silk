@@ -11,6 +11,8 @@ export type KeywordKind = Extract<Token.TokenKind, `${string}Keyword`>
 export const keywords: Record<KeywordKind, string> = {
   PubKeyword: 'pub',
   StructKeyword: 'struct',
+  ServiceKeyword: 'service',
+  InterfaceKeyword: 'interface',
   FnKeyword: 'fn',
   EffectKeyword: 'effect',
   RunKeyword: 'run',

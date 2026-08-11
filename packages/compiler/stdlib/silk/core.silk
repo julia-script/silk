@@ -1,0 +1,75 @@
+import silk.layout { Layout as LayoutValue }
+
+/// Allocates owned storage through an explicitly provided implementation.
+pub struct OutOfMemory {}
+
+pub effect fn outOfMemory() -> never ! OutOfMemory {
+  fail OutOfMemory {}
+}
+
+pub service Allocator {
+  effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemory ? &mut Allocator
+}
+
+/// Constructs the process-backed allocation provider.
+pub struct SystemAllocator {}
+
+pub fn make() -> SystemAllocator {
+  return SystemAllocator {}
+}
+
+effect fn allocate(self: &mut SystemAllocator, layout: LayoutValue) -> Allocation ! OutOfMemory {
+  return run Intrinsic.systemAllocationAcquire(move layout)
+}
+
+impl Allocator for SystemAllocator {
+  allocate: SystemAllocator.allocate
+}
+
+/// Failure to commit one complete stream message.
+pub struct StreamWriteFailure {}
+
+impl Report for StreamWriteFailure {}
+
+/// Portable complete-message output contract.
+pub service StandardStreams {
+  effect fn writeAll(
+    destination: bool,
+    bytes: &[u8]
+  ) -> () ! StreamWriteFailure ? &mut StandardStreams
+}
+
+/// Process-backed standard-stream provider.
+pub struct NativeStandardStreams {}
+
+pub fn stdout() -> bool {
+  return false
+}
+
+pub fn stderr() -> bool {
+  return true
+}
+
+pub fn native() -> NativeStandardStreams {
+  return NativeStandardStreams {}
+}
+
+effect fn nativeWriteAll(
+  self: &NativeStandardStreams,
+  destination: bool,
+  bytes: &[u8]
+) -> () ! StreamWriteFailure {
+  return run Intrinsic.standardStreamWrite(destination, bytes)
+}
+
+impl StandardStreams for NativeStandardStreams {
+  writeAll: NativeStandardStreams.nativeWriteAll
+}
+
+/// Builds one complete-write service effect.
+pub effect fn send(
+  destination: bool,
+  bytes: &[u8]
+) -> () ! StreamWriteFailure ? &mut StandardStreams {
+  return run StandardStreams.writeAll(move destination, bytes)
+}

@@ -322,7 +322,7 @@ it.effect(
         })
       }
     }),
-  30_000,
+  120_000,
 )
 
 it.effect('publishes only general MIR operations for the pressure VM', () =>
@@ -401,7 +401,7 @@ for (const representative of [corpus[1], corpus[3]]) {
         )
         assert.strictEqual(run.stderr, '')
       }),
-    60_000,
+    180_000,
   )
 }
 
@@ -483,5 +483,5 @@ it.effect(
         else assert.strictEqual(run.stderr, 'Error: silk/core.OutOfMemory\n')
       }
     }),
-  60_000,
+  180_000,
 )

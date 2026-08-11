@@ -86,11 +86,15 @@ it('resolves fixed and target-width scalar facts without phase-specific cases', 
       'greaterOrEqual',
     ],
   )
+  const intrinsic = Intrinsic.findActor('Intrinsic')
+  assert.notStrictEqual(intrinsic, undefined)
   for (const scalar of Scalar.all()) {
-    const intrinsic = Intrinsic.findActor(scalar.spelling)
-    assert.deepEqual(
-      intrinsic?.operations.map((candidate) => candidate.spelling),
-      scalar.operations.map((candidate) => candidate.spelling),
-    )
+    for (const operation of scalar.operations) {
+      const resolved = Intrinsic.findOperation(scalar.spelling, operation.spelling)
+      assert.notStrictEqual(resolved, undefined)
+      assert.strictEqual(resolved?.rule._tag, 'BuiltinRule')
+      if (resolved?.rule._tag === 'BuiltinRule')
+        assert.strictEqual(resolved.rule.operation, operation.code)
+    }
   }
 })

@@ -233,11 +233,12 @@ const directStaticCases = new Set([
   'map-both-success-effect',
   'map-both-failure-effect',
   'flat-map-effect',
+  'stored-effect',
   'affine-imperative',
   'affine-effect',
   'trap-effect',
 ])
-const constructorOnlyCases = new Set(['provide-effect', 'stored-effect'])
+const constructorOnlyCases = new Set(['provide-effect'])
 
 const clangText = (bitcode, id, arguments_) => {
   const bitcodePath = join(temporary, `${id}.bc`)

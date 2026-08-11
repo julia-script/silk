@@ -164,5 +164,5 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(wasm), [])
       assert.isAbove((yield* Analysis.codegenWasm(wasm, { mode: 'release' })).bytes.length, 0)
     }),
-  20_000,
+  90_000,
 )

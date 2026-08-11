@@ -108,7 +108,7 @@ it.effect('rejects every prohibited allocation shape before lowering', () =>
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
-  let mut buffer = RawBuffer.from<i32>(move allocation, 2)
+  let mut buffer = Intrinsic.rawBufferFrom<i32>(move allocation, 2)
   drop buffer
   return 1
 }

@@ -68,18 +68,21 @@ const encodeSnapshot = (self) => ({
 })
 
 process.stdout.write(
-  JSON.stringify({
-    ...encodeSnapshot(native),
-    wasmLayout:
-      Analysis.layoutOf(wasm)._tag === 'Available'
-        ? Layout.encode(Analysis.layoutOf(wasm).value)
-        : Analysis.layoutOf(wasm).error.message,
-    wasmMir: Mir.encode(Analysis.loweredMir(wasm)),
-    nativeSymbols: nativeArtifact.symbols,
-    wasmSymbols: wasmArtifact.symbols,
-    nativeText: hash(nativeArtifact.ir),
-    wasmText: hash(wasmArtifact.wat),
-    nativeBytes: hash(nativeArtifact.bitcode),
-    wasmBytes: hash(wasmArtifact.bytes),
-  }),
+  JSON.stringify(
+    {
+      ...encodeSnapshot(native),
+      wasmLayout:
+        Analysis.layoutOf(wasm)._tag === 'Available'
+          ? Layout.encode(Analysis.layoutOf(wasm).value)
+          : Analysis.layoutOf(wasm).error.message,
+      wasmMir: Mir.encode(Analysis.loweredMir(wasm)),
+      nativeSymbols: nativeArtifact.symbols,
+      wasmSymbols: wasmArtifact.symbols,
+      nativeText: hash(nativeArtifact.ir),
+      wasmText: hash(wasmArtifact.wat),
+      nativeBytes: hash(nativeArtifact.bitcode),
+      wasmBytes: hash(wasmArtifact.bytes),
+    },
+    (_key, value) => (typeof value === 'bigint' ? value.toString() : value),
+  ),
 )

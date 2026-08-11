@@ -1,0 +1,174 @@
+/// Calls the concrete f32 negate primitive.
+pub fn negate(value: f32) -> f32 {
+  return Intrinsic.f32Negate(value)
+}
+
+/// Calls the concrete f32 add primitive.
+pub fn add(left: f32, right: f32) -> f32 {
+  return Intrinsic.f32Add(left, right)
+}
+
+/// Calls the concrete f32 subtract primitive.
+pub fn subtract(left: f32, right: f32) -> f32 {
+  return Intrinsic.f32Subtract(left, right)
+}
+
+/// Calls the concrete f32 multiply primitive.
+pub fn multiply(left: f32, right: f32) -> f32 {
+  return Intrinsic.f32Multiply(left, right)
+}
+
+/// Calls the concrete f32 divide primitive.
+pub fn divide(left: f32, right: f32) -> f32 {
+  return Intrinsic.f32Divide(left, right)
+}
+
+/// Calls the concrete f32 remainder primitive.
+pub fn remainder(left: f32, right: f32) -> f32 {
+  return Intrinsic.f32Remainder(left, right)
+}
+
+/// Calls the concrete f32 equals primitive.
+pub fn equals(left: f32, right: f32) -> bool {
+  return Intrinsic.f32Equals(left, right)
+}
+
+/// Calls the concrete f32 notEquals primitive.
+pub fn notEquals(left: f32, right: f32) -> bool {
+  return Intrinsic.f32NotEquals(left, right)
+}
+
+/// Calls the concrete f32 lessThan primitive.
+pub fn lessThan(left: f32, right: f32) -> bool {
+  return Intrinsic.f32LessThan(left, right)
+}
+
+/// Calls the concrete f32 lessOrEqual primitive.
+pub fn lessOrEqual(left: f32, right: f32) -> bool {
+  return Intrinsic.f32LessOrEqual(left, right)
+}
+
+/// Calls the concrete f32 greaterThan primitive.
+pub fn greaterThan(left: f32, right: f32) -> bool {
+  return Intrinsic.f32GreaterThan(left, right)
+}
+
+/// Calls the concrete f32 greaterOrEqual primitive.
+pub fn greaterOrEqual(left: f32, right: f32) -> bool {
+  return Intrinsic.f32GreaterOrEqual(left, right)
+}
+
+/// Calls the concrete f32 isNaN primitive.
+pub fn isNaN(value: f32) -> bool {
+  return Intrinsic.f32IsNaN(value)
+}
+
+/// Calls the concrete f32 isInfinite primitive.
+pub fn isInfinite(value: f32) -> bool {
+  return Intrinsic.f32IsInfinite(value)
+}
+
+/// Calls the concrete f32 isFinite primitive.
+pub fn isFinite(value: f32) -> bool {
+  return Intrinsic.f32IsFinite(value)
+}
+
+/// Calls the concrete f32 isNormal primitive.
+pub fn isNormal(value: f32) -> bool {
+  return Intrinsic.f32IsNormal(value)
+}
+
+/// Calls the concrete f32 isSubnormal primitive.
+pub fn isSubnormal(value: f32) -> bool {
+  return Intrinsic.f32IsSubnormal(value)
+}
+
+/// Calls the concrete f32 isSignNegative primitive.
+pub fn isSignNegative(value: f32) -> bool {
+  return Intrinsic.f32IsSignNegative(value)
+}
+
+/// Calls the concrete f32 totalOrder primitive.
+pub fn totalOrder(left: f32, right: f32) -> bool {
+  return Intrinsic.f32TotalOrder(left, right)
+}
+
+/// Calls the concrete f32 toBits primitive.
+pub fn toBits(value: f32) -> u32 {
+  return Intrinsic.f32ToBits(value)
+}
+
+/// Calls the concrete f32 fromBits primitive.
+pub fn fromBits(value: u32) -> f32 {
+  return Intrinsic.f32FromBits(value)
+}
+
+/// Calls the concrete f32 sin primitive.
+pub fn sin(value: f32) -> f32 {
+  return Intrinsic.f32Sin(value)
+}
+
+/// Calls the concrete f32 cos primitive.
+pub fn cos(value: f32) -> f32 {
+  return Intrinsic.f32Cos(value)
+}
+
+/// Calls the concrete f32 toF32 primitive.
+pub fn toF32(value: f32) -> f32 {
+  return Intrinsic.f32ToF32(value)
+}
+
+/// Calls the concrete f32 toF64 primitive.
+pub fn toF64(value: f32) -> f64 {
+  return Intrinsic.f32ToF64(value)
+}
+
+/// Calls the concrete f32 toU8 primitive.
+pub fn toU8(value: f32) -> u8 {
+  return Intrinsic.f32ToU8(value)
+}
+
+/// Calls the concrete f32 toU16 primitive.
+pub fn toU16(value: f32) -> u16 {
+  return Intrinsic.f32ToU16(value)
+}
+
+/// Calls the concrete f32 toU32 primitive.
+pub fn toU32(value: f32) -> u32 {
+  return Intrinsic.f32ToU32(value)
+}
+
+/// Calls the concrete f32 toU64 primitive.
+pub fn toU64(value: f32) -> u64 {
+  return Intrinsic.f32ToU64(value)
+}
+
+/// Calls the concrete f32 toUsize primitive.
+pub fn toUsize(value: f32) -> usize {
+  return Intrinsic.f32ToUsize(value)
+}
+
+/// Calls the concrete f32 toI8 primitive.
+pub fn toI8(value: f32) -> i8 {
+  return Intrinsic.f32ToI8(value)
+}
+
+/// Calls the concrete f32 toI16 primitive.
+pub fn toI16(value: f32) -> i16 {
+  return Intrinsic.f32ToI16(value)
+}
+
+/// Calls the concrete f32 toI32 primitive.
+pub fn toI32(value: f32) -> i32 {
+  return Intrinsic.f32ToI32(value)
+}
+
+/// Calls the concrete f32 toI64 primitive.
+pub fn toI64(value: f32) -> i64 {
+  return Intrinsic.f32ToI64(value)
+}
+
+/// Calls the concrete f32 toIsize primitive.
+pub fn toIsize(value: f32) -> isize {
+  return Intrinsic.f32ToIsize(value)
+}

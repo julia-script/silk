@@ -1,0 +1,14 @@
+/// Calls the concrete bool equals primitive.
+pub fn equals(left: bool, right: bool) -> bool {
+  return Intrinsic.boolEquals(left, right)
+}
+
+/// Calls the concrete bool notEquals primitive.
+pub fn notEquals(left: bool, right: bool) -> bool {
+  return Intrinsic.boolNotEquals(left, right)
+}
+
+/// Calls the concrete bool not primitive.
+pub fn not(value: bool) -> bool {
+  return Intrinsic.boolNot(value)
+}

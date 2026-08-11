@@ -107,6 +107,8 @@ const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = Obje
   ['continue', 'ContinueKeyword'],
   ['const', 'ConstKeyword'],
   ['struct', 'StructKeyword'],
+  ['service', 'ServiceKeyword'],
+  ['interface', 'InterfaceKeyword'],
   ['true', 'TrueKeyword'],
   ['false', 'FalseKeyword'],
 ])

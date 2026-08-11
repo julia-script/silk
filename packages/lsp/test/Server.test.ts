@@ -308,7 +308,7 @@ pub fn main() -> i32 { return identity(42) }`,
 
     const latest = `// π🙂
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let allocator = i32.add(20, 22)
   return Effect.
 }`
     client.send({
@@ -336,7 +336,7 @@ pub fn main() -> i32 {
     }>
     assert.deepEqual(
       latestHints.map((hint) => hint.label),
-      [': SystemAllocator'],
+      [': i32'],
     )
 
     client.send({
@@ -360,13 +360,13 @@ pub fn main() -> i32 {
       method: 'textDocument/hover',
       params: {
         textDocument: { uri },
-        position: { line: 2, character: '  let mut allocator = '.length },
+        position: { line: 2, character: '  let allocator = '.length },
       },
     })
     const latestHover = (await client.waitFor((message) => response(message, 6))) as {
       contents: { value: string }
     }
-    assert.include(latestHover.contents.value, 'intrinsic type SystemAllocator')
+    assert.include(latestHover.contents.value, 'import silk/i32 as i32')
 
     client.send({
       method: 'textDocument/didClose',

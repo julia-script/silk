@@ -213,7 +213,10 @@ it('elaborates and encodes byte-identically across repeated fresh runs', () => {
 })
 
 it('elaborates built-in arithmetic calls with signed literals', () => {
-  const result = elaborate('golden://arith.silk', 'pub fn main() -> i32 { return i32.add(-8, 50) }')
+  const result = elaborate(
+    'golden://arith.silk',
+    'pub fn main() -> i32 { return Intrinsic.i32Add(-8, 50) }',
+  )
   const main = result.hir.functions.at(0)
   const returned = main === undefined ? undefined : Hir.returned(main)
 
@@ -248,9 +251,12 @@ it('diagnoses unknown actors and unknown operations distinctly', () => {
   const actor = elaborate('golden://actor.silk', 'pub fn main() -> i32 { return Math.add(1, 2) }')
   const operation = elaborate(
     'golden://operation.silk',
-    'pub fn main() -> i32 { return i32.frobnicate(1, 2) }',
+    'pub fn main() -> i32 { return Intrinsic.i32Frobnicate(1, 2) }',
   )
-  const arity = elaborate('golden://arity.silk', 'pub fn main() -> i32 { return i32.add() }')
+  const arity = elaborate(
+    'golden://arity.silk',
+    'pub fn main() -> i32 { return Intrinsic.i32Add() }',
+  )
 
   assert.deepEqual(
     actor.diagnostics.map((diagnostic) => diagnostic.code),
@@ -283,7 +289,7 @@ it('keeps bare built-in operation names unresolved', () => {
 it('elaborates conditionals with typed bool conditions and arm scopes', () => {
   const result = elaborate(
     'golden://branch.silk',
-    'pub fn main() -> i32 { let base = 40 if i32.equals(base, 40) { let bonus = 2 return i32.add(base, bonus) } return 0 }',
+    'pub fn main() -> i32 { let base = 40 if base == 40 { let bonus = 2 return base + bonus } return 0 }',
   )
   const main = result.hir.functions.at(0)
 
@@ -329,7 +335,7 @@ it('rejects non-bool conditions and mistyped arguments', () => {
   )
   const builtinArg = elaborate(
     'golden://builtin-arg.silk',
-    'pub fn main() -> i32 { return i32.add(true, 1) }',
+    'pub fn main() -> i32 { return Intrinsic.i32Add(true, 1) }',
   )
   const userArg = elaborate(
     'golden://user-arg.silk',
@@ -379,7 +385,7 @@ it('erases grouping and operators into canonical builtin HIR calls', () => {
 it('lowers builtin pipelines into left-first callable application with an erasable section', () => {
   const result = elaborate(
     'golden://pipeline.silk',
-    'pub fn main() -> i32 { return 2 |> i32.add(3) }',
+    'pub fn main() -> i32 { return 2 |> Intrinsic.i32Add(3) }',
   )
   const fn = result.hir.functions.at(0)
   const returned = fn === undefined ? undefined : Hir.returned(fn)
@@ -515,7 +521,7 @@ it('retains generic raw-buffer operations and whole-value borrows', () => {
     'hir://raw-storage.silk',
     `fn destroy(buffer: RawBuffer<i32>) -> () {
   let mut owner = move buffer
-  unsafe { return Slot.drop(RawBuffer.slot(&mut owner, 0)) }
+  unsafe { return Intrinsic.slotDrop(Intrinsic.rawBufferSlot(&mut owner, 0)) }
 }`,
   )
   const unsafe = result.hir.functions.at(0)?.statements.at(1)
@@ -540,7 +546,7 @@ it('retains shared pattern-field reborrows and raw-buffer reads', () => {
     'hir://shared-pattern-read.silk',
     `struct Box { buffer: RawBuffer<i32> }
 fn read(buffer: &RawBuffer<i32>) -> i32 {
-  unsafe { return RawBuffer.read<i32>(buffer, 0) }
+  unsafe { return Intrinsic.rawBufferRead<i32>(buffer, 0) }
 }
 fn inspect(input: Box) -> i32 {
   return match &input { Box { buffer } => read(&buffer) }

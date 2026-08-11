@@ -359,7 +359,7 @@ export type Operation =
     }
   | {
       /** Commits one immutable byte view to an explicit host-provided process destination. */
-      readonly _tag: 'StandardStreamWrite'
+      readonly _tag: 'HostWrite'
       readonly destination: LocalId
       readonly stream: LocalId
       readonly bytes: LocalId
@@ -1094,7 +1094,7 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination, operation.layout, operation.count]
     case 'Allocate':
       return [operation.destination, operation.layout]
-    case 'StandardStreamWrite':
+    case 'HostWrite':
       return [operation.destination, operation.stream, operation.bytes]
     case 'RawBufferFrom':
       return [operation.destination, operation.allocation, operation.count]
@@ -1350,7 +1350,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'ValidateLayout':
     case 'RepeatLayout':
     case 'Allocate':
-    case 'StandardStreamWrite':
+    case 'HostWrite':
     case 'Project':
     case 'ReadPlace':
     case 'CheckPlace':
@@ -1511,7 +1511,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.layout, operation.count]
     case 'Allocate':
       return [operation.layout]
-    case 'StandardStreamWrite':
+    case 'HostWrite':
       return [operation.stream, operation.bytes]
     case 'RawBufferFrom':
       return [operation.allocation, operation.count]
@@ -2325,7 +2325,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               }),
             )
         }
-        if (operation._tag === 'StandardStreamWrite') {
+        if (operation._tag === 'HostWrite') {
           const stream = fn.localTypes.at(operation.stream.ordinal)
           const bytes = fn.localTypes.at(operation.bytes.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
@@ -3493,7 +3493,7 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = layout-repeat ${localText(operation.layout)} count=${localText(operation.count)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Allocate':
       return `${localText(operation.destination)} = allocate ${localText(operation.layout)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'StandardStreamWrite':
+    case 'HostWrite':
       return `${localText(operation.destination)} = standard-stream-write destination=${localText(operation.stream)} bytes=${localText(operation.bytes)} failure=${SilkType.encode(operation.failure)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw-buffer-from ${localText(operation.allocation)} count=${localText(operation.count)} element=${SilkType.encode(operation.element)} stride=${operation.stride} align=${operation.elementAlignment} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`

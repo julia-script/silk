@@ -49,7 +49,7 @@ fn observe(result: Result<Token, i32>) -> i32 {
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
-  let storage = run Effect.bindRequirement(Allocator.allocate(move layout), &mut allocator)
+  let storage = run Intrinsic.bindRequirement(Allocator.allocate(move layout), &mut allocator)
   let token = Token { storage: move storage }
   let result = succeed<Token, i32>(move token)
   return observe(move result)
@@ -101,7 +101,7 @@ effect fn attempt() -> Result<Allocation, OutOfMemory> ? &mut Allocator {
 
 effect fn build() -> i32 {
   let mut allocator = SystemAllocator.make()
-  let completed = run Effect.bindRequirement(attempt(), &mut allocator)
+  let completed = run Intrinsic.bindRequirement(attempt(), &mut allocator)
   return match move completed {
     Result<Allocation, OutOfMemory> { value: outcome } => match move outcome {
       Success<Allocation> { value: storage } => release(move storage)
@@ -136,8 +136,8 @@ effect fn read() -> i32 ? &Clock@Primary | &Config { return 42 }
 pub fn main() -> i32 {
   let clock = Clock {}
   let config = Config {}
-  let rest = Effect.bindRequirement(read(), &clock, @Primary)
-  let closed = rest |> Effect.bindRequirement(&config)
+  let rest = Intrinsic.bindRequirement(read(), &clock, @Primary)
+  let closed = rest |> Intrinsic.bindRequirement(&config)
   return run closed
 }`
 

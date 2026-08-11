@@ -168,6 +168,8 @@ export const expressionStatementResultCode = 'SEM0087' as const
 export const genericParameterKindMismatchCode = 'SEM0088' as const
 /** Stable code for a failure or requirement row that cannot be finitely decomposed. */
 export const contractRowInferenceCode = 'SEM0089' as const
+/** Stable code for storage, bodies, or defaults inside a source service contract. */
+export const invalidServiceDeclarationCode = 'SEM0090' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -287,6 +289,7 @@ export type Code =
   | typeof expressionStatementResultCode
   | typeof genericParameterKindMismatchCode
   | typeof contractRowInferenceCode
+  | typeof invalidServiceDeclarationCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -360,6 +363,7 @@ export type Reason =
   | { readonly _tag: 'UnknownOwnedCallableReturn' }
   | { readonly _tag: 'MissingUnsafeBoundary'; readonly operation: string }
   | { readonly _tag: 'InvalidConformance'; readonly detail: string }
+  | { readonly _tag: 'InvalidServiceDeclaration'; readonly detail: string }
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
@@ -1991,6 +1995,20 @@ export const invalidConformance = (detail: string, span: SourceSpan.SourceSpan):
     severity: 'error',
     message: `Invalid conformance: ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidConformance', detail }),
+    span,
+  })
+
+export const invalidServiceDeclaration = (
+  detail: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidServiceDeclarationCode,
+    severity: 'error',
+    message: `Invalid service declaration: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidServiceDeclaration', detail }),
     span,
   })
 

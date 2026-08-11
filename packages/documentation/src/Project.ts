@@ -8,6 +8,8 @@ import * as Document from './Document.js'
 export type ItemKind =
   | 'Function'
   | 'Struct'
+  | 'Service'
+  | 'Interface'
   | 'Constant'
   | 'Parameter'
   | 'TypeParameter'
@@ -94,7 +96,11 @@ const targetOf = (
         ? 'Function'
         : lookup.declaration._tag === 'StructDeclaration'
           ? 'Struct'
-          : 'Constant',
+          : lookup.declaration._tag === 'ServiceDeclaration'
+            ? 'Service'
+            : lookup.declaration._tag === 'InterfaceDeclaration'
+              ? 'Interface'
+              : 'Constant',
   })
 }
 
@@ -183,6 +189,31 @@ const fieldItem = (
   })
 }
 
+const serviceOperationItem = (
+  snapshot: Analysis.FrontendSnapshot,
+  module: string,
+  source: SourceFile.SourceFile,
+  ownerId: string,
+  operation: DeclarationIndex.ServiceOperationFact,
+): Item => {
+  const presentation = Presentation.serviceOperation(operation)
+  const documentation = resolveDocumentation(
+    snapshot,
+    module,
+    parsedDocumentation(snapshot, module, source, operation.syntax),
+  )
+  return Object.freeze({
+    id: `${ownerId}::operation:${nameOf(operation.name, '_')}`,
+    kind: 'Operation',
+    name: nameOf(operation.name, '_'),
+    visibility: 'Inherited',
+    signature: Object.freeze({ text: presentation.text }),
+    source: rangeOf(operation.syntax),
+    ...(documentation === undefined ? {} : { documentation }),
+    children: Object.freeze([]),
+  })
+}
+
 const memberItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
@@ -196,7 +227,9 @@ const memberItem = (
       ? Presentation.functionDeclaration(member)
       : member._tag === 'StructDeclaration'
         ? Presentation.structDeclaration(member)
-        : Presentation.constantDeclaration(member)
+        : member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration'
+          ? Presentation.serviceDeclaration(member)
+          : Presentation.constantDeclaration(member)
   const documentation = resolveDocumentation(
     snapshot,
     module,
@@ -212,7 +245,11 @@ const memberItem = (
         ? member.fields
             .filter((field) => options.includePrivate === true || field.visibility === 'Public')
             .map((field) => fieldItem(snapshot, module, source, id, field))
-        : []
+        : member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration'
+          ? member.operations.map((operation) =>
+              serviceOperationItem(snapshot, module, source, id, operation),
+            )
+          : []
   return Object.freeze({
     id,
     kind:
@@ -220,7 +257,11 @@ const memberItem = (
         ? 'Function'
         : member._tag === 'StructDeclaration'
           ? 'Struct'
-          : 'Constant',
+          : member._tag === 'ServiceDeclaration'
+            ? 'Service'
+            : member._tag === 'InterfaceDeclaration'
+              ? 'Interface'
+              : 'Constant',
     name: nameOf(member.name, '_'),
     visibility: member.visibility,
     signature: Object.freeze({ text: presentation.text }),

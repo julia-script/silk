@@ -1,7 +1,7 @@
 # bootstrap-standard-streams Specification
 
 ## Purpose
-Define the smallest explicit process-output service needed to observe real Silk programs while preserving separate future Logger, default-provider, and Stream/Sink designs.
+Define the smallest explicit process-output service needed to observe real Silk programs while preserving separate Logger, default-provider, and Stream/Sink designs.
 ## Requirements
 ### Requirement: Standard streams are an explicit service requirement
 
@@ -37,9 +37,29 @@ Native execution SHALL connect an explicit provider to process destinations. Web
 
 ### Requirement: Logging remains separate
 
-This capability SHALL NOT define `Effect.log` as stdout writing. A future Logger MAY route structured events to standard streams, OpenTelemetry, tests, memory, or fan-out; future default providers SHALL apply uniformly to services.
+This capability SHALL NOT define `Effect.log` as stdout writing. A separate Logger SHALL receive
+complete semantic events rather than stream fragments and MAY route them to standard streams,
+browser facilities, OpenTelemetry, tests, memory, or fan-out. A stdout-backed Logger is one
+provider, not the meaning of logging; future default providers SHALL apply uniformly to services.
 
 #### Scenario: Write without logging semantics
 
 - **WHEN** an algorithm renders through `StandardStreams`
 - **THEN** no log level, Logger requirement, or telemetry metadata is invented
+
+### Requirement: StandardStreams is a source-defined service
+
+The `StandardStreams` contract, destination values, complete-write operation, typed failure, and
+provider mappings SHALL be canonical Silk source. A native or hosted implementation MAY call one
+complete-write intrinsic or private host import, but no compiler phase MAY recognize the
+`StandardStreams`, `stdout`, `stderr`, or `writeAll` spellings to select special behavior.
+
+#### Scenario: Write through the native implementation
+
+- **WHEN** a provided native StandardStreams implementation receives one complete byte view
+- **THEN** its source operation invokes one primitive complete-write boundary and preserves the service's typed result
+
+#### Scenario: Replace the service without host output
+
+- **WHEN** a pure in-memory implementation is provided
+- **THEN** the same service call records the bytes without a platform intrinsic or host import

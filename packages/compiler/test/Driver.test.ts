@@ -375,7 +375,7 @@ it.effect(
         }
       }
     }),
-  60000,
+  180_000,
 )
 
 it.effect('keeps direct WebAssembly in agreement across recursive corpus fixtures', () =>

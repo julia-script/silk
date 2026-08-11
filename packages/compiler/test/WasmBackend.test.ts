@@ -36,6 +36,19 @@ const run = Effect.fnUntraced(function* (text: string) {
   }
 })
 
+const binaryOperation = Effect.fnUntraced(function* (operator: string) {
+  const artifact = yield* emit(`pub fn calculate(left: i32, right: i32) -> i32 {
+  return i32.${operator}(left, right)
+}
+pub fn main() -> i32 { return calculate(0, 1) }`)
+  const symbol = artifact.symbols.find((entry) => entry.declaration.name === 'calculate')?.symbol
+  if (symbol === undefined) throw new Error(`Wasm artifact omitted i32.${operator}`)
+  const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+  const calculate = instance.exports[symbol]
+  if (typeof calculate !== 'function') throw new Error(`Wasm export ${symbol} is not callable`)
+  return (left: number, right: number): number => calculate(left, right)
+})
+
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
@@ -455,13 +468,17 @@ it.effect(
 
       const mismatches: Array<string> = []
       for (const [operator, reference] of references) {
+        const calculate = yield* binaryOperation(operator)
         for (const left of operands) {
           for (const right of operands) {
             const exact = reference(left, right)
             const traps = exact === undefined || exact > maximum || exact < minimum
-            const actual = yield* run(
-              `pub fn main() -> i32 { return i32.${operator}(${left}, ${right}) }`,
-            )
+            let actual: number | 'trap'
+            try {
+              actual = calculate(left, right)
+            } catch {
+              actual = 'trap'
+            }
             if (actual !== (traps ? 'trap' : exact)) {
               mismatches.push(
                 `i32.${operator}(${left}, ${right}) expected ${traps ? 'trap' : exact}, got ${actual}`,

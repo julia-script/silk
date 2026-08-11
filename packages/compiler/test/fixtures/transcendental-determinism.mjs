@@ -19,13 +19,16 @@ const nativeArtifact = await Effect.runPromise(Analysis.codegen(native, { mode: 
 const wasmArtifact = await Effect.runPromise(Analysis.codegenWasm(wasm, { mode: 'release' }))
 
 process.stdout.write(
-  JSON.stringify({
-    diagnostics: Analysis.diagnostics(native),
-    result: evaluation.result.value,
-    trace: evaluation.trace,
-    nativeIr: nativeArtifact.ir,
-    wasmIr: wasmArtifact.wat,
-    native: createHash('sha256').update(nativeArtifact.bitcode).digest('hex'),
-    wasm: createHash('sha256').update(wasmArtifact.bytes).digest('hex'),
-  }),
+  JSON.stringify(
+    {
+      diagnostics: Analysis.diagnostics(native),
+      result: evaluation.result.value,
+      trace: evaluation.trace,
+      nativeIr: nativeArtifact.ir,
+      wasmIr: wasmArtifact.wat,
+      native: createHash('sha256').update(nativeArtifact.bitcode).digest('hex'),
+      wasm: createHash('sha256').update(wasmArtifact.bytes).digest('hex'),
+    },
+    (_key, value) => (typeof value === 'bigint' ? value.toString() : value),
+  ),
 )

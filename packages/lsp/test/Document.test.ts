@@ -137,10 +137,11 @@ it.effect('maps hover and definition positions after non-ASCII recovery bytes', 
   }),
 )
 
-it.effect('distinguishes a binding, intrinsic actor, and operation hover', () =>
+it.effect('distinguishes a binding and a source-owned standard-library namespace', () =>
   Effect.gen(function* () {
-    const source = `pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+    const source = `import silk.core as Core
+pub fn main() -> i32 {
+  let mut allocator = Core.make()
   return 0
 }`
     const { document, snapshot } = yield* open(source)
@@ -150,12 +151,13 @@ it.effect('distinguishes a binding, intrinsic actor, and operation hover', () =>
         ? hover.contents.value
         : undefined
     }
-    assert.strictEqual(hoverText('allocator'), '```silk\nlet mut allocator: SystemAllocator\n```')
-    assert.strictEqual(hoverText('SystemAllocator'), '```silk\nintrinsic type SystemAllocator\n```')
     assert.strictEqual(
-      hoverText('make'),
-      '```silk\nfn SystemAllocator.make() -> SystemAllocator\n```',
+      hoverText('allocator'),
+      '```silk\nlet mut allocator: SystemAllocator\n```',
+      JSON.stringify(Analysis.diagnostics(snapshot)),
     )
+    assert.strictEqual(hoverText('Core'), '```silk\nimport silk/core as Core\n```')
+    assert.strictEqual(hoverText('make'), '```silk\npub fn make() -> SystemAllocator\n```')
   }),
 )
 
@@ -223,7 +225,7 @@ pub fn main() -> i32 {
         ? hover.contents.value
         : undefined
     }
-    assert.strictEqual(text('Effect'), '```silk\nintrinsic namespace Effect\n```')
+    assert.strictEqual(text('Effect'), '```silk\nimport silk/effects as Effect\n```')
     assert.include(text('catch') ?? '', 'pub effect fn catch')
     assert.strictEqual(text('Problem', 1), '```silk\nstruct Problem\n```')
   }),
@@ -288,7 +290,7 @@ it.effect('clips inferred hints, skips unavailable bindings, and maps Unicode sn
   }),
 )
 
-it.effect('completes intrinsic operations after actor member access', () =>
+it.effect('completes standard-library namespace and source service operations', () =>
   Effect.gen(function* () {
     const source = `pub fn main() -> i32 {
   return Effect.
@@ -308,20 +310,20 @@ it.effect('completes intrinsic operations after actor member access', () =>
     )
 
     const allocatorSource = `pub fn main() -> i32 {
-  return SystemAllocator.
+  return Allocator.
 }`
     const allocator = yield* open(allocatorSource)
     const allocatorCompletion = Document.completion(allocator.document, allocator.snapshot, {
       line: 1,
-      character: '  return SystemAllocator.'.length,
+      character: '  return Allocator.'.length,
     })
     assert.include(
       allocatorCompletion.items.map((item) => item.label),
-      'make',
+      'allocate',
     )
     assert.include(
-      allocatorCompletion.items.find((item) => item.label === 'make')?.detail ?? '',
-      'fn SystemAllocator.make()',
+      allocatorCompletion.items.find((item) => item.label === 'allocate')?.detail ?? '',
+      'effect fn allocate',
     )
   }),
 )

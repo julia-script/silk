@@ -352,7 +352,12 @@ const baseRunnerKey = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): st
 
 const witnessKey = (witness: DeclarationIndex.ConformanceWitness): string =>
   witness._tag === 'SourceConformanceWitness'
-    ? `${witness._tag}:${witness.operation?.module ?? ''}:${witness.operation?.name ?? ''}`
+    ? `${witness._tag}:${witness.operations
+        .map(
+          (operation) =>
+            `${operation.name}=${operation.implementation.module}.${operation.implementation.name}`,
+        )
+        .join(',')}`
     : `${witness._tag}:${Type.key(witness.provider)}`
 
 const providedRunnerKey = (
@@ -746,84 +751,6 @@ const lowerPlace = (
   return Object.freeze({ result: destination })
 }
 
-const lowerSourceAllocatorAllocate = (
-  fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'Run' }>,
-  recipe: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
-  provider: Mir.LocalId,
-  witness: Extract<
-    DeclarationIndex.ConformanceWitness,
-    { readonly _tag: 'SourceConformanceWitness' }
-  >,
-): LoweredExpression | undefined => {
-  const [layoutExpression] = recipe.arguments
-  if (
-    layoutExpression === undefined ||
-    fn.effectOutcome === undefined ||
-    witness.operation === undefined
-  )
-    return undefined
-  const loweredLayout = lowerExpression(fn, layoutExpression)
-  const effectResult = fn.effectResults.get(instanceText(witness.operation, []))
-  const successType = fn.type(expression.type)
-  const propagationType = fn.type(fn.effectOutcome)
-  const propagationShape = Layout.callingShape(fn.layout, fn.effectOutcome)
-  if (
-    loweredLayout === undefined ||
-    effectResult === undefined ||
-    successType?._tag !== 'Nominal' ||
-    propagationType?._tag !== 'EffectOutcome' ||
-    propagationShape === undefined
-  )
-    return undefined
-  const tagMappings = effectResult.type.failures.flatMap((failure, source) => {
-    const target = propagationType.type.failures.findIndex((candidate) =>
-      Type.equals(candidate, failure),
-    )
-    return target < 0 ? [] : [Object.freeze({ source: source + 1, target: target + 1 })]
-  })
-  if (tagMappings.length !== effectResult.type.failures.length) return undefined
-  const effectLocal = fn.alloc(effectResult)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Call',
-      destination: effectLocal,
-      target: witness.operation,
-      typeArguments: Object.freeze([]),
-      arguments: Object.freeze([provider, loweredLayout.result]),
-      type: effectResult,
-      provenance: authored(expression.span),
-    }),
-  )
-  const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
-    _tag: 'EffectOutcome',
-    type: effectResult.type,
-  })
-  const outcome = fn.alloc(outcomeType)
-  const destination = fn.alloc(successType)
-  fn.emit(
-    Object.freeze({
-      _tag: 'RunEffectValue',
-      destination,
-      outcome,
-      effect: effectLocal,
-      runner: runnerId(effectResult.environment.instance, effectResult.site),
-      runnerTypeArguments: effectResult.environment.instance.typeArguments,
-      arguments: Object.freeze([]),
-      outcomeType,
-      propagationType,
-      tagMappings: Object.freeze(tagMappings),
-      propagationLaneCount: propagationShape.laneCount,
-      ...(propagationReleases(fn, expression.span).length === 0
-        ? {}
-        : { releases: propagationReleases(fn, expression.span) }),
-      type: successType,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
-}
-
 const endLoans = (
   fn: FunctionLowering,
   loans: ReadonlyArray<Hir.BorrowId>,
@@ -904,7 +831,10 @@ const lowerEffectExecution = (
     if (result === undefined) return undefined
     endRunLoans(fn, span)
     endLoans(fn, [forwarded.provider.borrow], span)
-    if (forwarded.binding.protected._tag === 'EffectConstruct')
+    if (
+      forwarded.binding.protected._tag === 'EffectConstruct' ||
+      forwarded.binding.protected._tag === 'ServiceEffectConstruct'
+    )
       endLoans(fn, forwarded.binding.protected.loanEnds, span)
     return result
   }
@@ -986,7 +916,11 @@ const lowerEffectExecution = (
     )
     if (result === undefined) return undefined
     endRunLoans(fn, span)
-    if (subject.protected._tag === 'EffectConstruct') endLoans(fn, subject.protected.loanEnds, span)
+    if (
+      subject.protected._tag === 'EffectConstruct' ||
+      subject.protected._tag === 'ServiceEffectConstruct'
+    )
+      endLoans(fn, subject.protected.loanEnds, span)
     if (providerLoan !== undefined) {
       fn.emit(
         Object.freeze({
@@ -1000,18 +934,56 @@ const lowerEffectExecution = (
     return result
   }
 
+  if (subject._tag === 'ServiceEffectConstruct') {
+    const provided = availableRequirements.find(
+      (requirement) =>
+        requirement.role === subject.role &&
+        Type.equals(requirement.capability, subject.service) &&
+        (subject.access === 'Shared' || requirement.access === 'Exclusive'),
+    )
+    if (provided?.witness._tag !== 'SourceConformanceWitness' || provided.local === undefined)
+      return undefined
+    const target = DeclarationIndex.witnessOperation(provided.witness, subject.operation)
+    if (target === undefined) return undefined
+    const loweredArguments = subject.arguments.map((argument) => lowerExpression(fn, argument))
+    if (loweredArguments.some((argument) => argument === undefined)) return undefined
+    const typeArguments = Object.freeze<ReadonlyArray<Type.GenericArgument>>([])
+    const effectResult = fn.effectResults.get(instanceText(target, typeArguments))
+    if (effectResult === undefined) return undefined
+    const effect = fn.alloc(effectResult)
+    fn.emit(
+      Object.freeze({
+        _tag: 'Call',
+        destination: effect,
+        target,
+        typeArguments,
+        arguments: Object.freeze([
+          provided.local,
+          ...loweredArguments.flatMap((argument) =>
+            argument === undefined ? [] : [argument.result],
+          ),
+        ]),
+        type: effectResult,
+        provenance: authored(subject.span),
+      }),
+    )
+    const result = lowerRunEffectValue(
+      fn,
+      effect,
+      effectResult,
+      success,
+      span,
+      availableRequirements,
+    )
+    if (result !== undefined) {
+      endRunLoans(fn, span)
+      endLoans(fn, subject.loanEnds, span)
+    }
+    return result
+  }
+
   if (subject._tag === 'BuiltinCall' && Type.isEffect(subject.type)) {
     const run = Object.freeze({ _tag: 'Run' as const, subject, type: success, span })
-    if (subject.operation === 'AllocatorAllocate') {
-      const provided = availableRequirements.find(
-        (requirement) =>
-          requirement.role === 'DefaultRole' && Type.equals(requirement.capability, Type.allocator),
-      )
-      if (provided?.witness._tag === 'SourceConformanceWitness') {
-        if (provided.local === undefined) return undefined
-        return lowerSourceAllocatorAllocate(fn, run, subject, provided.local, provided.witness)
-      }
-    }
     return lowerExpression(fn, run)
   }
 
@@ -1588,6 +1560,8 @@ function lowerExpression(
       }
       if (resultRecipe !== undefined && inlineForwardedRequirement(fn, resultRecipe) !== undefined)
         return lowerEffectExecution(fn, resultRecipe, expression.type, expression.span)
+      if (resultRecipe?._tag === 'ServiceEffectConstruct')
+        return lowerEffectExecution(fn, resultRecipe, expression.type, expression.span)
       const loweredSubject = lowerExpression(fn, expression.subject)
       const effectValueType =
         loweredSubject === undefined ? undefined : fn.localTypes.at(loweredSubject.result.ordinal)
@@ -1664,22 +1638,7 @@ function lowerExpression(
           : expression.subject
       if (recipe?._tag === 'EffectBindRequirement' && recipe.protected._tag !== 'BuiltinCall')
         return lowerEffectExecution(fn, recipe, expression.type, expression.span)
-      if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'AllocatorAllocate') {
-        const provided = fn.providedRequirements.find(
-          (requirement) =>
-            requirement.role === 'DefaultRole' &&
-            Type.equals(requirement.capability, Type.allocator),
-        )
-        if (provided?.witness._tag === 'SourceConformanceWitness') {
-          if (provided.local === undefined) return undefined
-          return lowerSourceAllocatorAllocate(
-            fn,
-            expression,
-            recipe,
-            provided.local,
-            provided.witness,
-          )
-        }
+      if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'StorageAcquire') {
         const [layoutExpression] = recipe.arguments
         if (layoutExpression === undefined || fn.effectOutcome === undefined) return undefined
         const loweredLayout = lowerExpression(fn, layoutExpression)
@@ -1711,7 +1670,7 @@ function lowerExpression(
         )
         return Object.freeze({ result: destination })
       }
-      if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'StandardStreamsWriteAll') {
+      if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'HostWrite') {
         const [streamExpression, bytesExpression] = recipe.arguments
         if (
           streamExpression === undefined ||
@@ -1738,7 +1697,7 @@ function lowerExpression(
         const destination = fn.alloc(type)
         fn.emit(
           Object.freeze({
-            _tag: 'StandardStreamWrite' as const,
+            _tag: 'HostWrite' as const,
             destination,
             stream: stream.result,
             bytes: bytes.result,
@@ -1761,131 +1720,6 @@ function lowerExpression(
         if (provider === undefined) return undefined
         const selectedProvider = specializeProvider(fn, recipe.provider)
         if (selectedProvider === undefined) return undefined
-        const witness = selectedProvider.witness
-        if (
-          witness._tag === 'SourceConformanceWitness' &&
-          witness.operation !== undefined &&
-          recipe.protected._tag === 'BuiltinCall' &&
-          recipe.protected.operation === 'AllocatorAllocate'
-        ) {
-          // A source-declared witness dispatches through the ordinary effect-call machinery,
-          // exactly as if the source had called the qualified operation and run the result:
-          // an exclusive provider loan strictly around the call and run, so provider access
-          // ends when the allocation outcome returns.
-          const [layoutExpression] = recipe.protected.arguments
-          if (layoutExpression === undefined || fn.effectOutcome === undefined) return undefined
-          const loweredLayout = lowerExpression(fn, layoutExpression)
-          const effectResult = fn.effectResults.get(instanceText(witness.operation, []))
-          const successType = fn.type(expression.type)
-          const propagationType = fn.type(fn.effectOutcome)
-          const propagationShape = Layout.callingShape(fn.layout, fn.effectOutcome)
-          const providerType = fn.type(selectedProvider.providerType)
-          const referenceType = fn.type(
-            Object.freeze({
-              _tag: 'ReferenceType' as const,
-              access: 'Exclusive' as const,
-              target: selectedProvider.providerType,
-            }),
-          )
-          const loan = fn.ownership?.loans.find(
-            (candidate) =>
-              candidate.origin === 'EffectCapture' &&
-              candidate.access === 'Exclusive' &&
-              candidate.startSpan.start === recipe.provider.span.start &&
-              candidate.startSpan.end === recipe.provider.span.end,
-          )
-          if (
-            loweredLayout === undefined ||
-            effectResult === undefined ||
-            successType?._tag !== 'Nominal' ||
-            propagationType?._tag !== 'EffectOutcome' ||
-            propagationShape === undefined ||
-            providerType?._tag !== 'Nominal' ||
-            referenceType?._tag !== 'Reference' ||
-            loan === undefined
-          )
-            return undefined
-          const tagMappings = effectResult.type.failures.flatMap((failure, source) => {
-            const target = propagationType.type.failures.findIndex((candidate) =>
-              Type.equals(candidate, failure),
-            )
-            return target < 0 ? [] : [Object.freeze({ source: source + 1, target: target + 1 })]
-          })
-          if (tagMappings.length !== effectResult.type.failures.length) return undefined
-          const reference = fn.alloc(referenceType)
-          fn.emit(
-            Object.freeze({
-              _tag: 'BeginLoan',
-              borrow: loan.id,
-              destination: reference,
-              root: provider,
-              sourceType: providerType,
-              type: referenceType,
-              access: 'Exclusive',
-              reborrow: false,
-              suspendsParent: false,
-              provenance: authored(recipe.provider.span),
-            }),
-          )
-          const effectLocal = fn.alloc(effectResult)
-          fn.emit(
-            Object.freeze({
-              _tag: 'Call',
-              destination: effectLocal,
-              target: witness.operation,
-              typeArguments: Object.freeze([]),
-              arguments: Object.freeze([reference, loweredLayout.result]),
-              type: effectResult,
-              provenance: authored(expression.span),
-            }),
-          )
-          const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
-            _tag: 'EffectOutcome',
-            type: effectResult.type,
-          })
-          const outcome = fn.alloc(outcomeType)
-          const destination = fn.alloc(successType)
-          fn.emit(
-            Object.freeze({
-              _tag: 'RunEffectValue',
-              destination,
-              outcome,
-              effect: effectLocal,
-              runner: runnerId(effectResult.environment.instance, effectResult.site),
-              runnerTypeArguments: effectResult.environment.instance.typeArguments,
-              arguments: Object.freeze([]),
-              outcomeType,
-              propagationType,
-              tagMappings: Object.freeze(tagMappings),
-              propagationLaneCount: propagationShape.laneCount,
-              ...(propagationReleases(fn, expression.span).length === 0
-                ? {}
-                : { releases: propagationReleases(fn, expression.span) }),
-              type: successType,
-              provenance: authored(expression.span),
-            }),
-          )
-          fn.emit(
-            Object.freeze({
-              _tag: 'EndLoan',
-              borrow: loan.id,
-              slice: reference,
-              provenance: generated(recipe.provider.span),
-            }),
-          )
-          return Object.freeze({ result: destination })
-        }
-        if (
-          recipe.protected._tag === 'BuiltinCall' &&
-          recipe.protected.operation === 'AllocatorAllocate'
-        )
-          return lowerExpression(
-            fn,
-            Object.freeze({
-              ...expression,
-              subject: recipe.protected,
-            }),
-          )
         if (recipe.provider.access === 'Take') return undefined
         const loweredProtected = lowerExpression(fn, recipe.protected)
         const protectedType =
@@ -2534,68 +2368,7 @@ function lowerExpression(
         )
         return finishBuiltin(destination)
       }
-      if (expression.operation === 'LayoutMake' || expression.operation === 'LayoutRepeat') {
-        const [left, right] = argumentLocals
-        const type = fn.type(expression.type)
-        if (left === undefined || right === undefined || type?._tag !== 'Union') return undefined
-        const destination = fn.alloc(type)
-        fn.emit(
-          expression.operation === 'LayoutMake'
-            ? Object.freeze({
-                _tag: 'ValidateLayout' as const,
-                destination,
-                bytes: left,
-                alignment: right,
-                type,
-                provenance: authored(expression.span),
-              })
-            : Object.freeze({
-                _tag: 'RepeatLayout' as const,
-                destination,
-                layout: left,
-                count: right,
-                type,
-                provenance: authored(expression.span),
-              }),
-        )
-        return { result: destination }
-      }
-      if (expression.operation === 'SystemAllocatorMake') {
-        const type = fn.type(expression.type)
-        if (type?._tag !== 'Nominal' || !Type.equals(type.type, Type.systemAllocator))
-          return undefined
-        const destination = fn.alloc(type)
-        fn.emit(
-          Object.freeze({
-            _tag: 'Construct' as const,
-            destination,
-            type,
-            fields: Object.freeze([]),
-            provenance: authored(expression.span),
-          }),
-        )
-        return { result: destination }
-      }
-      if (
-        expression.operation === 'StandardStreamsStdout' ||
-        expression.operation === 'StandardStreamsStderr'
-      ) {
-        const destination = fn.alloc(bool)
-        fn.emit(
-          Object.freeze({
-            _tag: 'Literal' as const,
-            destination,
-            type: bool,
-            value: expression.operation === 'StandardStreamsStdout' ? 0 : 1,
-            provenance: authored(expression.span),
-          }),
-        )
-        return { result: destination }
-      }
-      if (
-        expression.operation === 'AllocatorAllocate' ||
-        expression.operation === 'StandardStreamsWriteAll'
-      )
+      if (expression.operation === 'StorageAcquire' || expression.operation === 'HostWrite')
         return undefined
       if (expression.operation === 'RawBufferFrom') {
         const [allocation, count] = argumentLocals
@@ -3411,6 +3184,7 @@ const lowerSequence = (
   if (statement._tag === 'Bind') {
     if (
       inlineForwardedRequirement(fn, statement.initializer) !== undefined ||
+      statement.initializer._tag === 'ServiceEffectConstruct' ||
       (statement.initializer._tag === 'EffectConstruct' &&
         fn.call(statement.initializer.span)?.resultEffect === undefined &&
         fn.effectResults.get(

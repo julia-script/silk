@@ -1567,7 +1567,7 @@ const emitOperation = (
         Instr.localSet(active),
       ]
     }
-    case 'StandardStreamWrite': {
+    case 'HostWrite': {
       if (memory?.standardWrite === undefined) {
         throw new RangeError('Wasm standard-stream write lost its host import or private memory')
       }
@@ -2831,10 +2831,7 @@ const emitOperation = (
         const right = operandSlots.at(1)
         if (
           right === undefined ||
-          target.operation === 'LayoutMake' ||
-          target.operation === 'LayoutRepeat' ||
-          target.operation === 'SystemAllocatorMake' ||
-          target.operation === 'AllocatorAllocate' ||
+          target.operation === 'StorageAcquire' ||
           !Mir.isBinaryOperator(target.operation)
         ) {
           throw new RangeError(
@@ -3783,13 +3780,13 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           operation._tag === 'SlotDrop',
       ),
     )
-    const needsStandardStreams = program.functions.some((fn) =>
-      Mir.operations(fn).some((operation) => operation._tag === 'StandardStreamWrite'),
+    const needsHostWrite = program.functions.some((fn) =>
+      Mir.operations(fn).some((operation) => operation._tag === 'HostWrite'),
     )
     const needsMemory =
       staticOffsets.size > 0 ||
       needsHeap ||
-      needsStandardStreams ||
+      needsHostWrite ||
       [...frames.values()].some((frame) => frame.roots.size > 0)
     const privateMemory = needsMemory
       ? yield* Memory.make(
@@ -3798,7 +3795,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           debug ? { name: 'silk_memory' } : {},
         )
       : undefined
-    if (needsStandardStreams && privateMemory !== undefined) {
+    if (needsHostWrite && privateMemory !== undefined) {
       yield* ExportActor.memory(builder, StandardStreams.wasmMemoryExport, privateMemory)
     }
     const stackPointer = needsMemory
@@ -3833,7 +3830,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           debug ? { name: 'silk_heap_pointer' } : {},
         )
       : undefined
-    const standardWrite = needsStandardStreams
+    const standardWrite = needsHostWrite
       ? yield* Import.func(
           builder,
           StandardStreams.wasmModule,
@@ -4083,7 +4080,7 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
       bytes: output.bitcode,
       wat: output.ir,
       hostImports: program.functions.some((fn) =>
-        Mir.operations(fn).some((operation) => operation._tag === 'StandardStreamWrite'),
+        Mir.operations(fn).some((operation) => operation._tag === 'HostWrite'),
       )
         ? Object.freeze([
             Object.freeze({

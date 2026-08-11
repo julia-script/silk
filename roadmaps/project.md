@@ -8,14 +8,29 @@
 ## Vision
 
 Silk Effect will be a low-level systems language that combines explicit memory and execution
-control with typed failures, explicit service requirements, deterministic cleanup, and
-tooling-friendly semantics. The immediate destination is a small, coherent language whose design
-survives recognizable programs; broader compiler, ecosystem, and eventual self-hosting work follows
-evidence from that language rather than defining it in advance.
+control with typed failures, explicit replaceable services, deterministic cleanup, and
+tooling-friendly semantics. Portable program intent should remain stable across native and browser
+hosts; lower-level platform facilities are explicit escape hatches rather than the default API.
 
-**Current objective:** shape Silk through complete, recognizable pressure programs — measured by
-ordinary Silk source exposing and categorizing language, standard-library, compiler, tooling, and
-cost-model gaps while preserving evaluator, native, and WebAssembly agreement.
+**Current objective:** establish a minimal explicit Intrinsic boundary and general source-defined
+services, then use that foundation for semantic Logging and whole-file FileSystem interaction. The
+compiler supplies only irreducible primitives; public service contracts, implementations, generic
+interfaces, and safe abstractions remain ordinary navigable Silk source.
+
+## Current baseline
+
+The stage-0 compiler now runs lossless source through module analysis, HIR, ownership and cleanup,
+specialization, target layout, MIR, logical evaluation, LLVM/native emission, LLVM WebAssembly, and
+direct WebAssembly. The language has modules, scalar families and typed constants, structs, arrays,
+slices, structural unions and exhaustive matching, generics, callables and pipelines, mutation,
+loops, recursion, affine ownership, deterministic Drop, explicit allocation, static text/bytes, and
+typed service-requiring Effects.
+
+Canonical `Result`, Effect transformations, and `Vector<T>` are navigable Silk source. Seven
+algorithm examples plus Silk-written lexer and bounded stack-VM pressure programs provide
+evaluator/native/direct-Wasm, failure-ordinal, and determinism evidence. The completed compiler
+realignment remains documented in [compiler-realignment](compiler-realignment.md); the pressure-
+program record remains in [real programs](real-programs.md).
 
 ## Column rules
 
@@ -25,273 +40,131 @@ cost-model gaps while preserving evaluator, native, and WebAssembly agreement.
 
 ## Now
 
-### Make Effect composition ordinary visible Silk
+### Make compiler privilege explicit and minimal
 
-**Status: complete (2026-08-10).** Kinded failure and requirement rows now specialize and erase
-through ordinary generics, while hidden-identity Effect values cross parameters, returns, locals,
-captures, and stored pipelines with explicit shared, exclusive, or take-once access. The compiler
-core is reduced to lazy execution, typed propagation, completed-outcome reification, and one typed
-requirement binding operation. Canonical `Result`, `mapBoth`, `map`, `mapError`, `flatMap`, `tap`,
-whole-channel `catch`, `retry`, `provide`, and `provideWith` are navigable `.silk` source with no
-combinator-name branches in HIR, MIR, the evaluator, LLVM, or direct Wasm.
+- **Problem:** The compiler-known actor catalog currently mixes irreducible scalar, Effect,
+  storage, and platform operations with public abstractions such as Allocator and StandardStreams.
+  Silk source cannot declare a new service contract, so implementing Logger now would add another
+  privileged name or build on a mechanism users cannot reproduce.
+- **Outcome & done-when:** Every callable compiler primitive is an audited member of the sealed
+  `Intrinsic` namespace. The compiler exposes only the smallest target-neutral operations needed to
+  build features in the standard library. Silk source can declare services, map provider actor
+  functions, require them in Effect contracts, and provide them lexically. Scalar interfaces,
+  Allocator, SystemAllocator, StandardStreams, layout policy, Effect wrappers, and safe storage APIs
+  are navigable source over those primitives, with no runtime generic dispatch or name-based
+  compiler branches.
+- **Status:** implemented — source, tooling, evaluator, LLVM, and direct-Wasm work is complete;
+  final repository gates and OpenSpec archival are the remaining handoff steps.
+- **Appetite:** one breaking foundation change delivered by catalog family, with differential
+  evaluator/native/direct-Wasm evidence after services, scalars, Effect, allocation/storage, and
+  standard streams migrate.
+- **Links:** change:
+  [`establish-minimal-intrinsic-boundary`](../openspec/changes/establish-minimal-intrinsic-boundary/proposal.md) ·
+  [language context](../CONTEXT.md) ·
+  [standard library spec](../openspec/specs/bootstrap-silk-stdlib/spec.md)
 
-The synchronous cost spike and its first shared MIR normalization are complete. Clang `-O2` already
-reduces every measured native entry to its imperative shape. Shared constructor folding now removes
-two or three direct-Wasm entry calls from eligible Effect cases, and local single-use Copy/shared
-environments dispatch through `RunStaticEffect`. Stored/provider shapes conservatively stop after
-constructor folding; affine captures and unknown suspension remain explicit. A follow-up classifier
-found that shared runner CFG inlining would need nested-effect, callable, cleanup, and ownership
-semantics. That work is intentionally deferred: production builds use LLVM, which already removes
-the measured composition overhead, while direct Wasm prioritizes external-tool independence and
-browser compilation. Its remaining runner call is acceptable and does not block Effect or releases.
+### Make semantic logging a portable Effect service
 
-### Add typed scalar constants from repeated program evidence
+- **Problem:** Silk can write complete bytes to process stdout/stderr, but raw standard streams do
+  not express semantic logging. Defining `Effect.log` as stdout would prevent tests, browsers,
+  OpenTelemetry, fan-out, and alternative presentation from supplying honest implementations.
+- **Outcome & done-when:** Ordinary Silk code dispatches one complete `LogEvent` through
+  `Effect.log`, retaining an explicit `Logger` requirement until a provider is supplied. The first
+  live provider renders complete events to stdout through `StandardStreams`; an in-memory provider
+  proves deterministic capture without process output. Evaluator, native LLVM, and direct Wasm
+  agree on event order, typed failures, provider replacement, and composed Effect behavior.
+- **Status:** blocked only on archival — its artifacts are reconciled with the implemented
+  source-defined service, static interface, and sealed Intrinsic contracts; no logging code starts
+  until `establish-minimal-intrinsic-boundary` archives.
+- **Appetite:** one focused OpenSpec change covering the event boundary, Logger capability,
+  `Effect.log`, stdout-backed provider, in-memory provider, tooling navigation, and three-engine
+  acceptance. Rich tracing, filtering policy, asynchronous export, and a complete OpenTelemetry
+  schema remain outside this slice.
+- **Boundary:** a log call submits a complete semantic message, never a byte-at-a-time append.
+  `StandardStreams` remains raw process output. Browser console and OpenTelemetry providers are
+  compatible future implementations, not special behavior in `Effect.log`.
+- **Links:** [language context](../CONTEXT.md) ·
+  change: [`add-portable-logging`](../openspec/changes/add-portable-logging/proposal.md) ·
+  [standard streams spec](../openspec/specs/bootstrap-standard-streams/spec.md) ·
+  [Effect model](../openspec/specs/bootstrap-flow-functions/spec.md)
 
-**Status: complete (2026-08-09).** Silk now accepts literal-only, explicitly typed scalar
-constants with optional public visibility. Boolean, integer, `usize`, and floating declarations
-resolve in local, selected-import, and qualified scopes; editor presentation and navigation use the
-same canonical identity. Accepted references inline into existing typed immediate values, so there
-is no global storage, runtime initialization, allocation, cleanup, or new backend representation.
-The lexer and stack VM now name their repeated token codes, opcodes, limits, and diagnostics while
-preserving evaluator, native LLVM, direct Wasm, allocation-failure, and fresh-process evidence.
+### Make file interaction portable by default
 
-Computed and aggregate constants, inferred types, addressable globals, and enum/exhaustiveness
-semantics remain deliberately separate.
-- **Links:** [real-programs initiative](real-programs.md)
-
-### Exercise Silk with a bounded stack bytecode VM
-
-**Status: complete (2026-08-09).** The ordinary Silk VM differentially matches its TypeScript oracle
-over arithmetic, taken and untaken branches, malformed bytecode, stack bounds, invalid jumps, and
-bounded loops. One owned ordered `Vector<Step | VmDiagnostic>` event stream supplies realistic
-allocation pressure; every growth ordinal preserves typed failure and balanced cleanup across the
-evaluator, native LLVM, and direct Wasm, and fresh processes reproduce the same artifacts.
-
-The VM independently confirmed the need for named typed values and shared Vector reads. It also
-exposed nested dynamic reference-place lowering, structural-union Copy provenance, and a native
-path-sensitivity defect for address-taken mutable roots. The native and union-copy defects are now
-repaired; the VM again uses one ordered union event vector and verifies every event after execution.
-The nested-place observation remains single-program evidence, not a committed compiler queue or
-self-hosting sequence.
-- **Links:** [real-programs initiative](real-programs.md)
-
-### Repair contextual integer literals exposed by the lexer
-
-**Status: complete (2026-08-09).** Focused characterization corrected the initial finding: direct,
-explicit-generic, and piped calls already apply concrete integer parameter contexts. The live defect
-was `bool` from an enclosing return position suppressing homogeneous operand refinement in
-expressions such as `return byte == 13`. Operator analysis now lets a resolved scalar first operand
-refine the remaining exact literals even when an enclosing result expectation exists. The lexer
-uses `u8` classifiers without the `i32` workaround, and semantic/HIR/MIR facts, diagnostics,
-evaluator, native LLVM, direct Wasm, and fresh-process artifacts agree.
-
-Enum/exhaustiveness and cost findings remain unpromoted. Shared Vector reads and structural-union
-Copy provenance now have complete focused repairs with independent pressure-program evidence.
-- **Links:** [real-programs initiative](real-programs.md)
-
-### Validate the language's defining effect execution model
-
-**Status: complete (2026-08-07).** The review replaced the evidence-producing Flow surface with
-`effect {}` as the primitive lazy imperative boundary, `effect fn` as whole-body sugar, `Effect` as
-the public computation type, and ordinary Copy-versus-move failure transfer. Capture access now
-derives shared-repeatable, exclusive-repeatable, or take-once execution; retry reconstructs locals
-while preserving captures; provision distinguishes captured providers from per-run acquisition;
-and typed failure remains separate from traps. First-class callable values and automatic
-data-first sections subsequently proved Effect composition without pipeline-only callback syntax.
-
-Named lifetime scopes, dynamic cleanup registries, provider-dependent result sets, and allocator
-magic were rejected from the bootstrap model. Allocation owners are self-contained affine values,
-restricted synchronous infallible `Drop` is the cleanup mechanism, and arena-backed escaping values
-remain deferred until Silk has a general non-privileged validity model.
-
-- **Links:** [effect model decision](../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md) ·
-  [ownership and allocation](../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md) ·
-  [bootstrap syntax](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
-
-### Widen the language, slice 1: bindings, arithmetic, branching
-
-**Status: complete (2026-08-05).** All three changes shipped and archived; see the changelog.
-
-- **Problem:** The realigned spine (diagnostics through native link, all 13 changes archived
-  2026-08-05) runs end to end over a grammar too small to exercise it: ownership is trivially
-  satisfiable, lowering never emits `Branch` or `Drop`, and the differential harness compares only
-  straight-line integer programs.
-- **Outcome & done-when:** Silk programs with `let` bindings and `move`, signed literals with
-  arithmetic, and `bool`/comparison/`if` compile through every phase — real liveness ranges and
-  cleanup drops in the ownership and MIR labs, real CFG diamonds, interpreter and native agreeing
-  across both branch arms — with every artifact encoder and golden extended, not replaced.
-- **Status:** shaped — dependency order pinned by the map: bindings first (the pressure issue 01
-  deferred to issue 08's syntax), then arithmetic, then branching. Includes threading the `Backend`
-  service through `Driver.CompileRequest` and `Analysis.codegen` instead of the current hardwired
-  `LlvmBackend` call, so the declared seam is actually exercised.
-- **Appetite:** three or four focused changes, one per feature, same
-  propose → implement → inspect → archive loop as the realignment; structs, unions, match,
-  failures, generics, and cross-module calls stay outside this slice.
-- **Links:** [bootstrap-language map](../wayfinder/bootstrap-language/map.md) ·
-  [ownership decision](../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md) ·
-  [syntax decision](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md) ·
-  [realignment record](compiler-realignment.md)
-
-### Make the language algorithmic: modules, operators, data, and loops
-
-**Status: complete (2026-08-06).** All nine changes shipped and archived. Compiler-published
-control remains a DAG until each backend converts it to its required target form.
-
-- **Problem:** The compiler spine is complete, but the language can only express small scalar,
-  call, binding, and branching examples. It lacks a settled operator surface, aggregate data,
-  indexed inline storage, mutation, and loops, so it cannot yet express even compact algorithms
-  over compiler-shaped values.
-- **Outcome & done-when:** Silk programs resolve declarations across modules and define, construct,
-  and project nominal structs; compute through a coherent operator model; store values in checked
-  fixed-size arrays; and use mutable bindings with structured loops. The same foundation then grows
-  normalized structural unions and exhaustive mode-aware matching. Every capability runs through
-  layout, ownership, MIR, interpretation, native and WebAssembly emission, and the inspector labs.
-- **Sequence:**
-  1. `standardize-target-aware-layouts` — complete and archived
-  2. `resolve-cross-module-declarations` — complete and archived
-  3. `standardize-expression-and-operator-semantics` — complete and archived
-  4. `declare-nominal-struct-types` — complete and archived
-  5. `construct-and-project-struct-values` — complete and archived
-  6. `add-fixed-size-arrays-and-indexing` — complete and archived
-  7. `add-mutable-bindings-and-structured-loops` — complete and archived
-  8. `normalize-structural-unions` — complete and archived
-  9. `match-exhaustively` — complete and archived
-- **Dependencies:** cross-module resolution precedes operator desugaring into canonical actor
-  operations and all cross-module data use. Struct declarations precede construction. Arrays build
-  on aggregate layout and the expression/operator foundation; the first useful loop slice adds
-  `let mut`, assignment, `while`, `break`, and `continue` over checked array access. Construction
-  and layout precede unions, and unions precede match.
-- **Appetite:** one focused OpenSpec change at a time, followed by implementation, inspection,
-  archive, and reassessment before proposing the next ticket.
-- **Links:** [type and value decision](../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md) ·
-  [module decision](../wayfinder/bootstrap-language/issues/04-modules-visibility-and-name-resolution.md) ·
-  [pipeline decision](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md) ·
-  [syntax decision](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
-
-### Borrow compiler input whose size is known only at runtime
-
-**Status: complete (2026-08-06).** `add-lexical-runtime-slices` shipped the first memory boundary.
-
-- **Outcome:** Explicit call-scoped `&[T]` and `&mut [T]` consume fixed arrays of different lengths
-  through one monomorphized contract. Root-attached loans remain compiler facts; evaluator cells,
-  aligned LLVM storage, and private Wasm shadow frames realize the same target-aware address-plus-
-  length layout. Shared traversal and exclusive move-only replacement agree across all three
-  engines and the unified `/labs` inspector.
-- **Deliberate boundary:** No allocator, owned dynamic sequence, raw pointer source API, implicit
-  array decay, escaping or stored slice, range, subslice, or iterator behavior was admitted.
-- **Evidence:** The coverage fold returns `40` and `42` from three- and six-element arrays through
-  one slice-taking instance and symbol; the exclusive fixture observes caller-visible replacement
-  with exactly-once displaced cleanup.
-
-### Complete the self-contained owned-allocation substrate
-
-**Status: complete (2026-08-08).** `unsafe` blocks, `impl` conformances, nominal `SystemAllocator`,
-affine `Allocation`, generic `RawBuffer<T>`, lexical `Slot<T>`, and compiler-sealed `Drop` hooks run
-through every phase and all three engines. A user-authored `impl Allocator for X` dispatches to its
-own operation through an exclusive call-scoped provider loan, so a counted quota allocator — state
-decremented through `&mut self` — exhausts identically on the evaluator, Wasm, and native
-executables. Allocation failure stays typed and allocation-free, a rejected request acquires
-nothing, and owners live at a failing run site release before the failure propagates.
-
-- **Problem:** Slices can borrow source-dependent input, but a compiler pass still cannot own an
-  output whose size emerges at runtime. The general prerequisites are now executable: target-sized
-  `usize`, typed Effects, capability requirements and provision, target-aware `Layout`, affine
-  ownership, deterministic cleanup, and first-class callables. What remains is the smallest unsafe
-  allocation boundary that composes those mechanisms without privileged allocator kinds.
-- **Outcome & done-when:** Add general `Allocator` capability dispatch, a standard-library
-  `SystemAllocator`, and an affine self-contained `Allocation` whose private reclaim ticket is
-  sufficient for exactly-once cleanup. Allocation failure is typed and allocation-free. Evaluator,
-  LLVM, Wasm, ownership, MIR, determinism, and `/labs` agree on acquisition, transfer, and release.
-  Then add restricted synchronous infallible `Drop` plus unsafe typed raw-buffer/slot operations
-  sufficient to initialize and roll back a dynamic sequence safely.
-- **Boundary:** The compiler recognizes capability, ownership, layout, and drop rules—not arenas,
-  allocator policies, or collection types. No named lifetime `Scope`, dynamic finalizer registry,
-  ambient/default allocator, user-callable `free`, primitive resize, zero-fill promise, or compiler-
-  known `Vector`. An arena is only another Silk standard-library implementation of `Allocator`.
-- **Sequence:**
-  1. General allocator dispatch, `SystemAllocator`, affine `Allocation`, and typed `OutOfMemory`
-  2. Restricted `Drop` and unsafe typed storage operations with deterministic rollback
-  3. Differential allocation and cleanup evidence across evaluator, LLVM, Wasm, and `/labs`
-- **Evidence:** A construction guard carrying runtime-counted move-only elements on the substrate
-  alone — no `Vector` or collection intrinsic — returns `42` from the evaluator, an instantiated Wasm
-  module, and a linked native executable, with one acquire and one release around ordered `Slot`
-  writes and takes. The failure-ordinal sweep proves atomic rejection, release-once, unchanged
-  `OutOfMemory`, and a successful subsequent run; MIR and Wasm bytes are identical across analyses.
-- **Links:** [ownership and scoped allocation](../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md) ·
-  [types and values](../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md) ·
-  [compiler pipeline](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md) ·
-  [bootstrap syntax](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
-
-### Implement growable compiler output in Silk
-
-**Status: complete (2026-08-08).** `add-silk-vector-and-scanner` ships the first importable Silk
-standard-library module and implements `Vector<T>` entirely in `silk.vector` over `Allocator`,
-`Allocation`, `RawBuffer<T>`, `Slot<T>`, and parametric `Drop`. Empty vectors allocate nothing;
-append grows 0 → 4 → ×2; failed replacement allocation preserves the original vector; initialized
-elements drop before storage release; and move-out plus early drop retain exactly-once ownership.
-
-- **Outcome:** The acceptance scanner borrows `&[U8]`, produces ten tokens in an owned
-  `Vector<Token>`, and crosses three allocation ordinals. Evaluator, native LLVM, and direct Wasm
-  all return `42` with identical token observations; quota sweeps fail each growth ordinal without
-  leaks and succeed once the quota covers all allocations. Two fresh processes produce identical
-  closure, HIR, ownership, instances, layout, MIR, traces, symbols, and backend artifacts.
-- **Boundary held:** No compiler phase recognizes `Vector`, no vector-shaped MIR or backend
-  primitive was added, and the scanner demonstrated no need for a bulk byte-memory or iterable
-  abstraction. The generic collection and its cleanup policy remain ordinary Silk source.
-- **Evidence:** `VectorAcceptance.test.ts`, `ScannerAcceptance.test.ts`, and
-  `ScannerDeterminism.test.ts` cover growth, rollback, early and lexical destruction, failure
-  ordinals, three-engine parity, and fresh-process determinism. Five coordinated `/labs` presets
-  expose the same sources and facts, with the scanner preset byte-identical to its acceptance
-  fixture.
+- **Problem:** Compiler and application code need files, but a common service defined in terms of
+  native handles, host path bytes, seeking, or implicit process state cannot run unchanged against a
+  browser virtual file system. Conversely, hiding every platform distinction would make genuinely
+  native requirements dishonest.
+- **Outcome & done-when:** A portable `FileSystem` capability exposes explicit-path whole-file and
+  directory operations with complete owned values, portable errors, deterministic ordering, and no
+  hidden current directory. The same program runs against native and deterministic in-memory
+  providers; direct Wasm can use a host-supplied virtual provider with no source change. A separate
+  lower-level `PlatformFileSystem` boundary is available for native paths, handles, mapping,
+  locking, and metadata that have no portable contract.
+- **Status:** blocked — follows the intrinsic boundary and Logging changes so both services exercise
+  one consistent source-defined service, requirement, and provider vocabulary.
+- **Appetite:** one focused OpenSpec change for the smallest complete-file slice, portable Path and
+  FileError semantics, native and in-memory providers, browser-host compatibility, tooling, and
+  differential acceptance. Open handles, streaming, mapping, watchers, locking, and broad native
+  metadata stay outside the portable slice.
+- **Boundary:** standard-library and documentation examples prefer `FileSystem`. Depending on
+  `PlatformFileSystem` is an explicit portability decision. The stage-0 compiler's TypeScript host
+  wrappers do not become Silk's public filesystem design.
+- **Links:** [language context](../CONTEXT.md) ·
+  change: [`add-portable-file-system`](../openspec/changes/add-portable-file-system/proposal.md) ·
+  [runtime and standard-library decision](../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md) ·
+  [source-resolution precedent](../openspec/specs/bootstrap-source-resolution/spec.md)
 
 ## Next
 
-Typed scalar constants, native address-root materialization, shared `Vector<T>` reads, and
-structural-union Copy provenance are complete. Select the next language change only after another
-recognizable program repeats a concrete wall or cost problem. No parser port, neighboring compiler
-module, async runtime, or self-hosting sequence is preselected.
+- **Resume recognizable pressure programs** — after Logging and FileSystem exist, select a program
+  that uses both and promote only repeated language, library, compiler, tooling, or cost walls. Do
+  not automatically port another compiler module.
+- **Revisit general default providers** — decide whether application-boundary defaults are useful
+  only after several explicit services exist. Defaults must apply uniformly; Logger and FileSystem
+  receive no ambient exception.
+- **Characterize full-suite timeout reliability** — the latest local `pnpm check` completed Biome,
+  typechecks, and 879 compiler tests, but 20 compiler cases expired at their configured timeouts.
+  Determine whether this is cold/concurrent execution pressure or a regression before changing
+  budgets or claiming the checkout is fully green.
 
 ## Later
 
 - **Make Silk capable of expressing its own compiler** — progressively replace the TypeScript seed
-  implementation with Silk modules while preserving reference equivalence, once the language is
-  small and well-defined enough that self-hosting tests it rather than prematurely steering it.
-- **Supply the compiler's native platform** — add runtime, host services, and any private C shim
-  demanded by an eventual real Silk compiler module, rather than speculating ahead of that need.
-- **Prove native self-hosting** — produce stage 1, stage 2, and a byte-identical fixed-point rebuild
-  with complete conformance, failure, debug, resource, and performance evidence on all required
-  native hosts.
-- **Preserve a pay-for-use path to Effect synchronization** — keep sequential Stream demand,
-  single-thread concurrency, and later parallel execution compatible with low-level cost
-  transparency without scheduling async work now; see the
-  [direction note](../wayfinder/bootstrap-language/research/concurrency-and-parallelism-direction.md).
-- **Grow beyond the bootstrap subset** — concurrency, networking, schemas, observability, richer
-  tooling, and broader standard-library families become candidates when pressure programs expose
-  their real constraints.
-- **Deepen WebAssembly integration** — extend the direct backend toward host integration and
-  generated Effect interop after the native bootstrap path is accepted.
+  only when the language can express compiler modules without letting the port choose premature
+  features.
+- **Supply and prove the native compiler platform** — add the host runtime and private shims demanded
+  by real Silk compiler modules, then reach stage 1, stage 2, and a byte-identical fixed point.
+- **Preserve pay-for-use synchronization** — add sequential Stream demand, single-thread
+  concurrency, and later parallel execution without charging synchronous programs for a scheduler.
+- **Grow portable service families** — networking, schemas, serialization, observability, testing,
+  clocks, and richer I/O become candidates after Logging and FileSystem establish the pattern.
+- **Deepen WebAssembly integration** — extend host bindings and generated Effect interop after the
+  portable service boundary is accepted.
 
 ## Maintenance budget
 
 Reserve approximately 20% of project capacity for keeping the foundation trustworthy.
 
-- Keep `@silk-effect/llvm` aligned with its pinned upstream baseline, deterministic fixtures, Effect
-  architecture rules, and packed release-candidate checks.
-- Keep OpenSpec capabilities, archived changes, the Wayfinder decision index, and this roadmap
-  synchronized with implementation discoveries instead of allowing multiple competing truths.
+- Keep `@silk-effect/llvm` aligned with its pinned upstream baseline, deterministic fixtures,
+  Effect architecture rules, and packed release-candidate checks.
+- Keep README, language context, Wayfinder decisions, OpenSpec capabilities, archived changes, and
+  roadmaps synchronized so shipped behavior and future direction are never mixed.
+- Keep evaluator/native/Wasm differential evidence and test runtime budgets meaningful as the
+  pressure corpus grows.
 
 ## Not doing
 
-- General concurrency, atomics, async scheduling, networking, or a broad user-facing FFI during
-  bootstrap — the compiler workload does not require them.
-- WebAssembly-hosted self-hosting as a prerequisite — native fixed-point acceptance remains the
-  bootstrap gate even though direct WebAssembly emission is maintained in differential parity.
-- A package registry, dependency solver, production build system, or full language server — none is
-  required to prove the bootstrap language.
-- A general incremental query engine — immutable analysis snapshots and localized deterministic
-  worklists are the accepted bootstrap architecture.
-- Backward compatibility for unreleased compiler APIs — early implementation evidence should be
-  allowed to improve boundaries rather than fossilize them.
+- Treating `Effect.log` as stdout syntax, a byte stream, or an ambient global logger.
+- Defining portable `FileSystem` in terms of native handles, implicit working directories, Unix path
+  bytes, browser-only objects, or one privileged runtime implementation.
+- Pretending every host feature is portable; native-only needs use an explicit lower-level service.
+- General concurrency, atomics, async scheduling, networking, or broad user-facing FFI during this
+  service slice.
+- A package registry, dependency solver, production build system, or compatibility layer for
+  unreleased APIs.
+- Selecting a parser port or self-hosting sequence merely because file access becomes available.
+- Implementing Logger or FileSystem before the minimal Intrinsic boundary and source-defined
+  service mechanism are archived.
 
 ## Open questions
 
@@ -300,180 +173,40 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
-- 2026-08-10: Closed the static-runner CFG-inlining spike with backend-only disposition. Thirteen
-  roots across the cost corpus were classified and a test-only immutable local/region/exit remapper
-  was proven. LLVM already removes the measured production overhead; optimizing the portable
-  browser-capable direct-Wasm backend remains optional future work.
-
-- 2026-08-10: Shipped shared static Effect representation normalization. Direct single-region
-  constructors fold by body shape, local Copy/shared environments become `RunStaticEffect`, and
-  evaluator, LLVM, direct Wasm, MIR verification, fresh-process cost evidence, and the labs consume
-  the same deterministic verdict-bearing MIR. Runner CFG inlining remains separate.
-
-- 2026-08-10: Completed the synchronous Effect cost spike. Pipe spelling is absent by HIR/MIR,
-  Clang removes composition from every measured native entry, and direct Wasm retains avoidable
-  calls and code size. Selected a guarded shared MIR normalization as a separate follow-up; no
-  scheduler, fiber, continuation runtime, or suspension ABI was introduced.
-
-- 2026-08-10: Replaced privileged Effect combinator recipes with visible source-defined `Result`
-  and Effect modules. Added erased channel-row generics, ordinary higher-order Effect values,
-  completed-outcome reification, typed requirement binding, and access-bounded `Effect`,
-  `mut Effect`, and `once Effect` contracts. The suspension seam remains private and the dependent
-  synchronous-cost spike now measures the actual library/core boundary.
-
-- 2026-08-09: Completed shared Vector observation and structural-union Copy provenance. The lexer
-  reads nominal Copy records, while the stack VM again uses and verifies one ordered
-  `Vector<Step | VmDiagnostic>` after execution. Slot and raw-buffer copies preserve canonical
-  union tag/payload lanes across evaluator, native, and Wasm without runtime dispatch or allocation.
-
-- 2026-08-09: Completed `add-typed-constants`. Literal-only explicit scalar names participate in
-  module visibility, import resolution, tooling, and direct immediate lowering with no runtime
-  storage. The lexer and stack VM now name representative codes and limits without losing their
-  allocator, evaluator/native/Wasm, or determinism gates. Shared Vector reads become the next
-  evidence-backed boundary; enums remain separate.
-
-- 2026-08-09: Selected a bounded stack bytecode VM as the second language-pressure program. It
-  independently tests closed opcode vocabulary, Vector observation, allocation rollback, invalid
-  execution, and cross-engine determinism without implying a production VM or self-hosting step.
-- 2026-08-09: Completed `fix-contextual-integer-call-literals`. Characterization showed ordinary
-  and piped calls were already correct; the repaired defect was enclosing `bool` result context
-  suppressing `u8` operand-to-literal refinement. The lexer now stays in byte types throughout its
-  classifiers with evaluator/native/Wasm and deterministic artifact parity.
-- 2026-08-09: Closed the first real-program milestone after lowercase primitive families, physical
-  stdlib sources, static text, standard streams, four baseline algorithms, allocation-pressure BFS,
-  recursive quicksort, and executable FFT all reached cross-engine parity.
-- 2026-08-09: Reframed the next compiler-shaped program as a language-pressure exercise. A Silk
-  lexer comes first; parser porting and continuous self-hosting remain later decisions.
-- 2026-08-09: Completed and archived `exercise-language-with-silk-lexer`. The full token surface,
-  invalid recovery, allocation rollback, all three engines, and fresh-process determinism agree;
-  the exercise also repaired an LLVM CFG inlining defect and selected contextual integer literals
-  as the next focused repair.
-
-- 2026-08-09: Recorded a non-binding concurrency and parallelism direction: synchronous programs
-  pay no scheduler or fiber cost; suspension, fork, and parallelism add progressively explicit
-  runtime costs; and future Stream/Sink adapters build above primitive effectful standard I/O.
-- 2026-08-09: Promoted the real-programs initiative to Now and split its former umbrella proposal
-  into six independently implementable changes. Native-platform expansion remains Next; String,
-  Logger, default providers, and Stream/Sink stay explicit future seams rather than hidden scope.
-
-- 2026-08-08: Completed `add-silk-vector-and-scanner` and promoted the minimum native compiler
-  platform to Next. `silk.vector` is the first embedded, explicitly imported standard-library
-  module; its generic `Vector<T>` grows, rolls back failed growth atomically, moves out values, and
-  destroys initialized elements before storage release without compiler-known collection behavior.
-  A Silk scanner now borrows runtime-sized bytes and returns ten owned tokens through three
-  allocation ordinals with evaluator/native/Wasm parity, typed quota-failure sweeps, fresh-process
-  artifact determinism, and coordinated `/labs` evidence. The shipped outcome answers the prior
-  pass-selection question: byte-to-token scanning was sufficient to expose and close the remaining
-  generic ownership, provider-forwarding, effect-capture, and backend representation gaps without
-  requiring bulk memory primitives.
-- 2026-08-08: Completed the self-contained owned-allocation substrate and promoted the Silk-written
-  `Vector<T>` and scanner change to the current objective. `unsafe` blocks, `impl` conformances,
-  nominal `SystemAllocator`, affine `Allocation`, generic `RawBuffer<T>`, lexical `Slot<T>`, and
-  compiler-sealed `Drop` hooks run through every phase and all three engines, with no named scope,
-  allocator-kind branch, ambient allocator, public `free`, implicit zeroing, or initialization
-  bitmap. Provision dispatches to user-authored allocator witnesses through an exclusive
-  call-scoped loan, and field projection through nominal references — the prerequisite for a
-  witness reading its own provider state — landed with it, making a counted quota allocator
-  expressible. Two pre-existing defects surfaced and were fixed on the way: ownership never
-  descended into lazy `effect` bodies, so use-after-move inside them went unreported, and failed
-  run propagation returned past every cleanup region, leaking owners live at the run site.
-- 2026-08-07: Settled the defining execution model around `Effect`, `effect {}`, and `effect fn`;
-  rejected named lifetime scopes and allocator privilege in favor of affine self-contained owners
-  with deterministic `Drop`. Shipped first-class callable values and automatic data-first sections,
-  making pipelines ordinary unary application and enabling reusable `Effect.map`, retry, and custom
-  combinator callbacks. Synced and archived the completed callable, source-resolution, project-CLI,
-  and LSP-navigation changes, leaving no completed records in the active change queue.
-- 2026-08-07: Shipped and archived the first executable typed-flow baseline, then promoted a full
-  effect-model review ahead of capability roles, scopes, and allocation. The baseline proves lazy
-  construction, typed failure outcomes, exact recovery, cleanup, compiler-owned target layout,
-  structured DAG lowering, evaluator/native/Wasm parity, determinism, and unified Labs inspection.
-  Its `flow fn`, `Flow`, and `fail move` spellings were deliberately left open at archive time and
-  settled later the same day after a broad scenario corpus and adversarial review.
-- 2026-08-06: The composed remaining-member acceptance fold established the first algorithmic
-  baseline across module resolution, all compiler representations, logical evaluation, native LLVM,
-  direct WebAssembly, fresh-process determinism, and the unified `/labs` workbench. The program
-  succeeds by fixing cardinality in `Array<T, N>`; promoted runtime-sized compiler input and output
-  to Next as the first demonstrated memory boundary, without freezing its syntax or feature
-  sequence.
-- 2026-08-06: Shipped and archived `match-exhaustively`, completing the nine-change algorithmic
-  language slice. Precise and structural-union values now support bare, move, shared, and exclusive
-  exhaustive matching with guarded and nested destructuring, canonical result joins, selected-path
-  ownership and cleanup, structured DAG HIR/MIR, logical evaluation, native and direct WebAssembly
-  parity, and coordinated inspection in `/labs`. No successor is promoted until a real
-  compiler-shaped program exposes the next smallest gap.
-- 2026-08-06: Shipped and archived `normalize-structural-unions`. Structural unions now have
-  canonical normalized identities, compiler-owned target-aware sum layouts and calling shapes,
-  explicit widening, ownership and cleanup semantics, evaluator/native/WebAssembly parity, and
-  unified inspector coverage. Next: `match-exhaustively`.
-- 2026-08-06: Shipped and archived `add-mutable-bindings-and-structured-loops`. Silk now has explicit
-  `let mut`, transactional whole-value assignment through binding/field/index places, structured
-  `while` with lexical `break` and `continue`, deterministic loop-header ownership fixed points,
-  exact cleanup on every transfer, and evaluator/native/WebAssembly parity. Compiler-published HIR
-  and MIR control are canonical DAGs; repetition is an explicit loop-region semantic, while cyclic
-  LLVM control and WebAssembly nesting remain backend-private derivations. Next:
-  `normalize-structural-unions`.
-- 2026-08-06: Began `add-mutable-bindings-and-structured-loops` after shipping fixed-size arrays.
-  Corrected the compiler-pipeline boundary before implementation: compiler-published control is a
-  structured DAG with explicit loop semantics, LLVM owns derived cyclic back-edges, and WebAssembly
-  consumes the preserved structure without CFG reconstruction.
-
-- 2026-08-05: Shipped and archived `resolve-cross-module-declarations`. Dotted logical imports now
-  support namespace, selective, aliased, and hybrid bindings over canonical slash module identities;
-  declarations are private by default with explicit `pub`; closure-wide name resolution feeds
-  ordinary canonical HIR calls, instance discovery, MIR, interpreter, native, and WebAssembly
-  paths; and the facade-only name-resolution lab exposes bindings, conflicts, visibility failures,
-  cycles, and diagnostic causes. Next: `standardize-expression-and-operator-semantics`.
-- 2026-08-05: Shipped and archived `standardize-target-aware-layouts`, then expanded the active
-  compiler-data sequence into an algorithmic-language milestone. Operators, fixed-size arrays,
-  mutable bindings, and structured loops now land before unions and matching so the language can
-  express small real algorithms rather than only declare data shapes.
-- 2026-08-05: Promoted the compiler-data slice to Now and shaped six dependency-ordered changes.
-  Settled that the compiler is backend-agnostic but target-aware: canonical target and concrete
-  layout are computed before MIR lowering and embedded in MIR. Also fixed the bootstrap import,
-  nominal construction, union widening, and mode-aware match decisions in Wayfinder.
-- 2026-08-05: Shipped and archived `branch-on-boolean-conditions` — slice 1 complete. `bool` as
-  the second scalar (literals, declared types, comparisons, `bool.not`), `if`/`else` statements
-  with brace arms, condition and argument type checking (`SEM0011`/`SEM0012`), arm-scoped
-  ownership with per-return and arm-end exits and conservative conditional moves, MIR branch
-  diamonds with join blocks and arm drops, exact interpreter branching, and native `icmp`/`zext`
-  emission. Six branching corpus programs hold interpreter/native parity arm by arm. The
-  language now binds, computes, and decides through every phase of the spine.
-- 2026-08-05: Shipped and archived `compute-integer-arithmetic` — slice 1's second change.
-  Signed literals with full `i32` range, qualified callees, and the compiler-known `i32` actor
-  (`add`/`subtract`/`multiply`/`divide`/`remainder`) as HIR builtin calls lowering to a trapping
-  MIR `Binary` operation; the interpreter traps exactly on overflow, division by zero, and
-  MIN/-1, and the backend expands to overflow intrinsics plus guarded division branching to trap
-  blocks. Six new corpus programs hold interpreter/native parity including native trap behavior.
-  Two recorded design deviations: built-ins live in an elaboration table (not the declaration
-  index), and the checked expansion is visible at the LLVM level (MIR stays compact). Next:
-  `bool`, comparisons, `if`/`else`.
-- 2026-08-05: Shipped and archived `bind-local-values` — slice 1's first change. `let` bindings
-  and `move` now run through the whole spine: statement sequences in grammar and HIR, initializer
-  inference, non-shadowing (`SEM0008`), the first real ownership analysis (liveness ranges, moves,
-  `OWN0001` use-after-move with a new ownership diagnostic phase and `Violation` verdict),
-  populated cleanup plans, lowered `Drop` operations, and interpreter/native trap parity across
-  four new corpus programs. Backend injection landed alongside in `fa83a5f`. Next: arithmetic.
-- 2026-08-05: Completed the compiler realignment — all 13 changes from
-  [compiler-realignment](compiler-realignment.md) implemented and archived in one loop. The spine
-  now runs source → module closure → declaration index → HIR → ownership → instances → MIR →
-  LLVM bitcode → pinned Clang object → linked native executable, with a MIR interpreter as the
-  differential oracle, deterministic encoders and goldens at every artifact, and nine facade-only
-  inspector labs. The two-function "Now" milestone and the former "Later" items for MIR lowering
-  and the first native program shipped inside it. Grammar freeze lifted; promoted language
-  widening slice 1 (bindings, arithmetic, branching) to Now and data types (issue 02) to Next.
-- 2026-08-04: Shipped and archived `analyze-first-bootstrap-function` in commit `373c4d8`; direct
-  declaration, `i32`, integer, compatibility, and semantic diagnostic facts held without AST/HIR.
-  Recast Now as a checkable two-function milestone split into four dependency-ordered changes, each
-  with a required inspector checkpoint and a sync/reassessment boundary.
-- 2026-08-04: Shipped and archived `parse-first-bootstrap-function` in commit `ba6feaf`; its
-  lossless tree, bounded recovery, deterministic diagnostics, and hidden inspector met the recorded
-  outcome. Promoted one-function declaration and `i32` fact analysis to Now, explicitly keeping HIR
-  behind evidence from a second semantic form.
-- 2026-08-04: Shipped exact source text and lossless lexing, then promoted a one-function concrete
-  syntax tree and direct-link inspector to Now; semantic interpretation remains Next.
-- 2026-08-04: Replaced the oversized end-to-end compiler-kernel initiative with source text and
-  lexing. Moved parsing, semantic facts, HIR/MIR, native code generation, and runtime work behind
-  evidence-producing capability boundaries.
-- 2026-08-04: Created after completing the bootstrap-language Wayfinder map and archiving the LLVM
-  builder and Tiny-language OpenSpec portfolios. The first bet is an end-to-end compiler kernel,
-  followed by frontend semantics, ownership-aware lowering, and the native bootstrap platform.
+- 2026-08-10: Promoted `establish-minimal-intrinsic-boundary` ahead of portable services. Logging
+  and FileSystem are now blocked until compiler-known operations move under one sealed namespace,
+  the minimal intrinsic rule is enforced, and ordinary Silk source can declare service contracts.
+- 2026-08-10: Implemented the minimal intrinsic boundary: one sealed callable namespace,
+  source-defined services and providers, static numeric interfaces, generic integer addition,
+  source-owned layout/allocation/storage/Effect/standard-stream policy, and hosted-write/storage
+  primitives with no standard-library-name lowering branches. Reconciled the deferred Logging and
+  FileSystem proposals with that boundary; archival remains their implementation gate.
+- 2026-08-10: Synchronized the public project story after 119 archived changes. Removed completed
+  work from Now, recorded the current compiler/language baseline, added shipped multiline text/byte
+  literals from `5da21fd`, and reconciled README, compiler documentation, language context, and the
+  minimum-runtime decision. Promoted portable semantic Logging and portable whole-file FileSystem
+  interaction to Now from explicit user direction; both use replaceable Effect services, while
+  stdout and native filesystem mechanisms remain lower-level providers. Created and strictly
+  validated implementation-ready `add-portable-logging` and `add-portable-file-system` changes.
+- 2026-08-10: Added general exclusive `Effect.provideMut` in `7186153`; allocator provision is now
+  ordinary source-defined service provision with no allocator-specific alias.
+- 2026-08-10: Closed the static-runner CFG-inlining spike in `62249a3`/`66d6137`. LLVM already erases
+  measured synchronous Effect overhead; direct-Wasm runner inlining remains optional until browser
+  performance evidence justifies its ownership and cleanup complexity.
+- 2026-08-10: Shipped shared static Effect normalization in `3ec9e75` and the synchronous cost corpus
+  in `318ccdc`; evaluator, LLVM, direct Wasm, verification, and labs consume one MIR verdict.
+- 2026-08-10: Replaced privileged Effect recipes with visible source-defined combinators in
+  `ca1dfa5`/`b08eec4`, including kinded channel rows, stored Effect values, outcome reification, and
+  typed requirement binding.
+- 2026-08-09: Completed shared Vector reads, structural-union Copy provenance, typed scalar
+  constants, contextual integer refinement, and native address-root repair through the lexer and
+  stack-VM pressure programs.
+- 2026-08-09: Closed the first real-program milestone: seven familiar algorithms, static text,
+  standard streams, integer and floating scalar families, recursion, and allocation pressure all
+  reached evaluator/native/direct-Wasm parity.
+- 2026-08-08: Shipped the self-contained allocation substrate and Silk-written `Vector<T>` plus
+  scanner with failure-ordinal cleanup and fresh-process determinism.
+- 2026-08-07: Settled the defining execution model around `Effect`, `effect {}`, `effect fn`,
+  explicit service provision, affine owners, and deterministic restricted `Drop`.
+- 2026-08-05: Completed the 13-change compiler realignment from lossless source through native
+  executable, with deterministic encoders and facade-only inspector labs at every phase.

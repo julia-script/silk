@@ -1,0 +1,36 @@
+/// A byte size paired with a non-zero power-of-two alignment.
+pub struct Layout {
+  pub bytes: usize
+  pub alignment: usize
+}
+
+pub struct InvalidAlignment {
+  pub alignment: usize
+}
+
+pub struct LayoutOverflow {}
+
+/// Returns the compiler-selected layout of T.
+pub fn of<T>() -> Layout {
+  return Intrinsic.layoutOf<T>()
+}
+
+/// Constructs a layout from an explicit size and alignment.
+pub fn make(size: usize, alignment: usize) -> Layout | InvalidAlignment {
+  if alignment == 0 {
+    return InvalidAlignment { alignment: alignment }
+  }
+  let previous = alignment - 1
+  if usize.bitAnd(alignment, previous) != 0 {
+    return InvalidAlignment { alignment: alignment }
+  }
+  return Layout { bytes: size, alignment: alignment }
+}
+
+/// Repeats a layout with checked aggregate-size semantics.
+pub fn repeat(layout: Layout, count: usize) -> Layout | LayoutOverflow {
+  return match move usize.checkedMultiply(layout.bytes, count) {
+    None {} => LayoutOverflow {}
+    Some<usize> { value } => Layout { bytes: value, alignment: layout.alignment }
+  }
+}

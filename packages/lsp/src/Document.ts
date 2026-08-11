@@ -272,6 +272,28 @@ export const symbols = (
         },
       ]
     }
+    if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
+      return [
+        {
+          name: member.name.spelling,
+          kind: SymbolKind.Interface,
+          range,
+          selectionRange,
+          children: member.operations.flatMap((operation) =>
+            operation.name._tag === 'Present'
+              ? [
+                  {
+                    name: operation.name.spelling,
+                    kind: SymbolKind.Method,
+                    range: LineIndex.rangeOf(self.index, SyntaxTree.span(operation.syntax)),
+                    selectionRange: LineIndex.rangeOf(self.index, operation.name.token.span),
+                  },
+                ]
+              : [],
+          ),
+        },
+      ]
+    }
     const fields = member.fields.flatMap((field) =>
       field.name._tag === 'Present'
         ? [

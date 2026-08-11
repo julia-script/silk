@@ -38,7 +38,7 @@ const occurrenceAt = (
   return Analysis.semanticOccurrenceAt(snapshot, 'main', offset)
 }
 
-it.effect('indexes allocator tokens as distinct binding, actor, and operation identities', () =>
+it.effect('indexes allocator tokens as source binding, actor, and function identities', () =>
   Analysis.ofSourceRealized('main', encoder.encode(allocatorSource)).pipe(
     Effect.map((snapshot) => {
       const source = new TextDecoder().decode(
@@ -49,10 +49,10 @@ it.effect('indexes allocator tokens as distinct binding, actor, and operation id
       const operation = occurrenceAt(snapshot, source, 'make')
       assert.strictEqual(binding?.role, 'Declaration')
       assert.strictEqual(actor?.role, 'Actor')
-      assert.strictEqual(operation?.role, 'Operation')
+      assert.strictEqual(operation?.role, 'Value')
       assert.isDefined(binding?.declaration)
       assert.isUndefined(actor?.declaration)
-      assert.isUndefined(operation?.declaration)
+      assert.isDefined(operation?.declaration)
       assert.strictEqual(
         binding === undefined
           ? undefined
@@ -63,7 +63,7 @@ it.effect('indexes allocator tokens as distinct binding, actor, and operation id
         operation === undefined
           ? undefined
           : Analysis.occurrencePresentation(snapshot, 'main', operation)?.text,
-        'fn SystemAllocator.make() -> SystemAllocator',
+        'pub fn make() -> SystemAllocator',
       )
       return undefined
     }),
@@ -94,6 +94,46 @@ it.effect('presents effect function declarations and references identically', ()
     }),
   ),
 )
+
+it.effect('presents and navigates source service declarations and operation contracts', () => {
+  const source = `/// A portable logging contract.
+pub service Logger {
+  /// Reports whether logging is enabled.
+  fn enabled() -> bool
+}
+pub fn main() -> i32 { return 0 }`
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const service = occurrenceAt(snapshot, source, 'Logger')
+      const operation = occurrenceAt(snapshot, source, 'enabled()')
+
+      assert.strictEqual(service?.role, 'Declaration')
+      assert.strictEqual(operation?.role, 'Declaration')
+      assert.isDefined(service?.declaration)
+      assert.isDefined(operation?.declaration)
+      assert.strictEqual(
+        service === undefined
+          ? undefined
+          : Analysis.occurrencePresentation(snapshot, 'main', service)?.text,
+        'pub service Logger',
+      )
+      assert.strictEqual(
+        operation === undefined
+          ? undefined
+          : Analysis.occurrencePresentation(snapshot, 'main', operation)?.text,
+        'fn enabled() -> bool',
+      )
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', source.indexOf('enabled()')),
+        ),
+        '/// Reports whether logging is enabled.',
+      )
+      return undefined
+    }),
+  )
+})
 
 it.effect('answers raw documentation for modules, declarations, children, and references', () => {
   const source = `//! Recovery module.
@@ -616,7 +656,50 @@ pub fn main(value: i32) -> i32 { return Library. }`
       'hidden',
     )
 
+    const serviceSource = `service Logger { fn enabled() -> bool }
+pub fn main() -> i32 { return Logger. }`
+    const serviceSnapshot = yield* Analysis.ofSourceRealized('main', encoder.encode(serviceSource))
+    const serviceResult = Analysis.completionAt(
+      serviceSnapshot,
+      'main',
+      serviceSource.indexOf('Logger.') + 'Logger.'.length,
+    )
+    assert.deepEqual(serviceResult?.context, {
+      _tag: 'ActorMemberContext',
+      actor: 'Logger',
+    })
+    assert.deepEqual(
+      serviceResult?.candidates.map((candidate) => candidate.label),
+      ['enabled'],
+    )
+
+    const importedServiceSource = `import contracts { Logger }
+pub fn main() -> i32 { return Logger. }`
+    const importedService = yield* Analysis.makeRealized({
+      root: SourceFile.make('main', encoder.encode(importedServiceSource)),
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([['contracts', encoder.encode('pub service Logger { fn enabled() -> bool }')]]),
+        ),
+      ),
+    )
+    const importedServiceResult = Analysis.completionAt(
+      importedService,
+      'main',
+      importedServiceSource.indexOf('Logger.') + 'Logger.'.length,
+    )
+    assert.deepEqual(importedServiceResult?.context, {
+      _tag: 'ActorMemberContext',
+      actor: 'Logger',
+    })
+    assert.deepEqual(
+      importedServiceResult?.candidates.map((candidate) => candidate.label),
+      ['enabled'],
+    )
+
     const typeSource = `struct Local {}
+service Logger { fn enabled() -> bool }
 fn identity<T>(value: ) -> i32 { return 0 }`
     const typeSnapshot = yield* Analysis.ofSourceRealized('main', encoder.encode(typeSource))
     const typeResult = Analysis.completionAt(
@@ -626,6 +709,7 @@ fn identity<T>(value: ) -> i32 { return 0 }`
     )
     assert.deepEqual(typeResult?.context, { _tag: 'DeclaredTypeContext' })
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'Local')
+    assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'Logger')
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'f32')
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'f64')
     assert.notInclude(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'true')

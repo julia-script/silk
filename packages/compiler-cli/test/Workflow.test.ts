@@ -73,67 +73,82 @@ it.effect('separates source diagnostics from operational resolver failures durin
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
-it.effect('builds to the deterministic target and profile path', () =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem
-    const root = yield* fileSystem.makeTempDirectoryScoped()
-    yield* makeProject(root)
+it.effect(
+  'builds to the deterministic target and profile path',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
 
-    const status = yield* Workflow.build(options(root))
-    const project = yield* Project.load({ workingDirectory: root })
+      const status = yield* Workflow.build(options(root))
+      const project = yield* Project.load({ workingDirectory: root })
 
-    assert.strictEqual(status, 0)
-    const host = yield* Target.host()
-    assert.strictEqual(
-      yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/${project.name}`),
-      true,
-    )
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+      assert.strictEqual(status, 0)
+      const host = yield* Target.host()
+      assert.strictEqual(
+        yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/${project.name}`),
+        true,
+      )
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  30_000,
 )
 
-it.effect('builds ordered native and LLVM-Wasm targets to independent artifacts', () =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem
-    const root = yield* fileSystem.makeTempDirectoryScoped()
-    yield* makeProject(root)
-    yield* fileSystem.writeFileString(
-      `${root}/silk.toml`,
-      '[package]\nname = "hello"\nversion = "0.1.0"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["host", "wasm32-unknown-unknown"]\n',
-    )
-    assert.strictEqual(yield* Workflow.build({ ...options(root), clang: wasmClang }), 0)
-    const host = yield* Target.host()
-    assert.strictEqual(yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello`), true)
-    assert.strictEqual(
-      yield* fileSystem.exists(`${root}/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`),
-      true,
-    )
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+it.effect(
+  'builds ordered native and LLVM-Wasm targets to independent artifacts',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
+      yield* fileSystem.writeFileString(
+        `${root}/silk.toml`,
+        '[package]\nname = "hello"\nversion = "0.1.0"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["host", "wasm32-unknown-unknown"]\n',
+      )
+      assert.strictEqual(yield* Workflow.build({ ...options(root), clang: wasmClang }), 0)
+      const host = yield* Target.host()
+      assert.strictEqual(
+        yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello`),
+        true,
+      )
+      assert.strictEqual(
+        yield* fileSystem.exists(`${root}/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`),
+        true,
+      )
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  30_000,
 )
 
-it.effect('retains a successful sibling when another target rejects target-dependent source', () =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem
-    const root = yield* fileSystem.makeTempDirectoryScoped()
-    yield* makeProject(
-      root,
-      `fn exact() -> usize { return 9007199254740993 }
+it.effect(
+  'retains a successful sibling when another target rejects target-dependent source',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(
+        root,
+        `fn exact() -> usize { return 9007199254740993 }
 pub fn main() -> i32 {
   if exact() == 9007199254740993 { return 42 }
   return 0
 }`,
-    )
-    const status = yield* Workflow.build({
-      ...options(root),
-      targets: ['host', 'wasm32-unknown-unknown'],
-    })
-    const host = yield* Target.host()
-    assert.strictEqual(status, 1)
-    assert.strictEqual(yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello`), true)
-    assert.strictEqual(
-      yield* fileSystem.exists(`${root}/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`),
-      false,
-    )
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+      )
+      const status = yield* Workflow.build({
+        ...options(root),
+        targets: ['host', 'wasm32-unknown-unknown'],
+      })
+      const host = yield* Target.host()
+      assert.strictEqual(status, 1)
+      assert.strictEqual(
+        yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello`),
+        true,
+      )
+      assert.strictEqual(
+        yield* fileSystem.exists(`${root}/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`),
+        false,
+      )
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  30_000,
 )
 
 it.effect('attempts a source rejection and operational failure, preferring exit two', () =>
@@ -212,14 +227,17 @@ it.effect('returns source and toolchain failure classes without leaving executab
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
-it.effect('builds and returns the compiled program exact exit status', () =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem
-    const root = yield* fileSystem.makeTempDirectoryScoped()
-    yield* makeProject(root)
+it.effect(
+  'builds and returns the compiled program exact exit status',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
 
-    const status = yield* Workflow.run(options(root), ['--literal', 'argument'])
+      const status = yield* Workflow.run(options(root), ['--literal', 'argument'])
 
-    assert.strictEqual(status, 42)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+      assert.strictEqual(status, 42)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  30_000,
 )

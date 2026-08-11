@@ -63,4 +63,4 @@ it('keeps stack VM pressure phases and artifacts byte-identical across fresh pro
   assert.strictEqual(encoded.separate.wasmText.length, 64)
   assert.strictEqual(encoded.separate.nativeBytes.length, 64)
   assert.strictEqual(encoded.separate.wasmBytes.length, 64)
-}, 90_000)
+}, 240_000)

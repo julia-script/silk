@@ -81,6 +81,12 @@ const directFunctionDeclarations = (node: SyntaxTree.Node): ReadonlyArray<Syntax
       SyntaxTree.isNode(element) && element.kind === 'FunctionDeclaration',
   )
 
+const directServiceDeclarations = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
+  node.children.filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ServiceDeclaration',
+  )
+
 const directTokenText = (
   result: SyntaxFile.SyntaxFile,
   node: SyntaxTree.Node,
@@ -167,6 +173,103 @@ fn main() -> i32 { let pending = work(Problem { code: 1 }) return run pending }`
   )
   assert.deepEqual(result.parserDiagnostics, [])
   assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
+})
+
+it('parses source service contracts with complete operation rows losslessly', () => {
+  const source = `/// A portable logging contract.
+pub service Logger<T> {
+  effect fn log(message: &[u8], value: T) -> () ! WriteFailure ? &mut Logger<T>
+  fn enabled() -> bool
+}
+fn after() -> i32 { return 1 }`
+  const result = parseText('memory://service.silk', source)
+  const service = directServiceDeclarations(result.root).at(0)
+
+  assert.strictEqual(service?.kind, 'ServiceDeclaration')
+  assert.strictEqual(
+    SyntaxTree.directToken(service ?? result.root, 'PubKeyword')?.kind,
+    'PubKeyword',
+  )
+  assert.strictEqual(
+    SyntaxTree.directToken(service ?? result.root, 'ServiceKeyword')?.kind,
+    'ServiceKeyword',
+  )
+  const operations =
+    service === undefined ? [] : SyntaxTree.directNodes(service, 'ServiceOperation')
+  assert.strictEqual(operations.length, 2)
+  assert.strictEqual(
+    SyntaxTree.directNode(operations[0] ?? result.root, 'FailureRow')?.kind,
+    'FailureRow',
+  )
+  assert.strictEqual(
+    SyntaxTree.directNode(operations[0] ?? result.root, 'RequirementRow')?.kind,
+    'RequirementRow',
+  )
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('parses ordinary static interfaces separately from services', () => {
+  const source = `pub interface Integer<T> {
+  fn add(left: T, right: T) -> T
+}
+fn after() -> i32 { return 1 }`
+  const result = parseText('memory://interface.silk', source)
+  const interface_ = SyntaxTree.directNodes(result.root, 'InterfaceDeclaration').at(0)
+
+  assert.strictEqual(interface_?.kind, 'InterfaceDeclaration')
+  assert.strictEqual(
+    SyntaxTree.directToken(interface_ ?? result.root, 'InterfaceKeyword')?.kind,
+    'InterfaceKeyword',
+  )
+  assert.strictEqual(
+    interface_ === undefined ? 0 : SyntaxTree.directNodes(interface_, 'ServiceOperation').length,
+    1,
+  )
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers a damaged service operation before the following operation and declaration', () => {
+  const source = `service Logger {
+  effect fn broken(message: &[u8] -> ()
+  fn enabled() -> bool
+}
+fn after() -> i32 { return 1 }`
+  const result = parseText('memory://damaged-service.silk', source)
+  const service = directServiceDeclarations(result.root).at(0)
+  const operations =
+    service === undefined ? [] : SyntaxTree.directNodes(service, 'ServiceOperation')
+
+  assert.strictEqual(operations.length, 2)
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
+  assert.include(
+    missingLeaves(result.root).map((token) => token.expected),
+    'RightParenthesis',
+  )
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('contains invalid service storage without consuming a valid following operation', () => {
+  const source = `service Broken {
+  state: i32
+  fn enabled() -> bool
+}`
+  const result = parseText('memory://service-storage.silk', source)
+  const service = directServiceDeclarations(result.root).at(0)
+
+  assert.strictEqual(
+    service === undefined ? 0 : SyntaxTree.directNodes(service, 'ServiceInvalidMember').length,
+    1,
+  )
+  assert.strictEqual(
+    service === undefined ? 0 : SyntaxTree.directNodes(service, 'ServiceOperation').length,
+    1,
+  )
+  assert.isAbove(result.parserDiagnostics.length, 0)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
 it('recovers a missing failure-row member without consuming the effect body or next function', () => {

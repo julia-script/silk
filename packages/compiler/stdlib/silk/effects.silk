@@ -3,6 +3,13 @@
 
 import silk.result { Result, Success, Failure }
 
+/// Reifies one Effect execution into Result data while preserving its requirements.
+pub effect fn result<A, !E, ?R>(
+  protected: once Effect<A ! E ? R>
+) -> Result<A, Row<!E>> ? R {
+  return run Intrinsic.effectResult(move protected)
+}
+
 effect fn raise<!E>(error: Row<!E>) -> never ! E {
   fail move error
 }
@@ -13,7 +20,7 @@ pub effect fn mapBoth<A, B, !E, !F, ?R>(
   onSuccess: once fn(A) -> B,
   onFailure: once fn(Row<!E>) -> Row<!F>
 ) -> B ! F ? R {
-  let completed = run Effect.result(move self)
+  let completed = run result(move self)
   return match move completed {
     Result<A, Row<!E>> { value: outcome } => match move outcome {
       Success<A> { value: success } => onSuccess(move success)
@@ -27,7 +34,7 @@ pub effect fn map<A, B, !E, ?R>(
   self: once Effect<A ! E ? R>,
   onSuccess: once fn(A) -> B
 ) -> B ! E ? R {
-  let completed = run Effect.result(move self)
+  let completed = run result(move self)
   return match move completed {
     Result<A, Row<!E>> { value: outcome } => match move outcome {
       Success<A> { value: success } => onSuccess(move success)
@@ -41,7 +48,7 @@ pub effect fn mapError<A, !E, !F, ?R>(
   self: once Effect<A ! E ? R>,
   onFailure: once fn(Row<!E>) -> Row<!F>
 ) -> A ! F ? R {
-  let completed = run Effect.result(move self)
+  let completed = run result(move self)
   return match move completed {
     Result<A, Row<!E>> { value: outcome } => match move outcome {
       Success<A> { value: success } => move success
@@ -55,7 +62,7 @@ pub effect fn flatMap<A, B, !E, !F, ?R, ?S>(
   self: once Effect<A ! E ? R>,
   onSuccess: once fn(A) -> Effect<B ! F ? S>
 ) -> B ! E | F ? R | S {
-  let completed = run Effect.result(move self)
+  let completed = run result(move self)
   return match move completed {
     Result<A, Row<!E>> { value: outcome } => match move outcome {
       Success<A> { value: success } => run onSuccess(move success)
@@ -69,7 +76,7 @@ pub effect fn tap<A, !E, !F, ?R, ?S>(
   self: once Effect<A ! E ? R>,
   callback: once fn(A) -> Effect<A ! F ? S>
 ) -> A ! E | F ? R | S {
-  let completed = run Effect.result(move self)
+  let completed = run result(move self)
   return match move completed {
     Result<A, Row<!E>> { value: outcome } => match move outcome {
       Success<A> { value: success } => run callback(move success)
@@ -83,7 +90,7 @@ pub effect fn catchAll<A, !E, !F, ?R, ?S>(
   self: once Effect<A ! E ? R>,
   onFailure: once fn(Row<!E>) -> Effect<A ! F ? S>
 ) -> A ! F ? R | S {
-  let completed = run Effect.result(move self)
+  let completed = run result(move self)
   return match move completed {
     Result<A, Row<!E>> { value: outcome } => match move outcome {
       Success<A> { value: success } => move success
@@ -115,7 +122,7 @@ effect fn retryLoop<A, !E, ?R>(
   self: mut Effect<A ! E ? R>,
   retries: usize
 ) -> A ! E ? R {
-  let completed = run Effect.result(self)
+  let completed = run result(self)
   return match move completed {
     Result<A, Row<!E>> { value: outcome } => match move outcome {
       Success<A> { value: success } => move success
@@ -133,12 +140,20 @@ pub effect fn retry<A, !E, ?R>(
 }
 
 /// Satisfies one typed service requirement with an existing provider.
-pub effect fn provide<A, C, !E, ?R>(
+pub effect fn bindRequirement<A, C, P, !E, ?R>(
   self: once Effect<A ! E ? &C | R>,
-  provider: &C
+  provider: &P
 ) -> A ! E ? R {
-  let bound = Effect.bindRequirement(move self, provider)
+  let bound = Intrinsic.bindRequirement(move self, provider)
   return run bound
+}
+
+/// Satisfies one typed service requirement with an existing provider.
+pub effect fn provide<A, C, P, !E, ?R>(
+  self: once Effect<A ! E ? &C | R>,
+  provider: &P
+) -> A ! E ? R {
+  return run bindRequirement(move self, provider)
 }
 
 /// Satisfies one typed service requirement with an existing exclusive provider.
@@ -146,7 +161,7 @@ pub effect fn provideMut<A, C, P, !E, ?R>(
   self: once Effect<A ! E ? &mut C | R>,
   provider: &mut P
 ) -> A ! E ? R {
-  let bound = Effect.bindRequirement(move self, provider)
+  let bound = Intrinsic.bindRequirement(move self, provider)
   return run bound
 }
 
@@ -156,6 +171,6 @@ pub effect fn provideWith<A, C, !E, !F, ?R, ?S>(
   acquire: Effect<C ! F ? S>
 ) -> A ! E | F ? R | S {
   let mut provider = run acquire
-  let bound = Effect.bindRequirement(move self, &mut provider)
+  let bound = Intrinsic.bindRequirement(move self, &mut provider)
   return run bound
 }

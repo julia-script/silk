@@ -1,0 +1,4989 @@
+{
+  "targets": ["Evaluator", "LLVM", "Wasm"],
+  "entries": [
+    {
+      "operation": "Intrinsic.boolEquals",
+      "signature": "fn Intrinsic.boolEquals(left: bool, right: bool) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/bool.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.boolNotEquals",
+      "signature": "fn Intrinsic.boolNotEquals(left: bool, right: bool) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/bool.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.boolNot",
+      "signature": "fn Intrinsic.boolNot(value: bool) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/bool.not",
+      "identity": "Not"
+    },
+    {
+      "operation": "Intrinsic.u8ToU8",
+      "signature": "fn Intrinsic.u8ToU8(value: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.toU8",
+      "identity": "ConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedToU8",
+      "signature": "fn Intrinsic.u8CheckedToU8(value: u8) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedToU8",
+      "identity": "CheckedConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.u8ToU16",
+      "signature": "fn Intrinsic.u8ToU16(value: u8) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.toU16",
+      "identity": "ConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedToU16",
+      "signature": "fn Intrinsic.u8CheckedToU16(value: u8) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedToU16",
+      "identity": "CheckedConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.u8ToU32",
+      "signature": "fn Intrinsic.u8ToU32(value: u8) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedToU32",
+      "signature": "fn Intrinsic.u8CheckedToU32(value: u8) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedToU32",
+      "identity": "CheckedConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.u8ToU64",
+      "signature": "fn Intrinsic.u8ToU64(value: u8) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.toU64",
+      "identity": "ConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedToU64",
+      "signature": "fn Intrinsic.u8CheckedToU64(value: u8) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedToU64",
+      "identity": "CheckedConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.u8ToUsize",
+      "signature": "fn Intrinsic.u8ToUsize(value: u8) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.toUsize",
+      "identity": "ConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedToUsize",
+      "signature": "fn Intrinsic.u8CheckedToUsize(value: u8) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedToUsize",
+      "identity": "CheckedConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.u8ToI8",
+      "signature": "fn Intrinsic.u8ToI8(value: u8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.toI8",
+      "identity": "ConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedToI8",
+      "signature": "fn Intrinsic.u8CheckedToI8(value: u8) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedToI8",
+      "identity": "CheckedConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.u8ToI16",
+      "signature": "fn Intrinsic.u8ToI16(value: u8) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.toI16",
+      "identity": "ConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedToI16",
+      "signature": "fn Intrinsic.u8CheckedToI16(value: u8) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedToI16",
+      "identity": "CheckedConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.u8ToI32",
+      "signature": "fn Intrinsic.u8ToI32(value: u8) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.toI32",
+      "identity": "ConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedToI32",
+      "signature": "fn Intrinsic.u8CheckedToI32(value: u8) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedToI32",
+      "identity": "CheckedConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.u8ToI64",
+      "signature": "fn Intrinsic.u8ToI64(value: u8) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.toI64",
+      "identity": "ConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedToI64",
+      "signature": "fn Intrinsic.u8CheckedToI64(value: u8) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedToI64",
+      "identity": "CheckedConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.u8ToIsize",
+      "signature": "fn Intrinsic.u8ToIsize(value: u8) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.toIsize",
+      "identity": "ConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedToIsize",
+      "signature": "fn Intrinsic.u8CheckedToIsize(value: u8) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedToIsize",
+      "identity": "CheckedConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.u8ToF32",
+      "signature": "fn Intrinsic.u8ToF32(value: u8) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.toF32",
+      "identity": "ConvertToF32"
+    },
+    {
+      "operation": "Intrinsic.u8ToF64",
+      "signature": "fn Intrinsic.u8ToF64(value: u8) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.toF64",
+      "identity": "ConvertToF64"
+    },
+    {
+      "operation": "Intrinsic.u8Add",
+      "signature": "fn Intrinsic.u8Add(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.add",
+      "identity": "Add"
+    },
+    {
+      "operation": "Intrinsic.u8Subtract",
+      "signature": "fn Intrinsic.u8Subtract(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.subtract",
+      "identity": "Subtract"
+    },
+    {
+      "operation": "Intrinsic.u8Multiply",
+      "signature": "fn Intrinsic.u8Multiply(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.multiply",
+      "identity": "Multiply"
+    },
+    {
+      "operation": "Intrinsic.u8Divide",
+      "signature": "fn Intrinsic.u8Divide(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.divide",
+      "identity": "Divide"
+    },
+    {
+      "operation": "Intrinsic.u8Remainder",
+      "signature": "fn Intrinsic.u8Remainder(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.remainder",
+      "identity": "Remainder"
+    },
+    {
+      "operation": "Intrinsic.u8BitAnd",
+      "signature": "fn Intrinsic.u8BitAnd(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.bitAnd",
+      "identity": "BitAnd"
+    },
+    {
+      "operation": "Intrinsic.u8BitOr",
+      "signature": "fn Intrinsic.u8BitOr(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.bitOr",
+      "identity": "BitOr"
+    },
+    {
+      "operation": "Intrinsic.u8BitXor",
+      "signature": "fn Intrinsic.u8BitXor(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.bitXor",
+      "identity": "BitXor"
+    },
+    {
+      "operation": "Intrinsic.u8BitNot",
+      "signature": "fn Intrinsic.u8BitNot(value: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.bitNot",
+      "identity": "BitNot"
+    },
+    {
+      "operation": "Intrinsic.u8ShiftLeft",
+      "signature": "fn Intrinsic.u8ShiftLeft(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.shiftLeft",
+      "identity": "ShiftLeft"
+    },
+    {
+      "operation": "Intrinsic.u8ShiftRight",
+      "signature": "fn Intrinsic.u8ShiftRight(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.shiftRight",
+      "identity": "ShiftRight"
+    },
+    {
+      "operation": "Intrinsic.u8RotateLeft",
+      "signature": "fn Intrinsic.u8RotateLeft(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.rotateLeft",
+      "identity": "RotateLeft"
+    },
+    {
+      "operation": "Intrinsic.u8RotateRight",
+      "signature": "fn Intrinsic.u8RotateRight(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.rotateRight",
+      "identity": "RotateRight"
+    },
+    {
+      "operation": "Intrinsic.u8WrappingAdd",
+      "signature": "fn Intrinsic.u8WrappingAdd(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.wrappingAdd",
+      "identity": "WrappingAdd"
+    },
+    {
+      "operation": "Intrinsic.u8WrappingSubtract",
+      "signature": "fn Intrinsic.u8WrappingSubtract(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.wrappingSubtract",
+      "identity": "WrappingSubtract"
+    },
+    {
+      "operation": "Intrinsic.u8WrappingMultiply",
+      "signature": "fn Intrinsic.u8WrappingMultiply(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.wrappingMultiply",
+      "identity": "WrappingMultiply"
+    },
+    {
+      "operation": "Intrinsic.u8SaturatingAdd",
+      "signature": "fn Intrinsic.u8SaturatingAdd(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.saturatingAdd",
+      "identity": "SaturatingAdd"
+    },
+    {
+      "operation": "Intrinsic.u8SaturatingSubtract",
+      "signature": "fn Intrinsic.u8SaturatingSubtract(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.saturatingSubtract",
+      "identity": "SaturatingSubtract"
+    },
+    {
+      "operation": "Intrinsic.u8SaturatingMultiply",
+      "signature": "fn Intrinsic.u8SaturatingMultiply(left: u8, right: u8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.saturatingMultiply",
+      "identity": "SaturatingMultiply"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedAdd",
+      "signature": "fn Intrinsic.u8CheckedAdd(left: u8, right: u8) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedAdd",
+      "identity": "CheckedAdd"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedSubtract",
+      "signature": "fn Intrinsic.u8CheckedSubtract(left: u8, right: u8) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedSubtract",
+      "identity": "CheckedSubtract"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedMultiply",
+      "signature": "fn Intrinsic.u8CheckedMultiply(left: u8, right: u8) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedMultiply",
+      "identity": "CheckedMultiply"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedDivide",
+      "signature": "fn Intrinsic.u8CheckedDivide(left: u8, right: u8) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedDivide",
+      "identity": "CheckedDivide"
+    },
+    {
+      "operation": "Intrinsic.u8CheckedRemainder",
+      "signature": "fn Intrinsic.u8CheckedRemainder(left: u8, right: u8) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.checkedRemainder",
+      "identity": "CheckedRemainder"
+    },
+    {
+      "operation": "Intrinsic.u8Equals",
+      "signature": "fn Intrinsic.u8Equals(left: u8, right: u8) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.u8NotEquals",
+      "signature": "fn Intrinsic.u8NotEquals(left: u8, right: u8) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.u8LessThan",
+      "signature": "fn Intrinsic.u8LessThan(left: u8, right: u8) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.u8LessOrEqual",
+      "signature": "fn Intrinsic.u8LessOrEqual(left: u8, right: u8) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.u8GreaterThan",
+      "signature": "fn Intrinsic.u8GreaterThan(left: u8, right: u8) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.u8GreaterOrEqual",
+      "signature": "fn Intrinsic.u8GreaterOrEqual(left: u8, right: u8) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u8.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
+      "operation": "Intrinsic.u16ToU8",
+      "signature": "fn Intrinsic.u16ToU8(value: u16) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.toU8",
+      "identity": "ConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedToU8",
+      "signature": "fn Intrinsic.u16CheckedToU8(value: u16) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedToU8",
+      "identity": "CheckedConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.u16ToU16",
+      "signature": "fn Intrinsic.u16ToU16(value: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.toU16",
+      "identity": "ConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedToU16",
+      "signature": "fn Intrinsic.u16CheckedToU16(value: u16) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedToU16",
+      "identity": "CheckedConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.u16ToU32",
+      "signature": "fn Intrinsic.u16ToU32(value: u16) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedToU32",
+      "signature": "fn Intrinsic.u16CheckedToU32(value: u16) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedToU32",
+      "identity": "CheckedConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.u16ToU64",
+      "signature": "fn Intrinsic.u16ToU64(value: u16) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.toU64",
+      "identity": "ConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedToU64",
+      "signature": "fn Intrinsic.u16CheckedToU64(value: u16) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedToU64",
+      "identity": "CheckedConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.u16ToUsize",
+      "signature": "fn Intrinsic.u16ToUsize(value: u16) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.toUsize",
+      "identity": "ConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedToUsize",
+      "signature": "fn Intrinsic.u16CheckedToUsize(value: u16) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedToUsize",
+      "identity": "CheckedConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.u16ToI8",
+      "signature": "fn Intrinsic.u16ToI8(value: u16) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.toI8",
+      "identity": "ConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedToI8",
+      "signature": "fn Intrinsic.u16CheckedToI8(value: u16) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedToI8",
+      "identity": "CheckedConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.u16ToI16",
+      "signature": "fn Intrinsic.u16ToI16(value: u16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.toI16",
+      "identity": "ConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedToI16",
+      "signature": "fn Intrinsic.u16CheckedToI16(value: u16) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedToI16",
+      "identity": "CheckedConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.u16ToI32",
+      "signature": "fn Intrinsic.u16ToI32(value: u16) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.toI32",
+      "identity": "ConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedToI32",
+      "signature": "fn Intrinsic.u16CheckedToI32(value: u16) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedToI32",
+      "identity": "CheckedConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.u16ToI64",
+      "signature": "fn Intrinsic.u16ToI64(value: u16) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.toI64",
+      "identity": "ConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedToI64",
+      "signature": "fn Intrinsic.u16CheckedToI64(value: u16) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedToI64",
+      "identity": "CheckedConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.u16ToIsize",
+      "signature": "fn Intrinsic.u16ToIsize(value: u16) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.toIsize",
+      "identity": "ConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedToIsize",
+      "signature": "fn Intrinsic.u16CheckedToIsize(value: u16) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedToIsize",
+      "identity": "CheckedConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.u16ToF32",
+      "signature": "fn Intrinsic.u16ToF32(value: u16) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.toF32",
+      "identity": "ConvertToF32"
+    },
+    {
+      "operation": "Intrinsic.u16ToF64",
+      "signature": "fn Intrinsic.u16ToF64(value: u16) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.toF64",
+      "identity": "ConvertToF64"
+    },
+    {
+      "operation": "Intrinsic.u16Add",
+      "signature": "fn Intrinsic.u16Add(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.add",
+      "identity": "Add"
+    },
+    {
+      "operation": "Intrinsic.u16Subtract",
+      "signature": "fn Intrinsic.u16Subtract(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.subtract",
+      "identity": "Subtract"
+    },
+    {
+      "operation": "Intrinsic.u16Multiply",
+      "signature": "fn Intrinsic.u16Multiply(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.multiply",
+      "identity": "Multiply"
+    },
+    {
+      "operation": "Intrinsic.u16Divide",
+      "signature": "fn Intrinsic.u16Divide(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.divide",
+      "identity": "Divide"
+    },
+    {
+      "operation": "Intrinsic.u16Remainder",
+      "signature": "fn Intrinsic.u16Remainder(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.remainder",
+      "identity": "Remainder"
+    },
+    {
+      "operation": "Intrinsic.u16BitAnd",
+      "signature": "fn Intrinsic.u16BitAnd(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.bitAnd",
+      "identity": "BitAnd"
+    },
+    {
+      "operation": "Intrinsic.u16BitOr",
+      "signature": "fn Intrinsic.u16BitOr(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.bitOr",
+      "identity": "BitOr"
+    },
+    {
+      "operation": "Intrinsic.u16BitXor",
+      "signature": "fn Intrinsic.u16BitXor(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.bitXor",
+      "identity": "BitXor"
+    },
+    {
+      "operation": "Intrinsic.u16BitNot",
+      "signature": "fn Intrinsic.u16BitNot(value: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.bitNot",
+      "identity": "BitNot"
+    },
+    {
+      "operation": "Intrinsic.u16ShiftLeft",
+      "signature": "fn Intrinsic.u16ShiftLeft(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.shiftLeft",
+      "identity": "ShiftLeft"
+    },
+    {
+      "operation": "Intrinsic.u16ShiftRight",
+      "signature": "fn Intrinsic.u16ShiftRight(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.shiftRight",
+      "identity": "ShiftRight"
+    },
+    {
+      "operation": "Intrinsic.u16RotateLeft",
+      "signature": "fn Intrinsic.u16RotateLeft(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.rotateLeft",
+      "identity": "RotateLeft"
+    },
+    {
+      "operation": "Intrinsic.u16RotateRight",
+      "signature": "fn Intrinsic.u16RotateRight(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.rotateRight",
+      "identity": "RotateRight"
+    },
+    {
+      "operation": "Intrinsic.u16WrappingAdd",
+      "signature": "fn Intrinsic.u16WrappingAdd(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.wrappingAdd",
+      "identity": "WrappingAdd"
+    },
+    {
+      "operation": "Intrinsic.u16WrappingSubtract",
+      "signature": "fn Intrinsic.u16WrappingSubtract(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.wrappingSubtract",
+      "identity": "WrappingSubtract"
+    },
+    {
+      "operation": "Intrinsic.u16WrappingMultiply",
+      "signature": "fn Intrinsic.u16WrappingMultiply(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.wrappingMultiply",
+      "identity": "WrappingMultiply"
+    },
+    {
+      "operation": "Intrinsic.u16SaturatingAdd",
+      "signature": "fn Intrinsic.u16SaturatingAdd(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.saturatingAdd",
+      "identity": "SaturatingAdd"
+    },
+    {
+      "operation": "Intrinsic.u16SaturatingSubtract",
+      "signature": "fn Intrinsic.u16SaturatingSubtract(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.saturatingSubtract",
+      "identity": "SaturatingSubtract"
+    },
+    {
+      "operation": "Intrinsic.u16SaturatingMultiply",
+      "signature": "fn Intrinsic.u16SaturatingMultiply(left: u16, right: u16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.saturatingMultiply",
+      "identity": "SaturatingMultiply"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedAdd",
+      "signature": "fn Intrinsic.u16CheckedAdd(left: u16, right: u16) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedAdd",
+      "identity": "CheckedAdd"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedSubtract",
+      "signature": "fn Intrinsic.u16CheckedSubtract(left: u16, right: u16) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedSubtract",
+      "identity": "CheckedSubtract"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedMultiply",
+      "signature": "fn Intrinsic.u16CheckedMultiply(left: u16, right: u16) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedMultiply",
+      "identity": "CheckedMultiply"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedDivide",
+      "signature": "fn Intrinsic.u16CheckedDivide(left: u16, right: u16) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedDivide",
+      "identity": "CheckedDivide"
+    },
+    {
+      "operation": "Intrinsic.u16CheckedRemainder",
+      "signature": "fn Intrinsic.u16CheckedRemainder(left: u16, right: u16) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.checkedRemainder",
+      "identity": "CheckedRemainder"
+    },
+    {
+      "operation": "Intrinsic.u16Equals",
+      "signature": "fn Intrinsic.u16Equals(left: u16, right: u16) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.u16NotEquals",
+      "signature": "fn Intrinsic.u16NotEquals(left: u16, right: u16) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.u16LessThan",
+      "signature": "fn Intrinsic.u16LessThan(left: u16, right: u16) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.u16LessOrEqual",
+      "signature": "fn Intrinsic.u16LessOrEqual(left: u16, right: u16) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.u16GreaterThan",
+      "signature": "fn Intrinsic.u16GreaterThan(left: u16, right: u16) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.u16GreaterOrEqual",
+      "signature": "fn Intrinsic.u16GreaterOrEqual(left: u16, right: u16) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u16.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
+      "operation": "Intrinsic.u32ToU8",
+      "signature": "fn Intrinsic.u32ToU8(value: u32) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.toU8",
+      "identity": "ConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedToU8",
+      "signature": "fn Intrinsic.u32CheckedToU8(value: u32) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedToU8",
+      "identity": "CheckedConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.u32ToU16",
+      "signature": "fn Intrinsic.u32ToU16(value: u32) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.toU16",
+      "identity": "ConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedToU16",
+      "signature": "fn Intrinsic.u32CheckedToU16(value: u32) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedToU16",
+      "identity": "CheckedConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.u32ToU32",
+      "signature": "fn Intrinsic.u32ToU32(value: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedToU32",
+      "signature": "fn Intrinsic.u32CheckedToU32(value: u32) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedToU32",
+      "identity": "CheckedConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.u32ToU64",
+      "signature": "fn Intrinsic.u32ToU64(value: u32) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.toU64",
+      "identity": "ConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedToU64",
+      "signature": "fn Intrinsic.u32CheckedToU64(value: u32) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedToU64",
+      "identity": "CheckedConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.u32ToUsize",
+      "signature": "fn Intrinsic.u32ToUsize(value: u32) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.toUsize",
+      "identity": "ConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedToUsize",
+      "signature": "fn Intrinsic.u32CheckedToUsize(value: u32) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedToUsize",
+      "identity": "CheckedConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.u32ToI8",
+      "signature": "fn Intrinsic.u32ToI8(value: u32) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.toI8",
+      "identity": "ConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedToI8",
+      "signature": "fn Intrinsic.u32CheckedToI8(value: u32) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedToI8",
+      "identity": "CheckedConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.u32ToI16",
+      "signature": "fn Intrinsic.u32ToI16(value: u32) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.toI16",
+      "identity": "ConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedToI16",
+      "signature": "fn Intrinsic.u32CheckedToI16(value: u32) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedToI16",
+      "identity": "CheckedConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.u32ToI32",
+      "signature": "fn Intrinsic.u32ToI32(value: u32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.toI32",
+      "identity": "ConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedToI32",
+      "signature": "fn Intrinsic.u32CheckedToI32(value: u32) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedToI32",
+      "identity": "CheckedConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.u32ToI64",
+      "signature": "fn Intrinsic.u32ToI64(value: u32) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.toI64",
+      "identity": "ConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedToI64",
+      "signature": "fn Intrinsic.u32CheckedToI64(value: u32) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedToI64",
+      "identity": "CheckedConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.u32ToIsize",
+      "signature": "fn Intrinsic.u32ToIsize(value: u32) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.toIsize",
+      "identity": "ConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedToIsize",
+      "signature": "fn Intrinsic.u32CheckedToIsize(value: u32) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedToIsize",
+      "identity": "CheckedConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.u32ToF32",
+      "signature": "fn Intrinsic.u32ToF32(value: u32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.toF32",
+      "identity": "ConvertToF32"
+    },
+    {
+      "operation": "Intrinsic.u32ToF64",
+      "signature": "fn Intrinsic.u32ToF64(value: u32) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.toF64",
+      "identity": "ConvertToF64"
+    },
+    {
+      "operation": "Intrinsic.u32Add",
+      "signature": "fn Intrinsic.u32Add(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.add",
+      "identity": "Add"
+    },
+    {
+      "operation": "Intrinsic.u32Subtract",
+      "signature": "fn Intrinsic.u32Subtract(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.subtract",
+      "identity": "Subtract"
+    },
+    {
+      "operation": "Intrinsic.u32Multiply",
+      "signature": "fn Intrinsic.u32Multiply(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.multiply",
+      "identity": "Multiply"
+    },
+    {
+      "operation": "Intrinsic.u32Divide",
+      "signature": "fn Intrinsic.u32Divide(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.divide",
+      "identity": "Divide"
+    },
+    {
+      "operation": "Intrinsic.u32Remainder",
+      "signature": "fn Intrinsic.u32Remainder(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.remainder",
+      "identity": "Remainder"
+    },
+    {
+      "operation": "Intrinsic.u32BitAnd",
+      "signature": "fn Intrinsic.u32BitAnd(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.bitAnd",
+      "identity": "BitAnd"
+    },
+    {
+      "operation": "Intrinsic.u32BitOr",
+      "signature": "fn Intrinsic.u32BitOr(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.bitOr",
+      "identity": "BitOr"
+    },
+    {
+      "operation": "Intrinsic.u32BitXor",
+      "signature": "fn Intrinsic.u32BitXor(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.bitXor",
+      "identity": "BitXor"
+    },
+    {
+      "operation": "Intrinsic.u32BitNot",
+      "signature": "fn Intrinsic.u32BitNot(value: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.bitNot",
+      "identity": "BitNot"
+    },
+    {
+      "operation": "Intrinsic.u32ShiftLeft",
+      "signature": "fn Intrinsic.u32ShiftLeft(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.shiftLeft",
+      "identity": "ShiftLeft"
+    },
+    {
+      "operation": "Intrinsic.u32ShiftRight",
+      "signature": "fn Intrinsic.u32ShiftRight(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.shiftRight",
+      "identity": "ShiftRight"
+    },
+    {
+      "operation": "Intrinsic.u32RotateLeft",
+      "signature": "fn Intrinsic.u32RotateLeft(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.rotateLeft",
+      "identity": "RotateLeft"
+    },
+    {
+      "operation": "Intrinsic.u32RotateRight",
+      "signature": "fn Intrinsic.u32RotateRight(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.rotateRight",
+      "identity": "RotateRight"
+    },
+    {
+      "operation": "Intrinsic.u32WrappingAdd",
+      "signature": "fn Intrinsic.u32WrappingAdd(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.wrappingAdd",
+      "identity": "WrappingAdd"
+    },
+    {
+      "operation": "Intrinsic.u32WrappingSubtract",
+      "signature": "fn Intrinsic.u32WrappingSubtract(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.wrappingSubtract",
+      "identity": "WrappingSubtract"
+    },
+    {
+      "operation": "Intrinsic.u32WrappingMultiply",
+      "signature": "fn Intrinsic.u32WrappingMultiply(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.wrappingMultiply",
+      "identity": "WrappingMultiply"
+    },
+    {
+      "operation": "Intrinsic.u32SaturatingAdd",
+      "signature": "fn Intrinsic.u32SaturatingAdd(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.saturatingAdd",
+      "identity": "SaturatingAdd"
+    },
+    {
+      "operation": "Intrinsic.u32SaturatingSubtract",
+      "signature": "fn Intrinsic.u32SaturatingSubtract(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.saturatingSubtract",
+      "identity": "SaturatingSubtract"
+    },
+    {
+      "operation": "Intrinsic.u32SaturatingMultiply",
+      "signature": "fn Intrinsic.u32SaturatingMultiply(left: u32, right: u32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.saturatingMultiply",
+      "identity": "SaturatingMultiply"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedAdd",
+      "signature": "fn Intrinsic.u32CheckedAdd(left: u32, right: u32) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedAdd",
+      "identity": "CheckedAdd"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedSubtract",
+      "signature": "fn Intrinsic.u32CheckedSubtract(left: u32, right: u32) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedSubtract",
+      "identity": "CheckedSubtract"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedMultiply",
+      "signature": "fn Intrinsic.u32CheckedMultiply(left: u32, right: u32) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedMultiply",
+      "identity": "CheckedMultiply"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedDivide",
+      "signature": "fn Intrinsic.u32CheckedDivide(left: u32, right: u32) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedDivide",
+      "identity": "CheckedDivide"
+    },
+    {
+      "operation": "Intrinsic.u32CheckedRemainder",
+      "signature": "fn Intrinsic.u32CheckedRemainder(left: u32, right: u32) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.checkedRemainder",
+      "identity": "CheckedRemainder"
+    },
+    {
+      "operation": "Intrinsic.u32Equals",
+      "signature": "fn Intrinsic.u32Equals(left: u32, right: u32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.u32NotEquals",
+      "signature": "fn Intrinsic.u32NotEquals(left: u32, right: u32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.u32LessThan",
+      "signature": "fn Intrinsic.u32LessThan(left: u32, right: u32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.u32LessOrEqual",
+      "signature": "fn Intrinsic.u32LessOrEqual(left: u32, right: u32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.u32GreaterThan",
+      "signature": "fn Intrinsic.u32GreaterThan(left: u32, right: u32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.u32GreaterOrEqual",
+      "signature": "fn Intrinsic.u32GreaterOrEqual(left: u32, right: u32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u32.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
+      "operation": "Intrinsic.u64ToU8",
+      "signature": "fn Intrinsic.u64ToU8(value: u64) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.toU8",
+      "identity": "ConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedToU8",
+      "signature": "fn Intrinsic.u64CheckedToU8(value: u64) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedToU8",
+      "identity": "CheckedConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.u64ToU16",
+      "signature": "fn Intrinsic.u64ToU16(value: u64) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.toU16",
+      "identity": "ConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedToU16",
+      "signature": "fn Intrinsic.u64CheckedToU16(value: u64) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedToU16",
+      "identity": "CheckedConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.u64ToU32",
+      "signature": "fn Intrinsic.u64ToU32(value: u64) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedToU32",
+      "signature": "fn Intrinsic.u64CheckedToU32(value: u64) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedToU32",
+      "identity": "CheckedConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.u64ToU64",
+      "signature": "fn Intrinsic.u64ToU64(value: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.toU64",
+      "identity": "ConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedToU64",
+      "signature": "fn Intrinsic.u64CheckedToU64(value: u64) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedToU64",
+      "identity": "CheckedConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.u64ToUsize",
+      "signature": "fn Intrinsic.u64ToUsize(value: u64) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.toUsize",
+      "identity": "ConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedToUsize",
+      "signature": "fn Intrinsic.u64CheckedToUsize(value: u64) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedToUsize",
+      "identity": "CheckedConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.u64ToI8",
+      "signature": "fn Intrinsic.u64ToI8(value: u64) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.toI8",
+      "identity": "ConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedToI8",
+      "signature": "fn Intrinsic.u64CheckedToI8(value: u64) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedToI8",
+      "identity": "CheckedConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.u64ToI16",
+      "signature": "fn Intrinsic.u64ToI16(value: u64) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.toI16",
+      "identity": "ConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedToI16",
+      "signature": "fn Intrinsic.u64CheckedToI16(value: u64) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedToI16",
+      "identity": "CheckedConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.u64ToI32",
+      "signature": "fn Intrinsic.u64ToI32(value: u64) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.toI32",
+      "identity": "ConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedToI32",
+      "signature": "fn Intrinsic.u64CheckedToI32(value: u64) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedToI32",
+      "identity": "CheckedConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.u64ToI64",
+      "signature": "fn Intrinsic.u64ToI64(value: u64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.toI64",
+      "identity": "ConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedToI64",
+      "signature": "fn Intrinsic.u64CheckedToI64(value: u64) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedToI64",
+      "identity": "CheckedConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.u64ToIsize",
+      "signature": "fn Intrinsic.u64ToIsize(value: u64) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.toIsize",
+      "identity": "ConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedToIsize",
+      "signature": "fn Intrinsic.u64CheckedToIsize(value: u64) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedToIsize",
+      "identity": "CheckedConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.u64ToF32",
+      "signature": "fn Intrinsic.u64ToF32(value: u64) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.toF32",
+      "identity": "ConvertToF32"
+    },
+    {
+      "operation": "Intrinsic.u64ToF64",
+      "signature": "fn Intrinsic.u64ToF64(value: u64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.toF64",
+      "identity": "ConvertToF64"
+    },
+    {
+      "operation": "Intrinsic.u64Add",
+      "signature": "fn Intrinsic.u64Add(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.add",
+      "identity": "Add"
+    },
+    {
+      "operation": "Intrinsic.u64Subtract",
+      "signature": "fn Intrinsic.u64Subtract(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.subtract",
+      "identity": "Subtract"
+    },
+    {
+      "operation": "Intrinsic.u64Multiply",
+      "signature": "fn Intrinsic.u64Multiply(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.multiply",
+      "identity": "Multiply"
+    },
+    {
+      "operation": "Intrinsic.u64Divide",
+      "signature": "fn Intrinsic.u64Divide(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.divide",
+      "identity": "Divide"
+    },
+    {
+      "operation": "Intrinsic.u64Remainder",
+      "signature": "fn Intrinsic.u64Remainder(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.remainder",
+      "identity": "Remainder"
+    },
+    {
+      "operation": "Intrinsic.u64BitAnd",
+      "signature": "fn Intrinsic.u64BitAnd(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.bitAnd",
+      "identity": "BitAnd"
+    },
+    {
+      "operation": "Intrinsic.u64BitOr",
+      "signature": "fn Intrinsic.u64BitOr(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.bitOr",
+      "identity": "BitOr"
+    },
+    {
+      "operation": "Intrinsic.u64BitXor",
+      "signature": "fn Intrinsic.u64BitXor(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.bitXor",
+      "identity": "BitXor"
+    },
+    {
+      "operation": "Intrinsic.u64BitNot",
+      "signature": "fn Intrinsic.u64BitNot(value: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.bitNot",
+      "identity": "BitNot"
+    },
+    {
+      "operation": "Intrinsic.u64ShiftLeft",
+      "signature": "fn Intrinsic.u64ShiftLeft(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.shiftLeft",
+      "identity": "ShiftLeft"
+    },
+    {
+      "operation": "Intrinsic.u64ShiftRight",
+      "signature": "fn Intrinsic.u64ShiftRight(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.shiftRight",
+      "identity": "ShiftRight"
+    },
+    {
+      "operation": "Intrinsic.u64RotateLeft",
+      "signature": "fn Intrinsic.u64RotateLeft(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.rotateLeft",
+      "identity": "RotateLeft"
+    },
+    {
+      "operation": "Intrinsic.u64RotateRight",
+      "signature": "fn Intrinsic.u64RotateRight(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.rotateRight",
+      "identity": "RotateRight"
+    },
+    {
+      "operation": "Intrinsic.u64WrappingAdd",
+      "signature": "fn Intrinsic.u64WrappingAdd(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.wrappingAdd",
+      "identity": "WrappingAdd"
+    },
+    {
+      "operation": "Intrinsic.u64WrappingSubtract",
+      "signature": "fn Intrinsic.u64WrappingSubtract(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.wrappingSubtract",
+      "identity": "WrappingSubtract"
+    },
+    {
+      "operation": "Intrinsic.u64WrappingMultiply",
+      "signature": "fn Intrinsic.u64WrappingMultiply(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.wrappingMultiply",
+      "identity": "WrappingMultiply"
+    },
+    {
+      "operation": "Intrinsic.u64SaturatingAdd",
+      "signature": "fn Intrinsic.u64SaturatingAdd(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.saturatingAdd",
+      "identity": "SaturatingAdd"
+    },
+    {
+      "operation": "Intrinsic.u64SaturatingSubtract",
+      "signature": "fn Intrinsic.u64SaturatingSubtract(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.saturatingSubtract",
+      "identity": "SaturatingSubtract"
+    },
+    {
+      "operation": "Intrinsic.u64SaturatingMultiply",
+      "signature": "fn Intrinsic.u64SaturatingMultiply(left: u64, right: u64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.saturatingMultiply",
+      "identity": "SaturatingMultiply"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedAdd",
+      "signature": "fn Intrinsic.u64CheckedAdd(left: u64, right: u64) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedAdd",
+      "identity": "CheckedAdd"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedSubtract",
+      "signature": "fn Intrinsic.u64CheckedSubtract(left: u64, right: u64) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedSubtract",
+      "identity": "CheckedSubtract"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedMultiply",
+      "signature": "fn Intrinsic.u64CheckedMultiply(left: u64, right: u64) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedMultiply",
+      "identity": "CheckedMultiply"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedDivide",
+      "signature": "fn Intrinsic.u64CheckedDivide(left: u64, right: u64) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedDivide",
+      "identity": "CheckedDivide"
+    },
+    {
+      "operation": "Intrinsic.u64CheckedRemainder",
+      "signature": "fn Intrinsic.u64CheckedRemainder(left: u64, right: u64) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.checkedRemainder",
+      "identity": "CheckedRemainder"
+    },
+    {
+      "operation": "Intrinsic.u64Equals",
+      "signature": "fn Intrinsic.u64Equals(left: u64, right: u64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.u64NotEquals",
+      "signature": "fn Intrinsic.u64NotEquals(left: u64, right: u64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.u64LessThan",
+      "signature": "fn Intrinsic.u64LessThan(left: u64, right: u64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.u64LessOrEqual",
+      "signature": "fn Intrinsic.u64LessOrEqual(left: u64, right: u64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.u64GreaterThan",
+      "signature": "fn Intrinsic.u64GreaterThan(left: u64, right: u64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.u64GreaterOrEqual",
+      "signature": "fn Intrinsic.u64GreaterOrEqual(left: u64, right: u64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/u64.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
+      "operation": "Intrinsic.usizeToU8",
+      "signature": "fn Intrinsic.usizeToU8(value: usize) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.toU8",
+      "identity": "ConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedToU8",
+      "signature": "fn Intrinsic.usizeCheckedToU8(value: usize) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedToU8",
+      "identity": "CheckedConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.usizeToU16",
+      "signature": "fn Intrinsic.usizeToU16(value: usize) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.toU16",
+      "identity": "ConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedToU16",
+      "signature": "fn Intrinsic.usizeCheckedToU16(value: usize) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedToU16",
+      "identity": "CheckedConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.usizeToU32",
+      "signature": "fn Intrinsic.usizeToU32(value: usize) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedToU32",
+      "signature": "fn Intrinsic.usizeCheckedToU32(value: usize) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedToU32",
+      "identity": "CheckedConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.usizeToU64",
+      "signature": "fn Intrinsic.usizeToU64(value: usize) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.toU64",
+      "identity": "ConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedToU64",
+      "signature": "fn Intrinsic.usizeCheckedToU64(value: usize) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedToU64",
+      "identity": "CheckedConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.usizeToUsize",
+      "signature": "fn Intrinsic.usizeToUsize(value: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.toUsize",
+      "identity": "ConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedToUsize",
+      "signature": "fn Intrinsic.usizeCheckedToUsize(value: usize) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedToUsize",
+      "identity": "CheckedConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.usizeToI8",
+      "signature": "fn Intrinsic.usizeToI8(value: usize) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.toI8",
+      "identity": "ConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedToI8",
+      "signature": "fn Intrinsic.usizeCheckedToI8(value: usize) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedToI8",
+      "identity": "CheckedConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.usizeToI16",
+      "signature": "fn Intrinsic.usizeToI16(value: usize) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.toI16",
+      "identity": "ConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedToI16",
+      "signature": "fn Intrinsic.usizeCheckedToI16(value: usize) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedToI16",
+      "identity": "CheckedConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.usizeToI32",
+      "signature": "fn Intrinsic.usizeToI32(value: usize) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.toI32",
+      "identity": "ConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedToI32",
+      "signature": "fn Intrinsic.usizeCheckedToI32(value: usize) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedToI32",
+      "identity": "CheckedConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.usizeToI64",
+      "signature": "fn Intrinsic.usizeToI64(value: usize) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.toI64",
+      "identity": "ConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedToI64",
+      "signature": "fn Intrinsic.usizeCheckedToI64(value: usize) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedToI64",
+      "identity": "CheckedConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.usizeToIsize",
+      "signature": "fn Intrinsic.usizeToIsize(value: usize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.toIsize",
+      "identity": "ConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedToIsize",
+      "signature": "fn Intrinsic.usizeCheckedToIsize(value: usize) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedToIsize",
+      "identity": "CheckedConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.usizeToF32",
+      "signature": "fn Intrinsic.usizeToF32(value: usize) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.toF32",
+      "identity": "ConvertToF32"
+    },
+    {
+      "operation": "Intrinsic.usizeToF64",
+      "signature": "fn Intrinsic.usizeToF64(value: usize) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.toF64",
+      "identity": "ConvertToF64"
+    },
+    {
+      "operation": "Intrinsic.usizeAdd",
+      "signature": "fn Intrinsic.usizeAdd(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.add",
+      "identity": "Add"
+    },
+    {
+      "operation": "Intrinsic.usizeSubtract",
+      "signature": "fn Intrinsic.usizeSubtract(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.subtract",
+      "identity": "Subtract"
+    },
+    {
+      "operation": "Intrinsic.usizeMultiply",
+      "signature": "fn Intrinsic.usizeMultiply(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.multiply",
+      "identity": "Multiply"
+    },
+    {
+      "operation": "Intrinsic.usizeDivide",
+      "signature": "fn Intrinsic.usizeDivide(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.divide",
+      "identity": "Divide"
+    },
+    {
+      "operation": "Intrinsic.usizeRemainder",
+      "signature": "fn Intrinsic.usizeRemainder(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.remainder",
+      "identity": "Remainder"
+    },
+    {
+      "operation": "Intrinsic.usizeBitAnd",
+      "signature": "fn Intrinsic.usizeBitAnd(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.bitAnd",
+      "identity": "BitAnd"
+    },
+    {
+      "operation": "Intrinsic.usizeBitOr",
+      "signature": "fn Intrinsic.usizeBitOr(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.bitOr",
+      "identity": "BitOr"
+    },
+    {
+      "operation": "Intrinsic.usizeBitXor",
+      "signature": "fn Intrinsic.usizeBitXor(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.bitXor",
+      "identity": "BitXor"
+    },
+    {
+      "operation": "Intrinsic.usizeBitNot",
+      "signature": "fn Intrinsic.usizeBitNot(value: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.bitNot",
+      "identity": "BitNot"
+    },
+    {
+      "operation": "Intrinsic.usizeShiftLeft",
+      "signature": "fn Intrinsic.usizeShiftLeft(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.shiftLeft",
+      "identity": "ShiftLeft"
+    },
+    {
+      "operation": "Intrinsic.usizeShiftRight",
+      "signature": "fn Intrinsic.usizeShiftRight(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.shiftRight",
+      "identity": "ShiftRight"
+    },
+    {
+      "operation": "Intrinsic.usizeRotateLeft",
+      "signature": "fn Intrinsic.usizeRotateLeft(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.rotateLeft",
+      "identity": "RotateLeft"
+    },
+    {
+      "operation": "Intrinsic.usizeRotateRight",
+      "signature": "fn Intrinsic.usizeRotateRight(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.rotateRight",
+      "identity": "RotateRight"
+    },
+    {
+      "operation": "Intrinsic.usizeWrappingAdd",
+      "signature": "fn Intrinsic.usizeWrappingAdd(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.wrappingAdd",
+      "identity": "WrappingAdd"
+    },
+    {
+      "operation": "Intrinsic.usizeWrappingSubtract",
+      "signature": "fn Intrinsic.usizeWrappingSubtract(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.wrappingSubtract",
+      "identity": "WrappingSubtract"
+    },
+    {
+      "operation": "Intrinsic.usizeWrappingMultiply",
+      "signature": "fn Intrinsic.usizeWrappingMultiply(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.wrappingMultiply",
+      "identity": "WrappingMultiply"
+    },
+    {
+      "operation": "Intrinsic.usizeSaturatingAdd",
+      "signature": "fn Intrinsic.usizeSaturatingAdd(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.saturatingAdd",
+      "identity": "SaturatingAdd"
+    },
+    {
+      "operation": "Intrinsic.usizeSaturatingSubtract",
+      "signature": "fn Intrinsic.usizeSaturatingSubtract(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.saturatingSubtract",
+      "identity": "SaturatingSubtract"
+    },
+    {
+      "operation": "Intrinsic.usizeSaturatingMultiply",
+      "signature": "fn Intrinsic.usizeSaturatingMultiply(left: usize, right: usize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.saturatingMultiply",
+      "identity": "SaturatingMultiply"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedAdd",
+      "signature": "fn Intrinsic.usizeCheckedAdd(left: usize, right: usize) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedAdd",
+      "identity": "CheckedAdd"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedSubtract",
+      "signature": "fn Intrinsic.usizeCheckedSubtract(left: usize, right: usize) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedSubtract",
+      "identity": "CheckedSubtract"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedMultiply",
+      "signature": "fn Intrinsic.usizeCheckedMultiply(left: usize, right: usize) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedMultiply",
+      "identity": "CheckedMultiply"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedDivide",
+      "signature": "fn Intrinsic.usizeCheckedDivide(left: usize, right: usize) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedDivide",
+      "identity": "CheckedDivide"
+    },
+    {
+      "operation": "Intrinsic.usizeCheckedRemainder",
+      "signature": "fn Intrinsic.usizeCheckedRemainder(left: usize, right: usize) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.checkedRemainder",
+      "identity": "CheckedRemainder"
+    },
+    {
+      "operation": "Intrinsic.usizeEquals",
+      "signature": "fn Intrinsic.usizeEquals(left: usize, right: usize) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.usizeNotEquals",
+      "signature": "fn Intrinsic.usizeNotEquals(left: usize, right: usize) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.usizeLessThan",
+      "signature": "fn Intrinsic.usizeLessThan(left: usize, right: usize) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.usizeLessOrEqual",
+      "signature": "fn Intrinsic.usizeLessOrEqual(left: usize, right: usize) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.usizeGreaterThan",
+      "signature": "fn Intrinsic.usizeGreaterThan(left: usize, right: usize) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.usizeGreaterOrEqual",
+      "signature": "fn Intrinsic.usizeGreaterOrEqual(left: usize, right: usize) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/usize.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
+      "operation": "Intrinsic.i8Negate",
+      "signature": "fn Intrinsic.i8Negate(value: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.negate",
+      "identity": "Negate"
+    },
+    {
+      "operation": "Intrinsic.i8WrappingNegate",
+      "signature": "fn Intrinsic.i8WrappingNegate(value: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.wrappingNegate",
+      "identity": "WrappingNegate"
+    },
+    {
+      "operation": "Intrinsic.i8SaturatingNegate",
+      "signature": "fn Intrinsic.i8SaturatingNegate(value: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.saturatingNegate",
+      "identity": "SaturatingNegate"
+    },
+    {
+      "operation": "Intrinsic.i8ToU8",
+      "signature": "fn Intrinsic.i8ToU8(value: i8) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.toU8",
+      "identity": "ConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedToU8",
+      "signature": "fn Intrinsic.i8CheckedToU8(value: i8) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedToU8",
+      "identity": "CheckedConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.i8ToU16",
+      "signature": "fn Intrinsic.i8ToU16(value: i8) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.toU16",
+      "identity": "ConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedToU16",
+      "signature": "fn Intrinsic.i8CheckedToU16(value: i8) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedToU16",
+      "identity": "CheckedConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.i8ToU32",
+      "signature": "fn Intrinsic.i8ToU32(value: i8) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedToU32",
+      "signature": "fn Intrinsic.i8CheckedToU32(value: i8) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedToU32",
+      "identity": "CheckedConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.i8ToU64",
+      "signature": "fn Intrinsic.i8ToU64(value: i8) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.toU64",
+      "identity": "ConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedToU64",
+      "signature": "fn Intrinsic.i8CheckedToU64(value: i8) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedToU64",
+      "identity": "CheckedConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.i8ToUsize",
+      "signature": "fn Intrinsic.i8ToUsize(value: i8) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.toUsize",
+      "identity": "ConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedToUsize",
+      "signature": "fn Intrinsic.i8CheckedToUsize(value: i8) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedToUsize",
+      "identity": "CheckedConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.i8ToI8",
+      "signature": "fn Intrinsic.i8ToI8(value: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.toI8",
+      "identity": "ConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedToI8",
+      "signature": "fn Intrinsic.i8CheckedToI8(value: i8) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedToI8",
+      "identity": "CheckedConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.i8ToI16",
+      "signature": "fn Intrinsic.i8ToI16(value: i8) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.toI16",
+      "identity": "ConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedToI16",
+      "signature": "fn Intrinsic.i8CheckedToI16(value: i8) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedToI16",
+      "identity": "CheckedConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.i8ToI32",
+      "signature": "fn Intrinsic.i8ToI32(value: i8) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.toI32",
+      "identity": "ConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedToI32",
+      "signature": "fn Intrinsic.i8CheckedToI32(value: i8) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedToI32",
+      "identity": "CheckedConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.i8ToI64",
+      "signature": "fn Intrinsic.i8ToI64(value: i8) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.toI64",
+      "identity": "ConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedToI64",
+      "signature": "fn Intrinsic.i8CheckedToI64(value: i8) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedToI64",
+      "identity": "CheckedConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.i8ToIsize",
+      "signature": "fn Intrinsic.i8ToIsize(value: i8) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.toIsize",
+      "identity": "ConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedToIsize",
+      "signature": "fn Intrinsic.i8CheckedToIsize(value: i8) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedToIsize",
+      "identity": "CheckedConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.i8ToF32",
+      "signature": "fn Intrinsic.i8ToF32(value: i8) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.toF32",
+      "identity": "ConvertToF32"
+    },
+    {
+      "operation": "Intrinsic.i8ToF64",
+      "signature": "fn Intrinsic.i8ToF64(value: i8) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.toF64",
+      "identity": "ConvertToF64"
+    },
+    {
+      "operation": "Intrinsic.i8Add",
+      "signature": "fn Intrinsic.i8Add(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.add",
+      "identity": "Add"
+    },
+    {
+      "operation": "Intrinsic.i8Subtract",
+      "signature": "fn Intrinsic.i8Subtract(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.subtract",
+      "identity": "Subtract"
+    },
+    {
+      "operation": "Intrinsic.i8Multiply",
+      "signature": "fn Intrinsic.i8Multiply(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.multiply",
+      "identity": "Multiply"
+    },
+    {
+      "operation": "Intrinsic.i8Divide",
+      "signature": "fn Intrinsic.i8Divide(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.divide",
+      "identity": "Divide"
+    },
+    {
+      "operation": "Intrinsic.i8Remainder",
+      "signature": "fn Intrinsic.i8Remainder(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.remainder",
+      "identity": "Remainder"
+    },
+    {
+      "operation": "Intrinsic.i8BitAnd",
+      "signature": "fn Intrinsic.i8BitAnd(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.bitAnd",
+      "identity": "BitAnd"
+    },
+    {
+      "operation": "Intrinsic.i8BitOr",
+      "signature": "fn Intrinsic.i8BitOr(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.bitOr",
+      "identity": "BitOr"
+    },
+    {
+      "operation": "Intrinsic.i8BitXor",
+      "signature": "fn Intrinsic.i8BitXor(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.bitXor",
+      "identity": "BitXor"
+    },
+    {
+      "operation": "Intrinsic.i8BitNot",
+      "signature": "fn Intrinsic.i8BitNot(value: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.bitNot",
+      "identity": "BitNot"
+    },
+    {
+      "operation": "Intrinsic.i8ShiftLeft",
+      "signature": "fn Intrinsic.i8ShiftLeft(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.shiftLeft",
+      "identity": "ShiftLeft"
+    },
+    {
+      "operation": "Intrinsic.i8ShiftRight",
+      "signature": "fn Intrinsic.i8ShiftRight(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.shiftRight",
+      "identity": "ShiftRight"
+    },
+    {
+      "operation": "Intrinsic.i8RotateLeft",
+      "signature": "fn Intrinsic.i8RotateLeft(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.rotateLeft",
+      "identity": "RotateLeft"
+    },
+    {
+      "operation": "Intrinsic.i8RotateRight",
+      "signature": "fn Intrinsic.i8RotateRight(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.rotateRight",
+      "identity": "RotateRight"
+    },
+    {
+      "operation": "Intrinsic.i8WrappingAdd",
+      "signature": "fn Intrinsic.i8WrappingAdd(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.wrappingAdd",
+      "identity": "WrappingAdd"
+    },
+    {
+      "operation": "Intrinsic.i8WrappingSubtract",
+      "signature": "fn Intrinsic.i8WrappingSubtract(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.wrappingSubtract",
+      "identity": "WrappingSubtract"
+    },
+    {
+      "operation": "Intrinsic.i8WrappingMultiply",
+      "signature": "fn Intrinsic.i8WrappingMultiply(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.wrappingMultiply",
+      "identity": "WrappingMultiply"
+    },
+    {
+      "operation": "Intrinsic.i8SaturatingAdd",
+      "signature": "fn Intrinsic.i8SaturatingAdd(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.saturatingAdd",
+      "identity": "SaturatingAdd"
+    },
+    {
+      "operation": "Intrinsic.i8SaturatingSubtract",
+      "signature": "fn Intrinsic.i8SaturatingSubtract(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.saturatingSubtract",
+      "identity": "SaturatingSubtract"
+    },
+    {
+      "operation": "Intrinsic.i8SaturatingMultiply",
+      "signature": "fn Intrinsic.i8SaturatingMultiply(left: i8, right: i8) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.saturatingMultiply",
+      "identity": "SaturatingMultiply"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedAdd",
+      "signature": "fn Intrinsic.i8CheckedAdd(left: i8, right: i8) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedAdd",
+      "identity": "CheckedAdd"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedSubtract",
+      "signature": "fn Intrinsic.i8CheckedSubtract(left: i8, right: i8) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedSubtract",
+      "identity": "CheckedSubtract"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedMultiply",
+      "signature": "fn Intrinsic.i8CheckedMultiply(left: i8, right: i8) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedMultiply",
+      "identity": "CheckedMultiply"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedDivide",
+      "signature": "fn Intrinsic.i8CheckedDivide(left: i8, right: i8) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedDivide",
+      "identity": "CheckedDivide"
+    },
+    {
+      "operation": "Intrinsic.i8CheckedRemainder",
+      "signature": "fn Intrinsic.i8CheckedRemainder(left: i8, right: i8) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.checkedRemainder",
+      "identity": "CheckedRemainder"
+    },
+    {
+      "operation": "Intrinsic.i8Equals",
+      "signature": "fn Intrinsic.i8Equals(left: i8, right: i8) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.i8NotEquals",
+      "signature": "fn Intrinsic.i8NotEquals(left: i8, right: i8) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.i8LessThan",
+      "signature": "fn Intrinsic.i8LessThan(left: i8, right: i8) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.i8LessOrEqual",
+      "signature": "fn Intrinsic.i8LessOrEqual(left: i8, right: i8) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.i8GreaterThan",
+      "signature": "fn Intrinsic.i8GreaterThan(left: i8, right: i8) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.i8GreaterOrEqual",
+      "signature": "fn Intrinsic.i8GreaterOrEqual(left: i8, right: i8) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i8.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
+      "operation": "Intrinsic.i16Negate",
+      "signature": "fn Intrinsic.i16Negate(value: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.negate",
+      "identity": "Negate"
+    },
+    {
+      "operation": "Intrinsic.i16WrappingNegate",
+      "signature": "fn Intrinsic.i16WrappingNegate(value: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.wrappingNegate",
+      "identity": "WrappingNegate"
+    },
+    {
+      "operation": "Intrinsic.i16SaturatingNegate",
+      "signature": "fn Intrinsic.i16SaturatingNegate(value: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.saturatingNegate",
+      "identity": "SaturatingNegate"
+    },
+    {
+      "operation": "Intrinsic.i16ToU8",
+      "signature": "fn Intrinsic.i16ToU8(value: i16) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.toU8",
+      "identity": "ConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedToU8",
+      "signature": "fn Intrinsic.i16CheckedToU8(value: i16) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedToU8",
+      "identity": "CheckedConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.i16ToU16",
+      "signature": "fn Intrinsic.i16ToU16(value: i16) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.toU16",
+      "identity": "ConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedToU16",
+      "signature": "fn Intrinsic.i16CheckedToU16(value: i16) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedToU16",
+      "identity": "CheckedConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.i16ToU32",
+      "signature": "fn Intrinsic.i16ToU32(value: i16) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedToU32",
+      "signature": "fn Intrinsic.i16CheckedToU32(value: i16) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedToU32",
+      "identity": "CheckedConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.i16ToU64",
+      "signature": "fn Intrinsic.i16ToU64(value: i16) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.toU64",
+      "identity": "ConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedToU64",
+      "signature": "fn Intrinsic.i16CheckedToU64(value: i16) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedToU64",
+      "identity": "CheckedConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.i16ToUsize",
+      "signature": "fn Intrinsic.i16ToUsize(value: i16) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.toUsize",
+      "identity": "ConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedToUsize",
+      "signature": "fn Intrinsic.i16CheckedToUsize(value: i16) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedToUsize",
+      "identity": "CheckedConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.i16ToI8",
+      "signature": "fn Intrinsic.i16ToI8(value: i16) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.toI8",
+      "identity": "ConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedToI8",
+      "signature": "fn Intrinsic.i16CheckedToI8(value: i16) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedToI8",
+      "identity": "CheckedConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.i16ToI16",
+      "signature": "fn Intrinsic.i16ToI16(value: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.toI16",
+      "identity": "ConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedToI16",
+      "signature": "fn Intrinsic.i16CheckedToI16(value: i16) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedToI16",
+      "identity": "CheckedConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.i16ToI32",
+      "signature": "fn Intrinsic.i16ToI32(value: i16) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.toI32",
+      "identity": "ConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedToI32",
+      "signature": "fn Intrinsic.i16CheckedToI32(value: i16) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedToI32",
+      "identity": "CheckedConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.i16ToI64",
+      "signature": "fn Intrinsic.i16ToI64(value: i16) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.toI64",
+      "identity": "ConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedToI64",
+      "signature": "fn Intrinsic.i16CheckedToI64(value: i16) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedToI64",
+      "identity": "CheckedConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.i16ToIsize",
+      "signature": "fn Intrinsic.i16ToIsize(value: i16) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.toIsize",
+      "identity": "ConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedToIsize",
+      "signature": "fn Intrinsic.i16CheckedToIsize(value: i16) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedToIsize",
+      "identity": "CheckedConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.i16ToF32",
+      "signature": "fn Intrinsic.i16ToF32(value: i16) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.toF32",
+      "identity": "ConvertToF32"
+    },
+    {
+      "operation": "Intrinsic.i16ToF64",
+      "signature": "fn Intrinsic.i16ToF64(value: i16) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.toF64",
+      "identity": "ConvertToF64"
+    },
+    {
+      "operation": "Intrinsic.i16Add",
+      "signature": "fn Intrinsic.i16Add(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.add",
+      "identity": "Add"
+    },
+    {
+      "operation": "Intrinsic.i16Subtract",
+      "signature": "fn Intrinsic.i16Subtract(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.subtract",
+      "identity": "Subtract"
+    },
+    {
+      "operation": "Intrinsic.i16Multiply",
+      "signature": "fn Intrinsic.i16Multiply(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.multiply",
+      "identity": "Multiply"
+    },
+    {
+      "operation": "Intrinsic.i16Divide",
+      "signature": "fn Intrinsic.i16Divide(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.divide",
+      "identity": "Divide"
+    },
+    {
+      "operation": "Intrinsic.i16Remainder",
+      "signature": "fn Intrinsic.i16Remainder(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.remainder",
+      "identity": "Remainder"
+    },
+    {
+      "operation": "Intrinsic.i16BitAnd",
+      "signature": "fn Intrinsic.i16BitAnd(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.bitAnd",
+      "identity": "BitAnd"
+    },
+    {
+      "operation": "Intrinsic.i16BitOr",
+      "signature": "fn Intrinsic.i16BitOr(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.bitOr",
+      "identity": "BitOr"
+    },
+    {
+      "operation": "Intrinsic.i16BitXor",
+      "signature": "fn Intrinsic.i16BitXor(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.bitXor",
+      "identity": "BitXor"
+    },
+    {
+      "operation": "Intrinsic.i16BitNot",
+      "signature": "fn Intrinsic.i16BitNot(value: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.bitNot",
+      "identity": "BitNot"
+    },
+    {
+      "operation": "Intrinsic.i16ShiftLeft",
+      "signature": "fn Intrinsic.i16ShiftLeft(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.shiftLeft",
+      "identity": "ShiftLeft"
+    },
+    {
+      "operation": "Intrinsic.i16ShiftRight",
+      "signature": "fn Intrinsic.i16ShiftRight(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.shiftRight",
+      "identity": "ShiftRight"
+    },
+    {
+      "operation": "Intrinsic.i16RotateLeft",
+      "signature": "fn Intrinsic.i16RotateLeft(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.rotateLeft",
+      "identity": "RotateLeft"
+    },
+    {
+      "operation": "Intrinsic.i16RotateRight",
+      "signature": "fn Intrinsic.i16RotateRight(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.rotateRight",
+      "identity": "RotateRight"
+    },
+    {
+      "operation": "Intrinsic.i16WrappingAdd",
+      "signature": "fn Intrinsic.i16WrappingAdd(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.wrappingAdd",
+      "identity": "WrappingAdd"
+    },
+    {
+      "operation": "Intrinsic.i16WrappingSubtract",
+      "signature": "fn Intrinsic.i16WrappingSubtract(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.wrappingSubtract",
+      "identity": "WrappingSubtract"
+    },
+    {
+      "operation": "Intrinsic.i16WrappingMultiply",
+      "signature": "fn Intrinsic.i16WrappingMultiply(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.wrappingMultiply",
+      "identity": "WrappingMultiply"
+    },
+    {
+      "operation": "Intrinsic.i16SaturatingAdd",
+      "signature": "fn Intrinsic.i16SaturatingAdd(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.saturatingAdd",
+      "identity": "SaturatingAdd"
+    },
+    {
+      "operation": "Intrinsic.i16SaturatingSubtract",
+      "signature": "fn Intrinsic.i16SaturatingSubtract(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.saturatingSubtract",
+      "identity": "SaturatingSubtract"
+    },
+    {
+      "operation": "Intrinsic.i16SaturatingMultiply",
+      "signature": "fn Intrinsic.i16SaturatingMultiply(left: i16, right: i16) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.saturatingMultiply",
+      "identity": "SaturatingMultiply"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedAdd",
+      "signature": "fn Intrinsic.i16CheckedAdd(left: i16, right: i16) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedAdd",
+      "identity": "CheckedAdd"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedSubtract",
+      "signature": "fn Intrinsic.i16CheckedSubtract(left: i16, right: i16) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedSubtract",
+      "identity": "CheckedSubtract"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedMultiply",
+      "signature": "fn Intrinsic.i16CheckedMultiply(left: i16, right: i16) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedMultiply",
+      "identity": "CheckedMultiply"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedDivide",
+      "signature": "fn Intrinsic.i16CheckedDivide(left: i16, right: i16) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedDivide",
+      "identity": "CheckedDivide"
+    },
+    {
+      "operation": "Intrinsic.i16CheckedRemainder",
+      "signature": "fn Intrinsic.i16CheckedRemainder(left: i16, right: i16) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.checkedRemainder",
+      "identity": "CheckedRemainder"
+    },
+    {
+      "operation": "Intrinsic.i16Equals",
+      "signature": "fn Intrinsic.i16Equals(left: i16, right: i16) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.i16NotEquals",
+      "signature": "fn Intrinsic.i16NotEquals(left: i16, right: i16) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.i16LessThan",
+      "signature": "fn Intrinsic.i16LessThan(left: i16, right: i16) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.i16LessOrEqual",
+      "signature": "fn Intrinsic.i16LessOrEqual(left: i16, right: i16) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.i16GreaterThan",
+      "signature": "fn Intrinsic.i16GreaterThan(left: i16, right: i16) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.i16GreaterOrEqual",
+      "signature": "fn Intrinsic.i16GreaterOrEqual(left: i16, right: i16) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i16.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
+      "operation": "Intrinsic.i32Negate",
+      "signature": "fn Intrinsic.i32Negate(value: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.negate",
+      "identity": "Negate"
+    },
+    {
+      "operation": "Intrinsic.i32WrappingNegate",
+      "signature": "fn Intrinsic.i32WrappingNegate(value: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.wrappingNegate",
+      "identity": "WrappingNegate"
+    },
+    {
+      "operation": "Intrinsic.i32SaturatingNegate",
+      "signature": "fn Intrinsic.i32SaturatingNegate(value: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.saturatingNegate",
+      "identity": "SaturatingNegate"
+    },
+    {
+      "operation": "Intrinsic.i32ToU8",
+      "signature": "fn Intrinsic.i32ToU8(value: i32) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.toU8",
+      "identity": "ConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedToU8",
+      "signature": "fn Intrinsic.i32CheckedToU8(value: i32) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedToU8",
+      "identity": "CheckedConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.i32ToU16",
+      "signature": "fn Intrinsic.i32ToU16(value: i32) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.toU16",
+      "identity": "ConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedToU16",
+      "signature": "fn Intrinsic.i32CheckedToU16(value: i32) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedToU16",
+      "identity": "CheckedConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.i32ToU32",
+      "signature": "fn Intrinsic.i32ToU32(value: i32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedToU32",
+      "signature": "fn Intrinsic.i32CheckedToU32(value: i32) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedToU32",
+      "identity": "CheckedConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.i32ToU64",
+      "signature": "fn Intrinsic.i32ToU64(value: i32) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.toU64",
+      "identity": "ConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedToU64",
+      "signature": "fn Intrinsic.i32CheckedToU64(value: i32) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedToU64",
+      "identity": "CheckedConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.i32ToUsize",
+      "signature": "fn Intrinsic.i32ToUsize(value: i32) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.toUsize",
+      "identity": "ConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedToUsize",
+      "signature": "fn Intrinsic.i32CheckedToUsize(value: i32) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedToUsize",
+      "identity": "CheckedConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.i32ToI8",
+      "signature": "fn Intrinsic.i32ToI8(value: i32) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.toI8",
+      "identity": "ConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedToI8",
+      "signature": "fn Intrinsic.i32CheckedToI8(value: i32) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedToI8",
+      "identity": "CheckedConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.i32ToI16",
+      "signature": "fn Intrinsic.i32ToI16(value: i32) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.toI16",
+      "identity": "ConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedToI16",
+      "signature": "fn Intrinsic.i32CheckedToI16(value: i32) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedToI16",
+      "identity": "CheckedConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.i32ToI32",
+      "signature": "fn Intrinsic.i32ToI32(value: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.toI32",
+      "identity": "ConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedToI32",
+      "signature": "fn Intrinsic.i32CheckedToI32(value: i32) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedToI32",
+      "identity": "CheckedConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.i32ToI64",
+      "signature": "fn Intrinsic.i32ToI64(value: i32) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.toI64",
+      "identity": "ConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedToI64",
+      "signature": "fn Intrinsic.i32CheckedToI64(value: i32) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedToI64",
+      "identity": "CheckedConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.i32ToIsize",
+      "signature": "fn Intrinsic.i32ToIsize(value: i32) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.toIsize",
+      "identity": "ConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedToIsize",
+      "signature": "fn Intrinsic.i32CheckedToIsize(value: i32) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedToIsize",
+      "identity": "CheckedConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.i32ToF32",
+      "signature": "fn Intrinsic.i32ToF32(value: i32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.toF32",
+      "identity": "ConvertToF32"
+    },
+    {
+      "operation": "Intrinsic.i32ToF64",
+      "signature": "fn Intrinsic.i32ToF64(value: i32) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.toF64",
+      "identity": "ConvertToF64"
+    },
+    {
+      "operation": "Intrinsic.i32Add",
+      "signature": "fn Intrinsic.i32Add(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.add",
+      "identity": "Add"
+    },
+    {
+      "operation": "Intrinsic.i32Subtract",
+      "signature": "fn Intrinsic.i32Subtract(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.subtract",
+      "identity": "Subtract"
+    },
+    {
+      "operation": "Intrinsic.i32Multiply",
+      "signature": "fn Intrinsic.i32Multiply(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.multiply",
+      "identity": "Multiply"
+    },
+    {
+      "operation": "Intrinsic.i32Divide",
+      "signature": "fn Intrinsic.i32Divide(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.divide",
+      "identity": "Divide"
+    },
+    {
+      "operation": "Intrinsic.i32Remainder",
+      "signature": "fn Intrinsic.i32Remainder(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.remainder",
+      "identity": "Remainder"
+    },
+    {
+      "operation": "Intrinsic.i32BitAnd",
+      "signature": "fn Intrinsic.i32BitAnd(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.bitAnd",
+      "identity": "BitAnd"
+    },
+    {
+      "operation": "Intrinsic.i32BitOr",
+      "signature": "fn Intrinsic.i32BitOr(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.bitOr",
+      "identity": "BitOr"
+    },
+    {
+      "operation": "Intrinsic.i32BitXor",
+      "signature": "fn Intrinsic.i32BitXor(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.bitXor",
+      "identity": "BitXor"
+    },
+    {
+      "operation": "Intrinsic.i32BitNot",
+      "signature": "fn Intrinsic.i32BitNot(value: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.bitNot",
+      "identity": "BitNot"
+    },
+    {
+      "operation": "Intrinsic.i32ShiftLeft",
+      "signature": "fn Intrinsic.i32ShiftLeft(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.shiftLeft",
+      "identity": "ShiftLeft"
+    },
+    {
+      "operation": "Intrinsic.i32ShiftRight",
+      "signature": "fn Intrinsic.i32ShiftRight(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.shiftRight",
+      "identity": "ShiftRight"
+    },
+    {
+      "operation": "Intrinsic.i32RotateLeft",
+      "signature": "fn Intrinsic.i32RotateLeft(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.rotateLeft",
+      "identity": "RotateLeft"
+    },
+    {
+      "operation": "Intrinsic.i32RotateRight",
+      "signature": "fn Intrinsic.i32RotateRight(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.rotateRight",
+      "identity": "RotateRight"
+    },
+    {
+      "operation": "Intrinsic.i32WrappingAdd",
+      "signature": "fn Intrinsic.i32WrappingAdd(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.wrappingAdd",
+      "identity": "WrappingAdd"
+    },
+    {
+      "operation": "Intrinsic.i32WrappingSubtract",
+      "signature": "fn Intrinsic.i32WrappingSubtract(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.wrappingSubtract",
+      "identity": "WrappingSubtract"
+    },
+    {
+      "operation": "Intrinsic.i32WrappingMultiply",
+      "signature": "fn Intrinsic.i32WrappingMultiply(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.wrappingMultiply",
+      "identity": "WrappingMultiply"
+    },
+    {
+      "operation": "Intrinsic.i32SaturatingAdd",
+      "signature": "fn Intrinsic.i32SaturatingAdd(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.saturatingAdd",
+      "identity": "SaturatingAdd"
+    },
+    {
+      "operation": "Intrinsic.i32SaturatingSubtract",
+      "signature": "fn Intrinsic.i32SaturatingSubtract(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.saturatingSubtract",
+      "identity": "SaturatingSubtract"
+    },
+    {
+      "operation": "Intrinsic.i32SaturatingMultiply",
+      "signature": "fn Intrinsic.i32SaturatingMultiply(left: i32, right: i32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.saturatingMultiply",
+      "identity": "SaturatingMultiply"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedAdd",
+      "signature": "fn Intrinsic.i32CheckedAdd(left: i32, right: i32) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedAdd",
+      "identity": "CheckedAdd"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedSubtract",
+      "signature": "fn Intrinsic.i32CheckedSubtract(left: i32, right: i32) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedSubtract",
+      "identity": "CheckedSubtract"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedMultiply",
+      "signature": "fn Intrinsic.i32CheckedMultiply(left: i32, right: i32) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedMultiply",
+      "identity": "CheckedMultiply"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedDivide",
+      "signature": "fn Intrinsic.i32CheckedDivide(left: i32, right: i32) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedDivide",
+      "identity": "CheckedDivide"
+    },
+    {
+      "operation": "Intrinsic.i32CheckedRemainder",
+      "signature": "fn Intrinsic.i32CheckedRemainder(left: i32, right: i32) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.checkedRemainder",
+      "identity": "CheckedRemainder"
+    },
+    {
+      "operation": "Intrinsic.i32Equals",
+      "signature": "fn Intrinsic.i32Equals(left: i32, right: i32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.i32NotEquals",
+      "signature": "fn Intrinsic.i32NotEquals(left: i32, right: i32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.i32LessThan",
+      "signature": "fn Intrinsic.i32LessThan(left: i32, right: i32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.i32LessOrEqual",
+      "signature": "fn Intrinsic.i32LessOrEqual(left: i32, right: i32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.i32GreaterThan",
+      "signature": "fn Intrinsic.i32GreaterThan(left: i32, right: i32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.i32GreaterOrEqual",
+      "signature": "fn Intrinsic.i32GreaterOrEqual(left: i32, right: i32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i32.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
+      "operation": "Intrinsic.i64Negate",
+      "signature": "fn Intrinsic.i64Negate(value: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.negate",
+      "identity": "Negate"
+    },
+    {
+      "operation": "Intrinsic.i64WrappingNegate",
+      "signature": "fn Intrinsic.i64WrappingNegate(value: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.wrappingNegate",
+      "identity": "WrappingNegate"
+    },
+    {
+      "operation": "Intrinsic.i64SaturatingNegate",
+      "signature": "fn Intrinsic.i64SaturatingNegate(value: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.saturatingNegate",
+      "identity": "SaturatingNegate"
+    },
+    {
+      "operation": "Intrinsic.i64ToU8",
+      "signature": "fn Intrinsic.i64ToU8(value: i64) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.toU8",
+      "identity": "ConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedToU8",
+      "signature": "fn Intrinsic.i64CheckedToU8(value: i64) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedToU8",
+      "identity": "CheckedConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.i64ToU16",
+      "signature": "fn Intrinsic.i64ToU16(value: i64) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.toU16",
+      "identity": "ConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedToU16",
+      "signature": "fn Intrinsic.i64CheckedToU16(value: i64) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedToU16",
+      "identity": "CheckedConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.i64ToU32",
+      "signature": "fn Intrinsic.i64ToU32(value: i64) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedToU32",
+      "signature": "fn Intrinsic.i64CheckedToU32(value: i64) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedToU32",
+      "identity": "CheckedConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.i64ToU64",
+      "signature": "fn Intrinsic.i64ToU64(value: i64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.toU64",
+      "identity": "ConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedToU64",
+      "signature": "fn Intrinsic.i64CheckedToU64(value: i64) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedToU64",
+      "identity": "CheckedConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.i64ToUsize",
+      "signature": "fn Intrinsic.i64ToUsize(value: i64) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.toUsize",
+      "identity": "ConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedToUsize",
+      "signature": "fn Intrinsic.i64CheckedToUsize(value: i64) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedToUsize",
+      "identity": "CheckedConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.i64ToI8",
+      "signature": "fn Intrinsic.i64ToI8(value: i64) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.toI8",
+      "identity": "ConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedToI8",
+      "signature": "fn Intrinsic.i64CheckedToI8(value: i64) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedToI8",
+      "identity": "CheckedConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.i64ToI16",
+      "signature": "fn Intrinsic.i64ToI16(value: i64) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.toI16",
+      "identity": "ConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedToI16",
+      "signature": "fn Intrinsic.i64CheckedToI16(value: i64) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedToI16",
+      "identity": "CheckedConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.i64ToI32",
+      "signature": "fn Intrinsic.i64ToI32(value: i64) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.toI32",
+      "identity": "ConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedToI32",
+      "signature": "fn Intrinsic.i64CheckedToI32(value: i64) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedToI32",
+      "identity": "CheckedConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.i64ToI64",
+      "signature": "fn Intrinsic.i64ToI64(value: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.toI64",
+      "identity": "ConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedToI64",
+      "signature": "fn Intrinsic.i64CheckedToI64(value: i64) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedToI64",
+      "identity": "CheckedConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.i64ToIsize",
+      "signature": "fn Intrinsic.i64ToIsize(value: i64) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.toIsize",
+      "identity": "ConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedToIsize",
+      "signature": "fn Intrinsic.i64CheckedToIsize(value: i64) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedToIsize",
+      "identity": "CheckedConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.i64ToF32",
+      "signature": "fn Intrinsic.i64ToF32(value: i64) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.toF32",
+      "identity": "ConvertToF32"
+    },
+    {
+      "operation": "Intrinsic.i64ToF64",
+      "signature": "fn Intrinsic.i64ToF64(value: i64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.toF64",
+      "identity": "ConvertToF64"
+    },
+    {
+      "operation": "Intrinsic.i64Add",
+      "signature": "fn Intrinsic.i64Add(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.add",
+      "identity": "Add"
+    },
+    {
+      "operation": "Intrinsic.i64Subtract",
+      "signature": "fn Intrinsic.i64Subtract(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.subtract",
+      "identity": "Subtract"
+    },
+    {
+      "operation": "Intrinsic.i64Multiply",
+      "signature": "fn Intrinsic.i64Multiply(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.multiply",
+      "identity": "Multiply"
+    },
+    {
+      "operation": "Intrinsic.i64Divide",
+      "signature": "fn Intrinsic.i64Divide(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.divide",
+      "identity": "Divide"
+    },
+    {
+      "operation": "Intrinsic.i64Remainder",
+      "signature": "fn Intrinsic.i64Remainder(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.remainder",
+      "identity": "Remainder"
+    },
+    {
+      "operation": "Intrinsic.i64BitAnd",
+      "signature": "fn Intrinsic.i64BitAnd(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.bitAnd",
+      "identity": "BitAnd"
+    },
+    {
+      "operation": "Intrinsic.i64BitOr",
+      "signature": "fn Intrinsic.i64BitOr(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.bitOr",
+      "identity": "BitOr"
+    },
+    {
+      "operation": "Intrinsic.i64BitXor",
+      "signature": "fn Intrinsic.i64BitXor(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.bitXor",
+      "identity": "BitXor"
+    },
+    {
+      "operation": "Intrinsic.i64BitNot",
+      "signature": "fn Intrinsic.i64BitNot(value: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.bitNot",
+      "identity": "BitNot"
+    },
+    {
+      "operation": "Intrinsic.i64ShiftLeft",
+      "signature": "fn Intrinsic.i64ShiftLeft(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.shiftLeft",
+      "identity": "ShiftLeft"
+    },
+    {
+      "operation": "Intrinsic.i64ShiftRight",
+      "signature": "fn Intrinsic.i64ShiftRight(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.shiftRight",
+      "identity": "ShiftRight"
+    },
+    {
+      "operation": "Intrinsic.i64RotateLeft",
+      "signature": "fn Intrinsic.i64RotateLeft(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.rotateLeft",
+      "identity": "RotateLeft"
+    },
+    {
+      "operation": "Intrinsic.i64RotateRight",
+      "signature": "fn Intrinsic.i64RotateRight(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.rotateRight",
+      "identity": "RotateRight"
+    },
+    {
+      "operation": "Intrinsic.i64WrappingAdd",
+      "signature": "fn Intrinsic.i64WrappingAdd(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.wrappingAdd",
+      "identity": "WrappingAdd"
+    },
+    {
+      "operation": "Intrinsic.i64WrappingSubtract",
+      "signature": "fn Intrinsic.i64WrappingSubtract(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.wrappingSubtract",
+      "identity": "WrappingSubtract"
+    },
+    {
+      "operation": "Intrinsic.i64WrappingMultiply",
+      "signature": "fn Intrinsic.i64WrappingMultiply(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.wrappingMultiply",
+      "identity": "WrappingMultiply"
+    },
+    {
+      "operation": "Intrinsic.i64SaturatingAdd",
+      "signature": "fn Intrinsic.i64SaturatingAdd(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.saturatingAdd",
+      "identity": "SaturatingAdd"
+    },
+    {
+      "operation": "Intrinsic.i64SaturatingSubtract",
+      "signature": "fn Intrinsic.i64SaturatingSubtract(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.saturatingSubtract",
+      "identity": "SaturatingSubtract"
+    },
+    {
+      "operation": "Intrinsic.i64SaturatingMultiply",
+      "signature": "fn Intrinsic.i64SaturatingMultiply(left: i64, right: i64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.saturatingMultiply",
+      "identity": "SaturatingMultiply"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedAdd",
+      "signature": "fn Intrinsic.i64CheckedAdd(left: i64, right: i64) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedAdd",
+      "identity": "CheckedAdd"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedSubtract",
+      "signature": "fn Intrinsic.i64CheckedSubtract(left: i64, right: i64) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedSubtract",
+      "identity": "CheckedSubtract"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedMultiply",
+      "signature": "fn Intrinsic.i64CheckedMultiply(left: i64, right: i64) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedMultiply",
+      "identity": "CheckedMultiply"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedDivide",
+      "signature": "fn Intrinsic.i64CheckedDivide(left: i64, right: i64) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedDivide",
+      "identity": "CheckedDivide"
+    },
+    {
+      "operation": "Intrinsic.i64CheckedRemainder",
+      "signature": "fn Intrinsic.i64CheckedRemainder(left: i64, right: i64) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.checkedRemainder",
+      "identity": "CheckedRemainder"
+    },
+    {
+      "operation": "Intrinsic.i64Equals",
+      "signature": "fn Intrinsic.i64Equals(left: i64, right: i64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.i64NotEquals",
+      "signature": "fn Intrinsic.i64NotEquals(left: i64, right: i64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.i64LessThan",
+      "signature": "fn Intrinsic.i64LessThan(left: i64, right: i64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.i64LessOrEqual",
+      "signature": "fn Intrinsic.i64LessOrEqual(left: i64, right: i64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.i64GreaterThan",
+      "signature": "fn Intrinsic.i64GreaterThan(left: i64, right: i64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.i64GreaterOrEqual",
+      "signature": "fn Intrinsic.i64GreaterOrEqual(left: i64, right: i64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/i64.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
+      "operation": "Intrinsic.isizeNegate",
+      "signature": "fn Intrinsic.isizeNegate(value: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.negate",
+      "identity": "Negate"
+    },
+    {
+      "operation": "Intrinsic.isizeWrappingNegate",
+      "signature": "fn Intrinsic.isizeWrappingNegate(value: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.wrappingNegate",
+      "identity": "WrappingNegate"
+    },
+    {
+      "operation": "Intrinsic.isizeSaturatingNegate",
+      "signature": "fn Intrinsic.isizeSaturatingNegate(value: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.saturatingNegate",
+      "identity": "SaturatingNegate"
+    },
+    {
+      "operation": "Intrinsic.isizeToU8",
+      "signature": "fn Intrinsic.isizeToU8(value: isize) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.toU8",
+      "identity": "ConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedToU8",
+      "signature": "fn Intrinsic.isizeCheckedToU8(value: isize) -> Option<u8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedToU8",
+      "identity": "CheckedConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.isizeToU16",
+      "signature": "fn Intrinsic.isizeToU16(value: isize) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.toU16",
+      "identity": "ConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedToU16",
+      "signature": "fn Intrinsic.isizeCheckedToU16(value: isize) -> Option<u16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedToU16",
+      "identity": "CheckedConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.isizeToU32",
+      "signature": "fn Intrinsic.isizeToU32(value: isize) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedToU32",
+      "signature": "fn Intrinsic.isizeCheckedToU32(value: isize) -> Option<u32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedToU32",
+      "identity": "CheckedConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.isizeToU64",
+      "signature": "fn Intrinsic.isizeToU64(value: isize) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.toU64",
+      "identity": "ConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedToU64",
+      "signature": "fn Intrinsic.isizeCheckedToU64(value: isize) -> Option<u64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedToU64",
+      "identity": "CheckedConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.isizeToUsize",
+      "signature": "fn Intrinsic.isizeToUsize(value: isize) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.toUsize",
+      "identity": "ConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedToUsize",
+      "signature": "fn Intrinsic.isizeCheckedToUsize(value: isize) -> Option<usize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedToUsize",
+      "identity": "CheckedConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.isizeToI8",
+      "signature": "fn Intrinsic.isizeToI8(value: isize) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.toI8",
+      "identity": "ConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedToI8",
+      "signature": "fn Intrinsic.isizeCheckedToI8(value: isize) -> Option<i8>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedToI8",
+      "identity": "CheckedConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.isizeToI16",
+      "signature": "fn Intrinsic.isizeToI16(value: isize) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.toI16",
+      "identity": "ConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedToI16",
+      "signature": "fn Intrinsic.isizeCheckedToI16(value: isize) -> Option<i16>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedToI16",
+      "identity": "CheckedConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.isizeToI32",
+      "signature": "fn Intrinsic.isizeToI32(value: isize) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.toI32",
+      "identity": "ConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedToI32",
+      "signature": "fn Intrinsic.isizeCheckedToI32(value: isize) -> Option<i32>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedToI32",
+      "identity": "CheckedConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.isizeToI64",
+      "signature": "fn Intrinsic.isizeToI64(value: isize) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.toI64",
+      "identity": "ConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedToI64",
+      "signature": "fn Intrinsic.isizeCheckedToI64(value: isize) -> Option<i64>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedToI64",
+      "identity": "CheckedConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.isizeToIsize",
+      "signature": "fn Intrinsic.isizeToIsize(value: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.toIsize",
+      "identity": "ConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedToIsize",
+      "signature": "fn Intrinsic.isizeCheckedToIsize(value: isize) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedToIsize",
+      "identity": "CheckedConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.isizeToF32",
+      "signature": "fn Intrinsic.isizeToF32(value: isize) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.toF32",
+      "identity": "ConvertToF32"
+    },
+    {
+      "operation": "Intrinsic.isizeToF64",
+      "signature": "fn Intrinsic.isizeToF64(value: isize) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.toF64",
+      "identity": "ConvertToF64"
+    },
+    {
+      "operation": "Intrinsic.isizeAdd",
+      "signature": "fn Intrinsic.isizeAdd(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.add",
+      "identity": "Add"
+    },
+    {
+      "operation": "Intrinsic.isizeSubtract",
+      "signature": "fn Intrinsic.isizeSubtract(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.subtract",
+      "identity": "Subtract"
+    },
+    {
+      "operation": "Intrinsic.isizeMultiply",
+      "signature": "fn Intrinsic.isizeMultiply(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.multiply",
+      "identity": "Multiply"
+    },
+    {
+      "operation": "Intrinsic.isizeDivide",
+      "signature": "fn Intrinsic.isizeDivide(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.divide",
+      "identity": "Divide"
+    },
+    {
+      "operation": "Intrinsic.isizeRemainder",
+      "signature": "fn Intrinsic.isizeRemainder(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.remainder",
+      "identity": "Remainder"
+    },
+    {
+      "operation": "Intrinsic.isizeBitAnd",
+      "signature": "fn Intrinsic.isizeBitAnd(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.bitAnd",
+      "identity": "BitAnd"
+    },
+    {
+      "operation": "Intrinsic.isizeBitOr",
+      "signature": "fn Intrinsic.isizeBitOr(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.bitOr",
+      "identity": "BitOr"
+    },
+    {
+      "operation": "Intrinsic.isizeBitXor",
+      "signature": "fn Intrinsic.isizeBitXor(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.bitXor",
+      "identity": "BitXor"
+    },
+    {
+      "operation": "Intrinsic.isizeBitNot",
+      "signature": "fn Intrinsic.isizeBitNot(value: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.bitNot",
+      "identity": "BitNot"
+    },
+    {
+      "operation": "Intrinsic.isizeShiftLeft",
+      "signature": "fn Intrinsic.isizeShiftLeft(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.shiftLeft",
+      "identity": "ShiftLeft"
+    },
+    {
+      "operation": "Intrinsic.isizeShiftRight",
+      "signature": "fn Intrinsic.isizeShiftRight(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.shiftRight",
+      "identity": "ShiftRight"
+    },
+    {
+      "operation": "Intrinsic.isizeRotateLeft",
+      "signature": "fn Intrinsic.isizeRotateLeft(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.rotateLeft",
+      "identity": "RotateLeft"
+    },
+    {
+      "operation": "Intrinsic.isizeRotateRight",
+      "signature": "fn Intrinsic.isizeRotateRight(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.rotateRight",
+      "identity": "RotateRight"
+    },
+    {
+      "operation": "Intrinsic.isizeWrappingAdd",
+      "signature": "fn Intrinsic.isizeWrappingAdd(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.wrappingAdd",
+      "identity": "WrappingAdd"
+    },
+    {
+      "operation": "Intrinsic.isizeWrappingSubtract",
+      "signature": "fn Intrinsic.isizeWrappingSubtract(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.wrappingSubtract",
+      "identity": "WrappingSubtract"
+    },
+    {
+      "operation": "Intrinsic.isizeWrappingMultiply",
+      "signature": "fn Intrinsic.isizeWrappingMultiply(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.wrappingMultiply",
+      "identity": "WrappingMultiply"
+    },
+    {
+      "operation": "Intrinsic.isizeSaturatingAdd",
+      "signature": "fn Intrinsic.isizeSaturatingAdd(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.saturatingAdd",
+      "identity": "SaturatingAdd"
+    },
+    {
+      "operation": "Intrinsic.isizeSaturatingSubtract",
+      "signature": "fn Intrinsic.isizeSaturatingSubtract(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.saturatingSubtract",
+      "identity": "SaturatingSubtract"
+    },
+    {
+      "operation": "Intrinsic.isizeSaturatingMultiply",
+      "signature": "fn Intrinsic.isizeSaturatingMultiply(left: isize, right: isize) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.saturatingMultiply",
+      "identity": "SaturatingMultiply"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedAdd",
+      "signature": "fn Intrinsic.isizeCheckedAdd(left: isize, right: isize) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedAdd",
+      "identity": "CheckedAdd"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedSubtract",
+      "signature": "fn Intrinsic.isizeCheckedSubtract(left: isize, right: isize) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedSubtract",
+      "identity": "CheckedSubtract"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedMultiply",
+      "signature": "fn Intrinsic.isizeCheckedMultiply(left: isize, right: isize) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedMultiply",
+      "identity": "CheckedMultiply"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedDivide",
+      "signature": "fn Intrinsic.isizeCheckedDivide(left: isize, right: isize) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedDivide",
+      "identity": "CheckedDivide"
+    },
+    {
+      "operation": "Intrinsic.isizeCheckedRemainder",
+      "signature": "fn Intrinsic.isizeCheckedRemainder(left: isize, right: isize) -> Option<isize>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.checkedRemainder",
+      "identity": "CheckedRemainder"
+    },
+    {
+      "operation": "Intrinsic.isizeEquals",
+      "signature": "fn Intrinsic.isizeEquals(left: isize, right: isize) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.isizeNotEquals",
+      "signature": "fn Intrinsic.isizeNotEquals(left: isize, right: isize) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.isizeLessThan",
+      "signature": "fn Intrinsic.isizeLessThan(left: isize, right: isize) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.isizeLessOrEqual",
+      "signature": "fn Intrinsic.isizeLessOrEqual(left: isize, right: isize) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.isizeGreaterThan",
+      "signature": "fn Intrinsic.isizeGreaterThan(left: isize, right: isize) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.isizeGreaterOrEqual",
+      "signature": "fn Intrinsic.isizeGreaterOrEqual(left: isize, right: isize) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/isize.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
+      "operation": "Intrinsic.f32Negate",
+      "signature": "fn Intrinsic.f32Negate(value: f32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.negate",
+      "identity": "Negate"
+    },
+    {
+      "operation": "Intrinsic.f32Add",
+      "signature": "fn Intrinsic.f32Add(left: f32, right: f32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.add",
+      "identity": "Add"
+    },
+    {
+      "operation": "Intrinsic.f32Subtract",
+      "signature": "fn Intrinsic.f32Subtract(left: f32, right: f32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.subtract",
+      "identity": "Subtract"
+    },
+    {
+      "operation": "Intrinsic.f32Multiply",
+      "signature": "fn Intrinsic.f32Multiply(left: f32, right: f32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.multiply",
+      "identity": "Multiply"
+    },
+    {
+      "operation": "Intrinsic.f32Divide",
+      "signature": "fn Intrinsic.f32Divide(left: f32, right: f32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.divide",
+      "identity": "Divide"
+    },
+    {
+      "operation": "Intrinsic.f32Remainder",
+      "signature": "fn Intrinsic.f32Remainder(left: f32, right: f32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.remainder",
+      "identity": "Remainder"
+    },
+    {
+      "operation": "Intrinsic.f32Equals",
+      "signature": "fn Intrinsic.f32Equals(left: f32, right: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.f32NotEquals",
+      "signature": "fn Intrinsic.f32NotEquals(left: f32, right: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.f32LessThan",
+      "signature": "fn Intrinsic.f32LessThan(left: f32, right: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.f32LessOrEqual",
+      "signature": "fn Intrinsic.f32LessOrEqual(left: f32, right: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.f32GreaterThan",
+      "signature": "fn Intrinsic.f32GreaterThan(left: f32, right: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.f32GreaterOrEqual",
+      "signature": "fn Intrinsic.f32GreaterOrEqual(left: f32, right: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
+      "operation": "Intrinsic.f32IsNaN",
+      "signature": "fn Intrinsic.f32IsNaN(value: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.isNaN",
+      "identity": "IsNaN"
+    },
+    {
+      "operation": "Intrinsic.f32IsInfinite",
+      "signature": "fn Intrinsic.f32IsInfinite(value: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.isInfinite",
+      "identity": "IsInfinite"
+    },
+    {
+      "operation": "Intrinsic.f32IsFinite",
+      "signature": "fn Intrinsic.f32IsFinite(value: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.isFinite",
+      "identity": "IsFinite"
+    },
+    {
+      "operation": "Intrinsic.f32IsNormal",
+      "signature": "fn Intrinsic.f32IsNormal(value: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.isNormal",
+      "identity": "IsNormal"
+    },
+    {
+      "operation": "Intrinsic.f32IsSubnormal",
+      "signature": "fn Intrinsic.f32IsSubnormal(value: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.isSubnormal",
+      "identity": "IsSubnormal"
+    },
+    {
+      "operation": "Intrinsic.f32IsSignNegative",
+      "signature": "fn Intrinsic.f32IsSignNegative(value: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.isSignNegative",
+      "identity": "IsSignNegative"
+    },
+    {
+      "operation": "Intrinsic.f32TotalOrder",
+      "signature": "fn Intrinsic.f32TotalOrder(left: f32, right: f32) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.totalOrder",
+      "identity": "TotalOrder"
+    },
+    {
+      "operation": "Intrinsic.f32ToBits",
+      "signature": "fn Intrinsic.f32ToBits(value: f32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toBits",
+      "identity": "ToBits"
+    },
+    {
+      "operation": "Intrinsic.f32FromBits",
+      "signature": "fn Intrinsic.f32FromBits(value: u32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.fromBits",
+      "identity": "FromBits"
+    },
+    {
+      "operation": "Intrinsic.f32Sin",
+      "signature": "fn Intrinsic.f32Sin(value: f32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.sin",
+      "identity": "Sin"
+    },
+    {
+      "operation": "Intrinsic.f32Cos",
+      "signature": "fn Intrinsic.f32Cos(value: f32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.cos",
+      "identity": "Cos"
+    },
+    {
+      "operation": "Intrinsic.f32ToF32",
+      "signature": "fn Intrinsic.f32ToF32(value: f32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toF32",
+      "identity": "ConvertToF32"
+    },
+    {
+      "operation": "Intrinsic.f32ToF64",
+      "signature": "fn Intrinsic.f32ToF64(value: f32) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toF64",
+      "identity": "ConvertToF64"
+    },
+    {
+      "operation": "Intrinsic.f32ToU8",
+      "signature": "fn Intrinsic.f32ToU8(value: f32) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toU8",
+      "identity": "ConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.f32ToU16",
+      "signature": "fn Intrinsic.f32ToU16(value: f32) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toU16",
+      "identity": "ConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.f32ToU32",
+      "signature": "fn Intrinsic.f32ToU32(value: f32) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.f32ToU64",
+      "signature": "fn Intrinsic.f32ToU64(value: f32) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toU64",
+      "identity": "ConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.f32ToUsize",
+      "signature": "fn Intrinsic.f32ToUsize(value: f32) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toUsize",
+      "identity": "ConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.f32ToI8",
+      "signature": "fn Intrinsic.f32ToI8(value: f32) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toI8",
+      "identity": "ConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.f32ToI16",
+      "signature": "fn Intrinsic.f32ToI16(value: f32) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toI16",
+      "identity": "ConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.f32ToI32",
+      "signature": "fn Intrinsic.f32ToI32(value: f32) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toI32",
+      "identity": "ConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.f32ToI64",
+      "signature": "fn Intrinsic.f32ToI64(value: f32) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toI64",
+      "identity": "ConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.f32ToIsize",
+      "signature": "fn Intrinsic.f32ToIsize(value: f32) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.toIsize",
+      "identity": "ConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.f64Negate",
+      "signature": "fn Intrinsic.f64Negate(value: f64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.negate",
+      "identity": "Negate"
+    },
+    {
+      "operation": "Intrinsic.f64Add",
+      "signature": "fn Intrinsic.f64Add(left: f64, right: f64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.add",
+      "identity": "Add"
+    },
+    {
+      "operation": "Intrinsic.f64Subtract",
+      "signature": "fn Intrinsic.f64Subtract(left: f64, right: f64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.subtract",
+      "identity": "Subtract"
+    },
+    {
+      "operation": "Intrinsic.f64Multiply",
+      "signature": "fn Intrinsic.f64Multiply(left: f64, right: f64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.multiply",
+      "identity": "Multiply"
+    },
+    {
+      "operation": "Intrinsic.f64Divide",
+      "signature": "fn Intrinsic.f64Divide(left: f64, right: f64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.divide",
+      "identity": "Divide"
+    },
+    {
+      "operation": "Intrinsic.f64Remainder",
+      "signature": "fn Intrinsic.f64Remainder(left: f64, right: f64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.remainder",
+      "identity": "Remainder"
+    },
+    {
+      "operation": "Intrinsic.f64Equals",
+      "signature": "fn Intrinsic.f64Equals(left: f64, right: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.f64NotEquals",
+      "signature": "fn Intrinsic.f64NotEquals(left: f64, right: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.f64LessThan",
+      "signature": "fn Intrinsic.f64LessThan(left: f64, right: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.f64LessOrEqual",
+      "signature": "fn Intrinsic.f64LessOrEqual(left: f64, right: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.f64GreaterThan",
+      "signature": "fn Intrinsic.f64GreaterThan(left: f64, right: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.f64GreaterOrEqual",
+      "signature": "fn Intrinsic.f64GreaterOrEqual(left: f64, right: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
+      "operation": "Intrinsic.f64IsNaN",
+      "signature": "fn Intrinsic.f64IsNaN(value: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.isNaN",
+      "identity": "IsNaN"
+    },
+    {
+      "operation": "Intrinsic.f64IsInfinite",
+      "signature": "fn Intrinsic.f64IsInfinite(value: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.isInfinite",
+      "identity": "IsInfinite"
+    },
+    {
+      "operation": "Intrinsic.f64IsFinite",
+      "signature": "fn Intrinsic.f64IsFinite(value: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.isFinite",
+      "identity": "IsFinite"
+    },
+    {
+      "operation": "Intrinsic.f64IsNormal",
+      "signature": "fn Intrinsic.f64IsNormal(value: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.isNormal",
+      "identity": "IsNormal"
+    },
+    {
+      "operation": "Intrinsic.f64IsSubnormal",
+      "signature": "fn Intrinsic.f64IsSubnormal(value: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.isSubnormal",
+      "identity": "IsSubnormal"
+    },
+    {
+      "operation": "Intrinsic.f64IsSignNegative",
+      "signature": "fn Intrinsic.f64IsSignNegative(value: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.isSignNegative",
+      "identity": "IsSignNegative"
+    },
+    {
+      "operation": "Intrinsic.f64TotalOrder",
+      "signature": "fn Intrinsic.f64TotalOrder(left: f64, right: f64) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.totalOrder",
+      "identity": "TotalOrder"
+    },
+    {
+      "operation": "Intrinsic.f64ToBits",
+      "signature": "fn Intrinsic.f64ToBits(value: f64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toBits",
+      "identity": "ToBits"
+    },
+    {
+      "operation": "Intrinsic.f64FromBits",
+      "signature": "fn Intrinsic.f64FromBits(value: u64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.fromBits",
+      "identity": "FromBits"
+    },
+    {
+      "operation": "Intrinsic.f64Sin",
+      "signature": "fn Intrinsic.f64Sin(value: f64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.sin",
+      "identity": "Sin"
+    },
+    {
+      "operation": "Intrinsic.f64Cos",
+      "signature": "fn Intrinsic.f64Cos(value: f64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.cos",
+      "identity": "Cos"
+    },
+    {
+      "operation": "Intrinsic.f64ToF32",
+      "signature": "fn Intrinsic.f64ToF32(value: f64) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toF32",
+      "identity": "ConvertToF32"
+    },
+    {
+      "operation": "Intrinsic.f64ToF64",
+      "signature": "fn Intrinsic.f64ToF64(value: f64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toF64",
+      "identity": "ConvertToF64"
+    },
+    {
+      "operation": "Intrinsic.f64ToU8",
+      "signature": "fn Intrinsic.f64ToU8(value: f64) -> u8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toU8",
+      "identity": "ConvertToU8"
+    },
+    {
+      "operation": "Intrinsic.f64ToU16",
+      "signature": "fn Intrinsic.f64ToU16(value: f64) -> u16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toU16",
+      "identity": "ConvertToU16"
+    },
+    {
+      "operation": "Intrinsic.f64ToU32",
+      "signature": "fn Intrinsic.f64ToU32(value: f64) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
+      "operation": "Intrinsic.f64ToU64",
+      "signature": "fn Intrinsic.f64ToU64(value: f64) -> u64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toU64",
+      "identity": "ConvertToU64"
+    },
+    {
+      "operation": "Intrinsic.f64ToUsize",
+      "signature": "fn Intrinsic.f64ToUsize(value: f64) -> usize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toUsize",
+      "identity": "ConvertToUsize"
+    },
+    {
+      "operation": "Intrinsic.f64ToI8",
+      "signature": "fn Intrinsic.f64ToI8(value: f64) -> i8",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toI8",
+      "identity": "ConvertToI8"
+    },
+    {
+      "operation": "Intrinsic.f64ToI16",
+      "signature": "fn Intrinsic.f64ToI16(value: f64) -> i16",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toI16",
+      "identity": "ConvertToI16"
+    },
+    {
+      "operation": "Intrinsic.f64ToI32",
+      "signature": "fn Intrinsic.f64ToI32(value: f64) -> i32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toI32",
+      "identity": "ConvertToI32"
+    },
+    {
+      "operation": "Intrinsic.f64ToI64",
+      "signature": "fn Intrinsic.f64ToI64(value: f64) -> i64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toI64",
+      "identity": "ConvertToI64"
+    },
+    {
+      "operation": "Intrinsic.f64ToIsize",
+      "signature": "fn Intrinsic.f64ToIsize(value: f64) -> isize",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.toIsize",
+      "identity": "ConvertToIsize"
+    },
+    {
+      "operation": "Intrinsic.layoutOf",
+      "signature": "fn Intrinsic.layoutOf<T>() -> Layout",
+      "unsafe": false,
+      "admission": "Representation",
+      "consumer": "silk/layout.of",
+      "identity": "LayoutOf"
+    },
+    {
+      "operation": "Intrinsic.systemAllocationAcquire",
+      "signature": "fn Intrinsic.systemAllocationAcquire(layout: Layout) -> Effect<Allocation ! OutOfMemory>",
+      "unsafe": false,
+      "admission": "Platform",
+      "consumer": "silk/core.allocate",
+      "identity": "StorageAcquire"
+    },
+    {
+      "operation": "Intrinsic.standardStreamWrite",
+      "signature": "fn Intrinsic.standardStreamWrite(destination: bool, bytes: &[u8]) -> Effect<() ! StreamWriteFailure>",
+      "unsafe": false,
+      "admission": "Platform",
+      "consumer": "silk/core.writeAll",
+      "identity": "HostWrite",
+      "hostImport": "silk_standard_stream_write_v1"
+    },
+    {
+      "operation": "Intrinsic.rawBufferFrom",
+      "signature": "unsafe fn Intrinsic.rawBufferFrom<T>(allocation: Allocation, count: usize) -> RawBuffer<T>",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/raw-buffer.from",
+      "identity": "RawBufferFrom",
+      "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
+    },
+    {
+      "operation": "Intrinsic.rawBufferSlot",
+      "signature": "unsafe fn Intrinsic.rawBufferSlot<T>(buffer: &mut RawBuffer<T>, index: usize) -> Slot<T>",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/raw-buffer.slot",
+      "identity": "RawBufferSlot",
+      "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
+    },
+    {
+      "operation": "Intrinsic.rawBufferCount",
+      "signature": "fn Intrinsic.rawBufferCount<T>(buffer: &RawBuffer<T>) -> usize",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/raw-buffer.count",
+      "identity": "RawBufferCount"
+    },
+    {
+      "operation": "Intrinsic.rawBufferRead",
+      "signature": "unsafe fn Intrinsic.rawBufferRead<T>(buffer: &RawBuffer<T>, index: usize) -> T",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/raw-buffer.read",
+      "identity": "RawBufferRead",
+      "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
+    },
+    {
+      "operation": "Intrinsic.slotWrite",
+      "signature": "unsafe fn Intrinsic.slotWrite<T>(slot: Slot<T>, value: T) -> ()",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/slot.write",
+      "identity": "SlotWrite",
+      "invariant": "caller proves the selected slot is in bounds and has the initializedness state required by the operation"
+    },
+    {
+      "operation": "Intrinsic.slotTake",
+      "signature": "unsafe fn Intrinsic.slotTake<T>(slot: Slot<T>) -> T",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/slot.take",
+      "identity": "SlotTake",
+      "invariant": "caller proves the selected slot is in bounds and has the initializedness state required by the operation"
+    },
+    {
+      "operation": "Intrinsic.slotCopy",
+      "signature": "unsafe fn Intrinsic.slotCopy<T>(slot: Slot<T>) -> T",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/slot.copy",
+      "identity": "SlotCopy",
+      "invariant": "caller proves the selected slot is in bounds and has the initializedness state required by the operation"
+    },
+    {
+      "operation": "Intrinsic.slotDrop",
+      "signature": "unsafe fn Intrinsic.slotDrop<T>(slot: Slot<T>) -> ()",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/slot.drop",
+      "identity": "SlotDrop",
+      "invariant": "caller proves the selected slot is in bounds and has the initializedness state required by the operation"
+    },
+    {
+      "operation": "Intrinsic.effectResult",
+      "signature": "fn Intrinsic.effectResult(protected: Effect<A ! E ? R>) -> Effect<Result<A, Row<!E>> ? R>",
+      "unsafe": false,
+      "admission": "Effect",
+      "consumer": "silk/effects.result",
+      "identity": "EffectRule.Result"
+    },
+    {
+      "operation": "Intrinsic.bindRequirement",
+      "signature": "fn Intrinsic.bindRequirement(protected: Effect<A ! E ? Selected | Rest>, provider: &Provider) -> Effect<A ! E ? Rest>",
+      "unsafe": false,
+      "admission": "Effect",
+      "consumer": "silk/effects.bindRequirement",
+      "identity": "EffectRule.BindRequirement"
+    },
+    {
+      "operation": "Intrinsic.replace",
+      "signature": "fn Intrinsic.replace<T>(place: &mut T, value: T) -> T",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "language:place-replacement",
+      "identity": "PlaceRule.Replace"
+    }
+  ]
+}

@@ -12,5 +12,9 @@ fn golden/operator.main params=0 locals=7 -> i32 entry=r0
     %3 = multiply %1, %2 : i32 [33, 39)
     %4 = add %0, %3 : i32 [29, 39)
     %5 = literal 1 : i32 [51, 52)
-    %6 = apply-callable i32.Add(%4) captures=#0:%5 access=shared evaluation=LeftThenCallable realization=DirectErasedSection : i32 [29, 53)
+    %6 = apply-callable silk/i32.add(%4) captures=#0:%5 access=shared evaluation=LeftThenCallable realization=DirectErasedSection : i32 [29, 53)
     return %6 [29, 53)
+fn silk/i32.add params=2 locals=3 -> i32 entry=r0
+  r0 operation:
+    %2 = add %0, %1 : i32 [3393, 3423)
+    return %2 [3393, 3423)

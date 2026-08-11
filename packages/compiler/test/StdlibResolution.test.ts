@@ -36,7 +36,16 @@ it.effect('resolves standard-library imports without vendoring source', () =>
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.deepEqual(
       Analysis.modules(snapshot).map((module) => module.name),
-      ['silk/vector', 'stdlib/importer'].sort(),
+      [
+        'silk/core',
+        'silk/layout',
+        'silk/option',
+        'silk/raw-buffer',
+        'silk/slot',
+        'silk/usize',
+        'silk/vector',
+        'stdlib/importer',
+      ],
     )
     // The resolved declarations carry the library's canonical module identity.
     const index = Analysis.declarationIndex(snapshot)

@@ -892,7 +892,14 @@ export const catalog = (
         for (const field of member.fields) {
           if (field.declaredType._tag === 'Resolved') addReferenced(field.declaredType.type)
         }
-      } else if (member.declaredType._tag === 'Resolved') {
+      } else if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
+        for (const operation of member.operations) {
+          for (const parameter of operation.parameters)
+            if (parameter.declaredType._tag === 'Resolved')
+              addReferenced(parameter.declaredType.type)
+          if (operation.returnType._tag === 'Resolved') addReferenced(operation.returnType.type)
+        }
+      } else if (member._tag === 'ConstantDeclaration' && member.declaredType._tag === 'Resolved') {
         addReferenced(member.declaredType.type)
       }
     }
@@ -991,6 +998,7 @@ const addExpressionTypes = (
   if (
     expression._tag === 'Call' ||
     expression._tag === 'EffectConstruct' ||
+    expression._tag === 'ServiceEffectConstruct' ||
     expression._tag === 'BuiltinCall'
   ) {
     for (const argument of expression.arguments) addExpressionTypes(types, argument, substitution)

@@ -99,6 +99,39 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('dispatches an arbitrary source service through a provided source witness', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'memory/evaluation',
+      ascii(`service Counter {
+  effect fn get() -> i32 ? &Counter
+}
+struct Fixed { value: i32 }
+effect fn get(self: &Fixed) -> i32 { return self.value }
+impl Counter for Fixed { get: Fixed.get }
+effect fn read() -> i32 ? &Counter { return run Counter.get() }
+pub fn main() -> i32 {
+  let fixed = Fixed { value: 42 }
+  return run Effect.provide(read(), &fixed)
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const instances = Analysis.instancesOf(snapshot)
+    assert.deepEqual(instances.violations, [])
+    const mir = Analysis.mirOf(snapshot)
+    assert.strictEqual(
+      mir._tag,
+      'Available',
+      mir._tag === 'Unavailable' ? mir.error.message : undefined,
+    )
+    const outcome = Analysis.evaluate(snapshot)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
 it.effect('executes named function values and stored automatic sections', () =>
   Effect.gen(function* () {
     const outcome = yield* evaluateSource(`fn identity(value: i32) -> i32 { return value }
