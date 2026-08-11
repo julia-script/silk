@@ -578,14 +578,20 @@ export const catalog = (
                 Object.freeze(['$context', 'usize'] as const),
                 Object.freeze(['$active', 'usize'] as const),
               ])
-            : Type.isRawBuffer(type)
+            : Type.equals(type, Type.osHandle)
               ? Object.freeze([
-                  Object.freeze(['$allocation', Type.allocation] as const),
-                  Object.freeze(['count', 'usize'] as const),
+                  Object.freeze(['$identity', 'usize'] as const),
+                  Object.freeze(['$kind', 'i32'] as const),
+                  Object.freeze(['$active', 'i32'] as const),
                 ])
-              : Type.isSlot(type)
-                ? Object.freeze([Object.freeze(['$address', 'usize'] as const)])
-                : Object.freeze([])
+              : Type.isRawBuffer(type)
+                ? Object.freeze([
+                    Object.freeze(['$allocation', Type.allocation] as const),
+                    Object.freeze(['count', 'usize'] as const),
+                  ])
+                : Type.isSlot(type)
+                  ? Object.freeze([Object.freeze(['$address', 'usize'] as const)])
+                  : Object.freeze([])
       let cursor = 0
       const fields: Array<Field> = []
       for (const [fieldOrdinal, [name, fieldType]] of fieldTypes.entries()) {

@@ -4866,6 +4866,96 @@
       "identity": "ConvertToIsize"
     },
     {
+      "operation": "Intrinsic.osFileOpen",
+      "signature": "unsafe fn Intrinsic.osFileOpen(root: &[u8], path: &[u8], mode: i32, reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<OsHandle>>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-filesystem.fileOpen",
+      "identity": "OsFileOpen",
+      "invariant": "root is an absolute native path; path is normalized provider-absolute; outputs are initialized; traversal rejects symlinks and namespace escape"
+    },
+    {
+      "operation": "Intrinsic.osFileRead",
+      "signature": "unsafe fn Intrinsic.osFileRead(handle: &mut OsHandle, output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-filesystem.fileRead",
+      "identity": "OsFileRead",
+      "invariant": "handle is a live file; output is initialized writable storage; success reports the exact transferred byte count"
+    },
+    {
+      "operation": "Intrinsic.osFileWrite",
+      "signature": "unsafe fn Intrinsic.osFileWrite(handle: &mut OsHandle, input: &[u8], offset: usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-filesystem.fileWrite",
+      "identity": "OsFileWrite",
+      "invariant": "handle is a live file; input is initialized; success reports the exact transferred byte count and may be partial"
+    },
+    {
+      "operation": "Intrinsic.osDirectoryOpen",
+      "signature": "unsafe fn Intrinsic.osDirectoryOpen(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<OsHandle>>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-filesystem.directoryOpen",
+      "identity": "OsDirectoryOpen",
+      "invariant": "root and path satisfy confined traversal and outputs are initialized"
+    },
+    {
+      "operation": "Intrinsic.osDirectoryNext",
+      "signature": "unsafe fn Intrinsic.osDirectoryNext(handle: &mut OsHandle, output: &mut [u8], kind: &mut i32, requiredCapacity: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-filesystem.directoryNext",
+      "identity": "OsDirectoryNext",
+      "invariant": "handle is a live directory; buffer-too-small does not advance and reports required capacity; zero means end"
+    },
+    {
+      "operation": "Intrinsic.osPathInspect",
+      "signature": "unsafe fn Intrinsic.osPathInspect(root: &[u8], path: &[u8], kind: &mut i32, byteLength: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-filesystem.pathInspect",
+      "identity": "OsPathInspect",
+      "invariant": "root and path satisfy confined traversal; kind and byteLength outputs are initialized"
+    },
+    {
+      "operation": "Intrinsic.osDirectoryCreate",
+      "signature": "unsafe fn Intrinsic.osDirectoryCreate(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-filesystem.directoryCreate",
+      "identity": "OsDirectoryCreate",
+      "invariant": "root and path satisfy confined traversal and failure outputs are initialized"
+    },
+    {
+      "operation": "Intrinsic.osFileRemove",
+      "signature": "unsafe fn Intrinsic.osFileRemove(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-filesystem.fileRemove",
+      "identity": "OsFileRemove",
+      "invariant": "root and path satisfy confined traversal and failure outputs are initialized"
+    },
+    {
+      "operation": "Intrinsic.osDirectoryRemove",
+      "signature": "unsafe fn Intrinsic.osDirectoryRemove(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-filesystem.directoryRemove",
+      "identity": "OsDirectoryRemove",
+      "invariant": "root and path satisfy confined traversal and failure outputs are initialized"
+    },
+    {
+      "operation": "Intrinsic.osHandleClose",
+      "signature": "unsafe fn Intrinsic.osHandleClose(handle: OsHandle, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-filesystem.handleClose",
+      "identity": "OsHandleClose",
+      "invariant": "consumes exactly one live file or directory handle whether close succeeds or fails"
+    },
+    {
       "operation": "Intrinsic.layoutOf",
       "signature": "fn Intrinsic.layoutOf<T>() -> Layout",
       "unsafe": false,

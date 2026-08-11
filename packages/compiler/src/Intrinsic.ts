@@ -171,6 +171,39 @@ const actor = (
 
 const rawElement = Type.parameter({ module: 'silk/core', name: '$RawStorage' }, 0, 'T')
 const rawTypeParameters = Object.freeze([rawElement])
+const nativeTargets = Object.freeze<ReadonlyArray<ExecutionTarget>>(['Evaluator', 'LLVM'])
+const byteSlice = Type.slice('Shared', 'u8')
+const mutableI32 = Type.reference('Exclusive', 'i32')
+const mutableU32 = Type.reference('Exclusive', 'u32')
+const mutableUsize = Type.reference('Exclusive', 'usize')
+const mutableHandle = Type.reference('Exclusive', Type.osHandle)
+
+const osEffect = (value: Type.Type): Type.Effect =>
+  Type.effect(value, Object.freeze([]), undefined, Object.freeze([]))
+
+const osBuiltin = (options: {
+  readonly name: string
+  readonly operation: Extract<Hir.BuiltinOperation, `Os${string}`>
+  readonly parameters: ReadonlyArray<ValueParameter>
+  readonly semanticParameters: ReadonlyArray<Type.Type>
+  readonly result: string
+  readonly semanticResult: Type.Type
+  readonly invariant: string
+}): Operation =>
+  Object.freeze({
+    ...builtin({
+      actor: 'Os',
+      name: options.name,
+      operation: options.operation,
+      parameters: options.parameters,
+      semanticParameters: options.semanticParameters,
+      result: options.result,
+      semanticResult: osEffect(options.semanticResult),
+      unsafe: true,
+      targets: nativeTargets,
+    }),
+    invariant: options.invariant,
+  })
 
 const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Operation => {
   const concreteResult =
@@ -214,6 +247,169 @@ const scalarActor = (scalar: Scalar.Scalar): Actor =>
 
 const legacyActors = Object.freeze([
   ...Scalar.all().map(scalarActor),
+  actor('OsHandle', 'Type', Object.freeze([])),
+  actor(
+    'Os',
+    'Namespace',
+    Object.freeze([
+      osBuiltin({
+        name: 'fileOpen',
+        operation: 'OsFileOpen',
+        parameters: Object.freeze([
+          valueParameter('root', '&[u8]'),
+          valueParameter('path', '&[u8]'),
+          valueParameter('mode', 'i32'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([byteSlice, byteSlice, 'i32', mutableI32, mutableU32]),
+        result: 'Effect<Option<OsHandle>>',
+        semanticResult: Type.option(Type.osHandle),
+        invariant:
+          'root is an absolute native path; path is normalized provider-absolute; outputs are initialized; traversal rejects symlinks and namespace escape',
+      }),
+      osBuiltin({
+        name: 'fileRead',
+        operation: 'OsFileRead',
+        parameters: Object.freeze([
+          valueParameter('handle', '&mut OsHandle'),
+          valueParameter('output', '&mut [u8]'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([
+          mutableHandle,
+          Type.slice('Exclusive', 'u8'),
+          mutableI32,
+          mutableU32,
+        ]),
+        result: 'Effect<Option<usize>>',
+        semanticResult: Type.option('usize'),
+        invariant:
+          'handle is a live file; output is initialized writable storage; success reports the exact transferred byte count',
+      }),
+      osBuiltin({
+        name: 'fileWrite',
+        operation: 'OsFileWrite',
+        parameters: Object.freeze([
+          valueParameter('handle', '&mut OsHandle'),
+          valueParameter('input', '&[u8]'),
+          valueParameter('offset', 'usize'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([
+          mutableHandle,
+          byteSlice,
+          'usize',
+          mutableI32,
+          mutableU32,
+        ]),
+        result: 'Effect<Option<usize>>',
+        semanticResult: Type.option('usize'),
+        invariant:
+          'handle is a live file; input is initialized; success reports the exact transferred byte count and may be partial',
+      }),
+      osBuiltin({
+        name: 'directoryOpen',
+        operation: 'OsDirectoryOpen',
+        parameters: Object.freeze([
+          valueParameter('root', '&[u8]'),
+          valueParameter('path', '&[u8]'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([byteSlice, byteSlice, mutableI32, mutableU32]),
+        result: 'Effect<Option<OsHandle>>',
+        semanticResult: Type.option(Type.osHandle),
+        invariant: 'root and path satisfy confined traversal and outputs are initialized',
+      }),
+      osBuiltin({
+        name: 'directoryNext',
+        operation: 'OsDirectoryNext',
+        parameters: Object.freeze([
+          valueParameter('handle', '&mut OsHandle'),
+          valueParameter('output', '&mut [u8]'),
+          valueParameter('kind', '&mut i32'),
+          valueParameter('requiredCapacity', '&mut usize'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([
+          mutableHandle,
+          Type.slice('Exclusive', 'u8'),
+          mutableI32,
+          mutableUsize,
+          mutableI32,
+          mutableU32,
+        ]),
+        result: 'Effect<Option<usize>>',
+        semanticResult: Type.option('usize'),
+        invariant:
+          'handle is a live directory; buffer-too-small does not advance and reports required capacity; zero means end',
+      }),
+      osBuiltin({
+        name: 'pathInspect',
+        operation: 'OsPathInspect',
+        parameters: Object.freeze([
+          valueParameter('root', '&[u8]'),
+          valueParameter('path', '&[u8]'),
+          valueParameter('kind', '&mut i32'),
+          valueParameter('byteLength', '&mut usize'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([
+          byteSlice,
+          byteSlice,
+          mutableI32,
+          mutableUsize,
+          mutableI32,
+          mutableU32,
+        ]),
+        result: 'Effect<bool>',
+        semanticResult: 'bool',
+        invariant:
+          'root and path satisfy confined traversal; kind and byteLength outputs are initialized',
+      }),
+      ...(
+        [
+          ['directoryCreate', 'OsDirectoryCreate'],
+          ['fileRemove', 'OsFileRemove'],
+          ['directoryRemove', 'OsDirectoryRemove'],
+        ] as const
+      ).map(([name, operation]) =>
+        osBuiltin({
+          name,
+          operation,
+          parameters: Object.freeze([
+            valueParameter('root', '&[u8]'),
+            valueParameter('path', '&[u8]'),
+            valueParameter('reason', '&mut i32'),
+            valueParameter('nativeCode', '&mut u32'),
+          ]),
+          semanticParameters: Object.freeze([byteSlice, byteSlice, mutableI32, mutableU32]),
+          result: 'Effect<bool>',
+          semanticResult: 'bool',
+          invariant: 'root and path satisfy confined traversal and failure outputs are initialized',
+        }),
+      ),
+      osBuiltin({
+        name: 'handleClose',
+        operation: 'OsHandleClose',
+        parameters: Object.freeze([
+          valueParameter('handle', 'OsHandle'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([Type.osHandle, mutableI32, mutableU32]),
+        result: 'Effect<bool>',
+        semanticResult: 'bool',
+        invariant:
+          'consumes exactly one live file or directory handle whether close succeeds or fails',
+      }),
+    ]),
+  ),
   actor(
     'Layout',
     'Type',
@@ -496,6 +692,7 @@ const flatSpelling = (actor_: string, operation: string): string => {
   if (actor_ === 'Place' && operation === 'replace') return 'replace'
   if (actor_ === 'Storage' && operation === 'acquire') return 'systemAllocationAcquire'
   if (actor_ === 'Host' && operation === 'write') return 'standardStreamWrite'
+  if (actor_ === 'Os') return `os${upperInitial(operation)}`
   return `${actor_.slice(0, 1).toLowerCase()}${actor_.slice(1)}${upperInitial(operation)}`
 }
 
@@ -507,7 +704,7 @@ const flatOperations = Object.freeze(
         ? 'Scalar'
         : actor_.spelling === 'Effect'
           ? 'Effect'
-          : actor_.spelling === 'Host' || actor_.spelling === 'Storage'
+          : actor_.spelling === 'Host' || actor_.spelling === 'Storage' || actor_.spelling === 'Os'
             ? 'Platform'
             : actor_.spelling === 'Layout'
               ? 'Representation'
@@ -522,9 +719,11 @@ const flatOperations = Object.freeze(
             ? 'silk/core.allocate'
             : actor_.spelling === 'Host'
               ? 'silk/core.writeAll'
-              : actor_.spelling === 'Place'
-                ? 'language:place-replacement'
-                : `silk/${actor_.spelling.replaceAll(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}.${operation.spelling}`
+              : actor_.spelling === 'Os'
+                ? `silk/os-filesystem.${operation.spelling}`
+                : actor_.spelling === 'Place'
+                  ? 'language:place-replacement'
+                  : `silk/${actor_.spelling.replaceAll(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}.${operation.spelling}`
       return Object.freeze({
         ...operation,
         id: operationId('Intrinsic', spelling),
@@ -532,7 +731,7 @@ const flatOperations = Object.freeze(
         admission,
         consumer,
         targets: operation.targets,
-        ...(operation.unsafe
+        ...(operation.unsafe && operation.invariant === undefined
           ? {
               invariant:
                 actor_.spelling === 'RawBuffer'
@@ -540,6 +739,7 @@ const flatOperations = Object.freeze(
                   : 'caller proves the selected slot is in bounds and has the initializedness state required by the operation',
             }
           : {}),
+        ...(operation.invariant === undefined ? {} : { invariant: operation.invariant }),
         ...(actor_.spelling === 'Host' && operation.spelling === 'write'
           ? { hostImport: 'silk_standard_stream_write_v1' }
           : {}),

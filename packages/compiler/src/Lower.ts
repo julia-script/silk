@@ -19,6 +19,10 @@ const i32: Extract<Mir.Type, { readonly _tag: 'i32' }> = Object.freeze({ _tag: '
 const usize: Extract<Mir.Type, { readonly _tag: 'usize' }> = Object.freeze({ _tag: 'usize' })
 const bool: Extract<Mir.Type, { readonly _tag: 'bool' }> = Object.freeze({ _tag: 'bool' })
 
+const isOsOperation = (
+  operation: Hir.BuiltinOperation,
+): operation is Extract<Hir.BuiltinOperation, `Os${string}`> => operation.startsWith('Os')
+
 const mirType = (
   type: Type.Type,
   substitution: Type.Substitution = new Map(),
@@ -1619,7 +1623,14 @@ function lowerExpressionInner(
         return lowerEffectExecution(fn, resultRecipe, expression.type, expression.span)
       if (resultRecipe?._tag === 'ServiceEffectConstruct')
         return lowerEffectExecution(fn, resultRecipe, expression.type, expression.span)
-      const loweredSubject = lowerExpression(fn, expression.subject)
+      const recipe =
+        expression.subject._tag === 'BindingReference'
+          ? fn.effectRecipes.get(expression.subject.binding.ordinal)
+          : expression.subject
+      // Compiler-backed effects lower directly from their recipe. Lowering the effect expression
+      // first would form every borrowed argument twice before the dedicated operation is emitted.
+      const loweredSubject =
+        recipe?._tag === 'BuiltinCall' ? undefined : lowerExpression(fn, expression.subject)
       const effectValueType =
         loweredSubject === undefined ? undefined : fn.localTypes.at(loweredSubject.result.ordinal)
       if (loweredSubject !== undefined && effectValueType?._tag === 'EffectValue') {
@@ -1689,10 +1700,6 @@ function lowerExpressionInner(
           endLoans(fn, expression.subject.loanEnds, expression.span)
         return Object.freeze({ result: destination })
       }
-      const recipe =
-        expression.subject._tag === 'BindingReference'
-          ? fn.effectRecipes.get(expression.subject.binding.ordinal)
-          : expression.subject
       if (recipe?._tag === 'EffectBindRequirement' && recipe.protected._tag !== 'BuiltinCall')
         return lowerEffectExecution(fn, recipe, expression.type, expression.span)
       if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'StorageAcquire') {
@@ -1765,6 +1772,41 @@ function lowerExpressionInner(
             provenance: authored(expression.span),
           }),
         )
+        return Object.freeze({ result: destination })
+      }
+      if (recipe?._tag === 'BuiltinCall' && isOsOperation(recipe.operation)) {
+        const arguments_: Array<Mir.LocalId> = []
+        for (const argument of recipe.arguments) {
+          const lowered = lowerExpression(fn, argument)
+          if (lowered === undefined) return undefined
+          arguments_.push(lowered.result)
+        }
+        const type = fn.type(expression.type)
+        if (type === undefined) return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'OsCall' as const,
+            operation: recipe.intrinsic,
+            destination,
+            arguments: Object.freeze(arguments_),
+            type,
+            provenance: authored(expression.span),
+          }),
+        )
+        for (const borrow of recipe.loanEnds) {
+          const held = fn.loanLocals.get(borrowKey(borrow))
+          if (held === undefined) continue
+          fn.emit(
+            Object.freeze({
+              _tag: 'EndLoan' as const,
+              borrow,
+              slice: held,
+              provenance: generated(expression.span),
+            }),
+          )
+          fn.loanLocals.delete(borrowKey(borrow))
+        }
         return Object.freeze({ result: destination })
       }
       if (recipe?._tag === 'EffectBindRequirement') {
@@ -2260,7 +2302,7 @@ function lowerExpressionInner(
             : fn.patternLocals.get(patternKey(expression.root.binding))
       const sourceType = fn.type(expression.source)
       const type = fn.type(expression.type)
-      if (root === undefined || sourceType?._tag !== 'Nominal' || type?._tag !== 'Reference') {
+      if (root === undefined || sourceType === undefined || type?._tag !== 'Reference') {
         return undefined
       }
       const destination = fn.alloc(type)
@@ -2656,6 +2698,7 @@ function lowerExpressionInner(
         )
         return finishBuiltin(destination)
       }
+      if (isOsOperation(expression.operation)) return undefined
       const conversionTarget = Scalar.conversionTarget(expression.operation)
       if (Scalar.isCheckedOperation(expression.operation)) {
         const [first] = argumentLocals
@@ -4298,23 +4341,56 @@ export const lowerProgram = (
   // Lowering a provided parent can discover provided children after their open bases were already
   // visited. Filter only after the worklist reaches its fixed point so backends never compile an
   // unreachable open runner that still calls another open runner without provider arguments.
+  const unresolvedOpenBase = (spec: GeneratedEffectRunner): boolean => {
+    const entryOwnsRunner =
+      discovery.entry._tag === 'Resolved' &&
+      discovery.entry.kind === 'Effect' &&
+      instanceText(spec.owner.key.declaration, spec.owner.key.typeArguments) ===
+        instanceText(discovery.entry.key.declaration, discovery.entry.key.typeArguments)
+    return (
+      !entryOwnsRunner &&
+      spec.providedRequirements.length === 0 &&
+      spec.type.type.requirements.length > 0
+    )
+  }
+  const runnerKey = (
+    declaration: DeclarationIndex.CanonicalId,
+    typeArguments: ReadonlyArray<Type.GenericArgument>,
+  ): string => instanceText(declaration, typeArguments)
+  const retainedRunners = new Set(
+    loweredRunners
+      .filter(({ spec }) => !unresolvedOpenBase(spec))
+      .map(({ spec }) => runnerKey(spec.id, spec.owner.key.typeArguments)),
+  )
+  const retainReferencedRunners = (fn: Mir.MirFunction): boolean => {
+    let changed = false
+    for (const operation of Mir.operations(fn)) {
+      if (
+        operation._tag !== 'RunEffectValue' &&
+        operation._tag !== 'RunStaticEffect' &&
+        operation._tag !== 'ReifyEffect'
+      )
+        continue
+      const key = runnerKey(operation.runner, operation.runnerTypeArguments)
+      if (!retainedRunners.has(key)) {
+        retainedRunners.add(key)
+        changed = true
+      }
+    }
+    return changed
+  }
+  for (const fn of functions) retainReferencedRunners(fn)
+  let retainedChanged = true
+  while (retainedChanged) {
+    retainedChanged = false
+    for (const { spec, runner } of loweredRunners) {
+      if (!retainedRunners.has(runnerKey(spec.id, spec.owner.key.typeArguments))) continue
+      if (retainReferencedRunners(runner)) retainedChanged = true
+    }
+  }
   functions.push(
     ...loweredRunners.flatMap(({ spec, runner }) => {
-      const entryOwnsRunner =
-        discovery.entry._tag === 'Resolved' &&
-        discovery.entry.kind === 'Effect' &&
-        instanceText(spec.owner.key.declaration, spec.owner.key.typeArguments) ===
-          instanceText(discovery.entry.key.declaration, discovery.entry.key.typeArguments)
-      const replacedOpenBase =
-        !entryOwnsRunner &&
-        spec.providedRequirements.length === 0 &&
-        spec.type.type.requirements.length > 0 &&
-        generatedRunners.some(
-          (candidate) =>
-            candidate.providedRequirements.length > 0 &&
-            candidate.specializationKey.startsWith(`${spec.specializationKey}\u0000`),
-        )
-      return replacedOpenBase ? [] : [runner]
+      return retainedRunners.has(runnerKey(spec.id, spec.owner.key.typeArguments)) ? [runner] : []
     }),
   )
   if (discovery.entry._tag !== 'Resolved') {

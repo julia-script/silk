@@ -131,6 +131,67 @@ pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &m
   return ()
 }
 
+/// Inserts one owned value at an index, shifting later elements without requiring T to be Copy.
+pub effect fn insert<T>(
+  self: &mut Vector<T>,
+  index: usize,
+  value: T
+) -> () ! OutOfMemory ? &mut Allocator {
+  if self.length == self.capacity {
+    let mut next = self.capacity + self.capacity
+    if self.capacity == counted(0) {
+      next = counted(4)
+    }
+    let element = Layout.of<T>()
+    let plan = Layout.repeat(move element, next)
+    let layout = match move plan {
+      Layout ready => ready
+      LayoutOverflow overflow => run overflowed()
+    }
+    let recipe = Allocator.allocate(move layout)
+    let allocation = run recipe
+    let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+    let moved = match move storage {
+      Empty<T> nothing => Full<T> { buffer: freshBuffer<T>(move allocation, next) }
+      Full<T> full => Full<T> { buffer: migrate<T>(move full, move allocation, self.length, next) }
+    }
+    self.storage = move moved
+    self.capacity = next
+  }
+  let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+  let stored = match move storage {
+    Empty<T> nothing => absurd<Full<T>>()
+    Full<T> full => insertInto<T>(move full, index, self.length, move value)
+  }
+  self.storage = move stored
+  self.length = self.length + counted(1)
+  return ()
+}
+
+fn insertInto<T>(full: Full<T>, index: usize, length: usize, value: T) -> Full<T> {
+  return match move full {
+    Full<T> { buffer } => Full<T> { buffer: insertBuffer<T>(move buffer, index, length, move value) }
+  }
+}
+
+fn insertBuffer<T>(buffer: RawBuffer<T>, index: usize, length: usize, value: T) -> RawBuffer<T> {
+  unsafe {
+    let mut owned = move buffer
+    let mut cursor = length
+    while index < cursor {
+      let source = RawBuffer.slot(&mut owned, cursor - counted(1))
+      let shifted = Slot.take(move source)
+      let target = RawBuffer.slot(&mut owned, cursor)
+      let written = Slot.write(move target, move shifted)
+      cursor = cursor - counted(1)
+    }
+    let selected = RawBuffer.slot(&mut owned, index)
+    let written = Slot.write(move selected, move value)
+    return move owned
+  }
+  return absurd<RawBuffer<T>>()
+}
+
 effect fn overflowed() -> Layout ! OutOfMemory {
   return run AllocationFailure.outOfMemory()
 }

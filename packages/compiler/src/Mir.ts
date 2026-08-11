@@ -2,6 +2,7 @@ import * as Option from 'effect/Option'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
+import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as Match from './Match.js'
 import type * as Ownership from './Ownership.js'
@@ -370,6 +371,15 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Executes one validated native-only opaque-handle protocol operation. */
+      readonly _tag: 'OsCall'
+      readonly operation: Intrinsic.OperationId
+      readonly destination: LocalId
+      readonly arguments: ReadonlyArray<LocalId>
+      readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'RawBufferFrom'
       readonly destination: LocalId
       readonly allocation: LocalId
@@ -466,7 +476,7 @@ export type Operation =
       readonly destination: LocalId
       readonly root: LocalId
       readonly selectors: ReadonlyArray<Extract<PlaceSelector, { readonly _tag: 'FieldSelector' }>>
-      readonly sourceType: Extract<Type, { readonly _tag: 'Nominal' | 'FixedArray' | 'Slice' }>
+      readonly sourceType: Type
       readonly type: Extract<Type, { readonly _tag: 'Slice' | 'Reference' }>
       readonly access: SilkType.Slice['access']
       readonly reborrow: boolean
@@ -1009,6 +1019,7 @@ export interface Violation {
     | 'InvalidLayoutOperation'
     | 'InvalidAllocationOperation'
     | 'InvalidStandardStreamOperation'
+    | 'InvalidOsOperation'
     | 'InvalidRawStorageOperation'
     | 'InvalidCallShape'
     | 'InvalidCallableOperation'
@@ -1111,6 +1122,8 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination, operation.layout]
     case 'HostWrite':
       return [operation.destination, operation.stream, operation.bytes]
+    case 'OsCall':
+      return [operation.destination, ...operation.arguments]
     case 'RawBufferFrom':
       return [operation.destination, operation.allocation, operation.count]
     case 'RawBufferCount':
@@ -1368,6 +1381,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'RepeatLayout':
     case 'Allocate':
     case 'HostWrite':
+    case 'OsCall':
     case 'Project':
     case 'ReadPlace':
     case 'CheckPlace':
@@ -1531,6 +1545,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.layout]
     case 'HostWrite':
       return [operation.stream, operation.bytes]
+    case 'OsCall':
+      return operation.arguments
     case 'RawBufferFrom':
       return [operation.allocation, operation.count]
     case 'RawBufferCount':
@@ -1602,6 +1618,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
 
 const loanViolations = (
   fn: MirFunction,
+  layout: Layout.Plan,
   region: Region,
   roots: ReadonlyArray<Operation>,
   globalBeginnings: ReadonlyMap<string, Extract<Operation, { readonly _tag: 'BeginLoan' }>>,
@@ -1633,11 +1650,9 @@ const loanViolations = (
         const source = fn.localTypes.at(operation.root.ordinal)
         const destination = fn.localTypes.at(operation.destination.ordinal)
         const sourceSemantic = semanticType(operation.sourceType)
-        const rootSemantic = source === undefined ? undefined : semanticType(source)
+        const selectedSource = placeType(fn, layout, operation.root, operation.selectors)
         const rootMatchesSource =
-          operation.selectors.length === 0
-            ? rootSemantic !== undefined && SilkType.equals(rootSemantic, sourceSemantic)
-            : rootSemantic !== undefined && SilkType.isReference(rootSemantic)
+          selectedSource !== undefined && SilkType.equals(selectedSource, sourceSemantic)
         const borrowed = operation.type.type
         const sourceElement =
           operation.sourceType._tag === 'FixedArray' || operation.sourceType._tag === 'Slice'
@@ -2017,7 +2032,14 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
     }
     for (const region of fn.regions) {
       violations.push(
-        ...loanViolations(fn, region, operationsOf(region), globalBeginnings, globalEndings),
+        ...loanViolations(
+          fn,
+          self.layout,
+          region,
+          operationsOf(region),
+          globalBeginnings,
+          globalEndings,
+        ),
       )
       if (region.ownerLoop !== undefined && !loops.has(region.ownerLoop.ordinal)) {
         violations.push(
@@ -2382,6 +2404,40 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 region: region.id,
                 detail:
                   'standard-stream write does not preserve destination, byte-view, unit, or typed-failure contracts',
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'OsCall') {
+          const catalog = Intrinsic.findOperationById(operation.operation)
+          const rule = catalog?.rule._tag === 'BuiltinRule' ? catalog.rule : undefined
+          const expectedResult =
+            rule !== undefined && SilkType.isEffect(rule.result) ? rule.result.success : undefined
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const argumentsValid =
+            rule?.operation.startsWith('Os') &&
+            rule.parameters.length === operation.arguments.length &&
+            rule.parameters.every((expected, ordinal) => {
+              const argument = operation.arguments.at(ordinal)
+              const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)
+              return actual !== undefined && SilkType.equals(semanticType(actual), expected)
+            })
+          if (
+            catalog?.unsafe !== true ||
+            catalog.targets.includes('Wasm') ||
+            expectedResult === undefined ||
+            destination === undefined ||
+            !SilkType.equals(semanticType(destination), expectedResult) ||
+            !SilkType.equals(semanticType(operation.type), expectedResult) ||
+            !argumentsValid
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidOsOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'OS operation does not match its sealed unsafe native-only signature',
               }),
             )
           }
@@ -3308,15 +3364,30 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             )
         }
         if (operation._tag === 'RunStaticEffect') {
-          const runner = self.functions.find((candidate) =>
-            matchesInstance(candidate, operation.runner, operation.runnerTypeArguments),
-          )
           const outcome = fn.localTypes.at(operation.outcome.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const inputs = [
             ...operation.captures.map((capture) => capture.source),
             ...operation.arguments,
           ]
+          const runner = self.functions.find(
+            (candidate) =>
+              matchesInstance(candidate, operation.runner, operation.runnerTypeArguments) &&
+              candidate.result._tag === 'EffectOutcome' &&
+              SilkType.equals(candidate.result.type, operation.outcomeType.type) &&
+              candidate.parameterCount === inputs.length &&
+              inputs.every((input, ordinal) => {
+                const actual = fn.localTypes.at(input.ordinal)
+                const expected = candidate.localTypes.at(ordinal)
+                return (
+                  actual !== undefined &&
+                  expected !== undefined &&
+                  TypeCompatibility.isCompatible(
+                    TypeCompatibility.check(semanticType(actual), semanticType(expected)),
+                  )
+                )
+              }),
+          )
           const parametersValid =
             runner !== undefined &&
             runner.parameterCount === inputs.length &&
@@ -3346,13 +3417,19 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                     SilkType.equals(source, targetFailure)
                   )
                 })
+          const runnerResultValid =
+            runner?.result._tag === 'EffectOutcome' &&
+            SilkType.equals(runner.result.type, operation.outcomeType.type)
+          const outcomeValid =
+            outcome?._tag === 'EffectOutcome' &&
+            SilkType.equals(outcome.type, operation.outcomeType.type)
+          const destinationValid =
+            destination !== undefined &&
+            SilkType.equals(semanticType(destination), semanticType(operation.type))
           if (
-            runner?.result._tag !== 'EffectOutcome' ||
-            outcome?._tag !== 'EffectOutcome' ||
-            destination === undefined ||
-            !SilkType.equals(runner.result.type, operation.outcomeType.type) ||
-            !SilkType.equals(outcome.type, operation.outcomeType.type) ||
-            !SilkType.equals(semanticType(destination), semanticType(operation.type)) ||
+            !runnerResultValid ||
+            !outcomeValid ||
+            !destinationValid ||
             !parametersValid ||
             !mappingsValid
           )
@@ -3558,6 +3635,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = allocate ${localText(operation.layout)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'HostWrite':
       return `${localText(operation.destination)} = standard-stream-write destination=${localText(operation.stream)} bytes=${localText(operation.bytes)} failure=${SilkType.encode(operation.failure)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'OsCall':
+      return `${localText(operation.destination)} = os-call ${operation.operation.actor}.${operation.operation.name}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw-buffer-from ${localText(operation.allocation)} count=${localText(operation.count)} element=${SilkType.encode(operation.element)} stride=${operation.stride} align=${operation.elementAlignment} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferCount':

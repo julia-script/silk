@@ -217,6 +217,8 @@ export const standardStreams: Nominal = nominal('silk/core', 'StandardStreams')
 export const streamWriteFailure: Nominal = nominal('silk/core', 'StreamWriteFailure')
 /** A self-contained affine owner carrying one private active reclaim ticket. */
 export const allocation: Nominal = nominal('silk/core', 'Allocation')
+/** Opaque affine native file-or-directory handle used only by unsafe OS intrinsics. */
+export const osHandle: Nominal = nominal('silk/core', 'OsHandle')
 /** Compiler-sealed cleanup capability used only by restricted impl declarations. */
 export const dropCapability: Nominal = nominal('silk/core', 'Drop')
 /** Compiler-sealed marker authorizing a canonical terminal failure report. */
@@ -277,6 +279,7 @@ export const isSlot = (
 
 export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [allocation.name, allocation],
+  [osHandle.name, osHandle],
   [dropCapability.name, dropCapability],
   [reportCapability.name, reportCapability],
   ['RawBuffer', nominal('silk/core', 'RawBuffer')],

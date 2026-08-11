@@ -38,6 +38,10 @@ const reclaimContextPaths = (
   plan: Ownership.CleanupPlan,
   prefix: ReadonlyArray<DeclarationIndex.FieldId> = [],
 ): ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>> | undefined => {
+  // Nested structural cases without a reclaim ticket contribute no conditional free path. They
+  // are common in failure payloads beside an owned success value and must not make the enclosing
+  // union look unsupported merely because their shape is itself a union or hook.
+  if (!planReclaims(plan)) return []
   switch (plan._tag) {
     case 'NoCleanup':
     case 'ParameterCleanup':
@@ -127,6 +131,8 @@ interface ArtifactBase {
   readonly target: Target.Target
   readonly symbols: ReadonlyArray<SymbolEntry>
   readonly termination: Termination
+  /** Compiler-owned native runtime entry points retained by executable intrinsic reachability. */
+  readonly nativeRuntimeSymbols: ReadonlyArray<string>
   readonly control: ReadonlyArray<ControlProvenance>
 }
 
@@ -348,6 +354,7 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'RepeatLayout':
     case 'Allocate':
     case 'HostWrite':
+    case 'OsCall':
     case 'RawBufferFrom':
     case 'RawBufferCount':
     case 'RawBufferSlot':
@@ -371,6 +378,7 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
 const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'Allocate' ||
   operation._tag === 'HostWrite' ||
+  operation._tag === 'OsCall' ||
   operation._tag === 'RawBufferFrom' ||
   operation._tag === 'RawBufferSlot' ||
   operation._tag === 'RawBufferRead' ||
@@ -955,6 +963,63 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             yield* LlvmType.functionType(builder, i32, [i32, pointer, usizeType]),
           )
         : undefined
+
+    const osRuntimeSymbol = (name: string): string => {
+      const words = name
+        .replace(/^os/, '')
+        .replaceAll(/([a-z])([A-Z])/g, '$1_$2')
+        .toLowerCase()
+      return `silk_os_${words}_v1`
+    }
+    const osRuntimes = new Map<
+      string,
+      {
+        readonly handle: FunctionActor.Function
+        readonly abi: 'Direct' | 'OpenOut'
+        readonly resultLaneCount: number
+        readonly symbol: string
+      }
+    >()
+    for (const operation of program.functions.flatMap((fn) => Mir.operations(fn))) {
+      if (operation._tag !== 'OsCall' || osRuntimes.has(operation.operation.name)) continue
+      const resultLanes = lanesFor(operation.type)
+      const abi =
+        operation.operation.name === 'osFileOpen' || operation.operation.name === 'osDirectoryOpen'
+          ? 'OpenOut'
+          : 'Direct'
+      const singleResultLane = resultLanes.at(0)
+      const resultType =
+        abi === 'OpenOut'
+          ? i32
+          : resultLanes.length === 0
+            ? (voidType ?? (yield* LlvmType.voidType(builder)))
+            : resultLanes.length === 1 && singleResultLane !== undefined
+              ? laneType(singleResultLane)
+              : yield* LlvmType.structure(builder, resultLanes.map(laneType))
+      const parameters = operation.arguments.flatMap((argument) => {
+        const type = program.functions
+          .find((fn) => Mir.operations(fn).includes(operation))
+          ?.localTypes.at(argument.ordinal)
+        return type === undefined ? [] : lanesFor(type).map(laneType)
+      })
+      osRuntimes.set(
+        operation.operation.name,
+        Object.freeze({
+          abi,
+          symbol: osRuntimeSymbol(operation.operation.name),
+          handle: yield* FunctionActor.declare(
+            builder,
+            osRuntimeSymbol(operation.operation.name),
+            yield* LlvmType.functionType(
+              builder,
+              resultType,
+              abi === 'OpenOut' ? [...parameters, pointer, pointer, pointer] : parameters,
+            ),
+          ),
+          resultLaneCount: resultLanes.length,
+        }),
+      )
+    }
 
     const declared: Array<{
       readonly fn: Mir.MirFunction
@@ -2104,13 +2169,67 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   throw new RangeError('LLVM union cleanup lost its shape')
                 }
                 const zero = yield* Constant.integerUnsigned(builder, usizeType, 0n)
-                for (const entry of plan.cases) {
-                  const paths = reclaimContextPaths(entry.cleanup)
+                for (const caseEntry of plan.cases) {
+                  const paths = reclaimContextPaths(caseEntry.cleanup)
                   if (paths === undefined) {
-                    throw new RangeError('LLVM cleanup does not yet lower this union case shape')
+                    const matches = yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      tagValue,
+                      yield* Constant.integerSigned(builder, i32, BigInt(caseEntry.ordinal)),
+                      `${tag}_u${caseEntry.ordinal}_is`,
+                    )
+                    const selectedBlock = yield* LlvmBlock.make(
+                      body,
+                      `${tag}_u${caseEntry.ordinal}_drop`,
+                    )
+                    const followingBlock = yield* LlvmBlock.make(
+                      body,
+                      `${tag}_u${caseEntry.ordinal}_next`,
+                    )
+                    yield* FunctionBody.conditionalBranch(
+                      body,
+                      matches,
+                      selectedBlock,
+                      followingBlock,
+                    )
+                    yield* LlvmBlock.setInsertionPoint(body, selectedBlock)
+                    const physical = Layout.memberFieldSlots(shape, caseEntry.member, [])
+                    const targetLanes = semanticLanesOf(caseEntry.member)
+                    const selected: Array<Value.Input> = []
+                    for (const [targetOrdinal, ordinal] of physical?.entries() ?? []) {
+                      const value = values.at(ordinal)
+                      const sourceLane = shape.lanes.at(ordinal)
+                      const targetLane = targetLanes.at(targetOrdinal)
+                      if (
+                        value === undefined ||
+                        sourceLane === undefined ||
+                        targetLane === undefined
+                      )
+                        continue
+                      selected.push(
+                        yield* coerceLane(
+                          value,
+                          sourceLane,
+                          targetLane,
+                          `${tag}_u${caseEntry.ordinal}_${targetOrdinal}_lane`,
+                        ),
+                      )
+                    }
+                    if (selected.length !== targetLanes.length) {
+                      throw new RangeError('LLVM union cleanup lost a member payload lane')
+                    }
+                    yield* dropThroughPlan(
+                      caseEntry.cleanup,
+                      Object.freeze(selected),
+                      `${tag}_u${caseEntry.ordinal}`,
+                    )
+                    yield* FunctionBody.branch(body, followingBlock)
+                    yield* LlvmBlock.setInsertionPoint(body, followingBlock)
+                    continue
                   }
                   for (const [pathOrdinal, path] of paths.entries()) {
-                    const slots = Layout.memberFieldSlots(shape, entry.member, path)
+                    const slots = Layout.memberFieldSlots(shape, caseEntry.member, path)
                     const contextSlot = slots?.at(4)
                     const context = contextSlot === undefined ? undefined : values.at(contextSlot)
                     if (context === undefined) {
@@ -2120,15 +2239,15 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       body,
                       'eq',
                       tagValue,
-                      yield* Constant.integerSigned(builder, i32, BigInt(entry.ordinal)),
-                      `${tag}_u${entry.ordinal}_${pathOrdinal}_is`,
+                      yield* Constant.integerSigned(builder, i32, BigInt(caseEntry.ordinal)),
+                      `${tag}_u${caseEntry.ordinal}_${pathOrdinal}_is`,
                     )
                     const guarded = yield* FunctionBody.select(
                       body,
                       matches,
                       context,
                       zero,
-                      `${tag}_u${entry.ordinal}_${pathOrdinal}_context`,
+                      `${tag}_u${caseEntry.ordinal}_${pathOrdinal}_context`,
                     )
                     yield* FunctionBody.callDirect(body, free, [
                       yield* FunctionBody.cast(
@@ -2136,7 +2255,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                         'inttoptr',
                         guarded,
                         pointer,
-                        `${tag}_u${entry.ordinal}_${pathOrdinal}_pointer`,
+                        `${tag}_u${caseEntry.ordinal}_${pathOrdinal}_pointer`,
                       ),
                     ])
                   }
@@ -2445,6 +2564,78 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   yield* emitHostFailure(operation)
                   yield* LlvmBlock.setInsertionPoint(body, written)
                   locals.set(operation.destination.ordinal, Object.freeze([]))
+                  break
+                }
+                case 'OsCall': {
+                  const runtime = osRuntimes.get(operation.operation.name)
+                  if (runtime === undefined) {
+                    throw new RangeError(
+                      `LLVM OS runtime ${operation.operation.name} is unavailable`,
+                    )
+                  }
+                  const arguments_ = operation.arguments.flatMap((argument) => [
+                    ...readLocal(argument),
+                  ])
+                  const resultLanes = lanesFor(operation.type)
+                  const openOutputs =
+                    runtime.abi === 'OpenOut'
+                      ? yield* Effect.forEach(resultLanes.slice(1), (lane, ordinal) =>
+                          FunctionBody.alloca(
+                            body,
+                            laneType(lane),
+                            `os${operation.destination.ordinal}_out${ordinal}`,
+                          ),
+                        )
+                      : Object.freeze([])
+                  const result = yield* FunctionBody.callDirect(
+                    body,
+                    runtime.handle,
+                    [...arguments_, ...openOutputs],
+                    `os${operation.destination.ordinal}`,
+                  )
+                  for (const root of [...addressRoots].sort((left, right) => left - right)) {
+                    yield* reloadAddressRoot(root)
+                  }
+                  if (runtime.resultLaneCount === 0) {
+                    locals.set(operation.destination.ordinal, Object.freeze([]))
+                    break
+                  }
+                  if (result === undefined)
+                    throw new RangeError('LLVM OS runtime returned no value')
+                  if (runtime.abi === 'OpenOut') {
+                    const values: Array<Value.Input> = [result]
+                    for (const [ordinal, output] of openOutputs.entries()) {
+                      const lane = resultLanes.at(ordinal + 1)
+                      if (lane === undefined)
+                        throw new RangeError('LLVM OS open runtime lost an output lane')
+                      values.push(
+                        yield* FunctionBody.load(
+                          body,
+                          laneType(lane),
+                          output,
+                          `os${operation.destination.ordinal}_out${ordinal}_value`,
+                        ),
+                      )
+                    }
+                    locals.set(operation.destination.ordinal, Object.freeze(values))
+                    break
+                  }
+                  if (runtime.resultLaneCount === 1) {
+                    locals.set(operation.destination.ordinal, Object.freeze([result]))
+                    break
+                  }
+                  const values: Array<Value.Input> = []
+                  for (let lane = 0; lane < runtime.resultLaneCount; lane += 1) {
+                    values.push(
+                      yield* FunctionBody.extractValue(
+                        body,
+                        result,
+                        [lane],
+                        `os${operation.destination.ordinal}_${lane}`,
+                      ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(values))
                   break
                 }
                 case 'RawBufferFrom': {
@@ -5497,12 +5688,34 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 }
                 case 'RunEffectValue':
                 case 'RunStaticEffect': {
-                  const target = declared.find((candidate) =>
-                    Mir.matchesInstance(
-                      candidate.fn,
-                      operation.runner,
-                      operation.runnerTypeArguments,
-                    ),
+                  const logicalInputs =
+                    operation._tag === 'RunStaticEffect'
+                      ? [
+                          ...operation.captures.map((capture) => capture.source),
+                          ...operation.arguments,
+                        ]
+                      : undefined
+                  const target = declared.find(
+                    (candidate) =>
+                      Mir.matchesInstance(
+                        candidate.fn,
+                        operation.runner,
+                        operation.runnerTypeArguments,
+                      ) &&
+                      (operation._tag !== 'RunStaticEffect' ||
+                        (logicalInputs !== undefined &&
+                          candidate.fn.result._tag === 'EffectOutcome' &&
+                          SilkType.equals(candidate.fn.result.type, operation.outcomeType.type) &&
+                          candidate.fn.parameterCount === logicalInputs.length &&
+                          logicalInputs.every((input, ordinal) => {
+                            const actual = entry.fn.localTypes.at(input.ordinal)
+                            const expected = candidate.fn.localTypes.at(ordinal)
+                            return (
+                              actual !== undefined &&
+                              expected !== undefined &&
+                              SilkType.equals(Mir.semanticType(actual), Mir.semanticType(expected))
+                            )
+                          }))),
                   )
                   if (target === undefined)
                     throw new RangeError(
@@ -6261,6 +6474,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           symbol: entry.symbol,
         }),
       ),
+      nativeRuntimeSymbols: Object.freeze(
+        [...osRuntimes.values()].map((runtime) => runtime.symbol),
+      ),
       ir: yield* IrText.render(builder),
       bitcode: yield* Bitcode.encode(builder),
     }
@@ -6298,6 +6514,7 @@ export const LlvmBackend: Backend<LlvmBitcodeArtifact> = Object.freeze({
       target: program.layout.target,
       symbols: Object.freeze(output.symbols),
       termination: terminationOf(program),
+      nativeRuntimeSymbols: output.nativeRuntimeSymbols,
       control: llvmControl(program),
       bitcode: output.bitcode,
       ir: output.ir,

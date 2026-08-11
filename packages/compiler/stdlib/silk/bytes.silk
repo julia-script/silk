@@ -21,6 +21,17 @@ pub fn make() -> Bytes {
   return Bytes { values: vectorMake<u8>() }
 }
 
+/// Allocates an owned initialized byte buffer of exactly `length` zero octets.
+pub effect fn zeroed(length: usize) -> Bytes ! OutOfMemory ? &mut Allocator {
+  let mut result = make()
+  let mut index = counted(0)
+  while index < length {
+    let appended = run vectorAppend<u8>(&mut result.values, u8.toU8(0))
+    index = index + counted(1)
+  }
+  return move result
+}
+
 /// Returns the initialized byte count.
 pub fn length(self: &Bytes) -> usize {
   return vectorLength<u8>(&self.values)

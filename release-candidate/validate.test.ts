@@ -283,6 +283,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './NameResolution',
       './NativeToolchain',
       './Operator',
+      './OsFileSystemHost',
       './Ownership',
       './Parser',
       './PhaseReport',
@@ -318,6 +319,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/effects.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/logging.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/numeric.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/os_filesystem.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/option.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/result.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/vector.silk'))).toBe(true)
@@ -339,6 +341,9 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     )
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/option.silk'), 'utf8')).toContain(
       'pub struct Option<T>',
+    )
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/os_filesystem.silk'), 'utf8')).toContain(
+      'pub struct OsFileSystem',
     )
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/result.silk'), 'utf8')).toContain(
       'pub struct Result<A, F>',
@@ -697,6 +702,7 @@ console.log(
       'ModuleTooling',
       'NameResolution',
       'Operator',
+      'OsFileSystemHost',
       'Ownership',
       'Parser',
       'PhaseReport',

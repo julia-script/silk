@@ -5,6 +5,7 @@
  */
 
 import type * as Backend from './Backend.js'
+import * as OsRuntime from './OsRuntime.js'
 import type * as Target from './Target.js'
 
 /** The fixed optimization profiles. There is no configurable pass pipeline. */
@@ -149,21 +150,25 @@ int silk_standard_stream_write_v1(int destination, const unsigned char *bytes, s
 }
 `
 
-const ordinaryShimSource = `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
+const reportBytes = (identity: string): ReadonlyArray<number> =>
+  Array.from(new TextEncoder().encode(`Error: ${identity}\n`))
+
+/** Generates the private native adapter for the artifact's exact termination contract. */
+export const shimSource = (
+  termination: Backend.Termination,
+  nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
+): string => {
+  const osRuntime = OsRuntime.source(nativeRuntimeSymbols)
+  if (termination._tag === 'PassThrough')
+    return `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
 ${hostWriteShimSource}
+${osRuntime}
 extern int silk_main(void);
 
 int main(void) {
   return silk_main();
 }
 `
-
-const reportBytes = (identity: string): ReadonlyArray<number> =>
-  Array.from(new TextEncoder().encode(`Error: ${identity}\n`))
-
-/** Generates the private native adapter for the artifact's exact termination contract. */
-export const shimSource = (termination: Backend.Termination): string => {
-  if (termination._tag === 'PassThrough') return ordinaryShimSource
   const declarations = termination.reports.map(
     (report, ordinal) =>
       `static const unsigned char silk_report_${ordinal + 1}[] = { ${reportBytes(report).join(', ')} };`,
@@ -174,6 +179,7 @@ export const shimSource = (termination: Backend.Termination): string => {
   )
   return `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
 ${hostWriteShimSource}
+${osRuntime}
 
 extern int silk_main(void);
 ${declarations.join('\n')}

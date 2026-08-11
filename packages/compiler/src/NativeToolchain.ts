@@ -263,8 +263,9 @@ export const compileShim = (
   scope: BuildScope,
   target: Target.Target,
   termination: Backend.Termination,
+  nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
 ): ObjectArtifact | ToolchainFailure => {
-  const sourceText = ToolchainPlan.shimSource(termination)
+  const sourceText = ToolchainPlan.shimSource(termination, nativeRuntimeSymbols)
   const cacheKey = `${toolchain.clang}\u0000${target.id}\u0000${sourceText}`
   const objectPath = join(scope.root, 'silk_shim.o')
   const source = writeArtifact(scope, target, 'silk_shim.c', sourceText)

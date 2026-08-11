@@ -122,6 +122,10 @@
       "types": "./dist/IntrinsicAvailability.d.ts",
       "import": "./dist/IntrinsicAvailability.js"
     },
+    "./OsFileSystemHost": {
+      "types": "./dist/OsFileSystemHost.d.ts",
+      "import": "./dist/OsFileSystemHost.js"
+    },
     "./Layout": {
       "types": "./dist/Layout.d.ts",
       "import": "./dist/Layout.js"

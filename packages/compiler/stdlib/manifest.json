@@ -101,6 +101,11 @@
     "aliases": ["None", "Some"]
   },
   {
+    "module": "silk/os_filesystem",
+    "path": "silk/os_filesystem.silk",
+    "namespace": "OsFileSystem"
+  },
+  {
     "module": "silk/raw-buffer",
     "path": "silk/raw-buffer.silk",
     "namespace": "RawBuffer"

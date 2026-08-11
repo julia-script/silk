@@ -116,14 +116,14 @@ program record remains in [real programs](real-programs.md).
   ordinary `OsFileSystem` source brackets every resource, confines each operation beneath an owned
   native root, translates low-level statuses, and implements the seven portable operations. Pure
   direct-Wasm providers and no-filesystem programs retain zero OS imports.
-- **Status:** proposal complete and strictly validated; now the active implementation item after
-  both portable FileSystem and target-restricted intrinsics shipped.
+- **Status:** shipped, synchronized, and archived on 2026-08-11. Native use is explicit and
+  reachable-only; direct Wasm remains free of an invented filesystem ABI.
 - **Appetite:** one low-level protocol, injected evaluator adapter, reachable native runtime, and
   ordinary provider with security and cleanup acceptance.
 - **Boundary:** no public handles, `PlatformFileSystem`, symlink following, automatic fallible Drop,
   built-in browser VFS, WASI binding, or transactional writes.
 - **Links:** change:
-  [`add-os-file-system-provider`](../openspec/changes/add-os-file-system-provider/proposal.md) ·
+  [`add-os-file-system-provider`](../openspec/changes/archive/2026-08-11-add-os-file-system-provider/proposal.md) ·
   [portable contract](../openspec/changes/archive/2026-08-11-add-portable-file-system/proposal.md)
 
 ## Next
@@ -186,6 +186,12 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   `@silk-effect/compiler`?
 
 ## Changelog
+
+- 2026-08-11: Shipped the confined native `OsFileSystem`: ten unsafe native-only intrinsics, an
+  opaque affine `OsHandle`, an injected evaluator adapter, reachable-only LLVM runtime symbols,
+  symlink- and traversal-resistant native operations, and an ordinary source provider with explicit
+  fallible close, partial I/O loops, deterministic directory ordering, and portable errors. The
+  five-step filesystem sequence is complete; owning String and formatting is next.
 
 - 2026-08-11: Shipped, synced, and archived generic target-restricted intrinsics. Exact canonical
   intrinsic identities now survive executable closure; evaluator and backend validation reject only

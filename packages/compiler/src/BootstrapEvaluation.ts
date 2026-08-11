@@ -6,6 +6,7 @@ import type * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
+import * as OsFileSystemHost from './OsFileSystemHost.js'
 import type * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -445,6 +446,7 @@ export type BlockedReason =
       readonly span: SourceSpan.SourceSpan
     }
   | { readonly _tag: 'MissingStandardStreams' }
+  | { readonly _tag: 'MissingOsFileSystemHost' }
   | {
       readonly _tag: 'IntrinsicTargetUnavailable'
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -599,6 +601,7 @@ interface EvaluationState {
   readonly allocations: Map<number, { active: boolean; readonly values: Map<string, Value> }>
   readonly callables: Map<number, { state: 'Available' | 'Running' | 'Consumed' | 'Released' }>
   readonly standardStreams?: StandardStreams.Provider
+  readonly osFileSystem?: OsFileSystemHost.Provider
 }
 
 export interface ActiveFrame {
@@ -1675,6 +1678,151 @@ function* executeFunction(
     })
   }
 
+  const replaceReferenced = (local: Mir.LocalId, replacement: Value): void => {
+    const reference = read(local).value
+    if (reference._tag !== 'ReferenceValue') {
+      throw new RangeError('OS intrinsic output is not an exclusive reference')
+    }
+    const key = cellKey(reference.frame, reference.cell)
+    const target = state.cells.get(key)
+    if (target === undefined) throw new RangeError('OS intrinsic output references a missing cell')
+    state.cells.set(key, {
+      value: replacePlace(
+        target.value,
+        reference.selectors,
+        Object.freeze(reference.selectors.map((selector) => selector.field.ordinal)),
+        replacement,
+      ),
+      fromCall: target.fromCall,
+    })
+  }
+
+  const byteView = (local: Mir.LocalId): ReadonlyArray<number> => {
+    const viewed = read(local).value
+    if (viewed._tag === 'StaticViewValue') return viewed.bytes
+    if (viewed._tag !== 'SliceValue') throw new RangeError('OS intrinsic expected a byte slice')
+    if (viewed.ticket !== undefined) {
+      const allocation = state.allocations.get(viewed.ticket)
+      if (allocation === undefined || !allocation.active)
+        throw new RangeError('OS intrinsic received released byte storage')
+      return Object.freeze(
+        Array.from({ length: viewed.length }, (_, index) => {
+          const selected = allocation.values.get(String(viewed.base + index))
+          if (selected?._tag !== 'ScalarIntegerValue' || selected.type !== 'u8')
+            throw new RangeError('OS intrinsic received uninitialized byte storage')
+          return Number(selected.value)
+        }),
+      )
+    }
+    const backing = cell(viewed).value
+    if (backing._tag !== 'ArrayValue') throw new RangeError('OS byte slice lost its array')
+    return Object.freeze(
+      backing.elements.slice(viewed.base, viewed.base + viewed.length).map((selected) => {
+        if (selected._tag !== 'ScalarIntegerValue' || selected.type !== 'u8')
+          throw new RangeError('OS intrinsic received a non-byte slice')
+        return Number(selected.value)
+      }),
+    )
+  }
+
+  const writeByteView = (local: Mir.LocalId, bytes: ReadonlyArray<number>): void => {
+    const viewed = read(local).value
+    if (viewed._tag !== 'SliceValue' || bytes.length > viewed.length)
+      throw new RangeError('OS intrinsic output exceeds its byte slice')
+    if (viewed.ticket !== undefined) {
+      const allocation = state.allocations.get(viewed.ticket)
+      if (allocation === undefined || !allocation.active)
+        throw new RangeError('OS intrinsic output uses released storage')
+      for (const [index, byte] of bytes.entries()) {
+        allocation.values.set(String(viewed.base + index), scalarIntegerValue('u8', BigInt(byte)))
+      }
+      return
+    }
+    const key = cellKey(viewed.frame, viewed.cell)
+    const backing = state.cells.get(key)
+    if (backing?.value._tag !== 'ArrayValue') throw new RangeError('OS output slice lost its array')
+    const next: ArrayValue = Object.freeze({
+      _tag: 'ArrayValue',
+      type: backing.value.type,
+      elements: Object.freeze(
+        backing.value.elements.map((element, index) => {
+          const byte = bytes.at(index - viewed.base)
+          return byte === undefined ? element : scalarIntegerValue('u8', BigInt(byte))
+        }),
+      ),
+    })
+    state.cells.set(key, { value: next, fromCall: backing.fromCall })
+  }
+
+  const optionValue = (element: Type.Type, payload?: Value): UnionValue => {
+    const semantic = Type.option(element)
+    if (!Type.isUnion(semantic)) throw new RangeError('OS Option result did not normalize')
+    const member = payload === undefined ? Type.none : Type.some(element)
+    const entry = program.layout.entries.find((candidate) => Type.equals(candidate.type, member))
+    if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
+      throw new RangeError('Target plan omitted an OS Option member')
+    return Object.freeze({
+      _tag: 'UnionValue',
+      type: semantic,
+      member,
+      payload: Object.freeze({
+        _tag: 'AggregateValue',
+        type: member,
+        fields: Object.freeze(
+          payload === undefined
+            ? []
+            : entry.representation.fields.map((field) =>
+                Object.freeze({ field: field.id, value: payload }),
+              ),
+        ),
+      }),
+    })
+  }
+
+  const handleValue = (handle: OsFileSystemHost.Handle): AggregateValue => {
+    const entry = program.layout.entries.find((candidate) =>
+      Type.equals(candidate.type, Type.osHandle),
+    )
+    if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
+      throw new RangeError('Target plan omitted OsHandle')
+    return Object.freeze({
+      _tag: 'AggregateValue',
+      type: Type.osHandle,
+      fields: Object.freeze(
+        entry.representation.fields.map((field) =>
+          Object.freeze({
+            field: field.id,
+            value:
+              field.name === '$identity'
+                ? Object.freeze({ _tag: 'UsizeValue' as const, value: BigInt(handle.identity) })
+                : value(field.name === '$kind' ? (handle.kind === 'File' ? 0 : 1) : 1),
+          }),
+        ),
+      ),
+    })
+  }
+
+  const hostHandle = (local: Mir.LocalId): OsFileSystemHost.Handle => {
+    const selected =
+      read(local).value._tag === 'ReferenceValue' ? referenced(local).value : read(local).value
+    if (selected._tag !== 'AggregateValue' || !Type.equals(selected.type, Type.osHandle))
+      throw new RangeError('OS intrinsic expected OsHandle')
+    const identity = selected.fields.at(0)?.value
+    const kind = selected.fields.at(1)?.value
+    const active = selected.fields.at(2)?.value
+    if (
+      identity?._tag !== 'UsizeValue' ||
+      kind?._tag !== 'I32Value' ||
+      active?._tag !== 'I32Value' ||
+      active.value !== 1
+    )
+      throw new RangeError('OS intrinsic expected one live OsHandle')
+    return Object.freeze({
+      identity: Number(identity.value),
+      kind: kind.value === 0 ? 'File' : 'Directory',
+    })
+  }
+
   let regionOrdinal = fn.entry.ordinal
   for (;;) {
     const region = regions.get(regionOrdinal)
@@ -1930,6 +2078,9 @@ function* executeFunction(
               operation.sourceType._tag === 'Slice'
                 ? source.value
                 : (() => {
+                    if (operation.sourceType._tag !== 'FixedArray') {
+                      throw new RangeError('MIR verifier allowed a non-array slice root')
+                    }
                     if (source.value._tag !== 'ArrayValue') {
                       throw new RangeError('MIR verifier allowed borrowing a non-array value')
                     }
@@ -2221,6 +2372,207 @@ function* executeFunction(
               }),
               fromCall: false,
             })
+            break
+          }
+          case 'OsCall': {
+            const host = state.osFileSystem
+            if (host === undefined) return blockedStep({ _tag: 'MissingOsFileSystemHost' })
+            const arguments_ = operation.arguments
+            const reasonOutput = arguments_.at(-2)
+            const codeOutput = arguments_.at(-1)
+            if (reasonOutput === undefined || codeOutput === undefined)
+              throw new RangeError('OS intrinsic omitted status outputs')
+            const status = (failure?: OsFileSystemHost.Failure): void => {
+              replaceReferenced(
+                reasonOutput,
+                value(failure === undefined ? 0 : OsFileSystemHost.reasonCode(failure.reason)),
+              )
+              replaceReferenced(
+                codeOutput,
+                scalarIntegerValue('u32', BigInt(failure?.nativeCode ?? 0)),
+              )
+            }
+            const commit = (result: Value): void =>
+              write(operation.destination, { value: result, fromCall: false })
+            const name = operation.operation.name
+            try {
+              if (name === 'osFileOpen' || name === 'osDirectoryOpen') {
+                const root = arguments_.at(0)
+                const path = arguments_.at(1)
+                if (root === undefined || path === undefined)
+                  throw new RangeError('OS open omitted paths')
+                const result =
+                  name === 'osFileOpen'
+                    ? host.fileOpen(
+                        byteView(root),
+                        byteView(path),
+                        readI32(arguments_.at(2) ?? root).value,
+                      )
+                    : host.directoryOpen(byteView(root), byteView(path))
+                if (result._tag === 'Failure') {
+                  status(result)
+                  commit(optionValue(Type.osHandle))
+                } else {
+                  status()
+                  commit(optionValue(Type.osHandle, handleValue(result.handle)))
+                }
+                break
+              }
+              if (name === 'osFileRead') {
+                const handle = arguments_.at(0)
+                const output = arguments_.at(1)
+                if (handle === undefined || output === undefined)
+                  throw new RangeError('OS read omitted arguments')
+                const capacity = byteView(output).length
+                const result = host.fileRead(hostHandle(handle), capacity)
+                if (result._tag === 'Failure') {
+                  status(result)
+                  commit(optionValue('usize'))
+                } else {
+                  writeByteView(output, result.bytes)
+                  status()
+                  commit(
+                    optionValue(
+                      'usize',
+                      Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.bytes.length) }),
+                    ),
+                  )
+                }
+                break
+              }
+              if (name === 'osFileWrite') {
+                const handle = arguments_.at(0)
+                const input = arguments_.at(1)
+                const offset = arguments_.at(2)
+                if (handle === undefined || input === undefined || offset === undefined)
+                  throw new RangeError('OS write omitted arguments')
+                const result = host.fileWrite(
+                  hostHandle(handle),
+                  byteView(input).slice(Number(readUsize(offset).value)),
+                )
+                if (result._tag === 'Failure') {
+                  status(result)
+                  commit(optionValue('usize'))
+                } else {
+                  status()
+                  commit(
+                    optionValue(
+                      'usize',
+                      Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.count) }),
+                    ),
+                  )
+                }
+                break
+              }
+              if (name === 'osDirectoryNext') {
+                const handle = arguments_.at(0)
+                const output = arguments_.at(1)
+                const kind = arguments_.at(2)
+                const required = arguments_.at(3)
+                if (
+                  handle === undefined ||
+                  output === undefined ||
+                  kind === undefined ||
+                  required === undefined
+                )
+                  throw new RangeError('OS directory next omitted arguments')
+                const result = host.directoryNext(hostHandle(handle), byteView(output).length)
+                if (result._tag === 'Failure' || result._tag === 'BufferTooSmall') {
+                  const failure: OsFileSystemHost.Failure =
+                    result._tag === 'Failure'
+                      ? result
+                      : { _tag: 'Failure', reason: 'BufferTooSmall' }
+                  status(failure)
+                  if (result._tag === 'BufferTooSmall')
+                    replaceReferenced(
+                      required,
+                      Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.requiredCapacity) }),
+                    )
+                  commit(optionValue('usize'))
+                } else if (result._tag === 'End') {
+                  status()
+                  commit(optionValue('usize', Object.freeze({ _tag: 'UsizeValue', value: 0n })))
+                } else {
+                  writeByteView(output, result.name)
+                  replaceReferenced(kind, value(result.kind === 'File' ? 0 : 1))
+                  status()
+                  commit(
+                    optionValue(
+                      'usize',
+                      Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.name.length) }),
+                    ),
+                  )
+                }
+                break
+              }
+              if (name === 'osPathInspect') {
+                const root = arguments_.at(0)
+                const path = arguments_.at(1)
+                const kind = arguments_.at(2)
+                const length = arguments_.at(3)
+                if (
+                  root === undefined ||
+                  path === undefined ||
+                  kind === undefined ||
+                  length === undefined
+                )
+                  throw new RangeError('OS inspect omitted arguments')
+                const result = host.pathInspect(byteView(root), byteView(path))
+                if (result._tag === 'Failure') {
+                  status(result)
+                  commit(value(0))
+                } else {
+                  replaceReferenced(kind, value(result.kind === 'File' ? 0 : 1))
+                  replaceReferenced(
+                    length,
+                    Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.byteLength) }),
+                  )
+                  status()
+                  commit(value(1))
+                }
+                break
+              }
+              const command =
+                name === 'osDirectoryCreate' ||
+                name === 'osFileRemove' ||
+                name === 'osDirectoryRemove'
+                  ? (() => {
+                      const root = arguments_.at(0)
+                      const path = arguments_.at(1)
+                      if (root === undefined || path === undefined)
+                        throw new RangeError('OS command omitted paths')
+                      return name === 'osDirectoryCreate'
+                        ? host.directoryCreate(byteView(root), byteView(path))
+                        : name === 'osFileRemove'
+                          ? host.fileRemove(byteView(root), byteView(path))
+                          : host.directoryRemove(byteView(root), byteView(path))
+                    })()
+                  : name === 'osHandleClose'
+                    ? host.handleClose(hostHandle(arguments_.at(0) ?? reasonOutput))
+                    : undefined
+              if (command === undefined) throw new RangeError(`Unknown OS intrinsic ${name}`)
+              if (command._tag === 'Failure') {
+                status(command)
+                commit(value(0))
+              } else {
+                status()
+                commit(value(1))
+              }
+            } catch {
+              const failure: OsFileSystemHost.Failure = { _tag: 'Failure', reason: 'Other' }
+              status(failure)
+              commit(
+                operation.type._tag === 'Union'
+                  ? optionValue(
+                      operation.type.type.members.some((member) =>
+                        Type.equals(member, Type.some(Type.osHandle)),
+                      )
+                        ? Type.osHandle
+                        : 'usize',
+                    )
+                  : value(0),
+              )
+            }
             break
           }
           case 'RawBufferFrom': {
@@ -4007,6 +4359,7 @@ const evaluationLimitOption = (
 /** Explicit host services available to one deterministic evaluation. */
 export interface Options {
   readonly standardStreams?: StandardStreams.Provider
+  readonly osFileSystem?: OsFileSystemHost.Provider
   readonly maxSteps?: number
   readonly maxCallDepth?: number
 }
@@ -4081,6 +4434,7 @@ export const evaluate = (
     allocations: new Map(),
     callables: new Map(),
     ...(options.standardStreams === undefined ? {} : { standardStreams: options.standardStreams }),
+    ...(options.osFileSystem === undefined ? {} : { osFileSystem: options.osFileSystem }),
   })
   if (result._tag === 'Blocked') {
     return Object.freeze({

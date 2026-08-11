@@ -1600,6 +1600,8 @@ const emitOperation = (
         ),
       ]
     }
+    case 'OsCall':
+      throw new RangeError('Target validation allowed a native-only OS operation into Wasm')
     case 'RawBufferFrom': {
       const allocation = slots(operation.allocation)
       const destination = slots(operation.destination)
@@ -4143,6 +4145,7 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
       target: program.layout.target,
       symbols: Object.freeze(output.symbols),
       termination: Backend.terminationOf(program),
+      nativeRuntimeSymbols: Object.freeze([]),
       control: controlProvenance(program),
       bytes: output.bitcode,
       wat: output.ir,

@@ -100,6 +100,16 @@ export type BuiltinOperation =
   | 'SlotTake'
   | 'SlotCopy'
   | 'SlotDrop'
+  | 'OsFileOpen'
+  | 'OsFileRead'
+  | 'OsFileWrite'
+  | 'OsDirectoryOpen'
+  | 'OsDirectoryNext'
+  | 'OsPathInspect'
+  | 'OsDirectoryCreate'
+  | 'OsFileRemove'
+  | 'OsDirectoryRemove'
+  | 'OsHandleClose'
 
 export type BoundsMode =
   | { readonly _tag: 'Proven'; readonly index: number; readonly length: number }

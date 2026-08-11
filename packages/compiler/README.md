@@ -76,6 +76,10 @@ borrowed UTF-8 messages, while providers own formatting, retention, and physical
 Owned `Bytes`, normalized provider-absolute `Path`, allocation-free `FileError`, and the seven-
 operation mutable `FileSystem` service are also ordinary source. No platform provider is selected by
 an import; native, browser, test, and Wasm applications explicitly provide their implementation.
+Native applications may construct the ordinary `silk.os_filesystem.OsFileSystem` provider with an
+owned absolute root. Its compiler boundary is limited to unsafe native-only handle intrinsics;
+evaluator hosts opt in through the exported `OsFileSystemHost.Provider`, and direct WebAssembly
+receives no implicit imports or filesystem ABI.
 
 This remains an unreleased subset. It does not yet commit to an owning String, enums, concurrency,
 networking, a general FFI, a package registry, or self-hosting.

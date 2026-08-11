@@ -108,8 +108,11 @@ it.effect(
 it('requires normalized target metadata in every sealed inventory entry', () => {
   assert.deepEqual(Intrinsic.executionTargets, ['Evaluator', 'LLVM', 'Wasm'])
   assert.isTrue(
-    Intrinsic.inventory().every(
-      (entry) => JSON.stringify(entry.targets) === JSON.stringify(Intrinsic.executionTargets),
-    ),
+    Intrinsic.inventory().every((entry) => {
+      const expected = entry.operation.startsWith('Intrinsic.os')
+        ? ['Evaluator', 'LLVM']
+        : Intrinsic.executionTargets
+      return JSON.stringify(entry.targets) === JSON.stringify(expected)
+    }),
   )
 })

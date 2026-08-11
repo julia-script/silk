@@ -803,6 +803,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = allocate ${localText(operation.layout)} ! ${operation.failure.name}`
     case 'HostWrite':
       return `${localText(operation.destination)} = write all ${localText(operation.bytes)} to stream ${localText(operation.stream)} ! ${operation.failure.name}`
+    case 'OsCall':
+      return `${localText(operation.destination)} = ${operation.operation}(${operation.arguments.map(localText).join(', ')})`
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw buffer from ${localText(operation.allocation)} × ${localText(operation.count)} · stride ${operation.stride}`
     case 'RawBufferCount':
@@ -1236,6 +1238,8 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return `invalid callable reuse · #${reason.ticket} is ${reason.state.toLowerCase()}`
     case 'MissingStandardStreams':
       return 'missing StandardStreams host provider'
+    case 'MissingOsFileSystemHost':
+      return 'missing OS filesystem host provider'
     case 'IntrinsicTargetUnavailable':
       return reason.diagnostics.map((diagnostic) => diagnostic.message).join(' · ')
   }

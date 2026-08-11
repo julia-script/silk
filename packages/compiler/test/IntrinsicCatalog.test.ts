@@ -149,6 +149,48 @@ pub effect fn main() -> i32 {
   let second = run Effect.provideMut(StandardStream.send(stderr, "error"), &mut native)
   return ()
 }`,
+  `import silk.option { Option, none }
+fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
+effect fn fileOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
+  unsafe { return run Intrinsic.osFileOpen(root, path, 0, reason, code) }
+  return none<OsHandle>()
+}
+effect fn fileRead(handle: &mut OsHandle, output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
+  unsafe { return run Intrinsic.osFileRead(handle, output, reason, code) }
+  return none<usize>()
+}
+effect fn fileWrite(handle: &mut OsHandle, input: &[u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
+  unsafe { return run Intrinsic.osFileWrite(handle, input, 0, reason, code) }
+  return none<usize>()
+}
+effect fn directoryOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
+  unsafe { return run Intrinsic.osDirectoryOpen(root, path, reason, code) }
+  return none<OsHandle>()
+}
+effect fn directoryNext(handle: &mut OsHandle, output: &mut [u8], kind: &mut i32, required: &mut usize, reason: &mut i32, code: &mut u32) -> Option<usize> {
+  unsafe { return run Intrinsic.osDirectoryNext(handle, output, kind, required, reason, code) }
+  return none<usize>()
+}
+effect fn inspect(root: &[u8], path: &[u8], kind: &mut i32, length: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osPathInspect(root, path, kind, length, reason, code) }
+  return false
+}
+effect fn create(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osDirectoryCreate(root, path, reason, code) }
+  return false
+}
+effect fn removeFile(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osFileRemove(root, path, reason, code) }
+  return false
+}
+effect fn removeDirectory(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osDirectoryRemove(root, path, reason, code) }
+  return false
+}
+effect fn close(handle: OsHandle, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osHandleClose(move handle, reason, code) }
+  return false
+}`,
 ])
 
 it.effect('pairs every intrinsic presentation with accepted semantic analysis', () =>
