@@ -678,6 +678,8 @@ const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
       return `InvalidCallableReuse: callable #${reason.ticket} is ${reason.state.toLowerCase()}`
     case 'MissingStandardStreams':
       return 'MissingStandardStreams: no host provider was supplied'
+    case 'IntrinsicTargetUnavailable':
+      return `IntrinsicTargetUnavailable: ${reason.diagnostics.map((diagnostic) => diagnostic.message).join('; ')}`
   }
 }
 
@@ -699,6 +701,8 @@ const blockedSpan = (
       return undefined
     case 'EvaluationLimit':
       return reason.span
+    case 'IntrinsicTargetUnavailable':
+      return reason.diagnostics.at(0)?.span
   }
 }
 

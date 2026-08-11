@@ -4,9 +4,7 @@
 
 Define the smallest explicit compiler primitive surface from which Silk source can build its
 standard library, services, and portable application APIs without hidden name-based privilege.
-
 ## Requirements
-
 ### Requirement: Callable compiler primitives occupy one sealed namespace
 
 Every source-callable operation selected by compiler identity SHALL be a qualified member of the
@@ -100,3 +98,20 @@ aliasing preconditions before invoking them.
 
 - **WHEN** a source-defined owner uses the raw-buffer view operations
 - **THEN** semantic analysis and lowering depend only on `RawBuffer` and slice invariants, not on the owner's declaration spelling
+
+### Requirement: Intrinsic availability metadata is sealed and auditable
+
+The canonical intrinsic inventory SHALL record a normalized supported-target set for every callable
+operation and SHALL expose that data to executable planning, tooling, and inventory tests. Ordinary
+source declarations MUST NOT override, infer, or attach compiler target privilege by spelling.
+
+#### Scenario: Audit one restricted operation
+
+- **WHEN** the intrinsic inventory is encoded for tests or tooling
+- **THEN** the operation's canonical identity and sorted supported-target set appear in deterministic form
+
+#### Scenario: Refuse source-defined target privilege
+
+- **WHEN** ordinary source declares a function or service using the same name as a restricted intrinsic
+- **THEN** it remains an ordinary declaration with no compiler availability metadata
+

@@ -14,8 +14,8 @@ hosts; lower-level platform facilities are explicit escape hatches rather than t
 
 **Current objective:** complete file interaction through five deliberately ordered changes rather
 than one platform-shaped feature. Returned lexical borrows, owned Bytes, and the portable whole-file
-FileSystem contract have shipped. Generic target-restricted intrinsics are next, and the confined OS
-provider joins both branches last. The compiler supplies only irreducible unsafe primitives; public
+FileSystem contract and generic target-restricted intrinsics have shipped. The confined OS provider
+now joins both branches last. The compiler supplies only irreducible unsafe primitives; public
 services, providers, values, helpers, and safe policy remain ordinary navigable Silk source.
 
 ## Current baseline
@@ -82,13 +82,13 @@ program record remains in [real programs](real-programs.md).
 - **Outcome & done-when:** every intrinsic has an enforced supported-target set; validation runs over
   executable operation closure; unsupported reachable calls receive a stable diagnostic; unreachable
   calls contribute no runtime symbols, imports, or host adapters.
-- **Status:** proposal complete and strictly validated; now the active implementation item and a
-  prerequisite for the OS provider.
+- **Status:** shipped, synchronized, and archived on 2026-08-11; the confined OS provider is now
+  unblocked.
 - **Appetite:** one generic catalog, closure, diagnostic, evaluator, and backend mechanism with
   pay-for-use artifact tests.
 - **Boundary:** no provider names, conditional parsing, hosted-Wasm ABI, or automatic backend switch.
 - **Links:** change:
-  [`add-target-restricted-intrinsics`](../openspec/changes/add-target-restricted-intrinsics/proposal.md) ·
+  [`add-target-restricted-intrinsics`](../openspec/changes/archive/2026-08-11-add-target-restricted-intrinsics/proposal.md) ·
   [intrinsic boundary spec](../openspec/specs/bootstrap-intrinsic-boundary/spec.md)
 
 ### Define portable whole-file interaction
@@ -116,15 +116,15 @@ program record remains in [real programs](real-programs.md).
   ordinary `OsFileSystem` source brackets every resource, confines each operation beneath an owned
   native root, translates low-level statuses, and implements the seven portable operations. Pure
   direct-Wasm providers and no-filesystem programs retain zero OS imports.
-- **Status:** proposal complete and strictly validated; starts after both portable FileSystem and
-  target-restricted intrinsics land.
+- **Status:** proposal complete and strictly validated; now the active implementation item after
+  both portable FileSystem and target-restricted intrinsics shipped.
 - **Appetite:** one low-level protocol, injected evaluator adapter, reachable native runtime, and
   ordinary provider with security and cleanup acceptance.
 - **Boundary:** no public handles, `PlatformFileSystem`, symlink following, automatic fallible Drop,
   built-in browser VFS, WASI binding, or transactional writes.
 - **Links:** change:
   [`add-os-file-system-provider`](../openspec/changes/add-os-file-system-provider/proposal.md) ·
-  [portable contract](../openspec/changes/add-portable-file-system/proposal.md)
+  [portable contract](../openspec/changes/archive/2026-08-11-add-portable-file-system/proposal.md)
 
 ## Next
 
@@ -187,6 +187,11 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-11: Shipped, synced, and archived generic target-restricted intrinsics. Exact canonical
+  intrinsic identities now survive executable closure; evaluator and backend validation reject only
+  reachable unsupported operations with stable provenance diagnostics; retained inventories drive
+  runtime/import planning so unreachable declarations remain inert. Promoted the confined native OS
+  provider as the final FileSystem-sequence implementation item.
 - 2026-08-11: Shipped, synced, and archived portable whole-file interaction: normalized provider-
   absolute Path values, allocation-free portable errors and metadata, seven mutable FileSystem
   primitives, ordinary recursive/existence helpers, application-defined providers, editor tooling,

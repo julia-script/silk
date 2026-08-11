@@ -16,8 +16,10 @@ import * as Variable from '@silk-effect/llvm/Variable'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import type * as Instances from './Instances.js'
+import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -173,6 +175,10 @@ export class BackendError extends Data.TaggedError('BackendError')<{
     | { readonly _tag: 'InvalidMir'; readonly violations: ReadonlyArray<Mir.Violation> }
     | { readonly _tag: 'UnsupportedMir'; readonly detail: string }
     | { readonly _tag: 'UnsupportedTarget'; readonly target: Target.Id }
+    | {
+        readonly _tag: 'UnsupportedIntrinsic'
+        readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+      }
     | { readonly _tag: 'WrappedFailure'; readonly cause: unknown }
 }> {}
 
@@ -191,6 +197,18 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
   program: Mir.Module,
   request: CodegenRequest,
 ): Effect.fn.Return<A, BackendError> {
+  const availability = IntrinsicAvailability.select(
+    program.intrinsics,
+    IntrinsicAvailability.backendTarget(self.id),
+  )
+  if (availability._tag === 'Unavailable') {
+    return yield* new BackendError({
+      operation: 'Backend.emit',
+      backend: self.name,
+      message: `${self.name} cannot emit a program with unavailable intrinsics`,
+      reason: { _tag: 'UnsupportedIntrinsic', diagnostics: availability.diagnostics },
+    })
+  }
   const violations = Mir.verify(program)
   if (violations.length > 0) {
     return yield* new BackendError({

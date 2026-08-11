@@ -15,6 +15,7 @@ import * as FrontendTooling from './FrontendTooling.js'
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
+import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import type * as ModuleClosure from './ModuleClosure.js'
@@ -1109,10 +1110,22 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
       resolutionFailures: self.closure.resolutionFailures,
     })
   }
-  if (self.mir._tag === 'Unavailable') return yield* self.mir.error
   // The cast closes the generic default/override variance gap: omitted selection is LLVM, while
   // an explicit backend determines A at the call site.
   const selected = backend ?? (Backend.LlvmBackend as Backend.Backend<A>)
+  const availability = IntrinsicAvailability.select(
+    self.instances.intrinsics,
+    IntrinsicAvailability.backendTarget(selected.id),
+  )
+  if (availability._tag === 'Unavailable') {
+    return yield* new CodegenUnavailable({
+      operation: 'Analysis.codegen',
+      message: `${selected.name} cannot emit a program with unavailable intrinsics`,
+      diagnostics: Diagnostic.merge(self.diagnostics, availability.diagnostics),
+      resolutionFailures: self.closure.resolutionFailures,
+    })
+  }
+  if (self.mir._tag === 'Unavailable') return yield* self.mir.error
   return yield* Backend.emit(selected, self.mir.value, {
     ...request,
     sources:

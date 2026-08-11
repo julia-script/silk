@@ -172,6 +172,8 @@ export const contractRowInferenceCode = 'SEM0089' as const
 export const invalidServiceDeclarationCode = 'SEM0090' as const
 export const invalidReturnedBorrowSignatureCode = 'SEM0091' as const
 export const invalidReturnedBorrowOriginCode = 'SEM0092' as const
+/** Stable code for one reachable intrinsic unavailable on the requested execution target. */
+export const intrinsicTargetUnavailableCode = 'SEM0093' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -294,6 +296,7 @@ export type Code =
   | typeof invalidServiceDeclarationCode
   | typeof invalidReturnedBorrowSignatureCode
   | typeof invalidReturnedBorrowOriginCode
+  | typeof intrinsicTargetUnavailableCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -370,6 +373,11 @@ export type Reason =
   | { readonly _tag: 'InvalidServiceDeclaration'; readonly detail: string }
   | { readonly _tag: 'InvalidReturnedBorrowSignature' }
   | { readonly _tag: 'InvalidReturnedBorrowOrigin' }
+  | {
+      readonly _tag: 'IntrinsicTargetUnavailable'
+      readonly operation: string
+      readonly target: 'Evaluator' | 'LLVM' | 'Wasm'
+    }
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
@@ -1991,6 +1999,22 @@ export const invalidReturnedBorrowOrigin = (span: SourceSpan.SourceSpan): Diagno
     severity: 'error',
     message: "The returned slice does not originate from the function's single borrowed parameter",
     reason: Object.freeze({ _tag: 'InvalidReturnedBorrowOrigin' }),
+    span,
+  })
+
+/** Diagnoses a reachable sealed operation before its unsupported execution surface is entered. */
+export const intrinsicTargetUnavailable = (
+  operation: string,
+  target: 'Evaluator' | 'LLVM' | 'Wasm',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: intrinsicTargetUnavailableCode,
+    severity: 'error',
+    message: `${operation} is unavailable for ${target}`,
+    reason: Object.freeze({ _tag: 'IntrinsicTargetUnavailable', operation, target }),
     span,
   })
 

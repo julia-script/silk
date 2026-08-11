@@ -434,6 +434,11 @@ const callableValueByIdentity = (
           _tag: 'BuiltinCallableTarget',
           actor: identity.target.actor,
           operation: identity.target.operation as Hir.BuiltinOperation,
+          intrinsic: Object.freeze({
+            _tag: 'IntrinsicOperationId',
+            actor: identity.target.intrinsic.actor,
+            name: identity.target.intrinsic.name,
+          }),
         })
   const environment =
     identity.environment === undefined
@@ -4316,6 +4321,7 @@ export const lowerProgram = (
     return Object.freeze({
       _tag: 'MirModule',
       module: discovery.rootModule,
+      intrinsics: discovery.intrinsics,
       entry: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
       layout,
       staticData,
@@ -4439,6 +4445,7 @@ export const lowerProgram = (
   return Object.freeze({
     _tag: 'MirModule',
     module: discovery.rootModule,
+    intrinsics: discovery.intrinsics,
     entry,
     layout,
     staticData,

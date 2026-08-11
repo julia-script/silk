@@ -892,6 +892,7 @@ export interface Module {
   readonly _tag: 'MirModule'
   readonly module: string
   readonly entry: Entry
+  readonly intrinsics: ReadonlyArray<Instances.IntrinsicCall>
   readonly layout: Layout.Plan
   readonly staticData?: ReadonlyArray<StaticText.Data>
   readonly functions: ReadonlyArray<MirFunction>
@@ -3770,6 +3771,7 @@ export const samples = (): ReadonlyArray<Module> => {
   const straight: Module = Object.freeze({
     _tag: 'MirModule',
     module: source.id,
+    intrinsics: Object.freeze([]),
     entry: Object.freeze({
       _tag: 'OrdinaryEntry',
       target: instance(canonical(source.id, 'answer')),
@@ -3811,6 +3813,7 @@ export const samples = (): ReadonlyArray<Module> => {
   const conditional: Module = Object.freeze({
     _tag: 'MirModule',
     module: source.id,
+    intrinsics: Object.freeze([]),
     entry: Object.freeze({
       _tag: 'OrdinaryEntry',
       target: instance(canonical(source.id, 'choose')),

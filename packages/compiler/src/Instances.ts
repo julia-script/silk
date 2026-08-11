@@ -2,6 +2,7 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
+import * as Intrinsic from './Intrinsic.js'
 import * as Ownership from './Ownership.js'
 import * as Type from './Type.js'
 
@@ -61,6 +62,13 @@ export interface CallInstance {
   readonly resultEffect?: string
 }
 
+/** One exact sealed intrinsic call retained by executable instance closure. */
+export interface IntrinsicCall {
+  readonly _tag: 'ReachableIntrinsicCall'
+  readonly operation: Intrinsic.OperationId
+  readonly span: Hir.Expression['span']
+}
+
 /** One normalized reportable failure retained by an effectful user entry. */
 export interface EntryFailure {
   readonly type: Type.Nominal
@@ -100,6 +108,7 @@ export interface Discovery {
   readonly instances: ReadonlyArray<Instance>
   readonly callables: ReadonlyArray<CallableInstance>
   readonly calls: ReadonlyArray<CallInstance>
+  readonly intrinsics: ReadonlyArray<IntrinsicCall>
   readonly violations: ReadonlyArray<PolymorphicRecursion>
 }
 
@@ -243,8 +252,40 @@ export const invalid = (rootModule: string): Discovery =>
     instances: Object.freeze([]),
     callables: Object.freeze([]),
     calls: Object.freeze([]),
+    intrinsics: Object.freeze([]),
     violations: Object.freeze([]),
   })
+
+const compareIntrinsicCalls = (left: IntrinsicCall, right: IntrinsicCall): number =>
+  Intrinsic.operationText(left.operation).localeCompare(Intrinsic.operationText(right.operation)) ||
+  left.span.sourceId.localeCompare(right.span.sourceId) ||
+  left.span.start - right.span.start ||
+  left.span.end - right.span.end
+
+/** Collects the canonical intrinsic identities retained by reachable function instances. */
+const reachableIntrinsics = (instances: ReadonlyArray<Instance>): ReadonlyArray<IntrinsicCall> => {
+  const calls = new Map<string, IntrinsicCall>()
+  for (const instance of instances) {
+    for (const statement of instance.function.statements) {
+      for (const root of Hir.statementExpressions(statement)) {
+        for (const expression of Hir.expressionTree(root)) {
+          const operation =
+            expression._tag === 'BuiltinCall'
+              ? expression.intrinsic
+              : (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection') &&
+                  expression.target._tag === 'BuiltinCallableTarget'
+                ? expression.target.intrinsic
+                : undefined
+          if (operation === undefined) continue
+          const span = expression.span
+          const key = `${Intrinsic.operationText(operation)}\u0000${span.sourceId}\u0000${span.start}\u0000${span.end}`
+          calls.set(key, Object.freeze({ _tag: 'ReachableIntrinsicCall', operation, span }))
+        }
+      }
+    }
+  }
+  return Object.freeze([...calls.values()].sort(compareIntrinsicCalls))
+}
 
 const keyOf = (
   declaration: DeclarationIndex.CanonicalId,
@@ -620,6 +661,7 @@ const callableTargetIdentity = (
         _tag: 'Builtin' as const,
         actor: target.actor,
         operation: target.operation,
+        intrinsic: target.intrinsic,
       })
 
 const callableOriginOf = (
@@ -1187,6 +1229,7 @@ export const discover = (
       instances: Object.freeze([]),
       callables: Object.freeze([]),
       calls: Object.freeze([]),
+      intrinsics: Object.freeze([]),
       violations: Object.freeze([]),
     })
   }
@@ -1355,13 +1398,15 @@ export const discover = (
     }
   }
 
+  const instances = Object.freeze([...recorded.values()])
   return Object.freeze({
     _tag: 'InstanceDiscovery',
     rootModule,
     entry,
-    instances: Object.freeze([...recorded.values()]),
+    instances,
     callables: Object.freeze([...recordedCallables.values()]),
     calls: Object.freeze([...recordedCalls.values()]),
+    intrinsics: reachableIntrinsics(instances),
     violations: Object.freeze(violations),
   })
 }

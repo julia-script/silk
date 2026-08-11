@@ -145,6 +145,7 @@ export type CallReferenceFact =
       readonly token: Token.Token
       readonly actor: string
       readonly operation: Hir.BuiltinOperation
+      readonly intrinsic: Intrinsic.OperationId
       readonly parameters: ReadonlyArray<SemanticType>
       readonly result: SemanticType
       readonly returnedBorrowParameter?: number
@@ -3511,6 +3512,7 @@ const interfaceConstraintDiagnostics = (
 }
 
 interface BuiltinSignature {
+  readonly id: Intrinsic.OperationId
   readonly operation: Hir.BuiltinOperation
   readonly typeParameters?: ReadonlyArray<Type.Parameter>
   readonly parameters: ReadonlyArray<SemanticType>
@@ -3523,6 +3525,7 @@ const builtinSignature = (actor: string, operation: string): BuiltinSignature | 
   const catalog = Intrinsic.findOperation(actor, operation)
   if (catalog?.rule._tag !== 'BuiltinRule') return undefined
   return Object.freeze({
+    id: catalog.id,
     operation: catalog.rule.operation,
     typeParameters: catalog.rule.typeParameters,
     parameters: catalog.rule.parameters,
@@ -3628,6 +3631,7 @@ const resolvedFunctionReference = (
           token: second,
           actor: qualifier,
           operation: signature.operation,
+          intrinsic: signature.id,
           parameters: signature.parameters,
           result: signature.result,
           ...(signature.returnedBorrowParameter === undefined
@@ -4329,6 +4333,7 @@ function analyzeBuiltinCall(
           token: operationToken,
           actor: actorSpelling,
           operation: signature.operation,
+          intrinsic: signature.id,
           parameters: instantiatedParameters,
           result: instantiatedResult ?? signature.result,
           ...(signature.returnedBorrowParameter === undefined
@@ -4569,6 +4574,7 @@ const analyzeOperatorExpression = (
     token: operatorToken,
     actor: target.actor,
     operation: signature.operation,
+    intrinsic: signature.id,
     parameters: operatorParameters,
     result: operatorResult,
   })
@@ -6911,6 +6917,7 @@ const hirCallableTarget = (reference: CallReferenceFact): Hir.CallableTarget | u
       _tag: 'BuiltinCallableTarget',
       actor: reference.actor,
       operation: reference.operation,
+      intrinsic: reference.intrinsic,
     })
   if (reference._tag === 'Resolved' && reference.declaration.canonical._tag === 'Canonical')
     return Object.freeze({
@@ -7497,6 +7504,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
     return Object.freeze({
       _tag: 'BuiltinCall',
       operation: fact.reference.operation,
+      intrinsic: fact.reference.intrinsic,
       typeArguments: Object.freeze(
         fact._tag === 'Call'
           ? fact.typeArguments.flatMap((argument) =>
