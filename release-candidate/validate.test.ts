@@ -27,10 +27,7 @@ const webContainerPackageRoot = resolve(workspaceRoot, 'packages/platform-webcon
 // pnpm's isolated store keeps it under the consuming package, not the workspace root.
 const workspaceTypesNodeVersion = (): string =>
   JSON.parse(
-    readFileSync(
-      resolve(compilerCliPackageRoot, 'node_modules/@types/node/package.json'),
-      'utf8',
-    ),
+    readFileSync(resolve(compilerCliPackageRoot, 'node_modules/@types/node/package.json'), 'utf8'),
   ).version
 
 const installConsumer = (cwd: string, ignoreWorkspace = false): void => {
