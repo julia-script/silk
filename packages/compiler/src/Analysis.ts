@@ -279,7 +279,8 @@ export const rootAnalysis = (self: FrontendSnapshot): Elaboration.Result => {
   return result
 }
 
-const declarationForIdentity = (
+/** Resolves the declaration one declaration identity names, canonical or module-local. */
+export const declarationForIdentity = (
   self: FrontendSnapshot,
   identity: Extract<SemanticOccurrence.Identity, { readonly _tag: 'DeclarationIdentity' }>,
 ): DeclarationIndex.MemberFact | undefined => {
