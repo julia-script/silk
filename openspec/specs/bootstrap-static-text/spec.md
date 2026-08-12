@@ -58,8 +58,14 @@ Single-line and multiline forms of the same text-or-byte category SHALL accept t
 vocabulary and reject the same malformed escapes. A backslash followed by a physical line ending
 SHALL be invalid and MUST NOT remove that line ending or any following whitespace. One or two
 unescaped consecutive quotes SHALL be content in a triple-delimited literal; the first unescaped
-run of three quotes SHALL be its closing delimiter. Raw escape behavior SHALL require a separately
-recognized future modifier and MUST NOT be inferred from delimiter width.
+run of three quotes SHALL be its closing delimiter. Raw escape behavior SHALL require the
+separately recognized `r` modifier and MUST NOT be inferred from delimiter width.
+
+A raw text literal using either one-quote or three-quote delimiters SHALL decode every content
+byte, including a backslash, as itself, SHALL accept no escape sequence, and SHALL reject no
+sequence as a malformed escape. It SHALL otherwise decode as an escaped text literal does: it SHALL
+yield immutable program-lifetime UTF-8, SHALL be rejected when its content is not valid UTF-8, and
+SHALL represent each physical CRLF pair in multiline content by one LF.
 
 #### Scenario: Decode the same escape in both widths
 
@@ -75,6 +81,11 @@ recognized future modifier and MUST NOT be inferred from delimiter width.
 
 - **WHEN** a triple-delimited literal body spells three escaped quotes as `\"\"\"`
 - **THEN** the decoded value contains three quote characters without closing at that escaped sequence
+
+#### Scenario: Decode a raw body without interpreting escapes
+
+- **WHEN** source contains `r"\n"` and `"\n"`
+- **THEN** the raw literal decodes to the two bytes backslash and `n` while the escaped literal decodes to the one byte LF
 
 ### Requirement: Static storage is target-neutral compiler data
 

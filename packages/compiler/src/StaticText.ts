@@ -63,7 +63,7 @@ export const decode = (
   let index = contentStart
   while (index < end) {
     const byte = token[index]
-    if (byte !== 0x5c) {
+    if (byte !== 0x5c || form.escapePolicy === 'Raw') {
       if (form.delimiterWidth === 3 && byte === 0x0d) {
         if (token[index + 1] !== 0x0a)
           return invalid('isolated carriage return in multiline literal', index)

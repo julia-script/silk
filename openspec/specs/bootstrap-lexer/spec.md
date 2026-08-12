@@ -222,18 +222,27 @@ same longest complete-identifier rule as every other keyword.
 
 ### Requirement: String literal introductions are closed and extensible
 
-The lexer SHALL recognize unmodified and `b`-modified string literal introductions with either one
-quote or three quotes as one deterministic literal token. The modifier SHALL be adjacent to the
-opening delimiter, delimiter recognition SHALL prefer three quotes over one quote, and the token
-kind SHALL retain whether the literal denotes text or bytes without requiring a distinct kind for
-every delimiter width. An identifier-like spelling immediately adjacent to a quote delimiter that
-is not in the closed modifier vocabulary SHALL be reserved as an invalid literal introduction and
-SHALL produce a lexical diagnostic rather than tokenize as an identifier followed by a literal.
+The lexer SHALL recognize unmodified, `b`-modified, and `r`-modified string literal introductions
+with either one quote or three quotes as one deterministic literal token. The modifier SHALL be
+adjacent to the opening delimiter, delimiter recognition SHALL prefer three quotes over one quote,
+and the token kind SHALL retain whether the literal denotes text or bytes without requiring a
+distinct kind for every delimiter width. The body-decoding policy SHALL be selected by the modifier
+independently of the delimiter width: the unmodified and `b`-modified forms SHALL be escaped, and
+the `r`-modified form SHALL be raw. A raw literal SHALL denote text and SHALL carry the text token
+kind. An identifier-like spelling immediately adjacent to a quote delimiter that is not in the
+closed modifier vocabulary SHALL be reserved as an invalid literal introduction and SHALL produce a
+lexical diagnostic rather than tokenize as an identifier followed by a literal. A modifier spelling
+SHALL remain an ordinary identifier wherever it is not adjacent to a quote delimiter.
 
 #### Scenario: Recognize every committed literal introduction
 
-- **WHEN** source contains `"text"`, `b"bytes"`, `"""text"""`, and `b"""bytes"""`
-- **THEN** the lexer emits four literal tokens retaining their text-or-byte category, delimiter width, exact source span, and source slice
+- **WHEN** source contains `"text"`, `b"bytes"`, `r"text"`, `"""text"""`, `b"""bytes"""`, and `r"""text"""`
+- **THEN** the lexer emits six literal tokens retaining their text-or-byte category, delimiter width, exact source span, and source slice
+
+#### Scenario: Keep a modifier spelling usable as an identifier
+
+- **WHEN** source contains `r` and `b` where no quote delimiter follows either spelling
+- **THEN** each spelling remains one ordinary identifier token and produces no lexical diagnostic
 
 #### Scenario: Prefer the multiline delimiter
 
@@ -250,10 +259,11 @@ SHALL produce a lexical diagnostic rather than tokenize as an identifier followe
 An escaped single-line literal SHALL close at the first unescaped quote and SHALL otherwise stop
 immediately before a physical CR or LF. An escaped multiline literal SHALL close at the first
 unescaped run of three quotes and MAY contain physical line endings; if no closing delimiter
-exists, it SHALL consume through end-of-file. Each unterminated literal SHALL produce exactly one
-lexical diagnostic anchored to its introduction. Recovery MUST NOT infer a closing boundary from
-indentation, keywords, declarations, braces, comments, or other code-like content inside a
-multiline literal.
+exists, it SHALL consume through end-of-file. A raw literal SHALL treat a backslash as ordinary
+content and SHALL therefore close at the first run of its delimiter, under the same single-line and
+multiline rules. Each unterminated literal SHALL produce exactly one lexical diagnostic anchored to
+its introduction. Recovery MUST NOT infer a closing boundary from indentation, keywords,
+declarations, braces, comments, or other code-like content inside a multiline literal.
 
 #### Scenario: Recover an unterminated single-line literal
 
@@ -269,6 +279,11 @@ multiline literal.
 
 - **WHEN** a multiline literal body contains `\"\"\"` followed later by an unescaped `"""`
 - **THEN** the escaped quotes remain literal content and the later unescaped triple quote closes the token
+
+#### Scenario: Close a raw literal at its first delimiter run
+
+- **WHEN** source contains `r"path\"` followed by further source on the same line
+- **THEN** the raw literal closes at the quote after the backslash rather than continuing past it, and the following source lexes independently
 
 ### Requirement: Integer literals select a base from their prefix
 

@@ -7,12 +7,12 @@ export type Category = 'Text' | 'Bytes'
 export type DelimiterWidth = 1 | 3
 
 /** The body-decoding policy selected independently from delimiter width. */
-export type EscapePolicy = 'Escaped'
+export type EscapePolicy = 'Escaped' | 'Raw'
 
 /** Immutable source-form metadata shared by the compiler and editor tooling. */
 export interface LiteralForm {
   readonly category: Category
-  readonly modifier: '' | 'b'
+  readonly modifier: '' | 'b' | 'r'
   readonly delimiterWidth: DelimiterWidth
   readonly escapePolicy: EscapePolicy
   readonly tokenKind: 'TextLiteral' | 'ByteStringLiteral'
@@ -22,19 +22,21 @@ const make = (
   category: Category,
   modifier: LiteralForm['modifier'],
   delimiterWidth: DelimiterWidth,
+  escapePolicy: EscapePolicy,
   tokenKind: LiteralForm['tokenKind'],
-): LiteralForm =>
-  Object.freeze({ category, modifier, delimiterWidth, escapePolicy: 'Escaped', tokenKind })
+): LiteralForm => Object.freeze({ category, modifier, delimiterWidth, escapePolicy, tokenKind })
 
 /**
  * Every committed form, ordered by longest introduction first. Consumers that generate matching
  * rules can retain this order without reconstructing the language's precedence contract.
  */
 export const forms: ReadonlyArray<LiteralForm> = Object.freeze([
-  make('Bytes', 'b', 3, 'ByteStringLiteral'),
-  make('Text', '', 3, 'TextLiteral'),
-  make('Bytes', 'b', 1, 'ByteStringLiteral'),
-  make('Text', '', 1, 'TextLiteral'),
+  make('Bytes', 'b', 3, 'Escaped', 'ByteStringLiteral'),
+  make('Text', 'r', 3, 'Raw', 'TextLiteral'),
+  make('Text', '', 3, 'Escaped', 'TextLiteral'),
+  make('Bytes', 'b', 1, 'Escaped', 'ByteStringLiteral'),
+  make('Text', 'r', 1, 'Raw', 'TextLiteral'),
+  make('Text', '', 1, 'Escaped', 'TextLiteral'),
 ])
 
 const quote = 0x22
@@ -98,11 +100,15 @@ export interface Boundary {
   readonly terminated: boolean
 }
 
-/** Scans exactly one escaped literal body after its opening delimiter. */
+/**
+ * Scans exactly one literal body after its opening delimiter. A raw body never consults a
+ * backslash, so `r"path\"` closes at its own quote rather than at the next one.
+ */
 export const scanBoundary = (
   bytes: ByteSequence,
   contentStart: number,
   delimiterWidth: DelimiterWidth,
+  escapePolicy: EscapePolicy = 'Escaped',
 ): Boundary => {
   let index = contentStart
   while (index < bytes.length) {
@@ -116,7 +122,7 @@ export const scanBoundary = (
       index += 1
       continue
     }
-    if (bytes[index] === 0x5c && index + 1 < bytes.length) {
+    if (escapePolicy === 'Escaped' && bytes[index] === 0x5c && index + 1 < bytes.length) {
       if (delimiterWidth === 1 && (bytes[index + 1] === 0x0a || bytes[index + 1] === 0x0d)) {
         index += 1
       } else {

@@ -57,11 +57,24 @@ it('generates one longest-first TextMate rule for every committed literal form',
     literals.map((pattern) => ({ name: pattern.name, begin: pattern.begin })),
     [
       { name: 'string.quoted.triple.byte.silk', begin: '(b)(""")' },
+      { name: 'string.quoted.triple.raw.silk', begin: '(r)(""")' },
       { name: 'string.quoted.triple.silk', begin: '(""")' },
       { name: 'string.quoted.double.byte.silk', begin: '(b)(")' },
+      { name: 'string.quoted.double.raw.silk', begin: '(r)(")' },
       { name: 'string.quoted.double.silk', begin: '(")' },
     ],
   )
+})
+
+it('gives a raw literal rule no escape patterns and no backslash boundary guard', () => {
+  const raw = TextMate.grammar.patterns.filter(
+    (pattern) => pattern.name?.startsWith('string.quoted.') && pattern.name.includes('.raw.'),
+  )
+  assert.lengthOf(raw, 2)
+  for (const pattern of raw) {
+    assert.deepStrictEqual(pattern.patterns, [])
+    assert.notInclude(pattern.end ?? '', '\\\\')
+  }
 })
 
 it('the VS Code extension ships exactly this grammar and configuration', () => {
@@ -163,5 +176,9 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   assert.notInclude(scopesAt(multiline, '// not a comment'), 'comment.line.double-slash.silk')
   assert.include(scopesAt(multiline, 'return |>'), 'string.quoted.triple.silk')
   assert.include(scopesAt('b"""bytes\n// body\n"""', '// body'), 'string.quoted.triple.byte.silk')
+  assert.include(scopesAt('r"\\d+"', '\\d+'), 'string.quoted.double.raw.silk')
+  // A raw body has no escapes, so a backslash is content rather than an escape scope.
+  assert.notInclude(scopesAt('r"\\d+"', '\\d+'), 'constant.character.escape.silk')
+  assert.include(scopesAt('r"""raw\n// body\n"""', '// body'), 'string.quoted.triple.raw.silk')
   highlighter.dispose()
 })

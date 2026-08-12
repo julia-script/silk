@@ -120,6 +120,65 @@ it('recognizes all static-literal forms with exact multiline boundaries', () => 
   assert.deepEqual(result.diagnostics, [])
 })
 
+it('recognizes raw text literals in both delimiter widths without escape processing', () => {
+  const text = 'r"\\d+\\.\\d+" r"""raw\nbody\\n""" r"path\\" tail'
+  const source = SourceFile.make('memory://raw-literals.silk', ascii(text))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'TextLiteral', start: 0, end: 11, slice: 'r"\\d+\\.\\d+"' },
+      { kind: 'TextLiteral', start: 12, end: 29, slice: 'r"""raw\nbody\\n"""' },
+      // A raw body never consults a backslash, so this closes at its own quote.
+      { kind: 'TextLiteral', start: 30, end: 38, slice: 'r"path\\"' },
+      { kind: 'Identifier', start: 39, end: 43, slice: 'tail' },
+      { kind: 'EndOfFile', start: 43, end: 43, slice: '' },
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('keeps the raw modifier spelling an identifier away from a quote delimiter', () => {
+  const source = SourceFile.make('memory://raw-identifier.silk', ascii('r rb"value" return'))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['Identifier', 'InvalidStaticLiteral', 'ReturnKeyword', 'EndOfFile'],
+  )
+  assert.deepEqual(
+    result.diagnostics.map(({ code, reason }) => ({ code, reason })),
+    [{ code: 'LEX0002', reason: { _tag: 'UnknownLiteralModifier', modifier: 'rb' } }],
+  )
+})
+
+it('recovers an unterminated raw literal with exactly one diagnostic', () => {
+  const source = SourceFile.make('memory://raw-unterminated.silk', ascii('r"broken\nnext'))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens.map((token) => token.kind),
+    ['InvalidStaticLiteral', 'Whitespace', 'Identifier', 'EndOfFile'],
+  )
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['LEX0003'],
+  )
+
+  const multiline = Lexer.lex(
+    SourceFile.make('memory://raw-unterminated-multiline.silk', ascii('r"""code-like\nfn f() { }')),
+  )
+  assert.deepEqual(
+    multiline.tokens.map((token) => token.kind),
+    ['InvalidStaticLiteral', 'EndOfFile'],
+  )
+  assert.deepEqual(
+    multiline.diagnostics.map((diagnostic) => diagnostic.code),
+    ['LEX0003'],
+  )
+  assert.strictEqual(multiline.tokens[0]?.span.end, multiline.source.bytes.length)
+})
+
 it('diagnoses reserved modifiers and unterminated delimiters once with committed recovery', () => {
   const unknown = Lexer.lex(
     SourceFile.make('memory://unknown-modifiers.silk', ascii('future"value" br"""value"""')),

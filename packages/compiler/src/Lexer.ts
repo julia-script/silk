@@ -339,6 +339,7 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
         bytes,
         start + modifierWidth + delimiterWidth,
         delimiterWidth,
+        form?.escapePolicy ?? 'Escaped',
       )
       index = boundary.end
       const span = pushToken(

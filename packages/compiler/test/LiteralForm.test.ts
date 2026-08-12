@@ -22,6 +22,13 @@ it('recognizes every committed form longest-first', () => {
       },
       {
         category: 'Text',
+        modifier: 'r',
+        delimiterWidth: 3,
+        escapePolicy: 'Raw',
+        tokenKind: 'TextLiteral',
+      },
+      {
+        category: 'Text',
         modifier: '',
         delimiterWidth: 3,
         escapePolicy: 'Escaped',
@@ -36,6 +43,13 @@ it('recognizes every committed form longest-first', () => {
       },
       {
         category: 'Text',
+        modifier: 'r',
+        delimiterWidth: 1,
+        escapePolicy: 'Raw',
+        tokenKind: 'TextLiteral',
+      },
+      {
+        category: 'Text',
         modifier: '',
         delimiterWidth: 1,
         escapePolicy: 'Escaped',
@@ -45,6 +59,19 @@ it('recognizes every committed form longest-first', () => {
   )
   assert.strictEqual(LiteralForm.recognize(bytes('"""body"""'))?.delimiterWidth, 3)
   assert.strictEqual(LiteralForm.recognize(bytes('b"""body"""'))?.delimiterWidth, 3)
+  assert.strictEqual(LiteralForm.recognize(bytes('r"""body"""'))?.delimiterWidth, 3)
+})
+
+it('scans a raw boundary without consulting a backslash', () => {
+  // `r"path\"` closes at its own quote; the escaped form would swallow it and run on.
+  assert.deepEqual(LiteralForm.scanBoundary(bytes('r"path\\" tail'), 2, 1, 'Raw'), {
+    end: 8,
+    terminated: true,
+  })
+  assert.deepEqual(LiteralForm.scanBoundary(bytes('"path\\" tail'), 1, 1, 'Escaped'), {
+    end: 12,
+    terminated: false,
+  })
 })
 
 it('reserves identifier-like unknown modifiers without accepting them as forms', () => {
