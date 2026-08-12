@@ -33,12 +33,16 @@ const open = (
     return { document, snapshot }
   })
 
-const positionOf = (source: string, spelling: string, occurrence = 0) => {
-  let offset = -1
-  for (let index = 0; index <= occurrence; index += 1) offset = source.indexOf(spelling, offset + 1)
+const positionAt = (source: string, offset: number) => {
   const before = source.slice(0, offset)
   const lineStart = before.lastIndexOf('\n') + 1
   return { line: before.split('\n').length - 1, character: offset - lineStart }
+}
+
+const positionOf = (source: string, spelling: string, occurrence = 0) => {
+  let offset = -1
+  for (let index = 0; index <= occurrence; index += 1) offset = source.indexOf(spelling, offset + 1)
+  return positionAt(source, offset)
 }
 
 it.effect('publishes compiler errors as protocol diagnostics', () =>
@@ -856,6 +860,73 @@ it.effect('refuses to rename a declaration the installed toolchain owns', () =>
       // The editor is never offered the rename UI for a toolchain-owned declaration either.
       assert.isUndefined(Document.prepareRename(document, snapshot, position))
     }
+  }),
+)
+
+const boolAlias =
+  'import silk.bool { equals as eq }\npub fn main() -> bool { return eq(true, true) }'
+// `eq` never spells `equals`, so these two offsets are the whole extent of the alias.
+const aliasBinding = boolAlias.indexOf(' as eq') + ' as '.length
+const aliasCall = boolAlias.indexOf('eq(')
+
+it.effect('renames a local alias of a toolchain import, which the project owns', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject([{ module: 'main', text: boolAlias }], 'main')
+    assert.isDefined(toolchainUri)
+    // The alias is renameable from its binding and from its use: both name `main`'s own binding.
+    for (const offset of [aliasBinding, aliasCall]) {
+      const position = positionAt(boolAlias, offset)
+      const renamed = Document.rename(document, snapshot, position, 'same', uriOfModule)
+      assert.strictEqual(renamed?._tag, 'RenameEdit')
+      if (renamed?._tag !== 'RenameEdit') return
+      const changes = renamed.edit.changes ?? {}
+      // Only the project module is edited: the `equals` half of the clause keeps its spelling.
+      assert.deepEqual(Object.keys(changes), [uriOfModule('main')])
+      assert.deepEqual(
+        changes[uriOfModule('main')]?.map((edit) => ({
+          ...edit.range.start,
+          newText: edit.newText,
+        })),
+        [
+          { ...positionAt(boolAlias, aliasBinding), newText: 'same' },
+          { ...positionAt(boolAlias, aliasCall), newText: 'same' },
+        ],
+      )
+      // Prepare must never grey out F2 where the rename itself succeeds.
+      assert.deepEqual(Document.prepareRename(document, snapshot, position), {
+        range: {
+          start: position,
+          end: { line: position.line, character: position.character + 'eq'.length },
+        },
+        placeholder: 'eq',
+      })
+    }
+  }),
+)
+
+it.effect('refuses a toolchain-owned rename before any flat-namespace collision', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [{ module: 'main', text: boolConsumer }],
+      'main',
+    )
+    // `main` already occupies this module's flat namespace, so both refusals apply at once and
+    // the toolchain one must win: no new spelling can make this rename legal.
+    const both = Document.rename(
+      document,
+      snapshot,
+      positionOf(boolConsumer, 'equals'),
+      'main',
+      uriOfModule,
+    )
+    assert.strictEqual(both?._tag, 'RenameRefusal')
+    if (both?._tag !== 'RenameRefusal') return
+    assert.strictEqual(both.code, 'LSP0002')
+    // A collision with no toolchain edit behind it still reports the binding conflict.
+    assert.deepEqual(
+      Document.rename(document, snapshot, positionOf(boolConsumer, 'main'), 'equals', uriOfModule),
+      { _tag: 'RenameRefusal', code: 'SEM0016', message: 'Multiple bindings claim equals' },
+    )
   }),
 )
 
