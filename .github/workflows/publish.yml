@@ -1,9 +1,9 @@
 name: Release
 
+# Disabled while the project is internal and the package names are not settled — publishing now
+# would squat names that are about to change. Re-enable by restoring the `push` trigger below.
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
