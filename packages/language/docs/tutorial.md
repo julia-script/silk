@@ -25,6 +25,7 @@ You get this layout:
 ```
 hello/
   silk.toml      # [package] name, version, root
+  .gitignore     # ignores the build/ directory
   src/main.silk  # the entry point named by root
 ```
 
