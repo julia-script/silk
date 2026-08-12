@@ -1230,9 +1230,29 @@ const emitOperation = (
             walk(plan_.element, byteOffset + index * representation.stride),
           ).flat()
         }
-        case 'UnionCleanup':
+        case 'UnionCleanup': {
           if (plan_.cases.every((entry) => !planHasHook(entry.cleanup))) return []
-          throw new RangeError('Wasm cleanup does not yet lower hook-bearing union cases')
+          const entry = LayoutPlan.entry(memory.plan, plan_.type)
+          const representation = entry?.representation
+          if (representation?._tag !== 'Union') return []
+          // Only the live case owns the payload, so each hook-bearing case runs guarded on the
+          // union's own tag. The tag sits at the union's base and the payload at its offset.
+          return plan_.cases.flatMap((caseEntry) =>
+            planHasHook(caseEntry.cleanup)
+              ? [
+                  ...frameAddress(planned.offset + byteOffset),
+                  Instr.memoryAccess('i32.load', memory.memory),
+                  Instr.i32Const(caseEntry.ordinal),
+                  Instr.op('i32.eq'),
+                  Instr.ifElse(
+                    Instr.emptyBlockType,
+                    walk(caseEntry.cleanup, byteOffset + representation.payloadOffset),
+                    [],
+                  ),
+                ]
+              : [],
+          )
+        }
         default:
           return []
       }
@@ -1330,9 +1350,29 @@ const emitOperation = (
             walk(plan_.element, byteOffset + index * representation.stride),
           ).flat()
         }
-        case 'UnionCleanup':
+        case 'UnionCleanup': {
           if (plan_.cases.every((entry) => !planHasHook(entry.cleanup))) return []
-          throw new RangeError('Wasm slot cleanup does not yet lower hook-bearing union cases')
+          const entry = LayoutPlan.entry(memory.plan, plan_.type)
+          const representation = entry?.representation
+          if (representation?._tag !== 'Union') return []
+          // Only the live case owns the payload, so each hook-bearing case runs guarded on the
+          // union's own tag. The tag sits at the union's base and the payload at its offset.
+          return plan_.cases.flatMap((caseEntry) =>
+            planHasHook(caseEntry.cleanup)
+              ? [
+                  ...addressAt(byteOffset),
+                  Instr.memoryAccess('i32.load', memory.memory),
+                  Instr.i32Const(caseEntry.ordinal),
+                  Instr.op('i32.eq'),
+                  Instr.ifElse(
+                    Instr.emptyBlockType,
+                    walk(caseEntry.cleanup, byteOffset + representation.payloadOffset),
+                    [],
+                  ),
+                ]
+              : [],
+          )
+        }
         default:
           return []
       }
