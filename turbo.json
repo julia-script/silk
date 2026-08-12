@@ -30,6 +30,15 @@
     "test": {
       "dependsOn": ["build"],
       "outputs": []
+    },
+    "@silk-effect/compiler#test": {
+      "dependsOn": ["build", "@silk-effect/documentation#build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/language/docs/diagnostics.md",
+        "$TURBO_ROOT$/packages/language/docs/stdlib.md"
+      ],
+      "outputs": []
     }
   }
 }
