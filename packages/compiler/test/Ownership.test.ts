@@ -253,6 +253,49 @@ pub fn main() -> i32 {
   assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Violation')
 })
 
+it('consumes a take effect parameter on its first run and rejects a repeated run', () => {
+  const facts = check(
+    'ownership://take-effect-parameter.silk',
+    `pub effect fn twice<A, !E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
+  let first = run self
+  return run self
+}`,
+  )
+
+  assert.deepEqual(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0001'],
+  )
+  assert.strictEqual(facts.functions.at(0)?.verdict._tag, 'Violation')
+})
+
+it('accepts a single run of a take effect parameter', () => {
+  const facts = check(
+    'ownership://take-effect-parameter-single.silk',
+    `pub effect fn flattenLike<A, !E, !F, ?R, ?S>(
+  self: once Effect<Effect<A ! F ? S> ! E ? R>
+) -> A ! E | F ? R | S {
+  let inner = run self
+  return run inner
+}`,
+  )
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(facts.functions.at(0)?.verdict._tag, 'Satisfied')
+})
+
+it('allows a shared effect parameter to run repeatedly', () => {
+  const facts = check(
+    'ownership://shared-effect-parameter.silk',
+    `pub effect fn twiceShared<?R>(self: Effect<i32 ? R>) -> i32 ? R {
+  return (run self) + (run self)
+}`,
+  )
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(facts.functions.at(0)?.verdict._tag, 'Satisfied')
+})
+
 it('derives take-once execution from an effect-block moved capture', () => {
   const facts = check(
     'ownership://take-effect-block.silk',

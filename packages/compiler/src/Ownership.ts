@@ -634,13 +634,14 @@ const checkExpression = (
       return
     }
     case 'Run': {
+      const site = useSite(expression.subject)
       if (
-        expression.subject._tag === 'BindingReference' &&
+        site !== undefined &&
+        expression.subject._tag !== 'Unavailable' &&
         Type.isEffect(expression.subject.type) &&
         expression.subject.type.access === 'Take'
       ) {
-        const site = useSite(expression.subject)
-        if (site !== undefined) checkUse(state, live, site, expression.span, true)
+        checkUse(state, live, site, expression.span, true)
       } else checkExpression(state, live, expression.subject, false, guard, escaping)
       return
     }
