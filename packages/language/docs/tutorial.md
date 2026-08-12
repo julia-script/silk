@@ -103,8 +103,9 @@ Notes on what is *not* here:
 
 - There is no `for` loop, no iterator, and no range. `while` is the whole vocabulary, plus `break`
   and `continue`.
-- `if` is a statement, not an expression. There is no `let x = if ...`; use `match` to select a
-  value.
+- `if` is a statement, not an expression. There is no `let x = if ...`. Declare the binding `mut`
+  and assign it in each branch, or `return` from the branches. (`match` *is* an expression, but its
+  scrutinee must be a struct or union — it cannot branch on a scalar comparison.)
 - Conditions take no parentheses and the braces are mandatory.
 
 Arithmetic is homogeneous: both operands must already be the *same* integer type. Silk performs no

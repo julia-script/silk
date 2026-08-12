@@ -623,6 +623,10 @@ syntax:
 
 A bare `match` on a non-copyable scrutinee is rejected: the mode must be explicit.
 
+The scrutinee must be a nominal type or a union of nominal members, in every mode. `match` is not a
+general switch — matching a scalar such as an `i32`, or a borrow of one, is `SEM0041` ("Cannot match
+non-nominal type"). Use `if` / `else if` to branch on a scalar.
+
 Arms are separated by line breaks and need no commas. Each arm is `pattern [if guard] => expression`.
 Patterns destructure fields by name, bind a whole member with `Member name`, acknowledge omitted
 fields with `..`, and match anything with `_`. A pattern without `..` must name every field exactly
