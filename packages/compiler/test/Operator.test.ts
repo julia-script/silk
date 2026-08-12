@@ -11,7 +11,9 @@ it('publishes the closed prefix vocabulary', () => {
   assert.strictEqual(Operator.prefixSpelling('BitNot'), '~')
 })
 
-it('orders the bitwise level below equality and above the pipeline', () => {
+it('orders the three bitwise levels between additive and relational operators', () => {
+  const additive = Operator.infix('Plus')
+  const relational = Operator.infix('Less')
   const equality = Operator.infix('EqualEqual')
   const and = Operator.infix('Ampersand')
   const or = Operator.infix('Pipe')
@@ -20,7 +22,15 @@ it('orders the bitwise level below equality and above the pipeline', () => {
   assert.notStrictEqual(and, undefined)
   assert.notStrictEqual(or, undefined)
   assert.notStrictEqual(xor, undefined)
-  if (equality === undefined || and === undefined || or === undefined || xor === undefined) return
+  if (
+    additive === undefined ||
+    relational === undefined ||
+    equality === undefined ||
+    and === undefined ||
+    or === undefined ||
+    xor === undefined
+  )
+    return
 
   assert.deepEqual(
     [and.operator, or.operator, xor.operator],
@@ -29,17 +39,19 @@ it('orders the bitwise level below equality and above the pipeline', () => {
   )
   assert.deepEqual([and.spelling, or.spelling, xor.spelling], ['&', '|', '^'])
   for (const info of [and, or, xor]) {
-    assert.strictEqual(info.precedence < equality.precedence, true)
+    assert.strictEqual(info.precedence < additive.precedence, true)
+    assert.strictEqual(info.precedence > relational.precedence, true)
+    assert.strictEqual(info.precedence > equality.precedence, true)
     assert.strictEqual(info.precedence > Operator.pipelinePrecedence, true)
+    assert.strictEqual(info.precedence < Operator.prefixPrecedence, true)
     assert.strictEqual(info.associativity, 'Left')
     assert.strictEqual(Object.isFrozen(info), true)
   }
   assert.strictEqual(
-    and.precedence === or.precedence && or.precedence === xor.precedence,
+    and.precedence > xor.precedence && xor.precedence > or.precedence,
     true,
-    'the three bitwise spellings share one precedence level',
+    '`&` binds tighter than `^`, which binds tighter than `|`',
   )
-  assert.strictEqual(and.precedence < Operator.prefixPrecedence, true)
 })
 
 it('targets the named bitwise operation of the selected integer actor', () => {

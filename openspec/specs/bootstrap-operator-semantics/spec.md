@@ -36,21 +36,28 @@ The language SHALL recognize prefix `-`, `!`, and `~`; multiplicative `*`, `/`, 
 `|`; and pipeline `|>`. Grouping parentheses SHALL override precedence.
 Primary and grouped expressions SHALL bind most tightly,
 followed by right-associative prefix operators, left-associative multiplicative operators,
-left-associative additive operators, non-associative relational operators, non-associative equality
-operators, left-associative bitwise operators, and left-associative pipelines. The three bitwise
-operators SHALL share one precedence level, so `a | b & c` groups as `(a | b) & c` and only
-grouping parentheses may reorder them. Chaining a non-associative comparison without explicit
+left-associative additive operators, the three left-associative bitwise operators, non-associative
+relational operators, non-associative equality operators, and left-associative pipelines. The
+bitwise operators SHALL occupy three distinct precedence levels that bind tighter than every
+comparison and looser than every additive operator, ordered `&` tighter than `^` and `^` tighter
+than `|`, so `a | b & c` groups as `a | (b & c)` and `a & b == c` groups as `(a & b) == c`.
+Chaining a non-associative comparison without explicit
 grouping SHALL be a parser error rather than an implicit multi-way comparison.
 
-#### Scenario: Bind bitwise operators below equality and above pipelines
+#### Scenario: Bind bitwise operators above comparison and above pipelines
 
 - **WHEN** a body spells `a & b |> f`
-- **THEN** the expression groups as `(a & b) |> f`, and `a & b == c` groups as `a & (b == c)`
+- **THEN** the expression groups as `(a & b) |> f`, and `a & b == c` groups as `(a & b) == c`
+
+#### Scenario: Order the three bitwise levels against one another
+
+- **WHEN** a body returns `8 | 1 ^ 3 & 2`
+- **THEN** the expression groups as `8 | (1 ^ (3 & 2))` and evaluates to `11`
 
 #### Scenario: Apply bitwise left associativity
 
 - **WHEN** a body returns `8 | 1 & 2`
-- **THEN** the expression groups as `(8 | 1) & 2` and evaluates to `0`
+- **THEN** the expression groups as `8 | (1 & 2)` and evaluates to `8`
 
 #### Scenario: Apply arithmetic precedence
 

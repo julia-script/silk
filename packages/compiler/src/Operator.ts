@@ -67,6 +67,24 @@ const infixByToken: Readonly<Partial<Record<Token.TokenKind, InfixInfo>>> = Obje
     precedence: 40,
     associativity: 'Left',
   }),
+  Ampersand: Object.freeze({
+    operator: 'BitAnd',
+    spelling: '&',
+    precedence: 37,
+    associativity: 'Left',
+  }),
+  Caret: Object.freeze({
+    operator: 'BitXor',
+    spelling: '^',
+    precedence: 35,
+    associativity: 'Left',
+  }),
+  Pipe: Object.freeze({
+    operator: 'BitOr',
+    spelling: '|',
+    precedence: 33,
+    associativity: 'Left',
+  }),
   Less: Object.freeze({
     operator: 'LessThan',
     spelling: '<',
@@ -102,24 +120,6 @@ const infixByToken: Readonly<Partial<Record<Token.TokenKind, InfixInfo>>> = Obje
     spelling: '!=',
     precedence: 20,
     associativity: 'None',
-  }),
-  Ampersand: Object.freeze({
-    operator: 'BitAnd',
-    spelling: '&',
-    precedence: 15,
-    associativity: 'Left',
-  }),
-  Caret: Object.freeze({
-    operator: 'BitXor',
-    spelling: '^',
-    precedence: 15,
-    associativity: 'Left',
-  }),
-  Pipe: Object.freeze({
-    operator: 'BitOr',
-    spelling: '|',
-    precedence: 15,
-    associativity: 'Left',
   }),
 })
 
