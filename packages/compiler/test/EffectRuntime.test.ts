@@ -6,6 +6,7 @@ import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Driver from '../src/Driver.js'
+import * as Intrinsic from '../src/Intrinsic.js'
 import * as Mir from '../src/Mir.js'
 import type * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -66,6 +67,27 @@ pub fn main() -> i32 {
 }`
 const callableMapSource = `effect fn succeed(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return run succeed(2) |> Effect.map(i32.add(40)) }`
+const flattenPrelude = `effect fn inner(value: i32) -> i32 { return value * 2 }
+effect fn outer(value: i32) -> Effect<i32> { return inner(value) }`
+const flattenSource = `${flattenPrelude}
+pub fn main() -> i32 {
+  let nested = outer(21)
+  let flattened = Effect.flatten(move nested)
+  return run flattened
+}`
+const flattenPipedSource = `${flattenPrelude}
+pub fn main() -> i32 { return run (outer(21) |> Effect.flatten) }`
+const flattenRowsSource = `struct Outer { code: i32 }
+struct Inner { code: i32 }
+struct Clock {}
+struct Meter {}
+effect fn inner() -> i32 ! Inner ? &Meter { return 21 }
+effect fn outer() -> Effect<i32 ! Inner ? &Meter> ! Outer ? &Clock { return inner() }
+pub fn main() -> i32 {
+  let nested = outer()
+  let flattened = Effect.flatten(move nested)
+  return 0
+}`
 const pipelinePrelude = `struct Clock {}
 effect fn read() -> i32 ? &Clock { return 20 }
 fn add(value: i32) -> i32 { return value + 1 }
@@ -681,5 +703,111 @@ it.effect('retries with fresh locals and persistent captures across all runtimes
     if (compiled._tag !== 'Compiled') return
     const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 3, run.stderr)
+  }),
+)
+
+it.effect('flattens one nested Effect layer across evaluator, LLVM, and Wasm', () =>
+  Effect.gen(function* () {
+    for (const [name, text] of [
+      ['direct', flattenSource],
+      ['piped', flattenPipedSource],
+    ] as const) {
+      const native = yield* Analysis.ofSourceRealized(
+        `effect-runtime/flatten-${name}`,
+        ascii(text),
+        'aarch64-apple-darwin',
+      )
+      const wasm = yield* Analysis.ofSourceRealized(
+        `effect-runtime/flatten-${name}`,
+        ascii(text),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(native), [], name)
+      assert.deepEqual(Analysis.diagnostics(wasm), [], name)
+      assert.deepEqual(Mir.verify(Analysis.loweredMir(wasm)), [], name)
+
+      const logical = Analysis.evaluate(native)
+      assert.strictEqual(logical._tag, 'Completed', `${name}: ${JSON.stringify(logical)}`)
+      assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42, name)
+      const llvm = yield* Analysis.codegen(native, { mode: 'release' })
+      assert.include(llvm.ir, 'define', name)
+      const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42, name)
+    }
+  }),
+)
+
+it.effect('unions both failure rows and both requirement rows through flatten', () =>
+  Effect.gen(function* () {
+    const module = 'effect-runtime/flatten-rows'
+    const snapshot = yield* Analysis.ofSourceRealized(module, ascii(flattenRowsSource))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const encoded = Analysis.expressionsOf(snapshot, module).flatMap((expression) =>
+      expression._tag === 'Call' && expression.type._tag === 'Available'
+        ? [Type.encode(expression.type.type)]
+        : [],
+    )
+    assert.deepEqual(encoded, [
+      `Effect<i32 ! ${module}.Inner ? &${module}.Meter>`,
+      `Effect<Effect<i32 ! ${module}.Inner ? &${module}.Meter> ! ${module}.Outer ? &${module}.Clock>`,
+      `Effect<i32 ! ${module}.Inner | ${module}.Outer ? &${module}.Clock | &${module}.Meter>`,
+    ])
+  }),
+)
+
+it.effect('resolves flatten through the ordinary declaration path without an intrinsic', () =>
+  Effect.gen(function* () {
+    const module = 'effect-runtime/flatten-declaration'
+    const snapshot = yield* Analysis.ofSourceRealized(module, ascii(flattenSource))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const occurrence = Analysis.semanticOccurrenceAt(
+      snapshot,
+      module,
+      flattenSource.indexOf('Effect.flatten') + 'Effect.'.length,
+    )
+    assert.strictEqual(occurrence?.role, 'Value')
+    assert.strictEqual(occurrence?.declaration?.module, 'silk/effects')
+    assert.include(
+      occurrence === undefined
+        ? ''
+        : (Analysis.occurrencePresentation(snapshot, module, occurrence)?.text ?? ''),
+      'pub effect fn flatten',
+    )
+
+    const constructed = (Analysis.hirOf(snapshot, module)?.functions ?? []).flatMap((fn) =>
+      fn.statements.flatMap((statement) =>
+        statement._tag === 'Bind' && statement.initializer._tag === 'EffectConstruct'
+          ? [
+              {
+                module: statement.initializer.target.module,
+                name: statement.initializer.target.name,
+              },
+            ]
+          : [],
+      ),
+    )
+    assert.deepEqual(constructed, [
+      { module, name: 'outer' },
+      { module: 'silk/effects', name: 'flatten' },
+    ])
+
+    const intrinsics = new Set(
+      (snapshot.semanticOccurrences.modules.get(module)?.occurrences ?? []).flatMap((candidate) =>
+        candidate.resolution._tag === 'Available' &&
+        candidate.resolution.identity._tag === 'IntrinsicOperationIdentity'
+          ? [`${candidate.resolution.identity.id.actor}.${candidate.resolution.identity.id.name}`]
+          : [],
+      ),
+    )
+    assert.deepEqual([...intrinsics], ['Intrinsic.i32Multiply'])
+
+    const catalog = Intrinsic.all().flatMap((actor) =>
+      actor.operations.map((operation) => operation.spelling),
+    )
+    assert.include(catalog, 'effectResult')
+    assert.notInclude(catalog, 'flatten')
   }),
 )

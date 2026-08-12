@@ -87,6 +87,14 @@ pub effect fn flatMap<A, B, !E, !F, ?R, ?S>(
   }
 }
 
+/// Removes one Effect layer from a nested Effect.
+pub effect fn flatten<A, !E, !F, ?R, ?S>(
+  self: once Effect<Effect<A ! F ? S> ! E ? R>
+) -> A ! E | F ? R | S {
+  let inner = run self
+  return run inner
+}
+
 /// Runs an effectful callback while preserving its returned success value.
 pub effect fn tap<A, !E, !F, ?R, ?S>(
   self: once Effect<A ! E ? R>,
