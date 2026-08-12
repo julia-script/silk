@@ -9,6 +9,10 @@
   source doc comments.
 - **[Diagnostic index](./diagnostics.md)** — every compiler error code and what it means.
 
+The last two pages are generated. Regenerate them with `pnpm --filter @silk-effect/compiler
+documentation:generate`; `pnpm --filter @silk-effect/compiler test` fails while either page is
+stale, so a new stdlib module or diagnostic code cannot land without its page.
+
 ## This package
 
 `@silk-effect/language` provides editor support for Silk: a CodeMirror 6 extension whose
