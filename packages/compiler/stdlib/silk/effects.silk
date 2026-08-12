@@ -189,12 +189,32 @@ pub effect fn provideMut<A, C, P, !E, ?R>(
   return run bound
 }
 
+effect fn acquireProvider<A, C, !E, !F, ?R, ?S>(
+  self: once Effect<A ! E ? &mut C | R>,
+  acquire: Effect<C ! F ? S>
+) -> Result<A, Row<!E>> ! F ? R | S {
+  let mut provider = run acquire
+  let bound = Intrinsic.bindRequirement(result(move self), &mut provider)
+  return run bound
+}
+
 /// Acquires and lexically provides one typed service requirement.
+///
+/// The acquisition runs inside this body, so every execution acquires its own provider and a
+/// retried attempt never reuses an earlier one. The provider is released when `acquireProvider`
+/// returns, which is why the provided Effect is reified into Result data before it is bound: a
+/// typed failure then reaches this body as data rather than as a propagation that would leave
+/// the frame — and the acquired provider — behind. The failure is re-raised only after the
+/// provider is gone, so a recovering caller never observes it.
 pub effect fn provideWith<A, C, !E, !F, ?R, ?S>(
   self: once Effect<A ! E ? &mut C | R>,
   acquire: Effect<C ! F ? S>
 ) -> A ! E | F ? R | S {
-  let mut provider = run acquire
-  let bound = Intrinsic.bindRequirement(move self, &mut provider)
-  return run bound
+  let completed = run acquireProvider(move self, acquire)
+  return match move completed {
+    Result<A, Row<!E>> { value: outcome } => match move outcome {
+      Success<A> { value: success } => move success
+      Failure<Row<!E>> { error } => run raise(move error)
+    }
+  }
 }
