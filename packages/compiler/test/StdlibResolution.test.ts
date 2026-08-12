@@ -47,6 +47,66 @@ it('declares one namespace for every standard-library module', () => {
   assert.deepEqual(Stdlib.find('silk/option')?.aliases, ['None', 'Some'])
 })
 
+/** A namespace named only in a comment is prose, not a qualified actor. */
+const commented = `// TODO: replace with Result.succeed once effect rows land
+pub struct Result<A, F> { value: A }
+
+pub fn main() -> i32 {
+  return 0
+}`
+
+/** A namespace named only inside a static literal is inert text, not a qualified actor. */
+const quoted = `pub fn label() -> string {
+  return "Result.succeed"
+}
+
+pub struct Result<A, F> { value: A }
+
+pub fn main() -> i32 {
+  return 0
+}`
+
+/** A namespace genuinely called in code still injects its module. */
+const called = `pub fn main() -> i32 {
+  let outcome = Result.succeed<i32, i32>(42)
+  drop outcome
+  return 0
+}`
+
+it.effect('never injects a namespace named only inside a comment', () =>
+  Effect.gen(function* () {
+    // The closure scan is lexical: a commented mention leaves the user's own Result alone.
+    const snapshot = yield* Analysis.ofSourceRealized('stdlib/commented', ascii(commented))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.notInclude(
+      Analysis.modules(snapshot).map((module) => module.name),
+      'silk/result',
+    )
+  }),
+)
+
+it.effect('never injects a namespace named only inside a static literal', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized('stdlib/quoted', ascii(quoted))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.notInclude(
+      Analysis.modules(snapshot).map((module) => module.name),
+      'silk/result',
+    )
+  }),
+)
+
+it.effect('keeps injecting a namespace that one qualified call actually names', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized('stdlib/called', ascii(called))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.include(
+      Analysis.modules(snapshot).map((module) => module.name),
+      'silk/result',
+    )
+  }),
+)
+
 it.effect('resolves standard-library imports without vendoring source', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized('stdlib/importer', ascii(importing))
