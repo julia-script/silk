@@ -270,11 +270,8 @@ export const start = (): void => {
     const session = await acquire(parameters.textDocument.uri)
     if (Option.isNone(session)) return null
     return (
-      Document.signatureHelp(
-        session.value.document,
-        session.value.snapshot,
-        parameters.position,
-      ) ?? null
+      Document.signatureHelp(session.value.document, session.value.snapshot, parameters.position) ??
+      null
     )
   })
 
