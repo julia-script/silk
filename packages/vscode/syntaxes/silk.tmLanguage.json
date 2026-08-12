@@ -28,6 +28,25 @@
       ]
     },
     {
+      "name": "string.quoted.triple.raw.silk",
+      "begin": "(r)(\"\"\")",
+      "end": "(\"\"\")",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.modifier.raw.silk"
+        },
+        "2": {
+          "name": "punctuation.definition.string.begin.silk"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.string.end.silk"
+        }
+      },
+      "patterns": []
+    },
+    {
       "name": "string.quoted.triple.silk",
       "begin": "(\"\"\")",
       "end": "(?<!\\\\)(?:\\\\\\\\)*(\"\"\")",
@@ -71,6 +90,25 @@
           "match": "\\\\(?:[nrt0\"\\\\]|x[0-9A-Fa-f]{2}|u\\{[0-9A-Fa-f]{1,6}\\})"
         }
       ]
+    },
+    {
+      "name": "string.quoted.double.raw.silk",
+      "begin": "(r)(\")",
+      "end": "(\")|$",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.modifier.raw.silk"
+        },
+        "2": {
+          "name": "punctuation.definition.string.begin.silk"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.string.end.silk"
+        }
+      },
+      "patterns": []
     },
     {
       "name": "string.quoted.double.silk",

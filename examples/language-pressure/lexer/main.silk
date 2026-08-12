@@ -84,7 +84,8 @@ fn isLineCommentStart(source: &[u8], index: usize) -> bool {
 
 fn isLiteralStart(source: &[u8], index: usize) -> bool {
   if byteAtOrZero(source, index) == 34 { return true }
-  return hasPair(source, index, 98, 34)
+  if hasPair(source, index, 98, 34) { return true }
+  return hasPair(source, index, 114, 34)
 }
 
 fn hasTripleQuote(source: &[u8], index: usize) -> bool {
@@ -260,7 +261,8 @@ fn scanLiteral(
   modifierWidth: usize,
   delimiterWidth: usize,
   kind: u8,
-  alwaysInvalid: bool
+  alwaysInvalid: bool,
+  raw: bool
 ) -> Decision {
   let mut index = start + modifierWidth + delimiterWidth
   while index < source.length {
@@ -283,7 +285,9 @@ fn scanLiteral(
         return Decision { kind: kind, end: index + 3, invalid: false }
       }
     }
-    if byte == 92 {
+    let mut escaping = byte == 92
+    if raw { escaping = false }
+    if escaping {
       if index + 1 < source.length {
         let escaped = source[index + 1]
         if delimiterWidth == 1 {
@@ -370,14 +374,19 @@ fn nextToken(source: &[u8], start: usize) -> Decision {
   if isLiteralStart(source, start) {
     let mut kind = u8.add(7, 0)
     let mut modifierWidth = usize.add(0, 0)
+    let mut raw = false
     if byte == 98 {
       kind = u8.add(8, 0)
+      modifierWidth = usize.add(1, 0)
+    }
+    if byte == 114 {
+      raw = true
       modifierWidth = usize.add(1, 0)
     }
     let quoteStart = start + modifierWidth
     let mut delimiterWidth = usize.add(1, 0)
     if hasTripleQuote(source, quoteStart) { delimiterWidth = usize.add(3, 0) }
-    return scanLiteral(source, start, modifierWidth, delimiterWidth, kind, false)
+    return scanLiteral(source, start, modifierWidth, delimiterWidth, kind, false, raw)
   }
   if isIdentifierStart(byte) {
     let end = scanIdentifier(source, start)
@@ -390,7 +399,8 @@ fn nextToken(source: &[u8], start: usize) -> Decision {
         end - start,
         delimiterWidth,
         tokenInvalidStaticLiteral,
-        true
+        true,
+        false
       )
     }
     return Decision { kind: keywordKind(source, start, end), end: end, invalid: false }

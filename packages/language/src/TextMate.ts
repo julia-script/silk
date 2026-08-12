@@ -86,28 +86,31 @@ const literalPatterns: ReadonlyArray<GrammarPattern> = LiteralForm.forms.map((fo
   const delimiter = '"'.repeat(form.delimiterWidth)
   const byte = form.category === 'Bytes'
   const width = form.delimiterWidth === 3 ? 'triple' : 'double'
+  const raw = form.escapePolicy === 'Raw'
   const begin = form.modifier.length === 0 ? `(${delimiter})` : `(${form.modifier})(${delimiter})`
   const delimiterCapture = form.modifier.length === 0 ? '1' : '2'
+  const guard = raw ? '' : '(?<!\\\\)(?:\\\\\\\\)*'
   return {
-    name: `string.quoted.${width}${byte ? '.byte' : ''}.silk`,
+    name: `string.quoted.${width}${byte ? '.byte' : raw ? '.raw' : ''}.silk`,
     begin,
-    end:
-      form.delimiterWidth === 3
-        ? `(?<!\\\\)(?:\\\\\\\\)*(${delimiter})`
-        : '(?<!\\\\)(?:\\\\\\\\)*(")|$',
+    end: form.delimiterWidth === 3 ? `${guard}(${delimiter})` : `${guard}(")|$`,
     beginCaptures: {
-      ...(form.modifier.length === 0 ? {} : { '1': { name: 'storage.modifier.byte.silk' } }),
+      ...(form.modifier.length === 0
+        ? {}
+        : { '1': { name: `storage.modifier.${byte ? 'byte' : 'raw'}.silk` } }),
       [delimiterCapture]: { name: 'punctuation.definition.string.begin.silk' },
     },
     endCaptures: {
       '1': { name: 'punctuation.definition.string.end.silk' },
     },
-    patterns: [
-      {
-        name: 'constant.character.escape.silk',
-        match: '\\\\(?:[nrt0"\\\\]|x[0-9A-Fa-f]{2}|u\\{[0-9A-Fa-f]{1,6}\\})',
-      },
-    ],
+    patterns: raw
+      ? []
+      : [
+          {
+            name: 'constant.character.escape.silk',
+            match: '\\\\(?:[nrt0"\\\\]|x[0-9A-Fa-f]{2}|u\\{[0-9A-Fa-f]{1,6}\\})',
+          },
+        ],
   }
 })
 

@@ -273,6 +273,11 @@ const corpus = [
       '"text\\"tail" b"\\x41" """line 1\r\n// body\n\\"\\"\\"""" b"""bytes\n""" future"value" "unterminated\nnext',
   }),
   Object.freeze({
+    id: 'raw-literals',
+    input:
+      'r"\\d+\\.\\d+" r"""raw\\n\nbody\r\n""" r"path\\" tail r"unterminated\nrb"value" r return',
+  }),
+  Object.freeze({
     id: 'punctuation',
     input: '( ) { } [ ] : ; , = == => - + * / % ! != ? @ < <= > >= | |> & ^ ~ . .. ->',
   }),

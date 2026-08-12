@@ -29,8 +29,8 @@ lexer-specific or token-specific operations, layouts, or branches.
 
 The Silk lexer SHALL be differentially checked against the TypeScript lexer, which remains the
 canonical implementation. The corpus SHALL cover whitespace, comments, identifiers, every current
-keyword, decimal integer and float forms, single-line and multiline text and byte literals with
-valid and malformed escapes, recognized and unknown literal modifiers, physical LF and CRLF,
+keyword, decimal integer and float forms, single-line and multiline text, byte, and raw literals
+with valid and malformed escapes, recognized and unknown literal modifiers, physical LF and CRLF,
 terminated and unterminated delimiters, every current single and compound punctuation token,
 end-of-file, and unsupported byte runs.
 
