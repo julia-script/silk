@@ -792,6 +792,47 @@ it('lexes the closed operator vocabulary with longest match', () => {
   assert.deepEqual(result.diagnostics, [])
 })
 
+it('lexes all four bitwise bytes as punctuation without an unsupported-byte diagnostic', () => {
+  const source = SourceFile.make('memory/bitwise-operators', ascii('& | ^ ~ |>'))
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['Ampersand', 'Pipe', 'Caret', 'Tilde', 'PipeGreater', 'EndOfFile'],
+  )
+  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind === 'Caret' || token.kind === 'Tilde')
+      .map((token) => [token.span.start, token.span.end]),
+    [
+      [4, 5],
+      [6, 7],
+    ],
+  )
+})
+
+it('keeps base-prefixed and separated literals intact around the bitwise bytes', () => {
+  const source = SourceFile.make('memory/bitwise-literals', ascii('0xff ^ 0x0f ~0b1010 1_0 ^ 2'))
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    [
+      'DecimalInteger',
+      'Caret',
+      'DecimalInteger',
+      'Tilde',
+      'DecimalInteger',
+      'DecimalInteger',
+      'Caret',
+      'DecimalInteger',
+      'EndOfFile',
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
 it('distinguishes division from line comments', () => {
   const source = SourceFile.make('memory/operator-comments', ascii('/ // comment\n/'))
   const result = Lexer.lex(source)

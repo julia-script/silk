@@ -11,6 +11,8 @@ const tokenConst: u8 = 67
 const tokenInvalidStaticLiteral: u8 = 68
 const tokenService: u8 = 69
 const tokenInterface: u8 = 70
+const tokenCaret: u8 = 71
+const tokenTilde: u8 = 72
 
 struct Token {
   kind: u8
@@ -114,6 +116,8 @@ fn isPunctuation(byte: u8) -> bool {
   if byte == 62 { return true }
   if byte == 124 { return true }
   if byte == 38 { return true }
+  if byte == 94 { return true }
+  if byte == 126 { return true }
   return byte == 46
 }
 
@@ -204,6 +208,8 @@ fn punctuationKind(byte: u8) -> u8 {
   if byte == 62 { return 57 }
   if byte == 124 { return 59 }
   if byte == 38 { return 61 }
+  if byte == 94 { return tokenCaret }
+  if byte == 126 { return tokenTilde }
   if byte == 46 { return 62 }
   return 65
 }

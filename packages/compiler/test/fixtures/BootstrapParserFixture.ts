@@ -72,8 +72,8 @@ export const acceptedShape: ExpectedNodeShape = Object.freeze({
 
 export const missingNameSource = 'pub fn () -> i32 { return 42 }'
 export const missingRightBraceSource = 'pub fn main() -> i32 { return 42'
-export const unexpectedPunctuationSource = 'pub fn ^ main() -> i32 { return 42 }'
-export const whollyUnrelatedSource = '^^^'
+export const unexpectedPunctuationSource = 'pub fn $ main() -> i32 { return 42 }'
+export const whollyUnrelatedSource = '$$$'
 export const twoFunctionSource = `pub fn answer() -> i32 { return 42 }
 pub fn main() -> i32 { return 0 }`
 export const threeFunctionSource = `pub fn one() -> i32 { return 1 }
@@ -82,7 +82,7 @@ pub fn three() -> i32 { return 3 }`
 export const missingFirstRightBraceSource = `pub fn answer() -> i32 { return 42
 pub fn main() -> i32 { return 0 }`
 export const interFunctionPunctuationSource = `pub fn answer() -> i32 { return 42 }
-^^
+$$
 pub fn main() -> i32 { return 0 }`
 export const trailingTriviaSource = `pub fn main() -> i32 { return 42 }
 // trailing source trivia

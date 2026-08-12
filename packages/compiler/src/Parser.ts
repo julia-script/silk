@@ -203,6 +203,7 @@ const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'FalseKeyword',
   'Minus',
   'Bang',
+  'Tilde',
   'LeftParenthesis',
   'LeftBracket',
   'MatchKeyword',
@@ -422,7 +423,7 @@ const primaryKind = (
         : significantKindAfter(state, 1) === 'DecimalFloat'
           ? 'Floating'
           : 'Prefix'
-    if (token.kind === 'Bang') return 'Prefix'
+    if (token.kind === 'Bang' || token.kind === 'Tilde') return 'Prefix'
     if (token.kind === 'TrueKeyword' || token.kind === 'FalseKeyword') return 'Boolean'
     if (token.kind === 'MoveKeyword') return 'Move'
     if (token.kind === 'EffectKeyword' && significantKindAfter(state, 1) === 'LeftBrace')
@@ -1159,7 +1160,8 @@ function parsePrefixExpression(
     return parseProjectionChain(
       parsePrimaryExpression(initial, reservedForEnclosingCalls, recoveryKind, allowStructLiteral),
     )
-  const tokenKind = nextSignificantKind(initial) === 'Bang' ? 'Bang' : 'Minus'
+  const nextKind = nextSignificantKind(initial)
+  const tokenKind = nextKind === 'Bang' || nextKind === 'Tilde' ? nextKind : 'Minus'
   const operator = expect(initial, tokenKind, [...expressionStarts, ...expressionFollowing])
   const operand = parsePrefixExpression(
     operator.state,
