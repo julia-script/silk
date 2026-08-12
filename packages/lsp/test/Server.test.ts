@@ -656,6 +656,53 @@ it('serves project-wide references and renames over real stdio', { timeout: 30_0
     })
     const unrenameable = await client.waitFor((message) => failure(message, 5))
     assert.include(unrenameable.message, 'no renameable declaration')
+
+    // A name the installed toolchain declares is refused outright: applying the edit would rewrite
+    // the standard library shipped with the compiler, for this project and every other one.
+    const toolchainUri = 'file:///silk-lsp-e2e/rename/Toolchain.silk'
+    const toolchainText =
+      'import silk.bool { equals }\npub fn same() -> bool { return equals(true, true) }'
+    didOpen(client, toolchainUri, toolchainText)
+    await client.waitFor((message) => {
+      const diagnostics = publishedDiagnostics(message, toolchainUri)
+      return diagnostics !== undefined && diagnostics.length === 0 ? diagnostics : undefined
+    })
+    const imported = { line: 0, character: toolchainText.indexOf('equals') }
+
+    client.send({
+      id: 6,
+      method: 'textDocument/rename',
+      params: { textDocument: { uri: toolchainUri }, position: imported, newName: 'sameAs' },
+    })
+    const toolchainRefusal = await client.waitFor((message) => failure(message, 6))
+    assert.include(toolchainRefusal.message, 'LSP0002')
+    assert.include(toolchainRefusal.message, 'silk/bool')
+
+    client.send({
+      id: 7,
+      method: 'textDocument/prepareRename',
+      params: { textDocument: { uri: toolchainUri }, position: imported },
+    })
+    const unofferable = await client.waitFor((message) => failure(message, 7))
+    assert.include(unofferable.message, 'no renameable declaration')
+
+    // References stay read-only, so the toolchain declaration is still listed for the same name.
+    client.send({
+      id: 8,
+      method: 'textDocument/references',
+      params: {
+        textDocument: { uri: toolchainUri },
+        position: imported,
+        context: { includeDeclaration: true },
+      },
+    })
+    const toolchainLocations = (await client.waitFor((message) => response(message, 8))) as Array<{
+      uri: string
+    }>
+    assert.isTrue(
+      toolchainLocations.some((location) => location.uri.endsWith('/stdlib/silk/bool.silk')),
+      JSON.stringify(toolchainLocations),
+    )
   } finally {
     await client.close()
   }

@@ -2,8 +2,12 @@ import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silk-effect/compiler/Analysis'
 import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as SourceOrigin from '@silk-effect/compiler/SourceOrigin'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
+import * as Stdlib from '@silk-effect/compiler/Stdlib'
 import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import { SymbolKind } from 'vscode-languageserver-types'
 import * as Document from '../src/Document.js'
 
@@ -600,7 +604,43 @@ interface ProjectModule {
   readonly text: string
 }
 
-const uriOfModule = (module: string): string => `file:///project/${module}.silk`
+/**
+ * Mirrors `Workspace.uriOf`: a toolchain-shipped module answers with its real installed
+ * `file://` href, so an edit aimed at the standard library is visible as such in a test.
+ */
+const uriOfModule = (module: string): string =>
+  Stdlib.find(module)?.sourceUrl.href ?? `file:///project/${module}.silk`
+
+/**
+ * Mirrors the installed toolchain resolver: project modules come from memory while reserved
+ * standard-library modules carry the `ToolchainFile` origin a real installation reports.
+ */
+const toolchainResolver = (
+  sources: ReadonlyMap<string, Uint8Array>,
+): Layer.Layer<SourceResolver.SourceResolver> =>
+  Layer.succeed(SourceResolver.SourceResolver, {
+    resolve: (module) => {
+      const bytes = sources.get(module)
+      return Effect.succeed(
+        bytes === undefined
+          ? Option.none()
+          : Option.some(SourceResolver.resolved(bytes, SourceOrigin.memory())),
+      )
+    },
+    resolveStandardLibrary: (module) => {
+      const entry = Stdlib.find(module)
+      return Effect.succeed(
+        entry === undefined
+          ? Option.none()
+          : Option.some(
+              SourceResolver.resolved(
+                entry.bytes,
+                SourceOrigin.toolchainFile(entry.sourceUrl.href),
+              ),
+            ),
+      )
+    },
+  })
 
 /** Opens several modules as one analyzed project and focuses one of them as the request document. */
 const openProject = (
@@ -616,7 +656,7 @@ const openProject = (
     )
     const project = yield* ProjectAnalysis.make(
       modules.map(({ module }) => SourceFile.make(module, bytes.get(module) ?? new Uint8Array())),
-    ).pipe(Effect.provide(SourceResolver.memory(bytes)))
+    ).pipe(Effect.provide(toolchainResolver(bytes)))
     const snapshot = ProjectAnalysis.view(project, focus)
     if (snapshot === undefined) throw new Error(`Project analysis lost focused root ${focus}`)
     return {
@@ -790,6 +830,88 @@ it.effect('renames the imported source name without disturbing a local alias', (
         newText: edit.newText,
       })),
       [{ line: 0, character: aliased.indexOf('area'), newText: 'surface' }],
+    )
+  }),
+)
+
+const toolchainUri = Stdlib.find('silk/bool')?.sourceUrl.href
+const boolConsumer =
+  'import silk.bool { equals }\npub fn main() -> bool { return equals(true, true) }'
+
+it.effect('refuses to rename a declaration the installed toolchain owns', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [{ module: 'main', text: boolConsumer }],
+      'main',
+    )
+    assert.isDefined(toolchainUri)
+    // The import binding and the call site both reach the same toolchain-owned declaration.
+    for (const occurrence of [0, 1]) {
+      const position = positionOf(boolConsumer, 'equals', occurrence)
+      const renamed = Document.rename(document, snapshot, position, 'sameAs', uriOfModule)
+      assert.strictEqual(renamed?._tag, 'RenameRefusal')
+      if (renamed?._tag !== 'RenameRefusal') return
+      assert.strictEqual(renamed.code, 'LSP0002')
+      assert.include(renamed.message, 'silk/bool')
+      // The editor is never offered the rename UI for a toolchain-owned declaration either.
+      assert.isUndefined(Document.prepareRename(document, snapshot, position))
+    }
+  }),
+)
+
+const boolHelper =
+  'import silk.bool { equals }\npub fn same(left: bool, right: bool) -> bool { return equals(left, right) }'
+const boolCaller = 'import helper { same }\npub fn main() -> bool { return same(true, true) }'
+
+it.effect('renames a project declaration used beside toolchain imports without touching them', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'helper', text: boolHelper },
+        { module: 'main', text: boolCaller },
+      ],
+      'helper',
+    )
+    const renamed = Document.rename(
+      document,
+      snapshot,
+      positionOf(boolHelper, 'same'),
+      'identical',
+      uriOfModule,
+    )
+    assert.strictEqual(renamed?._tag, 'RenameEdit')
+    if (renamed?._tag !== 'RenameEdit') return
+    const changes = renamed.edit.changes ?? {}
+    assert.deepEqual(Object.keys(changes).sort(), [uriOfModule('helper'), uriOfModule('main')])
+    // No edit may land in the toolchain installation, whatever the project's closure contains.
+    assert.isEmpty(
+      Object.keys(changes).filter((uri) => uri === toolchainUri || uri.includes('/stdlib/')),
+    )
+  }),
+)
+
+it.effect('still lists the toolchain declaration among a standard-library name references', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [{ module: 'main', text: boolConsumer }],
+      'main',
+    )
+    const locations = Document.references(
+      document,
+      snapshot,
+      positionOf(boolConsumer, 'equals'),
+      true,
+      uriOfModule,
+    )
+    assert.isDefined(locations)
+    // References stay read-only and complete: the toolchain declaration is useful to show.
+    assert.include(
+      locations?.map(({ uri }) => uri),
+      toolchainUri,
+    )
+    assert.include(
+      locations?.map(({ uri }) => uri),
+      uriOfModule('main'),
     )
   }),
 )

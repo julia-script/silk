@@ -230,6 +230,14 @@ const matchesOfIdentity = (
   return Object.freeze(matches)
 }
 
+/**
+ * Tests whether one module's exact bytes came from the installed compiler toolchain. Origin is the
+ * only trustworthy signal: a module-name prefix such as `silk/` is spoofable by a project module
+ * and would miss toolchain sources shipped outside the reserved namespace.
+ */
+const isToolchainModule = (snapshot: Analysis.FrontendSnapshot, module: string): boolean =>
+  Analysis.sources(snapshot).get(module)?.origin._tag === 'ToolchainFile'
+
 /** Returns one span's exact analyzed spelling, or `undefined` for an unloaded module. */
 const spellingOf = (
   snapshot: Analysis.FrontendSnapshot,
@@ -290,7 +298,9 @@ export type Rename = RenameEdit | RenameRefusal
 
 /**
  * Returns the name token a rename would replace. A token with no source-backed declaration, such
- * as a keyword, trivia, or an intrinsic with no Silk declaration, has no renameable name.
+ * as a keyword, trivia, or an intrinsic with no Silk declaration, has no renameable name. A
+ * declaration the installed toolchain owns has none either, so no editor offers the rename UI for
+ * a name the request would only refuse.
  */
 export const prepareRename = (
   self: Document,
@@ -304,6 +314,7 @@ export const prepareRename = (
   )
   if (occurrence?.resolution._tag !== 'Available' || occurrence.declaration === undefined)
     return undefined
+  if (isToolchainModule(snapshot, occurrence.declaration.module)) return undefined
   const placeholder = spellingOf(snapshot, self.module, occurrence.span)
   return placeholder === undefined
     ? undefined
@@ -344,7 +355,9 @@ const flatNamespaceRefusal = (
  * Renames one semantic identity across every module of the analyzed project. Only occurrences
  * whose analyzed spelling equals the selected name are edited: an imported member and its local
  * alias share one identity, so an alias keeps the local name its own module chose. The rename is
- * refused rather than partially applied when any occurrence cannot be placed in a document.
+ * refused rather than partially applied when any occurrence cannot be placed in a document, or
+ * when any occurrence lives in a source the installed toolchain owns: editors apply a workspace
+ * edit unprompted, and the standard library belongs to the installation, not to one project.
  */
 export const rename = (
   self: Document,
@@ -362,6 +375,13 @@ export const rename = (
     return undefined
   const spelling = spellingOf(snapshot, self.module, occurrence.span)
   if (spelling === undefined) return undefined
+  const declaringModule = occurrence.declaration.module
+  if (isToolchainModule(snapshot, declaringModule))
+    return Object.freeze({
+      _tag: 'RenameRefusal',
+      code: 'LSP0002',
+      message: `${spelling} is declared in ${declaringModule}, which the installed toolchain owns and cannot be renamed`,
+    })
   const identity = occurrence.resolution.identity
   const matches = matchesOfIdentity(snapshot, identity).filter(
     (match) => spellingOf(snapshot, match.module, match.occurrence.span) === spelling,
@@ -371,6 +391,14 @@ export const rename = (
   const indexOf = lineIndexes(self, snapshot)
   const changes: Record<string, Array<TextEdit>> = {}
   for (const match of matches) {
+    // A project-declared identity should never reach a toolchain source, but an edit aimed at the
+    // installation is damaging enough that the whole rename is refused rather than trimmed.
+    if (isToolchainModule(snapshot, match.module))
+      return Object.freeze({
+        _tag: 'RenameRefusal',
+        code: 'LSP0002',
+        message: `Renaming ${spelling} would edit ${match.module}, which the installed toolchain owns`,
+      })
     const uri = match.module === self.module ? self.uri : uriOf(match.module)
     const index = indexOf(match.module)
     if (uri === undefined || index === undefined)
