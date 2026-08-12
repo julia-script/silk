@@ -1068,3 +1068,136 @@ it.effect('keeps one module alias rename out of another module that chose the sa
     )
   }),
 )
+
+const wholeDocument = (text: string) => ({
+  start: { line: 0, character: 0 },
+  end: positionAt(text, text.length),
+})
+
+const redundantAlias =
+  'import geometry as geometry\npub fn main() -> i32 { return geometry.area(1, 2) }'
+
+it.effect('offers one quick fix that deletes a redundant alias clause', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'main', text: redundantAlias },
+      ],
+      'main',
+    )
+    const actions = Document.codeActions(
+      document,
+      snapshot,
+      wholeDocument(redundantAlias),
+      uriOfModule,
+    )
+    assert.strictEqual(actions.length, 1)
+    const action = actions[0]
+    assert.strictEqual(action?.title, 'Remove the redundant alias')
+    assert.strictEqual(action?.kind, 'quickfix')
+    // The action names the diagnostic it corrects, so the editor attaches it to that lightbulb.
+    assert.strictEqual(action?.diagnostics?.[0]?.code, 'SEM0013')
+    assert.deepEqual(action?.edit?.changes?.[uriOfModule('main')], [
+      {
+        range: {
+          start: positionAt(redundantAlias, redundantAlias.indexOf(' as geometry')),
+          end: positionAt(
+            redundantAlias,
+            redundantAlias.indexOf(' as geometry') + ' as geometry'.length,
+          ),
+        },
+        newText: '',
+      },
+    ])
+  }),
+)
+
+it.effect('offers no code action for a diagnostic that carries no edit', () =>
+  Effect.gen(function* () {
+    const source = 'pub fn main() -> i32 { return missing() }'
+    const { document, snapshot } = yield* open(source)
+    assert.strictEqual(
+      Document.diagnostics(document, snapshot, () => undefined)[0]?.code,
+      'SEM0004',
+    )
+    assert.deepEqual(
+      Document.codeActions(document, snapshot, wholeDocument(source), () => undefined),
+      [],
+    )
+  }),
+)
+
+const twoAliases = `import geometry as geometry
+import shapes as shapes
+pub fn main() -> i32 { return geometry.area(1, 2) + shapes.sides() }`
+
+it.effect('returns the quick fixes of two diagnostics in diagnostic order', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'shapes', text: 'pub fn sides() -> i32 { return 4 }' },
+        { module: 'main', text: twoAliases },
+      ],
+      'main',
+    )
+    const actions = Document.codeActions(document, snapshot, wholeDocument(twoAliases), uriOfModule)
+    assert.deepEqual(
+      actions.map((action) => action.edit?.changes?.[uriOfModule('main')]?.[0]?.range.start),
+      [
+        positionAt(twoAliases, twoAliases.indexOf(' as geometry')),
+        positionAt(twoAliases, twoAliases.indexOf(' as shapes')),
+      ],
+    )
+  }),
+)
+
+const nonAsciiAlias = `// π🙂
+import geometry as geometry
+pub fn main() -> i32 { return geometry.area(1, 2) }`
+
+it.effect('measures a quick fix range in UTF-16 units after non-ASCII source', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'main', text: nonAsciiAlias },
+      ],
+      'main',
+    )
+    const actions = Document.codeActions(
+      document,
+      snapshot,
+      wholeDocument(nonAsciiAlias),
+      uriOfModule,
+    )
+    // `positionAt` counts UTF-16 units, which is what the negotiated encoding measures; a byte
+    // offset would place the clause later on its line.
+    assert.deepEqual(actions[0]?.edit?.changes?.[uriOfModule('main')]?.[0]?.range, {
+      start: positionAt(nonAsciiAlias, nonAsciiAlias.indexOf(' as geometry')),
+      end: positionAt(nonAsciiAlias, nonAsciiAlias.indexOf(' as geometry') + ' as geometry'.length),
+    })
+  }),
+)
+
+it.effect('offers no quick fix for a diagnostic outside the requested range', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'main', text: redundantAlias },
+      ],
+      'main',
+    )
+    assert.deepEqual(
+      Document.codeActions(
+        document,
+        snapshot,
+        { start: { line: 1, character: 0 }, end: { line: 1, character: 4 } },
+        uriOfModule,
+      ),
+      [],
+    )
+  }),
+)

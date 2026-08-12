@@ -5,6 +5,7 @@ import * as ManagedRuntime from 'effect/ManagedRuntime'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import {
+  CodeActionKind,
   createConnection,
   DidChangeWatchedFilesNotification,
   LSPErrorCodes,
@@ -64,6 +65,7 @@ export const start = (): void => {
         inlayHintProvider: true,
         documentSymbolProvider: true,
         documentFormattingProvider: true,
+        codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix] },
       },
     }
   })
@@ -267,6 +269,19 @@ export const start = (): void => {
     const session = await acquire(parameters.textDocument.uri)
     if (Option.isNone(session)) return []
     return [...Document.symbols(session.value.document, session.value.snapshot)]
+  })
+
+  connection.onCodeAction(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return []
+    return [
+      ...Document.codeActions(
+        session.value.document,
+        session.value.snapshot,
+        parameters.range,
+        (module) => session.value.moduleUris.get(module),
+      ),
+    ]
   })
 
   connection.onDocumentFormatting(async (parameters) => {
