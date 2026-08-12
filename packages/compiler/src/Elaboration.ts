@@ -6118,6 +6118,57 @@ const analyzeStatements = (
     return region
   }
 
+  const analyzeConditional = (
+    element: SyntaxTree.Node,
+    armScope: Scope,
+    armLoopStack: ReadonlyArray<Hir.LoopId>,
+  ): StatementFact => {
+    const region = nextRegion()
+    const conditionNode = statementExpressionNode(element)
+    const condition = analyzeExpression(
+      context.source,
+      conditionNode,
+      context.declarations,
+      context.declaration,
+      armScope,
+      context.resolution,
+    )
+    if (condition === undefined) {
+      throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
+    }
+    context.diagnostics.push(...condition.diagnostics)
+    if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'bool') {
+      context.diagnostics.push(
+        Diagnostic.conditionNotBool(
+          Type.encode(condition.fact.type.type),
+          condition.fact.syntax.span,
+        ),
+      )
+    }
+
+    const arms = SyntaxTree.directNodes(element, 'Block')
+    const taken =
+      arms.at(0) === undefined
+        ? []
+        : analyzeStatements(context, arms[0] as SyntaxTree.Node, armScope, armLoopStack)
+    const chained = SyntaxTree.directNode(element, 'ConditionalStatement')
+    const otherwiseArm = arms.at(1)
+    const otherwise =
+      chained !== undefined
+        ? [analyzeConditional(chained, armScope, armLoopStack)]
+        : otherwiseArm === undefined
+          ? []
+          : analyzeStatements(context, otherwiseArm, armScope, armLoopStack)
+    return Object.freeze({
+      _tag: 'IfStatement',
+      condition: condition.fact,
+      taken: Object.freeze([...taken]),
+      otherwise: Object.freeze([...otherwise]),
+      region,
+      syntax: element,
+    })
+  }
+
   for (const element of blockNode.children) {
     if (!SyntaxTree.isNode(element)) continue
 
@@ -6237,47 +6288,7 @@ const analyzeStatements = (
     }
 
     if (element.kind === 'ConditionalStatement') {
-      const region = nextRegion()
-      const conditionNode = statementExpressionNode(element)
-      const condition = analyzeExpression(
-        context.source,
-        conditionNode,
-        context.declarations,
-        context.declaration,
-        scope,
-        context.resolution,
-      )
-      if (condition === undefined) {
-        throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
-      }
-      context.diagnostics.push(...condition.diagnostics)
-      if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'bool') {
-        context.diagnostics.push(
-          Diagnostic.conditionNotBool(
-            Type.encode(condition.fact.type.type),
-            condition.fact.syntax.span,
-          ),
-        )
-      }
-
-      const arms = SyntaxTree.directNodes(element, 'Block')
-      const taken =
-        arms.at(0) === undefined
-          ? []
-          : analyzeStatements(context, arms[0] as SyntaxTree.Node, scope, loopStack)
-      const otherwiseArm = arms.at(1)
-      const otherwise =
-        otherwiseArm === undefined ? [] : analyzeStatements(context, otherwiseArm, scope, loopStack)
-      facts.push(
-        Object.freeze({
-          _tag: 'IfStatement',
-          condition: condition.fact,
-          taken: Object.freeze([...taken]),
-          otherwise: Object.freeze([...otherwise]),
-          region,
-          syntax: element,
-        }),
-      )
+      facts.push(analyzeConditional(element, scope, loopStack))
       continue
     }
 

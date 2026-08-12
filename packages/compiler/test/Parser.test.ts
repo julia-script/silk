@@ -1746,6 +1746,59 @@ it('parses conditionals with both arms and boolean literals', () => {
   assert.deepEqual(booleans.parserDiagnostics, [])
 })
 
+it('parses a chain of three conditions as nested conditional statements', () => {
+  const result = parseText(
+    'fixture://else-if-chain.silk',
+    'pub fn main() -> i32 { if first { return 1 } else if second { return 2 } else if third { return 3 } else { return 4 } return 0 }',
+  )
+  const fn = directFunctionDeclarations(result.root).at(0)
+  const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
+  const outer =
+    block === undefined ? undefined : SyntaxTree.directNode(block, 'ConditionalStatement')
+
+  assert.notStrictEqual(outer, undefined)
+  if (outer === undefined) return
+  const statements = (block?.children ?? []).filter(SyntaxTree.isNode).map((node) => node.kind)
+  assert.deepEqual(statements, ['ConditionalStatement', 'ReturnStatement'])
+
+  // Each chained arm is the same node kind nested one level deeper, so no new
+  // node kind carries the chain and the tree stays lossless.
+  const middle = SyntaxTree.directNode(outer, 'ConditionalStatement')
+  assert.notStrictEqual(middle, undefined)
+  if (middle === undefined) return
+  const inner = SyntaxTree.directNode(middle, 'ConditionalStatement')
+  assert.notStrictEqual(inner, undefined)
+  if (inner === undefined) return
+  assert.strictEqual(SyntaxTree.directNode(inner, 'ConditionalStatement'), undefined)
+
+  for (const conditional of [outer, middle, inner]) {
+    assert.notStrictEqual(SyntaxTree.directToken(conditional, 'IfKeyword'), undefined)
+    assert.notStrictEqual(SyntaxTree.directToken(conditional, 'ElseKeyword'), undefined)
+    assert.notStrictEqual(SyntaxTree.directNode(conditional, 'IdentifierExpression'), undefined)
+  }
+
+  // A chained arm keeps only its taken block; the final arm keeps both blocks.
+  assert.strictEqual(SyntaxTree.directNodes(outer, 'Block').length, 1)
+  assert.strictEqual(SyntaxTree.directNodes(middle, 'Block').length, 1)
+  assert.strictEqual(SyntaxTree.directNodes(inner, 'Block').length, 2)
+
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
+it('keeps an else arm that is not a chained if anchored to its brace', () => {
+  const result = parseText(
+    'fixture://else-not-if.silk',
+    'pub fn main() -> i32 { if first { return 1 } else while second { } return 0 }',
+  )
+
+  assert.include(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    'PAR0001',
+  )
+  assertOriginalTokenTraversal(result)
+})
+
 it('recovers a missing condition before the arm brace', () => {
   const result = parseText(
     'fixture://missing-condition.silk',

@@ -1408,8 +1408,11 @@ function parseConditionalStatement(initial: State): NodeResult {
   ])
 
   if (nextSignificantKind(state) === 'ElseKeyword') {
-    const elseKeyword = expect(state, 'ElseKeyword', ['LeftBrace'])
-    const otherwise = parseBlock(elseKeyword.state, false)
+    const elseKeyword = expect(state, 'ElseKeyword', ['LeftBrace', 'IfKeyword'])
+    const otherwise =
+      nextSignificantKind(elseKeyword.state) === 'IfKeyword'
+        ? parseConditionalStatement(elseKeyword.state)
+        : parseBlock(elseKeyword.state, false)
     state = otherwise.state
     children = Object.freeze([...children, ...elseKeyword.elements, otherwise.node])
   }

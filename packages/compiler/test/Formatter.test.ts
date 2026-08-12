@@ -276,6 +276,47 @@ fn main() -> i32 {
   }),
 )
 
+it.effect('formats a chained else if arm on one line and idempotently', () =>
+  Effect.gen(function* () {
+    const first = yield* Formatter.format(
+      parse(
+        'memory://else-if-format.silk',
+        'pub fn classify(value:i32)->i32 { if value<0 { return 0 } else   if value<10 { return 1 } else if value<100 { return 2 } else { return 3 } return 4 }',
+      ),
+    )
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `pub fn classify(value: i32) -> i32 {
+  if value < 0 {
+    return 0
+  } else if value < 10 {
+    return 1
+  } else if value < 100 {
+    return 2
+  } else {
+    return 3
+  }
+  return 4
+}
+`,
+    )
+    // The chained arm never gains a line break, so each condition stays at the
+    // indentation of the conditional it continues.
+    for (const line of text.split('\n')) {
+      if (line.includes('else if')) assert.match(line, /^ {2}} else if .+ \{$/)
+    }
+
+    const reparsed = parse('memory://else-if-format.silk', text)
+    assert.deepEqual(reparsed.lexicalDiagnostics, [])
+    assert.deepEqual(reparsed.parserDiagnostics, [])
+    const second = yield* Formatter.format(reparsed)
+    assert.strictEqual(formattedText(second), text)
+    assert.deepEqual(second.bytes, first.bytes)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
 it.effect('formats unsafe blocks and conformance declarations canonically and idempotently', () =>
   Effect.gen(function* () {
     const source =
