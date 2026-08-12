@@ -54,7 +54,13 @@ it.effect('retains exact contextual magnitudes and target-owned usize layout fac
     if (plan._tag !== 'Available') return
     const usize = Layout.entry(plan.value, 'usize')
     assert.deepEqual(usize?.representation, { _tag: 'UnsignedInteger', bits: 64 })
-    assert.strictEqual(plan.value.literalVerdicts.length, 3)
+    // The program's own three usize literals. Reached library modules contribute their own
+    // verdicts — silk/usize's shared ZERO and ONE among them — so the count names this module.
+    assert.strictEqual(
+      plan.value.literalVerdicts.filter((verdict) => verdict.span.sourceId === 'usize/program')
+        .length,
+      3,
+    )
     assert.strictEqual(
       plan.value.literalVerdicts.every((verdict) => verdict._tag === 'AvailableUsizeLiteral'),
       true,

@@ -12,10 +12,6 @@ pub struct Bytes {
   values: Vector<u8>
 }
 
-fn counted(value: usize) -> usize {
-  return value
-}
-
 /// Constructs empty Bytes without allocating.
 pub fn make() -> Bytes {
   return Bytes { values: vectorMake<u8>() }
@@ -24,10 +20,10 @@ pub fn make() -> Bytes {
 /// Allocates an owned initialized byte buffer of exactly `length` zero octets.
 pub effect fn zeroed(length: usize) -> Bytes ! OutOfMemory ? &mut Allocator {
   let mut result = make()
-  let mut index = counted(0)
+  let mut index = usize.ZERO
   while index < length {
     let appended = run vectorAppend<u8>(&mut result.values, u8.toU8(0))
-    index = index + counted(1)
+    index = index + usize.ONE
   }
   return move result
 }
@@ -46,10 +42,10 @@ pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemory ? &mut Allocator {
 
 /// Appends one complete borrowed byte sequence in source order.
 pub effect fn append(self: &mut Bytes, values: &[u8]) -> () ! OutOfMemory ? &mut Allocator {
-  let mut index = counted(0)
+  let mut index = usize.ZERO
   while index < values.length {
     let appended = run vectorAppend<u8>(&mut self.values, values[index])
-    index = index + counted(1)
+    index = index + usize.ONE
   }
   return ()
 }

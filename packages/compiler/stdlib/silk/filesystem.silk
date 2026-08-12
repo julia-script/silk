@@ -172,15 +172,13 @@ effect fn rejectPath() -> never ! FileError {
   fail error(pathOperation(), invalidPath())
 }
 
-fn counted(value: usize) -> usize { return value }
-
 fn byte(value: u8) -> i32 { return u8.toI32(value) }
 
 fn containsNul(values: &[u8]) -> bool {
-  let mut index = counted(0)
+  let mut index = usize.ZERO
   while index < values.length {
     if values[index] == u8.toU8(0) { return true }
-    index = index + counted(1)
+    index = index + usize.ONE
   }
   return false
 }
@@ -196,23 +194,23 @@ fn validUtf8(values: &[u8]) -> bool {
 }
 
 fn isDot(values: &[u8], start: usize, end: usize) -> bool {
-  if end - start != counted(1) { return false }
+  if end - start != usize.ONE { return false }
   return byte(values[start]) == 46
 }
 
 fn isDotDot(values: &[u8], start: usize, end: usize) -> bool {
-  if end - start != counted(2) { return false }
+  if end - start != 2 { return false }
   if byte(values[start]) != 46 { return false }
-  return byte(values[start + counted(1)]) == 46
+  return byte(values[start + usize.ONE]) == 46
 }
 
 fn validAbsolute(values: &[u8]) -> bool {
-  if values.length == counted(0) { return false }
-  if byte(values[counted(0)]) != 47 { return false }
+  if values.length == usize.ZERO { return false }
+  if byte(values[usize.ZERO]) != 47 { return false }
   if containsNul(values) { return false }
-  if values.length == counted(1) { return true }
-  let mut start = counted(1)
-  let mut index = counted(1)
+  if values.length == usize.ONE { return true }
+  let mut start = usize.ONE
+  let mut index = usize.ONE
   while index <= values.length {
     if index == values.length {
       if start == index { return false }
@@ -224,19 +222,19 @@ fn validAbsolute(values: &[u8]) -> bool {
       if start == index { return false }
       if isDot(values, start, index) { return false }
       if isDotDot(values, start, index) { return false }
-      start = index + counted(1)
+      start = index + usize.ONE
     }
-    index = index + counted(1)
+    index = index + usize.ONE
   }
   return false
 }
 
 fn validRelativeFragment(values: &[u8]) -> bool {
-  if values.length == counted(0) { return false }
-  if byte(values[counted(0)]) == 47 { return false }
+  if values.length == usize.ZERO { return false }
+  if byte(values[usize.ZERO]) == 47 { return false }
   if containsNul(values) { return false }
-  let mut start = counted(0)
-  let mut index = counted(0)
+  let mut start = usize.ZERO
+  let mut index = usize.ZERO
   while index <= values.length {
     if index == values.length {
       if start == index { return false }
@@ -248,9 +246,9 @@ fn validRelativeFragment(values: &[u8]) -> bool {
       if start == index { return false }
       if isDot(values, start, index) { return false }
       if isDotDot(values, start, index) { return false }
-      start = index + counted(1)
+      start = index + usize.ONE
     }
-    index = index + counted(1)
+    index = index + usize.ONE
   }
   return false
 }
@@ -266,19 +264,19 @@ effect fn appendRange(
   while index < end {
     let one = [source[index]]
     let appended = run bytesAppend(&mut result, &one)
-    index = index + counted(1)
+    index = index + usize.ONE
   }
   return move result
 }
 
 fn finalNameStart(values: &[u8]) -> usize {
-  if values.length == counted(1) { return counted(1) }
+  if values.length == usize.ONE { return usize.ONE }
   let mut index = values.length
-  while counted(0) < index {
-    index = index - counted(1)
-    if byte(values[index]) == 47 { return index + counted(1) }
+  while usize.ZERO < index {
+    index = index - usize.ONE
+    if byte(values[index]) == 47 { return index + usize.ONE }
   }
-  return counted(0)
+  return usize.ZERO
 }
 
 effect fn finishPath(bytes: Bytes) -> Path ! OutOfMemory ? &mut Allocator {
@@ -292,7 +290,7 @@ effect fn finishPath(bytes: Bytes) -> Path ! OutOfMemory ? &mut Allocator {
 pub effect fn make(value: string) -> Path ! FileError | OutOfMemory ? &mut Allocator {
   let values = stringUtf8Bytes(value)
   if validAbsolute(values) == false { return run rejectPath() }
-  let copied = run appendRange(bytesMake(), values, counted(0), values.length)
+  let copied = run appendRange(bytesMake(), values, usize.ZERO, values.length)
   return run finishPath(move copied)
 }
 
@@ -312,7 +310,7 @@ pub fn view(self: &Path) -> string {
 }
 
 /// Reports whether this Path denotes the selected provider's root.
-pub fn isRoot(self: &Path) -> bool { return bytesAsSlice(&self.bytes).length == counted(1) }
+pub fn isRoot(self: &Path) -> bool { return bytesAsSlice(&self.bytes).length == usize.ONE }
 
 /// Borrows the final component as semantic text. Root returns empty text; use isRoot to distinguish absence.
 pub fn name(self: &Path) -> string {
@@ -326,12 +324,12 @@ effect fn joinBytes(
 ) -> Path ! FileError | OutOfMemory ? &mut Allocator {
   if validRelativeFragment(fragment) == false { return run rejectPath() }
   let baseBytes = pathBytes(base)
-  let mut combined = run appendRange(bytesMake(), baseBytes, counted(0), baseBytes.length)
+  let mut combined = run appendRange(bytesMake(), baseBytes, usize.ZERO, baseBytes.length)
   if isRoot(base) == false {
     let slash = run bytesAppend(&mut combined, stringUtf8Bytes("/"))
   }
   let beforeChild = Intrinsic.replace(combined, bytesMake())
-  combined = run appendRange(move beforeChild, fragment, counted(0), fragment.length)
+  combined = run appendRange(move beforeChild, fragment, usize.ZERO, fragment.length)
   return run finishPath(move combined)
 }
 
@@ -353,18 +351,18 @@ pub effect fn joinUtf8(
 }
 
 fn componentCount(values: &[u8]) -> usize {
-  if values.length == counted(1) { return counted(0) }
-  let mut count = counted(1)
-  let mut index = counted(1)
+  if values.length == usize.ONE { return usize.ZERO }
+  let mut count = usize.ONE
+  let mut index = usize.ONE
   while index < values.length {
-    if byte(values[index]) == 47 { count = count + counted(1) }
-    index = index + counted(1)
+    if byte(values[index]) == 47 { count = count + usize.ONE }
+    index = index + usize.ONE
   }
   return count
 }
 
 fn survivingRelative(values: &[u8], after: usize) -> bool {
-  let mut depth = counted(1)
+  let mut depth = usize.ONE
   let mut start = after
   let mut index = after
   while index <= values.length {
@@ -377,15 +375,15 @@ fn survivingRelative(values: &[u8], after: usize) -> bool {
     if boundary {
       if start < index {
         if isDotDot(values, start, index) {
-          depth = depth - counted(1)
-          if depth == counted(0) { return false }
+          depth = depth - usize.ONE
+          if depth == usize.ZERO { return false }
         } else {
-          if isDot(values, start, index) == false { depth = depth + counted(1) }
+          if isDot(values, start, index) == false { depth = depth + usize.ONE }
         }
       }
-      start = index + counted(1)
+      start = index + usize.ONE
     }
-    index = index + counted(1)
+    index = index + usize.ONE
   }
   return true
 }
@@ -397,14 +395,14 @@ pub effect fn resolve(
 ) -> Path ! FileError | OutOfMemory ? &mut Allocator {
   let relative = stringUtf8Bytes(relativeText)
   if containsNul(relative) { return run rejectPath() }
-  if counted(0) < relative.length {
-    if byte(relative[counted(0)]) == 47 { return run rejectPath() }
+  if usize.ZERO < relative.length {
+    if byte(relative[usize.ZERO]) == 47 { return run rejectPath() }
   }
   let baseBytes = pathBytes(base)
   let mut keptBase = componentCount(baseBytes)
-  let mut relativeDepth = counted(0)
-  let mut start = counted(0)
-  let mut index = counted(0)
+  let mut relativeDepth = usize.ZERO
+  let mut start = usize.ZERO
+  let mut index = usize.ZERO
   while index <= relative.length {
     let mut boundary = false
     if index == relative.length {
@@ -417,28 +415,28 @@ pub effect fn resolve(
         if index != relative.length { return run rejectPath() }
       } else {
         if isDotDot(relative, start, index) {
-          if counted(0) < relativeDepth {
-            relativeDepth = relativeDepth - counted(1)
+          if usize.ZERO < relativeDepth {
+            relativeDepth = relativeDepth - usize.ONE
           } else {
-            if keptBase == counted(0) { return run rejectPath() }
-            keptBase = keptBase - counted(1)
+            if keptBase == usize.ZERO { return run rejectPath() }
+            keptBase = keptBase - usize.ONE
           }
         } else {
           if isDot(relative, start, index) == false {
-            relativeDepth = relativeDepth + counted(1)
+            relativeDepth = relativeDepth + usize.ONE
           }
         }
       }
-      start = index + counted(1)
+      start = index + usize.ONE
     }
-    index = index + counted(1)
+    index = index + usize.ONE
   }
 
   let mut combined = bytesMake()
   let rooted = run bytesAppend(&mut combined, stringUtf8Bytes("/"))
-  let mut included = counted(0)
-  start = counted(1)
-  index = counted(1)
+  let mut included = usize.ZERO
+  start = usize.ONE
+  index = usize.ONE
   while index <= baseBytes.length {
     let mut boundary = false
     if index == baseBytes.length {
@@ -448,20 +446,20 @@ pub effect fn resolve(
     }
     if boundary {
       if included < keptBase {
-        if counted(0) < included {
+        if usize.ZERO < included {
           let slash = run bytesAppend(&mut combined, stringUtf8Bytes("/"))
         }
         let beforeBaseComponent = Intrinsic.replace(combined, bytesMake())
         combined = run appendRange(move beforeBaseComponent, baseBytes, start, index)
-        included = included + counted(1)
+        included = included + usize.ONE
       }
-      start = index + counted(1)
+      start = index + usize.ONE
     }
-    index = index + counted(1)
+    index = index + usize.ONE
   }
 
-  start = counted(0)
-  index = counted(0)
+  start = usize.ZERO
+  index = usize.ZERO
   while index <= relative.length {
     let mut boundary = false
     if index == relative.length {
@@ -473,20 +471,20 @@ pub effect fn resolve(
       if start < index {
         if isDot(relative, start, index) == false {
           if isDotDot(relative, start, index) == false {
-            if survivingRelative(relative, index + counted(1)) {
-              if counted(0) < included {
+            if survivingRelative(relative, index + usize.ONE) {
+              if usize.ZERO < included {
                 let slash = run bytesAppend(&mut combined, stringUtf8Bytes("/"))
               }
               let beforeRelativeComponent = Intrinsic.replace(combined, bytesMake())
               combined = run appendRange(move beforeRelativeComponent, relative, start, index)
-              included = included + counted(1)
+              included = included + usize.ONE
             }
           }
         }
       }
-      start = index + counted(1)
+      start = index + usize.ONE
     }
-    index = index + counted(1)
+    index = index + usize.ONE
   }
   return run finishPath(move combined)
 }
@@ -498,9 +496,9 @@ pub effect fn parent(
   if isRoot(self) { return none<Path>() }
   let values = pathBytes(self)
   let nameStart = finalNameStart(values)
-  let mut end = counted(1)
-  if nameStart != counted(1) { end = nameStart - counted(1) }
-  let copied = run appendRange(bytesMake(), values, counted(0), end)
+  let mut end = usize.ONE
+  if nameStart != usize.ONE { end = nameStart - usize.ONE }
+  let copied = run appendRange(bytesMake(), values, usize.ZERO, end)
   let owned = run finishPath(move copied)
   return some<Path>(move owned)
 }
@@ -556,7 +554,7 @@ pub effect fn createDirectoriesRecursively(
   path: &Path
 ) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator {
   let values = pathBytes(path)
-  let mut index = counted(1)
+  let mut index = usize.ONE
   while index <= values.length {
     let mut boundary = false
     if index == values.length {
@@ -565,7 +563,7 @@ pub effect fn createDirectoriesRecursively(
       if byte(values[index]) == 47 { boundary = true }
     }
     if boundary {
-      let prefixBytes = run appendRange(bytesMake(), values, counted(0), index)
+      let prefixBytes = run appendRange(bytesMake(), values, usize.ZERO, index)
       let prefix = run finishPath(move prefixBytes)
       let completed = run Intrinsic.effectResult(FileSystem.stat(&prefix))
       let decision = match move completed {
@@ -579,7 +577,7 @@ pub effect fn createDirectoriesRecursively(
         DirectoryStatFailure { error: failure } => run raise(move failure)
       }
     }
-    index = index + counted(1)
+    index = index + usize.ONE
   }
   return ()
 }
@@ -592,12 +590,12 @@ pub effect fn writeFileWithParents(
   if isRoot(path) { return run FileSystem.writeFile(path, bytes) }
   let pathValues = pathBytes(path)
   let nameStart = finalNameStart(pathValues)
-  let mut parentEnd = counted(1)
-  if nameStart != counted(1) { parentEnd = nameStart - counted(1) }
-  let parentBytes = run appendRange(bytesMake(), pathValues, counted(0), parentEnd)
+  let mut parentEnd = usize.ONE
+  if nameStart != usize.ONE { parentEnd = nameStart - usize.ONE }
+  let parentBytes = run appendRange(bytesMake(), pathValues, usize.ZERO, parentEnd)
   let ownedParent = run finishPath(move parentBytes)
   let values = pathBytes(&ownedParent)
-  let mut index = counted(1)
+  let mut index = usize.ONE
   while index <= values.length {
     let mut boundary = false
     if index == values.length {
@@ -606,7 +604,7 @@ pub effect fn writeFileWithParents(
       if byte(values[index]) == 47 { boundary = true }
     }
     if boundary {
-      let prefixBytes = run appendRange(bytesMake(), values, counted(0), index)
+      let prefixBytes = run appendRange(bytesMake(), values, usize.ZERO, index)
       let prefix = run finishPath(move prefixBytes)
       let completed = run Intrinsic.effectResult(FileSystem.stat(&prefix))
       let decision = match move completed {
@@ -620,7 +618,7 @@ pub effect fn writeFileWithParents(
         DirectoryStatFailure { error: failure } => run raise(move failure)
       }
     }
-    index = index + counted(1)
+    index = index + usize.ONE
   }
   return run FileSystem.writeFile(path, bytes)
 }
