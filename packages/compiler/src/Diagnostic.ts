@@ -646,7 +646,16 @@ export interface RelatedSpan {
   readonly span: SourceSpan.SourceSpan
 }
 
-/** One unambiguous machine-applicable replacement. Modeled; no phase emits one yet. */
+/**
+ * One unambiguous machine-applicable replacement: the corrected bytes for one source range.
+ *
+ * A phase emits an edit only where the correction needs no name choice and no type decision from
+ * the author; every other diagnostic carries none. Applying every edit of one diagnostic to its
+ * source removes that diagnostic. All edits of one diagnostic address the source that owns the
+ * diagnostic's primary span, and no two of them overlap, so a consumer may apply them in any
+ * order. Every edit is derived from byte offsets alone, so repeated compilations of the same
+ * source produce byte-identical edits.
+ */
 export interface Edit {
   readonly span: SourceSpan.SourceSpan
   readonly replacement: string
@@ -976,7 +985,16 @@ export const reservedModuleIdentity = (module: string, span: SourceSpan.SourceSp
     span,
   })
 
-export const duplicateImport = (module: string, span: SourceSpan.SourceSpan): Diagnostic =>
+/**
+ * Creates the diagnostic for one module imported more than once.
+ *
+ * `removal` covers the repeated import line, so the emitted edit deletes that line whole.
+ */
+export const duplicateImport = (
+  module: string,
+  removal: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'module',
@@ -985,9 +1003,20 @@ export const duplicateImport = (module: string, span: SourceSpan.SourceSpan): Di
     message: `Module ${module} is imported more than once`,
     reason: Object.freeze({ _tag: 'DuplicateImport', module }),
     span,
+    edits: Object.freeze([Object.freeze({ span: removal, replacement: '' })]),
   })
 
-export const redundantAlias = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+/**
+ * Creates the diagnostic for an alias that repeats the name it renames.
+ *
+ * `clause` covers the ` as name` bytes, so the emitted edit deletes the clause and leaves the
+ * imported name it duplicated.
+ */
+export const redundantAlias = (
+  spelling: string,
+  clause: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -996,6 +1025,7 @@ export const redundantAlias = (spelling: string, span: SourceSpan.SourceSpan): D
     message: `Alias ${spelling} does not change the name`,
     reason: Object.freeze({ _tag: 'RedundantAlias', spelling }),
     span,
+    edits: Object.freeze([Object.freeze({ span: clause, replacement: '' })]),
   })
 
 export const unknownImportedMember = (
