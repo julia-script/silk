@@ -30,10 +30,6 @@
     "test": {
       "dependsOn": ["build"],
       "outputs": []
-    },
-    "@silk-effect/docs#test": {
-      "dependsOn": ["^build"],
-      "outputs": []
     }
   }
 }
