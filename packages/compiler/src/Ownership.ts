@@ -835,6 +835,11 @@ const deferredBlocks = (
 /**
  * Run sites in this expression that can propagate a typed failure, stopping at effect blocks:
  * a deferred body's runs propagate out of its own compiled function, not out of this one.
+ *
+ * A run is fallible when its effect type carries failures OR an open failure row: inside a
+ * generic body the caller's failures arrive as a row *parameter*, so `failures` is empty while
+ * `failureParameters` is not, and specialization can substitute a row that really does fail.
+ * Reading `failures` alone leaves every owner live at such a run without a release.
  */
 const fallibleRunSites = (
   expression: Hir.Expression,
@@ -847,8 +852,24 @@ const fallibleRunSites = (
     typeof subjectType === 'object' &&
     subjectType !== null &&
     (subjectType as { readonly _tag?: string })._tag === 'EffectType' &&
-    (subjectType as Type.Effect).failures.length > 0
+    ((subjectType as Type.Effect).failures.length > 0 ||
+      (subjectType as Type.Effect).failureParameters.length > 0)
   return fallible ? [expression, ...nested] : nested
+}
+
+/**
+ * Owner sites this expression consumes by move, keyed like the liveness set.
+ *
+ * A propagation exit is published before the statement is walked, so the live set still holds
+ * every owner the run's own operands move away — `run f(move owned)` would otherwise release
+ * `owned` here as well as in the callee that now owns it. Excluding the operands keeps the
+ * exit to the owners that genuinely survive the run and are stranded by the failure.
+ */
+const consumedSites = (expression: Hir.Expression): ReadonlyArray<string> => {
+  const nested = Hir.expressionChildren(expression).flatMap(consumedSites)
+  if (expression._tag !== 'Move') return nested
+  const site = useSite(expression.subject)
+  return site === undefined ? nested : [siteKey(site), ...nested]
 }
 
 interface LoanAnalysis {
@@ -1975,11 +1996,12 @@ const checkFunction = (
       // still live at that point must release on the way out. The exit is keyed by the run
       // expression's span so lowering can attach the releases to the run operation.
       for (const run of statementRootExpressions(statement).flatMap(fallibleRunSites)) {
+        const consumed = new Set(consumedSites(run.subject))
         exits.push(
           Object.freeze({
             kind: 'Propagation' as const,
             span: run.span,
-            sites: frameSitesInnerFirst(frames, live),
+            sites: frameSitesInnerFirst(frames, live).filter((site) => !consumed.has(site)),
           }),
         )
       }
