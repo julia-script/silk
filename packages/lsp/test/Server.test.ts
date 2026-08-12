@@ -50,7 +50,9 @@ const connect = (): Client => {
             return
           }
         }
-        if (Date.now() - startedAt > 15_000) {
+        // Kept under the 30s per-test budget: this inner poll must not be the thing that fires
+        // first, or a slow runner reports a timeout instead of the test's own limit.
+        if (Date.now() - startedAt > 25_000) {
           reject(new Error(`Timed out waiting; saw ${JSON.stringify(messages)}`))
           return
         }
