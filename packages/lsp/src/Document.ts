@@ -11,6 +11,8 @@ import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import {
+  type CodeAction,
+  CodeActionKind,
   type CompletionItem,
   CompletionItemKind,
   type CompletionList,
@@ -90,6 +92,13 @@ const noteSuffix = (diagnostic: Diagnostic.Diagnostic): string =>
     ? ''
     : `\n${diagnostic.notes.map((note) => `note: ${note}`).join('\n')}`
 
+/** The document's own compiler diagnostics, in the deterministic order the phases produced. */
+const owned = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+): ReadonlyArray<Diagnostic.Diagnostic> =>
+  Analysis.diagnostics(snapshot).filter((diagnostic) => diagnostic.span.sourceId === self.module)
+
 /** Converts the document's own compiler diagnostics into protocol diagnostics. */
 export const diagnostics = (
   self: Document,
@@ -98,31 +107,84 @@ export const diagnostics = (
 ): ReadonlyArray<LspDiagnostic> => {
   // Sibling modules' line maps, built once per module from the snapshot's exact loaded bytes.
   const indexOf = lineIndexes(self, snapshot)
-  return Analysis.diagnostics(snapshot)
-    .filter((diagnostic) => diagnostic.span.sourceId === self.module)
-    .map((diagnostic) => {
-      const related = (diagnostic.relatedSpans ?? []).flatMap((relatedSpan) => {
-        const module = relatedSpan.span.sourceId
-        const uri = module === self.module ? self.uri : uriOf(module)
-        const index = indexOf(module)
-        return uri === undefined || index === undefined
-          ? []
-          : [
-              {
-                location: { uri, range: LineIndex.rangeOf(index, relatedSpan.span) },
-                message: relatedSpan.label,
-              },
-            ]
-      })
-      return {
-        range: LineIndex.rangeOf(self.index, diagnostic.span),
-        severity: DiagnosticSeverity.Error,
-        code: diagnostic.code,
-        source: 'silk',
-        message: `${diagnostic.message}${noteSuffix(diagnostic)}`,
-        ...(related.length > 0 ? { relatedInformation: related } : {}),
-      }
+  return owned(self, snapshot).map((diagnostic) => {
+    const related = (diagnostic.relatedSpans ?? []).flatMap((relatedSpan) => {
+      const module = relatedSpan.span.sourceId
+      const uri = module === self.module ? self.uri : uriOf(module)
+      const index = indexOf(module)
+      return uri === undefined || index === undefined
+        ? []
+        : [
+            {
+              location: { uri, range: LineIndex.rangeOf(index, relatedSpan.span) },
+              message: relatedSpan.label,
+            },
+          ]
     })
+    return {
+      range: LineIndex.rangeOf(self.index, diagnostic.span),
+      severity: DiagnosticSeverity.Error,
+      code: diagnostic.code,
+      source: 'silk',
+      message: `${diagnostic.message}${noteSuffix(diagnostic)}`,
+      ...(related.length > 0 ? { relatedInformation: related } : {}),
+    }
+  })
+}
+
+/**
+ * Names the correction one edit-carrying diagnostic applies.
+ *
+ * A `Diagnostic.Edit` carries corrected bytes but no prose, so the title comes from the code that
+ * emitted it. A code absent from this table carries no edit, so its diagnostic yields no action.
+ */
+const correctionTitles: Partial<Record<Diagnostic.Code, string>> = {
+  [Diagnostic.duplicateImportCode]: 'Remove the repeated import',
+  [Diagnostic.redundantAliasCode]: 'Remove the redundant alias',
+}
+
+/** Tests whether two protocol ranges share at least one position. */
+const overlaps = (left: Range, right: Range): boolean =>
+  !(
+    left.end.line < right.start.line ||
+    (left.end.line === right.start.line && left.end.character < right.start.character) ||
+    right.end.line < left.start.line ||
+    (right.end.line === left.start.line && right.end.character < left.start.character)
+  )
+
+/**
+ * Offers each machine-applicable edit of the diagnostics touching one range as a quick fix.
+ *
+ * The actions are recomputed from the analyzed snapshot rather than read from the request's
+ * client-supplied diagnostics, so an action always carries the edit the current source produces.
+ * A diagnostic that carries no edit contributes no action, and the actions follow diagnostic
+ * order, which is deterministic because every phase is.
+ */
+export const codeActions = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  range: Range,
+  uriOf: (module: string) => string | undefined,
+): ReadonlyArray<CodeAction> => {
+  // `diagnostics` maps the same `owned` list one-to-one, so the two stay index-aligned.
+  const published = diagnostics(self, snapshot, uriOf)
+  return owned(self, snapshot).flatMap((diagnostic, order) => {
+    const title = correctionTitles[diagnostic.code]
+    const source = published[order]
+    if (title === undefined || source === undefined || !overlaps(source.range, range)) return []
+    return (diagnostic.edits ?? []).map((edit) => ({
+      title,
+      kind: CodeActionKind.QuickFix,
+      diagnostics: [source],
+      edit: {
+        changes: {
+          [self.uri]: [
+            { range: LineIndex.rangeOf(self.index, edit.span), newText: edit.replacement },
+          ],
+        },
+      },
+    }))
+  })
 }
 
 /** Returns the source-like semantic presentation under one position. */

@@ -136,6 +136,9 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     assert.deepEqual(initialized.capabilities.completionProvider, { triggerCharacters: ['.'] })
     assert.strictEqual(initialized.capabilities.positionEncoding, 'utf-16')
     assert.strictEqual(initialized.capabilities.documentFormattingProvider, true)
+    assert.deepEqual(initialized.capabilities.codeActionProvider, {
+      codeActionKinds: ['quickfix'],
+    })
     client.send({ method: 'initialized', params: {} })
 
     const brokenUri = 'file:///silk-lsp-e2e/broken.silk'
@@ -705,6 +708,60 @@ it('serves project-wide references and renames over real stdio', { timeout: 30_0
       toolchainLocations.some((location) => location.uri.endsWith('/stdlib/silk/bool.silk')),
       JSON.stringify(toolchainLocations),
     )
+  } finally {
+    await client.close()
+  }
+})
+
+it('offers a diagnostic edit as a quick fix over real stdio', { timeout: 30_000 }, async () => {
+  const client = connect()
+  try {
+    client.send({
+      id: 1,
+      method: 'initialize',
+      params: { processId: null, rootUri: null, capabilities: {} },
+    })
+    await client.waitFor((message) => response(message, 1))
+    client.send({ method: 'initialized', params: {} })
+
+    const geometryUri = 'file:///silk-lsp-e2e/fix/Geometry.silk'
+    const mainUri = 'file:///silk-lsp-e2e/fix/Main.silk'
+    const mainText = 'import Geometry as Geometry\npub fn main() -> i32 { return Geometry.area() }'
+    didOpen(client, geometryUri, 'pub fn area() -> i32 { return 1 }')
+    didOpen(client, mainUri, mainText)
+    const diagnostics = await client.waitFor((message) => {
+      const published = publishedDiagnostics(message, mainUri)
+      return published !== undefined && published.length === 1 ? published : undefined
+    })
+    assert.strictEqual(diagnostics[0]?.code, 'SEM0013')
+
+    client.send({
+      id: 2,
+      method: 'textDocument/codeAction',
+      params: {
+        textDocument: { uri: mainUri },
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: mainText.length } },
+        context: { diagnostics: [] },
+      },
+    })
+    const actions = (await client.waitFor((message) => response(message, 2))) as Array<{
+      title: string
+      kind: string
+      edit: { changes: Record<string, Array<{ range: unknown; newText: string }>> }
+    }>
+    assert.strictEqual(actions.length, 1)
+    assert.strictEqual(actions[0]?.title, 'Remove the redundant alias')
+    assert.strictEqual(actions[0]?.kind, 'quickfix')
+    const clause = mainText.indexOf(' as Geometry')
+    assert.deepEqual(actions[0]?.edit.changes[mainUri], [
+      {
+        range: {
+          start: { line: 0, character: clause },
+          end: { line: 0, character: clause + ' as Geometry'.length },
+        },
+        newText: '',
+      },
+    ])
   } finally {
     await client.close()
   }
