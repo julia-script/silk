@@ -1,5 +1,16 @@
 # `@silk-effect/language` documentation
 
+## The Silk language
+
+- **[Tutorial](./tutorial.md)** — start here: from `silk init` to a program that runs.
+- **[Language reference](./reference.md)** — the lexical form, the types, the memory and ownership
+  rules, and the effect system.
+- **[Standard library](./stdlib.md)** — every module and public declaration, generated from the
+  source doc comments.
+- **[Diagnostic index](./diagnostics.md)** — every compiler error code and what it means.
+
+## This package
+
 `@silk-effect/language` provides editor support for Silk: a CodeMirror 6 extension whose
 highlighting is driven by the compiler's own bootstrap lexer, and the Silk TextMate grammar used by
 Shiki and VS Code-compatible editors.
@@ -19,6 +30,7 @@ pub fn answer() -> i32 {
 pub fn main() -> i32 {
     let ok = true
     if ok { return answer() } else { return 0 }
+    return 0
 }
 ```
 
