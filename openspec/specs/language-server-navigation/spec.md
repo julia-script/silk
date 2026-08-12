@@ -195,6 +195,21 @@ project revision, and SHALL edit only the occurrences whose analyzed spelling eq
 name so that an aliased import keeps the local name its own module chose. A rename SHALL be refused
 rather than partially applied when an occurrence cannot be placed in a document.
 
+The accepted project revision is the rename's outer bound: the open documents that serve as roots
+plus every module they transitively import, closed project files included, resolved from disk. A
+closed module that imports the renamed declaration but is reachable from no open root is therefore
+outside that revision and SHALL NOT be edited. Rooting analysis at open documents is what the
+`language-server-synchronization` capability specifies, so widening the root set is a change to
+synchronization rather than to navigation. The resulting failure is visible — the unedited module
+stops compiling — rather than silent.
+
+Within that revision, an `as` clause binds a name in one module only, so a rename selected through
+such a binding SHALL be confined to the module that wrote the clause. Two modules that alias one
+declaration to the same spelling agree on both identity and spelling, and neither owns the other's
+choice of name. The declaration site and the source half of an import clause name the declaration
+itself and SHALL stay project-wide. This confinement applies to rename alone; references are
+read-only and SHALL continue to report every occurrence of the identity.
+
 Because Silk has one flat non-shadowing module namespace, a rename of a name that occupies that
 namespace SHALL be refused when the new spelling is already bound in any module whose flat namespace
 the rename would extend. The refusal SHALL carry the existing `SEM0016` binding-collision code and
@@ -219,6 +234,16 @@ message rather than a rename-specific diagnostic.
 
 - **WHEN** a declaration reached through an aliased selected-member import is renamed
 - **THEN** the imported source name changes and the local alias and its uses keep their own spelling
+
+#### Scenario: Two modules alias one declaration to the same spelling
+
+- **WHEN** an alias is renamed in a module while a second module aliases the same declaration to the same spelling
+- **THEN** only the selecting module's clause and uses change, and the second module keeps the name it chose
+
+#### Scenario: Rename a project alias of a standard-library member
+
+- **WHEN** a project module's alias of a standard-library member is renamed and the installation aliases that member to the same spelling
+- **THEN** the edit covers the project module alone and reaches no file inside the installed toolchain
 
 #### Scenario: Rename onto an existing top-level name
 
