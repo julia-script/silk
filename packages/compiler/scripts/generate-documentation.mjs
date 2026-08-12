@@ -9,10 +9,9 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as Effect from 'effect/Effect'
-import * as Analysis from '../dist/Analysis.js'
-import * as SourceFile from '../dist/SourceFile.js'
-import * as Stdlib from '../dist/Stdlib.js'
 import * as DocumentationProject from '../../documentation/dist/Project.js'
+import * as Analysis from '../dist/Analysis.js'
+import * as Stdlib from '../dist/Stdlib.js'
 
 const documentationRoot = fileURLToPath(new URL('../../language/docs/', import.meta.url))
 const diagnosticSource = fileURLToPath(new URL('../src/Diagnostic.ts', import.meta.url))
@@ -142,8 +141,8 @@ const diagnosticsPage = () => {
   // one-line meaning available for the codes whose constant carries no comment.
   const messages = new Map()
   // `message:` may wrap onto its own line before the string literal.
-  const constructor = /code: (\w+)Code,[\s\S]{0,400}?message:\s*([`'"])((?:\\.|(?!\2)[\s\S])*)\2/g
-  for (const match of source.matchAll(constructor)) {
+  const factory = /code: (\w+)Code,[\s\S]{0,400}?message:\s*([`'"])((?:\\.|(?!\2)[\s\S])*)\2/g
+  for (const match of source.matchAll(factory)) {
     const template = match[3].replace(/\$\{([^}]*)\}/g, (_, expression) => {
       const tail = expression.trim().split('.').pop() ?? expression
       return `<${tail.replace(/[^A-Za-z0-9]/g, '')}>`
@@ -189,13 +188,17 @@ const diagnosticsPage = () => {
   for (const [prefix, phase] of Object.entries(phases)) {
     const group = codes.filter((entry) => entry.code.startsWith(prefix))
     if (group.length === 0) continue
-    lines.push(`## ${phase} (\`${prefix}\`)`, '', '| Code | Meaning | Reported as |', '| --- | --- | --- |')
+    lines.push(
+      `## ${phase} (\`${prefix}\`)`,
+      '',
+      '| Code | Meaning | Reported as |',
+      '| --- | --- | --- |',
+    )
     for (const entry of group) {
       const meaning = entry.comment.length > 0 ? entry.comment : ''
-      const reported = entry.message === undefined ? '' : `\`${entry.message.replace(/\|/g, '\\|')}\``
-      lines.push(
-        `| \`${entry.code}\` | ${meaning.replace(/\|/g, '\\|')} | ${reported} |`,
-      )
+      const reported =
+        entry.message === undefined ? '' : `\`${entry.message.replace(/\|/g, '\\|')}\``
+      lines.push(`| \`${entry.code}\` | ${meaning.replace(/\|/g, '\\|')} | ${reported} |`)
     }
     lines.push('')
   }
@@ -218,7 +221,9 @@ const write = (name, contents) => {
   if (check) {
     const existing = readFileSync(destination, 'utf8')
     if (existing !== contents) {
-      console.error(`${name} is stale. Run pnpm --filter @silk-effect/compiler documentation:generate`)
+      console.error(
+        `${name} is stale. Run pnpm --filter @silk-effect/compiler documentation:generate`,
+      )
       process.exitCode = 1
     }
     return
