@@ -279,6 +279,10 @@ const constantLiteral = (value: DeclarationIndex.ConstantLiteralFact): string =>
       return record('IntegerLiteral', [value.value.toString()])
     case 'FloatingLiteral':
       return record('FloatingLiteral', [value.spelling])
+    case 'StringLiteral':
+      return record('StringLiteral', [value.data.id])
+    case 'Malformed':
+      return record('MalformedLiteral', [value.detail])
     case 'Unavailable':
       return record('UnavailableLiteral')
     default:

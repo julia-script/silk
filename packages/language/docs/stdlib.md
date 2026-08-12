@@ -45,7 +45,7 @@ The library has 28 modules.
 | [`silk/u64`](#silk-u64) | `u64` | 52 |
 | [`silk/u8`](#silk-u8) | `u8` | 52 |
 | [`silk/usize`](#silk-usize) | `usize` | 54 |
-| [`silk/vector`](#silk-vector) | `Vector` | 28 |
+| [`silk/vector`](#silk-vector) | `Vector` | 45 |
 
 ## silk/bool
 
@@ -6418,6 +6418,54 @@ Inserts one owned value at an index, shifting later elements without requiring T
 ```silk
 pub fn get<T>(self: &silk/vector.Vector<T>, index: usize) -> T
 ```
+
+### `pop`
+
+```silk
+pub fn pop<T>(self: &mut silk/vector.Vector<T>) -> Option<T>
+```
+
+Removes the last element and returns it. Returns an absent value for an empty vector.
+
+### `remove`
+
+```silk
+pub fn remove<T>(self: &mut silk/vector.Vector<T>, index: usize) -> T
+```
+
+Removes the element at one index, shifting the later elements down. Traps out of range.
+
+### `clear`
+
+```silk
+pub fn clear<T>(self: &mut silk/vector.Vector<T>) -> ()
+```
+
+Drops every initialized element and sets the length to zero, keeping the capacity.
+
+### `truncate`
+
+```silk
+pub fn truncate<T>(self: &mut silk/vector.Vector<T>, length: usize) -> ()
+```
+
+Drops every element past one length, keeping the capacity. Shorter lengths are left alone.
+
+### `set`
+
+```silk
+pub fn set<T>(self: &mut silk/vector.Vector<T>, index: usize, value: T) -> ()
+```
+
+Overwrites the element at one index, dropping the old element first. Traps out of range.
+
+### `reserve`
+
+```silk
+pub effect fn reserve<T>(self: &mut silk/vector.Vector<T>, additional: usize) -> () ! OutOfMemory ? &mut Allocator
+```
+
+Grows the capacity to hold at least one additional count of elements.
 
 
 ## See also
