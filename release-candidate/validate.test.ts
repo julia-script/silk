@@ -21,6 +21,18 @@ const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
 const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
 const webContainerPackageRoot = resolve(workspaceRoot, 'packages/platform-webcontainer')
 
+// Consumers install with --offline, so an override may only name a version the workspace store
+// already holds. Read it from the installed copy rather than pinning a literal, which silently
+// drifts out of the store the next time the dependency is bumped.
+// pnpm's isolated store keeps it under the consuming package, not the workspace root.
+const workspaceTypesNodeVersion = (): string =>
+  JSON.parse(
+    readFileSync(
+      resolve(compilerCliPackageRoot, 'node_modules/@types/node/package.json'),
+      'utf8',
+    ),
+  ).version
+
 const installConsumer = (cwd: string, ignoreWorkspace = false): void => {
   const result = spawnSync(
     'pnpm',
@@ -1062,7 +1074,7 @@ test('the compiler CLI release candidate installs with its project-first command
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': 24.10.1\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${workspaceTypesNodeVersion()}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
     installConsumer(consumerRoot)
 
@@ -1343,7 +1355,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': 24.10.1\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${workspaceTypesNodeVersion()}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
     installConsumer(consumerRoot)
 
