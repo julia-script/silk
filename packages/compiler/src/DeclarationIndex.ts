@@ -3,9 +3,11 @@ import * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
+import * as LiteralForm from './LiteralForm.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as StaticText from './StaticText.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
@@ -310,9 +312,17 @@ export type ConstantLiteralFact =
       readonly spelling: string
       readonly token: Token.Token
     }
+  | {
+      readonly _tag: 'StringLiteral'
+      readonly data: StaticText.Data
+      readonly token: Token.Token
+    }
+  // A literal the lexer accepted but no value can be decoded from; it carries its own detail so
+  // the reference site reports the real cause instead of a literal-kind mismatch.
+  | { readonly _tag: 'Malformed'; readonly detail: string; readonly syntax: SyntaxTree.Element }
   | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
 
-/** One explicitly typed, compile-time scalar declaration. */
+/** One explicitly typed, compile-time scalar or static-text declaration. */
 export interface ConstantFact {
   readonly _tag: 'ConstantDeclaration'
   readonly id: DeclarationId
@@ -633,6 +643,22 @@ const constantLiteral = (
       spelling: `${SyntaxTree.directToken(initializer, 'Minus') === undefined ? '' : '-'}${literal}`,
       token,
     })
+  }
+  if (initializer.kind === 'StaticTextLiteralExpression') {
+    const token =
+      SyntaxTree.directToken(initializer, 'TextLiteral') ??
+      SyntaxTree.directToken(initializer, 'ByteStringLiteral')
+    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const bytes = Option.getOrUndefined(SourceFile.slice(source, token.span))
+    const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
+    if (bytes === undefined || form === undefined)
+      return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    // The header decodes once so every reference — in this module or an importing one — shares
+    // the exact bytes the equivalent `let` binding would produce.
+    const decoded = StaticText.decode(Array.from(bytes), form)
+    return decoded._tag === 'Decoded'
+      ? Object.freeze({ _tag: 'StringLiteral', data: decoded.data, token })
+      : Object.freeze({ _tag: 'Malformed', detail: decoded.detail, syntax: initializer })
   }
   return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
 }

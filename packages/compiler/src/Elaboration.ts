@@ -498,6 +498,7 @@ export interface ConstantExpressionFact {
         readonly spelling: string
         readonly type: 'f32' | 'f64'
       }
+    | { readonly _tag: 'String'; readonly data: StaticText.Data }
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
 }
@@ -1262,7 +1263,17 @@ const analyzeConstant = (
   let detail: string | undefined
 
   if (declared._tag !== 'Resolved' || typeof declared.type !== 'string') {
-    detail = 'the declared type must be one primitive scalar'
+    detail = 'the declared type must be one primitive scalar or string'
+  } else if (literal._tag === 'Malformed') {
+    detail = literal.detail
+  } else if (literal._tag === 'Unavailable') {
+    detail = 'the initializer must be one literal'
+  } else if (Type.isString(declared.type) && literal._tag === 'StringLiteral') {
+    if (literal.data.kind !== 'Text') detail = 'a byte-string literal does not produce a string'
+    else {
+      type = Type.string
+      value = Object.freeze({ _tag: 'String', data: literal.data })
+    }
   } else if (declared.type === 'bool' && literal._tag === 'BooleanLiteral') {
     type = 'bool'
     value = Object.freeze({ _tag: 'Boolean', value: literal.value })
@@ -7081,6 +7092,13 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
         bits: fact.value.bits,
         spelling: fact.value.spelling,
         type: fact.value.type,
+        span: fact.syntax.span,
+      })
+    if (fact.value?._tag === 'String')
+      return Object.freeze({
+        _tag: 'StaticStringLiteral',
+        data: fact.value.data,
+        type: Type.string,
         span: fact.syntax.span,
       })
     return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })

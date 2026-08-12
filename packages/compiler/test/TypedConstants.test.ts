@@ -116,6 +116,120 @@ pub fn main() -> i32 { return move answer }`),
   }),
 )
 
+/**
+ * A string constant holds the literal's decoded bytes, so its reference lowers to the very static
+ * datum the equivalent `let` binding lowers to. Identical HIR data ids are that byte equality.
+ */
+const stringConstantSource = (initializer: string, binding: string) =>
+  `import silk.string { byteLength }
+
+const pattern: string = ${initializer}
+
+pub fn main() -> i32 {
+  let inline = ${binding}
+  return usize.toI32(byteLength(pattern)) + usize.toI32(byteLength(inline))
+}`
+
+const staticStringIds = (hir: string): ReadonlyArray<string> =>
+  hir.split('\n').flatMap((line) => line.match(/static-string (\S+)/)?.slice(1, 2) ?? [])
+
+it.effect('gives an escaped string constant the same value as the equivalent let binding', () =>
+  Effect.gen(function* () {
+    const source = stringConstantSource('"\\\\d+"', '"\\\\d+"')
+    const snapshot = yield* Analysis.ofSourceRealized('constants/string', encoder.encode(source))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const ids = staticStringIds(Hir.encode(Analysis.rootAnalysis(snapshot).hir))
+    assert.deepEqual(ids, ['text:5c642b', 'text:5c642b'])
+
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 6)
+  }),
+)
+
+it.effect('gives a raw string constant the same value as the equivalent let binding', () =>
+  Effect.gen(function* () {
+    // `r"\d+"` and `"\\d+"` decode to the same three bytes, so the constant and the escaped
+    // binding must share one static datum.
+    const source = stringConstantSource('r"\\d+"', '"\\\\d+"')
+    const snapshot = yield* Analysis.ofSourceRealized('constants/raw', encoder.encode(source))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const ids = staticStringIds(Hir.encode(Analysis.rootAnalysis(snapshot).hir))
+    assert.deepEqual(ids, ['text:5c642b', 'text:5c642b'])
+
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 6)
+  }),
+)
+
+it.effect('compiles the raw-string example block that motivated the raw literal form', () =>
+  Effect.gen(function* () {
+    // Reproduced verbatim from the Example block of issue #13.
+    const example = String.raw`const decimalPattern: string = r"\d+\.\d+"
+const windowsPath: string = r"C:\Users\build\output"
+
+const helpText: string = r"""
+Usage: silk build [options]
+  --target \path\to\dir
+"""
+
+pub fn main() -> i32 { return 0 }`
+    const snapshot = yield* Analysis.ofSourceRealized('constants/example', encoder.encode(example))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
+it.effect('resolves a public string constant across a module boundary', () =>
+  Effect.gen(function* () {
+    const strings = 'pub const greeting: string = "hi"'
+    const main = `import strings { greeting }
+import silk.string { byteLength }
+
+pub fn main() -> i32 { return usize.toI32(byteLength(greeting)) }`
+    const snapshot = yield* Analysis.makeRealized({
+      root: SourceFile.make('main', encoder.encode(main)),
+    }).pipe(Effect.provide(SourceResolver.memory(new Map([['strings', encoder.encode(strings)]]))))
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 2)
+
+    const reference = Analysis.semanticOccurrenceAt(snapshot, 'main', main.indexOf('greeting)'))
+    assert.strictEqual(reference?.declaration?.module, 'strings')
+    assert.strictEqual(
+      reference === undefined
+        ? undefined
+        : Analysis.occurrencePresentation(snapshot, 'main', reference)?.text,
+      'pub const greeting: string',
+    )
+  }),
+)
+
+it.effect('names the restriction that remains on a string constant initializer', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'constants/string-invalid',
+      encoder.encode(`const source: string = "a"
+const copied: string = source
+const bytes: string = b"a"
+const escape: string = "\\q"
+pub fn main() -> i32 { return 0 }`),
+    )
+    const messages = Analysis.diagnostics(snapshot)
+      .filter((diagnostic) => diagnostic.code === 'SEM0086')
+      .map((diagnostic) => diagnostic.message)
+    assert.deepEqual(messages, [
+      'Invalid constant: the initializer must be one literal',
+      'Invalid constant: a byte-string literal does not produce a string',
+      'Invalid constant: unknown escape sequence',
+    ])
+  }),
+)
+
 it.effect('checks usize constants against the selected target even when unused', () =>
   Effect.gen(function* () {
     const wide = '4294967296'
