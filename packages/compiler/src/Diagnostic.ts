@@ -22,6 +22,9 @@ export const unknownLiteralModifierCode = 'LEX0002' as const
 /** Stable code for a literal whose matching closing delimiter is absent. */
 export const unterminatedStaticLiteralCode = 'LEX0003' as const
 
+/** Stable code for an integer-literal base prefix that no digit follows. */
+export const missingBaseDigitsCode = 'LEX0004' as const
+
 /** Stable code for one required token that is absent at its insertion position. */
 export const missingTokenCode = 'PAR0001' as const
 
@@ -199,6 +202,7 @@ export type Code =
   | typeof unsupportedBytesCode
   | typeof unknownLiteralModifierCode
   | typeof unterminatedStaticLiteralCode
+  | typeof missingBaseDigitsCode
   | typeof missingTokenCode
   | typeof unexpectedTokensCode
   | typeof reservedTemplateSyntaxCode
@@ -339,6 +343,7 @@ export type Reason =
       readonly modifier: string
       readonly delimiterWidth: 1 | 3
     }
+  | { readonly _tag: 'MissingBaseDigits'; readonly radix: 2 | 8 | 16 }
   | { readonly _tag: 'MissingToken'; readonly expected: Token.TokenKind }
   | {
       readonly _tag: 'UnexpectedTokens'
@@ -790,6 +795,18 @@ export const unterminatedStaticLiteral = (
     severity: 'error',
     message: `Unterminated ${delimiterWidth === 3 ? 'multiline ' : ''}static literal`,
     reason: Object.freeze({ _tag: 'UnterminatedStaticLiteral', modifier, delimiterWidth }),
+    span,
+  })
+
+/** Creates the lexical diagnostic for one base prefix that no digit of its base follows. */
+export const missingBaseDigits = (radix: 2 | 8 | 16, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'lexical',
+    code: missingBaseDigitsCode,
+    severity: 'error',
+    message: `Base-${radix} integer literal without digits`,
+    reason: Object.freeze({ _tag: 'MissingBaseDigits', radix }),
     span,
   })
 

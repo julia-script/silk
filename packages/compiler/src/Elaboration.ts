@@ -5,6 +5,7 @@ import * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
+import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
 import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
@@ -1095,12 +1096,6 @@ const spelling = (source: SourceFile.SourceFile, token: Token.Token): string =>
     () => new RangeError(`Semantic token span does not belong to source ${source.id}`),
   )
 
-const unsignedMagnitude = (bytes: Uint8Array): bigint => {
-  let value = 0n
-  for (const byte of bytes) value = value * 10n + BigInt(byte - 0x30)
-  return value
-}
-
 interface IntegerResult {
   readonly fact: IntegerExpressionFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -1178,7 +1173,7 @@ const analyzeInteger = (
       : Scalar.defaultInteger
   if (selected === undefined || selected.category !== 'Integer')
     throw new RangeError('The scalar catalog lost its default integer')
-  const magnitude = unsignedMagnitude(bytes)
+  const magnitude = IntegerLiteral.magnitude(bytes)
   const value = negative ? -magnitude : magnitude
   // Target-width integers are retained against the widest admitted target here. The concrete
   // target validates its selected 32- or 64-bit range before MIR is committed.
