@@ -13,14 +13,14 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 
 | Prefix | Phase | Codes |
 | --- | --- | --- |
-| `LEX` | Lexical | 5 |
+| `LEX` | Lexical | 6 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 93 |
+| `SEM` | Semantic | 94 |
 | `OWN` | Ownership | 12 |
 | `LAY` | Layout | 1 |
 
-There are 119 codes in total.
+There are 121 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -31,6 +31,7 @@ There are 119 codes in total.
 | `LEX0003` | Stable code for a literal whose matching closing delimiter is absent. | `Unterminated <delimiterWidth3multiline>static literal` |
 | `LEX0004` | Stable code for an integer-literal base prefix that no digit follows. | `Base-<radix> integer literal without digits` |
 | `LEX0005` | Stable code for a number-literal digit separator outside a position between two digits. | `Digit separator must sit between two digits` |
+| `LEX0006` | Stable code for a float-literal exponent marker that no exponent digit follows. | `Float literal exponent must have at least one digit` |
 
 ## Parser (`PAR`)
 
@@ -147,6 +148,7 @@ There are 119 codes in total.
 | `SEM0092` |  | `The returned slice does not originate from the function's single borrowed parameter` |
 | `SEM0093` | Stable code for one reachable intrinsic unavailable on the requested execution target. | `<operation> is unavailable for <target>` |
 | `SEM0094` | Stable code for wrapping the already-borrowed string view in another reference or slice. |  |
+| `SEM0095` | Stable code for a float literal spelling no floating-point value can represent. | `Invalid float literal: <spelling>` |
 
 ## Ownership (`OWN`)
 

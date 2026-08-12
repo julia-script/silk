@@ -60,6 +60,21 @@ buffering, and backpressure.
 general default-provider mechanism exists; neither logging nor process output receives an ambient
 exception.
 
+`StandardInput` is the separate byte-input boundary. `StandardStreams` writes and never reads, and
+the two contracts cannot merge: its `destination` is a `bool` with no room for a read direction, and
+its all-or-failure write contract cannot describe a read, which may commit fewer bytes than the
+caller asked for and eventually ends. One `StandardInput.read` fills a prefix of the caller's
+`&mut [u8]` and returns a `ReadOutcome`: `Filled { count }` carries the exact committed count, which
+may be less than the buffer length, and `EndOfInput` reports that no further bytes will arrive.
+End of input is outcome data, so draining input never handles a failure to do so; only a host error
+is `StreamReadFailure`. The service does not imply terminal control, raw mode, line editing, or
+non-blocking reads.
+
+`OsStandardInput` is the native provider. It reads the process standard-input descriptor through
+`Intrinsic.osStandardInputRead`, the same unsafe reason-and-native-code OS boundary `OsFileSystem`
+uses, and is native-only for the same reason. Any pure in-source provider implements the same
+service without an intrinsic.
+
 `Path` and `FileSystem` are the portable whole-file boundary. A `Path` is owned, normalized UTF-8
 inside the selected provider namespace: it is always absolute, never consults a process working
 directory, rejects NUL and lexical root escape, accepts textual construction and resolution inputs,

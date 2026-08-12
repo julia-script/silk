@@ -678,6 +678,8 @@ const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
       return `InvalidCallableReuse: callable #${reason.ticket} is ${reason.state.toLowerCase()}`
     case 'MissingStandardStreams':
       return 'MissingStandardStreams: no host provider was supplied'
+    case 'MissingStandardInput':
+      return 'MissingStandardInput: no host provider was supplied'
     case 'MissingOsFileSystemHost':
       return 'MissingOsFileSystemHost: no OS filesystem host provider was supplied'
     case 'IntrinsicTargetUnavailable':
@@ -700,6 +702,8 @@ const blockedSpan = (
     case 'InvalidCallableReuse':
       return reason.span
     case 'MissingStandardStreams':
+      return undefined
+    case 'MissingStandardInput':
       return undefined
     case 'MissingOsFileSystemHost':
       return undefined

@@ -1,4 +1,4 @@
-/** Compiler-owned native runtime symbols for the sealed OS filesystem protocol. */
+/** Compiler-owned native runtime symbols for the sealed OS filesystem and byte-input protocols. */
 export const symbols = Object.freeze([
   'silk_os_file_open_v1',
   'silk_os_file_read_v1',
@@ -10,6 +10,7 @@ export const symbols = Object.freeze([
   'silk_os_file_remove_v1',
   'silk_os_directory_remove_v1',
   'silk_os_handle_close_v1',
+  'silk_os_standard_input_read_v1',
 ] as const)
 
 export type Symbol = (typeof symbols)[number]
@@ -462,6 +463,16 @@ int silk_os_handle_close_v1(size_t identity, int kind, int active,
   free(native);
   if (status != 0) { silk_failure(reason, native_code, selected); return 0; }
   silk_success(reason, native_code); return 1;
+}
+`,
+  silk_os_standard_input_read_v1: `
+silk_option_usize silk_os_standard_input_read_v1(unsigned char *output, size_t capacity,
+                                                 int *reason, uint32_t *native_code) {
+  ssize_t received;
+  do { received = read(0, output, capacity); } while (received < 0 && errno == EINTR);
+  if (received < 0) { silk_failure(reason, native_code, errno); return silk_transfer_failure(); }
+  silk_success(reason, native_code);
+  return silk_transfer((size_t)received);
 }
 `,
 })

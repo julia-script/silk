@@ -4989,6 +4989,15 @@
       "invariant": "consumes exactly one live file or directory handle whether close succeeds or fails"
     },
     {
+      "operation": "Intrinsic.osStandardInputRead",
+      "signature": "unsafe fn Intrinsic.osStandardInputRead(output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-standard-input.read",
+      "identity": "OsStandardInputRead",
+      "invariant": "output is initialized writable storage; success reports the exact transferred byte count and zero means end of input"
+    },
+    {
       "operation": "Intrinsic.layoutOf",
       "signature": "fn Intrinsic.layoutOf<T>() -> Layout",
       "unsafe": false,

@@ -199,6 +199,10 @@ effect fn removeDirectory(root: &[u8], path: &[u8], reason: &mut i32, code: &mut
 effect fn close(handle: OsHandle, reason: &mut i32, code: &mut u32) -> bool {
   unsafe { return run Intrinsic.osHandleClose(move handle, reason, code) }
   return false
+}
+effect fn standardInputRead(output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
+  unsafe { return run Intrinsic.osStandardInputRead(move output, reason, code) }
+  return none<usize>()
 }`,
 ])
 

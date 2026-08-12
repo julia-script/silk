@@ -356,6 +356,15 @@ failure. Formatting and diagnostic presentation happen above the boundary; the s
 imply terminal control, color detection, flushing, logging, or interactive input.
 _Avoid_: console service, terminal service
 
+**Standard-input service**:
+The narrow bootstrap host capability for reading bytes from standard input. It is separate from the
+standard-streams service, which writes only: a write is all-or-failure while a read is inherently
+partial. One blocking read fills a prefix of the caller's buffer and reports the exact committed
+count; the end of input is outcome data rather than a typed failure, and only a host error is typed
+read failure. The service does not imply terminal control, raw mode, line editing, prompting, or
+non-blocking reads.
+_Avoid_: console service, stdin stream, reader service
+
 **Log invocation**:
 One complete semantic observability message submitted to a Logger with a separate closed severity.
 It is one provider call rather than a sequence of stream fragments. The bootstrap message is a
