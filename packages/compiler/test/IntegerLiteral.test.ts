@@ -1,4 +1,5 @@
 import { assert, it } from '@effect/vitest'
+import * as DigitSeparator from '../src/internal/DigitSeparator.js'
 import * as IntegerLiteral from '../src/internal/IntegerLiteral.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -45,4 +46,20 @@ it('reads the exact magnitude of every base without losing precision', () => {
     IntegerLiteral.magnitude('340282366920938463463374607431768211455'),
     340282366920938463463374607431768211455n,
   )
+})
+
+it('reads a separated literal as the value of its separator-free spelling', () => {
+  assert.strictEqual(IntegerLiteral.magnitude('1_000'), IntegerLiteral.magnitude('1000'))
+  assert.strictEqual(IntegerLiteral.magnitude('1_048_576'), 1048576n)
+  assert.strictEqual(IntegerLiteral.magnitude(ascii('0b1010_0000')), 160n)
+  assert.strictEqual(IntegerLiteral.magnitude('0xff_ff'), 65535n)
+  assert.strictEqual(IntegerLiteral.magnitude('0o1_7'), 15n)
+})
+
+it('removes every separator from one literal spelling', () => {
+  assert.strictEqual(DigitSeparator.strip('1_048_576'), '1048576')
+  assert.strictEqual(DigitSeparator.strip(ascii('3.141_592')), '3.141592')
+  assert.strictEqual(DigitSeparator.strip('1000'), '1000')
+  assert.isTrue(DigitSeparator.isSeparator('_'.charCodeAt(0)))
+  assert.isFalse(DigitSeparator.isSeparator(undefined))
 })

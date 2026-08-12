@@ -1,5 +1,6 @@
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
+import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
 import type * as SourceFile from './SourceFile.js'
@@ -237,6 +238,44 @@ const punctuationKind = (byte: number | undefined): Token.TokenKind => {
   }
 }
 
+/** One maximal run of digits and digit separators, with its separator placement already judged. */
+interface DigitRun {
+  readonly end: number
+  readonly digits: boolean
+  readonly separated: boolean
+}
+
+/**
+ * Consumes the longest run of base digits and `_` separators beginning at `from`.
+ *
+ * The run is taken greedily so that a misplaced separator stays inside the literal it belongs to
+ * rather than starting an identifier, which is what lets one diagnostic carry the literal's span.
+ * A separator is well placed only with a digit of the same run on each side.
+ */
+const scanDigitRun = (
+  bytes: ReadonlyArray<number>,
+  base: IntegerLiteral.Base,
+  from: number,
+): DigitRun => {
+  let at = from
+  let digits = false
+  let separated = true
+  let afterSeparator = false
+  while (at < bytes.length) {
+    if (IntegerLiteral.isDigit(base, bytes[at])) {
+      digits = true
+      afterSeparator = false
+      at += 1
+      continue
+    }
+    if (!DigitSeparator.isSeparator(bytes[at])) break
+    if (at === from || afterSeparator) separated = false
+    afterSeparator = true
+    at += 1
+  }
+  return Object.freeze({ end: at, digits, separated: separated && !afterSeparator })
+}
+
 const spanAt = (source: SourceFile.SourceFile, start: number, end: number): SourceSpan.SourceSpan =>
   Option.getOrThrowWith(
     SourceSpan.make(source, start, end),
@@ -324,28 +363,43 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
       const base = IntegerLiteral.recognize(bytes, index)
       if (base.radix !== 10) {
         index += base.width
-        const digits = index
-        while (index < bytes.length && IntegerLiteral.isDigit(base, bytes[index])) index += 1
-        const empty = index === digits
-        const span = pushToken(empty ? 'Invalid' : 'DecimalInteger', start, index)
-        if (empty) diagnostics.push(Diagnostic.missingBaseDigits(base.radix, span))
+        const run = scanDigitRun(bytes, base, index)
+        index = run.end
+        const span = pushToken(
+          run.digits && run.separated ? 'DecimalInteger' : 'Invalid',
+          start,
+          index,
+        )
+        if (!run.digits) diagnostics.push(Diagnostic.missingBaseDigits(base.radix, span))
+        else if (!run.separated) diagnostics.push(Diagnostic.invalidDigitSeparator(span))
         continue
       }
-      index += 1
-      while (index < bytes.length && isDecimalDigit(bytes[index])) index += 1
+      const whole = scanDigitRun(bytes, base, index)
+      index = whole.end
+      let separated = whole.separated
       let floating = false
-      if (bytes[index] === 0x2e && bytes[index + 1] !== 0x2e && isDecimalDigit(bytes[index + 1])) {
-        floating = true
-        index += 1
-        while (index < bytes.length && isDecimalDigit(bytes[index])) index += 1
+      if (bytes[index] === 0x2e && bytes[index + 1] !== 0x2e) {
+        const fraction = scanDigitRun(bytes, base, index + 1)
+        if (fraction.digits) {
+          floating = true
+          index = fraction.end
+          separated = separated && fraction.separated
+        }
       }
       if (bytes[index] === 0x65 || bytes[index] === 0x45) {
         floating = true
         index += 1
         if (bytes[index] === 0x2b || bytes[index] === 0x2d) index += 1
-        while (index < bytes.length && isDecimalDigit(bytes[index])) index += 1
+        const exponent = scanDigitRun(bytes, base, index)
+        index = exponent.end
+        separated = separated && exponent.separated
       }
-      pushToken(floating ? 'DecimalFloat' : 'DecimalInteger', start, index)
+      const span = pushToken(
+        !separated ? 'Invalid' : floating ? 'DecimalFloat' : 'DecimalInteger',
+        start,
+        index,
+      )
+      if (!separated) diagnostics.push(Diagnostic.invalidDigitSeparator(span))
       continue
     }
 

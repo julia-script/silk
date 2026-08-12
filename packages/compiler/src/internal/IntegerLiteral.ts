@@ -1,3 +1,5 @@
+import * as DigitSeparator from './DigitSeparator.js'
+
 /** The numeric base an integer literal's digits are read in. */
 export type Radix = 2 | 8 | 10 | 16
 
@@ -79,13 +81,16 @@ export const isDigit = (self: Base, byte: number | undefined): boolean => {
  * Reads the exact unsigned magnitude of one complete integer-literal slice.
  *
  * The slice carries its own base, so a conversion never assumes decimal for a prefixed literal.
+ * Digit separators group the digits without carrying value, so they are skipped.
  */
 export const magnitude = (digits: Digits): bigint => {
   const base = recognize(digits, 0)
   const radix = BigInt(base.radix)
   let value = 0n
   for (let index = base.width; index < digits.length; index += 1) {
-    value = value * radix + BigInt(digitValue(codeAt(digits, index)))
+    const code = codeAt(digits, index)
+    if (DigitSeparator.isSeparator(code)) continue
+    value = value * radix + BigInt(digitValue(code))
   }
   return value
 }

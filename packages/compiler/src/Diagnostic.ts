@@ -25,6 +25,9 @@ export const unterminatedStaticLiteralCode = 'LEX0003' as const
 /** Stable code for an integer-literal base prefix that no digit follows. */
 export const missingBaseDigitsCode = 'LEX0004' as const
 
+/** Stable code for a number-literal digit separator outside a position between two digits. */
+export const invalidDigitSeparatorCode = 'LEX0005' as const
+
 /** Stable code for one required token that is absent at its insertion position. */
 export const missingTokenCode = 'PAR0001' as const
 
@@ -203,6 +206,7 @@ export type Code =
   | typeof unknownLiteralModifierCode
   | typeof unterminatedStaticLiteralCode
   | typeof missingBaseDigitsCode
+  | typeof invalidDigitSeparatorCode
   | typeof missingTokenCode
   | typeof unexpectedTokensCode
   | typeof reservedTemplateSyntaxCode
@@ -344,6 +348,7 @@ export type Reason =
       readonly delimiterWidth: 1 | 3
     }
   | { readonly _tag: 'MissingBaseDigits'; readonly radix: 2 | 8 | 16 }
+  | { readonly _tag: 'InvalidDigitSeparator' }
   | { readonly _tag: 'MissingToken'; readonly expected: Token.TokenKind }
   | {
       readonly _tag: 'UnexpectedTokens'
@@ -807,6 +812,18 @@ export const missingBaseDigits = (radix: 2 | 8 | 16, span: SourceSpan.SourceSpan
     severity: 'error',
     message: `Base-${radix} integer literal without digits`,
     reason: Object.freeze({ _tag: 'MissingBaseDigits', radix }),
+    span,
+  })
+
+/** Creates the lexical diagnostic for one number literal whose `_` is not between two digits. */
+export const invalidDigitSeparator = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'lexical',
+    code: invalidDigitSeparatorCode,
+    severity: 'error',
+    message: 'Digit separator must sit between two digits',
+    reason: Object.freeze({ _tag: 'InvalidDigitSeparator' }),
     span,
   })
 

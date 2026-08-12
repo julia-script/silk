@@ -13,8 +13,9 @@ distinct token kind, the keywords `pub`, `fn`, `return`, `let`, `move`, and the 
 `-`, `->`, and end-of-file. An identifier SHALL begin with an ASCII letter or underscore and
 continue with ASCII letters, digits, or underscores. An integer literal written without a base
 prefix SHALL contain one or more ASCII digits and SHALL be read in base ten; the base prefixes are
-specified by "Integer literals select a base from their prefix". A `-` immediately followed by `>`
-SHALL remain one arrow token; any other `-` SHALL be one minus token.
+specified by "Integer literals select a base from their prefix", and the `_` digit separator is
+specified by "Number literals accept a digit separator between digits". A `-` immediately followed
+by `>` SHALL remain one arrow token; any other `-` SHALL be one minus token.
 
 #### Scenario: Lex the first parser fixture
 
@@ -299,3 +300,43 @@ to a value SHALL read the base from the token's own source slice rather than ass
 
 - **WHEN** a compiled program returns `0xff` where another returns `255`
 - **THEN** both programs produce the same value, and a prefixed literal outside its selected type's range produces the existing out-of-range diagnostic
+
+### Requirement: Number literals accept a digit separator between digits
+
+An integer or floating-point literal SHALL accept the byte `_` as a digit separator, and the
+separator SHALL be well placed only with a digit of the same digit run immediately on each side.
+A separator therefore SHALL NOT open or close a literal, SHALL NOT follow another separator, SHALL
+NOT sit immediately after a base prefix, and SHALL NOT sit immediately before or after the decimal
+point or the exponent letter. The lexer SHALL consume the separators of a literal itself, keeping
+one token rather than a literal followed by an identifier, and SHALL NOT require any group size.
+A literal whose separators are not all well placed SHALL be one invalid token covering the literal
+and SHALL produce exactly one lexical diagnostic over that same span, without introducing a new
+token kind. Every conversion of a literal to a value SHALL read it without its separators, so a
+separated literal SHALL retain the exact value of its separator-free spelling. The `_` byte SHALL
+keep its identifier meaning everywhere else, so a spelling beginning with `_` remains one
+identifier.
+
+#### Scenario: Separate the digits of an integer literal
+
+- **WHEN** the source bytes spell `1_000 1_048_576 0b1010_0000 0xff_ff`
+- **THEN** the stream contains exactly four integer literal tokens whose slices retain their separators, with no lexical diagnostic
+
+#### Scenario: Separate the digits of a float literal
+
+- **WHEN** the source bytes spell `1_000.5 1.000_5 1e1_0`
+- **THEN** the stream contains exactly three floating-point literal tokens, with no lexical diagnostic
+
+#### Scenario: Preserve the value of a separated literal
+
+- **WHEN** a compiled program compares `1_000` with `1000` and `1.000_5` with `1.0005`
+- **THEN** each pair is equal on every execution engine
+
+#### Scenario: Reject a misplaced separator
+
+- **WHEN** the source bytes spell any of `1_`, `1__0`, `0x_ff`, `1_.5`, `1._5`, `1_e5`, or `1e_5`
+- **THEN** the lexer emits one invalid token covering the literal and exactly one lexical diagnostic
+
+#### Scenario: Keep a leading underscore an identifier
+
+- **WHEN** the source bytes spell `_1` followed by `x_1`
+- **THEN** both spellings remain single identifier tokens
