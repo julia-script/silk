@@ -8,8 +8,10 @@ import * as Type from '../src/Type.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
+// Pinned, not host-resolved: the goldens record a target line, so an unpinned host target makes
+// these assertions pass only on Apple Silicon.
 const snapshot = (text: string): Effect.Effect<Analysis.Snapshot> =>
-  Analysis.ofSourceRealized('golden/program', ascii(text))
+  Analysis.ofSourceRealized('golden/program', ascii(text), 'aarch64-apple-darwin')
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
