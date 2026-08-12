@@ -1,5 +1,13 @@
 # @silk-effect/llvm
 
+## 1.0.0
+
+### Major Changes
+
+- 03f1f0a: Replace the generic `SilkError` export with the LLVM-specific `LlvmError` contract, make expected
+  validation and state-transition failures typed, guarantee scoped cleanup for function-body builds,
+  and add data-first and pipeable immutable flag transformations.
+
 ## Unreleased
 
 - Added the Effect-native LLVM builder, typed declarations and function bodies, advanced IR,

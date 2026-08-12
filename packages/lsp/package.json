@@ -1,6 +1,6 @@
 {
   "name": "@silk-effect/lsp",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Language Server Protocol server for Silk Effect, powered by the bootstrap compiler analysis snapshot.",
   "license": "MIT",
   "repository": {

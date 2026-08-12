@@ -1,6 +1,6 @@
 {
   "name": "@silk-effect/language",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Editor language support for Silk Effect: lexer-driven CodeMirror highlighting and the Silk TextMate grammar.",
   "license": "MIT",
   "repository": {

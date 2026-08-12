@@ -1,6 +1,6 @@
 {
   "name": "@silk-effect/platform-webcontainer",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Effect-native WebContainer runtime, filesystem, process, and event services.",
   "license": "MIT",
   "repository": {

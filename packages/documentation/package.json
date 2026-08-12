@@ -1,6 +1,6 @@
 {
   "name": "@silk-effect/documentation",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Lazy, formatter-neutral documentation tooling for Silk Effect source.",
   "license": "MIT",
   "repository": {
