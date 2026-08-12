@@ -22,15 +22,14 @@ const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
 const webContainerPackageRoot = resolve(workspaceRoot, 'packages/platform-webcontainer')
 
 // Consumers install with --offline, so an override may only name a version the workspace store
-// already holds. Read it from the installed copy rather than pinning a literal, which silently
-// drifts out of the store the next time the dependency is bumped.
-// pnpm's isolated store keeps it under the consuming package, not the workspace root.
-const workspaceTypesNodeVersion = (): string =>
+// already holds. A caret range resolves fresh against the registry and picks whatever is newest,
+// which is not what was installed — so every ranged dependency needs an exact override here.
+// Read each from its installed copy rather than pinning a literal, which silently drifts out of
+// the store the next time the dependency is bumped.
+// pnpm's isolated store keeps these under the consuming package, not the workspace root.
+const installedVersion = (name: string): string =>
   JSON.parse(
-    readFileSync(
-      resolve(compilerCliPackageRoot, 'node_modules/@types/node/package.json'),
-      'utf8',
-    ),
+    readFileSync(resolve(compilerCliPackageRoot, `node_modules/${name}/package.json`), 'utf8'),
   ).version
 
 const installConsumer = (cwd: string, ignoreWorkspace = false): void => {
@@ -1074,7 +1073,7 @@ test('the compiler CLI release candidate installs with its project-first command
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${workspaceTypesNodeVersion()}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
     installConsumer(consumerRoot)
 
@@ -1355,7 +1354,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${workspaceTypesNodeVersion()}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
     installConsumer(consumerRoot)
 
