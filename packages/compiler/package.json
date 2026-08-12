@@ -265,7 +265,9 @@
     "test": "pnpm stdlib:check && pnpm test:parallel && pnpm test:native-acceptance",
     "test:native-acceptance": "vitest run test/DriverNativeAcceptance.test.ts --passWithNoTests --maxWorkers=1",
     "test:parallel": "vitest run --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts",
-    "typecheck": "pnpm stdlib:check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+    "typecheck": "pnpm stdlib:check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "documentation:generate": "node scripts/generate-documentation.mjs",
+    "documentation:check": "node scripts/generate-documentation.mjs --check"
   },
   "dependencies": {
     "@silk-effect/llvm": "workspace:*",
