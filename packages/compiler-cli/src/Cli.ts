@@ -2,6 +2,7 @@ import { Command } from 'effect/unstable/cli'
 import * as BuildCommand from './BuildCommand.js'
 import * as BuildExeCommand from './BuildExeCommand.js'
 import * as CheckCommand from './CheckCommand.js'
+import * as CleanCommand from './CleanCommand.js'
 import * as DocCommand from './DocCommand.js'
 import * as FormatCommand from './FormatCommand.js'
 import * as InitCommand from './InitCommand.js'
@@ -17,6 +18,7 @@ export const command = Command.make('silk').pipe(
     InitCommand.command,
     BuildCommand.command,
     CheckCommand.command,
+    CleanCommand.command,
     DocCommand.command,
     FormatCommand.command,
     RunCommand.command,

@@ -7,7 +7,7 @@ Defines the user-visible Silk language-tool commands for project checking, build
 ## Requirements
 
 ### Requirement: Project-oriented command surface
-The root `silk` command SHALL expose `init`, `build`, `check`, `format`, `run`, and `build-exe`. `init` SHALL accept an optional path and package-name override. Project compilation commands SHALL accept a shared optional `--manifest-path`, one `--backend`, repeatable `--target`, and profile selection. Repeated command-line targets SHALL replace rather than append to manifest targets. `--release` SHALL select the release profile and SHALL conflict with an explicitly different `--profile`.
+The root `silk` command SHALL expose `init`, `build`, `check`, `clean`, `format`, `run`, and `build-exe`. `init` SHALL accept an optional path and package-name override. Project compilation commands SHALL accept a shared optional `--manifest-path`, one `--backend`, repeatable `--target`, and profile selection. Repeated command-line targets SHALL replace rather than append to manifest targets. `--release` SHALL select the release profile and SHALL conflict with an explicitly different `--profile`.
 
 #### Scenario: Display root help
 - **WHEN** a user requests `silk --help`
@@ -70,6 +70,28 @@ The root `silk` command SHALL expose `init`, `build`, `check`, `format`, `run`, 
 #### Scenario: Refuse a non-runnable backend
 - **WHEN** the selected backend cannot produce a host executable
 - **THEN** `silk run` fails before compilation with a clear backend compatibility error
+
+### Requirement: Project clean
+`silk clean` SHALL remove the artifacts the manifest output directory holds and SHALL accept the shared optional `--manifest-path`. It SHALL NOT remove a file the build did not write, and it SHALL exit zero when the output directory does not exist.
+
+#### Scenario: Remove build artifacts
+- **WHEN** a project has been built and `silk clean` is invoked
+- **THEN** the manifest output directory is removed, every project source file remains, and the command exits zero
+
+#### Scenario: Clean a project that was never built
+- **WHEN** `silk clean` is invoked and the manifest output directory does not exist
+- **THEN** the command removes nothing and exits zero
+
+### Requirement: Watch mode
+`silk build` and `silk check` SHALL accept `--watch`. Watch mode SHALL compile again after a change to any file in the source graph and SHALL report each compilation in the same format as one command run. It SHALL keep running after a compilation that reports diagnostics, and the toolchain exit codes SHALL apply only when the user stops it.
+
+#### Scenario: Recompile after a source change
+- **WHEN** `silk check --watch` is running and a file in the source graph changes
+- **THEN** the command analyzes the project again and reports the new result in the ordinary single-run format
+
+#### Scenario: Survive a reported diagnostic
+- **WHEN** a watched compilation reports a diagnostic
+- **THEN** the command prints the diagnostic, keeps watching, and does not exit with the compilation's status
 
 ### Requirement: Explicit direct-file compilation
 `silk build-exe <source>` SHALL retain direct-file controls for source root, output, target, profile, Clang path, saved temporary artifacts, and timing reports. The former `silk compile` command SHALL NOT be registered.

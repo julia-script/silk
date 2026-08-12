@@ -15,6 +15,7 @@ export const command = Command.make(
     targets: ProjectOptions.targets,
     profile: ProjectOptions.profile,
     release: ProjectOptions.release,
+    watch: ProjectOptions.watch,
   },
   Effect.fnUntraced(function* (config) {
     const options = ProjectOptions.resolve({
@@ -28,6 +29,10 @@ export const command = Command.make(
       yield* Console.error(options.failure.message)
       return yield* CommandExit.complete(2)
     }
-    yield* CommandExit.complete(yield* Workflow.build(options.success))
+    yield* CommandExit.complete(
+      config.watch
+        ? yield* Workflow.watch(Workflow.build, options.success)
+        : yield* Workflow.build(options.success),
+    )
   }),
 ).pipe(Command.withDescription('Build the nearest Silk project.'))

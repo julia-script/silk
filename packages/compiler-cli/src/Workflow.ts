@@ -11,6 +11,7 @@ import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import * as Result from 'effect/Result'
+import * as Stream from 'effect/Stream'
 import type { ChildProcessSpawner } from 'effect/unstable/process'
 import * as BuildBatch from './BuildBatch.js'
 import type * as BuildPlan from './BuildPlan.js'
@@ -256,6 +257,89 @@ export const build = Effect.fn('Workflow.build')(function* (
   const succeeded = attempts.filter((attempt) => attempt.status === 0).length
   yield* Console.log(`Build summary: ${succeeded} succeeded, ${attempts.length - succeeded} failed`)
   return aggregateStatus(attempts.map((attempt) => attempt.status))
+})
+
+/**
+ * Collects the source root and every directory beneath it. `FileSystem.watch` reports only a
+ * directory's own entries, so a nested module needs its own watch to be seen at all.
+ */
+const sourceDirectories = Effect.fnUntraced(function* (
+  root: string,
+): Effect.fn.Return<ReadonlyArray<string>, never, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const found: Array<string> = []
+  const pending: Array<string> = [root]
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    if (directory === undefined) continue
+    found.push(directory)
+    const names = yield* Effect.result(fileSystem.readDirectory(directory))
+    if (Result.isFailure(names)) continue
+    for (const name of names.success) {
+      const candidate = path.resolve(directory, name)
+      const info = yield* Effect.result(fileSystem.stat(candidate))
+      if (Result.isSuccess(info) && info.success.type === 'Directory') pending.push(candidate)
+    }
+  }
+  return found
+})
+
+/**
+ * Runs one compilation, then repeats it after every change under the project source root. The
+ * status of each pass is reported but never returned: only stopping the watch ends the command,
+ * so a pass that reports diagnostics leaves the watch running.
+ */
+export const watch = Effect.fn('Workflow.watch')(function* (
+  run: (
+    options: ProjectSelection,
+  ) => Effect.Effect<ExitStatus, never, FileSystem.FileSystem | Path.Path>,
+  options: ProjectSelection,
+): Effect.fn.Return<ExitStatus, never, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem
+  const loaded = yield* Effect.result(loadProject(options))
+  if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
+  const sourceRoot = loaded.success.entry.sourceRoot
+  yield* run(options)
+  // ponytail: directories are enumerated once; a directory created later needs a restart.
+  const directories = yield* sourceDirectories(sourceRoot)
+  yield* Console.log(`Watching ${sourceRoot} for changes.`)
+  yield* Stream.mergeAll(
+    directories.map((directory) => fileSystem.watch(directory)),
+    { concurrency: 'unbounded' },
+  ).pipe(
+    // ponytail: every event recompiles the whole graph; debounce if editors emit noisy bursts.
+    Stream.runForEach(
+      Effect.fnUntraced(function* () {
+        yield* run(options)
+        yield* Console.log(`Watching ${sourceRoot} for changes.`)
+      }),
+    ),
+    Effect.catchCause(() => Console.error(`Stopped watching ${sourceRoot}`)),
+  )
+  return 0
+})
+
+/**
+ * Removes the manifest output directory. Only the build writes there — `Project.load` rejects an
+ * `output-dir` that escapes the project — so no source file is reachable from this removal.
+ */
+export const clean = Effect.fn('Workflow.clean')(function* (
+  options: ProjectSelection,
+): Effect.fn.Return<ExitStatus, never, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem
+  const loaded = yield* Effect.result(loadProject(options))
+  if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
+  const outputDirectory = loaded.success.build.outputDirectory
+  const removed = yield* Effect.result(
+    fileSystem.remove(outputDirectory, { recursive: true, force: true }),
+  )
+  if (Result.isFailure(removed)) {
+    yield* Console.error(`Cannot remove build directory ${outputDirectory}`)
+    return 2
+  }
+  yield* Console.log(`Removed ${outputDirectory}`)
+  return 0
 })
 
 /** Builds exactly the host target through a runnable backend and preserves program exit status. */

@@ -11,7 +11,16 @@ it('exposes the project-first command surface without a compile alias', () => {
     group.commands.map((command) => command.name),
   )
 
-  assert.deepStrictEqual(names, ['init', 'build', 'check', 'doc', 'format', 'run', 'build-exe'])
+  assert.deepStrictEqual(names, [
+    'init',
+    'build',
+    'check',
+    'clean',
+    'doc',
+    'format',
+    'run',
+    'build-exe',
+  ])
   assert.strictEqual(names.includes('compile'), false)
 })
 
@@ -90,6 +99,15 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   30_000,
 )
+
+it('lists clean with its purpose in root help', () => {
+  const clean = Cli.command.subcommands
+    .flatMap((group) => group.commands)
+    .find((command) => command.name === 'clean')
+
+  assert.notStrictEqual(clean, undefined)
+  assert.strictEqual(clean?.description, 'Remove the build artifacts of the nearest Silk project.')
+})
 
 it.effect('rejects the removed compile subcommand', () =>
   Effect.gen(function* () {
