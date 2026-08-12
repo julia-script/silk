@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Option from 'effect/Option'
+import * as IntegerLiteral from '../src/internal/IntegerLiteral.js'
 import * as Lexer from '../src/Lexer.js'
 import * as SourceFile from '../src/SourceFile.js'
 import type * as Token from '../src/Token.js'
@@ -273,6 +274,109 @@ it('diagnoses a base prefix without digits exactly once and resumes lexing', () 
       { code: 'LEX0004', reason: { _tag: 'MissingBaseDigits', radix: 2 } },
       { code: 'LEX0004', reason: { _tag: 'MissingBaseDigits', radix: 8 } },
     ],
+  )
+})
+
+it('accepts a digit separator between two digits of every base', () => {
+  const source = SourceFile.make(
+    'memory://digit-separators.silk',
+    ascii('1_000 1_048_576 0b1010_0000 0xff_ff 0o1_7'),
+  )
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace' && token.kind !== 'EndOfFile')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'DecimalInteger', start: 0, end: 5, slice: '1_000' },
+      { kind: 'DecimalInteger', start: 6, end: 15, slice: '1_048_576' },
+      { kind: 'DecimalInteger', start: 16, end: 27, slice: '0b1010_0000' },
+      { kind: 'DecimalInteger', start: 28, end: 35, slice: '0xff_ff' },
+      { kind: 'DecimalInteger', start: 36, end: 41, slice: '0o1_7' },
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(IntegerLiteral.magnitude('1_000'), IntegerLiteral.magnitude('1000'))
+})
+
+it('accepts a digit separator between two digits of a float literal', () => {
+  const source = SourceFile.make('memory://separated-floats.silk', ascii('1_000.5 1.000_5 1e1_0'))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace' && token.kind !== 'EndOfFile')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'DecimalFloat', start: 0, end: 7, slice: '1_000.5' },
+      { kind: 'DecimalFloat', start: 8, end: 15, slice: '1.000_5' },
+      { kind: 'DecimalFloat', start: 16, end: 21, slice: '1e1_0' },
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('keeps a leading underscore an identifier rather than a separated literal', () => {
+  const source = SourceFile.make('memory://leading-separator.silk', ascii('_1 x_1'))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace' && token.kind !== 'EndOfFile')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'Identifier', start: 0, end: 2, slice: '_1' },
+      { kind: 'Identifier', start: 3, end: 6, slice: 'x_1' },
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('diagnoses every misplaced digit separator exactly once over the literal span', () => {
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ['1_', '1_'],
+    ['1__0', '1__0'],
+    ['0x_ff', '0x_ff'],
+    ['1_.5', '1_.5'],
+    ['1._5', '1._5'],
+    ['1_e5', '1_e5'],
+    ['1e_5', '1e_5'],
+    ['1e+_5', '1e+_5'],
+    ['1.5_', '1.5_'],
+  ]
+  for (const [spelling, expected] of cases) {
+    const source = SourceFile.make(`memory://misplaced-${spelling}.silk`, ascii(spelling))
+    const result = Lexer.lex(source)
+    assert.deepEqual(
+      result.diagnostics.map(({ code, reason }) => ({ code, reason })),
+      [{ code: 'LEX0005', reason: { _tag: 'InvalidDigitSeparator' } }],
+      spelling,
+    )
+    const invalid = result.tokens.filter((token) => token.kind === 'Invalid')
+    assert.deepEqual(
+      invalid.map((token) => tokenView(source, token).slice),
+      [expected],
+      spelling,
+    )
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [diagnostic.span.start, diagnostic.span.end]),
+      [[invalid[0]?.span.start, invalid[0]?.span.end]],
+      spelling,
+    )
+  }
+})
+
+it('keeps a base prefix followed only by separators a missing-digits diagnostic', () => {
+  const source = SourceFile.make('memory://separator-only-prefix.silk', ascii('0x_'))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens.map((token) => tokenView(source, token)),
+    [
+      { kind: 'Invalid', start: 0, end: 3, slice: '0x_' },
+      { kind: 'EndOfFile', start: 3, end: 3, slice: '' },
+    ],
+  )
+  assert.deepEqual(
+    result.diagnostics.map(({ code, reason }) => ({ code, reason })),
+    [{ code: 'LEX0004', reason: { _tag: 'MissingBaseDigits', radix: 16 } }],
   )
 })
 

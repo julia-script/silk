@@ -1,6 +1,7 @@
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
+import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as SourceFile from './SourceFile.js'
@@ -626,7 +627,7 @@ const constantLiteral = (
   if (initializer.kind === 'FloatingLiteralExpression') {
     const token = SyntaxTree.directToken(initializer, 'DecimalFloat')
     if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
-    const literal = spelling(source, token)
+    const literal = DigitSeparator.strip(spelling(source, token))
     return Object.freeze({
       _tag: 'FloatingLiteral',
       spelling: `${SyntaxTree.directToken(initializer, 'Minus') === undefined ? '' : '-'}${literal}`,

@@ -5,6 +5,7 @@ import * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
+import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
 import * as Match from './Match.js'
@@ -1220,7 +1221,7 @@ const analyzeFloating = (
     SourceFile.slice(source, token.span),
     () => new RangeError(`Semantic float span does not belong to source ${source.id}`),
   )
-  const unsigned = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
+  const unsigned = DigitSeparator.strip(bytes)
   const spelling = directToken(node, 'Minus') === undefined ? unsigned : `-${unsigned}`
   const selected = Scalar.isFloatSpelling(expected) ? expected : Scalar.defaultFloat.spelling
   const encoded = FloatingPoint.fromDecimal(spelling, selected === 'f32' ? 32 : 64)
