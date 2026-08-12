@@ -371,12 +371,17 @@ and the expression recovers at the existing statement and argument boundaries.
 
 The parser SHALL accept `if <expression> { <statements> } else { <statements> }` wherever a
 statement may appear, with the `else` arm optional and no parentheses around the condition, per
-the accepted surface. Each arm SHALL be a brace-delimited statement sequence (bindings,
-conditionals, and return statements), and the function body SHALL still end in exactly one
-trailing return statement after any conditionals. `true` and `false` SHALL parse as boolean
-literal expressions wherever an expression is allowed. Missing conditions, braces, and damaged
-arms SHALL remain explicit recovery data bounded by the existing statement and declaration
-anchors, and every token SHALL be retained losslessly.
+the accepted surface. The taken arm SHALL be a brace-delimited statement sequence (bindings,
+conditionals, and return statements). The `else` arm SHALL be either such a brace-delimited
+statement sequence or a chained conditional statement introduced by `if` immediately after the
+`else` keyword; the chained form SHALL be recorded as a conditional statement nested directly
+inside the conditional it continues, so a chain of conditions SHALL introduce no additional node
+kind and SHALL nest one level per arm. `if` SHALL introduce a chained arm only immediately after
+`else`. The function body SHALL still end in exactly one trailing return statement after any
+conditionals. `true` and `false` SHALL parse as boolean literal expressions wherever an expression
+is allowed. Missing conditions, braces, and damaged arms SHALL remain explicit recovery data
+bounded by the existing statement and declaration anchors, and every token SHALL be retained
+losslessly, so the formatter SHALL print a chained arm as `} else if <condition> {` on one line.
 
 #### Scenario: Parse a conditional with both arms
 
@@ -387,6 +392,21 @@ anchors, and every token SHALL be retained losslessly.
 
 - **WHEN** a body spells `if flag { return 1 } return 0`
 - **THEN** the conditional retains one arm and no else branch, and the trailing return remains a sibling statement
+
+#### Scenario: Parse a chain of three conditions
+
+- **WHEN** a body spells `if first { return 1 } else if second { return 2 } else if third { return 3 } else { return 4 } return 0`
+- **THEN** the block contains one conditional statement whose else keyword is followed by a nested conditional statement, nested once more for the third condition, with the two chained conditionals retaining one brace-delimited arm each and the innermost retaining both arms, and the trailing return remains a sibling statement
+
+#### Scenario: Print a chained arm on one line
+
+- **WHEN** the formatter prints a conditional whose else arm is a chained conditional
+- **THEN** the arm is printed as `} else if <condition> {` on one line, and printing the result again produces identical bytes
+
+#### Scenario: Recover an else arm that is neither a block nor a chained if
+
+- **WHEN** a body spells `if first { return 1 } else while second { }`
+- **THEN** the else keyword retains an explicit missing arm with one parser diagnostic, and every token stays in the tree
 
 #### Scenario: Parse boolean literals
 
