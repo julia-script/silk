@@ -307,6 +307,22 @@ const soleEdit = (
   return { edits, edit: present(edits.at(0), `edit for ${diagnostic.code}`) }
 }
 
+const everyEdit = (
+  diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
+): ReadonlyArray<Diagnostic.Edit> =>
+  diagnostics.flatMap((diagnostic) => [...present(diagnostic.edits, `edit for ${diagnostic.code}`)])
+
+/** Names each pair of edits that claim a byte in common, so a failure reports the guilty spans. */
+const overlaps = (edits: ReadonlyArray<Diagnostic.Edit>): ReadonlyArray<string> => {
+  const ordered = [...edits].sort((left, right) => left.span.start - right.span.start)
+  return ordered.flatMap((edit, index) => {
+    const previous = ordered[index - 1]
+    return previous === undefined || previous.span.end <= edit.span.start
+      ? []
+      : [`[${previous.span.start},${previous.span.end}) and [${edit.span.start},${edit.span.end})`]
+  })
+}
+
 const oneAnswer = { 'library/One': 'pub fn one() -> i32 { return 1 }' }
 
 it.effect('emits one deletion edit for a redundant namespace alias', () =>
@@ -377,6 +393,92 @@ it.effect('keeps the following line intact for a repeated import that shares a l
     assert.strictEqual(corrected, 'import library.One\npub fn main() -> i32 { return 0 }')
     assert.isTrue(corrected.includes('\npub fn main'))
     const fixed = yield* snapshot('root', { root: corrected, ...oneAnswer })
+    assert.deepEqual(Analysis.diagnostics(fixed), [])
+  }),
+)
+
+it.effect('still takes the trailing blanks of a repeated import that ends its line', () =>
+  Effect.gen(function* () {
+    const text = 'import library.One\nimport library.One   \npub fn main() -> i32 { return 0 }'
+    const self = yield* snapshot('root', { root: text, ...oneAnswer })
+    const diagnostic = present(Analysis.diagnostics(self).at(0), 'diagnostic')
+    assert.strictEqual(diagnostic.code, 'MOD0003')
+    const { edits, edit } = soleEdit(diagnostic)
+    assert.strictEqual(editedText(text, edit), 'import library.One   \n')
+
+    const corrected = applyEdits(text, edits)
+    assert.strictEqual(corrected, 'import library.One\npub fn main() -> i32 { return 0 }')
+    const fixed = yield* snapshot('root', { root: corrected, ...oneAnswer })
+    assert.deepEqual(Analysis.diagnostics(fixed), [])
+  }),
+)
+
+it.effect('keeps two repeated imports sharing a line from claiming the same bytes', () =>
+  Effect.gen(function* () {
+    const text =
+      'import library.One\nimport library.One import library.One\npub fn main() -> i32 { return 0 }'
+    const self = yield* snapshot('root', { root: text, ...oneAnswer })
+    const diagnostics = Analysis.diagnostics(self)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['MOD0003', 'MOD0003'],
+    )
+    const edits = everyEdit(diagnostics)
+    assert.strictEqual(edits.length, 2)
+    assert.deepEqual(overlaps(edits), [])
+    assert.strictEqual(
+      applyEdits(text, [present(edits.at(0), 'first edit')]),
+      'import library.One\n import library.One\npub fn main() -> i32 { return 0 }',
+    )
+    assert.strictEqual(
+      applyEdits(text, [present(edits.at(1), 'second edit')]),
+      'import library.One\nimport library.One\npub fn main() -> i32 { return 0 }',
+    )
+
+    // Neither span may swallow the line break: the first shares its line with the second, and the
+    // second would splice the remainder onto `pub fn main`. The emptied line stays behind.
+    const corrected = applyEdits(text, edits)
+    assert.strictEqual(corrected, 'import library.One\n\npub fn main() -> i32 { return 0 }')
+    const fixed = yield* snapshot('root', { root: corrected, ...oneAnswer })
+    assert.deepEqual(Analysis.diagnostics(fixed), [])
+  }),
+)
+
+it.effect('applies every redundant alias and repeated import edit of one file together', () =>
+  Effect.gen(function* () {
+    const text = `import library.One as One
+import library.Two as Two
+import library.One import library.Two
+import library.Three { three as three }
+pub fn main() -> i32 { return 0 }`
+    const answers = {
+      ...oneAnswer,
+      'library/Two': 'pub fn two() -> i32 { return 2 }',
+      'library/Three': 'pub fn three() -> i32 { return 3 }',
+    }
+    const self = yield* snapshot('root', { root: text, ...answers })
+    const diagnostics = Analysis.diagnostics(self)
+    assert.deepEqual([...diagnostics.map((diagnostic) => diagnostic.code)].sort(), [
+      'MOD0003',
+      'MOD0003',
+      'SEM0013',
+      'SEM0013',
+      'SEM0013',
+    ])
+    const edits = everyEdit(diagnostics)
+    assert.strictEqual(edits.length, 5)
+    assert.deepEqual(overlaps(edits), [])
+
+    const corrected = applyEdits(text, edits)
+    assert.strictEqual(
+      corrected,
+      `import library.One
+import library.Two
+
+import library.Three { three }
+pub fn main() -> i32 { return 0 }`,
+    )
+    const fixed = yield* snapshot('root', { root: corrected, ...answers })
     assert.deepEqual(Analysis.diagnostics(fixed), [])
   }),
 )

@@ -133,6 +133,11 @@ const aliasClauseSpan = (
  * only when the declaration owns its line: a declaration that shares a line with an earlier one
  * would otherwise splice the following line onto that remainder, since Silk has no statement
  * terminator and two declarations on one line parse.
+ *
+ * Trailing blanks join the span only when nothing but the line break follows them. Blanks that
+ * separate this declaration from the next one on the same line belong to that neighbour, which
+ * claims them leftward: were both spans to take them, the two spans would overlap and applying
+ * every edit of a file together — as a fix-all action does — would delete from stale offsets.
  */
 const importLineSpan = (
   source: SourceFile.SourceFile,
@@ -142,10 +147,15 @@ const importLineSpan = (
     SyntaxTree.directToken(declaration, 'ImportKeyword')?.span.start ?? declaration.span.start
   while (start > 0 && isHorizontalBlank(source.bytes[start - 1])) start -= 1
   let end = declaration.span.end
-  while (end < source.bytes.length && isHorizontalBlank(source.bytes[end])) end += 1
+  let trailing = end
+  while (trailing < source.bytes.length && isHorizontalBlank(source.bytes[trailing])) trailing += 1
+  const following = source.bytes[trailing]
+  const endsLine =
+    trailing === source.bytes.length || following === lineFeed || following === carriageReturn
+  if (endsLine) end = trailing
   const preceding = start === 0 ? undefined : source.bytes[start - 1]
   const ownsLine = start === 0 || preceding === lineFeed || preceding === carriageReturn
-  if (ownsLine) {
+  if (ownsLine && endsLine) {
     if (source.bytes[end] === carriageReturn) end += 1
     if (source.bytes[end] === lineFeed) end += 1
   }
