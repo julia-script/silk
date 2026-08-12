@@ -62,6 +62,7 @@ export const start = (): void => {
         referencesProvider: true,
         renameProvider: { prepareProvider: true },
         completionProvider: { triggerCharacters: ['.'] },
+        signatureHelpProvider: { triggerCharacters: ['(', ','] },
         inlayHintProvider: true,
         documentSymbolProvider: true,
         documentFormattingProvider: true,
@@ -263,6 +264,15 @@ export const start = (): void => {
     const session = await acquire(parameters.textDocument.uri)
     if (Option.isNone(session)) return { isIncomplete: false, items: [] }
     return Document.completion(session.value.document, session.value.snapshot, parameters.position)
+  })
+
+  connection.onSignatureHelp(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return null
+    return (
+      Document.signatureHelp(session.value.document, session.value.snapshot, parameters.position) ??
+      null
+    )
   })
 
   connection.onDocumentSymbol(async (parameters) => {

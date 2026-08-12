@@ -2,6 +2,7 @@ import * as Analysis from '@silk-effect/compiler/Analysis'
 import * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import * as FormattedDocument from '@silk-effect/compiler/FormattedDocument'
 import * as Formatter from '@silk-effect/compiler/Formatter'
+import * as Presentation from '@silk-effect/compiler/Presentation'
 import * as SemanticOccurrence from '@silk-effect/compiler/SemanticOccurrence'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceSpan from '@silk-effect/compiler/SourceSpan'
@@ -26,6 +27,7 @@ import {
   type Diagnostic as LspDiagnostic,
   type Position,
   type Range,
+  type SignatureHelp,
   SymbolKind,
   type TextEdit,
   type WorkspaceEdit,
@@ -220,6 +222,106 @@ export const hover = (
           : `${signature}\n\n${documentation}`,
     },
     range: LineIndex.rangeOf(self.index, span),
+  }
+}
+
+/**
+ * The innermost call whose argument list encloses one byte offset, with that list.
+ *
+ * The search reads the concrete syntax tree rather than elaborated facts, because the parser keeps
+ * a recovered call form for a source that does not compile and signature help is most wanted while
+ * the arguments are still half-written. An offset exactly on the closing parenthesis is outside the
+ * call; one on an absent closing parenthesis is inside it, since the user is still typing there.
+ */
+const enclosingCall = (
+  root: SyntaxTree.Node,
+  offset: number,
+): { readonly callee: SyntaxTree.Element; readonly argumentList: SyntaxTree.Node } | undefined => {
+  let selected:
+    | { readonly callee: SyntaxTree.Element; readonly argumentList: SyntaxTree.Node }
+    | undefined
+  const visit = (node: SyntaxTree.Node): void => {
+    if (node.kind === 'CallExpression') {
+      const callee = node.children[0]
+      const argumentList = node.children.find(
+        (child): child is SyntaxTree.Node =>
+          SyntaxTree.isNode(child) && child.kind === 'ArgumentList',
+      )
+      if (callee !== undefined && argumentList !== undefined) {
+        // The opening parenthesis is the list's first byte, so `>` puts the cursor after it.
+        const closed = argumentList.children.some(
+          (child) => SyntaxTree.isToken(child) && child.kind === 'RightParenthesis',
+        )
+        const end = closed ? argumentList.span.end - 1 : argumentList.span.end
+        if (
+          offset > argumentList.span.start &&
+          offset <= end &&
+          (selected === undefined ||
+            argumentList.span.end - argumentList.span.start <=
+              selected.argumentList.span.end - selected.argumentList.span.start)
+        )
+          selected = Object.freeze({ callee, argumentList })
+      }
+    }
+    for (const child of node.children) if (SyntaxTree.isNode(child)) visit(child)
+  }
+  visit(root)
+  return selected
+}
+
+/**
+ * Describes the call the cursor sits inside, selecting the parameter the cursor is writing.
+ *
+ * The label and the parameter labels come from the same presentations hover and completion detail
+ * render, so one declaration reads identically everywhere. The active parameter counts the commas
+ * this argument list owns before the cursor: a comma nested in an inner call belongs to that call's
+ * own list, so it never advances the outer selection.
+ */
+export const signatureHelp = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  position: Position,
+): SignatureHelp | undefined => {
+  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  if (syntax === undefined) return undefined
+  const offset = LineIndex.offsetOf(self.index, position)
+  const call = enclosingCall(syntax.root, offset)
+  if (call === undefined) return undefined
+  // The callee's last byte is inside its name token, which is where its occurrence is indexed.
+  const occurrence = Analysis.semanticOccurrenceAt(
+    snapshot,
+    self.module,
+    SyntaxTree.span(call.callee).end - 1,
+  )
+  if (occurrence?.resolution._tag !== 'Available') return undefined
+  const identity = occurrence.resolution.identity
+  if (identity._tag !== 'DeclarationIdentity') return undefined
+  const declaration = Analysis.declarationForIdentity(snapshot, identity)
+  if (declaration?._tag !== 'FunctionDeclaration') return undefined
+  const raw = Analysis.documentationOfIdentity(snapshot, identity)
+  const source = raw === undefined ? undefined : Analysis.sources(snapshot).get(raw.span.sourceId)
+  const documentation =
+    raw === undefined || source === undefined
+      ? undefined
+      : Documentation.toMarkdown(Documentation.parse(source, raw))
+  const activeParameter = call.argumentList.children.filter(
+    (child) =>
+      SyntaxTree.isToken(child) && child.kind === 'Comma' && SyntaxTree.span(child).end <= offset,
+  ).length
+  return {
+    signatures: [
+      {
+        label: Presentation.functionDeclaration(declaration).text,
+        parameters: declaration.parameters.map((parameter) => ({
+          label: Presentation.parameter(parameter).text,
+        })),
+        ...(documentation === undefined || documentation.length === 0
+          ? {}
+          : { documentation: { kind: 'markdown' as const, value: documentation } }),
+      },
+    ],
+    activeSignature: 0,
+    activeParameter,
   }
 }
 

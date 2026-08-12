@@ -1201,3 +1201,114 @@ it.effect('offers no quick fix for a diagnostic outside the requested range', ()
     )
   }),
 )
+
+const clamp = `pub fn clamp(value: i32, low: i32, high: i32) -> i32 { return value }
+pub fn main() -> i32 { return clamp(3, 0, 10) }
+`
+
+it.effect('labels a call signature with its declaration and one label per parameter', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* open(clamp)
+    const help = Document.signatureHelp(
+      document,
+      snapshot,
+      positionAt(clamp, clamp.indexOf('clamp(3') + 'clamp('.length),
+    )
+    assert.strictEqual(help?.signatures.length, 1)
+    assert.strictEqual(
+      help?.signatures[0]?.label,
+      'pub fn clamp(value: i32, low: i32, high: i32) -> i32',
+    )
+    assert.deepEqual(
+      help?.signatures[0]?.parameters?.map((parameter) => parameter.label),
+      ['value: i32', 'low: i32', 'high: i32'],
+    )
+    assert.strictEqual(help?.activeSignature, 0)
+  }),
+)
+
+it.effect('advances the active parameter across each comma of the call', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* open(clamp)
+    const call = clamp.indexOf('clamp(3')
+    const activeAt = (offset: number) =>
+      Document.signatureHelp(document, snapshot, positionAt(clamp, offset))?.activeParameter
+    assert.strictEqual(activeAt(call + 'clamp('.length), 0)
+    assert.strictEqual(activeAt(call + 'clamp(3, '.length), 1)
+    assert.strictEqual(activeAt(call + 'clamp(3, 0, '.length), 2)
+  }),
+)
+
+it.effect('returns no signature help outside a call', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* open(clamp)
+    assert.isUndefined(Document.signatureHelp(document, snapshot, positionOf(clamp, 'clamp', 0)))
+    assert.isUndefined(
+      Document.signatureHelp(
+        document,
+        snapshot,
+        positionAt(clamp, clamp.indexOf('clamp(3, 0, 10)') + 'clamp(3, 0, 10)'.length),
+      ),
+    )
+  }),
+)
+
+it.effect('answers signature help from the recovered call of a source with a parser error', () =>
+  Effect.gen(function* () {
+    const source = `pub fn clamp(value: i32, low: i32, high: i32) -> i32 { return value }
+pub fn main() -> i32 { return clamp(3,
+}
+`
+    const { document, snapshot } = yield* open(source)
+    assert.isTrue(
+      Document.diagnostics(document, snapshot, () => undefined).length > 0,
+      'the source is expected not to compile',
+    )
+    const help = Document.signatureHelp(
+      document,
+      snapshot,
+      positionAt(source, source.indexOf('clamp(3,') + 'clamp(3,'.length),
+    )
+    assert.strictEqual(
+      help?.signatures[0]?.label,
+      'pub fn clamp(value: i32, low: i32, high: i32) -> i32',
+    )
+    assert.strictEqual(help?.activeParameter, 1)
+  }),
+)
+
+it.effect('carries the documentation of the called declaration as Markdown', () =>
+  Effect.gen(function* () {
+    const source = `/// Clamps a value into a range.
+pub fn clamp(value: i32, low: i32, high: i32) -> i32 { return value }
+pub fn main() -> i32 { return clamp(3, 0, 10) }
+`
+    const { document, snapshot } = yield* open(source)
+    const help = Document.signatureHelp(
+      document,
+      snapshot,
+      positionAt(source, source.indexOf('clamp(3') + 'clamp('.length),
+    )
+    assert.deepEqual(help?.signatures[0]?.documentation, {
+      kind: 'markdown',
+      value: 'Clamps a value into a range.',
+    })
+  }),
+)
+
+it.effect('selects the inner call when two calls nest', () =>
+  Effect.gen(function* () {
+    const source = `pub fn clamp(value: i32, low: i32, high: i32) -> i32 { return value }
+pub fn double(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return clamp(double(1), 0, 10) }
+`
+    const { document, snapshot } = yield* open(source)
+    const help = Document.signatureHelp(
+      document,
+      snapshot,
+      positionAt(source, source.indexOf('double(1') + 'double('.length),
+    )
+    assert.strictEqual(help?.signatures[0]?.label, 'pub fn double(value: i32) -> i32')
+    assert.strictEqual(help?.activeParameter, 0)
+  }),
+)

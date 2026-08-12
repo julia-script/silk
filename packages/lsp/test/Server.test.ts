@@ -139,6 +139,9 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     assert.deepEqual(initialized.capabilities.codeActionProvider, {
       codeActionKinds: ['quickfix'],
     })
+    assert.deepEqual(initialized.capabilities.signatureHelpProvider, {
+      triggerCharacters: ['(', ','],
+    })
     client.send({ method: 'initialized', params: {} })
 
     const brokenUri = 'file:///silk-lsp-e2e/broken.silk'
