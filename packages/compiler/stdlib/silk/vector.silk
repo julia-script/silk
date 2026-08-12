@@ -262,3 +262,208 @@ fn readAt<T>(buffer: &RawBuffer<T>, index: usize) -> T {
   }
   return absurd<T>()
 }
+
+// Carries the storage back out alongside the element moved out of it, so a removal never leaves
+// the union behind in `self` while the element travels.
+struct Taken<T> {
+  storage: Full<T>
+  value: T
+}
+
+fn takeAt<T>(full: Full<T>, index: usize) -> Taken<T> {
+  return match move full {
+    Full<T> { buffer } => takeSlot<T>(move buffer, index)
+  }
+}
+
+fn takeSlot<T>(buffer: RawBuffer<T>, index: usize) -> Taken<T> {
+  unsafe {
+    let mut owned = move buffer
+    let selected = RawBuffer.slot(&mut owned, index)
+    let value = Slot.take(move selected)
+    return Taken<T> { storage: Full<T> { buffer: move owned }, value: move value }
+  }
+  return absurd<Taken<T>>()
+}
+
+/// Removes the last element and returns it. Returns an absent value for an empty vector.
+pub fn pop<T>(self: &mut Vector<T>) -> Option<T> {
+  if self.length == usize.ZERO {
+    return Option.none<T>()
+  }
+  let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+  let taken = match move storage {
+    Empty<T> nothing => absurd<Taken<T>>()
+    Full<T> full => takeAt<T>(move full, self.length - usize.ONE)
+  }
+  self.length = self.length - usize.ONE
+  return match move taken {
+    Taken<T> { storage: kept, value } => finish<T>(move self, move kept, move value)
+  }
+}
+
+// Commits the storage back into the vector and yields the removed element as a present optional.
+fn finish<T>(self: &mut Vector<T>, storage: Full<T>, value: T) -> Option<T> {
+  self.storage = move storage
+  return Option.some<T>(move value)
+}
+
+/// Removes the element at one index, shifting the later elements down. Traps out of range.
+pub fn remove<T>(self: &mut Vector<T>, index: usize) -> T {
+  if self.length <= index {
+    let boom = 1 / 0
+  }
+  let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+  let taken = match move storage {
+    Empty<T> nothing => absurd<Taken<T>>()
+    Full<T> full => removeAt<T>(move full, index, self.length)
+  }
+  self.length = self.length - usize.ONE
+  return match move taken {
+    Taken<T> { storage: kept, value } => commit<T>(move self, move kept, move value)
+  }
+}
+
+// Commits the storage back into the vector and yields the removed element itself.
+fn commit<T>(self: &mut Vector<T>, storage: Full<T>, value: T) -> T {
+  self.storage = move storage
+  return move value
+}
+
+fn removeAt<T>(full: Full<T>, index: usize, length: usize) -> Taken<T> {
+  return match move full {
+    Full<T> { buffer } => removeBuffer<T>(move buffer, index, length)
+  }
+}
+
+// Rotates the removed element towards the end one swap at a time, then takes it out of the last
+// slot. Keeping the take last means no element is held live across the loop, and every slot holds
+// an initialized value at every step because each iteration swaps a pair rather than clearing one.
+// Takes the element out first, then closes the hole by moving each later element down one slot,
+// mirroring insertBuffer so every slot holds an initialized value at each step.
+fn removeBuffer<T>(buffer: RawBuffer<T>, index: usize, length: usize) -> Taken<T> {
+  unsafe {
+    let mut owned = move buffer
+    let selected = RawBuffer.slot(&mut owned, index)
+    let value = Slot.take(move selected)
+    let mut cursor = index + usize.ONE
+    while cursor < length {
+      let source = RawBuffer.slot(&mut owned, cursor)
+      let shifted = Slot.take(move source)
+      let target = RawBuffer.slot(&mut owned, cursor - usize.ONE)
+      let written = Slot.write(move target, move shifted)
+      cursor = cursor + usize.ONE
+    }
+    return Taken<T> { storage: Full<T> { buffer: move owned }, value: move value }
+  }
+  return absurd<Taken<T>>()
+}
+
+/// Drops every initialized element and sets the length to zero, keeping the capacity.
+pub fn clear<T>(self: &mut Vector<T>) -> () {
+  return truncate<T>(move self, usize.ZERO)
+}
+
+/// Drops every element past one length, keeping the capacity. Shorter lengths are left alone.
+pub fn truncate<T>(self: &mut Vector<T>, length: usize) -> () {
+  if self.length <= length {
+    return ()
+  }
+  let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+  let kept = match move storage {
+    Empty<T> nothing => absurd<Full<T>>()
+    Full<T> full => dropRange<T>(move full, length, self.length)
+  }
+  self.storage = move kept
+  self.length = length
+  return ()
+}
+
+fn dropRange<T>(full: Full<T>, from: usize, to: usize) -> Full<T> {
+  return match move full {
+    Full<T> { buffer } => Full<T> { buffer: dropRangeBuffer<T>(move buffer, from, to) }
+  }
+}
+
+fn dropRangeBuffer<T>(buffer: RawBuffer<T>, from: usize, to: usize) -> RawBuffer<T> {
+  unsafe {
+    let mut owned = move buffer
+    let mut index = from
+    while index < to {
+      let selected = RawBuffer.slot(&mut owned, index)
+      let cleared = Slot.dropValue(move selected)
+      index = index + usize.ONE
+    }
+    return move owned
+  }
+  return absurd<RawBuffer<T>>()
+}
+
+/// Overwrites the element at one index, dropping the old element first. Traps out of range.
+pub fn set<T>(self: &mut Vector<T>, index: usize, value: T) -> () {
+  if self.length <= index {
+    let boom = 1 / 0
+  }
+  let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+  let stored = match move storage {
+    Empty<T> nothing => absurd<Full<T>>()
+    Full<T> full => replaceAt<T>(move full, index, move value)
+  }
+  self.storage = move stored
+  return ()
+}
+
+fn replaceAt<T>(full: Full<T>, index: usize, value: T) -> Full<T> {
+  return match move full {
+    Full<T> { buffer } => Full<T> { buffer: replaceSlot<T>(move buffer, index, move value) }
+  }
+}
+
+fn replaceSlot<T>(buffer: RawBuffer<T>, index: usize, value: T) -> RawBuffer<T> {
+  unsafe {
+    let mut owned = move buffer
+    let selected = RawBuffer.slot(&mut owned, index)
+    let cleared = Slot.dropValue(move selected)
+    let target = RawBuffer.slot(&mut owned, index)
+    let written = Slot.write(move target, move value)
+    return move owned
+  }
+  return absurd<RawBuffer<T>>()
+}
+
+// Growth is atomic exactly as in append: the replacement buffer holds every element before the
+// vector's storage commits, so a failed allocation leaves the original untouched.
+
+/// Grows the capacity to hold at least one additional count of elements.
+pub effect fn reserve<T>(
+  self: &mut Vector<T>,
+  additional: usize
+) -> () ! OutOfMemory ? &mut Allocator {
+  let needed = self.length + additional
+  if needed <= self.capacity {
+    return ()
+  }
+  let mut next = self.capacity + self.capacity
+  if self.capacity == usize.ZERO {
+    next = 4
+  }
+  while next < needed {
+    next = next + next
+  }
+  let element = Layout.of<T>()
+  let plan = Layout.repeat(move element, next)
+  let layout = match move plan {
+    Layout ready => ready
+    LayoutOverflow overflow => run overflowed()
+  }
+  let recipe = Allocator.allocate(move layout)
+  let allocation = run recipe
+  let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+  let moved = match move storage {
+    Empty<T> nothing => Full<T> { buffer: freshBuffer<T>(move allocation, next) }
+    Full<T> full => Full<T> { buffer: migrate<T>(move full, move allocation, self.length, next) }
+  }
+  self.storage = move moved
+  self.capacity = next
+  return ()
+}
