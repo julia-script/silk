@@ -91,6 +91,11 @@
     "aliases": ["InMemoryLogger", "LogError", "LogLevel", "StdoutLogger"]
   },
   {
+    "module": "silk/metrics",
+    "path": "silk/metrics.silk",
+    "namespace": "AllocationMetrics"
+  },
+  {
     "module": "silk/numeric",
     "path": "silk/numeric.silk",
     "namespace": "Integer"

@@ -1,0 +1,50 @@
+// Allocation counts an allocator provider can publish as an ordinary Silk value. No compiler
+// phase knows this module: every count is a plain `usize`, so `AllocationMetrics` is a Copy
+// struct that implements no Drop hook and carries no cleanup obligation, and a provider folds
+// its own events into one with ordinary field assignment.
+//
+// A program that never names this module never loads it, so the counts cost nothing until they
+// are read.
+
+/// The acquire, release, and peak-live counts one allocation provider has observed.
+pub struct AllocationMetrics {
+  pub acquired: usize
+  pub released: usize
+  pub peakLive: usize
+}
+
+/// Constructs the zeroed counts a provider starts from.
+pub fn make() -> AllocationMetrics {
+  return AllocationMetrics { acquired: usize.ZERO, released: usize.ZERO, peakLive: usize.ZERO }
+}
+
+/// Reads one independent snapshot through a shared borrow. Every field is Copy, so publishing
+/// the counts never moves the provider's own value out of it.
+pub fn copy(self: &AllocationMetrics) -> AllocationMetrics {
+  return AllocationMetrics {
+    acquired: self.acquired,
+    released: self.released,
+    peakLive: self.peakLive
+  }
+}
+
+/// The allocations acquired and not yet released.
+pub fn live(self: &AllocationMetrics) -> usize {
+  return self.acquired - self.released
+}
+
+/// Records one acquired allocation, raising the peak when the new live count exceeds it.
+pub fn recordAcquire(self: &mut AllocationMetrics) -> () {
+  self.acquired = self.acquired + usize.ONE
+  let current = self.acquired - self.released
+  if current > self.peakLive {
+    self.peakLive = current
+  }
+  return ()
+}
+
+/// Records one released allocation. The peak keeps the highest live count ever observed.
+pub fn recordRelease(self: &mut AllocationMetrics) -> () {
+  self.released = self.released + usize.ONE
+  return ()
+}
