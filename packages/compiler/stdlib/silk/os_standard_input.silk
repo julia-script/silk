@@ -1,0 +1,48 @@
+import silk.option { None, Option, Some, none }
+import silk.standard_input {
+  ReadOutcome,
+  StandardInput,
+  StreamReadFailure,
+  endOfInput,
+  filled,
+  readFailure
+}
+
+/// Native provider reading the process standard-input descriptor. It owns no state; the descriptor
+/// belongs to the process rather than to the value.
+pub struct OsStandardInput {}
+
+/// Constructs the process-backed byte-input provider.
+pub fn make() -> OsStandardInput {
+  return OsStandardInput {}
+}
+
+effect fn rawRead(output: &mut [u8], lowReason: &mut i32, nativeCode: &mut u32) -> Option<usize> {
+  unsafe { return run Intrinsic.osStandardInputRead(output, lowReason, nativeCode) }
+  let impossible = 1 / 0
+  return none<usize>()
+}
+
+effect fn raise() -> never ! StreamReadFailure {
+  fail readFailure()
+}
+
+/// Commits one host read into the caller's buffer.
+///
+/// The low-level boundary reports a zero-length transfer for the end of input, which becomes
+/// `EndOfInput` data rather than a typed failure. Only a host error becomes `StreamReadFailure`.
+effect fn read(self: &mut OsStandardInput, buffer: &mut [u8]) -> ReadOutcome ! StreamReadFailure {
+  let mut lowReason = 0
+  let mut nativeCode = u32.toU32(0)
+  let received = run rawRead(move buffer, &mut lowReason, &mut nativeCode)
+  let length = match move received {
+    None {} => run raise()
+    Some<usize> { value: selected } => selected
+  }
+  if length == usize.ZERO { return endOfInput() }
+  return filled(length)
+}
+
+impl StandardInput for OsStandardInput {
+  read: OsStandardInput.read
+}

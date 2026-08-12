@@ -1270,6 +1270,8 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return `invalid callable reuse · #${reason.ticket} is ${reason.state.toLowerCase()}`
     case 'MissingStandardStreams':
       return 'missing StandardStreams host provider'
+    case 'MissingStandardInput':
+      return 'missing StandardInput host provider'
     case 'MissingOsFileSystemHost':
       return 'missing OS filesystem host provider'
     case 'IntrinsicTargetUnavailable':

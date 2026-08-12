@@ -112,6 +112,11 @@
     "namespace": "OsFileSystem"
   },
   {
+    "module": "silk/os_standard_input",
+    "path": "silk/os_standard_input.silk",
+    "namespace": "OsStandardInput"
+  },
+  {
     "module": "silk/raw-buffer",
     "path": "silk/raw-buffer.silk",
     "namespace": "RawBuffer"
@@ -125,6 +130,12 @@
     "module": "silk/slot",
     "path": "silk/slot.silk",
     "namespace": "Slot"
+  },
+  {
+    "module": "silk/standard_input",
+    "path": "silk/standard_input.silk",
+    "namespace": "StandardInput",
+    "aliases": ["EndOfInput", "Filled", "ReadOutcome", "StreamReadFailure"]
   },
   {
     "module": "silk/string",

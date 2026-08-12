@@ -10,6 +10,7 @@ import * as OsFileSystemHost from './OsFileSystemHost.js'
 import type * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
 import * as Transcendental from './Transcendental.js'
 import * as Type from './Type.js'
@@ -489,6 +490,7 @@ export type BlockedReason =
       readonly span: SourceSpan.SourceSpan
     }
   | { readonly _tag: 'MissingStandardStreams' }
+  | { readonly _tag: 'MissingStandardInput' }
   | { readonly _tag: 'MissingOsFileSystemHost' }
   | {
       readonly _tag: 'IntrinsicTargetUnavailable'
@@ -649,6 +651,7 @@ interface EvaluationState {
   readonly activeLoans: Set<string>
   readonly stringLoans: Set<string>
   readonly standardStreams?: StandardStreams.Provider
+  readonly standardInput?: StandardInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
 }
 
@@ -2587,8 +2590,6 @@ function* executeFunction(
             break
           }
           case 'OsCall': {
-            const host = state.osFileSystem
-            if (host === undefined) return blockedStep({ _tag: 'MissingOsFileSystemHost' })
             const arguments_ = operation.arguments
             const reasonOutput = arguments_.at(-2)
             const codeOutput = arguments_.at(-1)
@@ -2607,6 +2608,32 @@ function* executeFunction(
             const commit = (result: Value): void =>
               write(operation.destination, { value: result, fromCall: false })
             const name = operation.operation.name
+            if (name === 'osStandardInputRead') {
+              const input = state.standardInput
+              if (input === undefined) return blockedStep({ _tag: 'MissingStandardInput' })
+              const output = arguments_.at(0)
+              if (output === undefined) throw new RangeError('OS read omitted its output buffer')
+              const capacity = byteView(output).length
+              const result = input.read(capacity)
+              if (result._tag === 'ReadFailure') {
+                status({ _tag: 'Failure', reason: 'Other' })
+                commit(optionValue('usize'))
+                break
+              }
+              if (result.bytes.length > capacity)
+                throw new RangeError('standard-input provider overran the caller buffer')
+              writeByteView(output, result.bytes)
+              status()
+              commit(
+                optionValue(
+                  'usize',
+                  Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.bytes.length) }),
+                ),
+              )
+              break
+            }
+            const host = state.osFileSystem
+            if (host === undefined) return blockedStep({ _tag: 'MissingOsFileSystemHost' })
             try {
               if (name === 'osFileOpen' || name === 'osDirectoryOpen') {
                 const root = arguments_.at(0)
@@ -4571,6 +4598,7 @@ const evaluationLimitOption = (
 /** Explicit host services available to one deterministic evaluation. */
 export interface Options {
   readonly standardStreams?: StandardStreams.Provider
+  readonly standardInput?: StandardInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
   readonly maxSteps?: number
   readonly maxCallDepth?: number
@@ -4648,6 +4676,7 @@ export const evaluate = (
     activeLoans: new Set(),
     stringLoans: new Set(),
     ...(options.standardStreams === undefined ? {} : { standardStreams: options.standardStreams }),
+    ...(options.standardInput === undefined ? {} : { standardInput: options.standardInput }),
     ...(options.osFileSystem === undefined ? {} : { osFileSystem: options.osFileSystem }),
   })
   if (result._tag === 'Blocked') {

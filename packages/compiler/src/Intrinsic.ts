@@ -464,6 +464,20 @@ const legacyActors = Object.freeze([
         invariant:
           'consumes exactly one live file or directory handle whether close succeeds or fails',
       }),
+      osBuiltin({
+        name: 'standardInputRead',
+        operation: 'OsStandardInputRead',
+        parameters: Object.freeze([
+          valueParameter('output', '&mut [u8]'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([Type.slice('Exclusive', 'u8'), mutableI32, mutableU32]),
+        result: 'Effect<Option<usize>>',
+        semanticResult: Type.option('usize'),
+        invariant:
+          'output is initialized writable storage; success reports the exact transferred byte count and zero means end of input',
+      }),
     ]),
   ),
   actor(
@@ -776,7 +790,9 @@ const flatOperations = Object.freeze(
             : actor_.spelling === 'Host'
               ? 'silk/core.writeAll'
               : actor_.spelling === 'Os'
-                ? `silk/os-filesystem.${operation.spelling}`
+                ? operation.spelling === 'standardInputRead'
+                  ? 'silk/os-standard-input.read'
+                  : `silk/os-filesystem.${operation.spelling}`
                 : actor_.spelling === 'Place'
                   ? 'language:place-replacement'
                   : `silk/${actor_.spelling.replaceAll(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}.${operation.spelling}`

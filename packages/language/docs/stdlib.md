@@ -12,7 +12,7 @@ each signature and description below is the `///` comment on the declaration in
 $ pnpm --filter @silk-effect/compiler documentation:generate
 ```
 
-The library has 28 modules.
+The library has 30 modules.
 
 ## Modules
 
@@ -36,9 +36,11 @@ The library has 28 modules.
 | [`silk/numeric`](#silk-numeric) | `Integer` | 12 |
 | [`silk/option`](#silk-option) | `Option` | 5 |
 | [`silk/os_filesystem`](#silk-os-filesystem) | `OsFileSystem` | 35 |
+| [`silk/os_standard_input`](#silk-os-standard-input) | `OsStandardInput` | 6 |
 | [`silk/raw-buffer`](#silk-raw-buffer) | `RawBuffer` | 6 |
 | [`silk/result`](#silk-result) | `Result` | 5 |
 | [`silk/slot`](#silk-slot) | `Slot` | 4 |
+| [`silk/standard_input`](#silk-standard-input) | `StandardInput` | 12 |
 | [`silk/string`](#silk-string) | `String` | 23 |
 | [`silk/u16`](#silk-u16) | `u16` | 52 |
 | [`silk/u32`](#silk-u32) | `u32` | 52 |
@@ -3926,6 +3928,28 @@ pub effect fn make(root: string) -> OsFileSystem ! OutOfMemory ? &mut Allocator
 Copies one absolute native root. A relative or NUL-containing root violates the constructor precondition.
 
 
+## silk/os_standard_input
+
+Import as `OsStandardInput` with `import silk.os_standard_input`.
+
+### `OsStandardInput`
+
+```silk
+pub struct OsStandardInput
+```
+
+Native provider reading the process standard-input descriptor. It owns no state; the descriptor
+belongs to the process rather than to the value.
+
+### `make`
+
+```silk
+pub fn make() -> OsStandardInput
+```
+
+Constructs the process-backed byte-input provider.
+
+
 ## silk/raw-buffer
 
 Import as `RawBuffer` with `import silk.raw-buffer`.
@@ -4063,6 +4087,113 @@ pub fn dropValue<T>(slot: silk/core.Slot<T>) -> ()
 ```
 
 Drops an initialized value in one selected raw slot.
+
+
+## silk/standard_input
+
+Import as `StandardInput` with `import silk.standard_input`.
+
+### `StreamReadFailure`
+
+```silk
+pub struct StreamReadFailure
+```
+
+Failure to complete one standard-input read.
+
+### `readFailure`
+
+```silk
+pub fn readFailure() -> StreamReadFailure
+```
+
+Constructs the typed failure of one host read that could not complete.
+
+### `Filled`
+
+```silk
+pub struct Filled
+```
+
+A read that committed `count` bytes into the caller's buffer.
+
+| Field | Description |
+| --- | --- |
+| `pub count: usize` | The exact number of leading buffer bytes the provider wrote. It may be less than the buffer length and is never greater. |
+
+### `EndOfInput`
+
+```silk
+pub struct EndOfInput
+```
+
+A read that observed the end of input. No further bytes will arrive.
+
+### `ReadOutcome`
+
+```silk
+pub struct ReadOutcome
+```
+
+One completed read outcome, narrowed with `match`.
+
+End of input is data rather than a typed failure: reaching it is the ordinary way input ends,
+so a caller that drains input never handles a failure to do so.
+
+| Field | Description |
+| --- | --- |
+| `pub value: silk/standard_input.EndOfInput \| silk/standard_input.Filled` | The completed outcome. |
+
+### `StandardInput`
+
+```silk
+pub service StandardInput
+```
+
+Portable blocking byte-input contract.
+
+One `read` fills a prefix of the caller's buffer and reports the exact committed count. A host
+error is `StreamReadFailure`; the end of input is not.
+
+### `filled`
+
+```silk
+pub fn filled(count: usize) -> ReadOutcome
+```
+
+Constructs the outcome of a read that committed `count` bytes.
+
+### `endOfInput`
+
+```silk
+pub fn endOfInput() -> ReadOutcome
+```
+
+Constructs the outcome of a read that observed the end of input.
+
+### `count`
+
+```silk
+pub fn count(outcome: &silk/standard_input.ReadOutcome) -> usize
+```
+
+Returns the committed byte count, treating the end of input as zero.
+
+### `isEndOfInput`
+
+```silk
+pub fn isEndOfInput(outcome: &silk/standard_input.ReadOutcome) -> bool
+```
+
+Reports whether the outcome observed the end of input.
+
+### `receive`
+
+```silk
+pub effect fn receive(buffer: &mut [u8]) -> ReadOutcome ! StreamReadFailure ? &mut StandardInput
+```
+
+Builds one service read effect.
 
 
 ## silk/string

@@ -117,6 +117,7 @@ export type BuiltinOperation =
   | 'OsFileRemove'
   | 'OsDirectoryRemove'
   | 'OsHandleClose'
+  | 'OsStandardInputRead'
 
 export type BoundsMode =
   | { readonly _tag: 'Proven'; readonly index: number; readonly length: number }

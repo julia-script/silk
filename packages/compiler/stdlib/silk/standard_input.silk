@@ -1,0 +1,75 @@
+// The portable byte-input boundary. `StandardStreams` writes and never reads; this service reads
+// and never writes. The two are separate because a write is all-or-failure while a read is
+// inherently partial and has an end.
+
+/// Failure to complete one standard-input read.
+pub struct StreamReadFailure {}
+
+impl Report for StreamReadFailure {}
+
+/// Constructs the typed failure of one host read that could not complete.
+pub fn readFailure() -> StreamReadFailure {
+  return StreamReadFailure {}
+}
+
+/// A read that committed `count` bytes into the caller's buffer.
+pub struct Filled {
+  /// The exact number of leading buffer bytes the provider wrote. It may be less than the
+  /// buffer length and is never greater.
+  pub count: usize
+}
+
+/// A read that observed the end of input. No further bytes will arrive.
+pub struct EndOfInput {}
+
+/// One completed read outcome, narrowed with `match`.
+///
+/// End of input is data rather than a typed failure: reaching it is the ordinary way input ends,
+/// so a caller that drains input never handles a failure to do so.
+pub struct ReadOutcome {
+  /// The completed outcome.
+  pub value: Filled | EndOfInput
+}
+
+/// Portable blocking byte-input contract.
+///
+/// One `read` fills a prefix of the caller's buffer and reports the exact committed count. A host
+/// error is `StreamReadFailure`; the end of input is not.
+pub service StandardInput {
+  effect fn read(
+    buffer: &mut [u8]
+  ) -> ReadOutcome ! StreamReadFailure ? &mut StandardInput
+}
+
+/// Constructs the outcome of a read that committed `count` bytes.
+pub fn filled(count: usize) -> ReadOutcome {
+  return ReadOutcome { value: Filled { count: count } }
+}
+
+/// Constructs the outcome of a read that observed the end of input.
+pub fn endOfInput() -> ReadOutcome {
+  return ReadOutcome { value: EndOfInput {} }
+}
+
+/// Returns the committed byte count, treating the end of input as zero.
+pub fn count(outcome: &ReadOutcome) -> usize {
+  return match &outcome.value {
+    Filled { count } => count
+    EndOfInput {} => usize.ZERO
+  }
+}
+
+/// Reports whether the outcome observed the end of input.
+pub fn isEndOfInput(outcome: &ReadOutcome) -> bool {
+  return match &outcome.value {
+    Filled { count } => false
+    EndOfInput {} => true
+  }
+}
+
+/// Builds one service read effect.
+pub effect fn receive(
+  buffer: &mut [u8]
+) -> ReadOutcome ! StreamReadFailure ? &mut StandardInput {
+  return run StandardInput.read(move buffer)
+}
