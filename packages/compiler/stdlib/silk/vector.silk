@@ -433,6 +433,7 @@ fn replaceSlot<T>(buffer: RawBuffer<T>, index: usize, value: T) -> RawBuffer<T> 
 
 // Growth is atomic exactly as in append: the replacement buffer holds every element before the
 // vector's storage commits, so a failed allocation leaves the original untouched.
+
 /// Grows the capacity to hold at least one additional count of elements.
 pub effect fn reserve<T>(
   self: &mut Vector<T>,
