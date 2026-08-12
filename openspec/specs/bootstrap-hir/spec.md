@@ -158,6 +158,13 @@ MUST NOT carry import aliases, module traversal state, runtime namespace objects
 cross-module call operation. Missing, conflicting, unknown-member, and inaccessible-member lookups
 SHALL remain explicit unavailable HIR expressions carrying their originating diagnostic cause.
 
+Every qualifier form that resolves a call SHALL supply that callee's declared parameter types as the
+expected types of the call's arguments, including a qualifier that names a nominal struct or
+interface acting as its module's actor. An argument whose meaning depends on the expected type — a
+borrow above all, which is well-formed only where a reference or slice is wanted — SHALL therefore
+elaborate identically under every spelling of one call. A qualified call and the selected-member
+call it duplicates SHALL produce identical lowered MIR.
+
 #### Scenario: Elaborate a selected imported call
 
 - **WHEN** root `main` calls a uniquely selected public `answer()` from module `library/Answer`
@@ -167,6 +174,16 @@ SHALL remain explicit unavailable HIR expressions carrying their originating dia
 
 - **WHEN** root imports `library.Answer as Answers` and calls `Answers.answer()`
 - **THEN** HIR contains the same canonical call target as the selective form while retaining the qualified call's source span
+
+#### Scenario: Pass a borrow to a nominal actor's operation
+
+- **WHEN** a call qualified by a nominal type passes a shared or exclusive borrow to a parameter declared as a reference
+- **THEN** the borrow elaborates as it does through the selected-member spelling and the two calls lower to identical MIR
+
+#### Scenario: Keep an invalid borrow position invalid
+
+- **WHEN** a qualified call passes a borrow to a parameter that declares an owned type
+- **THEN** the invalid-borrow-position diagnostic is still reported
 
 #### Scenario: Elaborate a private local call
 

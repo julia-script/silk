@@ -2954,6 +2954,27 @@ function analyzeArguments(
       qualifier.declaration._tag === 'ServiceDeclaration'
     ) {
       target = serviceOperation(qualifier.declaration, memberSpelling)
+    } else if (
+      qualifier._tag === 'Resolved' &&
+      (qualifier.declaration._tag === 'StructDeclaration' ||
+        qualifier.declaration._tag === 'InterfaceDeclaration') &&
+      qualifier.declaration.canonical._tag === 'Canonical'
+    ) {
+      // A nominal type doubles as an actor: `Vector.length(...)` names a public function of the
+      // module that declares `Vector`. The call itself already resolves that way, but arguments are
+      // analyzed first, and without the same lookup they get no expected types — which reads to a
+      // borrow argument as "no borrow is wanted here" and rejects it as an invalid borrow position.
+      const member = DeclarationIndex.lookup(
+        resolution.index,
+        qualifier.declaration.canonical.id.module,
+        memberSpelling,
+      )
+      target =
+        member._tag === 'Resolved' &&
+        member.declaration._tag === 'FunctionDeclaration' &&
+        member.declaration.visibility === 'Public'
+          ? member.declaration
+          : undefined
     }
   }
   const declaredTypeParameters =
