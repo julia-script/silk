@@ -111,8 +111,10 @@ const identifiers = (node: SyntaxTree.Node): ReadonlyArray<Token.Token> =>
       SyntaxTree.isToken(element) && element.kind === 'Identifier',
   )
 const lineFeed = 0x0a
+const carriageReturn = 0x0d
 const isBlank = (byte: number | undefined): boolean =>
   byte === 0x20 || byte === 0x09 || byte === 0x0d
+const isHorizontalBlank = (byte: number | undefined): boolean => byte === 0x20 || byte === 0x09
 /**
  * Covers the ` as name` clause together with the blanks that separate it from the name it
  * renames, so deleting the span leaves that name alone on a well-formed import.
@@ -126,8 +128,11 @@ const aliasClauseSpan = (
   return Option.getOrElse(SourceSpan.make(source, start, alias.span.end), () => alias.span)
 }
 /**
- * Covers one import declaration together with its own line, so deleting the span removes the
- * line whole and leaves the surrounding declarations on their original lines.
+ * Covers one import declaration together with the blanks around it, so deleting the span leaves
+ * the surrounding declarations on their original lines. The trailing line break joins the span
+ * only when the declaration owns its line: a declaration that shares a line with an earlier one
+ * would otherwise splice the following line onto that remainder, since Silk has no statement
+ * terminator and two declarations on one line parse.
  */
 const importLineSpan = (
   source: SourceFile.SourceFile,
@@ -135,10 +140,15 @@ const importLineSpan = (
 ): SourceSpan.SourceSpan => {
   let start =
     SyntaxTree.directToken(declaration, 'ImportKeyword')?.span.start ?? declaration.span.start
-  while (start > 0 && isBlank(source.bytes[start - 1])) start -= 1
+  while (start > 0 && isHorizontalBlank(source.bytes[start - 1])) start -= 1
   let end = declaration.span.end
-  while (end < source.bytes.length && isBlank(source.bytes[end])) end += 1
-  if (source.bytes[end] === lineFeed) end += 1
+  while (end < source.bytes.length && isHorizontalBlank(source.bytes[end])) end += 1
+  const preceding = start === 0 ? undefined : source.bytes[start - 1]
+  const ownsLine = start === 0 || preceding === lineFeed || preceding === carriageReturn
+  if (ownsLine) {
+    if (source.bytes[end] === carriageReturn) end += 1
+    if (source.bytes[end] === lineFeed) end += 1
+  }
   return Option.getOrElse(SourceSpan.make(source, start, end), () => declaration.span)
 }
 const aliasName = (

@@ -362,6 +362,25 @@ it.effect('emits one whole-line deletion edit for a repeated import', () =>
   }),
 )
 
+it.effect('keeps the following line intact for a repeated import that shares a line', () =>
+  Effect.gen(function* () {
+    const text = 'import library.One import library.One as Again\npub fn main() -> i32 { return 0 }'
+    const self = yield* snapshot('root', { root: text, ...oneAnswer })
+    const diagnostic = present(Analysis.diagnostics(self).at(0), 'diagnostic')
+    assert.strictEqual(diagnostic.code, 'MOD0003')
+    const { edits, edit } = soleEdit(diagnostic)
+    assert.strictEqual(editedText(text, edit), ' import library.One as Again')
+    assert.isFalse(editedText(text, edit).includes('\n'))
+    assert.strictEqual(edit.replacement, '')
+
+    const corrected = applyEdits(text, edits)
+    assert.strictEqual(corrected, 'import library.One\npub fn main() -> i32 { return 0 }')
+    assert.isTrue(corrected.includes('\npub fn main'))
+    const fixed = yield* snapshot('root', { root: corrected, ...oneAnswer })
+    assert.deepEqual(Analysis.diagnostics(fixed), [])
+  }),
+)
+
 it.effect('leaves an ambiguous pattern binding conflict without an edit', () =>
   Effect.gen(function* () {
     const self = yield* snapshot('nested', {
