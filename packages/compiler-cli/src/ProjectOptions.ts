@@ -32,6 +32,10 @@ export const release = Flag.boolean('release').pipe(
   Flag.withDescription('Build with the release profile.'),
 )
 
+export const watch = Flag.boolean('watch').pipe(
+  Flag.withDescription('Run again after every change to a project source file.'),
+)
+
 export interface Input {
   readonly manifestPath?: string
   readonly backend?: string

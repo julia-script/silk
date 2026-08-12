@@ -4,6 +4,7 @@ import { assert, it } from '@effect/vitest'
 import * as Backend from '@silk-effect/compiler/Backend'
 import * as Target from '@silk-effect/compiler/Target'
 import * as Effect from 'effect/Effect'
+import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
 import * as Project from '../src/Project.js'
 import * as Workflow from '../src/Workflow.js'
@@ -36,6 +37,34 @@ const makeProject = Effect.fnUntraced(function* (root: string, program = source)
 const options = (workingDirectory: string): Workflow.ProjectSelection => ({
   workingDirectory,
   profile: 'debug',
+})
+
+/** Polls a watch-mode side effect, which lands on a filesystem event rather than a returned value. */
+const waitUntil = Effect.fnUntraced(function* (condition: () => boolean) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (condition()) return
+    yield* Effect.sleep('50 millis')
+  }
+  throw new Error('Timed out waiting for the watch mode to compile again')
+})
+
+/**
+ * Rewrites a source file until the watch reacts. The watcher registers after the first
+ * compilation finishes, so a single early write can land before anything is listening.
+ */
+const editUntilRecompiled = Effect.fnUntraced(function* (
+  file: string,
+  text: string,
+  recompiled: () => boolean,
+) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    yield* writeFile(file, text)
+    for (let poll = 0; poll < 20; poll += 1) {
+      if (recompiled()) return
+      yield* Effect.sleep('50 millis')
+    }
+  }
+  throw new Error('Timed out waiting for the watch mode to compile again')
 })
 
 it.effect('checks a whole project without creating build artifacts', () =>
@@ -238,6 +267,90 @@ it.effect(
       const status = yield* Workflow.run(options(root), ['--literal', 'argument'])
 
       assert.strictEqual(status, 42)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  30_000,
+)
+
+it.effect(
+  'removes the build artifacts and keeps the source files',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
+      assert.strictEqual(yield* Workflow.build(options(root)), 0)
+      assert.strictEqual(yield* fileSystem.exists(`${root}/build`), true)
+
+      const status = yield* Workflow.clean(options(root))
+
+      assert.strictEqual(status, 0)
+      assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
+      assert.strictEqual(yield* fileSystem.exists(`${root}/src/Main.silk`), true)
+      assert.strictEqual(yield* fileSystem.exists(`${root}/silk.toml`), true)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  30_000,
+)
+
+it.effect('exits zero cleaning a project that was never built', () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const root = yield* fileSystem.makeTempDirectoryScoped()
+    yield* makeProject(root)
+    assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
+
+    assert.strictEqual(yield* Workflow.clean(options(root)), 0)
+    assert.strictEqual(yield* fileSystem.exists(`${root}/src/Main.silk`), true)
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)
+
+it.live(
+  'checks again after a watched source file changes',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
+      const passes: Array<Workflow.ExitStatus> = []
+      const record = (selection: Workflow.ProjectSelection) =>
+        Workflow.check(selection).pipe(
+          Effect.tap((status) => Effect.sync(() => passes.push(status))),
+        )
+
+      const watching = yield* Effect.forkChild(Workflow.watch(record, options(root)))
+      yield* waitUntil(() => passes.length >= 1)
+      yield* editUntilRecompiled(
+        `${root}/src/Main.silk`,
+        'pub fn main() -> i32 { return 7 }',
+        () => passes.length >= 2,
+      )
+      yield* Fiber.interrupt(watching)
+
+      assert.deepStrictEqual(passes.slice(0, 2), [0, 0])
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  30_000,
+)
+
+it.live(
+  'keeps watching after a compilation that reports a diagnostic',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root, 'pub fn main() -> Mystery { return 42 }')
+      const passes: Array<Workflow.ExitStatus> = []
+      const record = (selection: Workflow.ProjectSelection) =>
+        Workflow.check(selection).pipe(
+          Effect.tap((status) => Effect.sync(() => passes.push(status))),
+        )
+
+      const watching = yield* Effect.forkChild(Workflow.watch(record, options(root)))
+      yield* waitUntil(() => passes.length >= 1)
+      assert.strictEqual(passes[0], 1)
+
+      yield* editUntilRecompiled(`${root}/src/Main.silk`, source, () => passes.length >= 2)
+
+      assert.strictEqual(passes[1], 0)
+      yield* Fiber.interrupt(watching)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   30_000,
 )
