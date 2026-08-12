@@ -1,5 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Option from 'effect/Option'
+import * as FloatingPoint from '../src/FloatingPoint.js'
+import * as DigitSeparator from '../src/internal/DigitSeparator.js'
 import * as IntegerLiteral from '../src/internal/IntegerLiteral.js'
 import * as Lexer from '../src/Lexer.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -189,6 +191,67 @@ it('retains decimal fractions and exponent spellings as exact float tokens', () 
       { kind: 'DecimalInteger', start: 17, end: 18, slice: '4' },
     ],
   )
+})
+
+it('rejects an exponent marker that no digit follows', () => {
+  for (const spelling of ['1e', '1e+', '1e-', '1E', '1.5e']) {
+    const source = SourceFile.make('memory://bad-exponent.silk', ascii(spelling))
+    const result = Lexer.lex(source)
+    assert.deepEqual(
+      result.tokens
+        .filter((token) => token.kind !== 'EndOfFile')
+        .map((token) => tokenView(source, token)),
+      [{ kind: 'Invalid', start: 0, end: spelling.length, slice: spelling }],
+      spelling,
+    )
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => diagnostic.code),
+      ['LEX0006'],
+      spelling,
+    )
+  }
+})
+
+it('keeps a well-formed exponent one float token without a diagnostic', () => {
+  for (const spelling of ['1e5', '1e+5', '1e-5', '1.5e10', '0e2', '1_0e5']) {
+    const source = SourceFile.make('memory://good-exponent.silk', ascii(spelling))
+    const result = Lexer.lex(source)
+    assert.deepEqual(
+      result.tokens
+        .filter((token) => token.kind !== 'EndOfFile')
+        .map((token) => tokenView(source, token)),
+      [{ kind: 'DecimalFloat', start: 0, end: spelling.length, slice: spelling }],
+      spelling,
+    )
+    assert.deepEqual(result.diagnostics, [], spelling)
+  }
+})
+
+it('accepts as a float token only a spelling the decimal conversion can represent', () => {
+  // The lexer's float grammar and FloatingPoint.fromDecimal must agree, so no accepted
+  // literal can reach elaboration as an Unavailable fact carrying no diagnostic.
+  const wholes = ['0', '1', '12', '1_000']
+  const fractions = ['', '.5', '.0', '.1_2']
+  const exponents = ['', 'e', 'E', 'e+', 'e-', 'e5', 'E+5', 'e-5', 'e0', 'e_5', 'e5_', 'e1_0']
+  let accepted = 0
+  for (const whole of wholes) {
+    for (const fraction of fractions) {
+      for (const exponent of exponents) {
+        const spelling = `${whole}${fraction}${exponent}`
+        const source = SourceFile.make('memory://float-agreement.silk', ascii(spelling))
+        const result = Lexer.lex(source)
+        const tokens = result.tokens.filter((token) => token.kind !== 'EndOfFile')
+        if (tokens[0]?.kind !== 'DecimalFloat' || result.diagnostics.length !== 0) continue
+        accepted += 1
+        assert.notStrictEqual(
+          FloatingPoint.fromDecimal(DigitSeparator.strip(Array.from(ascii(spelling))), 64),
+          undefined,
+          spelling,
+        )
+      }
+    }
+  }
+  assert.isAbove(accepted, 0)
 })
 
 it('lexes every base prefix as one integer token with its exact slice', () => {

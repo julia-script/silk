@@ -392,20 +392,23 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
           separated = separated && fraction.separated
         }
       }
+      let exponentDigits = true
       if (bytes[index] === 0x65 || bytes[index] === 0x45) {
         floating = true
         index += 1
         if (bytes[index] === 0x2b || bytes[index] === 0x2d) index += 1
         const exponent = scanDigitRun(bytes, base, index)
         index = exponent.end
+        exponentDigits = exponent.digits
         separated = separated && exponent.separated
       }
       const span = pushToken(
-        !separated ? 'Invalid' : floating ? 'DecimalFloat' : 'DecimalInteger',
+        !separated || !exponentDigits ? 'Invalid' : floating ? 'DecimalFloat' : 'DecimalInteger',
         start,
         index,
       )
       if (!separated) diagnostics.push(Diagnostic.invalidDigitSeparator(span))
+      else if (!exponentDigits) diagnostics.push(Diagnostic.missingExponentDigits(span))
       continue
     }
 

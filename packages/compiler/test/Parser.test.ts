@@ -110,22 +110,36 @@ const assertOriginalTokenTraversal = (result: SyntaxFile.SyntaxFile): void => {
 }
 
 it('preserves signed exponent literals and malformed exponent recovery losslessly', () => {
-  for (const source of [
+  const wellFormed = parseText(
+    'memory://float-parser.silk',
     'fn value() -> f64 { return -1.25e-3 }',
-    'fn damaged() -> f64 { return 1.25e- }',
-  ]) {
-    const result = parseText('memory://float-parser.silk', source)
-    const literal = descendants(result.root).find(
+  )
+  const literal = descendants(wellFormed.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'FloatingLiteralExpression',
+  )
+  assert.isDefined(literal)
+  assert.strictEqual(
+    literal === undefined ? undefined : directTokenText(wellFormed, literal, 'DecimalFloat'),
+    '1.25e-3',
+  )
+  assert.deepEqual(reconstructedBytes(wellFormed), ascii('fn value() -> f64 { return -1.25e-3 }'))
+
+  // An exponent with no digits is one invalid token, so no float literal node forms, and the
+  // parser still reconstructs the source byte for byte.
+  const damagedText = 'fn damaged() -> f64 { return 1.25e- }'
+  const damaged = parseText('memory://float-parser-damaged.silk', damagedText)
+  assert.isUndefined(
+    descendants(damaged.root).find(
       (element): element is SyntaxTree.Node =>
         SyntaxTree.isNode(element) && element.kind === 'FloatingLiteralExpression',
-    )
-    assert.isDefined(literal)
-    assert.strictEqual(
-      literal === undefined ? undefined : directTokenText(result, literal, 'DecimalFloat'),
-      source.includes('-1.25') ? '1.25e-3' : '1.25e-',
-    )
-    assert.deepEqual(reconstructedBytes(result), ascii(source))
-  }
+    ),
+  )
+  assert.include(
+    SyntaxTree.tokens(damaged.root).map((token) => token.kind),
+    'Invalid',
+  )
+  assert.deepEqual(reconstructedBytes(damaged), ascii(damagedText))
 })
 
 const reconstructedBytes = (result: SyntaxFile.SyntaxFile): Uint8Array => {

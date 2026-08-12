@@ -34,6 +34,40 @@ it('rounds decimal source directly to canonical IEEE bits', () => {
   })
 })
 
+it.effect('fails to compile a float literal whose exponent has no digits', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'float/malformed-exponent',
+      new TextEncoder().encode('pub fn main() -> f64 {\n  return 1e\n}'),
+      'wasm32-unknown-unknown',
+    )
+    const codes = Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
+    assert.include(codes, 'LEX0006')
+    assert.strictEqual(codes.filter((code) => code === 'LEX0006').length, 1)
+  }),
+)
+
+it.effect('keeps a well-formed exponent compiling to its exact value', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'float/well-formed-exponent',
+      new TextEncoder().encode(
+        'pub fn main() -> i32 {\n' +
+          '  if 1e5 != 100000.0 { return 1 }\n' +
+          '  if 1e+5 != 100000.0 { return 2 }\n' +
+          '  if 1e-5 != 0.00001 { return 3 }\n' +
+          '  if 1.5e10 != 15000000000.0 { return 4 }\n' +
+          '  return 42\n}',
+      ),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
 it('publishes canonical float catalog entries', () => {
   assert.deepEqual(
     Scalar.floats().map((scalar) => scalar.spelling),
