@@ -47,6 +47,8 @@ const compileSource = (
     toolchain,
     profile: 'release',
     destination: join(destinationRoot, name),
+    // This file asserts exact phase reports, so it builds uncached unless a test opts back in.
+    cache: false,
     ...overrides,
   }).pipe(Effect.provide(SourceResolver.empty))
 
@@ -110,6 +112,7 @@ it.effect('compiles a three-module call chain to native execution matching the i
       toolchain,
       profile: 'release',
       destination: join(destinationRoot, 'cross-module'),
+      cache: false,
     }).pipe(Effect.provide(layer))
     const interpreted = Analysis.evaluate(
       yield* Analysis.makeRealized({ root: SourceFile.make('app/Main', root) }).pipe(
@@ -485,4 +488,43 @@ it.effect(
       }
     }),
   30_000,
+)
+
+it.effect('serves identical bitcode from the artifact cache without invoking the toolchain', () =>
+  Effect.gen(function* () {
+    const cacheDirectory = mkdtempSync(join(tmpdir(), 'silk-artifact-cache-'))
+    const cachingToolchain: NativeToolchain.Toolchain = Object.freeze({
+      _tag: 'Toolchain',
+      clang,
+      shimCache: NativeToolchain.makeShimCache(),
+      artifactCache: NativeToolchain.makeDiskArtifactCache(cacheDirectory),
+    })
+    const source = 'pub fn main() -> i32 { return 42 }'
+    const first = yield* compileSource('cache-first', source, {
+      toolchain: cachingToolchain,
+      cache: true,
+    })
+    const second = yield* compileSource('cache-second', source, {
+      toolchain: cachingToolchain,
+      cache: true,
+    })
+    rmSync(cacheDirectory, { recursive: true, force: true })
+    assert.strictEqual(first._tag, 'Compiled')
+    assert.strictEqual(second._tag, 'Compiled')
+    if (first._tag !== 'Compiled' || second._tag !== 'Compiled') return
+    assert.strictEqual(
+      first.report.some((entry) => entry.phase === 'link'),
+      true,
+    )
+    assert.strictEqual(
+      second.report.some((entry) => entry.phase === 'artifact-cache'),
+      true,
+    )
+    assert.strictEqual(
+      second.report.some((entry) => entry.phase === 'object'),
+      false,
+    )
+    const run = spawnSync(second.path, [], { encoding: 'utf8' })
+    assert.strictEqual(run.status, 42)
+  }),
 )

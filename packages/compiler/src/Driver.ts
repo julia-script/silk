@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { memoryUsage } from 'node:process'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
@@ -11,7 +12,7 @@ import * as Pipeline from './Pipeline.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceResolver from './SourceResolver.js'
 import * as Target from './Target.js'
-import type * as ToolchainPlan from './ToolchainPlan.js'
+import * as ToolchainPlan from './ToolchainPlan.js'
 
 /**
  * The end-to-end compiler driver: one orchestration path from a compilation request to a durable
@@ -41,6 +42,8 @@ export interface CompileRequest {
   readonly backend?: Backend.Backend
   readonly scopeName?: string
   readonly saveTemps?: boolean
+  /** Set false to bypass the content-addressed artifact cache for this request. */
+  readonly cache?: boolean
 }
 
 /** A completed compilation with its durable artifact identity and report. */
@@ -203,6 +206,58 @@ export const compile = Effect.fn('Driver.compile')(function* (
   }
   const artifact = emitted.artifact
 
+  const cacheKind: NativeToolchain.FinalArtifact['kind'] = Target.isNative(target)
+    ? 'NativeExecutable'
+    : 'WebAssemblyModule'
+  const artifactCache =
+    request.cache !== false && artifact._tag === 'LlvmBitcodeArtifact'
+      ? (request.toolchain.artifactCache ?? NativeToolchain.defaultArtifactCache())
+      : undefined
+  const cacheKey =
+    artifactCache !== undefined && artifact._tag === 'LlvmBitcodeArtifact'
+      ? NativeToolchain.artifactCacheKey(
+          request.toolchain,
+          cacheKind,
+          target,
+          request.profile,
+          artifact.bitcode,
+          cacheKind === 'NativeExecutable' ? ToolchainPlan.shimSource(artifact.termination) : '',
+        )
+      : undefined
+  if (
+    artifactCache !== undefined &&
+    cacheKey !== undefined &&
+    artifact._tag === 'LlvmBitcodeArtifact'
+  ) {
+    const bytes = artifactCache.get(cacheKey)
+    if (bytes !== undefined) {
+      const committed = phase(
+        'artifact-cache',
+        1,
+        () => NativeToolchain.commitCachedArtifact(bytes, cacheKind, target, request.destination),
+        (result) => (result._tag === 'FinalArtifact' ? 1 : 0),
+      )
+      if (committed._tag === 'StorageFailure') {
+        return Object.freeze({
+          _tag: 'Failed',
+          stage: 'artifact-commit',
+          failure: committed,
+          report: Object.freeze([...report]),
+        })
+      }
+      return Object.freeze({
+        _tag: 'Compiled',
+        backend: artifact.backend,
+        artifactKind: committed.kind,
+        path: committed.path,
+        target: committed.target,
+        symbols: artifact.symbols,
+        diagnostics,
+        report: Object.freeze([...report]),
+      })
+    }
+  }
+
   return NativeToolchain.withBuildScope(
     request.scopeName ?? 'driver',
     (scope) => {
@@ -255,6 +310,9 @@ export const compile = Effect.fn('Driver.compile')(function* (
             failure: finalized,
             report: Object.freeze([...report]),
           })
+        }
+        if (artifactCache !== undefined && cacheKey !== undefined) {
+          artifactCache.set(cacheKey, readFileSync(finalized.path))
         }
         return Object.freeze({
           _tag: 'Compiled',
@@ -324,6 +382,9 @@ export const compile = Effect.fn('Driver.compile')(function* (
           failure: linked,
           report: Object.freeze([...report]),
         })
+      }
+      if (artifactCache !== undefined && cacheKey !== undefined) {
+        artifactCache.set(cacheKey, readFileSync(linked.path))
       }
       return Object.freeze({
         _tag: 'Compiled',

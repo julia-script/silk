@@ -16,3 +16,5 @@ apps/docs/content/*-api/
 /apps/docs/tsconfig.tsbuildinfo
 
 .scratch
+.vercel
+.env*
