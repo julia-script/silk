@@ -1,6 +1,7 @@
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
+import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -614,9 +615,10 @@ const constantLiteral = (
     if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
     const digits = spelling(source, token)
     const negative = SyntaxTree.directToken(initializer, 'Minus') !== undefined
+    const magnitude = IntegerLiteral.magnitude(digits)
     return Object.freeze({
       _tag: 'IntegerLiteral',
-      value: BigInt(`${negative ? '-' : ''}${digits}`),
+      value: negative ? -magnitude : magnitude,
       spelling: `${negative ? '-' : ''}${digits}`,
       token,
     })
@@ -920,7 +922,7 @@ export const analyzeDeclaredType = (
       })
     } else {
       const lengthSpelling = spelling(source, lengthToken)
-      const value = Number(lengthSpelling)
+      const value = Number(IntegerLiteral.magnitude(lengthSpelling))
       if (!Number.isSafeInteger(value) || value > 2147483647) {
         const diagnostic = Diagnostic.integerOutOfRange(lengthSpelling, lengthToken.span)
         diagnostics.push(diagnostic)

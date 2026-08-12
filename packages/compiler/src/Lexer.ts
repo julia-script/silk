@@ -1,5 +1,6 @@
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
+import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
 import type * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
@@ -320,6 +321,16 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
     }
 
     if (isDecimalDigit(byte)) {
+      const base = IntegerLiteral.recognize(bytes, index)
+      if (base.radix !== 10) {
+        index += base.width
+        const digits = index
+        while (index < bytes.length && IntegerLiteral.isDigit(base, bytes[index])) index += 1
+        const empty = index === digits
+        const span = pushToken(empty ? 'Invalid' : 'DecimalInteger', start, index)
+        if (empty) diagnostics.push(Diagnostic.missingBaseDigits(base.radix, span))
+        continue
+      }
       index += 1
       while (index < bytes.length && isDecimalDigit(bytes[index])) index += 1
       let floating = false

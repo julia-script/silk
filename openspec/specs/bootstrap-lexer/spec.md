@@ -11,9 +11,10 @@ The lexer SHALL recognize ASCII whitespace, `//` line comments, `///` documentat
 distinct token kind, the keywords `pub`, `fn`, `return`, `let`, `move`, and the provisional
 `import`, ASCII identifiers, decimal integer literals, `(`, `)`, `{`, `}`, `:`, `,`, `=`, `.`,
 `-`, `->`, and end-of-file. An identifier SHALL begin with an ASCII letter or underscore and
-continue with ASCII letters, digits, or underscores. A decimal integer literal SHALL contain one
-or more ASCII digits. A `-` immediately followed by `>` SHALL remain one arrow token; any other
-`-` SHALL be one minus token.
+continue with ASCII letters, digits, or underscores. An integer literal written without a base
+prefix SHALL contain one or more ASCII digits and SHALL be read in base ten; the base prefixes are
+specified by "Integer literals select a base from their prefix". A `-` immediately followed by `>`
+SHALL remain one arrow token; any other `-` SHALL be one minus token.
 
 #### Scenario: Lex the first parser fixture
 
@@ -262,3 +263,39 @@ multiline literal.
 
 - **WHEN** a multiline literal body contains `\"\"\"` followed later by an unescaped `"""`
 - **THEN** the escaped quotes remain literal content and the later unescaped triple quote closes the token
+
+### Requirement: Integer literals select a base from their prefix
+
+An integer literal SHALL accept the base prefixes `0x` and `0X` for base sixteen, `0b` and `0B` for
+base two, and `0o` and `0O` for base eight, each followed by one or more digits of its selected
+base. A prefixed literal SHALL be one integer literal token of the same kind as an unprefixed
+literal, SHALL retain its exact magnitude, and SHALL NOT accept a fraction part or an exponent
+part. A leading `0` that no base letter follows SHALL keep the decimal reading, so `0` alone and
+`0.5` retain their existing token kinds. A base prefix that no digit of its base follows SHALL be
+one invalid token producing exactly one lexical diagnostic. Every conversion of an integer literal
+to a value SHALL read the base from the token's own source slice rather than assume base ten.
+
+#### Scenario: Lex every base prefix
+
+- **WHEN** the source bytes spell `0xff 0b1010 0o777`
+- **THEN** the stream contains exactly three integer literal tokens whose slices are `0xff`, `0b1010`, and `0o777`
+
+#### Scenario: Preserve the unprefixed readings
+
+- **WHEN** the source bytes spell `0 0.5`
+- **THEN** the stream contains one integer literal token `0` and one floating-point literal token `0.5`
+
+#### Scenario: Reject a prefix without digits
+
+- **WHEN** the source bytes spell `0x` with no following hexadecimal digit
+- **THEN** the lexer emits one invalid token covering the prefix and exactly one lexical diagnostic
+
+#### Scenario: Keep a prefixed literal free of float parts
+
+- **WHEN** the source bytes spell `0xff.5`
+- **THEN** the integer literal token ends after `0xff` and the remaining bytes are tokenized independently
+
+#### Scenario: Convert a prefixed literal in its own base
+
+- **WHEN** a compiled program returns `0xff` where another returns `255`
+- **THEN** both programs produce the same value, and a prefixed literal outside its selected type's range produces the existing out-of-range diagnostic

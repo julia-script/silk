@@ -190,6 +190,92 @@ it('retains decimal fractions and exponent spellings as exact float tokens', () 
   )
 })
 
+it('lexes every base prefix as one integer token with its exact slice', () => {
+  const source = SourceFile.make(
+    'memory://base-prefixes.silk',
+    ascii('0xff 0XFF 0b1010 0B1 0o777 0O7'),
+  )
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace' && token.kind !== 'EndOfFile')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'DecimalInteger', start: 0, end: 4, slice: '0xff' },
+      { kind: 'DecimalInteger', start: 5, end: 9, slice: '0XFF' },
+      { kind: 'DecimalInteger', start: 10, end: 16, slice: '0b1010' },
+      { kind: 'DecimalInteger', start: 17, end: 20, slice: '0B1' },
+      { kind: 'DecimalInteger', start: 21, end: 26, slice: '0o777' },
+      { kind: 'DecimalInteger', start: 27, end: 30, slice: '0O7' },
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('keeps unprefixed zero and decimal fractions at their existing kinds', () => {
+  const source = SourceFile.make('memory://unprefixed-zero.silk', ascii('0 0.5 00 0e2'))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace' && token.kind !== 'EndOfFile')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'DecimalInteger', start: 0, end: 1, slice: '0' },
+      { kind: 'DecimalFloat', start: 2, end: 5, slice: '0.5' },
+      { kind: 'DecimalInteger', start: 6, end: 8, slice: '00' },
+      { kind: 'DecimalFloat', start: 9, end: 12, slice: '0e2' },
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('stops a prefixed literal before any fraction, exponent, or foreign digit', () => {
+  const source = SourceFile.make('memory://prefixed-boundaries.silk', ascii('0xff.5 0b1e5 0o18'))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace' && token.kind !== 'EndOfFile')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'DecimalInteger', start: 0, end: 4, slice: '0xff' },
+      { kind: 'Dot', start: 4, end: 5, slice: '.' },
+      { kind: 'DecimalInteger', start: 5, end: 6, slice: '5' },
+      { kind: 'DecimalInteger', start: 7, end: 10, slice: '0b1' },
+      { kind: 'Identifier', start: 10, end: 12, slice: 'e5' },
+      { kind: 'DecimalInteger', start: 13, end: 16, slice: '0o1' },
+      { kind: 'DecimalInteger', start: 16, end: 17, slice: '8' },
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('diagnoses a base prefix without digits exactly once and resumes lexing', () => {
+  const source = SourceFile.make('memory://empty-base-prefix.silk', ascii('0x tail'))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens.map((token) => tokenView(source, token)),
+    [
+      { kind: 'Invalid', start: 0, end: 2, slice: '0x' },
+      { kind: 'Whitespace', start: 2, end: 3, slice: ' ' },
+      { kind: 'Identifier', start: 3, end: 7, slice: 'tail' },
+      { kind: 'EndOfFile', start: 7, end: 7, slice: '' },
+    ],
+  )
+  assert.deepEqual(
+    result.diagnostics.map(({ code, reason }) => ({ code, reason })),
+    [{ code: 'LEX0004', reason: { _tag: 'MissingBaseDigits', radix: 16 } }],
+  )
+
+  const others = Lexer.lex(SourceFile.make('memory://empty-base-prefixes.silk', ascii('0b 0O')))
+  assert.deepEqual(
+    others.diagnostics.map(({ code, reason }) => ({ code, reason })),
+    [
+      { code: 'LEX0004', reason: { _tag: 'MissingBaseDigits', radix: 2 } },
+      { code: 'LEX0004', reason: { _tag: 'MissingBaseDigits', radix: 8 } },
+    ],
+  )
+})
+
 it('recognizes struct only as a complete keyword', () => {
   const result = Lexer.lex(
     SourceFile.make('memory://struct-keyword.silk', ascii('struct structure structs')),
