@@ -7,6 +7,65 @@ it('publishes the closed prefix vocabulary', () => {
   assert.strictEqual(Operator.prefix('Plus'), undefined)
   assert.strictEqual(Operator.prefixSpelling('Negate'), '-')
   assert.strictEqual(Operator.prefixSpelling('Not'), '!')
+  assert.strictEqual(Operator.prefix('Tilde'), 'BitNot')
+  assert.strictEqual(Operator.prefixSpelling('BitNot'), '~')
+})
+
+it('orders the three bitwise levels between additive and relational operators', () => {
+  const additive = Operator.infix('Plus')
+  const relational = Operator.infix('Less')
+  const equality = Operator.infix('EqualEqual')
+  const and = Operator.infix('Ampersand')
+  const or = Operator.infix('Pipe')
+  const xor = Operator.infix('Caret')
+
+  assert.notStrictEqual(and, undefined)
+  assert.notStrictEqual(or, undefined)
+  assert.notStrictEqual(xor, undefined)
+  if (
+    additive === undefined ||
+    relational === undefined ||
+    equality === undefined ||
+    and === undefined ||
+    or === undefined ||
+    xor === undefined
+  )
+    return
+
+  assert.deepEqual(
+    [and.operator, or.operator, xor.operator],
+    ['BitAnd', 'BitOr', 'BitXor'],
+    'the three spellings map to the three named bitwise operations',
+  )
+  assert.deepEqual([and.spelling, or.spelling, xor.spelling], ['&', '|', '^'])
+  for (const info of [and, or, xor]) {
+    assert.strictEqual(info.precedence < additive.precedence, true)
+    assert.strictEqual(info.precedence > relational.precedence, true)
+    assert.strictEqual(info.precedence > equality.precedence, true)
+    assert.strictEqual(info.precedence > Operator.pipelinePrecedence, true)
+    assert.strictEqual(info.precedence < Operator.prefixPrecedence, true)
+    assert.strictEqual(info.associativity, 'Left')
+    assert.strictEqual(Object.isFrozen(info), true)
+  }
+  assert.strictEqual(
+    and.precedence > xor.precedence && xor.precedence > or.precedence,
+    true,
+    '`&` binds tighter than `^`, which binds tighter than `|`',
+  )
+})
+
+it('targets the named bitwise operation of the selected integer actor', () => {
+  assert.deepEqual(Operator.target('BitAnd', 'u32'), { actor: 'u32', operation: 'bitAnd' })
+  assert.deepEqual(Operator.target('BitOr', 'u32'), { actor: 'u32', operation: 'bitOr' })
+  assert.deepEqual(Operator.target('BitXor', 'u64'), { actor: 'u64', operation: 'bitXor' })
+  assert.deepEqual(Operator.target('BitNot', 'i64'), { actor: 'i64', operation: 'bitNot' })
+  assert.deepEqual(Operator.target('BitAnd'), { actor: 'i32', operation: 'bitAnd' })
+  assert.deepEqual(
+    Operator.target('BitAnd', 'f64'),
+    { actor: 'i32', operation: 'bitAnd' },
+    'a non-integer actor falls back to the default integer so analysis reports a type diagnostic',
+  )
+  assert.deepEqual(Operator.target('BitNot', 'bool'), { actor: 'i32', operation: 'bitNot' })
 })
 
 it('orders infix operators by immutable precedence metadata', () => {

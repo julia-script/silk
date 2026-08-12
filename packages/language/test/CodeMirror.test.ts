@@ -43,7 +43,11 @@ it('highlights Markdown links and nested Silk examples inside documentation', ()
 })
 
 it('marks invalid bytes', () => {
-  assert.deepStrictEqual(spellings('let ^', 'invalid'), ['^'])
+  assert.deepStrictEqual(spellings('let $', 'invalid'), ['$'])
+})
+
+it('classifies the bitwise operator spellings as operators', () => {
+  assert.deepStrictEqual(spellings('a & b ^ c | ~d', 'operator'), ['&', '^', '|', '~'])
 })
 
 it('highlights every single-line and multiline literal from compiler token ranges', () => {
@@ -179,6 +183,6 @@ it('the state field re-lexes on edit', () => {
 })
 
 it('invalid tokens carry a distinct stable class', () => {
-  const state = EditorState.create({ doc: 'let ^', extensions: [CodeMirror.extension()] })
+  const state = EditorState.create({ doc: 'let $', extensions: [CodeMirror.extension()] })
   assert.isTrue(stateClasses(state).some((cls) => cls.includes('cm-silk-invalid')))
 })

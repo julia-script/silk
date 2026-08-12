@@ -317,6 +317,34 @@ it.effect('formats a chained else if arm on one line and idempotently', () =>
   }),
 )
 
+it.effect('formats the bitwise operators with canonical spacing and idempotently', () =>
+  Effect.gen(function* () {
+    const first = yield* Formatter.format(
+      parse(
+        'memory://bitwise-format.silk',
+        'pub fn checksum(value:u32,mask:u32)->u32 { let masked = value&mask let flipped = ~masked return flipped^mask|masked }',
+      ),
+    )
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `pub fn checksum(value: u32, mask: u32) -> u32 {
+  let masked = value & mask
+  let flipped = ~masked
+  return flipped ^ mask | masked
+}
+`,
+    )
+
+    const reparsed = parse('memory://bitwise-format.silk', text)
+    assert.deepEqual(reparsed.lexicalDiagnostics, [])
+    assert.deepEqual(reparsed.parserDiagnostics, [])
+    const second = yield* Formatter.format(reparsed)
+    assert.strictEqual(formattedText(second), text)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
 it.effect('formats unsafe blocks and conformance declarations canonically and idempotently', () =>
   Effect.gen(function* () {
     const source =

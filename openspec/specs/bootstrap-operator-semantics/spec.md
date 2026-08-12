@@ -7,7 +7,7 @@ data-first behavior while giving source programs conventional precedence and pip
 ## Requirements
 ### Requirement: Operators resolve homogeneously across integers
 
-Arithmetic and comparison operators SHALL resolve only for compatible operands of the same integer type. They SHALL select that type's signed or unsigned checked semantics without implicit conversion, overload lookup, truthiness, or operand reordering. Prefix negation SHALL support signed integers only; logical negation SHALL support `bool` only.
+Arithmetic, bitwise, and comparison operators SHALL resolve only for compatible operands of the same integer type. They SHALL select that type's signed or unsigned checked semantics without implicit conversion, overload lookup, truthiness, or operand reordering. Prefix negation SHALL support signed integers only; logical negation SHALL support `bool` only; bitwise complement SHALL support integers only. Each bitwise operator SHALL select exactly the operation its named counterpart selects — `&` selects `bitAnd`, `|` selects `bitOr`, `^` selects `bitXor`, and prefix `~` selects `bitNot` — without introducing an intrinsic of its own.
 
 #### Scenario: Resolve unsigned multiplication
 
@@ -19,15 +19,45 @@ Arithmetic and comparison operators SHALL resolve only for compatible operands o
 - **WHEN** operands have types `i32` and `i64`
 - **THEN** operator analysis rejects them without conversion
 
+#### Scenario: Resolve a bitwise operator to its named operation
+
+- **WHEN** both operands of `&` are `u32`
+- **THEN** the operator selects `u32.bitAnd` and `a & b` evaluates to the same value as `u32.bitAnd(a, b)`
+
+#### Scenario: Reject a mixed-width bitwise operand pair
+
+- **WHEN** operands of `&` have types `u32` and `i32`
+- **THEN** operator analysis rejects them exactly as it rejects the same pair passed to `u32.bitAnd`
+
 ### Requirement: The bootstrap operator surface is closed and ordered
 
-The language SHALL recognize prefix `-` and `!`; multiplicative `*`, `/`, and `%`; additive `+`
-and `-`; relational `<`, `<=`, `>`, and `>=`; equality `==` and `!=`; and pipeline `|>`. Grouping
-parentheses SHALL override precedence. Primary and grouped expressions SHALL bind most tightly,
+The language SHALL recognize prefix `-`, `!`, and `~`; multiplicative `*`, `/`, and `%`; additive
+`+` and `-`; relational `<`, `<=`, `>`, and `>=`; equality `==` and `!=`; bitwise `&`, `^`, and
+`|`; and pipeline `|>`. Grouping parentheses SHALL override precedence.
+Primary and grouped expressions SHALL bind most tightly,
 followed by right-associative prefix operators, left-associative multiplicative operators,
-left-associative additive operators, non-associative relational operators, non-associative equality
-operators, and left-associative pipelines. Chaining a non-associative comparison without explicit
+left-associative additive operators, the three left-associative bitwise operators, non-associative
+relational operators, non-associative equality operators, and left-associative pipelines. The
+bitwise operators SHALL occupy three distinct precedence levels that bind tighter than every
+comparison and looser than every additive operator, ordered `&` tighter than `^` and `^` tighter
+than `|`, so `a | b & c` groups as `a | (b & c)` and `a & b == c` groups as `(a & b) == c`.
+Chaining a non-associative comparison without explicit
 grouping SHALL be a parser error rather than an implicit multi-way comparison.
+
+#### Scenario: Bind bitwise operators above comparison and above pipelines
+
+- **WHEN** a body spells `a & b |> f`
+- **THEN** the expression groups as `(a & b) |> f`, and `a & b == c` groups as `(a & b) == c`
+
+#### Scenario: Order the three bitwise levels against one another
+
+- **WHEN** a body returns `8 | 1 ^ 3 & 2`
+- **THEN** the expression groups as `8 | (1 ^ (3 & 2))` and evaluates to `11`
+
+#### Scenario: Apply bitwise left associativity
+
+- **WHEN** a body returns `8 | 1 & 2`
+- **THEN** the expression groups as `8 | (1 & 2)` and evaluates to `8`
 
 #### Scenario: Apply arithmetic precedence
 

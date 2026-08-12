@@ -154,10 +154,10 @@ spelling SHALL remain one identifier token.
 
 ### Requirement: Expression operators use deterministic longest tokens
 
-The lexer SHALL recognize `+`, `-`, `*`, `/`, `%`, `!`, `<`, `<=`, `>`, `>=`, `==`, `!=`, and
-`|>` as distinct operator tokens with exact source spans. Longest recognition SHALL prefer `->`
-over `-`, `<=` over `<`, `>=` over `>`, `==` over `=`, `!=` over `!`, and `|>` over unsupported
-prefix fragments. `//` SHALL continue to begin a line comment while a single `/` SHALL be the
+The lexer SHALL recognize `+`, `-`, `*`, `/`, `%`, `!`, `<`, `<=`, `>`, `>=`, `==`, `!=`, `&`,
+`|`, `^`, `~`, and `|>` as distinct operator tokens with exact source spans. Longest recognition
+SHALL prefer `->` over `-`, `<=` over `<`, `>=` over `>`, `==` over `=`, `!=` over `!`, and `|>`
+over a bare `|`. `//` SHALL continue to begin a line comment while a single `/` SHALL be the
 division token. Operator recognition SHALL preserve the existing lossless coverage and invalid-byte
 recovery guarantees.
 
@@ -165,6 +165,11 @@ recovery guarantees.
 
 - **WHEN** source contains the complete operator vocabulary separated by trivia
 - **THEN** each spelling produces one supported token with its exact span and source slice
+
+#### Scenario: Lex the bitwise operator bytes
+
+- **WHEN** source contains `& | ^ ~ |>`
+- **THEN** the four bitwise spellings are punctuation tokens, `|>` still wins over a bare `|`, and no unsupported-byte diagnostic is reported
 
 #### Scenario: Prefer comments over division pairs
 

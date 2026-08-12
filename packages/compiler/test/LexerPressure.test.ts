@@ -83,6 +83,8 @@ const tokenKinds = [
   'Pipe',
   'PipeGreater',
   'Ampersand',
+  'Caret',
+  'Tilde',
   'Dot',
   'DotDot',
   'Arrow',
@@ -166,6 +168,8 @@ const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
   InvalidStaticLiteral: 68,
   ServiceKeyword: 69,
   InterfaceKeyword: 70,
+  Caret: 71,
+  Tilde: 72,
 })
 
 interface ExpectedToken {
@@ -270,7 +274,7 @@ const corpus = [
   }),
   Object.freeze({
     id: 'punctuation',
-    input: '( ) { } [ ] : ; , = == => - + * / % ! != ? @ < <= > >= | |> & . .. ->',
+    input: '( ) { } [ ] : ; , = == => - + * / % ! != ? @ < <= > >= | |> & ^ ~ . .. ->',
   }),
   Object.freeze({ id: 'invalid', input: '#~ pub \u0000? $x' }),
 ] as const

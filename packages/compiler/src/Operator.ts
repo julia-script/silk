@@ -2,7 +2,7 @@ import * as Scalar from './Scalar.js'
 import type * as Token from './Token.js'
 
 /** Prefix operators supported by the bootstrap expression grammar. */
-export type Prefix = 'Negate' | 'Not'
+export type Prefix = 'Negate' | 'Not' | 'BitNot'
 
 /** Infix operators supported by the bootstrap expression grammar. */
 export type Infix =
@@ -17,6 +17,9 @@ export type Infix =
   | 'GreaterOrEqual'
   | 'Equals'
   | 'NotEquals'
+  | 'BitAnd'
+  | 'BitOr'
+  | 'BitXor'
 
 /** The associativity used when parsing one infix precedence level. */
 export type Associativity = 'Left' | 'None'
@@ -64,6 +67,24 @@ const infixByToken: Readonly<Partial<Record<Token.TokenKind, InfixInfo>>> = Obje
     precedence: 40,
     associativity: 'Left',
   }),
+  Ampersand: Object.freeze({
+    operator: 'BitAnd',
+    spelling: '&',
+    precedence: 37,
+    associativity: 'Left',
+  }),
+  Caret: Object.freeze({
+    operator: 'BitXor',
+    spelling: '^',
+    precedence: 35,
+    associativity: 'Left',
+  }),
+  Pipe: Object.freeze({
+    operator: 'BitOr',
+    spelling: '|',
+    precedence: 33,
+    associativity: 'Left',
+  }),
   Less: Object.freeze({
     operator: 'LessThan',
     spelling: '<',
@@ -106,6 +127,7 @@ const infixByToken: Readonly<Partial<Record<Token.TokenKind, InfixInfo>>> = Obje
 export const prefix = (kind: Token.TokenKind): Prefix | undefined => {
   if (kind === 'Minus') return 'Negate'
   if (kind === 'Bang') return 'Not'
+  if (kind === 'Tilde') return 'BitNot'
   return undefined
 }
 
@@ -113,7 +135,8 @@ export const prefix = (kind: Token.TokenKind): Prefix | undefined => {
 export const infix = (kind: Token.TokenKind): InfixInfo | undefined => infixByToken[kind]
 
 /** Returns the canonical source spelling of one prefix operator. */
-export const prefixSpelling = (self: Prefix): string => (self === 'Negate' ? '-' : '!')
+export const prefixSpelling = (self: Prefix): string =>
+  self === 'Negate' ? '-' : self === 'Not' ? '!' : '~'
 
 const operationByOperator: Readonly<
   Record<Exclude<Prefix | Infix, 'Equals' | 'NotEquals'>, string>
@@ -129,7 +152,22 @@ const operationByOperator: Readonly<
   LessOrEqual: 'lessOrEqual',
   GreaterThan: 'greaterThan',
   GreaterOrEqual: 'greaterOrEqual',
+  BitAnd: 'bitAnd',
+  BitOr: 'bitOr',
+  BitXor: 'bitXor',
+  BitNot: 'bitNot',
 })
+
+/**
+ * True only for the operators that spell an integer bitwise operation.
+ *
+ * Only integers carry `bitAnd`, `bitOr`, `bitXor`, and `bitNot`, so a bitwise operator over a
+ * float or Boolean operand selects the default integer instead. Analysis then reports the same
+ * operand-type diagnostic the named function reports, rather than looking up an actor operation
+ * that does not exist.
+ */
+const isBitwise = (self: Prefix | Infix): boolean =>
+  self === 'BitAnd' || self === 'BitOr' || self === 'BitXor' || self === 'BitNot'
 
 /** Returns the canonical actor operation for an operator and its selected equality actor. */
 export const target = (
@@ -160,7 +198,8 @@ export const target = (
             selected.category === 'Boolean' ||
             (self === 'Negate' &&
               selected.category === 'Integer' &&
-              selected.signedness !== 'Signed')
+              selected.signedness !== 'Signed') ||
+            (isBitwise(self) && selected.category !== 'Integer')
           ? Scalar.defaultInteger.spelling
           : equalityActor,
     operation: operationByOperator[self],

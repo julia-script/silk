@@ -94,6 +94,8 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   Pipe: operator,
   PipeGreater: operator,
   Ampersand: operator,
+  Caret: operator,
+  Tilde: operator,
   Arrow: operator,
   DotDot: punctuation,
   Invalid: { name: 'invalid', tags: [tags.invalid] },

@@ -282,7 +282,7 @@
     },
     {
       "name": "keyword.operator.silk",
-      "match": "=>|->|\\|>|\\||[=!<>]=|[-+*/%!<>=&]"
+      "match": "=>|->|\\|>|\\||[=!<>]=|[-+*/%!<>=&^~]"
     },
     {
       "name": "punctuation.definition.pattern.rest.silk",

@@ -68,6 +68,8 @@ export type TokenKind =
   | 'Pipe'
   | 'PipeGreater'
   | 'Ampersand'
+  | 'Caret'
+  | 'Tilde'
   | 'Dot'
   | 'DotDot'
   | 'Arrow'
@@ -141,6 +143,8 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   Pipe: '`|`',
   PipeGreater: '`|>`',
   Ampersand: '`&`',
+  Caret: '`^`',
+  Tilde: '`~`',
   Dot: '`.`',
   DotDot: '`..`',
   Arrow: '`->`',

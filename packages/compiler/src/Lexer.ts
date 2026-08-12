@@ -58,6 +58,8 @@ const isPunctuation = (byte: number | undefined): boolean =>
   byte === 0x3e ||
   byte === 0x7c ||
   byte === 0x26 ||
+  byte === 0x5e ||
+  byte === 0x7e ||
   byte === 0x2e
 
 const compoundPunctuationKind = (
@@ -231,6 +233,10 @@ const punctuationKind = (byte: number | undefined): Token.TokenKind => {
       return 'Pipe'
     case 0x26:
       return 'Ampersand'
+    case 0x5e:
+      return 'Caret'
+    case 0x7e:
+      return 'Tilde'
     case 0x2e:
       return 'Dot'
     default:

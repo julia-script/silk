@@ -139,6 +139,9 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   assert.include(scopesAt(match, 'match'), 'keyword.control.silk')
   assert.include(scopesAt(match, '&'), 'keyword.operator.silk')
   assert.include(scopesAt(match, '=>'), 'keyword.operator.silk')
+  const bitwise = 'fn f(a: u32, b: u32) -> u32 { return a & b ^ ~b }'
+  assert.include(scopesAt(bitwise, '^'), 'keyword.operator.silk')
+  assert.include(scopesAt(bitwise, '~'), 'keyword.operator.silk')
   assert.include(scopesAt(match, '..'), 'punctuation.definition.pattern.rest.silk')
   assert.include(scopesAt(match, 'Token'), 'entity.name.type.silk')
   assert.include(scopesAt(match, '_'), 'variable.language.wildcard.silk')
