@@ -880,19 +880,43 @@ pub fn main() -> i32 {
 
 it.effect('preserves ambiguous, missing, namespace, and type completion contexts', () =>
   Effect.gen(function* () {
-    const ambiguousSource = `struct SystemAllocator {}
-pub fn main() -> i32 { return SystemAllocator. }`
+    // Two bindings the module wrote itself still collide, and an ambiguous qualifier offers nothing.
+    const ambiguousSource = `import silk.vector { Vector }
+struct Vector {}
+pub fn main() -> i32 { return Vector. }`
     const ambiguous = yield* Analysis.ofSourceRealized('main', encoder.encode(ambiguousSource))
     const ambiguousResult = Analysis.completionAt(
       ambiguous,
       'main',
-      ambiguousSource.indexOf('SystemAllocator.') + 'SystemAllocator.'.length,
+      ambiguousSource.indexOf('return Vector.') + 'return Vector.'.length,
     )
     assert.deepEqual(ambiguousResult?.context, {
       _tag: 'ValueMemberContext',
       state: 'Ambiguous',
     })
     assert.deepEqual(ambiguousResult?.candidates, [])
+
+    // A seeded standard-library namespace is a prelude, so a local declaration of the same spelling
+    // takes it rather than colliding with it: the qualifier is the empty local struct, which has no
+    // members to offer, and completion is unavailable rather than ambiguous.
+    const shadowedSource = `struct SystemAllocator {}
+pub fn main() -> i32 { return SystemAllocator. }`
+    const shadowed = yield* Analysis.ofSourceRealized('main', encoder.encode(shadowedSource))
+    const shadowedResult = Analysis.completionAt(
+      shadowed,
+      'main',
+      shadowedSource.indexOf('SystemAllocator.') + 'SystemAllocator.'.length,
+    )
+    assert.deepEqual(shadowedResult?.context, {
+      _tag: 'ValueMemberContext',
+      state: 'Unavailable',
+    })
+    // The source is deliberately truncated after the dot, so it carries the parser's recovery
+    // diagnostic; what matters is that no binding collision joins it.
+    assert.notInclude(
+      Analysis.diagnostics(shadowed).map((diagnostic) => diagnostic.code),
+      'SEM0016',
+    )
 
     const missingSource = `pub fn main() -> i32 { return Mystery. }`
     const missing = yield* Analysis.ofSourceRealized('main', encoder.encode(missingSource))

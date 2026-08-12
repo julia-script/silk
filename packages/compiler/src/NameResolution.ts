@@ -221,6 +221,12 @@ export const resolve = (
     const candidates: Array<Binding> = Intrinsic.all().map((intrinsic) =>
       Object.freeze({ _tag: 'IntrinsicActor', spelling: intrinsic.spelling }),
     )
+    // Seeded standard-library namespaces are a prelude, not bindings this module wrote: nothing in
+    // its source asks for them. A module that declares or imports the spelling itself therefore
+    // takes it, and the prelude entry is dropped rather than collided with — the standard-library
+    // module stays reachable through an ordinary import. Intrinsic actors and `Intrinsic` are
+    // deliberately not part of this tier; they are language bindings and still collide.
+    const prelude: Array<Binding> = []
     for (const candidate of closure.modules) {
       const standard = Stdlib.find(candidate.name)
       if (standard === undefined || candidate.name === module.name) continue
@@ -234,7 +240,7 @@ export const resolve = (
             declared.declaration._tag === 'StructDeclaration') &&
           declared.declaration.canonical._tag === 'Canonical'
         )
-          candidates.push(
+          prelude.push(
             Object.freeze({
               _tag: 'LocalDeclaration',
               spelling: namespace,
@@ -242,7 +248,7 @@ export const resolve = (
             }),
           )
         else
-          candidates.push(
+          prelude.push(
             Object.freeze({
               _tag: 'StdlibNamespace',
               spelling: namespace,
@@ -414,6 +420,15 @@ export const resolve = (
         Object.freeze({ _tag: 'Available', import: imported, bindings: Object.freeze(created) }),
       )
     }
+    // Everything the module itself brought into scope is settled by now, so a prelude namespace
+    // joins only where the module left the spelling free. Unavailable bindings claim their spelling
+    // too: a failed `import x { Result }` already carries its own diagnostic, and quietly resolving
+    // that module's `Result` to the standard library would answer a question the source did not ask.
+    // Two prelude entries that claim one spelling still collide with each other: that is a defect in
+    // the shipped manifest, and shadowing is a rule about a module overriding the prelude, not about
+    // the prelude quietly picking among itself.
+    const claimed = new Set(candidates.map((binding) => binding.spelling))
+    for (const binding of prelude) if (!claimed.has(binding.spelling)) candidates.push(binding)
     const grouped = new Map<string, Array<Binding>>()
     for (const binding of candidates) {
       if (binding._tag === 'Unavailable') continue

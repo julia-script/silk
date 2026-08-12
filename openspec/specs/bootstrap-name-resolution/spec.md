@@ -87,6 +87,34 @@ explicitly unavailable with the collision diagnostic as their cause.
 - **WHEN** equivalent closures are supplied or traversed in different orders
 - **THEN** their ordered module scopes, conflicts, lookup outcomes, and diagnostics are identical
 
+### Requirement: A module's own bindings shadow the standard-library prelude
+
+A standard-library module that declares a manifest namespace SHALL be seeded into every other
+module's scope under that namespace, and those seeded bindings SHALL form a prelude tier beneath
+everything the module's own source establishes. Where a module's local declaration or import claims
+a spelling the prelude also claims, the module's binding SHALL take the spelling and the prelude
+entry SHALL be dropped, without a collision diagnostic and without regard to declaration kind. The
+shadowed standard-library module SHALL remain reachable through an ordinary import, including under
+an alias. Two prelude entries claiming one spelling SHALL still collide with each other, and a
+module's own bindings SHALL continue to collide among themselves under the flat-namespace rule
+above. Intrinsic actors and the sealed `Intrinsic` namespace are language bindings rather than a
+prelude and SHALL keep colliding.
+
+#### Scenario: Declare a name the prelude also claims
+
+- **WHEN** a module declares its own top-level `Result` while the standard library seeds a `Result` namespace
+- **THEN** the scope reports no collision and `Result` resolves to the module's own declaration
+
+#### Scenario: Reach a shadowed standard-library module anyway
+
+- **WHEN** a module that shadows `Result` imports the standard-library result module under an alias
+- **THEN** the alias resolves to the standard-library module and the local `Result` keeps its own meaning
+
+#### Scenario: Leave an unshadowed namespace seeded
+
+- **WHEN** a module declares no name that the prelude claims
+- **THEN** every seeded namespace remains bound and qualified use resolves without an import
+
 ### Requirement: Visibility governs cross-module member access
 
 A declaration SHALL be visible within its defining module regardless of whether it is public. Only
