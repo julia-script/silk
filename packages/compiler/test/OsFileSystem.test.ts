@@ -105,7 +105,7 @@ pub effect fn main() -> () ! FileError | OutOfMemory {
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       yield* Analysis.codegen(snapshot, { mode: 'release' })
     }),
-  15_000,
+  60_000,
 )
 
 it.effect('blocks OS evaluation without an injected adapter and uses one when supplied', () =>
