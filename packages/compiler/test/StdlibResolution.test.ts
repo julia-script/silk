@@ -34,6 +34,19 @@ it('keeps the generated manifest ordered and byte-identical to canonical Silk fi
   }
 })
 
+it('declares one namespace for every standard-library module', () => {
+  // A module without a manifest namespace is never auto-injected, so qualified use of it cannot
+  // resolve. Every shipped module declares one; option keeps its member aliases alongside.
+  assert.deepEqual(
+    Stdlib.manifest.filter((entry) => entry.namespace === undefined).map((entry) => entry.module),
+    [],
+  )
+  assert.strictEqual(Stdlib.findNamespace('Option')?.module, 'silk/option')
+  assert.strictEqual(Stdlib.findNamespace('Result')?.module, 'silk/result')
+  assert.strictEqual(Stdlib.findNamespace('Vector')?.module, 'silk/vector')
+  assert.deepEqual(Stdlib.find('silk/option')?.aliases, ['None', 'Some'])
+})
+
 it.effect('resolves standard-library imports without vendoring source', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized('stdlib/importer', ascii(importing))

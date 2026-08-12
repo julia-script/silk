@@ -98,6 +98,7 @@
   {
     "module": "silk/option",
     "path": "silk/option.silk",
+    "namespace": "Option",
     "aliases": ["None", "Some"]
   },
   {
@@ -112,7 +113,8 @@
   },
   {
     "module": "silk/result",
-    "path": "silk/result.silk"
+    "path": "silk/result.silk",
+    "namespace": "Result"
   },
   {
     "module": "silk/slot",
@@ -152,6 +154,7 @@
   },
   {
     "module": "silk/vector",
-    "path": "silk/vector.silk"
+    "path": "silk/vector.silk",
+    "namespace": "Vector"
   }
 ]
