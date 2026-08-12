@@ -1,14 +1,18 @@
-import { spawnSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 
-it('keeps stack VM pressure phases and artifacts byte-identical across fresh processes', () => {
+it('keeps stack VM pressure phases and artifacts byte-identical across fresh processes', async () => {
   const fixture = fileURLToPath(
     new URL('./fixtures/stack-vm-pressure-determinism.mjs', import.meta.url),
   )
-  const run = () => spawnSync(process.execPath, [fixture], { encoding: 'utf8' })
-  const first = run()
-  const second = run()
+  const run = () =>
+    new Promise<{ status: number; stdout: string; stderr: string }>((resolve) => {
+      execFile(process.execPath, [fixture], { encoding: 'utf8' }, (error, stdout, stderr) =>
+        resolve({ status: error === null ? 0 : 1, stdout, stderr }),
+      )
+    })
+  const [first, second] = await Promise.all([run(), run()])
 
   assert.strictEqual(first.status, 0, first.stderr)
   assert.strictEqual(second.status, 0, second.stderr)
