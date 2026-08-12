@@ -306,11 +306,51 @@ interface RenameSubject {
 }
 
 /**
- * Resolves the occurrences one rename request would rewrite. An imported member and its local
- * alias share a single identity, so the selected spelling is what separates them: renaming the
- * alias `eq` of `equals as eq` edits the `eq` occurrences alone, all of them owned by the module
- * that chose the alias. Narrowing here, before any refusal is decided, is what lets prepare and
- * rename answer from the same facts.
+ * Tests whether one spelling names, in one module, a declaration the module reaches through its own
+ * `as` clause. Such an alias is the importing module's own name for a declaration it does not own:
+ * the clause introduces it, Silk's one flat module namespace makes the spelling resolve to it
+ * throughout that module, and no other module can see it. A member imported under the declaration's
+ * own spelling introduces no separate name, so the source half of `make as vectorMake` — and a
+ * plain `{ equals }` — still reach the declaration itself.
+ */
+const bindsLocalAlias = (
+  snapshot: Analysis.FrontendSnapshot,
+  module: string,
+  spelling: string,
+  identity: SemanticOccurrence.Identity,
+): boolean => {
+  const key = SemanticOccurrence.identityKey(identity)
+  for (const imported of Analysis.moduleScope(snapshot, module)?.imports ?? []) {
+    if (imported._tag !== 'Available') continue
+    for (const binding of imported.bindings) {
+      if (binding._tag !== 'ImportedMember') continue
+      if (binding.spelling !== spelling || binding.spelling === binding.sourceSpelling) continue
+      const bound = SemanticOccurrence.identityKey(
+        Object.freeze({ _tag: 'DeclarationIdentity', id: binding.declaration }),
+      )
+      if (bound === key) return true
+    }
+  }
+  return false
+}
+
+/**
+ * Resolves the occurrences one rename request would rewrite. A declaration's identity is canonical
+ * and module-independent, so it alone cannot say which occurrences a rename owns; two narrowings
+ * finish the job.
+ *
+ * The selected spelling separates an imported member from its local alias, which share that one
+ * identity: renaming the alias `eq` of `equals as eq` edits the `eq` occurrences alone.
+ *
+ * Spelling is not enough on its own, because unrelated modules pick the same alias for the same
+ * declaration all the time — `silk/bytes` and a project module both writing `make as vectorMake`
+ * agree on identity *and* spelling. An `as` clause binds a name in one module only, so when the
+ * selection resolves through such a binding the rename is confined to the module that wrote it.
+ * The declaration site and the source half of an import clause name the declaration itself and
+ * stay project-wide.
+ *
+ * Narrowing here, before any refusal is decided, is what lets prepare and rename answer from the
+ * same facts.
  */
 const renameSubjectAt = (
   self: Document,
@@ -327,12 +367,15 @@ const renameSubjectAt = (
   const spelling = spellingOf(snapshot, self.module, occurrence.span)
   if (spelling === undefined) return undefined
   const identity = occurrence.resolution.identity
+  const aliased = bindsLocalAlias(snapshot, self.module, spelling, identity)
   return Object.freeze({
     occurrence,
     identity,
     spelling,
     matches: matchesOfIdentity(snapshot, identity).filter(
-      (match) => spellingOf(snapshot, match.module, match.occurrence.span) === spelling,
+      (match) =>
+        (!aliased || match.module === self.module) &&
+        spellingOf(snapshot, match.module, match.occurrence.span) === spelling,
     ),
   })
 }

@@ -986,3 +986,85 @@ it.effect('still lists the toolchain declaration among a standard-library name r
     )
   }),
 )
+
+const stdlibAliases =
+  'import silk.bytes { make as bytesMake }\nimport silk.vector { make as vectorMake }\npub fn main() -> i32 { return 0 }'
+// `make` is a prefix of neither alias, but the alias spellings repeat across the standard library,
+// so the offsets are taken from the clause itself rather than searched for by spelling.
+const vectorAliasBinding = stdlibAliases.indexOf('make as vectorMake') + 'make as '.length
+
+it.effect('renames the project alias of a standard-library member the toolchain also aliases', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [{ module: 'main', text: stdlibAliases }],
+      'main',
+    )
+    const position = positionAt(stdlibAliases, vectorAliasBinding)
+    // `silk/bytes` and `silk/os_filesystem` spell their own alias of `silk.vector.make`
+    // `vectorMake` too: identity and spelling both coincide, and only the module that wrote the
+    // clause owns this binding.
+    const renamed = Document.rename(document, snapshot, position, 'newVector', uriOfModule)
+    assert.strictEqual(renamed?._tag, 'RenameEdit')
+    if (renamed?._tag !== 'RenameEdit') return
+    const changes = renamed.edit.changes ?? {}
+    assert.deepEqual(Object.keys(changes), [uriOfModule('main')])
+    assert.deepEqual(
+      changes[uriOfModule('main')]?.map((edit) => ({ ...edit.range.start, newText: edit.newText })),
+      [{ ...position, newText: 'newVector' }],
+    )
+    // No edit may reach the installation under any module name it ships.
+    assert.isEmpty(Object.keys(changes).filter((uri) => uri.includes('/stdlib/')))
+    // Prepare answers from the same facts, so the editor offers the rename it will accept.
+    assert.deepEqual(Document.prepareRename(document, snapshot, position), {
+      range: {
+        start: position,
+        end: { line: position.line, character: position.character + 'vectorMake'.length },
+      },
+      placeholder: 'vectorMake',
+    })
+    // Confining the *rename* leaves the read-only reference list whole: every occurrence of the
+    // declaration, standard-library ones included, is still worth showing.
+    const locations = Document.references(document, snapshot, position, true, uriOfModule)
+    assert.isDefined(locations)
+    assert.include(
+      locations?.map(({ uri }) => uri),
+      uriOfModule('main'),
+    )
+    assert.isNotEmpty(
+      (locations ?? []).filter(({ uri }) => uri === Stdlib.find('silk/vector')?.sourceUrl.href),
+    )
+  }),
+)
+
+const alphaAlias = 'import geometry { area as region }\npub fn one() -> i32 { return region(1, 2) }'
+const betaAlias = 'import geometry { area as region }\npub fn two() -> i32 { return region(3, 4) }'
+
+it.effect('keeps one module alias rename out of another module that chose the same alias', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'alpha', text: alphaAlias },
+        { module: 'beta', text: betaAlias },
+      ],
+      'alpha',
+    )
+    const binding = positionAt(alphaAlias, alphaAlias.indexOf('area as region') + 'area as '.length)
+    const renamed = Document.rename(document, snapshot, binding, 'zone', uriOfModule)
+    assert.strictEqual(renamed?._tag, 'RenameEdit')
+    if (renamed?._tag !== 'RenameEdit') return
+    const changes = renamed.edit.changes ?? {}
+    // `beta` chose the same spelling for the same declaration; it is not `alpha`'s name to change.
+    assert.deepEqual(Object.keys(changes), [uriOfModule('alpha')])
+    assert.deepEqual(
+      changes[uriOfModule('alpha')]?.map((edit) => ({
+        ...edit.range.start,
+        newText: edit.newText,
+      })),
+      [
+        { ...binding, newText: 'zone' },
+        { ...positionAt(alphaAlias, alphaAlias.indexOf('region(1, 2)')), newText: 'zone' },
+      ],
+    )
+  }),
+)
