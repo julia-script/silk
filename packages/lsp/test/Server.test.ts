@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assert, it } from '@effect/vitest'
+import * as Document from '../src/Document.js'
 
 const binPath = fileURLToPath(new URL('../dist/bin.js', import.meta.url))
 
@@ -141,6 +142,12 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     })
     assert.deepEqual(initialized.capabilities.signatureHelpProvider, {
       triggerCharacters: ['(', ','],
+    })
+    assert.strictEqual(initialized.capabilities.foldingRangeProvider, true)
+    assert.strictEqual(initialized.capabilities.callHierarchyProvider, true)
+    assert.deepEqual(initialized.capabilities.semanticTokensProvider, {
+      legend: { tokenTypes: [...Document.semanticTokenTypes], tokenModifiers: [] },
+      full: true,
     })
     client.send({ method: 'initialized', params: {} })
 

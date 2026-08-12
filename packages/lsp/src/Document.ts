@@ -1,4 +1,5 @@
 import * as Analysis from '@silk-effect/compiler/Analysis'
+import type * as DeclarationIndex from '@silk-effect/compiler/DeclarationIndex'
 import * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import * as FormattedDocument from '@silk-effect/compiler/FormattedDocument'
 import * as Formatter from '@silk-effect/compiler/Formatter'
@@ -7,11 +8,15 @@ import * as SemanticOccurrence from '@silk-effect/compiler/SemanticOccurrence'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceSpan from '@silk-effect/compiler/SourceSpan'
 import * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
+import type * as Token from '@silk-effect/compiler/Token'
 import * as Documentation from '@silk-effect/documentation/Document'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import {
+  type CallHierarchyIncomingCall,
+  type CallHierarchyItem,
+  type CallHierarchyOutgoingCall,
   type CodeAction,
   CodeActionKind,
   type CompletionItem,
@@ -19,6 +24,8 @@ import {
   type CompletionList,
   DiagnosticSeverity,
   type DocumentSymbol,
+  type FoldingRange,
+  FoldingRangeKind,
   type Hover,
   type InlayHint,
   InlayHintKind,
@@ -27,6 +34,9 @@ import {
   type Diagnostic as LspDiagnostic,
   type Position,
   type Range,
+  type SemanticTokens,
+  type SemanticTokensLegend,
+  SemanticTokenTypes,
   type SignatureHelp,
   SymbolKind,
   type TextEdit,
@@ -809,6 +819,462 @@ export const symbols = (
       },
     ]
   })
+}
+
+/**
+ * The token types the server reports, in the order the protocol's numeric encoding indexes them.
+ *
+ * Every entry is reachable from a Silk token kind or occurrence role, so the legend advertises no
+ * type the server never sends. `keyword`, `comment`, `string`, `number`, and `operator` come from
+ * the lexer's own kinds — the same kinds `@silk-effect/language`'s TextMate grammar colors — while
+ * an identifier's type is decided by the semantic occurrence covering it, which is what separates a
+ * type name from a variable name that the grammar's regular expressions must color alike.
+ */
+export const semanticTokenTypes: ReadonlyArray<string> = Object.freeze([
+  SemanticTokenTypes.keyword,
+  SemanticTokenTypes.comment,
+  SemanticTokenTypes.string,
+  SemanticTokenTypes.number,
+  SemanticTokenTypes.operator,
+  SemanticTokenTypes.type,
+  SemanticTokenTypes.typeParameter,
+  SemanticTokenTypes.function,
+  SemanticTokenTypes.method,
+  SemanticTokenTypes.parameter,
+  SemanticTokenTypes.variable,
+  SemanticTokenTypes.property,
+  SemanticTokenTypes.namespace,
+])
+
+/** The legend one client negotiates once and then decodes every token reply against. */
+export const semanticTokensLegend: SemanticTokensLegend = Object.freeze({
+  tokenTypes: [...semanticTokenTypes],
+  tokenModifiers: [],
+})
+
+const typeIndexes = new Map(semanticTokenTypes.map((name, index) => [name, index] as const))
+
+/**
+ * The token type of one lexer kind alone, before any semantic occurrence refines it.
+ *
+ * An identifier is deliberately absent: its type depends on what it names, not on how it lexed, so
+ * an identifier with no occurrence covering it contributes no token rather than a guessed one.
+ */
+const lexicalTokenType = (kind: Token.TokenKind): string | undefined => {
+  if (kind.endsWith('Keyword')) return SemanticTokenTypes.keyword
+  switch (kind) {
+    case 'LineComment':
+    case 'DocComment':
+    case 'ModuleDocComment':
+      return SemanticTokenTypes.comment
+    case 'TextLiteral':
+    case 'ByteStringLiteral':
+      return SemanticTokenTypes.string
+    case 'DecimalInteger':
+    case 'DecimalFloat':
+      return SemanticTokenTypes.number
+    case 'Equals':
+    case 'EqualEqual':
+    case 'FatArrow':
+    case 'Minus':
+    case 'Plus':
+    case 'Star':
+    case 'Slash':
+    case 'Percent':
+    case 'Bang':
+    case 'BangEqual':
+    case 'Question':
+    case 'Less':
+    case 'LessEqual':
+    case 'Greater':
+    case 'GreaterEqual':
+    case 'Pipe':
+    case 'PipeGreater':
+    case 'Ampersand':
+    case 'Caret':
+    case 'Tilde':
+    case 'Arrow':
+      return SemanticTokenTypes.operator
+    default:
+      return undefined
+  }
+}
+
+/**
+ * The token type one resolved occurrence gives the identifier it covers. The role says how the name
+ * was used and the resolved identity says what it names, so a function used as a value still reads
+ * as a function while a parameter and a local binding stay distinct.
+ */
+const occurrenceTokenType = (
+  snapshot: Analysis.FrontendSnapshot,
+  occurrence: SemanticOccurrence.SemanticOccurrence,
+): string => {
+  const identity =
+    occurrence.resolution._tag === 'Available' ? occurrence.resolution.identity : undefined
+  switch (identity?._tag) {
+    case 'TypeParameterIdentity':
+      return SemanticTokenTypes.typeParameter
+    case 'ParameterIdentity':
+      return SemanticTokenTypes.parameter
+    case 'BindingIdentity':
+    case 'PatternBindingIdentity':
+      return SemanticTokenTypes.variable
+    case 'FieldIdentity':
+      return SemanticTokenTypes.property
+    case 'ServiceOperationIdentity':
+    case 'IntrinsicOperationIdentity':
+      return SemanticTokenTypes.method
+    case 'ImportNamespaceIdentity':
+    case 'IntrinsicActorIdentity':
+      return SemanticTokenTypes.namespace
+    case 'DeclarationIdentity': {
+      const declaration = Analysis.declarationForIdentity(snapshot, identity)
+      if (declaration?._tag === 'FunctionDeclaration') return SemanticTokenTypes.function
+      if (declaration?._tag === 'ConstantDeclaration') return SemanticTokenTypes.variable
+      return SemanticTokenTypes.type
+    }
+    default:
+      break
+  }
+  // An unresolved name still has a role, which is enough to keep a type reading as a type.
+  switch (occurrence.role) {
+    case 'Type':
+      return SemanticTokenTypes.type
+    case 'Field':
+      return SemanticTokenTypes.property
+    case 'Actor':
+      return SemanticTokenTypes.namespace
+    case 'Operation':
+      return SemanticTokenTypes.method
+    default:
+      return SemanticTokenTypes.variable
+  }
+}
+
+/**
+ * Colors the whole document from the compiler's own facts rather than from a regular expression.
+ *
+ * The lexer's token kinds carry keywords, comments, literals, and operators, and the semantic
+ * occurrence index types every identifier by what it actually resolves to. Tokens are emitted in
+ * source order and delta-encoded against the previous token as the protocol requires. A token
+ * spanning more than one line is dropped rather than truncated, because the protocol's encoding
+ * cannot express one, and a multi-line token in Silk is only ever a triple-quoted literal the
+ * grammar already colors.
+ */
+export const semanticTokens = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+): SemanticTokens => {
+  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  if (syntax === undefined) return { data: [] }
+  const source = Analysis.sources(snapshot).get(self.module)
+  const occurrences =
+    source === undefined
+      ? []
+      : Option.match(SourceSpan.make(source, 0, SourceFile.length(source)), {
+          onNone: () => [],
+          onSome: (whole) => [...Analysis.semanticOccurrencesInRange(snapshot, self.module, whole)],
+        })
+  // Occurrences are start-sorted, so one advancing cursor pairs each identifier with its own.
+  const byStart = new Map(occurrences.map((occurrence) => [occurrence.span.start, occurrence]))
+  const data: Array<number> = []
+  let previousLine = 0
+  let previousCharacter = 0
+  for (const token of SyntaxTree.tokens(syntax.root)) {
+    const occurrence = byStart.get(token.span.start)
+    const type =
+      occurrence !== undefined && token.kind === 'Identifier'
+        ? occurrenceTokenType(snapshot, occurrence)
+        : lexicalTokenType(token.kind)
+    if (type === undefined) continue
+    const index = typeIndexes.get(type)
+    if (index === undefined) continue
+    const start = LineIndex.positionOf(self.index, token.span.start)
+    const end = LineIndex.positionOf(self.index, token.span.end)
+    if (end.line !== start.line) continue
+    const length = end.character - start.character
+    if (length <= 0) continue
+    const deltaLine = start.line - previousLine
+    data.push(
+      deltaLine,
+      deltaLine === 0 ? start.character - previousCharacter : start.character,
+      length,
+      index,
+      0,
+    )
+    previousLine = start.line
+    previousCharacter = start.character
+  }
+  return { data }
+}
+
+/** The syntax node kinds whose body an editor may fold, each folded from its own brace pair. */
+const foldableKinds: ReadonlySet<SyntaxTree.NodeKind> = new Set([
+  'Block',
+  'StructDeclaration',
+  'ServiceDeclaration',
+  'InterfaceDeclaration',
+  'ImplDeclaration',
+  'MatchExpression',
+  'ImportMemberList',
+])
+
+/**
+ * Returns one folding range for each braced region and each run of comment lines.
+ *
+ * A region folds from the line holding its opening brace to the line holding its closing one, so
+ * the collapsed line keeps the brace that opened it, which is what an editor shows. A region whose
+ * braces sit on one line offers nothing to fold and is omitted. Comment runs fold as one range per
+ * consecutive block of comment lines: Silk has no delimited block comment, so a run of `//`, `///`,
+ * or `//!` lines is the block a reader means to collapse.
+ */
+export const foldingRanges = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+): ReadonlyArray<FoldingRange> => {
+  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  if (syntax === undefined) return []
+  const ranges: Array<FoldingRange> = []
+  const visit = (node: SyntaxTree.Node): void => {
+    if (foldableKinds.has(node.kind)) {
+      const open = node.children.find(
+        (child) => SyntaxTree.isToken(child) && child.kind === 'LeftBrace',
+      )
+      const close = node.children.findLast(
+        (child) => SyntaxTree.isToken(child) && child.kind === 'RightBrace',
+      )
+      if (open !== undefined && close !== undefined) {
+        const startLine = LineIndex.lineOf(self.index, SyntaxTree.span(open).start)
+        const endLine = LineIndex.lineOf(self.index, SyntaxTree.span(close).start)
+        if (endLine > startLine) ranges.push({ startLine, endLine })
+      }
+    }
+    for (const child of node.children) if (SyntaxTree.isNode(child)) visit(child)
+  }
+  visit(syntax.root)
+  // One run of adjacent comment lines folds as a single block, in source order with the rest.
+  let runStart: number | undefined
+  let runEnd = 0
+  const flush = (): void => {
+    if (runStart !== undefined && runEnd > runStart)
+      ranges.push({ startLine: runStart, endLine: runEnd, kind: FoldingRangeKind.Comment })
+    runStart = undefined
+  }
+  for (const token of SyntaxTree.tokens(syntax.root)) {
+    if (
+      token.kind !== 'LineComment' &&
+      token.kind !== 'DocComment' &&
+      token.kind !== 'ModuleDocComment'
+    )
+      continue
+    const line = LineIndex.lineOf(self.index, token.span.start)
+    if (runStart !== undefined && line === runEnd + 1) runEnd = line
+    else {
+      flush()
+      runStart = line
+      runEnd = line
+    }
+  }
+  flush()
+  return Object.freeze(
+    ranges.sort((left, right) =>
+      left.startLine !== right.startLine
+        ? left.startLine - right.startLine
+        : left.endLine - right.endLine,
+    ),
+  )
+}
+
+/** Builds the protocol item naming one source-backed declaration of the analyzed project. */
+const callHierarchyItem = (
+  declaration: DeclarationIndex.MemberFact,
+  indexOf: (module: string) => LineIndex.LineIndex | undefined,
+  uriOf: (module: string) => string | undefined,
+): CallHierarchyItem | undefined => {
+  if (declaration.name._tag !== 'Present') return undefined
+  const module = declaration.name.token.span.sourceId
+  const uri = uriOf(module)
+  const index = indexOf(module)
+  if (uri === undefined || index === undefined) return undefined
+  return {
+    name: declaration.name.spelling,
+    kind: declaration._tag === 'FunctionDeclaration' ? SymbolKind.Function : SymbolKind.Constant,
+    ...(declaration._tag === 'FunctionDeclaration'
+      ? { detail: Presentation.functionDeclaration(declaration).text }
+      : {}),
+    uri,
+    range: LineIndex.rangeOf(index, SyntaxTree.span(declaration.syntax)),
+    selectionRange: LineIndex.rangeOf(index, declaration.name.token.span),
+    data: SemanticOccurrence.identityKey(
+      Object.freeze({
+        _tag: 'DeclarationIdentity',
+        id: declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : declaration.id,
+      }),
+    ),
+  }
+}
+
+/** Every function declaration of the analyzed project, in canonical module and source order. */
+const functionDeclarations = (
+  snapshot: Analysis.FrontendSnapshot,
+): ReadonlyArray<DeclarationIndex.MemberFact> =>
+  Analysis.declarationIndex(snapshot)
+    .modules.flatMap((module) => module.members)
+    .filter((member) => member._tag === 'FunctionDeclaration')
+
+/** The declaration whose body encloses one span, which is the function a call is written inside. */
+const enclosingDeclaration = (
+  snapshot: Analysis.FrontendSnapshot,
+  module: string,
+  span: SourceSpan.SourceSpan,
+): DeclarationIndex.MemberFact | undefined =>
+  functionDeclarations(snapshot).find((declaration) => {
+    const declarationSpan = SyntaxTree.span(declaration.syntax)
+    return (
+      declarationSpan.sourceId === module &&
+      declarationSpan.start <= span.start &&
+      span.end <= declarationSpan.end
+    )
+  })
+
+/**
+ * Names the function the cursor selects, which anchors both call directions.
+ *
+ * The selection reads the semantic occurrence index, so a call site, a use as a value, and the
+ * declaration's own name all prepare the same declaration. A position naming no source-backed
+ * function prepares nothing rather than the file it sits in.
+ */
+export const prepareCallHierarchy = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  position: Position,
+  uriOf: (module: string) => string | undefined,
+): ReadonlyArray<CallHierarchyItem> => {
+  const occurrence = Analysis.semanticOccurrenceAt(
+    snapshot,
+    self.module,
+    LineIndex.offsetOf(self.index, position),
+  )
+  if (occurrence?.resolution._tag !== 'Available') return []
+  const identity = occurrence.resolution.identity
+  if (identity._tag !== 'DeclarationIdentity') return []
+  const declaration = Analysis.declarationForIdentity(snapshot, identity)
+  if (declaration?._tag !== 'FunctionDeclaration') return []
+  const item = callHierarchyItem(declaration, lineIndexes(self, snapshot), (module) =>
+    module === self.module ? self.uri : uriOf(module),
+  )
+  return item === undefined ? [] : Object.freeze([item])
+}
+
+/** Resolves the declaration one prepared item was built from, by the identity key it carries. */
+const declarationOfItem = (
+  snapshot: Analysis.FrontendSnapshot,
+  item: CallHierarchyItem,
+): DeclarationIndex.MemberFact | undefined =>
+  functionDeclarations(snapshot).find(
+    (declaration) =>
+      SemanticOccurrence.identityKey(
+        Object.freeze({
+          _tag: 'DeclarationIdentity',
+          id:
+            declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : declaration.id,
+        }),
+      ) === item.data,
+  )
+
+/**
+ * Lists every function that calls the selected one, across every module of the analyzed project.
+ *
+ * Each use of the selected declaration is attributed to the declaration whose body encloses it, so
+ * two calls from one caller collapse into one entry carrying both ranges, and a use written outside
+ * any function body — an import clause, the declaration's own name — contributes no caller.
+ */
+export const incomingCalls = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  item: CallHierarchyItem,
+  uriOf: (module: string) => string | undefined,
+): ReadonlyArray<CallHierarchyIncomingCall> => {
+  const target = declarationOfItem(snapshot, item)
+  if (target === undefined) return []
+  const identity = Object.freeze({
+    _tag: 'DeclarationIdentity' as const,
+    id: target.canonical._tag === 'Canonical' ? target.canonical.id : target.id,
+  })
+  const indexOf = lineIndexes(self, snapshot)
+  const uriOfModule = (module: string): string | undefined =>
+    module === self.module ? self.uri : uriOf(module)
+  const callers = new Map<string, { item: CallHierarchyItem; ranges: Array<Range> }>()
+  for (const match of matchesOfIdentity(snapshot, identity)) {
+    if (match.occurrence.role === 'Declaration' || match.occurrence.role === 'Import') continue
+    const caller = enclosingDeclaration(snapshot, match.module, match.occurrence.span)
+    if (caller === undefined) continue
+    const index = indexOf(match.module)
+    if (index === undefined) continue
+    const key = SemanticOccurrence.identityKey(
+      Object.freeze({
+        _tag: 'DeclarationIdentity',
+        id: caller.canonical._tag === 'Canonical' ? caller.canonical.id : caller.id,
+      }),
+    )
+    const existing = callers.get(key)
+    const range = LineIndex.rangeOf(index, match.occurrence.span)
+    if (existing !== undefined) {
+      existing.ranges.push(range)
+      continue
+    }
+    const from = callHierarchyItem(caller, indexOf, uriOfModule)
+    if (from === undefined) continue
+    callers.set(key, { item: from, ranges: [range] })
+  }
+  return Object.freeze(
+    [...callers.values()].map(({ item: from, ranges }) => ({ from, fromRanges: ranges })),
+  )
+}
+
+/**
+ * Lists every function the selected one calls, in the order the calls are written.
+ *
+ * The selected declaration's own body is scanned through the same occurrence index, so a callee
+ * reached through a qualified name is found exactly as a bare one is, and repeated calls to one
+ * callee collapse into a single entry carrying every call's range.
+ */
+export const outgoingCalls = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  item: CallHierarchyItem,
+  uriOf: (module: string) => string | undefined,
+): ReadonlyArray<CallHierarchyOutgoingCall> => {
+  const caller = declarationOfItem(snapshot, item)
+  if (caller === undefined) return []
+  const body = SyntaxTree.span(caller.syntax)
+  const module = body.sourceId
+  const indexOf = lineIndexes(self, snapshot)
+  const callerIndex = indexOf(module)
+  if (callerIndex === undefined) return []
+  const uriOfModule = (candidate: string): string | undefined =>
+    candidate === self.module ? self.uri : uriOf(candidate)
+  const callees = new Map<string, { item: CallHierarchyItem; ranges: Array<Range> }>()
+  for (const occurrence of Analysis.semanticOccurrencesInRange(snapshot, module, body)) {
+    if (occurrence.role === 'Declaration' || occurrence.resolution._tag !== 'Available') continue
+    const identity = occurrence.resolution.identity
+    if (identity._tag !== 'DeclarationIdentity') continue
+    const callee = Analysis.declarationForIdentity(snapshot, identity)
+    if (callee?._tag !== 'FunctionDeclaration') continue
+    const key = SemanticOccurrence.identityKey(identity)
+    const range = LineIndex.rangeOf(callerIndex, occurrence.span)
+    const existing = callees.get(key)
+    if (existing !== undefined) {
+      existing.ranges.push(range)
+      continue
+    }
+    const to = callHierarchyItem(callee, indexOf, uriOfModule)
+    if (to === undefined) continue
+    callees.set(key, { item: to, ranges: [range] })
+  }
+  return Object.freeze(
+    [...callees.values()].map(({ item: to, ranges }) => ({ to, fromRanges: ranges })),
+  )
 }
 
 /** Formats the whole document, yielding no edits for damaged or already canonical sources. */

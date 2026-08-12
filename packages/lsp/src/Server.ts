@@ -67,6 +67,9 @@ export const start = (): void => {
         documentSymbolProvider: true,
         documentFormattingProvider: true,
         codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix] },
+        semanticTokensProvider: { legend: Document.semanticTokensLegend, full: true },
+        foldingRangeProvider: true,
+        callHierarchyProvider: true,
       },
     }
   })
@@ -289,6 +292,56 @@ export const start = (): void => {
         session.value.document,
         session.value.snapshot,
         parameters.range,
+        (module) => session.value.moduleUris.get(module),
+      ),
+    ]
+  })
+
+  connection.languages.semanticTokens.on(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return { data: [] }
+    return Document.semanticTokens(session.value.document, session.value.snapshot)
+  })
+
+  connection.onFoldingRanges(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return []
+    return [...Document.foldingRanges(session.value.document, session.value.snapshot)]
+  })
+
+  connection.languages.callHierarchy.onPrepare(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return null
+    const items = Document.prepareCallHierarchy(
+      session.value.document,
+      session.value.snapshot,
+      parameters.position,
+      (module) => session.value.moduleUris.get(module),
+    )
+    return items.length === 0 ? null : [...items]
+  })
+
+  connection.languages.callHierarchy.onIncomingCalls(async (parameters) => {
+    const session = await acquire(parameters.item.uri)
+    if (Option.isNone(session)) return null
+    return [
+      ...Document.incomingCalls(
+        session.value.document,
+        session.value.snapshot,
+        parameters.item,
+        (module) => session.value.moduleUris.get(module),
+      ),
+    ]
+  })
+
+  connection.languages.callHierarchy.onOutgoingCalls(async (parameters) => {
+    const session = await acquire(parameters.item.uri)
+    if (Option.isNone(session)) return null
+    return [
+      ...Document.outgoingCalls(
+        session.value.document,
+        session.value.snapshot,
+        parameters.item,
         (module) => session.value.moduleUris.get(module),
       ),
     ]
