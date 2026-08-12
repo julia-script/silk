@@ -10,7 +10,7 @@
   "scripts": {
     "build": "turbo run build",
     "changeset": "changeset",
-    "check": "biome check . && turbo run typecheck test && pnpm test:scripts",
+    "check": "biome check . && turbo run build && turbo run typecheck test && pnpm test:scripts",
     "check:write": "biome check --write .",
     "dev": "turbo run dev",
     "format": "biome format --write .",
