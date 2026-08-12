@@ -73,6 +73,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "@silk-effect/language": "workspace:*",
     "@types/node": "^24.10.1"
   }
 }

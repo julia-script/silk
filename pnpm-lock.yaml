@@ -282,6 +282,9 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
+      '@silk-effect/language':
+        specifier: workspace:*
+        version: link:../language
       '@types/node':
         specifier: ^24.10.1
         version: 24.13.3

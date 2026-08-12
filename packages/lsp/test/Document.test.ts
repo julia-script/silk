@@ -5,10 +5,11 @@ import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceOrigin from '@silk-effect/compiler/SourceOrigin'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
 import * as Stdlib from '@silk-effect/compiler/Stdlib'
+import * as TextMate from '@silk-effect/language/TextMate'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
-import { SymbolKind } from 'vscode-languageserver-types'
+import { SemanticTokenTypes, SymbolKind } from 'vscode-languageserver-types'
 import * as Document from '../src/Document.js'
 
 const encoder = new TextEncoder()
@@ -1310,5 +1311,246 @@ pub fn main() -> i32 { return clamp(double(1), 0, 10) }
     )
     assert.strictEqual(help?.signatures[0]?.label, 'pub fn double(value: i32) -> i32')
     assert.strictEqual(help?.activeParameter, 0)
+  }),
+)
+
+/** Decodes the protocol's delta encoding back into absolute, readable tokens. */
+const decodeSemanticTokens = (tokens: {
+  readonly data: ReadonlyArray<number>
+}): ReadonlyArray<{
+  readonly line: number
+  readonly character: number
+  readonly length: number
+  readonly type: string
+}> => {
+  const decoded: Array<{
+    line: number
+    character: number
+    length: number
+    type: string
+  }> = []
+  let line = 0
+  let character = 0
+  for (let index = 0; index + 4 < tokens.data.length; index += 5) {
+    const deltaLine = tokens.data[index] ?? 0
+    const deltaCharacter = tokens.data[index + 1] ?? 0
+    line += deltaLine
+    character = deltaLine === 0 ? character + deltaCharacter : deltaCharacter
+    decoded.push({
+      line,
+      character,
+      length: tokens.data[index + 2] ?? 0,
+      type: Document.semanticTokenTypes[tokens.data[index + 3] ?? 0] ?? 'unknown',
+    })
+  }
+  return decoded
+}
+
+const semanticTokenAt = (
+  decoded: ReadonlyArray<{
+    readonly line: number
+    readonly character: number
+    readonly length: number
+    readonly type: string
+  }>,
+  source: string,
+  spelling: string,
+  occurrence = 0,
+) => {
+  const { line, character } = positionOf(source, spelling, occurrence)
+  return decoded.find((token) => token.line === line && token.character === character)
+}
+
+it.effect('colors a type name and a variable name with different token types', () =>
+  Effect.gen(function* () {
+    const source = `pub struct Point { x: i32 }
+pub fn main() -> i32 {
+  let total = 1
+  return total
+}
+`
+    const { document, snapshot } = yield* open(source)
+    const decoded = decodeSemanticTokens(Document.semanticTokens(document, snapshot))
+    const type = semanticTokenAt(decoded, source, 'Point')
+    const variable = semanticTokenAt(decoded, source, 'total', 1)
+    assert.strictEqual(type?.type, 'type')
+    assert.strictEqual(variable?.type, 'variable')
+    // The lexer's own kinds carry the rest, so a keyword never depends on a resolved name.
+    assert.strictEqual(semanticTokenAt(decoded, source, 'pub')?.type, 'keyword')
+    assert.strictEqual(semanticTokenAt(decoded, source, 'main')?.type, 'function')
+  }),
+)
+
+it.effect('names every keyword the TextMate grammar colors in the semantic token legend', () =>
+  Effect.gen(function* () {
+    // The grammar and the legend both read the compiler's token kinds, so one source of keywords
+    // decides both: every kind the grammar spells must reach a legend entry the server sends.
+    const source = `${Object.values(TextMate.keywords).join(' ')}\n`
+    const { document, snapshot } = yield* open(source)
+    const decoded = decodeSemanticTokens(Document.semanticTokens(document, snapshot))
+    const colored = new Set(
+      decoded.filter((token) => token.type === 'keyword').map((token) => token.character),
+    )
+    assert.isTrue(Document.semanticTokenTypes.includes('keyword'))
+    for (const spelling of Object.values(TextMate.keywords)) {
+      assert.isTrue(
+        colored.has(positionOf(source, spelling).character),
+        `keyword ${spelling} carries no semantic token`,
+      )
+    }
+    for (const type of Document.semanticTokenTypes) {
+      assert.isTrue(
+        (Object.values(SemanticTokenTypes) as ReadonlyArray<string>).includes(type),
+        `legend entry ${type} is not a standard token type`,
+      )
+    }
+  }),
+)
+
+it.effect('folds a function body from its open brace to its close brace', () =>
+  Effect.gen(function* () {
+    const source = `pub fn main() -> i32 {
+  let total = 1
+  return total
+}
+`
+    const { document, snapshot } = yield* open(source)
+    assert.deepEqual(
+      Document.foldingRanges(document, snapshot).map(({ startLine, endLine }) => ({
+        startLine,
+        endLine,
+      })),
+      [{ startLine: 0, endLine: 3 }],
+    )
+  }),
+)
+
+it.effect('folds a run of comment lines as one block', () =>
+  Effect.gen(function* () {
+    const source = `// first
+// second
+// third
+pub fn main() -> i32 { return 1 }
+`
+    const { document, snapshot } = yield* open(source)
+    assert.deepEqual(Document.foldingRanges(document, snapshot), [
+      { startLine: 0, endLine: 2, kind: 'comment' },
+    ])
+  }),
+)
+
+const calleeModule = 'pub fn helper(value: i32) -> i32 { return value }'
+
+it.effect('lists two callers of one function across two modules', () =>
+  Effect.gen(function* () {
+    const first = 'import helper\npub fn caller() -> i32 { return helper.helper(1) }'
+    const second = 'import helper\npub fn main() -> i32 { return helper.helper(3) }'
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'helper', text: calleeModule },
+        { module: 'caller', text: first },
+        { module: 'main', text: second },
+      ],
+      'helper',
+    )
+    const prepared = Document.prepareCallHierarchy(
+      document,
+      snapshot,
+      positionOf(calleeModule, 'helper'),
+      uriOfModule,
+    )
+    assert.strictEqual(prepared.length, 1)
+    assert.strictEqual(prepared[0]?.name, 'helper')
+    assert.strictEqual(prepared[0]?.detail, 'pub fn helper(value: i32) -> i32')
+    const item = prepared[0]
+    if (item === undefined) throw new Error('prepare produced no item')
+    assert.deepEqual(
+      Document.incomingCalls(document, snapshot, item, uriOfModule).map(({ from, fromRanges }) => ({
+        name: from.name,
+        uri: from.uri,
+        calls: fromRanges.length,
+      })),
+      [
+        { name: 'caller', uri: uriOfModule('caller'), calls: 1 },
+        { name: 'main', uri: uriOfModule('main'), calls: 1 },
+      ],
+    )
+  }),
+)
+
+it.effect('places structural answers with the negotiated position encoding', () =>
+  Effect.gen(function* () {
+    // The comment holds an astral character, which is one UTF-16 surrogate pair and four bytes:
+    // a byte-counted column would put every answer after it two columns too far right.
+    const source = `// 😀
+pub fn helper(value: i32) -> i32 { return value }
+pub fn main() -> i32 {
+  return helper(1)
+}
+`
+    const { document, snapshot } = yield* open(source)
+    const decoded = decodeSemanticTokens(Document.semanticTokens(document, snapshot))
+    assert.deepEqual(
+      decoded.filter((token) => token.line === 1 && token.type === 'function'),
+      // `helper` sits at UTF-16 column 7 of its own line, unshifted by the astral character above.
+      [{ line: 1, character: 7, length: 6, type: 'function' }],
+    )
+    assert.deepEqual(
+      Document.foldingRanges(document, snapshot).map(({ startLine, endLine }) => ({
+        startLine,
+        endLine,
+      })),
+      [
+        { startLine: 0, endLine: 0 },
+        { startLine: 1, endLine: 1 },
+        { startLine: 2, endLine: 4 },
+      ].filter(({ startLine, endLine }) => endLine > startLine),
+    )
+    const prepared = Document.prepareCallHierarchy(
+      document,
+      snapshot,
+      positionOf(source, 'main'),
+      () => undefined,
+    )
+    const item = prepared[0]
+    if (item === undefined) throw new Error('prepare produced no item')
+    assert.deepEqual(
+      Document.outgoingCalls(document, snapshot, item, () => undefined).map(
+        ({ to, fromRanges }) => ({ name: to.name, ranges: fromRanges }),
+      ),
+      [
+        {
+          name: 'helper',
+          ranges: [{ start: { line: 3, character: 9 }, end: { line: 3, character: 15 } }],
+        },
+      ],
+    )
+  }),
+)
+
+it.effect('lists the functions one function calls', () =>
+  Effect.gen(function* () {
+    const source = `pub fn helper(value: i32) -> i32 { return value }
+pub fn double(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return helper(1) + double(2) + helper(3) }
+`
+    const { document, snapshot } = yield* open(source)
+    const prepared = Document.prepareCallHierarchy(
+      document,
+      snapshot,
+      positionOf(source, 'main'),
+      () => undefined,
+    )
+    const item = prepared[0]
+    if (item === undefined) throw new Error('prepare produced no item')
+    assert.deepEqual(
+      Document.outgoingCalls(document, snapshot, item, () => undefined).map(
+        ({ to, fromRanges }) => ({ name: to.name, calls: fromRanges.length }),
+      ),
+      [
+        { name: 'helper', calls: 2 },
+        { name: 'double', calls: 1 },
+      ],
+    )
   }),
 )
