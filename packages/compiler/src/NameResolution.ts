@@ -4,6 +4,7 @@ import * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as SourceFile from './SourceFile.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as Stdlib from './Stdlib.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
@@ -109,13 +110,56 @@ const identifiers = (node: SyntaxTree.Node): ReadonlyArray<Token.Token> =>
     (element): element is Token.Token =>
       SyntaxTree.isToken(element) && element.kind === 'Identifier',
   )
+const lineFeed = 0x0a
+const isBlank = (byte: number | undefined): boolean =>
+  byte === 0x20 || byte === 0x09 || byte === 0x0d
+/**
+ * Covers the ` as name` clause together with the blanks that separate it from the name it
+ * renames, so deleting the span leaves that name alone on a well-formed import.
+ */
+const aliasClauseSpan = (
+  source: SourceFile.SourceFile,
+  alias: SyntaxTree.Node,
+): SourceSpan.SourceSpan => {
+  let start = SyntaxTree.directToken(alias, 'AsKeyword')?.span.start ?? alias.span.start
+  while (start > 0 && isBlank(source.bytes[start - 1])) start -= 1
+  return Option.getOrElse(SourceSpan.make(source, start, alias.span.end), () => alias.span)
+}
+/**
+ * Covers one import declaration together with its own line, so deleting the span removes the
+ * line whole and leaves the surrounding declarations on their original lines.
+ */
+const importLineSpan = (
+  source: SourceFile.SourceFile,
+  declaration: SyntaxTree.Node,
+): SourceSpan.SourceSpan => {
+  let start =
+    SyntaxTree.directToken(declaration, 'ImportKeyword')?.span.start ?? declaration.span.start
+  while (start > 0 && isBlank(source.bytes[start - 1])) start -= 1
+  let end = declaration.span.end
+  while (end < source.bytes.length && isBlank(source.bytes[end])) end += 1
+  if (source.bytes[end] === lineFeed) end += 1
+  return Option.getOrElse(SourceSpan.make(source, start, end), () => declaration.span)
+}
 const aliasName = (
   source: SourceFile.SourceFile,
   parent: SyntaxTree.Node,
-): { readonly spelling: string; readonly token: Token.Token } | undefined => {
+):
+  | {
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly clause: SourceSpan.SourceSpan
+    }
+  | undefined => {
   const alias = SyntaxTree.directNode(parent, 'ImportAlias')
   const token = alias === undefined ? undefined : SyntaxTree.directToken(alias, 'Identifier')
-  return token === undefined ? undefined : Object.freeze({ spelling: text(source, token), token })
+  return alias === undefined || token === undefined
+    ? undefined
+    : Object.freeze({
+        spelling: text(source, token),
+        token,
+        clause: aliasClauseSpan(source, alias),
+      })
 }
 type CanonicalMember = DeclarationIndex.MemberFact & {
   readonly canonical: Extract<DeclarationIndex.CanonicalState, { readonly _tag: 'Canonical' }>
@@ -199,6 +243,7 @@ export const resolve = (
         )
     const seenTargets = new Set<string>()
     const imports: Array<ImportOutcome> = []
+    const source = module.syntax.source
     for (const imported of module.imports) {
       if (imported.target._tag !== 'Resolved') {
         imports.push(
@@ -212,7 +257,11 @@ export const resolve = (
       }
       const target = imported.target.module
       if (seenTargets.has(target)) {
-        const diagnostic = Diagnostic.duplicateImport(target, imported.path.span)
+        const diagnostic = Diagnostic.duplicateImport(
+          target,
+          importLineSpan(source, imported.syntax),
+          imported.path.span,
+        )
         diagnostics.push(diagnostic)
         imports.push(
           Object.freeze({
@@ -225,7 +274,6 @@ export const resolve = (
       }
       seenTargets.add(target)
       const created: Array<Binding> = []
-      const source = module.syntax.source
       const pathNames = identifiers(imported.path)
       const defaultName = pathNames.at(-1)
       const aliasSyntax = SyntaxTree.directNode(imported.syntax, 'ImportAlias')
@@ -247,6 +295,7 @@ export const resolve = (
         ) {
           const diagnostic = Diagnostic.redundantAlias(
             explicitAlias.spelling,
+            explicitAlias.clause,
             explicitAlias.token.span,
           )
           diagnostics.push(diagnostic)
@@ -276,7 +325,11 @@ export const resolve = (
         const sourceName = text(source, sourceToken)
         const alias = aliasName(source, member)
         if (alias !== undefined && alias.spelling === sourceName) {
-          const diagnostic = Diagnostic.redundantAlias(alias.spelling, alias.token.span)
+          const diagnostic = Diagnostic.redundantAlias(
+            alias.spelling,
+            alias.clause,
+            alias.token.span,
+          )
           diagnostics.push(diagnostic)
           created.push(
             Object.freeze({
