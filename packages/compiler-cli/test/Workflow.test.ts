@@ -331,6 +331,37 @@ it.live(
 )
 
 it.live(
+  'checks again after a nested module in the source graph changes',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(
+        root,
+        'import library.Answer { answer }\npub fn main() -> i32 { return answer() }',
+      )
+      yield* writeFile(`${root}/src/library/Answer.silk`, 'pub fn answer() -> i32 { return 42 }')
+      const passes: Array<Workflow.ExitStatus> = []
+      const record = (selection: Workflow.ProjectSelection) =>
+        Workflow.check(selection).pipe(
+          Effect.tap((status) => Effect.sync(() => passes.push(status))),
+        )
+
+      const watching = yield* Effect.forkChild(Workflow.watch(record, options(root)))
+      yield* waitUntil(() => passes.length >= 1)
+      yield* editUntilRecompiled(
+        `${root}/src/library/Answer.silk`,
+        'pub fn answer() -> i32 { return 7 }',
+        () => passes.length >= 2,
+      )
+      yield* Fiber.interrupt(watching)
+
+      assert.deepStrictEqual(passes.slice(0, 2), [0, 0])
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  30_000,
+)
+
+it.live(
   'keeps watching after a compilation that reports a diagnostic',
   () =>
     Effect.gen(function* () {

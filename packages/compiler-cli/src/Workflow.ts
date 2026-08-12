@@ -260,6 +260,32 @@ export const build = Effect.fn('Workflow.build')(function* (
 })
 
 /**
+ * Collects the source root and every directory beneath it. `FileSystem.watch` reports only a
+ * directory's own entries, so a nested module needs its own watch to be seen at all.
+ */
+const sourceDirectories = Effect.fnUntraced(function* (
+  root: string,
+): Effect.fn.Return<ReadonlyArray<string>, never, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const found: Array<string> = []
+  const pending: Array<string> = [root]
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    if (directory === undefined) continue
+    found.push(directory)
+    const names = yield* Effect.result(fileSystem.readDirectory(directory))
+    if (Result.isFailure(names)) continue
+    for (const name of names.success) {
+      const candidate = path.resolve(directory, name)
+      const info = yield* Effect.result(fileSystem.stat(candidate))
+      if (Result.isSuccess(info) && info.success.type === 'Directory') pending.push(candidate)
+    }
+  }
+  return found
+})
+
+/**
  * Runs one compilation, then repeats it after every change under the project source root. The
  * status of each pass is reported but never returned: only stopping the watch ends the command,
  * so a pass that reports diagnostics leaves the watch running.
@@ -275,8 +301,13 @@ export const watch = Effect.fn('Workflow.watch')(function* (
   if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
   const sourceRoot = loaded.success.entry.sourceRoot
   yield* run(options)
+  // ponytail: directories are enumerated once; a directory created later needs a restart.
+  const directories = yield* sourceDirectories(sourceRoot)
   yield* Console.log(`Watching ${sourceRoot} for changes.`)
-  yield* fileSystem.watch(sourceRoot).pipe(
+  yield* Stream.mergeAll(
+    directories.map((directory) => fileSystem.watch(directory)),
+    { concurrency: 'unbounded' },
+  ).pipe(
     // ponytail: every event recompiles the whole graph; debounce if editors emit noisy bursts.
     Stream.runForEach(
       Effect.fnUntraced(function* () {
