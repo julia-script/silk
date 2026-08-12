@@ -1,5 +1,11 @@
 import silk.option { Option }
 
+/// The usize zero. A bare literal defaults to i32, so a count without a typed context names this.
+pub const ZERO: usize = 0
+
+/// The usize one. A bare literal defaults to i32, so a step without a typed context names this.
+pub const ONE: usize = 1
+
 /// Calls the concrete usize toU8 primitive.
 pub fn toU8(value: usize) -> u8 {
   return Intrinsic.usizeToU8(value)

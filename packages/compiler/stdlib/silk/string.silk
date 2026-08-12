@@ -31,10 +31,6 @@ pub struct ScalarStep {
   next: ScalarCursor
 }
 
-fn counted(value: usize) -> usize {
-  return value
-}
-
 fn byte(value: u8) -> u8 {
   return value
 }
@@ -50,49 +46,49 @@ fn continuation(value: u8) -> bool {
 
 /// Validates a complete byte view and borrows it as text without allocating.
 pub fn fromUtf8(values: &[u8]) -> Result<string, InvalidUtf8> {
-  let mut index = counted(0)
+  let mut index = usize.ZERO
   while index < values.length {
     let first = values[index]
     if first < byte(128) {
-      index = index + counted(1)
+      index = index + usize.ONE
     } else {
       if first < byte(194) { return invalid(index) }
       if first <= byte(223) {
-        if values.length <= index + counted(1) { return invalid(index) }
-        if continuation(values[index + counted(1)]) == false {
-          return invalid(index + counted(1))
+        if values.length <= index + usize.ONE { return invalid(index) }
+        if continuation(values[index + usize.ONE]) == false {
+          return invalid(index + usize.ONE)
         }
-        index = index + counted(2)
+        index = index + 2
       } else {
         if first <= byte(239) {
-          if values.length <= index + counted(2) { return invalid(index) }
-          let second = values[index + counted(1)]
-          let third = values[index + counted(2)]
-          if continuation(second) == false { return invalid(index + counted(1)) }
-          if continuation(third) == false { return invalid(index + counted(2)) }
+          if values.length <= index + 2 { return invalid(index) }
+          let second = values[index + usize.ONE]
+          let third = values[index + 2]
+          if continuation(second) == false { return invalid(index + usize.ONE) }
+          if continuation(third) == false { return invalid(index + 2) }
           if first == byte(224) {
-            if second < byte(160) { return invalid(index + counted(1)) }
+            if second < byte(160) { return invalid(index + usize.ONE) }
           }
           if first == byte(237) {
-            if byte(159) < second { return invalid(index + counted(1)) }
+            if byte(159) < second { return invalid(index + usize.ONE) }
           }
-          index = index + counted(3)
+          index = index + 3
         } else {
           if byte(244) < first { return invalid(index) }
-          if values.length <= index + counted(3) { return invalid(index) }
-          let second = values[index + counted(1)]
-          let third = values[index + counted(2)]
-          let fourth = values[index + counted(3)]
-          if continuation(second) == false { return invalid(index + counted(1)) }
-          if continuation(third) == false { return invalid(index + counted(2)) }
-          if continuation(fourth) == false { return invalid(index + counted(3)) }
+          if values.length <= index + 3 { return invalid(index) }
+          let second = values[index + usize.ONE]
+          let third = values[index + 2]
+          let fourth = values[index + 3]
+          if continuation(second) == false { return invalid(index + usize.ONE) }
+          if continuation(third) == false { return invalid(index + 2) }
+          if continuation(fourth) == false { return invalid(index + 3) }
           if first == byte(240) {
-            if second < byte(144) { return invalid(index + counted(1)) }
+            if second < byte(144) { return invalid(index + usize.ONE) }
           }
           if first == byte(244) {
-            if byte(143) < second { return invalid(index + counted(1)) }
+            if byte(143) < second { return invalid(index + usize.ONE) }
           }
-          index = index + counted(4)
+          index = index + 4
         }
       }
     }
@@ -101,7 +97,7 @@ pub fn fromUtf8(values: &[u8]) -> Result<string, InvalidUtf8> {
     let text = Intrinsic.stringFromUtf8Unchecked(values)
     return succeed<string, InvalidUtf8>(text)
   }
-  return invalid(counted(0))
+  return invalid(usize.ZERO)
 }
 
 /// Constructs an empty owned String without allocating.
@@ -156,7 +152,7 @@ pub fn ownedByteLength(self: &String) -> usize {
 
 /// Selects the position before the first Unicode scalar.
 pub fn scalarCursor() -> ScalarCursor {
-  return ScalarCursor { byteOffset: counted(0) }
+  return ScalarCursor { byteOffset: usize.ZERO }
 }
 
 /// Returns a cursor's explicit UTF-8 byte offset.
@@ -192,24 +188,24 @@ pub fn nextScalar(value: string, cursor: ScalarCursor) -> Option<ScalarStep> {
   if offset == bytes.length { return none<ScalarStep>() }
   let first = bytes[offset]
   let mut scalar = scalar32(first)
-  let mut width = counted(1)
+  let mut width = usize.ONE
   if byte(194) <= first {
     if first <= byte(223) {
       scalar = (scalar32(first) - u32.toU32(192)) * u32.toU32(64)
-        + (scalar32(bytes[offset + counted(1)]) - u32.toU32(128))
-      width = counted(2)
+        + (scalar32(bytes[offset + usize.ONE]) - u32.toU32(128))
+      width = 2
     } else {
       if first <= byte(239) {
         scalar = (scalar32(first) - u32.toU32(224)) * u32.toU32(4096)
-          + (scalar32(bytes[offset + counted(1)]) - u32.toU32(128)) * u32.toU32(64)
-          + (scalar32(bytes[offset + counted(2)]) - u32.toU32(128))
-        width = counted(3)
+          + (scalar32(bytes[offset + usize.ONE]) - u32.toU32(128)) * u32.toU32(64)
+          + (scalar32(bytes[offset + 2]) - u32.toU32(128))
+        width = 3
       } else {
         scalar = (scalar32(first) - u32.toU32(240)) * u32.toU32(262144)
-          + (scalar32(bytes[offset + counted(1)]) - u32.toU32(128)) * u32.toU32(4096)
-          + (scalar32(bytes[offset + counted(2)]) - u32.toU32(128)) * u32.toU32(64)
-          + (scalar32(bytes[offset + counted(3)]) - u32.toU32(128))
-        width = counted(4)
+          + (scalar32(bytes[offset + usize.ONE]) - u32.toU32(128)) * u32.toU32(4096)
+          + (scalar32(bytes[offset + 2]) - u32.toU32(128)) * u32.toU32(64)
+          + (scalar32(bytes[offset + 3]) - u32.toU32(128))
+        width = 4
       }
     }
   }

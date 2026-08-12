@@ -19,11 +19,6 @@ pub struct Vector<T> {
   capacity: usize
 }
 
-// A usize-typed literal anchor: parameters drive literal typing, so bare counts stay explicit.
-fn counted(value: usize) -> usize {
-  return value
-}
-
 // Diverges on the arms the surrounding logic has already proven impossible.
 fn absurd<T>() -> T {
   let boom = 1 / 0
@@ -31,7 +26,7 @@ fn absurd<T>() -> T {
 }
 
 pub fn make<T>() -> Vector<T> {
-  return Vector<T> { storage: Empty<T> { anchor: [] }, length: counted(0), capacity: counted(0) }
+  return Vector<T> { storage: Empty<T> { anchor: [] }, length: usize.ZERO, capacity: usize.ZERO }
 }
 
 pub fn length<T>(self: &Vector<T>) -> usize {
@@ -54,7 +49,7 @@ fn emptyMutSlice<T>(anchor: &mut [T]) -> &mut [T] {
 pub fn asSlice<T>(self: &Vector<T>) -> &[T] {
   return match &self.storage {
     Empty<T> { anchor } => emptySlice<T>(&anchor)
-    Full<T> { buffer } => RawBuffer.view<T>(&buffer, counted(0), self.length)
+    Full<T> { buffer } => RawBuffer.view<T>(&buffer, usize.ZERO, self.length)
   }
 }
 
@@ -62,14 +57,14 @@ pub fn asSlice<T>(self: &Vector<T>) -> &[T] {
 pub fn asMutSlice<T>(self: &mut Vector<T>) -> &mut [T] {
   return match &mut self.storage {
     Empty<T> { anchor } => emptyMutSlice<T>(&mut anchor)
-    Full<T> { buffer } => RawBuffer.viewMut<T>(&mut buffer, counted(0), self.length)
+    Full<T> { buffer } => RawBuffer.viewMut<T>(&mut buffer, usize.ZERO, self.length)
   }
 }
 
 impl<T> Drop for Vector<T> {
   fn drop(self: &mut Vector<T>) -> () {
     let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
-    let count = Intrinsic.replace(self.length, counted(0))
+    let count = Intrinsic.replace(self.length, usize.ZERO)
     return match move storage {
       Empty<T> nothing => ()
       Full<T> full => releaseFull<T>(move full, count)
@@ -86,11 +81,11 @@ fn releaseFull<T>(full: Full<T>, length: usize) -> () {
 fn releaseBuffer<T>(buffer: RawBuffer<T>, length: usize) -> () {
   unsafe {
     let mut owned = move buffer
-    let mut index = counted(0)
+    let mut index = usize.ZERO
     while index < length {
       let selected = RawBuffer.slot(&mut owned, index)
       let cleared = Slot.dropValue(move selected)
-      index = index + counted(1)
+      index = index + usize.ONE
     }
     drop owned
   }
@@ -102,8 +97,8 @@ fn releaseBuffer<T>(buffer: RawBuffer<T>, length: usize) -> () {
 pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &mut Allocator {
   if self.length == self.capacity {
     let mut next = self.capacity + self.capacity
-    if self.capacity == counted(0) {
-      next = counted(4)
+    if self.capacity == usize.ZERO {
+      next = 4
     }
     let element = Layout.of<T>()
     let plan = Layout.repeat(move element, next)
@@ -127,7 +122,7 @@ pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &m
     Full<T> full => writeAt<T>(move full, self.length, move value)
   }
   self.storage = move stored
-  self.length = self.length + counted(1)
+  self.length = self.length + usize.ONE
   return ()
 }
 
@@ -139,8 +134,8 @@ pub effect fn insert<T>(
 ) -> () ! OutOfMemory ? &mut Allocator {
   if self.length == self.capacity {
     let mut next = self.capacity + self.capacity
-    if self.capacity == counted(0) {
-      next = counted(4)
+    if self.capacity == usize.ZERO {
+      next = 4
     }
     let element = Layout.of<T>()
     let plan = Layout.repeat(move element, next)
@@ -164,7 +159,7 @@ pub effect fn insert<T>(
     Full<T> full => insertInto<T>(move full, index, self.length, move value)
   }
   self.storage = move stored
-  self.length = self.length + counted(1)
+  self.length = self.length + usize.ONE
   return ()
 }
 
@@ -179,11 +174,11 @@ fn insertBuffer<T>(buffer: RawBuffer<T>, index: usize, length: usize, value: T) 
     let mut owned = move buffer
     let mut cursor = length
     while index < cursor {
-      let source = RawBuffer.slot(&mut owned, cursor - counted(1))
+      let source = RawBuffer.slot(&mut owned, cursor - usize.ONE)
       let shifted = Slot.take(move source)
       let target = RawBuffer.slot(&mut owned, cursor)
       let written = Slot.write(move target, move shifted)
-      cursor = cursor - counted(1)
+      cursor = cursor - usize.ONE
     }
     let selected = RawBuffer.slot(&mut owned, index)
     let written = Slot.write(move selected, move value)
@@ -214,13 +209,13 @@ fn migrateBuffer<T>(old: RawBuffer<T>, allocation: Allocation, length: usize, co
   let mut target = freshBuffer<T>(move allocation, count)
   unsafe {
     let mut source = move old
-    let mut index = counted(0)
+    let mut index = usize.ZERO
     while index < length {
       let sourceSlot = RawBuffer.slot(&mut source, index)
       let element = Slot.take(move sourceSlot)
       let targetSlot = RawBuffer.slot(&mut target, index)
       let written = Slot.write(move targetSlot, move element)
-      index = index + counted(1)
+      index = index + usize.ONE
     }
     drop source
   }

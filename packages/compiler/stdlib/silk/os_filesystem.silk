@@ -57,17 +57,15 @@ pub struct OsFileSystem {
   root: Bytes
 }
 
-fn counted(value: usize) -> usize { return value }
-
 /// Copies one absolute native root. A relative or NUL-containing root violates the constructor precondition.
 pub effect fn make(root: string) -> OsFileSystem ! OutOfMemory ? &mut Allocator {
   let rootBytes = stringUtf8Bytes(root)
-  if rootBytes.length == counted(0) { let invalid = 1 / 0 }
-  if rootBytes[counted(0)] != u8.toU8(47) { let invalid = 1 / 0 }
-  let mut index = counted(0)
+  if rootBytes.length == usize.ZERO { let invalid = 1 / 0 }
+  if rootBytes[usize.ZERO] != u8.toU8(47) { let invalid = 1 / 0 }
+  let mut index = usize.ZERO
   while index < rootBytes.length {
     if rootBytes[index] == u8.toU8(0) { let invalid = 1 / 0 }
-    index = index + counted(1)
+    index = index + usize.ONE
   }
   let owned = run bytesCopy(rootBytes)
   return OsFileSystem { root: move owned }
@@ -198,7 +196,7 @@ effect fn preserveOutOfMemory(
 
 effect fn readLoop(handle: &mut OsHandle) -> Bytes ! FileError | OutOfMemory ? &mut Allocator {
   let mut result = bytesMake()
-  let mut buffer = run bytesZeroed(counted(256))
+  let mut buffer = run bytesZeroed(256)
   let mut complete = false
   while complete == false {
     let mut lowReason = 0
@@ -212,15 +210,15 @@ effect fn readLoop(handle: &mut OsHandle) -> Bytes ! FileError | OutOfMemory ? &
       None {} => run raise(readFileOperation(), lowReason, nativeCode)
       Some<usize> { value: selected } => selected
     }
-    if length == counted(0) {
+    if length == usize.ZERO {
       complete = true
     } else {
       let view = bytesSlice(&buffer)
-      let mut index = counted(0)
+      let mut index = usize.ZERO
       while index < length {
         let one = [view[index]]
         let appended = run bytesAppend(&mut result, &one)
-        index = index + counted(1)
+        index = index + usize.ONE
       }
     }
   }
@@ -251,7 +249,7 @@ effect fn readFile(
 }
 
 effect fn writeLoop(handle: &mut OsHandle, bytes: &[u8]) -> () ! FileError {
-  let mut offset = counted(0)
+  let mut offset = usize.ZERO
   while offset < bytes.length {
     let mut lowReason = 0
     let mut nativeCode = u32.toU32(0)
@@ -264,7 +262,7 @@ effect fn writeLoop(handle: &mut OsHandle, bytes: &[u8]) -> () ! FileError {
       None {} => run raise(writeFileOperation(), lowReason, nativeCode)
       Some<usize> { value: selected } => selected
     }
-    if length == counted(0) { return run raise(writeFileOperation(), 10, u32.toU32(0)) }
+    if length == usize.ZERO { return run raise(writeFileOperation(), 10, u32.toU32(0)) }
     offset = offset + length
   }
   return ()
@@ -289,7 +287,7 @@ effect fn writeFile(self: &mut OsFileSystem, path: &Path, bytes: &[u8]) -> () ! 
 
 effect fn stat(self: &mut OsFileSystem, path: &Path) -> FileInfo | DirectoryInfo ! FileError {
   let mut kind = 0
-  let mut byteLength = counted(0)
+  let mut byteLength = usize.ZERO
   let mut lowReason = 0
   let mut nativeCode = u32.toU32(0)
   let inspected = run rawInspect(bytesSlice(&self.root), pathBytes(path), &mut kind, &mut byteLength, &mut lowReason, &mut nativeCode)
@@ -303,12 +301,12 @@ effect fn listLoop(
   parent: &Path
 ) -> Vector<DirectoryEntry> ! FileError | OutOfMemory ? &mut Allocator {
   let mut entries = vectorMake<DirectoryEntry>()
-  let initialBuffer = bytesZeroed(counted(64))
+  let initialBuffer = bytesZeroed(64)
   let mut buffer = run initialBuffer
   let mut complete = false
   while complete == false {
     let mut kind = 0
-    let mut required = counted(0)
+    let mut required = usize.ZERO
     let mut lowReason = 0
     let mut nativeCode = u32.toU32(0)
     let mut output = bytesMutSlice(&mut buffer)
@@ -317,10 +315,10 @@ effect fn listLoop(
       next = run Intrinsic.osDirectoryNext(handle, output, &mut kind, &mut required, &mut lowReason, &mut nativeCode)
     }
     let encodedLength = match move next {
-      Some<usize> { value: presentLength } => presentLength + counted(1)
-      None {} => counted(0)
+      Some<usize> { value: presentLength } => presentLength + usize.ONE
+      None {} => usize.ZERO
     }
-    if encodedLength == counted(0) {
+    if encodedLength == usize.ZERO {
       if lowReason == 8 {
         let resized = bytesZeroed(required)
         buffer = run resized
@@ -328,17 +326,17 @@ effect fn listLoop(
         return run raise(listDirectoryOperation(), lowReason, nativeCode)
       }
     } else {
-      let length = encodedLength - counted(1)
-      if length == counted(0) {
+      let length = encodedLength - usize.ONE
+      if length == usize.ZERO {
         complete = true
       } else {
         let view = bytesSlice(&buffer)
         let mut name = bytesMake()
-        let mut index = counted(0)
+        let mut index = usize.ZERO
         while index < length {
           let one = [view[index]]
           let appended = run bytesAppend(&mut name, &one)
-          index = index + counted(1)
+          index = index + usize.ONE
         }
         let child = run pathJoinUtf8(parent, bytesSlice(&name))
         let mut entryKind = directory()
@@ -356,13 +354,13 @@ effect fn listLoop(
 }
 
 fn insertionFor(child: &Path, existing: &[DirectoryEntry]) -> usize {
-  let mut insertion = counted(0)
+  let mut insertion = usize.ZERO
   while insertion < existing.length {
     let before = match &existing[insertion] {
       DirectoryEntry { path, kind } => pathLess(child, &path)
     }
     if before { return insertion }
-    insertion = insertion + counted(1)
+    insertion = insertion + usize.ONE
   }
   return insertion
 }
@@ -370,12 +368,12 @@ fn insertionFor(child: &Path, existing: &[DirectoryEntry]) -> usize {
 fn pathLess(left: &Path, right: &Path) -> bool {
   let leftBytes = pathBytes(left)
   let rightBytes = pathBytes(right)
-  let mut index = counted(0)
+  let mut index = usize.ZERO
   while index < leftBytes.length {
     if rightBytes.length <= index { return false }
     if leftBytes[index] < rightBytes[index] { return true }
     if rightBytes[index] < leftBytes[index] { return false }
-    index = index + counted(1)
+    index = index + usize.ONE
   }
   if leftBytes.length < rightBytes.length { return true }
   return false
