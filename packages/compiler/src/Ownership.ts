@@ -843,11 +843,18 @@ const fallibleRunSites = (
   const nested = Hir.expressionChildren(expression).flatMap(fallibleRunSites)
   if (expression._tag !== 'Run') return nested
   const subjectType: unknown = 'type' in expression.subject ? expression.subject.type : undefined
-  const fallible =
+  const effect =
     typeof subjectType === 'object' &&
     subjectType !== null &&
-    (subjectType as { readonly _tag?: string })._tag === 'EffectType' &&
-    (subjectType as Type.Effect).failures.length > 0
+    (subjectType as { readonly _tag?: string })._tag === 'EffectType'
+      ? (subjectType as Type.Effect)
+      : undefined
+  // An open failure row counts as fallible. Inside a generic combinator the caller's failures
+  // arrive as a row parameter, so `failures` is empty while `failureParameters` is not; reading
+  // only the former calls the run infallible, publishes no propagation exit, and leaves every owner
+  // held across it without a release once specialization substitutes a row that really can fail.
+  const fallible =
+    effect !== undefined && (effect.failures.length > 0 || effect.failureParameters.length > 0)
   return fallible ? [expression, ...nested] : nested
 }
 

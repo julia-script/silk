@@ -1212,9 +1212,28 @@ const emitOperation = (
             walk(plan_.element, byteOffset + index * representation.stride),
           ).flat()
         }
-        case 'UnionCleanup':
+        case 'UnionCleanup': {
           if (plan_.cases.every((entry) => !planHasHook(entry.cleanup))) return []
-          throw new RangeError('Wasm cleanup does not yet lower hook-bearing union cases')
+          const entry = LayoutPlan.entry(memory.plan, plan_.type)
+          const representation = entry?.representation
+          if (representation?._tag !== 'Union') return []
+          // Which case a union holds is known only at runtime, so each hook-bearing case guards its
+          // own cleanup on the tag that sits at the union's own offset. A case with no hook emits
+          // nothing rather than an empty branch.
+          return plan_.cases.flatMap((branch) => {
+            if (!planHasHook(branch.cleanup)) return []
+            const body = walk(branch.cleanup, byteOffset + representation.payloadOffset)
+            return body.length === 0
+              ? []
+              : [
+                  ...frameAddress(planned.offset + byteOffset),
+                  Instr.memoryAccess('i32.load', memory.memory),
+                  Instr.i32Const(branch.ordinal),
+                  Instr.op('i32.eq'),
+                  Instr.ifElse(Instr.emptyBlockType, body, []),
+                ]
+          })
+        }
         default:
           return []
       }
