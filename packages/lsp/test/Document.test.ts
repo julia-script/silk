@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
 import * as Effect from 'effect/Effect'
@@ -590,6 +591,205 @@ it.effect('returns no definition for unavailable targets and trivia', () =>
     )
     assert.isUndefined(
       Document.definition(document, snapshot, { line: 0, character: 3 }, () => undefined),
+    )
+  }),
+)
+
+interface ProjectModule {
+  readonly module: string
+  readonly text: string
+}
+
+const uriOfModule = (module: string): string => `file:///project/${module}.silk`
+
+/** Opens several modules as one analyzed project and focuses one of them as the request document. */
+const openProject = (
+  modules: ReadonlyArray<ProjectModule>,
+  focus: string,
+): Effect.Effect<{
+  readonly document: Document.Document
+  readonly snapshot: Analysis.FrontendSnapshot
+}> =>
+  Effect.gen(function* () {
+    const bytes = new Map(
+      modules.map(({ module, text }) => [module, encoder.encode(text)] as const),
+    )
+    const project = yield* ProjectAnalysis.make(
+      modules.map(({ module }) => SourceFile.make(module, bytes.get(module) ?? new Uint8Array())),
+    ).pipe(Effect.provide(SourceResolver.memory(bytes)))
+    const snapshot = ProjectAnalysis.view(project, focus)
+    if (snapshot === undefined) throw new Error(`Project analysis lost focused root ${focus}`)
+    return {
+      document: Document.make({
+        uri: uriOfModule(focus),
+        version: 1,
+        workspace: 'project:/project/silk.toml',
+        module: focus,
+        sourceRoot: '/project',
+        bytes: bytes.get(focus) ?? new Uint8Array(),
+      }),
+      snapshot,
+    }
+  })
+
+const geometry = 'pub fn area(width: i32, height: i32) -> i32 { return width }'
+const consumer =
+  'import geometry\npub fn main() -> i32 { return geometry.area(2, 3) + geometry.area(4, 5) }'
+
+it.effect('finds every use of one declaration across two modules', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'main', text: consumer },
+      ],
+      'geometry',
+    )
+    const position = positionOf(geometry, 'area')
+    assert.deepEqual(
+      Document.references(document, snapshot, position, true, uriOfModule)?.map(
+        ({ uri, range }) => ({ uri, line: range.start.line, character: range.start.character }),
+      ),
+      [
+        { uri: uriOfModule('geometry'), line: 0, character: geometry.indexOf('area') },
+        { uri: uriOfModule('main'), line: 1, character: consumer.split('\n')[1]?.indexOf('area') },
+        {
+          uri: uriOfModule('main'),
+          line: 1,
+          character: consumer.split('\n')[1]?.indexOf('area', 40),
+        },
+      ],
+    )
+    // Excluding the declaration drops exactly the declaration-site occurrence.
+    assert.deepEqual(
+      Document.references(document, snapshot, position, false, uriOfModule)?.map(({ uri }) => uri),
+      [uriOfModule('main'), uriOfModule('main')],
+    )
+  }),
+)
+
+it.effect('renames a declaration with one workspace edit covering both modules', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'main', text: consumer },
+      ],
+      'geometry',
+    )
+    const renamed = Document.rename(
+      document,
+      snapshot,
+      positionOf(geometry, 'area'),
+      'surface',
+      uriOfModule,
+    )
+    assert.strictEqual(renamed?._tag, 'RenameEdit')
+    if (renamed?._tag !== 'RenameEdit') return
+    const changes = renamed.edit.changes ?? {}
+    assert.deepEqual(Object.keys(changes).sort(), [uriOfModule('geometry'), uriOfModule('main')])
+    assert.deepEqual(
+      changes[uriOfModule('geometry')]?.map((edit) => edit.newText),
+      ['surface'],
+    )
+    assert.deepEqual(
+      changes[uriOfModule('main')]?.map((edit) => edit.newText),
+      ['surface', 'surface'],
+    )
+  }),
+)
+
+it.effect('refuses a rename that collides with a top-level name in any edited module', () =>
+  Effect.gen(function* () {
+    const local = yield* openProject(
+      [{ module: 'geometry', text: `${geometry}\npub fn surface() -> i32 { return 1 }` }],
+      'geometry',
+    )
+    const refusedLocally = Document.rename(
+      local.document,
+      local.snapshot,
+      positionOf(geometry, 'area'),
+      'surface',
+      uriOfModule,
+    )
+    assert.deepEqual(refusedLocally, {
+      _tag: 'RenameRefusal',
+      code: 'SEM0016',
+      message: 'Multiple bindings claim surface',
+    })
+
+    // The importing module's flat namespace counts too: its selected member would collide there.
+    const importer = 'import geometry { area }\npub fn surface() -> i32 { return area(1, 2) }'
+    const across = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'main', text: importer },
+      ],
+      'geometry',
+    )
+    assert.deepEqual(
+      Document.rename(
+        across.document,
+        across.snapshot,
+        positionOf(geometry, 'area'),
+        'surface',
+        uriOfModule,
+      ),
+      { _tag: 'RenameRefusal', code: 'SEM0016', message: 'Multiple bindings claim surface' },
+    )
+  }),
+)
+
+it.effect('prepares a rename on a name token but fails on a keyword', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [{ module: 'geometry', text: geometry }],
+      'geometry',
+    )
+    assert.deepEqual(Document.prepareRename(document, snapshot, positionOf(geometry, 'area')), {
+      range: {
+        start: { line: 0, character: geometry.indexOf('area') },
+        end: { line: 0, character: geometry.indexOf('area') + 'area'.length },
+      },
+      placeholder: 'area',
+    })
+    assert.isUndefined(
+      Document.prepareRename(document, snapshot, positionOf(geometry, 'pub')),
+      'a keyword token has no renameable declaration',
+    )
+    assert.isUndefined(Document.prepareRename(document, snapshot, positionOf(geometry, 'return')))
+  }),
+)
+
+it.effect('renames the imported source name without disturbing a local alias', () =>
+  Effect.gen(function* () {
+    const aliased =
+      'import geometry { area as region }\npub fn main() -> i32 { return region(1, 2) }'
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'main', text: aliased },
+      ],
+      'geometry',
+    )
+    const renamed = Document.rename(
+      document,
+      snapshot,
+      positionOf(geometry, 'area'),
+      'surface',
+      uriOfModule,
+    )
+    assert.strictEqual(renamed?._tag, 'RenameEdit')
+    if (renamed?._tag !== 'RenameEdit') return
+    const changes = renamed.edit.changes ?? {}
+    // Only the `area` half of `area as region` moves; `region` and its uses keep their spelling.
+    assert.deepEqual(
+      changes[uriOfModule('main')]?.map((edit) => ({
+        line: edit.range.start.line,
+        character: edit.range.start.character,
+        newText: edit.newText,
+      })),
+      [{ line: 0, character: aliased.indexOf('area'), newText: 'surface' }],
     )
   }),
 )

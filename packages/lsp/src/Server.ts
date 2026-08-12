@@ -7,7 +7,9 @@ import * as Path from 'effect/Path'
 import {
   createConnection,
   DidChangeWatchedFilesNotification,
+  LSPErrorCodes,
   ProposedFeatures,
+  ResponseError,
   TextDocumentSyncKind,
   TextDocuments,
 } from 'vscode-languageserver/node.js'
@@ -56,6 +58,8 @@ export const start = (): void => {
         textDocumentSync: TextDocumentSyncKind.Incremental,
         hoverProvider: true,
         definitionProvider: true,
+        referencesProvider: true,
+        renameProvider: { prepareProvider: true },
         completionProvider: { triggerCharacters: ['.'] },
         inlayHintProvider: true,
         documentSymbolProvider: true,
@@ -195,6 +199,54 @@ export const start = (): void => {
       (module) => session.value.moduleUris.get(module),
     )
     return definition === undefined ? null : [definition]
+  })
+
+  connection.onReferences(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return null
+    const locations = Document.references(
+      session.value.document,
+      session.value.snapshot,
+      parameters.position,
+      parameters.context.includeDeclaration,
+      (module) => session.value.moduleUris.get(module),
+    )
+    return locations === undefined ? null : [...locations]
+  })
+
+  const unrenameable = (): ResponseError<void> =>
+    new ResponseError<void>(
+      LSPErrorCodes.RequestFailed,
+      'The selected token has no renameable declaration',
+    )
+
+  connection.onPrepareRename(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return unrenameable()
+    const prepared = Document.prepareRename(
+      session.value.document,
+      session.value.snapshot,
+      parameters.position,
+    )
+    return prepared === undefined
+      ? unrenameable()
+      : { range: prepared.range, placeholder: prepared.placeholder }
+  })
+
+  connection.onRenameRequest(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return unrenameable()
+    const renamed = Document.rename(
+      session.value.document,
+      session.value.snapshot,
+      parameters.position,
+      parameters.newName,
+      (module) => session.value.moduleUris.get(module),
+    )
+    if (renamed === undefined) return unrenameable()
+    return renamed._tag === 'RenameEdit'
+      ? renamed.edit
+      : new ResponseError<void>(LSPErrorCodes.RequestFailed, `${renamed.code}: ${renamed.message}`)
   })
 
   connection.languages.inlayHint.on(async (parameters) => {

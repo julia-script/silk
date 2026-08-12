@@ -1,11 +1,14 @@
 import * as Analysis from '@silk-effect/compiler/Analysis'
-import type * as Diagnostic from '@silk-effect/compiler/Diagnostic'
+import * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import * as FormattedDocument from '@silk-effect/compiler/FormattedDocument'
 import * as Formatter from '@silk-effect/compiler/Formatter'
+import * as SemanticOccurrence from '@silk-effect/compiler/SemanticOccurrence'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as SourceSpan from '@silk-effect/compiler/SourceSpan'
 import * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
 import * as Documentation from '@silk-effect/documentation/Document'
 import * as Effect from 'effect/Effect'
+import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import {
   type CompletionItem,
@@ -16,12 +19,14 @@ import {
   type Hover,
   type InlayHint,
   InlayHintKind,
+  type Location,
   type LocationLink,
   type Diagnostic as LspDiagnostic,
   type Position,
   type Range,
   SymbolKind,
   type TextEdit,
+  type WorkspaceEdit,
 } from 'vscode-languageserver-types'
 import * as LineIndex from './LineIndex.js'
 
@@ -59,6 +64,27 @@ export const make = (options: {
     index: LineIndex.make(options.bytes),
   })
 
+/**
+ * Resolves any project module's line map from the snapshot's exact analyzed bytes, memoizing
+ * siblings so one request builds each foreign module's map at most once.
+ */
+const lineIndexes = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+): ((module: string) => LineIndex.LineIndex | undefined) => {
+  const siblingIndexes = new Map<string, LineIndex.LineIndex>()
+  return (module) => {
+    if (module === self.module) return self.index
+    const existing = siblingIndexes.get(module)
+    if (existing !== undefined) return existing
+    const source = Analysis.sources(snapshot).get(module)
+    if (source === undefined) return undefined
+    const index = LineIndex.make(SourceFile.toUint8Array(source))
+    siblingIndexes.set(module, index)
+    return index
+  }
+}
+
 const noteSuffix = (diagnostic: Diagnostic.Diagnostic): string =>
   diagnostic.notes === undefined || diagnostic.notes.length === 0
     ? ''
@@ -71,17 +97,7 @@ export const diagnostics = (
   uriOf: (module: string) => string | undefined,
 ): ReadonlyArray<LspDiagnostic> => {
   // Sibling modules' line maps, built once per module from the snapshot's exact loaded bytes.
-  const siblingIndexes = new Map<string, LineIndex.LineIndex>()
-  const indexOf = (module: string): LineIndex.LineIndex | undefined => {
-    if (module === self.module) return self.index
-    const existing = siblingIndexes.get(module)
-    if (existing !== undefined) return existing
-    const source = Analysis.sources(snapshot).get(module)
-    if (source === undefined) return undefined
-    const index = LineIndex.make(SourceFile.toUint8Array(source))
-    siblingIndexes.set(module, index)
-    return index
-  }
+  const indexOf = lineIndexes(self, snapshot)
   return Analysis.diagnostics(snapshot)
     .filter((diagnostic) => diagnostic.span.sourceId === self.module)
     .map((diagnostic) => {
@@ -173,6 +189,202 @@ export const definition = (
     targetRange: LineIndex.rangeOf(targetIndex, location.span),
     targetSelectionRange: LineIndex.rangeOf(targetIndex, location.selectionSpan),
   }
+}
+
+/** One project-wide occurrence sharing the semantic identity selected by a request. */
+interface Match {
+  readonly module: string
+  readonly occurrence: SemanticOccurrence.SemanticOccurrence
+}
+
+/**
+ * Collects every occurrence of one semantic identity across the whole analyzed project. The
+ * occurrence index spans every module of the accepted project revision even though a root view's
+ * closure names one root, so this reads the same index go-to-definition reads, in reverse.
+ */
+const matchesOfIdentity = (
+  snapshot: Analysis.FrontendSnapshot,
+  identity: SemanticOccurrence.Identity,
+): ReadonlyArray<Match> => {
+  const key = SemanticOccurrence.identityKey(identity)
+  const sources = Analysis.sources(snapshot)
+  const modules = [...sources.keys()].sort((left, right) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  )
+  const seen = new Set<string>()
+  const matches: Array<Match> = []
+  for (const module of modules) {
+    const source = sources.get(module)
+    if (source === undefined) continue
+    const whole = Option.getOrUndefined(SourceSpan.make(source, 0, SourceFile.length(source)))
+    if (whole === undefined) continue
+    for (const occurrence of Analysis.semanticOccurrencesInRange(snapshot, module, whole)) {
+      if (occurrence.resolution._tag !== 'Available') continue
+      if (SemanticOccurrence.identityKey(occurrence.resolution.identity) !== key) continue
+      const at = `${module}:${occurrence.span.start}:${occurrence.span.end}`
+      if (seen.has(at)) continue
+      seen.add(at)
+      matches.push(Object.freeze({ module, occurrence }))
+    }
+  }
+  return Object.freeze(matches)
+}
+
+/** Returns one span's exact analyzed spelling, or `undefined` for an unloaded module. */
+const spellingOf = (
+  snapshot: Analysis.FrontendSnapshot,
+  module: string,
+  span: SourceSpan.SourceSpan,
+): string | undefined => {
+  const source = Analysis.sources(snapshot).get(module)
+  return source === undefined ? undefined : Option.getOrUndefined(SourceFile.spelling(source, span))
+}
+
+/** Returns every project occurrence of the semantic identity selected at one position. */
+export const references = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  position: Position,
+  includeDeclaration: boolean,
+  uriOf: (module: string) => string | undefined,
+): ReadonlyArray<Location> | undefined => {
+  const occurrence = Analysis.semanticOccurrenceAt(
+    snapshot,
+    self.module,
+    LineIndex.offsetOf(self.index, position),
+  )
+  if (occurrence?.resolution._tag !== 'Available') return undefined
+  const indexOf = lineIndexes(self, snapshot)
+  return Object.freeze(
+    matchesOfIdentity(snapshot, occurrence.resolution.identity).flatMap((match) => {
+      if (!includeDeclaration && match.occurrence.role === 'Declaration') return []
+      const uri = match.module === self.module ? self.uri : uriOf(match.module)
+      const index = indexOf(match.module)
+      return uri === undefined || index === undefined
+        ? []
+        : [{ uri, range: LineIndex.rangeOf(index, match.occurrence.span) }]
+    }),
+  )
+}
+
+/** The renameable name token under one position and the spelling an editor should preselect. */
+export interface PreparedRename {
+  readonly range: Range
+  readonly placeholder: string
+}
+
+/** One refused rename carrying the compiler diagnostic that explains the refusal. */
+export interface RenameRefusal {
+  readonly _tag: 'RenameRefusal'
+  readonly code: string
+  readonly message: string
+}
+
+/** One accepted rename covering every module of the analyzed project. */
+export interface RenameEdit {
+  readonly _tag: 'RenameEdit'
+  readonly edit: WorkspaceEdit
+}
+
+export type Rename = RenameEdit | RenameRefusal
+
+/**
+ * Returns the name token a rename would replace. A token with no source-backed declaration, such
+ * as a keyword, trivia, or an intrinsic with no Silk declaration, has no renameable name.
+ */
+export const prepareRename = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  position: Position,
+): PreparedRename | undefined => {
+  const occurrence = Analysis.semanticOccurrenceAt(
+    snapshot,
+    self.module,
+    LineIndex.offsetOf(self.index, position),
+  )
+  if (occurrence?.resolution._tag !== 'Available' || occurrence.declaration === undefined)
+    return undefined
+  const placeholder = spellingOf(snapshot, self.module, occurrence.span)
+  return placeholder === undefined
+    ? undefined
+    : Object.freeze({ range: LineIndex.rangeOf(self.index, occurrence.span), placeholder })
+}
+
+/** Silk's one flat module namespace holds top-level declarations and import bindings only. */
+const occupiesFlatNamespace = (identity: SemanticOccurrence.Identity): boolean =>
+  identity._tag === 'DeclarationIdentity' || identity._tag === 'ImportNamespaceIdentity'
+
+/**
+ * Refuses a new spelling already claimed in a flat namespace the rename would extend. Only the
+ * declaration site and import bindings put a name into a module's flat namespace, so a module that
+ * merely reaches the declaration through a qualifier keeps its own unrelated top-level names.
+ */
+const flatNamespaceRefusal = (
+  snapshot: Analysis.FrontendSnapshot,
+  identity: SemanticOccurrence.Identity,
+  matches: ReadonlyArray<Match>,
+  newName: string,
+  span: SourceSpan.SourceSpan,
+): RenameRefusal | undefined => {
+  if (!occupiesFlatNamespace(identity)) return undefined
+  for (const match of matches) {
+    if (match.occurrence.role !== 'Declaration' && match.occurrence.role !== 'Import') continue
+    if (Analysis.lookupName(snapshot, match.module, newName)._tag === 'Missing') continue
+    const diagnostic = Diagnostic.bindingConflict(newName, span)
+    return Object.freeze({
+      _tag: 'RenameRefusal',
+      code: diagnostic.code,
+      message: diagnostic.message,
+    })
+  }
+  return undefined
+}
+
+/**
+ * Renames one semantic identity across every module of the analyzed project. Only occurrences
+ * whose analyzed spelling equals the selected name are edited: an imported member and its local
+ * alias share one identity, so an alias keeps the local name its own module chose. The rename is
+ * refused rather than partially applied when any occurrence cannot be placed in a document.
+ */
+export const rename = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  position: Position,
+  newName: string,
+  uriOf: (module: string) => string | undefined,
+): Rename | undefined => {
+  const occurrence = Analysis.semanticOccurrenceAt(
+    snapshot,
+    self.module,
+    LineIndex.offsetOf(self.index, position),
+  )
+  if (occurrence?.resolution._tag !== 'Available' || occurrence.declaration === undefined)
+    return undefined
+  const spelling = spellingOf(snapshot, self.module, occurrence.span)
+  if (spelling === undefined) return undefined
+  const identity = occurrence.resolution.identity
+  const matches = matchesOfIdentity(snapshot, identity).filter(
+    (match) => spellingOf(snapshot, match.module, match.occurrence.span) === spelling,
+  )
+  const refusal = flatNamespaceRefusal(snapshot, identity, matches, newName, occurrence.span)
+  if (refusal !== undefined) return refusal
+  const indexOf = lineIndexes(self, snapshot)
+  const changes: Record<string, Array<TextEdit>> = {}
+  for (const match of matches) {
+    const uri = match.module === self.module ? self.uri : uriOf(match.module)
+    const index = indexOf(match.module)
+    if (uri === undefined || index === undefined)
+      return Object.freeze({
+        _tag: 'RenameRefusal',
+        code: 'LSP0001',
+        message: `Module ${match.module} has no document to rename ${spelling} in`,
+      })
+    const edits = changes[uri]
+    const edit = { range: LineIndex.rangeOf(index, match.occurrence.span), newText: newName }
+    if (edits === undefined) changes[uri] = [edit]
+    else edits.push(edit)
+  }
+  return Object.freeze({ _tag: 'RenameEdit', edit: { changes } })
 }
 
 /** Converts compiler-owned inferred local types into standard protocol inlay hints. */
