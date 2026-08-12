@@ -942,6 +942,14 @@ const layoutOf = (
 ): Layout => {
   const named = (type: ValType.ValType, name: string): FuncActor.Local =>
     debug ? { type, name } : { type }
+  const localLaneName = (type: Mir.Type, ordinal: number, lane: number): string => {
+    const semantic = Mir.semanticType(type)
+    if (SilkType.isString(semantic))
+      return `string${ordinal}_${lane === 0 ? 'utf8_address' : 'byte_length'}`
+    if (SilkType.isSlice(semantic) && SilkType.equals(semantic.element, 'u8'))
+      return `bytes${ordinal}_${lane === 0 ? 'address' : 'length'}`
+    return `local${ordinal}_${lane}`
+  }
   const logicalLanes = (type: Mir.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
     if (type._tag === 'EffectBorrow') {
       const shape = LayoutPlan.callingShape(plan, type.type)
@@ -996,7 +1004,7 @@ const layoutOf = (
     const localSlots = logical.map(() => physical++)
     slots.push(Object.freeze(localSlots))
     for (const [lane, logicalLane] of logical.entries()) {
-      declared.push(named(laneValueType(plan, logicalLane), `local${ordinal}_${lane}`))
+      declared.push(named(laneValueType(plan, logicalLane), localLaneName(type, ordinal, lane)))
     }
   }
   const scratch = physical
@@ -1335,6 +1343,84 @@ const emitOperation = (
     })
   }
   switch (operation._tag) {
+    case 'StaticString': {
+      const context = requireMemory()
+      const offset = context.staticOffsets.get(operation.data)
+      const [address, length] = slots(operation.destination)
+      if (offset === undefined || address === undefined || length === undefined) {
+        throw new RangeError('Wasm static string lost its data placement or logical lanes')
+      }
+      return [
+        Instr.i32Const(offset),
+        Instr.localSet(address),
+        Instr.i32Const(operation.byteLength),
+        Instr.localSet(length),
+      ]
+    }
+    case 'StringFromUtf8Unchecked':
+      return copy(slots(operation.bytes), slots(operation.destination))
+    case 'StringUtf8Bytes':
+      return copy(slots(operation.string), slots(operation.destination))
+    case 'StringByteLength': {
+      const length = slots(operation.string).at(1)
+      if (length === undefined) throw new RangeError('Wasm string lost its byte-length lane')
+      return [Instr.localGet(length), Instr.localSet(scalar(operation.destination))]
+    }
+    case 'StringEqualsExact': {
+      const context = requireMemory()
+      const [leftAddress, leftLength] = slots(operation.left)
+      const [rightAddress, rightLength] = slots(operation.right)
+      const destination = scalar(operation.destination)
+      if (
+        leftAddress === undefined ||
+        leftLength === undefined ||
+        rightAddress === undefined ||
+        rightLength === undefined
+      ) {
+        throw new RangeError('Wasm string equality lost its logical lanes')
+      }
+      const loop = [
+        Instr.localGet(layout.scratch),
+        Instr.localGet(leftLength),
+        Instr.op('i32.ge_u'),
+        Instr.brIf(1),
+        Instr.localGet(destination),
+        Instr.localGet(leftAddress),
+        Instr.localGet(layout.scratch),
+        Instr.op('i32.add'),
+        Instr.memoryAccess('i32.load8_u', context.memory),
+        Instr.localGet(rightAddress),
+        Instr.localGet(layout.scratch),
+        Instr.op('i32.add'),
+        Instr.memoryAccess('i32.load8_u', context.memory),
+        Instr.op('i32.eq'),
+        Instr.op('i32.and'),
+        Instr.localSet(destination),
+        Instr.localGet(layout.scratch),
+        Instr.i32Const(1),
+        Instr.op('i32.add'),
+        Instr.localSet(layout.scratch),
+        Instr.br(0),
+      ]
+      return [
+        Instr.localGet(leftLength),
+        Instr.localGet(rightLength),
+        Instr.op('i32.eq'),
+        Instr.localTee(destination),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          [
+            Instr.i32Const(0),
+            Instr.localSet(layout.scratch),
+            Instr.block(Instr.emptyBlockType, [Instr.loop(Instr.emptyBlockType, loop)]),
+          ],
+          [],
+        ),
+        ...(operation.negated
+          ? [Instr.localGet(destination), Instr.op('i32.eqz'), Instr.localSet(destination)]
+          : []),
+      ]
+    }
     case 'ValidateLayout': {
       const bytes = scalar(operation.bytes)
       const alignment = scalar(operation.alignment)
@@ -3886,7 +3972,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
             privateMemory,
             [Instr.i32Const(offset)],
             Uint8Array.from(data.bytes),
-            debug ? { name: `static_${offset}` } : {},
+            debug ? { name: `${data.kind === 'Text' ? 'string_utf8' : 'bytes'}_${offset}` } : {},
           )
       }
     }

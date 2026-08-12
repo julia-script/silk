@@ -1333,6 +1333,23 @@ const writeMetadata = (
         ])
         break
       }
+      case 'StringType': {
+        const encoding: Readonly<Record<MetadataDescription.StringEncoding, number>> = {
+          utf: 0x10,
+        }
+        Bitstream.writeUnabbreviatedRecord(block, 41, [
+          node.distinct ? 1 : 0,
+          0x12,
+          optional(node.name),
+          optional(node.stringLength),
+          optional(node.stringLengthExpression),
+          optional(node.stringLocationExpression),
+          node.sizeInBits,
+          node.alignInBits,
+          encoding[node.encoding],
+        ])
+        break
+      }
       case 'CompositeType': {
         const tag: Readonly<Record<MetadataDescription.CompositeKind, number>> = {
           array: 0x01,

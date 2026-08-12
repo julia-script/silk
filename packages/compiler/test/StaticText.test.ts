@@ -17,9 +17,9 @@ const source = `pub fn main() -> i32 {
   let bytes = b"""life
 """
   let repeated = "hé\\n"
-  if text.length != 4 { return 0 }
+  if Intrinsic.stringByteLength(text) != 4 { return 0 }
   if bytes.length != 5 { return 1 }
-  if repeated.length != text.length { return 2 }
+  if Intrinsic.stringByteLength(repeated) != Intrinsic.stringByteLength(text) { return 2 }
   return 42
 }`
 

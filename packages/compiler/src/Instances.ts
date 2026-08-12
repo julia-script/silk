@@ -443,6 +443,10 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
     return [...callTargets(expression.protected), ...witnessCallTargets(witness)]
   }
   if (expression._tag === 'Move') return callTargets(expression.subject)
+  if (expression._tag === 'RuntimeStringView') return callTargets(expression.source)
+  if (expression._tag === 'StringEquality') {
+    return [...callTargets(expression.left), ...callTargets(expression.right)]
+  }
   if (expression._tag === 'UnionConvert') return callTargets(expression.source)
   if (expression._tag === 'Project') return callTargets(expression.subject)
   if (expression._tag === 'IndexPlace') {

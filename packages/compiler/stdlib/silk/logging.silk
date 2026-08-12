@@ -4,6 +4,7 @@ import silk.core {
   send
 }
 import silk.result { Failure, Result, Success }
+import silk.string { utf8Bytes as stringUtf8Bytes }
 
 /// A closed bootstrap logging severity.
 pub struct LogLevel {
@@ -46,7 +47,7 @@ effect fn reject(code: i32) -> never ! LogError {
 pub service Logger {
   effect fn log(
     level: LogLevel,
-    message: &[u8]
+    message: string
   ) -> () ! LogError ? &mut Logger
 }
 
@@ -67,10 +68,11 @@ effect fn writeStdoutCounted(
 effect fn writeStdout(
   self: &mut StdoutLogger,
   level: LogLevel,
-  message: &[u8]
+  message: string
 ) -> () ! LogError {
   let mut streams = NativeStandardStreams.native()
-  let completed = run Intrinsic.effectResult(writeStdoutCounted(&mut streams, message))
+  let bytes = stringUtf8Bytes(message)
+  let completed = run Intrinsic.effectResult(writeStdoutCounted(&mut streams, bytes))
   return match move completed {
     Result<i32, StreamWriteFailure> { value: outcome } => match move outcome {
       Success<i32> { value: success } => ()
@@ -139,8 +141,9 @@ pub fn memoryFailAt(failAt: usize) -> InMemoryLogger {
 effect fn record(
   self: &mut InMemoryLogger,
   level: LogLevel,
-  message: &[u8]
+  message: string
 ) -> () ! LogError {
+  let values = stringUtf8Bytes(message)
   let ordinal = self.attempts
   self.attempts = self.attempts + usize.add(0, 1)
   if self.failEnabled {
@@ -148,13 +151,13 @@ effect fn record(
   }
 
   if self.count == usize.add(0, 8) { return run reject(2) }
-  if message.length > usize.add(0, 64) - self.messageLength { return run reject(2) }
+  if values.length > usize.add(0, 64) - self.messageLength { return run reject(2) }
 
   let offset = self.messageLength
   let mut messages = Intrinsic.replace(self.messages, emptyMessages())
   let mut index = usize.add(0, 0)
-  while index < message.length {
-    messages[offset + index] = u8.toI32(message[index])
+  while index < values.length {
+    messages[offset + index] = u8.toI32(values[index])
     index = index + usize.add(0, 1)
   }
   let mut levels = Intrinsic.replace(self.levels, emptyLevels())
@@ -162,13 +165,13 @@ effect fn record(
   let mut lengths = Intrinsic.replace(self.lengths, emptyIndexes())
   levels[self.count] = levelCode(move level)
   offsets[self.count] = offset
-  lengths[self.count] = message.length
+  lengths[self.count] = values.length
   self.messages = move messages
   self.levels = move levels
   self.offsets = move offsets
   self.lengths = move lengths
   self.count = self.count + usize.add(0, 1)
-  self.messageLength = self.messageLength + message.length
+  self.messageLength = self.messageLength + values.length
   return ()
 }
 

@@ -40,3 +40,26 @@ be independently testable without changing compiler type identity or target ABI.
 
 - **WHEN** source requests a named normalization form for canonically equivalent strings
 - **THEN** normalization follows the stdlib's declared Unicode policy rather than changing ordinary equality
+
+### Requirement: Semantic text boundaries use string
+
+Shipped standard-library APIs SHALL use `string` for complete logging messages, normalized path
+construction and resolution, path text accessors, and native filesystem roots. Implementations
+SHALL request UTF-8 byte views explicitly where text reaches byte storage, standard streams, or raw
+OS operations. APIs whose domain is arbitrary bytes, including `Bytes`, whole-file contents, and
+standard streams, SHALL remain byte-oriented.
+
+#### Scenario: Log semantic text
+
+- **WHEN** source submits a complete message through `Effect.log`, `Effect.logAt`, or `Logger.log`
+- **THEN** the API accepts `string` and a provider converts it to bytes only if its output boundary requires an encoding
+
+#### Scenario: Construct and inspect paths as text
+
+- **WHEN** source constructs, joins, resolves, or inspects a normalized `Path`
+- **THEN** the textual inputs and borrowed textual outputs use `string` without exposing the path's owned byte storage
+
+#### Scenario: Preserve binary boundaries
+
+- **WHEN** source writes arbitrary file contents or standard-stream bytes, or a provider invokes a raw OS intrinsic
+- **THEN** that boundary continues to use byte views and any textual caller performs an explicit UTF-8 conversion

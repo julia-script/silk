@@ -29,6 +29,7 @@ export type Type =
   | { readonly _tag: 'Bottom'; readonly type: SilkType.Bottom }
   | { readonly _tag: 'Nominal'; readonly type: SilkType.Nominal }
   | { readonly _tag: 'FixedArray'; readonly type: SilkType.FixedArray }
+  | { readonly _tag: 'String'; readonly type: SilkType.String }
   | { readonly _tag: 'Slice'; readonly type: SilkType.Slice }
   | { readonly _tag: 'Reference'; readonly type: SilkType.Reference }
   | { readonly _tag: 'Union'; readonly type: SilkType.StructuralUnion }
@@ -62,6 +63,7 @@ export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
   self._tag === 'Nominal' ||
   self._tag === 'Bottom' ||
   self._tag === 'FixedArray' ||
+  self._tag === 'String' ||
   self._tag === 'Slice' ||
   self._tag === 'Reference' ||
   self._tag === 'Union' ||
@@ -74,14 +76,22 @@ export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
 
 const typeText = (self: Type): string => SilkType.encode(semanticType(self))
 const isCopyType = (type: DeclarationIndex.SemanticType): boolean =>
-  SilkType.isBuiltin(type) || (SilkType.isFixedArray(type) && isCopyType(type.element))
+  SilkType.isBuiltin(type) ||
+  SilkType.isString(type) ||
+  (SilkType.isFixedArray(type) && isCopyType(type.element))
 
 const isStructurallyCopyType = (
   layout: Layout.Plan,
   type: DeclarationIndex.SemanticType,
   visiting = new Set<string>(),
 ): boolean => {
-  if (SilkType.isBuiltin(type) || SilkType.isReference(type) || SilkType.isSlice(type)) return true
+  if (
+    SilkType.isBuiltin(type) ||
+    SilkType.isString(type) ||
+    SilkType.isReference(type) ||
+    SilkType.isSlice(type)
+  )
+    return true
   if (SilkType.isFixedArray(type)) return isStructurallyCopyType(layout, type.element, visiting)
   if (SilkType.isUnion(type))
     return type.members.every((member) => isStructurallyCopyType(layout, member, visiting))
@@ -259,6 +269,47 @@ export type Operation =
       readonly data: string
       readonly length: number
       readonly type: Extract<Type, { readonly _tag: 'Slice' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'StaticString'
+      readonly destination: LocalId
+      readonly data: string
+      readonly byteLength: number
+      readonly type: Extract<Type, { readonly _tag: 'String' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'StringFromUtf8Unchecked'
+      readonly destination: LocalId
+      readonly bytes: LocalId
+      readonly heldLoans: ReadonlyArray<Hir.BorrowId>
+      readonly authorization: 'Unsafe'
+      readonly type: Extract<Type, { readonly _tag: 'String' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'StringUtf8Bytes'
+      readonly destination: LocalId
+      readonly string: LocalId
+      readonly heldLoans: ReadonlyArray<Hir.BorrowId>
+      readonly type: Extract<Type, { readonly _tag: 'Slice' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'StringByteLength'
+      readonly destination: LocalId
+      readonly string: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'usize' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'StringEqualsExact'
+      readonly destination: LocalId
+      readonly left: LocalId
+      readonly right: LocalId
+      readonly negated: boolean
+      readonly type: Extract<Type, { readonly _tag: 'bool' }>
       readonly provenance: Provenance
     }
   | {
@@ -1029,6 +1080,7 @@ export interface Violation {
     | 'InvalidWrite'
     | 'InvalidLoan'
     | 'InvalidSliceOperation'
+    | 'InvalidStringOperation'
     | 'InvalidMatchLayout'
     | 'InvalidMatchDecision'
     | 'InvalidMatchBinding'
@@ -1102,7 +1154,15 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
   switch (operation._tag) {
     case 'Literal':
     case 'StaticView':
+    case 'StaticString':
       return [operation.destination]
+    case 'StringFromUtf8Unchecked':
+      return [operation.destination, operation.bytes]
+    case 'StringUtf8Bytes':
+    case 'StringByteLength':
+      return [operation.destination, operation.string]
+    case 'StringEqualsExact':
+      return [operation.destination, operation.left, operation.right]
     case 'Binary':
       return [operation.destination, operation.left, operation.right]
     case 'ConvertInteger':
@@ -1386,6 +1446,15 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'ReadPlace':
     case 'CheckPlace':
       return [semanticType(operation.type)]
+    case 'StaticString':
+      return [SilkType.string]
+    case 'StringFromUtf8Unchecked':
+      return [SilkType.slice('Shared', 'u8'), SilkType.string]
+    case 'StringUtf8Bytes':
+      return [SilkType.string, semanticType(operation.type)]
+    case 'StringByteLength':
+    case 'StringEqualsExact':
+      return [SilkType.string, semanticType(operation.type)]
     case 'ConvertInteger':
     case 'ConvertScalar':
     case 'ReinterpretScalar':
@@ -1527,6 +1596,13 @@ interface ActiveLoan {
 
 const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
   switch (operation._tag) {
+    case 'StringFromUtf8Unchecked':
+      return [operation.bytes]
+    case 'StringUtf8Bytes':
+    case 'StringByteLength':
+      return [operation.string]
+    case 'StringEqualsExact':
+      return [operation.left, operation.right]
     case 'Binary':
       return [operation.left, operation.right]
     case 'ConvertInteger':
@@ -1609,6 +1685,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.scrutinee]
     case 'Literal':
     case 'StaticView':
+    case 'StaticString':
     case 'BeginLoan':
     case 'EndLoan':
     case 'SliceLength':
@@ -2095,6 +2172,98 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       }
       const operations = operationsOf(region).flatMap(operationTree)
       for (const [index, operation] of operations.entries()) {
+        const invalidString = (detail: string): void => {
+          violations.push(
+            Object.freeze({
+              _tag: 'Violation',
+              rule: 'InvalidStringOperation',
+              function: fn.id,
+              region: region.id,
+              detail,
+            }),
+          )
+        }
+        const heldStringLoansValid = (
+          heldLoans: ReadonlyArray<Hir.BorrowId>,
+          source?: LocalId,
+        ): boolean => {
+          const keys = heldLoans.map(borrowKey)
+          return (
+            new Set(keys).size === keys.length &&
+            heldLoans.every((borrow) => {
+              const key = borrowKey(borrow)
+              const beginning = globalBeginnings.get(key)
+              return (
+                beginning !== undefined &&
+                globalEndings.has(key) &&
+                (source === undefined || beginning.destination.ordinal === source.ordinal)
+              )
+            })
+          )
+        }
+        if (operation._tag === 'StaticString') {
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const data = self.staticData?.find((candidate) => candidate.id === operation.data)
+          if (
+            destination?._tag !== 'String' ||
+            operation.type._tag !== 'String' ||
+            data?.kind !== 'Text' ||
+            !data.utf8 ||
+            data.bytes.length !== operation.byteLength
+          ) {
+            invalidString(
+              'static string disagrees with its UTF-8 data, byte length, or string destination',
+            )
+          }
+        }
+        if (operation._tag === 'StringFromUtf8Unchecked') {
+          const bytes = fn.localTypes.at(operation.bytes.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          if (
+            bytes?._tag !== 'Slice' ||
+            !SilkType.equals(bytes.type, SilkType.slice('Shared', 'u8')) ||
+            destination?._tag !== 'String' ||
+            operation.type._tag !== 'String' ||
+            operation.authorization !== 'Unsafe' ||
+            !heldStringLoansValid(operation.heldLoans, operation.bytes)
+          ) {
+            invalidString(
+              'unchecked formation requires unsafe authorization, one shared byte view, retained backing loans, and a string destination',
+            )
+          }
+        }
+        if (operation._tag === 'StringUtf8Bytes') {
+          const string = fn.localTypes.at(operation.string.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          if (
+            string?._tag !== 'String' ||
+            destination?._tag !== 'Slice' ||
+            !SilkType.equals(destination.type, SilkType.slice('Shared', 'u8')) ||
+            !SilkType.equals(operation.type.type, SilkType.slice('Shared', 'u8')) ||
+            !heldStringLoansValid(operation.heldLoans)
+          ) {
+            invalidString(
+              'UTF-8 byte viewing requires a string source, an immutable byte-view destination, and retained backing loans',
+            )
+          }
+        }
+        if (operation._tag === 'StringByteLength') {
+          const string = fn.localTypes.at(operation.string.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          if (string?._tag !== 'String' || destination?._tag !== 'usize') {
+            invalidString('string byte length requires a string source and usize destination')
+          }
+        }
+        if (operation._tag === 'StringEqualsExact') {
+          const left = fn.localTypes.at(operation.left.ordinal)
+          const right = fn.localTypes.at(operation.right.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          if (left?._tag !== 'String' || right?._tag !== 'String' || destination?._tag !== 'bool') {
+            invalidString(
+              'exact string equality requires two string operands and a bool destination',
+            )
+          }
+        }
         if (operation._tag === 'StaticView') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const data = self.staticData?.find((candidate) => candidate.id === operation.data)
@@ -3613,6 +3782,16 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = literal ${operation.value} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'StaticView':
       return `${localText(operation.destination)} = static-view ${operation.data} length=${operation.length} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'StaticString':
+      return `${localText(operation.destination)} = static-string ${operation.data} byte-length=${operation.byteLength} : string ${provenanceText(operation.provenance)}`
+    case 'StringFromUtf8Unchecked':
+      return `${localText(operation.destination)} = string-from-utf8-unchecked ${localText(operation.bytes)} loans=${operation.heldLoans.map((borrow) => `l${borrow.ordinal}`).join(',') || 'none'} authorization=${operation.authorization.toLowerCase()} : string ${provenanceText(operation.provenance)}`
+    case 'StringUtf8Bytes':
+      return `${localText(operation.destination)} = string-utf8-bytes ${localText(operation.string)} loans=${operation.heldLoans.map((borrow) => `l${borrow.ordinal}`).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'StringByteLength':
+      return `${localText(operation.destination)} = string-byte-length ${localText(operation.string)} : usize ${provenanceText(operation.provenance)}`
+    case 'StringEqualsExact':
+      return `${localText(operation.destination)} = string-${operation.negated ? 'not-equals-exact' : 'equals-exact'} ${localText(operation.left)}, ${localText(operation.right)} : bool ${provenanceText(operation.provenance)}`
     case 'Binary':
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(operation.left)}, ${localText(operation.right)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ConvertInteger':

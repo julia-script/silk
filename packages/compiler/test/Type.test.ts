@@ -31,6 +31,34 @@ it('orders built-in and nominal types by canonical keys', () => {
   assert.strictEqual(Type.isNominal(values[0] ?? 'i32'), true)
 })
 
+it('keeps string canonical, non-scalar, borrowed, and structurally atomic', () => {
+  const owner = { module: 'work', name: 'identity' }
+  const parameter = Type.parameter(owner, 0, 'T')
+  const substitution = new Map([[Type.key(parameter), 'u8' as const]])
+  const values: ReadonlyArray<Type.Type> = [Type.string, 'i32', Type.nominal('text', 'Owner')]
+
+  assert.strictEqual(Type.isString(Type.string), true)
+  assert.strictEqual(Type.isBuiltin(Type.string), false)
+  assert.strictEqual(Type.key(Type.string), 'string')
+  assert.strictEqual(Type.encode(Type.string), 'string')
+  assert.deepEqual([...values].sort(Type.compare).map(Type.encode), ['i32', 'text.Owner', 'string'])
+  assert.strictEqual(Type.substitute(Type.string, substitution), Type.string)
+  assert.strictEqual(Type.isConcrete(Type.string), true)
+  assert.deepEqual(Type.parameters(Type.string), [])
+  assert.deepEqual(Type.nominals(Type.string), [])
+  assert.strictEqual(Type.containsBorrow(Type.string), true)
+  assert.strictEqual(
+    TypeCompatibility.isCompatible(TypeCompatibility.check(Type.string, Type.string)),
+    true,
+  )
+  assert.strictEqual(
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(Type.string, Type.slice('Shared', 'u8')),
+    ),
+    false,
+  )
+})
+
 it('keeps fixed-array element type and length in recursive structural identity', () => {
   const three = Type.fixedArray('i32', 3)
   const repeated = Type.fixedArray('i32', 3)

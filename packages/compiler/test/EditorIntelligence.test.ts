@@ -28,7 +28,7 @@ const documentationText = (
 }
 
 const occurrenceAt = (
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   source: string,
   spelling: string,
   occurrence = 0,
@@ -445,7 +445,7 @@ pub fn main() -> i32 { return 42 }`
           snapshot,
           Analysis.documentationAt(snapshot, 'main', source.indexOf('resolve(base')),
         ),
-        '/// Resolves relative bytes lexically against one explicit absolute base.',
+        '/// Resolves relative text lexically against one explicit absolute base.',
       )
 
       for (const [prefix, expected] of [
@@ -461,7 +461,10 @@ pub fn main() -> i32 { return 42 }`
             'removeDirectory',
           ],
         ],
-        ['Path.', ['make', 'root', 'join', 'resolve', 'asBytes', 'isRoot', 'name', 'parent']],
+        [
+          'Path.',
+          ['make', 'root', 'join', 'joinUtf8', 'resolve', 'view', 'isRoot', 'name', 'parent'],
+        ],
         ['FileError.', ['error', 'errorWithCode', 'providerCode']],
       ] as const) {
         const offset = source.indexOf(prefix) + prefix.length
@@ -523,6 +526,42 @@ it.effect('answers deterministic inferred hints and recovered completions', () =
     }),
   ),
 )
+
+it.effect('presents canonical string in hover, inlay hints, and semantic occurrences', () => {
+  const source = `fn identity(value: string) -> string {
+  let result = value
+  return result
+}`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const occurrence = occurrenceAt(snapshot, source, 'string')
+      const hover = Analysis.hoverSubjectAt(snapshot, 'main', source.indexOf('string'))
+      const hints = Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length)
+
+      assert.strictEqual(occurrence?.role, 'Type')
+      assert.deepEqual(occurrence?.resolution, {
+        _tag: 'Available',
+        identity: {
+          _tag: 'IntrinsicActorIdentity',
+          id: { _tag: 'IntrinsicActorId', name: 'string' },
+        },
+      })
+      assert.strictEqual(hover?.presentation.text, 'intrinsic type string')
+      assert.deepEqual(
+        hints.map((hint) => hint.presentation.text),
+        ['string'],
+      )
+      assert.strictEqual(
+        Analysis.expressionsOf(snapshot, 'main').some(
+          (expression) =>
+            expression.type._tag === 'Available' && Type.isString(expression.type.type),
+        ),
+        true,
+      )
+      return undefined
+    }),
+  )
+})
 
 it.effect(
   'retains exact semantic tokens for calls, constructors, initializers, and projections',
@@ -952,6 +991,7 @@ fn identity<T>(value: ) -> i32 { return 0 }`
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'Logger')
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'f32')
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'f64')
+    assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'string')
     assert.notInclude(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'true')
   }),
 )

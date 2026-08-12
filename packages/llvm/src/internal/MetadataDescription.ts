@@ -8,6 +8,7 @@ export interface Attachment {
 }
 
 export type BasicEncoding = 'boolean' | 'unsigned' | 'signed' | 'float'
+export type StringEncoding = 'utf'
 export type CompositeKind = 'structure' | 'union' | 'enumeration' | 'array' | 'vector'
 export type DerivedKind = 'pointer' | 'member' | 'typedef'
 
@@ -66,6 +67,16 @@ export type Node =
       readonly name: number | undefined
       readonly sizeInBits: bigint
       readonly encoding: BasicEncoding
+    })
+  | (NodeBase & {
+      readonly _tag: 'StringType'
+      readonly name: number | undefined
+      readonly stringLength: number | undefined
+      readonly stringLengthExpression: number | undefined
+      readonly stringLocationExpression: number | undefined
+      readonly sizeInBits: bigint
+      readonly alignInBits: bigint
+      readonly encoding: StringEncoding
     })
   | (NodeBase & {
       readonly _tag: 'CompositeType'
@@ -162,6 +173,7 @@ export const category = (node: Node): Exclude<Category, 'any'> => {
     case 'Location':
       return 'scope'
     case 'BasicType':
+    case 'StringType':
     case 'CompositeType':
     case 'DerivedType':
     case 'SubroutineType':
@@ -194,6 +206,13 @@ export const references = (node: Node): ReadonlyArray<number> => {
     case 'BasicType':
     case 'Enumerator':
       return optional(node.name)
+    case 'StringType':
+      return optional(
+        node.name,
+        node.stringLength,
+        node.stringLengthExpression,
+        node.stringLocationExpression,
+      )
     case 'File':
       return optional(node.filename, node.directory)
     case 'CompileUnit':

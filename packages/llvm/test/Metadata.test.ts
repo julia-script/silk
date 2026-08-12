@@ -123,6 +123,15 @@ it.effect(
         yield* Metadata.signedType(builder, intName, 32),
         'expected basic type',
       )
+      const stringType = required(
+        yield* Metadata.stringType(builder, {
+          name: yield* Metadata.string(builder, 'string'),
+          sizeInBits: 128,
+          alignInBits: 64,
+          encoding: 'utf',
+        }),
+        'expected string type',
+      )
       const recursiveForward = required(
         yield* Metadata.forward(builder, 'type'),
         'expected type forward',
@@ -147,7 +156,7 @@ it.effect(
         'expected structure type',
       )
       yield* Metadata.resolveForward(builder, recursiveForward, structure)
-      const types = yield* Metadata.tuple(builder, [undefined, intType, structure])
+      const types = yield* Metadata.tuple(builder, [undefined, intType, structure, stringType])
       const signature = required(
         yield* Metadata.subroutineType(builder, types, DIFlags.make({ prototyped: true })),
         'expected debug signature',
@@ -200,6 +209,10 @@ it.effect(
       assert.include(ir, '!DICompileUnit(')
       assert.include(ir, 'distinct !DISubprogram(')
       assert.include(ir, '!DICompositeType(tag: DW_TAG_structure_type')
+      assert.include(
+        ir,
+        '!DIStringType(name: "string", size: 128, align: 64, encoding: DW_ATE_UTF)',
+      )
       assert.strictEqual(ir.match(/!dbg !/g)?.length, 4)
       assert.include(ir, 'DIFlagAllCallsDescribed')
     }),
@@ -271,6 +284,10 @@ it.effect('validates integer-valued debug fields before bigint conversion', () =
     }
     assert.instanceOf(
       yield* Effect.flip(Metadata.structureType(builder, { sizeInBits: -1 })),
+      LlvmError,
+    )
+    assert.instanceOf(
+      yield* Effect.flip(Metadata.stringType(builder, { alignInBits: -1 })),
       LlvmError,
     )
     assert.instanceOf(

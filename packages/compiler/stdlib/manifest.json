@@ -120,6 +120,12 @@
     "namespace": "Slot"
   },
   {
+    "module": "silk/string",
+    "path": "silk/string.silk",
+    "namespace": "String",
+    "aliases": ["InvalidUtf8", "ScalarCursor", "ScalarStep"]
+  },
+  {
     "module": "silk/u16",
     "path": "silk/u16.silk",
     "namespace": "u16"

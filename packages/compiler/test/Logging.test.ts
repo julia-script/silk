@@ -104,14 +104,15 @@ pub fn main() -> i32 { return run Effect.catch(program(), recover) }`)
 
 it.effect('accepts a user-authored Logger implementation without compiler registration', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct CountingLogger { calls: i32 bytes: usize }
+    const self = yield* snapshot(`import silk.string { byteLength }
+struct CountingLogger { calls: i32 bytes: usize }
 effect fn record(
   self: &mut CountingLogger,
   level: LogLevel,
-  message: &[u8]
+  message: string
 ) -> () {
   self.calls = self.calls + 1
-  self.bytes = self.bytes + message.length
+  self.bytes = self.bytes + byteLength(message)
   return ()
 }
 impl Logger for CountingLogger { log: CountingLogger.record }

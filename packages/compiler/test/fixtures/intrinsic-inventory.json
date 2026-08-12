@@ -4866,6 +4866,39 @@
       "identity": "ConvertToIsize"
     },
     {
+      "operation": "Intrinsic.stringFromUtf8Unchecked",
+      "signature": "unsafe fn Intrinsic.stringFromUtf8Unchecked(bytes: &[u8]) -> string",
+      "unsafe": true,
+      "admission": "Representation",
+      "consumer": "silk/string.fromUtf8Unchecked",
+      "identity": "StringFromUtf8Unchecked",
+      "invariant": "bytes remain live and immutable for the returned view lifetime and contain complete valid UTF-8"
+    },
+    {
+      "operation": "Intrinsic.stringUtf8Bytes",
+      "signature": "fn Intrinsic.stringUtf8Bytes(value: string) -> &[u8]",
+      "unsafe": false,
+      "admission": "Representation",
+      "consumer": "silk/string.utf8Bytes",
+      "identity": "StringUtf8Bytes"
+    },
+    {
+      "operation": "Intrinsic.stringByteLength",
+      "signature": "fn Intrinsic.stringByteLength(value: string) -> usize",
+      "unsafe": false,
+      "admission": "Representation",
+      "consumer": "silk/string.byteLength",
+      "identity": "StringByteLength"
+    },
+    {
+      "operation": "Intrinsic.stringEqualsExact",
+      "signature": "fn Intrinsic.stringEqualsExact(left: string, right: string) -> bool",
+      "unsafe": false,
+      "admission": "Representation",
+      "consumer": "silk/string.equalsExact",
+      "identity": "StringEqualsExact"
+    },
+    {
       "operation": "Intrinsic.osFileOpen",
       "signature": "unsafe fn Intrinsic.osFileOpen(root: &[u8], path: &[u8], mode: i32, reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<OsHandle>>",
       "unsafe": true,

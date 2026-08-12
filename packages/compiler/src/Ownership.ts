@@ -1,6 +1,6 @@
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
-import type * as Elaboration from './Elaboration.js'
+import * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
 import type * as Match from './Match.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -256,7 +256,11 @@ const satisfied: Verdict = Object.freeze({ _tag: 'Satisfied' })
 const copyable: OwnershipCategory = Object.freeze({ _tag: 'Copyable' })
 
 const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipCategory =>
-  type === undefined || Type.isBuiltin(type) || Type.isNever(type) || Type.isOutOfMemory(type)
+  type === undefined ||
+  Type.isBuiltin(type) ||
+  Type.isString(type) ||
+  Type.isNever(type) ||
+  Type.isOutOfMemory(type)
     ? copyable
     : Type.isSlice(type)
       ? type.access === 'Shared'
@@ -989,7 +993,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         if (
           site?._tag === 'Let' &&
           expression.type._tag === 'Available' &&
-          Type.isSlice(expression.type.type)
+          Type.containsViewBorrow(expression.type.type)
         ) {
           const previous = viewEnds.get(site.binding.ordinal)
           if (previous === undefined || previous.span.end < expression.syntax.span.end) {
@@ -1049,15 +1053,11 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
   scanStatementRunEnds(fn.statements)
 
   const returnedArgumentOrdinal = (expression: Elaboration.ExpressionFact): number | undefined => {
-    if (expression._tag !== 'Call') return undefined
-    if (expression.reference._tag === 'ResolvedBuiltin') {
-      return expression.reference.returnedBorrowParameter
-    }
-    if (expression.reference._tag !== 'Resolved') return undefined
-    return DeclarationIndex.returnedBorrow(expression.reference.declaration)?.parameter.id.ordinal
+    return Elaboration.returnedBorrowArgument(expression)?.id.ordinal
   }
 
   const viewRoots = new Map<number, BindingSite>()
+  const viewAliases = new Map<number, number>()
   const sourceSite = (expression: Elaboration.ExpressionFact): BindingSite | undefined => {
     if (expression._tag === 'Grouped') return sourceSite(expression.expression)
     if (expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable') {
@@ -1079,13 +1079,32 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
   for (const binding of fn.bindings) {
     if (
       binding.inferredType._tag !== 'Available' ||
-      !Type.isSlice(binding.inferredType.type) ||
+      !Type.containsViewBorrow(binding.inferredType.type) ||
       returnedArgumentOrdinal(binding.initializer) === undefined
     ) {
       continue
     }
+    const returnedOrdinal = returnedArgumentOrdinal(binding.initializer)
+    if (returnedOrdinal !== undefined && binding.initializer._tag === 'Call') {
+      const argument = binding.initializer.arguments.at(returnedOrdinal)
+      const source = argument === undefined ? undefined : directSite(argument.expression)?.site
+      if (source?._tag === 'Let') viewAliases.set(binding.id.ordinal, source.binding.ordinal)
+    }
     const root = sourceSite(binding.initializer)
     if (root !== undefined) viewRoots.set(binding.id.ordinal, root)
+  }
+
+  let propagatedViewEnd = true
+  while (propagatedViewEnd) {
+    propagatedViewEnd = false
+    for (const [alias, source] of viewAliases) {
+      const ending = viewEnds.get(alias)
+      const previous = viewEnds.get(source)
+      if (ending !== undefined && (previous === undefined || previous.span.end < ending.span.end)) {
+        viewEnds.set(source, ending)
+        propagatedViewEnd = true
+      }
+    }
   }
 
   const delayedLoansAt = (span: SourceSpan.SourceSpan): ReadonlyArray<LoanFact> =>
@@ -1478,7 +1497,8 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
                       region: statement.region,
                       span: fn.declaration.syntax.span,
                     })
-                  : initializerType._tag === 'Available' && Type.isSlice(initializerType.type)
+                  : initializerType._tag === 'Available' &&
+                      Type.containsViewBorrow(initializerType.type)
                     ? (viewEnds.get(statement.binding.id.ordinal) ?? {
                         region: statement.region,
                         span: statement.binding.initializer.syntax.span,
@@ -1570,6 +1590,7 @@ export const cleanupPlan = (
   seen = new Set<string>(),
 ): CleanupPlan => {
   if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isString(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
   if (Type.isFailureProjection(type)) return Object.freeze({ _tag: 'NoCleanup', type })
@@ -2209,7 +2230,7 @@ const checkFunction = (
       const returnsBorrow =
         statement._tag === 'Return' &&
         fn.contract._tag === 'Contract' &&
-        Type.isSlice(fn.contract.result)
+        Type.containsViewBorrow(fn.contract.result)
       checkExpression(state, live, statement.expression, !returnsBorrow)
       exits.push(
         Object.freeze({

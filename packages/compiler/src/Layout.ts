@@ -56,6 +56,23 @@ export type Representation =
       readonly stride: number
     }
   | {
+      readonly _tag: 'String'
+      readonly storage: {
+        readonly provenance: 'Utf8'
+        readonly bits: 32 | 64
+        readonly offset: 0
+        readonly size: 4 | 8
+        readonly alignment: 4 | 8
+      }
+      readonly byteLength: {
+        readonly type: 'usize'
+        readonly offset: number
+        readonly size: 4 | 8
+      }
+      readonly storagePadding: number
+      readonly tailPadding: number
+    }
+  | {
       readonly _tag: 'Reference'
       readonly target: DeclarationIndex.SemanticType
       readonly address: {
@@ -259,6 +276,8 @@ export type Selector =
   | { readonly _tag: 'UnionPayloadSelector'; readonly slot: number }
   | { readonly _tag: 'SliceAddressSelector' }
   | { readonly _tag: 'SliceLengthSelector' }
+  | { readonly _tag: 'StringStorageSelector' }
+  | { readonly _tag: 'StringByteLengthSelector' }
   | { readonly _tag: 'ReferenceAddressSelector' }
 
 export type CallingShapeNode =
@@ -285,6 +304,13 @@ export type CallingShapeNode =
       readonly type: Type.Slice
       readonly address: { readonly type: AddressScalar; readonly lane: 0 }
       readonly length: { readonly type: 'usize'; readonly lane: 1 }
+      readonly laneCount: 2
+    }
+  | {
+      readonly _tag: 'StringShape'
+      readonly type: Type.String
+      readonly storage: { readonly type: AddressScalar; readonly lane: 0 }
+      readonly byteLength: { readonly type: 'usize'; readonly lane: 1 }
       readonly laneCount: 2
     }
   | {
@@ -415,6 +441,37 @@ const sliceEntry = (target: Target.Target, type: Type.Slice, element: Entry): En
       addressPadding: lengthOffset - target.pointerSize,
       tailPadding: size - contentSize,
       stride: alignUp(element.size, element.alignment),
+    }),
+  })
+}
+
+const stringEntry = (target: Target.Target): Entry => {
+  const addressBits: 32 | 64 = target.pointerSize === 4 ? 32 : 64
+  const byteLengthOffset = alignUp(target.pointerSize, target.pointerAlignment)
+  const alignment = target.pointerAlignment
+  const contentSize = byteLengthOffset + target.pointerSize
+  const size = alignUp(contentSize, alignment)
+  return Object.freeze({
+    _tag: 'LayoutEntry',
+    type: Type.string,
+    size,
+    alignment,
+    representation: Object.freeze({
+      _tag: 'String',
+      storage: Object.freeze({
+        provenance: 'Utf8',
+        bits: addressBits,
+        offset: 0,
+        size: target.pointerSize,
+        alignment: target.pointerAlignment,
+      }),
+      byteLength: Object.freeze({
+        type: 'usize',
+        offset: byteLengthOffset,
+        size: target.pointerSize,
+      }),
+      storagePadding: byteLengthOffset - target.pointerSize,
+      tailPadding: size - contentSize,
     }),
   })
 }
@@ -766,6 +823,11 @@ export const catalog = (
 
   const layoutType = (type: DeclarationIndex.SemanticType): CatalogEntry => {
     if (Type.isBuiltin(type)) return scalarEntry(target, type)
+    if (Type.isString(type)) {
+      const result = stringEntry(target)
+      completed.set(Type.key(type), result)
+      return result
+    }
     if (Type.isNever(type)) {
       const result = neverEntry()
       completed.set(Type.key(type), result)
@@ -982,6 +1044,12 @@ const addExpressionTypes = (
     }
   }
   if (expression._tag === 'Move') addExpressionTypes(types, expression.subject, substitution)
+  if (expression._tag === 'RuntimeStringView')
+    addExpressionTypes(types, expression.source, substitution)
+  if (expression._tag === 'StringEquality') {
+    addExpressionTypes(types, expression.left, substitution)
+    addExpressionTypes(types, expression.right, substitution)
+  }
   if (expression._tag === 'UnionConvert') addExpressionTypes(types, expression.source, substitution)
   if (expression._tag === 'Project') addExpressionTypes(types, expression.subject, substitution)
   if (expression._tag === 'IndexPlace') {
@@ -1499,6 +1567,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const entries = new Map<string, Entry>()
   const resolve = (type: DeclarationIndex.SemanticType): Entry | undefined => {
     if (Type.isBuiltin(type)) return scalarEntry(self.target, type)
+    if (Type.isString(type)) return stringEntry(self.target)
     if (Type.isNever(type)) return neverEntry()
     const candidate = catalogEntry(self, type)
     if (candidate?._tag === 'LayoutEntry') return candidate
@@ -1530,6 +1599,8 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     } else if (candidate.representation._tag === 'Slice') {
       add(candidate.representation.element)
       add('usize')
+    } else if (candidate.representation._tag === 'String') {
+      add('usize')
     } else if (candidate.representation._tag === 'Reference') {
       add(candidate.representation.target)
     } else if (candidate.representation._tag === 'Union') {
@@ -1553,7 +1624,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)
     for (const expression of expressions) {
-      if (expression._tag === 'StaticTextLiteral')
+      if (expression._tag === 'StaticStringLiteral' || expression._tag === 'StaticByteViewLiteral')
         staticDataById.set(expression.data.id, expression.data)
     }
   }
@@ -1619,6 +1690,22 @@ const shapeNode = (
 ): CallingShapeNode => {
   if (Type.isBuiltin(type)) {
     return Object.freeze({ _tag: 'ScalarShape', type, laneCount: 1 })
+  }
+  if (Type.isString(type)) {
+    return Object.freeze({
+      _tag: 'StringShape',
+      type,
+      storage: Object.freeze({
+        type: Object.freeze({
+          _tag: 'Address',
+          element: Type.string,
+          bits: target.pointerSize === 4 ? 32 : 64,
+        }),
+        lane: 0,
+      }),
+      byteLength: Object.freeze({ type: 'usize', lane: 1 }),
+      laneCount: 2,
+    })
   }
   if (Type.isNever(type)) {
     return Object.freeze({ _tag: 'EmptyShape', type, laneCount: 0 })
@@ -1805,6 +1892,20 @@ const materializeLanes = (
       Object.freeze({
         _tag: 'CallingLane',
         path: Object.freeze([...path, Object.freeze({ _tag: 'SliceLengthSelector' })]),
+        type: 'usize',
+      }),
+    ])
+  }
+  if (node._tag === 'StringShape') {
+    return Object.freeze([
+      Object.freeze({
+        _tag: 'CallingLane',
+        path: Object.freeze([...path, Object.freeze({ _tag: 'StringStorageSelector' })]),
+        type: node.storage.type,
+      }),
+      Object.freeze({
+        _tag: 'CallingLane',
+        path: Object.freeze([...path, Object.freeze({ _tag: 'StringByteLengthSelector' })]),
         type: 'usize',
       }),
     ])
@@ -2073,6 +2174,21 @@ const representationEquals = (left: Representation, right: Representation): bool
       left.stride === right.stride
     )
   }
+  if (left._tag === 'String') {
+    return (
+      right._tag === 'String' &&
+      left.storage.provenance === right.storage.provenance &&
+      left.storage.bits === right.storage.bits &&
+      left.storage.offset === right.storage.offset &&
+      left.storage.size === right.storage.size &&
+      left.storage.alignment === right.storage.alignment &&
+      left.byteLength.type === right.byteLength.type &&
+      left.byteLength.offset === right.byteLength.offset &&
+      left.byteLength.size === right.byteLength.size &&
+      left.storagePadding === right.storagePadding &&
+      left.tailPadding === right.tailPadding
+    )
+  }
   if (left._tag === 'Reference') {
     return (
       right._tag === 'Reference' &&
@@ -2175,6 +2291,20 @@ const verifyEntry = (
             'InvalidAggregate',
             candidate.type,
             `${Type.encode(candidate.type)} has non-canonical repeated layout facts`,
+          ),
+        ])
+  }
+  if (Type.isString(candidate.type)) {
+    const expected = stringEntry(target)
+    return candidate.size === expected.size &&
+      candidate.alignment === expected.alignment &&
+      representationEquals(candidate.representation, expected.representation)
+      ? Object.freeze([])
+      : Object.freeze([
+          invalid(
+            'InvalidAggregate',
+            candidate.type,
+            'string does not match the canonical UTF-8 storage-provenance layout',
           ),
         ])
   }
@@ -2399,9 +2529,13 @@ export const selectorEquals = (left: Selector, right: Selector): boolean =>
           ? right._tag === 'SliceAddressSelector'
           : left._tag === 'SliceLengthSelector'
             ? right._tag === 'SliceLengthSelector'
-            : left._tag === 'ReferenceAddressSelector'
-              ? right._tag === 'ReferenceAddressSelector'
-              : right._tag === 'FieldId' && fieldIdEquals(left, right)
+            : left._tag === 'StringStorageSelector'
+              ? right._tag === 'StringStorageSelector'
+              : left._tag === 'StringByteLengthSelector'
+                ? right._tag === 'StringByteLengthSelector'
+                : left._tag === 'ReferenceAddressSelector'
+                  ? right._tag === 'ReferenceAddressSelector'
+                  : right._tag === 'FieldId' && fieldIdEquals(left, right)
 
 /** Resolves one compiler-planned scalar lane to its byte offset within a logical value. */
 export const laneOffset = (
@@ -2457,6 +2591,16 @@ export const laneOffset = (
     if (selector._tag === 'SliceAddressSelector') {
       return ordinal === path.length - 1 && candidate.representation._tag === 'Slice'
         ? offset + candidate.representation.address.offset
+        : undefined
+    }
+    if (selector._tag === 'StringStorageSelector') {
+      return ordinal === path.length - 1 && candidate.representation._tag === 'String'
+        ? offset + candidate.representation.storage.offset
+        : undefined
+    }
+    if (selector._tag === 'StringByteLengthSelector') {
+      return ordinal === path.length - 1 && candidate.representation._tag === 'String'
+        ? offset + candidate.representation.byteLength.offset
         : undefined
     }
     if (selector._tag === 'ReferenceAddressSelector') {
@@ -2649,11 +2793,13 @@ const representationText = (representation: Representation): string =>
             ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
             : representation._tag === 'Slice'
               ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=usize@${representation.length.offset}/${representation.length.size} address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
-              : representation._tag === 'Reference'
-                ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
-                : representation._tag === 'Union'
-                  ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
-                  : `aggregate tail-padding=${representation.tailPadding}`
+              : representation._tag === 'String'
+                ? `string storage=${representation.storage.provenance}:i${representation.storage.bits}@${representation.storage.offset}/${representation.storage.size}/${representation.storage.alignment} byte-length=usize@${representation.byteLength.offset}/${representation.byteLength.size} storage-padding=${representation.storagePadding} tail-padding=${representation.tailPadding}`
+                : representation._tag === 'Reference'
+                  ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
+                  : representation._tag === 'Union'
+                    ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
+                    : `aggregate tail-padding=${representation.tailPadding}`
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
   `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
@@ -2671,16 +2817,21 @@ const entryLines = (candidate: Entry): ReadonlyArray<string> => [
             `  address Address<${Type.encode(candidate.representation.element)}> bits=${candidate.representation.address.bits} offset=${candidate.representation.address.offset} size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
             `  length usize offset=${candidate.representation.length.offset} size=${candidate.representation.length.size} stride=${candidate.representation.stride}`,
           ]
-        : candidate.representation._tag === 'Reference'
+        : candidate.representation._tag === 'String'
           ? [
-              `  address Address<${Type.encode(candidate.representation.target)}> bits=${candidate.representation.address.bits} offset=0 size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+              `  storage StringUtf8 bits=${candidate.representation.storage.bits} offset=${candidate.representation.storage.offset} size=${candidate.representation.storage.size} align=${candidate.representation.storage.alignment}`,
+              `  byte-length usize offset=${candidate.representation.byteLength.offset} size=${candidate.representation.byteLength.size}`,
             ]
-          : candidate.representation._tag === 'Union'
-            ? candidate.representation.members.map(
-                (member) =>
-                  `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
-              )
-            : []),
+          : candidate.representation._tag === 'Reference'
+            ? [
+                `  address Address<${Type.encode(candidate.representation.target)}> bits=${candidate.representation.address.bits} offset=0 size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+              ]
+            : candidate.representation._tag === 'Union'
+              ? candidate.representation.members.map(
+                  (member) =>
+                    `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
+                )
+              : []),
 ]
 
 /** Deterministic textual encoding of a complete runtime layout plan. */
@@ -2723,9 +2874,13 @@ export const encode = (self: Plan): string =>
                                 ? 'address'
                                 : selector._tag === 'SliceLengthSelector'
                                   ? 'length'
-                                  : selector._tag === 'ReferenceAddressSelector'
-                                    ? 'address'
-                                    : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
+                                  : selector._tag === 'StringStorageSelector'
+                                    ? 'storage'
+                                    : selector._tag === 'StringByteLengthSelector'
+                                      ? 'byte-length'
+                                      : selector._tag === 'ReferenceAddressSelector'
+                                        ? 'address'
+                                        : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
                       )
                       .join('.')}]`,
                 )

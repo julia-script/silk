@@ -17,9 +17,9 @@ afterAll(() => rmSync(outputRoot, { recursive: true, force: true }))
 
 const source = `pub effect fn main() -> () ! StreamWriteFailure {
   let mut native = NativeStandardStreams.native()
-  let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), "heading\\n"), &mut native)
+  let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("heading\\n")), &mut native)
   let second = run Effect.provideMut(StandardStream.send(StandardStream.stderr(), b"warning\\n"), &mut native)
-  let third = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), "row\\n"), &mut native)
+  let third = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("row\\n")), &mut native)
   return ()
 }`
 
@@ -166,8 +166,8 @@ effect fn record(
 impl StandardStreams for MemoryStreams { writeAll: MemoryStreams.record }
 pub effect fn main() -> () ! StreamWriteFailure {
   let mut memory = MemoryStreams { writes: 0 }
-  let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), "one"), &mut memory)
-  let second = run Effect.provideMut(StandardStream.send(StandardStream.stderr(), "two"), &mut memory)
+  let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("one")), &mut memory)
+  let second = run Effect.provideMut(StandardStream.send(StandardStream.stderr(), Intrinsic.stringUtf8Bytes("two")), &mut memory)
   if memory.writes != 2 { let boom = 1 / 0 }
   return ()
 }`),

@@ -9,7 +9,7 @@ const encoder = new TextEncoder()
 
 const key = (actor: string, operation: string): string => `${actor}.${operation}`
 
-const operationKeys = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
+const operationKeys = (snapshot: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   [...snapshot.semanticOccurrences.modules.values()].flatMap((module) =>
     module.occurrences.flatMap((occurrence) =>
       occurrence.resolution._tag === 'Available' &&
@@ -129,6 +129,15 @@ pub fn main() -> i32 {
   let mut counter = Counter { value: 1 }
   return replace(&mut counter)
 }`,
+  `fn inspect(bytes: &[u8]) -> bool {
+  unsafe {
+    let text = Intrinsic.stringFromUtf8Unchecked(bytes)
+    let raw = Intrinsic.stringUtf8Bytes(text)
+    let length = Intrinsic.stringByteLength(text)
+    return Intrinsic.stringEqualsExact(text, text)
+  }
+  return false
+}`,
   `import silk.result { Result, Success, Failure }
 struct ResultProblem {}
 effect fn succeed() -> i32 ! ResultProblem { return 42 }
@@ -145,8 +154,8 @@ pub effect fn main() -> i32 {
   let mut native = NativeStandardStreams.native()
   let stdout = StandardStream.stdout()
   let stderr = StandardStream.stderr()
-  let first = run Effect.provideMut(StandardStream.send(stdout, "out"), &mut native)
-  let second = run Effect.provideMut(StandardStream.send(stderr, "error"), &mut native)
+  let first = run Effect.provideMut(StandardStream.send(stdout, b"out"), &mut native)
+  let second = run Effect.provideMut(StandardStream.send(stderr, b"error"), &mut native)
   return ()
 }`,
   `import silk.option { Option, none }
@@ -197,7 +206,7 @@ it.effect('pairs every intrinsic presentation with accepted semantic analysis', 
   Effect.gen(function* () {
     const observed = new Set<string>()
     for (const [ordinal, source] of acceptedSources.entries()) {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* Analysis.ofSource(
         `intrinsic/accepted-${ordinal}`,
         encoder.encode(source),
       )
@@ -220,7 +229,7 @@ it.effect('keeps every intrinsic identifiable and presentable in rejected calls'
           operation.rule._tag === 'PlaceRule'
             ? `pub fn main() -> i32 { let mut value = 0 let rejected = Intrinsic.replace(value) return 0 }`
             : `pub fn main() -> i32 { let rejected = ${actor.spelling}.${operation.spelling}(${arguments_}) return 0 }`
-        const snapshot = yield* Analysis.ofSourceRealized(
+        const snapshot = yield* Analysis.ofSource(
           `intrinsic/rejected-${actor.spelling}-${operation.spelling}`,
           encoder.encode(source),
         )
@@ -260,7 +269,7 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
   assert.deepEqual(fixture, { targets: ['Evaluator', 'LLVM', 'Wasm'], entries })
   assert.deepEqual(
     Intrinsic.all().map((actor) => actor.spelling),
-    ['Intrinsic'],
+    ['string', 'Intrinsic'],
   )
   assert.isTrue(entries.every((entry) => entry.consumer.length > 0))
   assert.isTrue(entries.filter((entry) => entry.unsafe).every((entry) => 'invariant' in entry))

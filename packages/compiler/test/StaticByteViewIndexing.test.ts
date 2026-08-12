@@ -82,9 +82,9 @@ it.effect('keeps byte literals as shared u8 slices through semantic facts, HIR, 
       hir?.functions.flatMap((fn) =>
         fn.statements.flatMap(Hir.statementExpressions).flatMap(Hir.expressionTree),
       ) ?? []
-    const literal = expressions.find((expression) => expression._tag === 'StaticTextLiteral')
-    assert.strictEqual(literal?._tag, 'StaticTextLiteral')
-    if (literal?._tag === 'StaticTextLiteral') {
+    const literal = expressions.find((expression) => expression._tag === 'StaticByteViewLiteral')
+    assert.strictEqual(literal?._tag, 'StaticByteViewLiteral')
+    if (literal?._tag === 'StaticByteViewLiteral') {
       assert.strictEqual(Type.key(literal.type), Type.key(Type.slice('Shared', 'u8')))
       assert.deepEqual(literal.data.bytes, [153, 19, 29, 0])
     }

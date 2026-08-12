@@ -327,6 +327,11 @@ interface StructuredBlock {
 const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
   switch (operation._tag) {
     case 'Literal':
+    case 'StaticString':
+    case 'StringFromUtf8Unchecked':
+    case 'StringUtf8Bytes':
+    case 'StringByteLength':
+    case 'StringEqualsExact':
     case 'Binary':
     case 'ConvertInteger':
     case 'CheckedInteger':
@@ -952,6 +957,17 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           ]),
         )
       : undefined
+    const needsStringEquality = program.functions.some((fn) =>
+      Mir.operations(fn).some((operation) => operation._tag === 'StringEqualsExact'),
+    )
+    const memcmp =
+      needsStringEquality && usizeType !== undefined
+        ? yield* FunctionActor.declare(
+            builder,
+            'memcmp',
+            yield* LlvmType.functionType(builder, i32, [pointer, pointer, usizeType]),
+          )
+        : undefined
     const needsHostWrite = program.functions.some((fn) =>
       Mir.operations(fn).some((operation) => operation._tag === 'HostWrite'),
     )
@@ -1078,14 +1094,56 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       }
     }
 
+    const debugTypes = new Map<string, LlvmMetadata.Optional>()
+    const debugTypeOf = Effect.fnUntraced(function* (
+      type: Mir.Type,
+    ): Effect.fn.Return<LlvmMetadata.Optional, LlvmError.LlvmError> {
+      if (!debug) return undefined
+      const semantic = Mir.semanticType(type)
+      const key = SilkType.key(semantic)
+      if (debugTypes.has(key)) return debugTypes.get(key)
+      const selected = Layout.entry(program.layout, semantic)
+      if (selected === undefined) {
+        debugTypes.set(key, undefined)
+        return undefined
+      }
+      let metadata: LlvmMetadata.Optional
+      if (SilkType.isString(semantic)) {
+        metadata = yield* LlvmMetadata.stringType(builder, {
+          name: yield* LlvmMetadata.string(builder, 'string'),
+          sizeInBits: selected.size * 8,
+          alignInBits: selected.alignment * 8,
+          encoding: 'utf',
+        })
+      } else if (SilkType.isSlice(semantic) && SilkType.equals(semantic.element, 'u8')) {
+        metadata = yield* LlvmMetadata.structureType(builder, {
+          name: yield* LlvmMetadata.string(builder, SilkType.encode(semantic)),
+          file,
+          sizeInBits: selected.size * 8,
+          alignInBits: selected.alignment * 8,
+        })
+      }
+      debugTypes.set(key, metadata)
+      return metadata
+    })
+
     for (const entry of declared) {
       let subprogram: LlvmMetadata.Optional
       if (debug && file !== undefined && compileUnit !== undefined) {
         const startLine = positionOf(table, functionStart(entry.fn)).line
         const symbolName = yield* LlvmMetadata.string(builder, entry.symbol)
+        const signatureTypes = yield* LlvmMetadata.tuple(builder, [
+          yield* debugTypeOf(entry.fn.result),
+          ...(yield* Effect.forEach(
+            entry.fn.localTypes.slice(0, entry.fn.parameterCount),
+            debugTypeOf,
+          )),
+        ])
+        const signature = yield* LlvmMetadata.subroutineType(builder, signatureTypes)
         subprogram = yield* LlvmMetadata.subprogram(builder, file, symbolName, {
           line: startLine,
           scopeLine: startLine,
+          type: signature,
           spFlags: DISPFlags.make({ definition: true }),
           compileUnit,
         })
@@ -1356,6 +1414,15 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             target: Layout.CallingLane,
             name: string,
           ) {
+            const sourceIsAddress = typeof source.type !== 'string'
+            const targetIsAddress = typeof target.type !== 'string'
+            if (sourceIsAddress && !targetIsAddress) {
+              return yield* FunctionBody.cast(body, 'ptrtoint', input, laneType(target), name)
+            }
+            if (!sourceIsAddress && targetIsAddress) {
+              return yield* FunctionBody.cast(body, 'inttoptr', input, laneType(target), name)
+            }
+            if (sourceIsAddress && targetIsAddress) return input
             const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
             const scalarBits = (lane: Layout.CallingLane): number =>
               typeof lane.type === 'string'
@@ -2389,6 +2456,115 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   )
                   break
                 }
+                case 'StaticString': {
+                  const address = staticPointers.get(operation.data)
+                  if (address === undefined || usizeType === undefined) {
+                    throw new RangeError('LLVM static string lost its data placement or usize type')
+                  }
+                  locals.set(
+                    operation.destination.ordinal,
+                    Object.freeze([
+                      address,
+                      yield* Constant.integerUnsigned(builder, usizeType, operation.byteLength),
+                    ]),
+                  )
+                  break
+                }
+                case 'StringFromUtf8Unchecked': {
+                  locals.set(operation.destination.ordinal, readLocal(operation.bytes))
+                  break
+                }
+                case 'StringUtf8Bytes': {
+                  locals.set(operation.destination.ordinal, readLocal(operation.string))
+                  break
+                }
+                case 'StringByteLength': {
+                  const length = readLocal(operation.string).at(1)
+                  if (length === undefined) {
+                    throw new RangeError('LLVM string lost its byte-length lane')
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze([length]))
+                  break
+                }
+                case 'StringEqualsExact': {
+                  const [leftAddress, leftLength] = readLocal(operation.left)
+                  const [rightAddress, rightLength] = readLocal(operation.right)
+                  if (
+                    leftAddress === undefined ||
+                    leftLength === undefined ||
+                    rightAddress === undefined ||
+                    rightLength === undefined ||
+                    memcmp === undefined ||
+                    usizeType === undefined
+                  ) {
+                    throw new RangeError('LLVM string equality lost its lanes or runtime helper')
+                  }
+                  const lengthsEqual = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    leftLength,
+                    rightLength,
+                    `string${operation.destination.ordinal}_lengths_equal`,
+                  )
+                  const zeroLength = yield* Constant.integerUnsigned(builder, usizeType, 0n)
+                  const comparedLength = yield* FunctionBody.select(
+                    body,
+                    lengthsEqual,
+                    leftLength,
+                    zeroLength,
+                    `string${operation.destination.ordinal}_compared_length`,
+                  )
+                  const compared = yield* FunctionBody.callDirect(
+                    body,
+                    memcmp,
+                    [leftAddress, rightAddress, comparedLength],
+                    `string${operation.destination.ordinal}_memcmp`,
+                  )
+                  if (compared === undefined) {
+                    throw new RangeError('LLVM string equality produced no comparison result')
+                  }
+                  const zero = yield* Constant.integerSigned(builder, i32, 0n)
+                  const bytesEqual = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    compared,
+                    zero,
+                    `string${operation.destination.ordinal}_bytes_equal`,
+                  )
+                  const exact = yield* FunctionBody.binary(
+                    body,
+                    'and',
+                    lengthsEqual,
+                    bytesEqual,
+                    `string${operation.destination.ordinal}_exact`,
+                  )
+                  const selected = operation.negated
+                    ? yield* FunctionBody.integerCompare(
+                        body,
+                        'eq',
+                        exact,
+                        yield* Constant.integerUnsigned(
+                          builder,
+                          yield* LlvmType.integer(builder, 1),
+                          0n,
+                        ),
+                        `string${operation.destination.ordinal}_negated`,
+                      )
+                    : exact
+                  locals.set(
+                    operation.destination.ordinal,
+                    Object.freeze([
+                      yield* FunctionBody.cast(
+                        body,
+                        'zext',
+                        selected,
+                        i32,
+                        `string${operation.destination.ordinal}_result`,
+                      ),
+                    ]),
+                  )
+                  break
+                }
                 case 'Allocate': {
                   const [bytes, alignment] = readLocal(operation.layout)
                   if (
@@ -3090,7 +3266,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   while (values.length < lanes.length) {
                     const lane = lanes.at(values.length)
                     if (lane === undefined) break
-                    values.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                    values.push(yield* Constant.nullValue(builder, laneType(lane)))
                   }
                   locals.set(operation.destination.ordinal, Object.freeze(values))
                   break
@@ -3258,7 +3434,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   while (values.length < lanes.length) {
                     const lane = lanes.at(values.length)
                     if (lane === undefined) break
-                    values.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                    values.push(yield* Constant.nullValue(builder, laneType(lane)))
                   }
                   locals.set(operation.destination.ordinal, Object.freeze(values))
                   break
@@ -3345,9 +3521,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       throw new RangeError('Bottom move lost its destination type')
                     const placeholders: Array<Value.Input> = []
                     for (const lane of lanesFor(destinationType)) {
-                      placeholders.push(
-                        yield* Constant.integerUnsigned(builder, laneType(lane), 0n),
-                      )
+                      placeholders.push(yield* Constant.nullValue(builder, laneType(lane)))
                     }
                     locals.set(operation.destination.ordinal, Object.freeze(placeholders))
                     break
@@ -3467,7 +3641,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       const sourceLane = sourceLanes.at(ordinal)
                       payload.push(
                         input === undefined || sourceLane === undefined
-                          ? yield* Constant.integerUnsigned(builder, laneType(targetLane), 0n)
+                          ? yield* Constant.nullValue(builder, laneType(targetLane))
                           : yield* coerceLane(
                               input,
                               sourceLane,
@@ -3520,7 +3694,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     const sourceLane = sourceLanes.at(ordinal + 1)
                     payload.push(
                       input === undefined || sourceLane === undefined
-                        ? yield* Constant.integerUnsigned(builder, laneType(targetLane), 0n)
+                        ? yield* Constant.nullValue(builder, laneType(targetLane))
                         : yield* coerceLane(
                             input,
                             sourceLane,
@@ -5497,7 +5671,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   while (values.length < lanes.length) {
                     const lane = lanes.at(values.length)
                     if (lane === undefined) break
-                    values.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                    values.push(yield* Constant.nullValue(builder, laneType(lane)))
                   }
                   locals.set(operation.destination.ordinal, Object.freeze(values))
                   break
@@ -5534,7 +5708,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     const sourceLane = sourceLanes.at(ordinal)
                     values.push(
                       input === undefined || sourceLane === undefined
-                        ? yield* Constant.integerUnsigned(builder, laneType(targetLane), 0n)
+                        ? yield* Constant.nullValue(builder, laneType(targetLane))
                         : yield* coerceLane(
                             input,
                             sourceLane,
@@ -5646,7 +5820,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                         sourceLane !== undefined &&
                         laneType(sourceLane) === laneType(lane)
                         ? sourceValue
-                        : yield* Constant.integerUnsigned(builder, laneType(lane), 0n),
+                        : yield* Constant.nullValue(builder, laneType(lane)),
                     )
                   }
                   if (returned.length === 1) {
@@ -5817,7 +5991,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                         sourceLane !== undefined &&
                         laneType(sourceLane) === laneType(lane)
                         ? sourceValue
-                        : yield* Constant.integerUnsigned(builder, laneType(lane), 0n),
+                        : yield* Constant.nullValue(builder, laneType(lane)),
                     )
                   }
                   yield* FunctionBody.returnValue(
@@ -5911,7 +6085,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       const sourceLane = lanes.at(ordinal)
                       branch.push(
                         input === undefined || sourceLane === undefined
-                          ? yield* Constant.integerUnsigned(builder, laneType(targetLane), 0n)
+                          ? yield* Constant.nullValue(builder, laneType(targetLane))
                           : yield* coerceLane(input, sourceLane, targetLane, `${label}_${ordinal}`),
                       )
                     }

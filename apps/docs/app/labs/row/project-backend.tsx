@@ -624,6 +624,8 @@ export const layoutRows = (
               ? `${entry.representation.length} × ${typeText(entry.representation.element)} · stride ${entry.representation.stride}`
               : entry.representation._tag === 'Slice'
                 ? `address i${entry.representation.address.bits} + length i32 · stride ${entry.representation.stride}`
+              : entry.representation._tag === 'String'
+                ? `UTF-8 address i${entry.representation.storage.bits} + byte length i${entry.representation.byteLength.size * 8}`
               : entry.representation._tag === 'Union'
                 ? `sum · tag i${entry.representation.tag.bits} · payload +${entry.representation.payloadOffset}/${entry.representation.payloadSize}`
               : entry.representation._tag === 'Reference'
@@ -717,6 +719,16 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = const ${operation.value}`
     case 'StaticView':
       return `${localText(operation.destination)} = static ${operation.data} · ${operation.length} bytes`
+    case 'StaticString':
+      return `${localText(operation.destination)} = static string ${operation.data} · ${operation.byteLength} bytes`
+    case 'StringFromUtf8Unchecked':
+      return `${localText(operation.destination)} = string from UTF-8 ${localText(operation.bytes)} · unsafe`
+    case 'StringUtf8Bytes':
+      return `${localText(operation.destination)} = UTF-8 bytes ${localText(operation.string)}`
+    case 'StringByteLength':
+      return `${localText(operation.destination)} = byte length ${localText(operation.string)}`
+    case 'StringEqualsExact':
+      return `${localText(operation.destination)} = exact string ${operation.negated ? 'not equals' : 'equals'} ${localText(operation.left)}, ${localText(operation.right)}`
     case 'Binary':
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(
         operation.left,
@@ -1046,6 +1058,8 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
         ? `slice cell f${value.frame}.c${value.cell} [${value.base}..${value.base + value.length})`
         : value._tag === 'StaticViewValue'
           ? `static ${value.data} · ${value.length} bytes`
+        : value._tag === 'StringValue'
+          ? `${JSON.stringify(new TextDecoder().decode(Uint8Array.from(value.bytes)))} · ${value.byteLength} UTF-8 bytes · ${value.storage._tag}`
       : value._tag === 'UnionValue'
         ? `${typeText(value.type)} <${typeText(value.member)} ${valueText(value.payload)}>`
       : value._tag === 'EffectOutcomeValue'
@@ -1166,6 +1180,18 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `release allocation #${event.ticket}`
     case 'HostWrite':
       return `${event.destination.toLowerCase()} write ${event.bytes.length} bytes · ${event.outcome.toLowerCase()}`
+    case 'StringStatic':
+      return `string ${event.storage ?? 'static'} · ${event.byteLength ?? 0} UTF-8 bytes`
+    case 'StringRuntime':
+      return `string ${event.storage ?? 'runtime'} · ${event.byteLength ?? 0} UTF-8 bytes`
+    case 'StringBytes':
+      return `view string UTF-8 bytes · ${event.byteLength ?? 0} bytes`
+    case 'StringByteLength':
+      return `read string byte length · ${event.byteLength ?? 0}`
+    case 'StringEqualsExact':
+      return `compare exact strings · ${event.result === true ? 'equal' : 'different'}`
+    case 'StringLoanEnd':
+      return `end string backing loan ${event.loan ?? '?'}`
   }
 }
 
@@ -1216,6 +1242,12 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'SlotDrop':
     case 'AllocationRelease':
     case 'HostWrite':
+    case 'StringStatic':
+    case 'StringRuntime':
+    case 'StringBytes':
+    case 'StringByteLength':
+    case 'StringEqualsExact':
+    case 'StringLoanEnd':
       return 2
   }
 }

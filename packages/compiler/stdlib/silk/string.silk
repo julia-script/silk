@@ -1,0 +1,221 @@
+import silk.bytes {
+  Bytes,
+  make as bytesMake,
+  copy as bytesCopy,
+  append as bytesAppend,
+  asSlice as bytesAsSlice,
+  length as bytesLength
+}
+import silk.option { Option, none, some }
+import silk.result { Result, failResult, succeed }
+
+/// An owned sequence of valid UTF-8 bytes.
+pub struct String {
+  bytes: Bytes
+}
+
+/// The first byte offset at which UTF-8 validation failed.
+pub struct InvalidUtf8 {
+  pub offset: usize
+}
+
+/// An opaque position between Unicode scalars in a string.
+pub struct ScalarCursor {
+  byteOffset: usize
+}
+
+/// One decoded Unicode scalar and the cursor following it.
+pub struct ScalarStep {
+  scalar: u32
+  byteOffset: usize
+  next: ScalarCursor
+}
+
+fn counted(value: usize) -> usize {
+  return value
+}
+
+fn byte(value: u8) -> u8 {
+  return value
+}
+
+fn invalid(offset: usize) -> Result<string, InvalidUtf8> {
+  return failResult<string, InvalidUtf8>(InvalidUtf8 { offset: offset })
+}
+
+fn continuation(value: u8) -> bool {
+  if value < byte(128) { return false }
+  return value <= byte(191)
+}
+
+/// Validates a complete byte view and borrows it as text without allocating.
+pub fn fromUtf8(values: &[u8]) -> Result<string, InvalidUtf8> {
+  let mut index = counted(0)
+  while index < values.length {
+    let first = values[index]
+    if first < byte(128) {
+      index = index + counted(1)
+    } else {
+      if first < byte(194) { return invalid(index) }
+      if first <= byte(223) {
+        if values.length <= index + counted(1) { return invalid(index) }
+        if continuation(values[index + counted(1)]) == false {
+          return invalid(index + counted(1))
+        }
+        index = index + counted(2)
+      } else {
+        if first <= byte(239) {
+          if values.length <= index + counted(2) { return invalid(index) }
+          let second = values[index + counted(1)]
+          let third = values[index + counted(2)]
+          if continuation(second) == false { return invalid(index + counted(1)) }
+          if continuation(third) == false { return invalid(index + counted(2)) }
+          if first == byte(224) {
+            if second < byte(160) { return invalid(index + counted(1)) }
+          }
+          if first == byte(237) {
+            if byte(159) < second { return invalid(index + counted(1)) }
+          }
+          index = index + counted(3)
+        } else {
+          if byte(244) < first { return invalid(index) }
+          if values.length <= index + counted(3) { return invalid(index) }
+          let second = values[index + counted(1)]
+          let third = values[index + counted(2)]
+          let fourth = values[index + counted(3)]
+          if continuation(second) == false { return invalid(index + counted(1)) }
+          if continuation(third) == false { return invalid(index + counted(2)) }
+          if continuation(fourth) == false { return invalid(index + counted(3)) }
+          if first == byte(240) {
+            if second < byte(144) { return invalid(index + counted(1)) }
+          }
+          if first == byte(244) {
+            if byte(143) < second { return invalid(index + counted(1)) }
+          }
+          index = index + counted(4)
+        }
+      }
+    }
+  }
+  unsafe {
+    let text = Intrinsic.stringFromUtf8Unchecked(values)
+    return succeed<string, InvalidUtf8>(text)
+  }
+  return invalid(counted(0))
+}
+
+/// Constructs an empty owned String without allocating.
+pub fn make() -> String {
+  return String { bytes: bytesMake() }
+}
+
+/// Copies valid text into independently owned storage.
+pub effect fn copy(value: string) -> String ! OutOfMemory ? &mut Allocator {
+  let source = Intrinsic.stringUtf8Bytes(value)
+  let bytes = run bytesCopy(source)
+  return String { bytes: move bytes }
+}
+
+/// Appends complete valid text atomically with respect to allocation failure.
+pub effect fn append(self: &mut String, value: string) -> () ! OutOfMemory ? &mut Allocator {
+  let current = bytesAsSlice(&self.bytes)
+  let mut next = run bytesCopy(current)
+  let suffix = Intrinsic.stringUtf8Bytes(value)
+  let appended = run bytesAppend(&mut next, suffix)
+  let previous = Intrinsic.replace(self.bytes, move next)
+  drop previous
+  return ()
+}
+
+/// Borrows the complete owned contents as valid text without allocating.
+pub fn view(self: &String) -> string {
+  let bytes = bytesAsSlice(&self.bytes)
+  unsafe { return Intrinsic.stringFromUtf8Unchecked(bytes) }
+  return ""
+}
+
+/// Borrows a string's immutable UTF-8 encoding.
+pub fn utf8Bytes(value: string) -> &[u8] {
+  return Intrinsic.stringUtf8Bytes(value)
+}
+
+/// Returns a string's UTF-8 byte length.
+pub fn byteLength(value: string) -> usize {
+  return Intrinsic.stringByteLength(value)
+}
+
+/// Borrows an owned String's immutable UTF-8 encoding.
+pub fn ownedUtf8Bytes(self: &String) -> &[u8] {
+  return bytesAsSlice(&self.bytes)
+}
+
+/// Returns an owned String's initialized UTF-8 byte length.
+pub fn ownedByteLength(self: &String) -> usize {
+  return bytesLength(&self.bytes)
+}
+
+/// Selects the position before the first Unicode scalar.
+pub fn scalarCursor() -> ScalarCursor {
+  return ScalarCursor { byteOffset: counted(0) }
+}
+
+/// Returns a cursor's explicit UTF-8 byte offset.
+pub fn cursorByteOffset(cursor: &ScalarCursor) -> usize {
+  return cursor.byteOffset
+}
+
+/// Returns the decoded Unicode scalar value for one step.
+pub fn scalarValue(step: &ScalarStep) -> u32 {
+  return step.scalar
+}
+
+/// Returns the UTF-8 byte offset at which one step begins.
+pub fn scalarByteOffset(step: &ScalarStep) -> usize {
+  return step.byteOffset
+}
+
+/// Returns the cursor immediately following one decoded scalar.
+pub fn nextCursor(step: ScalarStep) -> ScalarCursor {
+  return match move step {
+    ScalarStep { scalar, byteOffset, next } => move next
+  }
+}
+
+fn scalar32(value: u8) -> u32 {
+  return u8.toU32(value)
+}
+
+/// Decodes the scalar at a cursor, or returns None at the end of the string.
+pub fn nextScalar(value: string, cursor: ScalarCursor) -> Option<ScalarStep> {
+  let bytes = Intrinsic.stringUtf8Bytes(value)
+  let offset = cursor.byteOffset
+  if offset == bytes.length { return none<ScalarStep>() }
+  let first = bytes[offset]
+  let mut scalar = scalar32(first)
+  let mut width = counted(1)
+  if byte(194) <= first {
+    if first <= byte(223) {
+      scalar = (scalar32(first) - u32.toU32(192)) * u32.toU32(64)
+        + (scalar32(bytes[offset + counted(1)]) - u32.toU32(128))
+      width = counted(2)
+    } else {
+      if first <= byte(239) {
+        scalar = (scalar32(first) - u32.toU32(224)) * u32.toU32(4096)
+          + (scalar32(bytes[offset + counted(1)]) - u32.toU32(128)) * u32.toU32(64)
+          + (scalar32(bytes[offset + counted(2)]) - u32.toU32(128))
+        width = counted(3)
+      } else {
+        scalar = (scalar32(first) - u32.toU32(240)) * u32.toU32(262144)
+          + (scalar32(bytes[offset + counted(1)]) - u32.toU32(128)) * u32.toU32(4096)
+          + (scalar32(bytes[offset + counted(2)]) - u32.toU32(128)) * u32.toU32(64)
+          + (scalar32(bytes[offset + counted(3)]) - u32.toU32(128))
+        width = counted(4)
+      }
+    }
+  }
+  return some<ScalarStep>(ScalarStep {
+    scalar: scalar,
+    byteOffset: offset,
+    next: ScalarCursor { byteOffset: offset + width }
+  })
+}

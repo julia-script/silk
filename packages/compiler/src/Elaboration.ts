@@ -700,6 +700,29 @@ export type ExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
 
+/** The unique call argument whose lexical storage may back this call's result. */
+export const returnedBorrowArgument = (self: ExpressionFact): ArgumentFact | undefined => {
+  if (self._tag !== 'Call') return undefined
+  if (self.reference._tag === 'ResolvedBuiltin') {
+    const ordinal = self.reference.returnedBorrowParameter
+    return ordinal === undefined ? undefined : self.arguments.at(ordinal)
+  }
+  if (self.reference._tag !== 'Resolved') return undefined
+  const declared = DeclarationIndex.returnedBorrow(self.reference.declaration)
+  if (declared !== undefined) {
+    return self.mappings.find(
+      (mapping) => mapping.parameter.id.ordinal === declared.parameter.id.ordinal,
+    )?.argument
+  }
+  if (self.type._tag !== 'Available' || !Type.containsViewBorrow(self.type.type)) return undefined
+  const candidates = self.mappings.filter(
+    (mapping) =>
+      mapping.argument.type._tag === 'Available' &&
+      Type.containsViewBorrow(mapping.argument.type.type),
+  )
+  return candidates.length === 1 ? candidates.at(0)?.argument : undefined
+}
+
 /** A deterministic argument identity within one caller and concrete call site. */
 export interface ArgumentId {
   readonly _tag: 'ArgumentId'
@@ -3044,7 +3067,7 @@ const analyzeCallTypeArguments = (
       (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
     )
     const invalidBorrow =
-      resolved.fact._tag === 'Resolved' && Type.containsBorrow(resolved.fact.type)
+      resolved.fact._tag === 'Resolved' && Type.containsPositionRestrictedBorrow(resolved.fact.type)
         ? Diagnostic.sliceTypePosition('type argument', node.span)
         : undefined
     return Object.freeze({
@@ -4557,9 +4580,11 @@ const analyzeOperatorExpression = (
         })
       : false
   const selectedActor: Operator.Actor =
-    selectedFirstType?._tag === 'Available' && Scalar.isSpelling(selectedFirstType.type)
-      ? selectedFirstType.type
-      : Scalar.defaultInteger.spelling
+    selectedFirstType?._tag === 'Available' && Type.isString(selectedFirstType.type)
+      ? 'string'
+      : selectedFirstType?._tag === 'Available' && Scalar.isSpelling(selectedFirstType.type)
+        ? selectedFirstType.type
+        : Scalar.defaultInteger.spelling
   const target = Operator.target(operator, selectedActor)
   const signature = builtinSignature(target.actor, target.operation)
   if (signature === undefined) throw new RangeError('Compiler operator table is inconsistent')
@@ -5334,7 +5359,7 @@ function analyzeExpression(
     const type =
       data === undefined
         ? unavailableExpressionType
-        : availableExpressionType(Type.slice('Shared', 'u8'))
+        : availableExpressionType(data.kind === 'Text' ? Type.string : Type.slice('Shared', 'u8'))
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'StaticText',
@@ -6629,16 +6654,8 @@ const analyzeFunctionBody = (
       return originOf(expression.subject, patternOrigins)
     }
     if (expression._tag === 'Call' && expression.reference._tag === 'Resolved') {
-      const contract = DeclarationIndex.returnedBorrow(expression.reference.declaration)
-      const mapping =
-        contract === undefined
-          ? undefined
-          : expression.mappings.find(
-              (candidate) => candidate.parameter.id.ordinal === contract.parameter.id.ordinal,
-            )
-      return mapping === undefined
-        ? undefined
-        : originOf(mapping.argument.expression, patternOrigins)
+      const argument = returnedBorrowArgument(expression)
+      return argument === undefined ? undefined : originOf(argument.expression, patternOrigins)
     }
     if (expression._tag === 'Call' && expression.reference._tag === 'ResolvedBuiltin') {
       const ordinal = expression.reference.returnedBorrowParameter
@@ -6668,11 +6685,29 @@ const analyzeFunctionBody = (
   }
 
   if (returnedBorrow !== undefined) {
+    const isBorrowFreeReturn = (expression: ExpressionFact): boolean => {
+      if (expression._tag === 'Grouped') return isBorrowFreeReturn(expression.expression)
+      if (expression._tag === 'StaticText') return expression.data?.kind === 'Text'
+      if (expression._tag !== 'Call' || expression.reference._tag !== 'Resolved') return false
+      const argument = returnedBorrowArgument(expression)
+      return (
+        argument === undefined &&
+        expression.type._tag === 'Available' &&
+        Type.containsViewBorrow(expression.type.type) &&
+        expression.arguments.every(
+          (candidate) =>
+            candidate.type._tag === 'Available' && !Type.containsViewBorrow(candidate.type.type),
+        )
+      )
+    }
     const validateReturns = (body: ReadonlyArray<StatementFact>): void => {
       for (const statement of body) {
         if (statement._tag === 'ReturnStatement') {
           const origin = originOf(statement.expression)
-          if (origin?.id.ordinal !== returnedBorrow.parameter.id.ordinal) {
+          if (
+            origin?.id.ordinal !== returnedBorrow.parameter.id.ordinal &&
+            !isBorrowFreeReturn(statement.expression)
+          ) {
             context.diagnostics.push(
               Diagnostic.invalidReturnedBorrowOrigin(statement.expression.syntax.span),
             )
@@ -6952,12 +6987,19 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
   if (fact._tag === 'StaticText') {
     return fact.data === undefined
       ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
-      : Object.freeze({
-          _tag: 'StaticTextLiteral',
-          data: fact.data,
-          type: Type.slice('Shared', 'u8'),
-          span: fact.syntax.span,
-        })
+      : fact.data.kind === 'Text'
+        ? Object.freeze({
+            _tag: 'StaticStringLiteral',
+            data: fact.data,
+            type: Type.string,
+            span: fact.syntax.span,
+          })
+        : Object.freeze({
+            _tag: 'StaticByteViewLiteral',
+            data: fact.data,
+            type: Type.slice('Shared', 'u8'),
+            span: fact.syntax.span,
+          })
   }
   if (fact._tag === 'Unit') {
     return Object.freeze({
@@ -7501,6 +7543,70 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
             )
           })
         : []
+    const arguments_ = Object.freeze(
+      fact.arguments.map((argument, ordinal) => {
+        const borrowId: Hir.BorrowId | undefined =
+          argument.expression._tag === 'Borrow' &&
+          argument.expression.formation._tag !== 'Unavailable'
+            ? Object.freeze({
+                _tag: 'BorrowId',
+                function: argument.id.function,
+                callSpan: argument.id.callSpan,
+                ordinal,
+              })
+            : undefined
+        return hirExpression(argument.expression, borrowId)
+      }),
+    )
+    const heldLoans = Object.freeze(
+      fact.reference.operation === 'RawBufferSlot'
+        ? directLoanEnds
+        : fact.arguments.flatMap(
+            (argument, ordinal): ReadonlyArray<Hir.BorrowId> =>
+              argument.expression._tag === 'Borrow' &&
+              argument.expression.formation._tag !== 'Unavailable' &&
+              returnedBorrowParameter === ordinal
+                ? [
+                    Object.freeze({
+                      _tag: 'BorrowId' as const,
+                      function: argument.id.function,
+                      callSpan: argument.id.callSpan,
+                      ordinal,
+                    }),
+                  ]
+                : [],
+          ),
+    )
+    if (fact.reference.operation === 'StringFromUtf8Unchecked') {
+      const source = arguments_.at(0)
+      return source === undefined || source._tag === 'Unavailable'
+        ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+        : Object.freeze({
+            _tag: 'RuntimeStringView',
+            source,
+            heldLoans,
+            type: Type.string,
+            span: fact.syntax.span,
+          })
+    }
+    if (fact.reference.operation === 'StringEqualsExact') {
+      const left = arguments_.at(0)
+      const right = arguments_.at(1)
+      return left === undefined ||
+        right === undefined ||
+        left._tag === 'Unavailable' ||
+        right._tag === 'Unavailable'
+        ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+        : Object.freeze({
+            _tag: 'StringEquality',
+            left,
+            right,
+            negated: fact._tag === 'Operator' && fact.operator === 'NotEquals',
+            intrinsic: fact.reference.intrinsic,
+            type: Scalar.boolean.spelling,
+            span: fact.syntax.span,
+          })
+    }
     return Object.freeze({
       _tag: 'BuiltinCall',
       operation: fact.reference.operation,
@@ -7512,45 +7618,13 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
             )
           : [],
       ),
-      arguments: Object.freeze(
-        fact.arguments.map((argument, ordinal) => {
-          const borrowId: Hir.BorrowId | undefined =
-            argument.expression._tag === 'Borrow' &&
-            argument.expression.formation._tag !== 'Unavailable'
-              ? Object.freeze({
-                  _tag: 'BorrowId',
-                  function: argument.id.function,
-                  callSpan: argument.id.callSpan,
-                  ordinal,
-                })
-              : undefined
-          return hirExpression(argument.expression, borrowId)
-        }),
-      ),
+      arguments: arguments_,
       loanEnds: Object.freeze(
         fact.reference.operation === 'RawBufferSlot'
           ? []
           : [...directLoanEnds, ...nestedSlotLoanEnds],
       ),
-      heldLoans: Object.freeze(
-        fact.reference.operation === 'RawBufferSlot'
-          ? directLoanEnds
-          : fact.arguments.flatMap(
-              (argument, ordinal): ReadonlyArray<Hir.BorrowId> =>
-                argument.expression._tag === 'Borrow' &&
-                argument.expression.formation._tag !== 'Unavailable' &&
-                returnedBorrowParameter === ordinal
-                  ? [
-                      Object.freeze({
-                        _tag: 'BorrowId' as const,
-                        function: argument.id.function,
-                        callSpan: argument.id.callSpan,
-                        ordinal,
-                      }),
-                    ]
-                  : [],
-            ),
-      ),
+      heldLoans,
       type: fact.type.type,
       span: fact.syntax.span,
     })
@@ -7637,6 +7711,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
   ) {
     const target = fact.reference.declaration
     const substitution = fact.contract.substitution
+    const returnedBorrowOrdinal = returnedBorrowArgument(fact)?.id.ordinal
     const call = {
       target: fact.reference.declaration.canonical.id,
       typeArguments: fact.contract.typeArguments,
@@ -7669,7 +7744,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
           (argument, ordinal): ReadonlyArray<Hir.BorrowId> =>
             argument.expression._tag === 'Borrow' &&
             argument.expression.formation._tag !== 'Unavailable' &&
-            DeclarationIndex.returnedBorrow(target)?.parameter.id.ordinal !== ordinal
+            returnedBorrowOrdinal !== ordinal
               ? [
                   Object.freeze({
                     _tag: 'BorrowId',
@@ -7686,7 +7761,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
           (argument, ordinal): ReadonlyArray<Hir.BorrowId> =>
             argument.expression._tag === 'Borrow' &&
             argument.expression.formation._tag !== 'Unavailable' &&
-            DeclarationIndex.returnedBorrow(target)?.parameter.id.ordinal === ordinal
+            returnedBorrowOrdinal === ordinal
               ? [
                   Object.freeze({
                     _tag: 'BorrowId',

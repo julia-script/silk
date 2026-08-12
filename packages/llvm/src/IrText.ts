@@ -456,6 +456,20 @@ const renderMetadataNode = (
         ['encoding', encoding[node.encoding]],
       ])})`
     }
+    case 'StringType': {
+      const encoding: Readonly<Record<MetadataDescription.StringEncoding, string>> = {
+        utf: 'DW_ATE_UTF',
+      }
+      return `!DIStringType(${metadataFields([
+        ['name', string(node.name)],
+        ['stringLength', ref(node.stringLength)],
+        ['stringLengthExpression', ref(node.stringLengthExpression)],
+        ['stringLocationExpression', ref(node.stringLocationExpression)],
+        ['size', node.sizeInBits],
+        ['align', node.alignInBits],
+        ['encoding', encoding[node.encoding]],
+      ])})`
+    }
     case 'CompositeType': {
       const tag: Readonly<Record<MetadataDescription.CompositeKind, string>> = {
         structure: 'DW_TAG_structure_type',

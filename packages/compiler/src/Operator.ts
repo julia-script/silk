@@ -30,11 +30,11 @@ export interface InfixInfo {
 }
 
 /** A compiler-known actor selected by operator elaboration. */
-export type Actor = Scalar.Spelling
+export type Actor = Scalar.Spelling | 'string'
 
 /** The canonical actor operation represented by one surface operator. */
 export interface Target {
-  readonly actor: Actor
+  readonly actor: string
   readonly operation: string
 }
 
@@ -137,9 +137,18 @@ export const target = (
   equalityActor: Actor = Scalar.defaultInteger.spelling,
 ): Target => {
   if (self === 'Equals' || self === 'NotEquals') {
+    if (equalityActor === 'string') {
+      return Object.freeze({ actor: 'Intrinsic', operation: 'stringEqualsExact' })
+    }
     return Object.freeze({
       actor: equalityActor,
       operation: self === 'Equals' ? 'equals' : 'notEquals',
+    })
+  }
+  if (equalityActor === 'string') {
+    return Object.freeze({
+      actor: Scalar.defaultInteger.spelling,
+      operation: operationByOperator[self],
     })
   }
   const selected = Scalar.find(equalityActor)

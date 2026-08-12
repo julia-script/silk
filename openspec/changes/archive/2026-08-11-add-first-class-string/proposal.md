@@ -17,10 +17,16 @@ without moving ownership, allocation, Unicode policy, or collection behavior int
 - Provide explicit byte length, UTF-8 byte viewing, scalar traversal, and exact equality. Direct
   indexing, generic `length`, and implicit Unicode normalization are not supported.
 - Add minimal string intrinsics for unchecked formation, immutable bytes, byte length, and exact
-  equality, plus safe stdlib validation that returns a typed invalid-UTF-8 value.
+  equality. Declare them portable across the current evaluator, native, and Wasm execution targets,
+  and keep target availability visible in the auditable intrinsic inventory. Safe stdlib validation
+  returns a typed invalid-UTF-8 value.
 - Add ordinary stdlib `String` ownership over valid UTF-8 storage. `String` can copy a `string` and
   expose an allocation-free lexical `string` view, but the compiler does not recognize the stdlib
   declaration by module or type spelling.
+- **BREAKING**: Migrate semantic-text standard-library boundaries to `string`: complete logging
+  messages, normalized path construction and resolution, path text accessors, and native
+  filesystem roots. Keep byte slices at explicit UTF-8 conversion, binary I/O, and native ABI
+  boundaries.
 - Keep every conversion explicit: no implicit allocation and no implicit coercion between
   `string`, `String`, and byte views.
 
@@ -56,5 +62,6 @@ without moving ownership, allocation, Unicode policy, or collection behavior int
 The change affects lexer/elaboration type assignment, the compiler type vocabulary, ownership and
 borrow analysis, HIR and MIR, target layout and calling shapes, evaluation, LLVM and Wasm emission,
 debug information, analysis snapshots, and compiler fixtures. It adds shipped Silk stdlib source
-for owned strings and UTF-8 validation. Existing source that relies on a text literal being
-directly usable as `&[u8]` must call the explicit UTF-8 byte-view operation instead.
+for owned strings and UTF-8 validation. Existing semantic-text APIs now accept `string` directly;
+source that intentionally crosses into bytes, such as file contents, standard streams, or native
+OS intrinsics, must call the explicit UTF-8 byte-view operation instead.

@@ -1,6 +1,6 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
-import type * as Intrinsic from './Intrinsic.js'
+import * as Intrinsic from './Intrinsic.js'
 import * as Match from './Match.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -51,6 +51,9 @@ export interface BorrowId {
   readonly ordinal: number
 }
 
+const borrowText = (borrow: BorrowId): string =>
+  `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
+
 /** Hidden nominal identity for one source `effect {}` construction site. */
 export interface EffectSiteId {
   readonly _tag: 'EffectSiteId'
@@ -100,6 +103,10 @@ export type BuiltinOperation =
   | 'SlotTake'
   | 'SlotCopy'
   | 'SlotDrop'
+  | 'StringFromUtf8Unchecked'
+  | 'StringUtf8Bytes'
+  | 'StringByteLength'
+  | 'StringEqualsExact'
   | 'OsFileOpen'
   | 'OsFileRead'
   | 'OsFileWrite'
@@ -188,7 +195,13 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
-      readonly _tag: 'StaticTextLiteral'
+      readonly _tag: 'StaticStringLiteral'
+      readonly data: StaticText.Data
+      readonly type: Type.String
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'StaticByteViewLiteral'
       readonly data: StaticText.Data
       readonly type: Type.Slice
       readonly span: SourceSpan.SourceSpan
@@ -343,6 +356,22 @@ export type Expression =
       readonly source: Type.Type
       readonly access: Type.Reference['access']
       readonly type: Type.Reference
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'RuntimeStringView'
+      readonly source: Expression
+      readonly heldLoans: ReadonlyArray<BorrowId>
+      readonly type: Type.String
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'StringEquality'
+      readonly left: Expression
+      readonly right: Expression
+      readonly negated: boolean
+      readonly intrinsic: Intrinsic.OperationId
+      readonly type: 'bool'
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -634,6 +663,10 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
       case 'Project':
       case 'UnionConvert':
         return [expression._tag === 'UnionConvert' ? expression.source : expression.subject]
+      case 'RuntimeStringView':
+        return [expression.source]
+      case 'StringEquality':
+        return [expression.left, expression.right]
       case 'Replace':
         return [expression.value]
       case 'IndexPlace':
@@ -693,6 +726,10 @@ export const hasUnavailable = (self: HirFunction): boolean => {
       case 'Move':
       case 'Project':
         return walk(expression.subject)
+      case 'RuntimeStringView':
+        return walk(expression.source)
+      case 'StringEquality':
+        return walk(expression.left) || walk(expression.right)
       case 'Replace':
         return walk(expression.value)
       case 'UnionConvert':
@@ -749,6 +786,10 @@ export const firstUnavailable = (
       case 'Move':
       case 'Project':
         return walk(expression.subject)
+      case 'RuntimeStringView':
+        return walk(expression.source)
+      case 'StringEquality':
+        return walk(expression.left) ?? walk(expression.right)
       case 'Replace':
         return walk(expression.value)
       case 'UnionConvert':
@@ -836,7 +877,10 @@ export type VerificationIssue =
   | { readonly _tag: 'InvalidPatternBinding'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidSliceBorrow'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidValueBorrow'; readonly span: SourceSpan.SourceSpan }
+  | { readonly _tag: 'InvalidStaticText'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidSliceOperation'; readonly span: SourceSpan.SourceSpan }
+  | { readonly _tag: 'InvalidStringView'; readonly span: SourceSpan.SourceSpan }
+  | { readonly _tag: 'InvalidStringEquality'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidLoanEnd'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidBorrowedWrite'; readonly span: SourceSpan.SourceSpan }
 
@@ -851,14 +895,21 @@ const sameMembers = (
 export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
   const issues: Array<VerificationIssue> = []
   const active = new Set<Expression>()
-  const borrowKey = (borrow: BorrowId): string =>
-    `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
   const walk = (expression: Expression): void => {
     if (active.has(expression)) {
       issues.push(Object.freeze({ _tag: 'CyclicExpression', span: expression.span }))
       return
     }
     active.add(expression)
+    if (
+      (expression._tag === 'StaticStringLiteral' &&
+        (expression.data.kind !== 'Text' || !Type.equals(expression.type, Type.string))) ||
+      (expression._tag === 'StaticByteViewLiteral' &&
+        (expression.data.kind !== 'Bytes' ||
+          !Type.equals(expression.type, Type.slice('Shared', 'u8'))))
+    ) {
+      issues.push(Object.freeze({ _tag: 'InvalidStaticText', span: expression.span }))
+    }
     if (expression._tag === 'SliceBorrow') {
       const element = Type.isFixedArray(expression.source)
         ? expression.source.element
@@ -881,6 +932,35 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
       ) {
         issues.push(Object.freeze({ _tag: 'InvalidValueBorrow', span: expression.span }))
       }
+    }
+    if (expression._tag === 'RuntimeStringView') {
+      const begins = expressionTree(expression.source).flatMap((candidate) =>
+        candidate._tag === 'SliceBorrow' || candidate._tag === 'ValueBorrow'
+          ? [borrowText(candidate.borrow)]
+          : [],
+      )
+      const held = expression.heldLoans.map(borrowText)
+      if (
+        expression.source._tag === 'Unavailable' ||
+        !Type.equals(expression.type, Type.string) ||
+        !Type.equals(expression.source.type, Type.slice('Shared', 'u8')) ||
+        begins.length !== held.length ||
+        begins.some((begin, ordinal) => begin !== held.at(ordinal)) ||
+        new Set(held).size !== held.length
+      ) {
+        issues.push(Object.freeze({ _tag: 'InvalidStringView', span: expression.span }))
+      }
+    }
+    if (
+      expression._tag === 'StringEquality' &&
+      (expression.left._tag === 'Unavailable' ||
+        expression.right._tag === 'Unavailable' ||
+        !Type.equals(expression.left.type, Type.string) ||
+        !Type.equals(expression.right.type, Type.string) ||
+        !Type.equals(expression.type, 'bool') ||
+        expression.intrinsic.name !== 'stringEqualsExact')
+    ) {
+      issues.push(Object.freeze({ _tag: 'InvalidStringEquality', span: expression.span }))
     }
     if (expression._tag === 'SliceLength') {
       if (
@@ -932,8 +1012,8 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
               (candidate.borrow.callSpan.start === expression.span.start &&
                 candidate.borrow.callSpan.end === expression.span.end)),
         )
-        .map((candidate) => borrowKey(candidate.borrow))
-      const ends = [...expression.loanEnds, ...expression.heldLoans].map(borrowKey)
+        .map((candidate) => borrowText(candidate.borrow))
+      const ends = [...expression.loanEnds, ...expression.heldLoans].map(borrowText)
       if (
         begins.length !== ends.length ||
         begins.some((begin, ordinal) => begin !== ends.at(ordinal)) ||
@@ -1092,8 +1172,10 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       return `${indent}literal ${expression.value} : ${Type.encode(expression.type)}${expression.constant === undefined ? '' : ` constant=${expression.constant.module}::${expression.constant.name}`} ${spanText(expression.span)}`
     case 'FloatingLiteral':
       return `${indent}literal ${expression.spelling} bits=0x${expression.bits.toString(16)} : ${expression.type} ${spanText(expression.span)}`
-    case 'StaticTextLiteral':
-      return `${indent}static-${expression.data.kind.toLowerCase()} ${expression.data.id} bytes=${expression.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} length=${expression.data.bytes.length} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+    case 'StaticStringLiteral':
+      return `${indent}static-string ${expression.data.id} bytes=${expression.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} length=${expression.data.bytes.length} provenance=program : string ${spanText(expression.span)}`
+    case 'StaticByteViewLiteral':
+      return `${indent}static-bytes ${expression.data.id} bytes=${expression.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} length=${expression.data.bytes.length} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'UnitLiteral':
       return `${indent}unit : () ${spanText(expression.span)}`
     case 'BooleanLiteral':
@@ -1108,6 +1190,17 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       return [
         `${indent}move : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.subject, depth + 1),
+      ].join('\n')
+    case 'RuntimeStringView':
+      return [
+        `${indent}runtime-string-view loans=${expression.heldLoans.map(borrowText).join(',') || 'none'} : string ${spanText(expression.span)}`,
+        encodeExpression(expression.source, depth + 1),
+      ].join('\n')
+    case 'StringEquality':
+      return [
+        `${indent}string-${expression.negated ? 'not-equals' : 'equals'} intrinsic=${Intrinsic.operationText(expression.intrinsic)} : bool ${spanText(expression.span)}`,
+        encodeExpression(expression.left, depth + 1),
+        encodeExpression(expression.right, depth + 1),
       ].join('\n')
     case 'Replace':
       return [

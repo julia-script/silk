@@ -110,6 +110,12 @@ existing operator table resolves concrete operators to compiler-known actors; ad
 of a stdlib equality declaration would be a larger and less principled privilege. Its semantics are
 only exact byte comparison of valid UTF-8, so it adds no Unicode or locale policy.
 
+Each operation declares the complete current execution-target set in the intrinsic catalog. The
+shared availability pass therefore admits the portable string operations for evaluator, native,
+and Wasm pipelines and rejects a missing target during backend preparation before target layout and
+MIR lowering. The deterministic inventory records the normalized target list alongside signature,
+safety, admission, and consumer metadata.
+
 Validation, copying, appending, capacity, scalar decoding, normalization, and grapheme policy are
 excluded from the catalog. The intrinsic inventory fixture remains the auditable source of exact
 signatures, unsafe classification, admission phase, and stdlib consumer.
@@ -145,6 +151,25 @@ contracts; there is no collection-shaped compiler operation.
 *Alternative considered:* validate in the intrinsic and return a result. Rejected because UTF-8
 diagnostic detail, validation strategy, and safe wrapper shape are reusable library policy rather
 than representation primitives.
+
+### Semantic stdlib text boundaries use string
+
+The standard library classifies every existing `&[u8]` boundary by meaning rather than preserving
+the pre-string API mechanically. Complete log messages, normalized paths, path components, and
+native filesystem roots are text and therefore accept or return `string`. Their implementations
+borrow UTF-8 bytes only at private storage loops, binary stream writes, directory-entry decoding,
+or raw OS intrinsic calls. Directory entries arriving from a native provider are validated before
+they become path text through the explicitly named `Path.joinUtf8` provider interop operation;
+ordinary path construction, joining, resolution, and inspection remain string-shaped.
+
+Byte collections, whole-file contents, standard streams, and the sealed OS ABI remain byte-based:
+their semantics permit arbitrary octets or require a physical encoding. The explicit
+`string.utf8Bytes` operation marks each text-to-binary crossing. This keeps `string` useful at
+domain boundaries without pretending that every byte buffer is text.
+
+*Alternative considered:* preserve all old byte-slice signatures and require callers to convert
+string literals. Rejected because logging and paths only used bytes as a substitute for the text
+type that did not yet exist, making the resulting API needlessly representation-shaped.
 
 ### Literal and conversion behavior is deliberately non-contextual
 
@@ -191,6 +216,9 @@ without changing this compiler type boundary.
   MIR and layout in addition to lane equality.
 - [Equality or traversal grows compiler Unicode policy] → Limit compiler equality to exact bytes of
   already valid input and keep every Unicode table/algorithm in stdlib source.
+- [A string intrinsic is implemented by only some execution targets] → Declare and inventory the
+  complete portable target set, test availability for evaluator/native/Wasm, and reject unavailable
+  targets during backend preparation before target layout and MIR lowering.
 - [Debuggers cannot express a native UTF-8 view directly] → Preserve canonical string metadata and
   deterministic physical components; use the strongest pinned LLVM representation without making
   debugger limitations part of source semantics.
@@ -204,8 +232,9 @@ without changing this compiler type boundary.
 3. Add the four intrinsic operations, verification, evaluator behavior, and native/Wasm parity.
 4. Add lexical runtime formation and loan propagation, including nested validated results.
 5. Ship `silk/string` with validation, owned storage, explicit views/copies, and scalar traversal.
-6. Change text literal typing to `string`, migrate stdlib/examples/tests to explicit UTF-8 byte
-   viewing, then enable the breaking diagnostics for implicit use as `&[u8]`.
+6. Change text literal typing to `string`, migrate semantic stdlib boundaries to accept text, and
+   add explicit UTF-8 byte views only at genuinely binary or native ABI crossings; then enable the
+   breaking diagnostics for implicit use as `&[u8]`.
 7. Add string-aware inspection and debug metadata, run the full release-candidate verification,
    and land the change atomically because the project is pre-release.
 

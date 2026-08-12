@@ -64,6 +64,17 @@ impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }`,
   }),
 )
 
+it.effect('keeps string distinct from an immutable byte view in module surfaces', () =>
+  Effect.gen(function* () {
+    const text = yield* surface('pub fn identity(value: string) -> string { return value }')
+    const bytes = yield* surface('pub fn identity(value: &[u8]) -> &[u8] { return value }')
+
+    assert.strictEqual(ModuleSurface.equals(text, bytes), false)
+    assert.include(text.canonical, 'string')
+    assert.include(bytes.canonical, 'slice:Shared<builtin:u8>')
+  }),
+)
+
 it.effect('keeps malformed and unavailable header states deterministic without stale repair', () =>
   Effect.gen(function* () {
     const damaged = 'pub fn answer(value: ) -> { return 1 }'

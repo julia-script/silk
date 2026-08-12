@@ -32,9 +32,11 @@ const mirType = (
   return typeof specialized === 'string'
     ? Type.isBuiltin(specialized)
       ? Object.freeze({ _tag: specialized })
-      : Type.isNever(specialized)
-        ? Object.freeze({ _tag: 'Bottom', type: specialized })
-        : undefined
+      : Type.isString(specialized)
+        ? Object.freeze({ _tag: 'String', type: specialized })
+        : Type.isNever(specialized)
+          ? Object.freeze({ _tag: 'Bottom', type: specialized })
+          : undefined
     : Type.isNominal(specialized)
       ? Object.freeze({ _tag: 'Nominal', type: specialized })
       : Type.isFixedArray(specialized)
@@ -1083,7 +1085,74 @@ function lowerExpressionInner(
       )
       return { result: destination }
     }
-    case 'StaticTextLiteral': {
+    case 'StaticStringLiteral': {
+      const type = fn.type(expression.type)
+      if (type?._tag !== 'String') return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'StaticString',
+          destination,
+          data: expression.data.id,
+          byteLength: expression.data.bytes.length,
+          type,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
+    case 'RuntimeStringView': {
+      const source = lowerExpression(fn, expression.source)
+      const sourceType = source === undefined ? undefined : fn.localTypes.at(source.result.ordinal)
+      const type = fn.type(expression.type)
+      if (
+        source === undefined ||
+        sourceType?._tag !== 'Slice' ||
+        !Type.equals(sourceType.type, Type.slice('Shared', 'u8')) ||
+        type?._tag !== 'String'
+      )
+        return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'StringFromUtf8Unchecked',
+          destination,
+          bytes: source.result,
+          heldLoans: expression.heldLoans,
+          authorization: 'Unsafe',
+          type,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
+    case 'StringEquality': {
+      const left = lowerExpression(fn, expression.left)
+      const right = lowerExpression(fn, expression.right)
+      const leftType = left === undefined ? undefined : fn.localTypes.at(left.result.ordinal)
+      const rightType = right === undefined ? undefined : fn.localTypes.at(right.result.ordinal)
+      if (
+        left === undefined ||
+        right === undefined ||
+        leftType?._tag !== 'String' ||
+        rightType?._tag !== 'String'
+      )
+        return undefined
+      const destination = fn.alloc(bool)
+      fn.emit(
+        Object.freeze({
+          _tag: 'StringEqualsExact',
+          destination,
+          left: left.result,
+          right: right.result,
+          negated: expression.negated,
+          type: bool,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
+    case 'StaticByteViewLiteral': {
       const type = fn.type(expression.type)
       if (type?._tag !== 'Slice') return undefined
       const destination = fn.alloc(type)
@@ -2699,6 +2768,43 @@ function lowerExpressionInner(
         return finishBuiltin(destination)
       }
       if (isOsOperation(expression.operation)) return undefined
+      if (expression.operation === 'StringFromUtf8Unchecked') return undefined
+      if (expression.operation === 'StringUtf8Bytes') {
+        const [string] = argumentLocals
+        const stringType = string === undefined ? undefined : fn.localTypes.at(string.ordinal)
+        const type = fn.type(expression.type)
+        if (string === undefined || stringType?._tag !== 'String' || type?._tag !== 'Slice')
+          return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'StringUtf8Bytes',
+            destination,
+            string,
+            heldLoans: expression.heldLoans,
+            type,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      if (expression.operation === 'StringByteLength') {
+        const [string] = argumentLocals
+        const stringType = string === undefined ? undefined : fn.localTypes.at(string.ordinal)
+        if (string === undefined || stringType?._tag !== 'String') return undefined
+        const destination = fn.alloc(usize)
+        fn.emit(
+          Object.freeze({
+            _tag: 'StringByteLength',
+            destination,
+            string,
+            type: usize,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      if (expression.operation === 'StringEqualsExact') return undefined
       const conversionTarget = Scalar.conversionTarget(expression.operation)
       if (Scalar.isCheckedOperation(expression.operation)) {
         const [first] = argumentLocals
@@ -3173,7 +3279,7 @@ const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined
     const site = release.binding.site
     const dropped =
       site._tag === 'Parameter'
-        ? local(site.parameter.ordinal)
+        ? fn.parameterLocals.get(site.parameter.ordinal)
         : fn.bindingLocals.get(site.binding.ordinal)
     if (dropped === undefined) continue
     const localType = fn.localTypes.at(dropped.ordinal)
@@ -4274,13 +4380,16 @@ export const lowerProgram = (
 ): Mir.Module => {
   const staticDataById = new Map<
     string,
-    Extract<Hir.Expression, { readonly _tag: 'StaticTextLiteral' }>['data']
+    Extract<
+      Hir.Expression,
+      { readonly _tag: 'StaticStringLiteral' | 'StaticByteViewLiteral' }
+    >['data']
   >()
   for (const instance of discovery.instances) {
     for (const expression of instance.function.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)) {
-      if (expression._tag === 'StaticTextLiteral')
+      if (expression._tag === 'StaticStringLiteral' || expression._tag === 'StaticByteViewLiteral')
         staticDataById.set(expression.data.id, expression.data)
     }
   }

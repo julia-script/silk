@@ -17,7 +17,6 @@ import silk.filesystem {
   FileSystem,
   Path,
   alreadyExists,
-  asBytes as pathBytes,
   createDirectoryOperation,
   directory,
   directoryEntry,
@@ -40,10 +39,12 @@ import silk.filesystem {
   unsupported,
   writeFileOperation,
   wrongType,
-  join as pathJoin
+  joinUtf8 as pathJoinUtf8,
+  view as pathView
 }
 import silk.option { None, Option, Some, none }
 import silk.result { Failure, Result, Success }
+import silk.string { utf8Bytes as stringUtf8Bytes }
 import silk.vector {
   Vector,
   asSlice as vectorSlice,
@@ -59,16 +60,21 @@ pub struct OsFileSystem {
 fn counted(value: usize) -> usize { return value }
 
 /// Copies one absolute native root. A relative or NUL-containing root violates the constructor precondition.
-pub effect fn make(root: &[u8]) -> OsFileSystem ! OutOfMemory ? &mut Allocator {
-  if root.length == counted(0) { let invalid = 1 / 0 }
-  if root[counted(0)] != u8.toU8(47) { let invalid = 1 / 0 }
+pub effect fn make(root: string) -> OsFileSystem ! OutOfMemory ? &mut Allocator {
+  let rootBytes = stringUtf8Bytes(root)
+  if rootBytes.length == counted(0) { let invalid = 1 / 0 }
+  if rootBytes[counted(0)] != u8.toU8(47) { let invalid = 1 / 0 }
   let mut index = counted(0)
-  while index < root.length {
-    if root[index] == u8.toU8(0) { let invalid = 1 / 0 }
+  while index < rootBytes.length {
+    if rootBytes[index] == u8.toU8(0) { let invalid = 1 / 0 }
     index = index + counted(1)
   }
-  let owned = run bytesCopy(root)
+  let owned = run bytesCopy(rootBytes)
   return OsFileSystem { root: move owned }
+}
+
+fn pathBytes(path: &Path) -> &[u8] {
+  return stringUtf8Bytes(pathView(path))
 }
 
 fn reason(value: i32) -> FileReason {
@@ -334,7 +340,7 @@ effect fn listLoop(
           let appended = run bytesAppend(&mut name, &one)
           index = index + counted(1)
         }
-        let child = run pathJoin(parent, bytesSlice(&name))
+        let child = run pathJoinUtf8(parent, bytesSlice(&name))
         let mut entryKind = directory()
         if kind == 0 { entryKind = file() }
         let insertion = insertionFor(&child, vectorSlice<DirectoryEntry>(&entries))

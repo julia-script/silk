@@ -6,7 +6,7 @@ import silk.logging { LogError, LogLevel, Logger }
 
 /// Dispatches one complete Info message through the explicitly provided Logger.
 pub effect fn log(
-  message: &[u8]
+  message: string
 ) -> () ! LogError ? &mut Logger {
   return run Logger.log(LogLevel.info(), message)
 }
@@ -14,7 +14,7 @@ pub effect fn log(
 /// Dispatches one complete message at the selected level through the provided Logger.
 pub effect fn logAt(
   level: LogLevel,
-  message: &[u8]
+  message: string
 ) -> () ! LogError ? &mut Logger {
   return run Logger.log(move level, message)
 }

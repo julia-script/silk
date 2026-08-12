@@ -311,6 +311,67 @@ it.effect('resolves header signatures and diagnoses unknown types at exact spans
   }),
 )
 
+it.effect('resolves string in signatures and generic arguments without treating it as scalar', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `pub struct Box<T> { value: T }
+pub fn identity(value: string, boxed: Box<string>) -> string { return value }`,
+      ],
+    ])
+    const declaration = index.modules.at(0)?.declarations.at(0)
+    const parameterTypes = declaration?.parameters.map((parameter) =>
+      parameter.declaredType._tag === 'Resolved'
+        ? parameter.declaredType.type
+        : parameter.declaredType._tag,
+    )
+
+    assert.deepEqual(
+      parameterTypes?.map((type) => (typeof type === 'string' ? type : Type.encode(type))),
+      ['string', 'root.Box<string>'],
+    )
+    assert.strictEqual(
+      declaration?.returnType._tag === 'Resolved'
+        ? Type.equals(declaration.returnType.type, Type.string)
+        : false,
+      true,
+    )
+    assert.strictEqual(Type.isBuiltin(Type.string), false)
+    assert.strictEqual(DeclarationIndex.copyType(index, Type.string), true)
+    assert.strictEqual(DeclarationIndex.containsLexicalBorrow(index, Type.string), true)
+    assert.deepEqual(index.diagnostics, [])
+  }),
+)
+
+it.effect('rejects reference and slice wrappers around the canonical string view', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        'fn duplicate(first: &string, second: &mut string, third: &[string]) -> () { return () }',
+      ],
+    ])
+    const declaration = index.modules.at(0)?.declarations.at(0)
+
+    assert.deepEqual(
+      declaration?.parameters.map((parameter) => parameter.declaredType._tag),
+      ['Unavailable', 'Unavailable', 'Unavailable'],
+    )
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        reason: diagnostic.reason,
+      })),
+      [
+        { code: 'SEM0094', reason: { _tag: 'InvalidStringViewType', form: 'reference' } },
+        { code: 'SEM0094', reason: { _tag: 'InvalidStringViewType', form: 'reference' } },
+        { code: 'SEM0094', reason: { _tag: 'InvalidStringViewType', form: 'slice' } },
+      ],
+    )
+  }),
+)
+
 it.effect('resolves callable parameter and result contracts canonically', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [

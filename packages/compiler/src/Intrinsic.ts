@@ -245,8 +245,64 @@ const scalarActor = (scalar: Scalar.Scalar): Actor =>
     scalar.operations.map((operation) => scalarOperation(scalar, operation)),
   )
 
+const stringOperations = actor(
+  'string',
+  'Type',
+  Object.freeze([
+    Object.freeze({
+      ...builtin({
+        actor: 'string',
+        name: 'fromUtf8Unchecked',
+        operation: 'StringFromUtf8Unchecked',
+        parameters: Object.freeze([valueParameter('bytes', '&[u8]')]),
+        semanticParameters: Object.freeze([byteSlice]),
+        result: 'string',
+        semanticResult: Type.string,
+        unsafe: true,
+        returnedBorrowParameter: 0,
+      }),
+      invariant:
+        'bytes remain live and immutable for the returned view lifetime and contain complete valid UTF-8',
+    }),
+    builtin({
+      actor: 'string',
+      name: 'utf8Bytes',
+      operation: 'StringUtf8Bytes',
+      parameters: Object.freeze([valueParameter('value', 'string')]),
+      semanticParameters: Object.freeze([Type.string]),
+      result: '&[u8]',
+      semanticResult: byteSlice,
+      returnedBorrowParameter: 0,
+    }),
+    builtin({
+      actor: 'string',
+      name: 'byteLength',
+      operation: 'StringByteLength',
+      parameters: Object.freeze([valueParameter('value', 'string')]),
+      semanticParameters: Object.freeze([Type.string]),
+      result: 'usize',
+      semanticResult: 'usize',
+    }),
+    builtin({
+      actor: 'string',
+      name: 'equalsExact',
+      operation: 'StringEqualsExact',
+      parameters: Object.freeze([
+        valueParameter('left', 'string'),
+        valueParameter('right', 'string'),
+      ]),
+      semanticParameters: Object.freeze([Type.string, Type.string]),
+      result: 'bool',
+      semanticResult: 'bool',
+    }),
+  ]),
+)
+
+const stringActor = actor('string', 'Type', Object.freeze([]))
+
 const legacyActors = Object.freeze([
   ...Scalar.all().map(scalarActor),
+  stringOperations,
   actor('OsHandle', 'Type', Object.freeze([])),
   actor(
     'Os',
@@ -706,7 +762,7 @@ const flatOperations = Object.freeze(
           ? 'Effect'
           : actor_.spelling === 'Host' || actor_.spelling === 'Storage' || actor_.spelling === 'Os'
             ? 'Platform'
-            : actor_.spelling === 'Layout'
+            : actor_.spelling === 'Layout' || actor_.spelling === 'string'
               ? 'Representation'
               : actor_.spelling === 'RawBuffer' || actor_.spelling === 'Slot'
                 ? 'Ownership'
@@ -748,7 +804,7 @@ const flatOperations = Object.freeze(
   ),
 )
 
-const operations = Object.freeze([actor('Intrinsic', 'Namespace', flatOperations)])
+const operations = Object.freeze([stringActor, actor('Intrinsic', 'Namespace', flatOperations)])
 
 /** Every intrinsic actor in stable presentation and completion order. */
 export const all = (): ReadonlyArray<Actor> => operations

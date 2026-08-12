@@ -63,7 +63,8 @@ The bootstrap language currently includes:
 - mutable bindings, transactional place replacement, structured loops, and runtime recursion;
 - affine values, moves, shared and exclusive borrows, restricted deterministic `Drop`, allocator
   capabilities, raw storage, and lexical slots;
-- static text and byte literals, including escaped triple-quoted multiline forms; and
+- immutable UTF-8 `string` views, owned standard-library `String` values, byte literals, and
+  escaped triple-quoted multiline text; and
 - lazy typed `Effect` computations with failure recovery, retry, shared/exclusive/owned service
   provision, ordinary source-defined combinators, and complete-message semantic logging through an
   explicit replaceable `Logger` service.
@@ -72,17 +73,20 @@ The compiler-shipped standard library lives as canonical `.silk` files under [`s
 `Result`, Effect transformations, Option, and the generic growable `Vector<T>` compile through the
 same declaration, ownership, specialization, and lowering paths as user code. `Logger`,
 `Effect.log`, `StdoutLogger`, and `InMemoryLogger` use those same paths: callers submit complete
-borrowed UTF-8 messages, while providers own formatting, retention, and physical output strategy.
+borrowed `string` messages, while providers own formatting, retention, and physical output strategy.
 Owned `Bytes`, normalized provider-absolute `Path`, allocation-free `FileError`, and the seven-
 operation mutable `FileSystem` service are also ordinary source. No platform provider is selected by
 an import; native, browser, test, and Wasm applications explicitly provide their implementation.
 Native applications may construct the ordinary `silk.os_filesystem.OsFileSystem` provider with an
-owned absolute root. Its compiler boundary is limited to unsafe native-only handle intrinsics;
+owned absolute `string` root. Its compiler boundary is limited to unsafe native-only handle intrinsics;
 evaluator hosts opt in through the exported `OsFileSystemHost.Provider`, and direct WebAssembly
 receives no implicit imports or filesystem ABI.
 
-This remains an unreleased subset. It does not yet commit to an owning String, enums, concurrency,
-networking, a general FFI, a package registry, or self-hosting.
+See the [standard-library string reference](stdlib/README.md#string-and-string) for the distinction
+between borrowed `string`, owned `String`, and byte views.
+
+This remains an unreleased subset. It does not yet commit to enums, concurrency, networking, a
+general FFI, a package registry, or self-hosting.
 
 ## Source resolution and project analysis
 

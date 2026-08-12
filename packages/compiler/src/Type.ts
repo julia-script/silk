@@ -3,6 +3,9 @@ import * as Scalar from './Scalar.js'
 /** The built-in scalar types implemented by the current executable bootstrap surface. */
 export type Builtin = Scalar.Spelling
 
+/** The canonical immutable valid-UTF-8 view, distinct from every scalar and byte slice. */
+export type String = 'string'
+
 /** The empty structural union and uninhabited bottom type. */
 export type Bottom = 'never'
 
@@ -175,6 +178,7 @@ export interface StructuralUnion {
 /** The closed semantic type vocabulary accepted by declaration analysis. */
 export type Type =
   | Builtin
+  | String
   | Bottom
   | Nominal
   | Parameter
@@ -190,6 +194,9 @@ export type Type =
 export type UnionNormalization =
   | { readonly _tag: 'Normalized'; readonly type: Type }
   | { readonly _tag: 'InvalidMembers'; readonly members: ReadonlyArray<Type> }
+
+/** The canonical lowercase string identity used by source and every compiler phase. */
+export const string: String = 'string'
 
 /** Constructs one immutable canonical nominal type. */
 export const nominal = (
@@ -545,6 +552,9 @@ export const union = (inputs: ReadonlyArray<Type>): UnionNormalization => {
 /** Tests whether a semantic type is one of the executable built-in scalars. */
 export const isBuiltin = (self: unknown): self is Builtin => Scalar.isSpelling(self)
 
+/** Tests whether a semantic type is the canonical immutable UTF-8 string view. */
+export const isString = (self: unknown): self is String => self === string
+
 /** Tests whether a semantic type is the empty structural union. */
 export const isNever = (self: Type): self is Bottom => self === 'never'
 
@@ -585,6 +595,7 @@ export const isUnion = (self: Type): self is StructuralUnion =>
 
 /** Returns the canonical deterministic key used for equality and ordering. */
 export const key = (self: Type): string => {
+  if (isString(self)) return 'string'
   if (isBuiltin(self)) return `builtin:${self}`
   if (isNever(self)) return 'union:'
   if (isNominal(self))
@@ -738,6 +749,7 @@ export const isConcreteGenericArgument = (self: GenericArgument): boolean =>
 
 /** Tests whether a type contains a lexical borrow at any depth. */
 export const containsBorrow = (self: Type): boolean => {
+  if (isString(self)) return true
   if (isSlice(self) || isReference(self)) return true
   if (isSlot(self)) return true
   if (isFailureProjection(self)) return false
@@ -746,6 +758,39 @@ export const containsBorrow = (self: Type): boolean => {
   if (isCallable(self)) return self.parameters.some(containsBorrow) || containsBorrow(self.result)
   if (isEffect(self)) return containsBorrow(self.success) || self.failures.some(containsBorrow)
   if (isUnion(self)) return self.members.some(containsBorrow)
+  return false
+}
+
+/** Tests whether a value may carry a lexical immutable view through data or control flow. */
+export const containsViewBorrow = (self: Type): boolean => {
+  if (isString(self) || isSlice(self)) return true
+  if (isNominal(self)) return self.arguments.some(containsViewBorrow)
+  if (isFixedArray(self)) return containsViewBorrow(self.element)
+  if (isCallable(self))
+    return self.parameters.some(containsViewBorrow) || containsViewBorrow(self.result)
+  if (isEffect(self))
+    return containsViewBorrow(self.success) || self.failures.some(containsViewBorrow)
+  if (isUnion(self)) return self.members.some(containsViewBorrow)
+  return false
+}
+
+/** Tests for explicit borrow wrappers forbidden inside ordinary type positions. */
+export const containsPositionRestrictedBorrow = (self: Type): boolean => {
+  if (isString(self)) return false
+  if (isSlice(self) || isReference(self) || isSlot(self)) return true
+  if (isNominal(self)) return self.arguments.some(containsPositionRestrictedBorrow)
+  if (isFixedArray(self)) return containsPositionRestrictedBorrow(self.element)
+  if (isCallable(self))
+    return (
+      self.parameters.some(containsPositionRestrictedBorrow) ||
+      containsPositionRestrictedBorrow(self.result)
+    )
+  if (isEffect(self))
+    return (
+      containsPositionRestrictedBorrow(self.success) ||
+      self.failures.some(containsPositionRestrictedBorrow)
+    )
+  if (isUnion(self)) return self.members.some(containsPositionRestrictedBorrow)
   return false
 }
 

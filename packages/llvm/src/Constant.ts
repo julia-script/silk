@@ -605,6 +605,7 @@ export const string = Effect.fn('Constant.string')(function* (
     : input
   const i8 = yield* Type.integer(builder, 8)
   const type = yield* Type.array(builder, i8, contents.bytes.length)
+  if (ByteString.isEmpty(contents)) return yield* zero(builder, type)
   const typeIndex = yield* BuilderState.mutate(builder, 'Constant.string', (_state, owner) =>
     Handle.resolve(builder, owner, type, 'Type', 'Constant.string'),
   )

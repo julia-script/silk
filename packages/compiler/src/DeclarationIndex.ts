@@ -263,30 +263,34 @@ export interface ReturnedBorrowFact {
  * No lifetime names are inferred: a valid header has one, and only one, possible borrowed source.
  */
 export const returnedBorrow = (declaration: DeclarationFact): ReturnedBorrowFact | undefined => {
+  const result =
+    declaration.returnType._tag === 'Resolved' ? declaration.returnType.type : undefined
   if (
     declaration.functionKind !== 'Ordinary' ||
-    declaration.returnType._tag !== 'Resolved' ||
-    !Type.isSlice(declaration.returnType.type)
+    result === undefined ||
+    !Type.containsViewBorrow(result)
   ) {
     return undefined
   }
   const borrowed = declaration.parameters.filter(
     (parameter) =>
       parameter.declaredType._tag === 'Resolved' &&
-      (Type.isSlice(parameter.declaredType.type) || Type.isReference(parameter.declaredType.type)),
+      (Type.isReference(parameter.declaredType.type) ||
+        Type.containsViewBorrow(parameter.declaredType.type)),
   )
   const parameter = borrowed.length === 1 ? borrowed[0] : undefined
   if (parameter?.declaredType._tag !== 'Resolved') return undefined
   const source = parameter.declaredType.type
-  const sourceAccess = Type.isSlice(source) || Type.isReference(source) ? source.access : undefined
-  if (sourceAccess === undefined) return undefined
-  if (declaration.returnType.type.access === 'Exclusive' && sourceAccess !== 'Exclusive') {
+  const sourceAccess: 'Shared' | 'Exclusive' =
+    Type.isSlice(source) || Type.isReference(source) ? source.access : 'Shared'
+  const resultAccess: 'Shared' | 'Exclusive' = Type.isSlice(result) ? result.access : 'Shared'
+  if (resultAccess === 'Exclusive' && sourceAccess !== 'Exclusive') {
     return undefined
   }
   return Object.freeze({
     _tag: 'ReturnedBorrow',
     parameter,
-    access: declaration.returnType.type.access,
+    access: resultAccess,
   })
 }
 
@@ -815,6 +819,17 @@ export const analyzeDeclaredType = (
     const access: Type.Slice['access'] =
       SyntaxTree.directToken(syntax, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
     const element = analyzeDeclaredType(source, elementSyntax, typeParameters)
+    if (element.fact._tag === 'Resolved' && Type.isString(element.fact.type)) {
+      const diagnostic = Diagnostic.invalidStringViewType('slice', syntax.span)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          syntax,
+          cause: Diagnostic.identity(diagnostic),
+        }),
+        diagnostics: Object.freeze([...element.diagnostics, diagnostic]),
+      })
+    }
     if (element.fact._tag === 'Resolved') {
       const type = Type.slice(access, element.fact.type)
       return Object.freeze({
@@ -856,6 +871,17 @@ export const analyzeDeclaredType = (
     const access: 'Shared' | 'Exclusive' =
       SyntaxTree.directToken(syntax, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
     const target = analyzeDeclaredType(source, targetSyntax, typeParameters)
+    if (target.fact._tag === 'Resolved' && Type.isString(target.fact.type)) {
+      const diagnostic = Diagnostic.invalidStringViewType('reference', syntax.span)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          syntax,
+          cause: Diagnostic.identity(diagnostic),
+        }),
+        diagnostics: Object.freeze([...target.diagnostics, diagnostic]),
+      })
+    }
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Reference',
@@ -1231,7 +1257,10 @@ export const analyzeDeclaredType = (
     segments: Object.freeze(segments),
     syntax,
   })
-  if (segments.length === 1 && (Type.isBuiltin(first.spelling) || first.spelling === 'never')) {
+  if (
+    segments.length === 1 &&
+    (Type.isBuiltin(first.spelling) || Type.isString(first.spelling) || first.spelling === 'never')
+  ) {
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Resolved',
@@ -2958,8 +2987,10 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
 
   const conformanceKeys = new Map<string, SourceSpan.SourceSpan>()
   const copyMemo = new Map<string, boolean>()
+  const containsPositionRestrictedBorrow = Type.containsPositionRestrictedBorrow
   const isCopyType = (type: Type.Type, visiting = new Set<string>()): boolean => {
-    if (Type.isBuiltin(type) || Type.isReference(type) || Type.isSlice(type)) return true
+    if (Type.isBuiltin(type) || Type.isString(type) || Type.isReference(type) || Type.isSlice(type))
+      return true
     if (Type.isFixedArray(type)) return isCopyType(type.element, visiting)
     if (Type.isUnion(type)) return type.members.every((member) => isCopyType(member, visiting))
     if (Type.equals(type, Type.unit)) return true
@@ -3444,13 +3475,13 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         for (const parameter of member.parameters) {
           if (
             parameter.declaredType._tag === 'Resolved' &&
-            Type.containsBorrow(parameter.declaredType.type) &&
+            containsPositionRestrictedBorrow(parameter.declaredType.type) &&
             (!(
               Type.isSlice(parameter.declaredType.type) ||
               Type.isReference(parameter.declaredType.type) ||
               Type.isSlot(parameter.declaredType.type)
             ) ||
-              Type.containsBorrow(
+              containsPositionRestrictedBorrow(
                 Type.isSlice(parameter.declaredType.type)
                   ? parameter.declaredType.type.element
                   : Type.isReference(parameter.declaredType.type)
@@ -3465,9 +3496,9 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         }
         if (
           member.returnType._tag === 'Resolved' &&
-          Type.containsBorrow(member.returnType.type) &&
+          containsPositionRestrictedBorrow(member.returnType.type) &&
           (!Type.isSlot(member.returnType.type) ||
-            Type.containsBorrow(member.returnType.type.arguments.at(0) ?? 'never')) &&
+            containsPositionRestrictedBorrow(member.returnType.type.arguments.at(0) ?? 'never')) &&
           (!Type.isSlice(member.returnType.type) || returnedBorrow(member) === undefined)
         ) {
           diagnostics.push(
@@ -3483,13 +3514,13 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           for (const parameter of operation.parameters) {
             if (
               parameter.declaredType._tag === 'Resolved' &&
-              Type.containsBorrow(parameter.declaredType.type) &&
+              containsPositionRestrictedBorrow(parameter.declaredType.type) &&
               (!(
                 Type.isSlice(parameter.declaredType.type) ||
                 Type.isReference(parameter.declaredType.type) ||
                 Type.isSlot(parameter.declaredType.type)
               ) ||
-                Type.containsBorrow(
+                containsPositionRestrictedBorrow(
                   Type.isSlice(parameter.declaredType.type)
                     ? parameter.declaredType.type.element
                     : Type.isReference(parameter.declaredType.type)
@@ -3503,9 +3534,11 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           }
           if (
             operation.returnType._tag === 'Resolved' &&
-            Type.containsBorrow(operation.returnType.type) &&
+            containsPositionRestrictedBorrow(operation.returnType.type) &&
             (!Type.isSlot(operation.returnType.type) ||
-              Type.containsBorrow(operation.returnType.type.arguments.at(0) ?? 'never'))
+              containsPositionRestrictedBorrow(
+                operation.returnType.type.arguments.at(0) ?? 'never',
+              ))
           )
             diagnostics.push(
               Diagnostic.sliceTypePosition('return', operation.returnType.syntax.span),
@@ -3516,7 +3549,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       for (const field of member.fields) {
         if (
           field.declaredType._tag === 'Resolved' &&
-          Type.containsBorrow(field.declaredType.type)
+          containsPositionRestrictedBorrow(field.declaredType.type)
         ) {
           diagnostics.push(Diagnostic.sliceTypePosition('field', field.declaredType.syntax.span))
         }
@@ -3959,7 +3992,8 @@ export const copyType = (
   type: Type.Type,
   visiting: ReadonlySet<string> = new Set(),
 ): boolean => {
-  if (Type.isBuiltin(type) || Type.isReference(type) || Type.isSlice(type)) return true
+  if (Type.isBuiltin(type) || Type.isString(type) || Type.isReference(type) || Type.isSlice(type))
+    return true
   if (Type.isFixedArray(type)) return copyType(self, type.element, visiting)
   if (Type.equals(type, Type.unit)) return true
   if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return false
@@ -3990,7 +4024,7 @@ export const containsLexicalBorrow = (
   type: Type.Type,
   seen: ReadonlySet<string> = new Set(),
 ): boolean => {
-  if (Type.isSlice(type) || Type.isReference(type)) return true
+  if (Type.isString(type) || Type.isSlice(type) || Type.isReference(type)) return true
   if (Type.isFixedArray(type)) return containsLexicalBorrow(self, type.element, seen)
   if (Type.isUnion(type))
     return type.members.some((member) => containsLexicalBorrow(self, member, seen))

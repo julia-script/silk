@@ -64,6 +64,7 @@ it.effect('represents special, string, splat, cast, binary, and assembly constan
     const sum = yield* Constant.binary(builder, 'add nuw', one, two)
     const cast = yield* Constant.cast(builder, 'bitcast', sum, i32)
     const text = yield* Constant.string(builder, 'silk', { nullTerminated: true })
+    const empty = yield* Constant.string(builder, '')
     const zero = yield* Constant.zero(builder, vector)
     const functionType = yield* Type.functionType(builder, i32, [])
     const assembly = yield* Constant.assembly(builder, functionType, 'nop', '', {
@@ -73,6 +74,7 @@ it.effect('represents special, string, splat, cast, binary, and assembly constan
     assert.strictEqual(yield* Constant.tag(builder, splat), 'Splat')
     assert.strictEqual(yield* Constant.tag(builder, cast), 'Cast')
     assert.strictEqual(yield* Constant.tag(builder, text), 'String')
+    assert.strictEqual(yield* Constant.tag(builder, empty), 'Special')
     assert.strictEqual(yield* Constant.tag(builder, zero), 'Special')
     assert.strictEqual(yield* Constant.tag(builder, assembly), 'Assembly')
   }),

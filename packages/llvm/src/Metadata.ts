@@ -43,6 +43,13 @@ export type Category = MetadataDescription.Category
  */
 export type BasicEncoding = MetadataDescription.BasicEncoding
 /**
+ * String encoding accepted by {@link stringType}.
+ *
+ * @category metadata
+ * @since 0.0.0
+ */
+export type StringEncoding = MetadataDescription.StringEncoding
+/**
  * Composite debug type family accepted by {@link compositeType}.
  *
  * @category metadata
@@ -101,6 +108,22 @@ export interface CompositeTypeOptions {
   readonly alignInBits?: bigint | number
   readonly fields?: Optional
   readonly flags?: DIFlags.DIFlags
+}
+
+/**
+ * Dynamic location, length, layout, and encoding fields for a string debug type.
+ *
+ * @category metadata
+ * @since 0.0.0
+ */
+export interface StringTypeOptions {
+  readonly name?: Metadata
+  readonly stringLength?: Optional
+  readonly stringLengthExpression?: Optional
+  readonly stringLocationExpression?: Optional
+  readonly sizeInBits?: bigint | number
+  readonly alignInBits?: bigint | number
+  readonly encoding?: StringEncoding
 }
 
 /**
@@ -741,6 +764,67 @@ export const floatingType = Effect.fn('Metadata.floatingType')(function* (
   bits: bigint | number,
 ) {
   return yield* basicType(builder, 'float', name, bits)
+})
+
+/**
+ * Creates an LLVM `DIStringType` carrying explicit UTF text identity.
+ *
+ * @category metadata
+ * @since 0.0.0
+ */
+export const stringType = Effect.fn('Metadata.stringType')(function* (
+  builder: Builder.Builder,
+  options: StringTypeOptions = {},
+): Effect.fn.Return<Optional, LlvmError> {
+  const sizeInBits = yield* Effect.fromResult(
+    IntegerInput.normalize(options.sizeInBits ?? 0, {
+      operation: 'Metadata.stringType',
+      message: 'Debug string type sizes must be unsigned 64-bit integers',
+      minimum: 0n,
+      maximum: 0xffff_ffff_ffff_ffffn,
+    }),
+  )
+  const alignInBits = yield* Effect.fromResult(
+    IntegerInput.normalize(options.alignInBits ?? 0, {
+      operation: 'Metadata.stringType',
+      message: 'Debug string type alignments must be unsigned 64-bit integers',
+      minimum: 0n,
+      maximum: 0xffff_ffff_ffff_ffffn,
+    }),
+  )
+  return yield* debugNode(builder, 'Metadata.stringType', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'StringType',
+        distinct: false,
+        name: yield* resolveString(builder, state, owner, options.name, 'Metadata.stringType'),
+        stringLength: yield* resolveIndex(
+          builder,
+          state,
+          owner,
+          options.stringLength,
+          'Metadata.stringType',
+        ),
+        stringLengthExpression: yield* resolveIndex(
+          builder,
+          state,
+          owner,
+          options.stringLengthExpression,
+          'Metadata.stringType',
+        ),
+        stringLocationExpression: yield* resolveIndex(
+          builder,
+          state,
+          owner,
+          options.stringLocationExpression,
+          'Metadata.stringType',
+        ),
+        sizeInBits,
+        alignInBits,
+        encoding: options.encoding ?? 'utf',
+      }
+    }),
+  )
 })
 
 /**

@@ -6,6 +6,11 @@ import silk.bytes {
 }
 import silk.option { None, Option, Some, none, some }
 import silk.result { Failure, Result, Success }
+import silk.string {
+  InvalidUtf8,
+  fromUtf8 as stringFromUtf8,
+  utf8Bytes as stringUtf8Bytes
+}
 import silk.vector { Vector }
 
 /// A normalized path rooted in the selected FileSystem provider.
@@ -171,65 +176,23 @@ fn counted(value: usize) -> usize { return value }
 
 fn byte(value: u8) -> i32 { return u8.toI32(value) }
 
-fn continuation(value: u8) -> bool {
-  if value < u8.toU8(128) { return false }
-  return value <= u8.toU8(191)
+fn containsNul(values: &[u8]) -> bool {
+  let mut index = counted(0)
+  while index < values.length {
+    if values[index] == u8.toU8(0) { return true }
+    index = index + counted(1)
+  }
+  return false
 }
 
 fn validUtf8(values: &[u8]) -> bool {
-  let mut index = counted(0)
-  while index < values.length {
-    let first = values[index]
-    if first == u8.toU8(0) { return false }
-    if first < u8.toU8(128) {
-      index = index + counted(1)
-    } else {
-      if first < u8.toU8(194) { return false }
-      if first <= u8.toU8(223) {
-        if values.length <= index + counted(1) { return false }
-        if continuation(values[index + counted(1)]) == false { return false }
-        index = index + counted(2)
-      } else {
-        if first <= u8.toU8(239) {
-          if values.length <= index + counted(2) { return false }
-          let second = values[index + counted(1)]
-          let third = values[index + counted(2)]
-          if continuation(third) == false { return false }
-          if first == u8.toU8(224) {
-            if second < u8.toU8(160) { return false }
-            if u8.toU8(191) < second { return false }
-          } else {
-            if first == u8.toU8(237) {
-              if second < u8.toU8(128) { return false }
-              if u8.toU8(159) < second { return false }
-            } else {
-              if continuation(second) == false { return false }
-            }
-          }
-          index = index + counted(3)
-        } else {
-          if u8.toU8(244) < first { return false }
-          if values.length <= index + counted(3) { return false }
-          let second = values[index + counted(1)]
-          if continuation(values[index + counted(2)]) == false { return false }
-          if continuation(values[index + counted(3)]) == false { return false }
-          if first == u8.toU8(240) {
-            if second < u8.toU8(144) { return false }
-            if u8.toU8(191) < second { return false }
-          } else {
-            if first == u8.toU8(244) {
-              if second < u8.toU8(128) { return false }
-              if u8.toU8(143) < second { return false }
-            } else {
-              if continuation(second) == false { return false }
-            }
-          }
-          index = index + counted(4)
-        }
-      }
+  let decoded = stringFromUtf8(values)
+  return match move decoded {
+    Result<string, InvalidUtf8> { value: outcome } => match move outcome {
+      Success<string> { value: text } => true
+      Failure<InvalidUtf8> { error: invalid } => false
     }
   }
-  return true
 }
 
 fn isDot(values: &[u8], start: usize, end: usize) -> bool {
@@ -246,7 +209,7 @@ fn isDotDot(values: &[u8], start: usize, end: usize) -> bool {
 fn validAbsolute(values: &[u8]) -> bool {
   if values.length == counted(0) { return false }
   if byte(values[counted(0)]) != 47 { return false }
-  if validUtf8(values) == false { return false }
+  if containsNul(values) { return false }
   if values.length == counted(1) { return true }
   let mut start = counted(1)
   let mut index = counted(1)
@@ -271,7 +234,7 @@ fn validAbsolute(values: &[u8]) -> bool {
 fn validRelativeFragment(values: &[u8]) -> bool {
   if values.length == counted(0) { return false }
   if byte(values[counted(0)]) == 47 { return false }
-  if validUtf8(values) == false { return false }
+  if containsNul(values) { return false }
   let mut start = counted(0)
   let mut index = counted(0)
   while index <= values.length {
@@ -325,8 +288,9 @@ effect fn finishPath(bytes: Bytes) -> Path ! OutOfMemory ? &mut Allocator {
   return Path { bytes: move bytes, nameBytes: move nameBytes }
 }
 
-/// Constructs an owned normalized provider-absolute Path.
-pub effect fn make(values: &[u8]) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+/// Constructs an owned normalized provider-absolute Path from semantic text.
+pub effect fn make(value: string) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+  let values = stringUtf8Bytes(value)
   if validAbsolute(values) == false { return run rejectPath() }
   let copied = run appendRange(bytesMake(), values, counted(0), values.length)
   return run finishPath(move copied)
@@ -335,31 +299,57 @@ pub effect fn make(values: &[u8]) -> Path ! FileError | OutOfMemory ? &mut Alloc
 /// Constructs the selected provider's root Path.
 pub effect fn root() -> Path ! OutOfMemory ? &mut Allocator {
   let mut copied = bytesMake()
-  let appended = run bytesAppend(&mut copied, "/")
+  let appended = run bytesAppend(&mut copied, stringUtf8Bytes("/"))
   return run finishPath(move copied)
 }
 
-/// Borrows the complete normalized path bytes.
-pub fn asBytes(self: &Path) -> &[u8] { return bytesAsSlice(&self.bytes) }
+fn pathBytes(self: &Path) -> &[u8] { return bytesAsSlice(&self.bytes) }
+
+/// Borrows the complete normalized path as semantic text.
+pub fn view(self: &Path) -> string {
+  unsafe { return Intrinsic.stringFromUtf8Unchecked(pathBytes(self)) }
+  return ""
+}
 
 /// Reports whether this Path denotes the selected provider's root.
 pub fn isRoot(self: &Path) -> bool { return bytesAsSlice(&self.bytes).length == counted(1) }
 
-/// Borrows the final component. Root returns an empty view; use isRoot to distinguish absence.
-pub fn name(self: &Path) -> &[u8] { return bytesAsSlice(&self.nameBytes) }
+/// Borrows the final component as semantic text. Root returns empty text; use isRoot to distinguish absence.
+pub fn name(self: &Path) -> string {
+  unsafe { return Intrinsic.stringFromUtf8Unchecked(bytesAsSlice(&self.nameBytes)) }
+  return ""
+}
 
-/// Joins one already-normalized relative fragment to an absolute Path.
-pub effect fn join(
+effect fn joinBytes(
   base: &Path,
   fragment: &[u8]
 ) -> Path ! FileError | OutOfMemory ? &mut Allocator {
   if validRelativeFragment(fragment) == false { return run rejectPath() }
-  let baseBytes = asBytes(base)
+  let baseBytes = pathBytes(base)
   let mut combined = run appendRange(bytesMake(), baseBytes, counted(0), baseBytes.length)
-  if isRoot(base) == false { let slash = run bytesAppend(&mut combined, "/") }
+  if isRoot(base) == false {
+    let slash = run bytesAppend(&mut combined, stringUtf8Bytes("/"))
+  }
   let beforeChild = Intrinsic.replace(combined, bytesMake())
   combined = run appendRange(move beforeChild, fragment, counted(0), fragment.length)
   return run finishPath(move combined)
+}
+
+/// Joins one already-normalized relative text fragment to an absolute Path.
+pub effect fn join(
+  base: &Path,
+  fragment: string
+) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+  return run joinBytes(base, stringUtf8Bytes(fragment))
+}
+
+/// Validates and joins one provider-supplied UTF-8 byte fragment.
+pub effect fn joinUtf8(
+  base: &Path,
+  fragment: &[u8]
+) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+  if validUtf8(fragment) == false { return run rejectPath() }
+  return run joinBytes(base, fragment)
 }
 
 fn componentCount(values: &[u8]) -> usize {
@@ -400,16 +390,17 @@ fn survivingRelative(values: &[u8], after: usize) -> bool {
   return true
 }
 
-/// Resolves relative bytes lexically against one explicit absolute base.
+/// Resolves relative text lexically against one explicit absolute base.
 pub effect fn resolve(
   base: &Path,
-  relative: &[u8]
+  relativeText: string
 ) -> Path ! FileError | OutOfMemory ? &mut Allocator {
-  if validUtf8(relative) == false { return run rejectPath() }
+  let relative = stringUtf8Bytes(relativeText)
+  if containsNul(relative) { return run rejectPath() }
   if counted(0) < relative.length {
     if byte(relative[counted(0)]) == 47 { return run rejectPath() }
   }
-  let baseBytes = asBytes(base)
+  let baseBytes = pathBytes(base)
   let mut keptBase = componentCount(baseBytes)
   let mut relativeDepth = counted(0)
   let mut start = counted(0)
@@ -444,7 +435,7 @@ pub effect fn resolve(
   }
 
   let mut combined = bytesMake()
-  let rooted = run bytesAppend(&mut combined, "/")
+  let rooted = run bytesAppend(&mut combined, stringUtf8Bytes("/"))
   let mut included = counted(0)
   start = counted(1)
   index = counted(1)
@@ -457,7 +448,9 @@ pub effect fn resolve(
     }
     if boundary {
       if included < keptBase {
-        if counted(0) < included { let slash = run bytesAppend(&mut combined, "/") }
+        if counted(0) < included {
+          let slash = run bytesAppend(&mut combined, stringUtf8Bytes("/"))
+        }
         let beforeBaseComponent = Intrinsic.replace(combined, bytesMake())
         combined = run appendRange(move beforeBaseComponent, baseBytes, start, index)
         included = included + counted(1)
@@ -481,7 +474,9 @@ pub effect fn resolve(
         if isDot(relative, start, index) == false {
           if isDotDot(relative, start, index) == false {
             if survivingRelative(relative, index + counted(1)) {
-              if counted(0) < included { let slash = run bytesAppend(&mut combined, "/") }
+              if counted(0) < included {
+                let slash = run bytesAppend(&mut combined, stringUtf8Bytes("/"))
+              }
               let beforeRelativeComponent = Intrinsic.replace(combined, bytesMake())
               combined = run appendRange(move beforeRelativeComponent, relative, start, index)
               included = included + counted(1)
@@ -501,7 +496,7 @@ pub effect fn parent(
   self: &Path
 ) -> Option<Path> ! OutOfMemory ? &mut Allocator {
   if isRoot(self) { return none<Path>() }
-  let values = asBytes(self)
+  let values = pathBytes(self)
   let nameStart = finalNameStart(values)
   let mut end = counted(1)
   if nameStart != counted(1) { end = nameStart - counted(1) }
@@ -560,7 +555,7 @@ fn classifyDirectory(
 pub effect fn createDirectoriesRecursively(
   path: &Path
 ) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator {
-  let values = asBytes(path)
+  let values = pathBytes(path)
   let mut index = counted(1)
   while index <= values.length {
     let mut boundary = false
@@ -595,13 +590,13 @@ pub effect fn writeFileWithParents(
   bytes: &[u8]
 ) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator {
   if isRoot(path) { return run FileSystem.writeFile(path, bytes) }
-  let pathValues = asBytes(path)
+  let pathValues = pathBytes(path)
   let nameStart = finalNameStart(pathValues)
   let mut parentEnd = counted(1)
   if nameStart != counted(1) { parentEnd = nameStart - counted(1) }
   let parentBytes = run appendRange(bytesMake(), pathValues, counted(0), parentEnd)
   let ownedParent = run finishPath(move parentBytes)
-  let values = asBytes(&ownedParent)
+  let values = pathBytes(&ownedParent)
   let mut index = counted(1)
   while index <= values.length {
     let mut boundary = false

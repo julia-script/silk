@@ -80,6 +80,31 @@ export interface StaticViewValue {
   readonly length: number
 }
 
+export type StringStorage =
+  | {
+      readonly _tag: 'StaticTextStorage'
+      readonly data: string
+      readonly bytes: ReadonlyArray<number>
+    }
+  | {
+      readonly _tag: 'StaticByteStorage'
+      readonly data: string
+      readonly bytes: ReadonlyArray<number>
+    }
+  | {
+      readonly _tag: 'RuntimeSliceStorage'
+      readonly view: SliceValue
+    }
+
+/** A logical valid UTF-8 view retaining storage identity and lexical backing facts. */
+export interface StringValue {
+  readonly _tag: 'StringValue'
+  readonly storage: StringStorage
+  readonly bytes: ReadonlyArray<number>
+  readonly byteLength: number
+  readonly heldLoans: ReadonlyArray<string>
+}
+
 export interface ReferenceValue {
   readonly _tag: 'ReferenceValue'
   readonly frame: number
@@ -174,6 +199,7 @@ export type Value =
   | ArrayValue
   | SliceValue
   | StaticViewValue
+  | StringValue
   | ReferenceValue
   | UnionValue
   | EffectBorrowValue
@@ -390,6 +416,22 @@ export interface StandardStreamTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
+export interface StringTraceEvent {
+  readonly _tag:
+    | 'StringStatic'
+    | 'StringRuntime'
+    | 'StringBytes'
+    | 'StringByteLength'
+    | 'StringEqualsExact'
+    | 'StringLoanEnd'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly storage?: StringStorage['_tag']
+  readonly byteLength?: number
+  readonly result?: boolean
+  readonly loan?: string
+  readonly span: SourceSpan.SourceSpan
+}
+
 export type TraceEvent =
   | EntryTraceEvent
   | CallTraceEvent
@@ -407,6 +449,7 @@ export type TraceEvent =
   | CallableTraceEvent
   | AllocationTraceEvent
   | StandardStreamTraceEvent
+  | StringTraceEvent
 
 /** Every expected reason the closed bootstrap interpreter can stop. */
 export type BlockedReason =
@@ -499,6 +542,9 @@ const scalarIntegerValue = (
 
 const floatValue = (type: Scalar.FloatSpelling, bits: bigint): FloatValue =>
   Object.freeze({ _tag: 'FloatValue', type, bits: BigInt.asUintN(type === 'f32' ? 32 : 64, bits) })
+
+const borrowKey = (borrow: Hir.BorrowId): string =>
+  `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
 
 const floatingBits = (self: FloatValue): FloatingPoint.Bits =>
   Object.freeze({ width: self.type === 'f32' ? 32 : 64, bits: self.bits })
@@ -600,6 +646,8 @@ interface EvaluationState {
   readonly cells: Map<string, LocalState>
   readonly allocations: Map<number, { active: boolean; readonly values: Map<string, Value> }>
   readonly callables: Map<number, { state: 'Available' | 'Running' | 'Consumed' | 'Released' }>
+  readonly activeLoans: Set<string>
+  readonly stringLoans: Set<string>
   readonly standardStreams?: StandardStreams.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
 }
@@ -1697,10 +1745,8 @@ function* executeFunction(
     })
   }
 
-  const byteView = (local: Mir.LocalId): ReadonlyArray<number> => {
-    const viewed = read(local).value
+  const bytesOfView = (viewed: SliceValue | StaticViewValue): ReadonlyArray<number> => {
     if (viewed._tag === 'StaticViewValue') return viewed.bytes
-    if (viewed._tag !== 'SliceValue') throw new RangeError('OS intrinsic expected a byte slice')
     if (viewed.ticket !== undefined) {
       const allocation = state.allocations.get(viewed.ticket)
       if (allocation === undefined || !allocation.active)
@@ -1723,6 +1769,34 @@ function* executeFunction(
         return Number(selected.value)
       }),
     )
+  }
+
+  const byteView = (local: Mir.LocalId): ReadonlyArray<number> => {
+    const viewed = read(local).value
+    if (viewed._tag !== 'SliceValue' && viewed._tag !== 'StaticViewValue')
+      throw new RangeError('OS intrinsic expected a byte slice')
+    return bytesOfView(viewed)
+  }
+
+  const stringView = (string: StringValue): SliceValue | StaticViewValue =>
+    string.storage._tag === 'RuntimeSliceStorage'
+      ? string.storage.view
+      : Object.freeze({
+          _tag: 'StaticViewValue',
+          data: string.storage.data,
+          bytes: string.storage.bytes,
+          length: string.byteLength,
+        })
+
+  const stringBytes = (string: StringValue): ReadonlyArray<number> => {
+    if (string.heldLoans.some((loan) => !state.activeLoans.has(loan))) {
+      throw new RangeError('MIR string uses backing storage after its lexical loan ended')
+    }
+    const bytes = bytesOfView(stringView(string))
+    if (bytes.length !== string.byteLength) {
+      throw new RangeError('MIR string byte length disagrees with its backing storage')
+    }
+    return bytes
   }
 
   const writeByteView = (local: Mir.LocalId, bytes: ReadonlyArray<number>): void => {
@@ -2043,10 +2117,135 @@ function* executeFunction(
             })
             break
           }
+          case 'StaticString': {
+            const data = program.staticData?.find((candidate) => candidate.id === operation.data)
+            if (data?.kind !== 'Text' || !data.utf8 || data.bytes.length !== operation.byteLength) {
+              throw new RangeError('MIR verifier allowed a missing or mismatched static string')
+            }
+            const string: StringValue = Object.freeze({
+              _tag: 'StringValue',
+              storage: Object.freeze({
+                _tag: 'StaticTextStorage',
+                data: data.id,
+                bytes: data.bytes,
+              }),
+              bytes: data.bytes,
+              byteLength: data.bytes.length,
+              heldLoans: Object.freeze([]),
+            })
+            write(operation.destination, { value: string, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'StringStatic',
+                function: fn.id,
+                storage: string.storage._tag,
+                byteLength: string.byteLength,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'StringFromUtf8Unchecked': {
+            const bytes = read(operation.bytes).value
+            if (bytes._tag !== 'SliceValue' && bytes._tag !== 'StaticViewValue') {
+              throw new RangeError('MIR verifier allowed string formation from a non-byte view')
+            }
+            const heldLoans = Object.freeze(operation.heldLoans.map(borrowKey))
+            if (heldLoans.some((loan) => !state.activeLoans.has(loan))) {
+              throw new RangeError('MIR string formation lost its active backing loan')
+            }
+            const storage: StringStorage =
+              bytes._tag === 'StaticViewValue'
+                ? Object.freeze({
+                    _tag: 'StaticByteStorage',
+                    data: bytes.data,
+                    bytes: bytes.bytes,
+                  })
+                : Object.freeze({ _tag: 'RuntimeSliceStorage', view: bytes })
+            for (const loan of heldLoans) state.stringLoans.add(loan)
+            const string: StringValue = Object.freeze({
+              _tag: 'StringValue',
+              storage,
+              bytes: bytesOfView(bytes),
+              byteLength: bytes.length,
+              heldLoans,
+            })
+            write(operation.destination, { value: string, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'StringRuntime',
+                function: fn.id,
+                storage: string.storage._tag,
+                byteLength: string.byteLength,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'StringUtf8Bytes': {
+            const string = read(operation.string).value
+            if (string._tag !== 'StringValue')
+              throw new RangeError('MIR verifier allowed byte viewing of a non-string')
+            stringBytes(string)
+            write(operation.destination, { value: stringView(string), fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'StringBytes',
+                function: fn.id,
+                storage: string.storage._tag,
+                byteLength: string.byteLength,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'StringByteLength': {
+            const string = read(operation.string).value
+            if (string._tag !== 'StringValue')
+              throw new RangeError('MIR verifier allowed byte length of a non-string')
+            stringBytes(string)
+            write(operation.destination, {
+              value: usizeValue(BigInt(string.byteLength)),
+              fromCall: false,
+            })
+            trace.push(
+              Object.freeze({
+                _tag: 'StringByteLength',
+                function: fn.id,
+                storage: string.storage._tag,
+                byteLength: string.byteLength,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'StringEqualsExact': {
+            const left = read(operation.left).value
+            const right = read(operation.right).value
+            if (left._tag !== 'StringValue' || right._tag !== 'StringValue')
+              throw new RangeError('MIR verifier allowed exact equality of non-string values')
+            const leftBytes = stringBytes(left)
+            const rightBytes = stringBytes(right)
+            const equal =
+              leftBytes.length === rightBytes.length &&
+              leftBytes.every((byte, index) => byte === rightBytes.at(index))
+            const result = operation.negated ? !equal : equal
+            write(operation.destination, { value: value(result ? 1 : 0), fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'StringEqualsExact',
+                function: fn.id,
+                result,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
           case 'Move':
             write(operation.destination, read(operation.source))
             break
           case 'BeginLoan': {
+            state.activeLoans.add(borrowKey(operation.borrow))
             const source = read(operation.root)
             if (operation.type._tag === 'Reference') {
               const inherited =
@@ -2100,8 +2299,21 @@ function* executeFunction(
             write(operation.destination, { value: slice, fromCall: source.fromCall })
             break
           }
-          case 'EndLoan':
+          case 'EndLoan': {
+            const loan = borrowKey(operation.borrow)
+            state.activeLoans.delete(loan)
+            if (state.stringLoans.delete(loan)) {
+              trace.push(
+                Object.freeze({
+                  _tag: 'StringLoanEnd',
+                  function: fn.id,
+                  loan,
+                  span: operation.provenance.span,
+                }),
+              )
+            }
             break
+          }
           case 'SliceLength': {
             const slice = read(operation.slice).value
             if (slice._tag !== 'SliceValue' && slice._tag !== 'StaticViewValue') {
@@ -4433,6 +4645,8 @@ export const evaluate = (
     cells: new Map(),
     allocations: new Map(),
     callables: new Map(),
+    activeLoans: new Set(),
+    stringLoans: new Set(),
     ...(options.standardStreams === undefined ? {} : { standardStreams: options.standardStreams }),
     ...(options.osFileSystem === undefined ? {} : { osFileSystem: options.osFileSystem }),
   })

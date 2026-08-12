@@ -25,7 +25,7 @@ const portableProvider = `import silk.filesystem {
   FileError,
   FileInfo,
   FileSystem,
-  asBytes as pathBytes,
+  view as pathView,
   createDirectoriesRecursively,
   createDirectoryOperation,
   directory,
@@ -60,16 +60,6 @@ import silk.vector {
 }
 
 impl Report for OutOfMemory {}
-
-fn same(left: &[u8], right: &[u8]) -> bool {
-  if left.length != right.length { return false }
-  let mut index = usize.add(0, 0)
-  while index < left.length {
-    if left[index] != right[index] { return false }
-    index = index + usize.add(0, 1)
-  }
-  return true
-}
 
 struct MemoryFileSystem {
   contents: [u8; 4]
@@ -117,19 +107,19 @@ effect fn memoryStat(
   path: &Path
 ) -> FileInfo | DirectoryInfo ! FileError {
   self.calls = self.calls + 1
-  let bytes = pathBytes(path)
-  if same(bytes, "/") { return directoryInfo() }
-  if same(bytes, "/data") { return directoryInfo() }
-  if same(bytes, "/a") { return directoryInfo() }
-  if same(bytes, "/a/b") {
+  let value = pathView(path)
+  if value == "/" { return directoryInfo() }
+  if value == "/data" { return directoryInfo() }
+  if value == "/a" { return directoryInfo() }
+  if value == "/a/b" {
     if self.bExists { return directoryInfo() }
     fail fsError(statOperation(), notFound())
   }
-  if same(bytes, "/a/b/c") {
+  if value == "/a/b/c" {
     if self.cExists { return directoryInfo() }
     fail fsError(statOperation(), notFound())
   }
-  if same(bytes, "/data/file") {
+  if value == "/data/file" {
     if self.fileExists { return fileInfo(usize.add(0, 4)) }
   }
   fail fsError(statOperation(), notFound())
@@ -145,14 +135,14 @@ effect fn memoryList(
 
 effect fn memoryCreate(self: &mut MemoryFileSystem, path: &Path) -> () ! FileError {
   self.calls = self.calls + 1
-  let bytes = pathBytes(path)
-  if same(bytes, "/a/b") {
+  let value = pathView(path)
+  if value == "/a/b" {
     if self.bExists { fail fsError(createDirectoryOperation(), alreadyExists()) }
     self.bExists = true
     self.creates = self.creates + 1
     return ()
   }
-  if same(bytes, "/a/b/c") {
+  if value == "/a/b/c" {
     if self.cExists { fail fsError(createDirectoryOperation(), alreadyExists()) }
     self.cExists = true
     self.creates = self.creates + 1
@@ -250,25 +240,15 @@ pub fn main() -> i32 {
 
 it.effect('constructs and resolves normalized provider-absolute Paths', () =>
   Effect.gen(function* () {
-    const source = `import silk.filesystem { Path, asBytes, isRoot, make, name, parent, resolve, root }
+    const source = `import silk.filesystem { Path, isRoot, make, name, parent, resolve, root, view }
 import silk.option { None, Option, Some }
 import silk.result { Failure, Result, Success }
 impl Report for OutOfMemory {}
 
-fn same(left: &[u8], right: &[u8]) -> bool {
-  if left.length != right.length { return false }
-  let mut index = usize.add(0, 0)
-  while index < left.length {
-    if left[index] != right[index] { return false }
-    index = index + usize.add(0, 1)
-  }
-  return true
-}
-
-fn matchesParent(possible: Option<Path>, expected: &[u8]) -> bool {
+fn matchesParent(possible: Option<Path>, expected: string) -> bool {
   return match move possible {
     None {} => false
-    Some<Path> { value } => same(asBytes(&value), expected)
+    Some<Path> { value } => view(&value) == expected
   }
 }
 
@@ -276,14 +256,14 @@ effect fn check() -> i32 ! FileError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let canonicalRoot = run root() |> Effect.provideMut(&mut allocator)
   if isRoot(&canonicalRoot) == false { return 3 }
-  if name(&canonicalRoot).length != usize.add(0, 0) { return 4 }
+  if name(&canonicalRoot) != "" { return 4 }
   let rootParent = run parent(&canonicalRoot) |> Effect.provideMut(&mut allocator)
   if matchesParent(move rootParent, "/") { return 5 }
   let base = run make("/project/src") |> Effect.provideMut(&mut allocator)
   let resolved = run resolve(&base, "../assets/./logo.bin")
     |> Effect.provideMut(&mut allocator)
-  if same(asBytes(&resolved), "/project/assets/logo.bin") == false { return 1 }
-  if same(name(&resolved), "logo.bin") == false { return 6 }
+  if view(&resolved) != "/project/assets/logo.bin" { return 1 }
+  if name(&resolved) != "logo.bin" { return 6 }
   let ownedParent = run parent(&resolved) |> Effect.provideMut(&mut allocator)
   if matchesParent(move ownedParent, "/project/assets") { return 42 }
   return 7
@@ -329,13 +309,13 @@ pub fn main() -> i32 {
 )
 
 it.effect('rejects malformed paths and lexical root escape before service provision', () => {
-  const source = `import silk.filesystem { FileError, make, resolve }
+  const source = `import silk.filesystem { FileError, joinUtf8, make, resolve }
 
 impl Report for OutOfMemory {}
 
-effect fn construct(values: &[u8]) -> bool ! FileError | OutOfMemory {
+effect fn construct(value: string) -> bool ! FileError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let path = run make(values) |> Effect.provideMut(&mut allocator)
+  let path = run make(value) |> Effect.provideMut(&mut allocator)
   return false
 }
 
@@ -343,6 +323,13 @@ effect fn resolveEscape() -> bool ! FileError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let base = run make("/a") |> Effect.provideMut(&mut allocator)
   let escaped = run resolve(&base, "../../b") |> Effect.provideMut(&mut allocator)
+  return false
+}
+
+effect fn rejectProviderBytes() -> bool ! FileError | OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let base = run make("/a") |> Effect.provideMut(&mut allocator)
+  let invalid = run joinUtf8(&base, b"\\xff") |> Effect.provideMut(&mut allocator)
   return false
 }
 
@@ -354,9 +341,9 @@ pub fn main() -> i32 {
   if run Effect.catch(construct("/double//slash"), recovered) {} else { return 3 }
   if run Effect.catch(construct("/./dot"), recovered) {} else { return 4 }
   if run Effect.catch(construct("/../parent"), recovered) {} else { return 5 }
-  if run Effect.catch(construct(b"/\\x00"), recovered) {} else { return 6 }
-  if run Effect.catch(construct(b"/\\xff"), recovered) {} else { return 7 }
-  if run Effect.catch(resolveEscape(), recovered) {} else { return 8 }
+  if run Effect.catch(construct("/\\u{0}"), recovered) {} else { return 6 }
+  if run Effect.catch(resolveEscape(), recovered) {} else { return 7 }
+  if run Effect.catch(rejectProviderBytes(), recovered) {} else { return 8 }
   return 42
 }`
   return Effect.gen(function* () {

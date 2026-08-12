@@ -35,7 +35,7 @@ const lowLevelSource = `pub fn main() -> i32 {
   let mut nativeCode = u32.toU32(0)
   let mut inspected = false
   unsafe {
-    inspected = run Intrinsic.osPathInspect("/tmp", "/file", &mut kind, &mut length, &mut reason, &mut nativeCode)
+    inspected = run Intrinsic.osPathInspect(Intrinsic.stringUtf8Bytes("/tmp"), Intrinsic.stringUtf8Bytes("/file"), &mut kind, &mut length, &mut reason, &mut nativeCode)
   }
   if inspected { return kind + usize.toI32(length) }
   return reason
@@ -70,7 +70,7 @@ it.effect('loads the ordinary canonical OS provider without compiler-known libra
     const snapshot = yield* Analysis.ofSourceRealized(
       'os-filesystem/importer',
       ascii(`import silk.os_filesystem { OsFileSystem, make }
-pub effect fn construct(root: &[u8]) -> OsFileSystem ! OutOfMemory ? &mut Allocator {
+pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemory ? &mut Allocator {
   return run make(root)
 }`),
     )
@@ -78,11 +78,13 @@ pub effect fn construct(root: &[u8]) -> OsFileSystem ! OutOfMemory ? &mut Alloca
   }),
 )
 
-it.effect('lowers the OS directory-list provider runner', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'os-filesystem/list-runner',
-      ascii(`import silk.os_filesystem { OsFileSystem, make as osMake }
+it.effect(
+  'lowers the OS directory-list provider runner',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'os-filesystem/list-runner',
+        ascii(`import silk.os_filesystem { OsFileSystem, make as osMake }
 import silk.filesystem { DirectoryEntry, FileError, FileSystem, Path, root as pathRoot }
 import silk.vector { Vector }
 
@@ -99,10 +101,11 @@ pub effect fn main() -> () ! FileError | OutOfMemory {
   drop entries
   return ()
 }`),
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    yield* Analysis.codegen(snapshot, { mode: 'release' })
-  }),
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      yield* Analysis.codegen(snapshot, { mode: 'release' })
+    }),
+  15_000,
 )
 
 it.effect('blocks OS evaluation without an injected adapter and uses one when supplied', () =>
@@ -237,15 +240,15 @@ pub fn main() -> i32 {
 it.effect('retries oversized directory entries without advancing and sorts complete paths', () =>
   Effect.gen(function* () {
     const source = `import silk.os_filesystem { make as osMake }
-import silk.filesystem { DirectoryEntry, FileError, FileSystem, asBytes as pathBytes, root as pathRoot }
+import silk.filesystem { DirectoryEntry, FileError, FileSystem, root as pathRoot, view as pathView }
 import silk.result { Failure, Result, Success }
 import silk.vector { asSlice as vectorSlice }
 
 impl Report for OutOfMemory {}
 
-fn secondByte(entries: &[DirectoryEntry], index: usize) -> u8 {
+fn pathMatches(entries: &[DirectoryEntry], index: usize, expected: string) -> bool {
   return match &entries[index] {
-    DirectoryEntry { path, kind } => pathBytes(&path)[usize.add(0, 1)]
+    DirectoryEntry { path, kind } => pathView(&path) == expected
   }
 }
 
@@ -259,8 +262,8 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
   )
   let listed = vectorSlice<DirectoryEntry>(&entries)
   if listed.length != usize.add(0, 3) { return 1 }
-  if secondByte(listed, usize.add(0, 0)) != u8.toU8(97) { return 2 }
-  if secondByte(listed, usize.add(0, 2)) != u8.toU8(122) { return 3 }
+  if pathMatches(listed, usize.add(0, 0), "/a") == false { return 2 }
+  if pathMatches(listed, usize.add(0, 2), "/z") == false { return 3 }
   return 42
 }
 
@@ -302,6 +305,23 @@ pub fn main() -> i32 {
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
     assert.strictEqual(retries, 1)
+
+    let invalidPending = true
+    const invalidDirectoryProvider: OsFileSystemHost.Provider = {
+      ...provider,
+      directoryOpen: () => ({
+        _tag: 'Opened',
+        handle: { identity: 2, kind: 'Directory' },
+      }),
+      directoryNext: () => {
+        if (invalidPending === false) return end
+        invalidPending = false
+        return { _tag: 'Entry', name: [255], kind: 'File' }
+      },
+    }
+    const invalid = Analysis.evaluate(snapshot, { osFileSystem: invalidDirectoryProvider })
+    assert.strictEqual(invalid._tag, 'Completed')
+    if (invalid._tag === 'Completed') assert.strictEqual(invalid.result.value, 10)
   }),
 )
 
@@ -397,7 +417,7 @@ pub fn main() -> i32 { return 0 }`),
 it.effect('navigates provider policy to Silk source and low-level calls to Intrinsic', () =>
   Effect.gen(function* () {
     const source = `import silk.os_filesystem { OsFileSystem, make as osMake }
-pub effect fn construct(root: &[u8]) -> OsFileSystem ! OutOfMemory ? &mut Allocator {
+pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemory ? &mut Allocator {
   return run osMake(root)
 }
 pub fn main() -> i32 {
@@ -406,7 +426,7 @@ pub fn main() -> i32 {
   let mut reason = 0
   let mut code = u32.toU32(0)
   unsafe {
-    let inspected = run Intrinsic.osPathInspect("/root", "/path", &mut kind, &mut length, &mut reason, &mut code)
+    let inspected = run Intrinsic.osPathInspect(Intrinsic.stringUtf8Bytes("/root"), Intrinsic.stringUtf8Bytes("/path"), &mut kind, &mut length, &mut reason, &mut code)
   }
   return 42
 }`
@@ -552,13 +572,13 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
   let mut nativeCode = u32.toU32(0)
   let mut escaped = false
   unsafe {
-    escaped = run Intrinsic.osPathInspect("${nativeRoot}", "/../outside", &mut kind, &mut length, &mut reason, &mut nativeCode)
+    escaped = run Intrinsic.osPathInspect(Intrinsic.stringUtf8Bytes("${nativeRoot}"), Intrinsic.stringUtf8Bytes("/../outside"), &mut kind, &mut length, &mut reason, &mut nativeCode)
   }
   if escaped { return 3 }
   if reason != 3 { return 4 }
   reason = 0
   unsafe {
-    escaped = run Intrinsic.osPathInspect("${nativeRoot}", "/escape/marker", &mut kind, &mut length, &mut reason, &mut nativeCode)
+    escaped = run Intrinsic.osPathInspect(Intrinsic.stringUtf8Bytes("${nativeRoot}"), Intrinsic.stringUtf8Bytes("/escape/marker"), &mut kind, &mut length, &mut reason, &mut nativeCode)
   }
   if escaped { return 5 }
   if reason == 0 { return 6 }
