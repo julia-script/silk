@@ -197,8 +197,10 @@ pub fn main() -> i32 {
 An `interface` is a static conformance contract resolved at specialization time. It creates no
 runtime dispatch, no provider slot, and no requirement row.
 
-An `impl` maps operation names to *existing* functions; it does not contain method bodies. The one
-exception is `Drop`, whose hook has a body.
+An `impl` maps operation names to *existing* functions; it does not contain method bodies. Both the
+interface and the service conformance paths reject a hook body outright, with the message
+"implementations use operation mappings, not a hook body". `Drop` is the exception: its conformance
+carries a hook body rather than an operation mapping.
 
 ```
 pub interface Integer<T> {
@@ -334,11 +336,24 @@ Bounded generics take an interface bound, written `T: Bound`.
 
 ### 4.1 Affine values, explicit moves
 
-Silk is affine: a value is used at most once. There are **no named lifetimes and no region syntax**;
-borrow safety comes from lexical call scoping instead.
+Silk is affine: a value of a move-only type is used at most once. There are **no named lifetimes and
+no region syntax**; borrow safety comes from lexical call scoping instead.
 
-Handing a value away is written `move`, and there is no implicit move — even for copyable types, a
-`move` consumes the binding.
+Every binding has one of two ownership categories, and the category decides whether `move` is
+required:
+
+| Category | Types | Consuming use |
+| --- | --- | --- |
+| **Copyable** | every scalar and `bool`, `string`, `never`, `OutOfMemory`, shared slices `&[T]`, shared references `&T`, shared effects, shared callables, and fixed arrays whose element type is copyable | copies; the binding stays usable |
+| **Move-only** | everything else — nominal structs, exclusive slices `&mut [T]`, exclusive references `&mut T`, exclusive or `once` effects and callables, and fixed arrays of move-only elements | requires an explicit `move`; omitting it is `OWN0003` |
+
+Two rules follow, and they are easy to conflate:
+
+- **`move` is required only for move-only types.** Passing a copyable binding into a consuming
+  position simply copies it. `OWN0003` is raised only for a move-only binding, so an `i32` may be
+  passed to a by-value parameter as many times as you like.
+- **Writing `move` always consumes the binding, in both categories.** An explicit `move` on a
+  copyable binding still ends its life, and a later use is `OWN0001`.
 
 ```silk
 pub struct Ticket {
@@ -349,9 +364,20 @@ fn consume(ticket: Ticket) -> i32 {
   return ticket.id
 }
 
+fn double(value: i32) -> i32 {
+  return value * 2
+}
+
 pub fn main() -> i32 {
   let ticket = Ticket { id: 3 }
-  return consume(move ticket)
+  let identifier = consume(move ticket)
+
+  // `count` is copyable, so a consuming position copies it and it stays usable.
+  let count = 2
+  let first = double(count)
+  let second = double(count)
+
+  return identifier + first + second - 8
 }
 ```
 
@@ -366,8 +392,41 @@ leaves the place initialized throughout.
 ### 4.2 Borrows
 
 Borrows are written `&` and `&mut` and exist **only as call arguments and parameters**. A standalone
-borrow binding such as `let view = &values` is rejected, as is borrowing a temporary or a subplace,
-or storing a slice inside an owned value.
+borrow binding such as `let view = &values` is rejected, as is borrowing a temporary or storing a
+slice inside an owned value.
+
+Borrowing through a **nominal field** is supported and is a first-class part of the model: `&x.field`
+and `&mut x.field` project through resolved struct fields rooted in a stable local, pattern binding,
+or borrowed parameter, and the borrow retains that field path rather than copying the projected
+value. Exclusive projection through a parameter requires an exclusive reference.
+
+```silk
+pub struct Inner {
+  pub value: i32
+}
+
+pub struct Outer {
+  pub inner: Inner
+}
+
+fn readInner(inner: &Inner) -> i32 {
+  return inner.value
+}
+
+fn bumpInner(inner: &mut Inner) {
+  inner.value = inner.value + 1
+  return
+}
+
+pub fn main() -> i32 {
+  let mut outer = Outer { inner: Inner { value: 1 } }
+  let bumped = bumpInner(&mut outer.inner)
+  return readInner(&outer.inner)
+}
+```
+
+The narrower prohibition is on **array subplaces**: a slice must be formed over a complete array
+root, so `&values[1]` and a borrow of part of an array are unsupported.
 
 Within one call, two shared borrows of the same root are fine; a shared and an exclusive borrow, or
 two exclusive borrows, are rejected. A shared parameter reborrows only as shared; an exclusive
@@ -470,8 +529,16 @@ Recovery is therefore just reify, `match`, and re-raise or return. Because a fai
 `Row<!E>` — ordinary value data projected to a structural union — a handler can match on it like any
 other value.
 
-`Effect.catch<E>(handler)` handles the named members only: it removes them once coverage is complete,
-unions in the handler's own failures, and passes the rest through.
+`Effect.catch` as it ships today is an unconditional alias for `Effect.catchAll`: its body is
+`return run catchAll(move self, move onFailure)`, and its doc comment is identical. Both take a
+handler over the whole reified row `Row<!E>`, discard the entire failure row `!E`, and replace it
+with the handler's own `!F`. There is no residual row and no member selector — the `E` in
+`catch<A, !E, !F, ?R, ?S>` is the protected row, not a chosen member, so a selective
+`Effect.catch<E>(handler)` cannot be written.
+
+Selective recovery is therefore done by hand: reify with `Effect.result`, `match` the row, and
+re-raise the members you do not handle. The specification does describe a member-selective `catch`;
+the standard library does not yet implement one.
 
 ### 5.5 Provision
 

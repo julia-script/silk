@@ -6,8 +6,9 @@ knowledge of the language. Every program on this page compiles with the current 
 Silk is a small, explicitly typed language. Two things make it unusual, and both appear before the
 end of this page:
 
-- **Ownership is affine and explicit.** A value is used at most once, and handing it away is
-  written with the `move` keyword. Nothing moves implicitly.
+- **Ownership is affine and explicit.** A value of a move-only type — a struct, an owned
+  collection, an exclusive borrow — is used at most once, and handing it away is written with the
+  `move` keyword. Scalars, `bool`, strings, and shared borrows are copyable and are reused freely.
 - **Effects are values.** A computation that can fail, or that needs a capability from its caller,
   has that fact in its type. Running it is written with the `run` keyword.
 
@@ -135,12 +136,22 @@ pub fn main() -> i32 {
 }
 ```
 
-The `move` in `manhattan(move origin)` is the ownership rule in action. Passing `origin` by value
-hands the whole value to `manhattan`, and Silk requires you to say so. Dropping the `move` is an
-`OWN0003` error, and using `origin` again *after* the move is an `OWN0001` error.
+The `move` in `manhattan(move origin)` is the ownership rule in action. `Point` is a struct, and
+structs are **move-only**: passing one by value hands the whole value to `manhattan`, and Silk
+requires you to say so. Dropping the `move` is an `OWN0003` error, and using `origin` again *after*
+the move is an `OWN0001` error.
 
-This is the single most common surprise for a new Silk programmer, and it is deliberate: the point
-at which a value stops being yours is always written down.
+This is why the loop counters in the previous section needed no `move`. `i32`, `bool`, strings,
+shared borrows, and fixed arrays of copyable elements are **copyable**: passing one to a function
+copies it, the binding stays usable, and `OWN0003` never fires. Only move-only types require the
+keyword.
+
+One rule spans both categories: writing `move` explicitly always consumes the binding, even for a
+copyable type. `let x = 1` followed by `f(move x)` makes any later use of `x` an `OWN0001` error,
+so reach for `move` when you mean it rather than as decoration.
+
+The distinction is the single most common surprise for a new Silk programmer, and it is deliberate:
+the point at which a value stops being yours is always written down.
 
 ## Borrowing instead of giving away
 
