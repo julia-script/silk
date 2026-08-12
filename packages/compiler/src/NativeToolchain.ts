@@ -1,7 +1,9 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   renameSync,
@@ -28,6 +30,7 @@ export interface Toolchain {
   readonly _tag: 'Toolchain'
   readonly clang: string
   readonly shimCache?: ShimCache
+  readonly artifactCache?: ArtifactCache
 }
 
 /** Process-local compiled shim bytes shared explicitly across independent build scopes. */
@@ -67,6 +70,105 @@ export const makeShimCache = (): ShimCache => {
 
 /** Reads immutable counters from a shared shim cache. */
 export const shimCacheStats = (self: ShimCache): ShimCacheStats => self.stats()
+
+/**
+ * Content-addressed storage of finished artifact bytes, keyed by everything that can change the
+ * output. A hit skips the external toolchain entirely.
+ */
+export interface ArtifactCache {
+  readonly _tag: 'ArtifactCache'
+  readonly get: (key: string) => Uint8Array | undefined
+  readonly set: (key: string, bytes: Uint8Array) => void
+}
+
+/** Makes a durable artifact cache under `directory`, shared across processes. */
+export const makeDiskArtifactCache = (directory: string): ArtifactCache => {
+  const root = resolve(directory)
+  return Object.freeze({
+    _tag: 'ArtifactCache',
+    get: (key: string) => {
+      const path = join(root, key)
+      if (!existsSync(path)) return undefined
+      try {
+        return readFileSync(path)
+      } catch {
+        // ponytail: an unreadable entry is a miss, not a build failure.
+        return undefined
+      }
+    },
+    set: (key: string, bytes: Uint8Array) => {
+      try {
+        mkdirSync(root, { recursive: true })
+        // Stage then rename, so a concurrent reader never observes a partial entry.
+        const path = join(root, key)
+        const temporary = `${path}.silk-tmp-${process.pid}`
+        writeFileSync(temporary, bytes)
+        renameSync(temporary, path)
+      } catch {
+        // ponytail: caching is an optimization; a write failure must not fail the build.
+      }
+    },
+  })
+}
+
+const processArtifactCache = new Map<string, Uint8Array>()
+
+/** The process-local artifact cache used when a toolchain pins none of its own. */
+export const defaultArtifactCache = (): ArtifactCache =>
+  Object.freeze({
+    _tag: 'ArtifactCache',
+    get: (key: string) => processArtifactCache.get(key),
+    set: (key: string, bytes: Uint8Array) => {
+      processArtifactCache.set(key, Uint8Array.from(bytes))
+    },
+  })
+
+/**
+ * Derives the cache identity of a finished artifact. Every input that can change the emitted
+ * bytes participates, so a hit is only ever served for a byte-identical build.
+ */
+export const artifactCacheKey = (
+  toolchain: Toolchain,
+  kind: FinalArtifact['kind'],
+  target: Target.Target,
+  profile: ToolchainPlan.OptimizationProfile,
+  bitcode: Uint8Array | string,
+  shimSource: string,
+): string => {
+  const digest = createHash('sha256')
+  digest.update(kind)
+  digest.update('\0')
+  digest.update(target.triple)
+  digest.update('\0')
+  digest.update(profile)
+  digest.update('\0')
+  digest.update(toolchain.clang)
+  digest.update('\0')
+  digest.update(shimSource)
+  digest.update('\0')
+  digest.update(bitcode)
+  return `${digest.digest('hex')}.${kind === 'NativeExecutable' ? 'bin' : 'wasm'}`
+}
+
+/** Commits cached artifact bytes straight to their destination, bypassing the toolchain. */
+export const commitCachedArtifact = (
+  bytes: Uint8Array,
+  kind: FinalArtifact['kind'],
+  target: Target.Target,
+  destination: string,
+): FinalArtifact | StorageFailure => {
+  const path = resolve(destination)
+  const temporary = `${path}.silk-tmp-${process.pid}`
+  try {
+    // A cached native executable must be restored runnable; bytes alone do not carry the mode.
+    writeFileSync(temporary, bytes, kind === 'NativeExecutable' ? { mode: 0o755 } : undefined)
+    renameSync(temporary, path)
+    return Object.freeze({ _tag: 'FinalArtifact', kind, path, target })
+  } catch (cause) {
+    rmSync(temporary, { force: true })
+    return storageFailure(path, cause)
+  }
+}
 
 /** One owned, path-backed artifact tied to a build scope. */
 export interface PathArtifact {
