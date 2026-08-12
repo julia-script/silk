@@ -28,6 +28,9 @@ export const missingBaseDigitsCode = 'LEX0004' as const
 /** Stable code for a number-literal digit separator outside a position between two digits. */
 export const invalidDigitSeparatorCode = 'LEX0005' as const
 
+/** Stable code for a float-literal exponent marker that no exponent digit follows. */
+export const missingExponentDigitsCode = 'LEX0006' as const
+
 /** Stable code for one required token that is absent at its insertion position. */
 export const missingTokenCode = 'PAR0001' as const
 
@@ -182,6 +185,8 @@ export const invalidReturnedBorrowOriginCode = 'SEM0092' as const
 export const intrinsicTargetUnavailableCode = 'SEM0093' as const
 /** Stable code for wrapping the already-borrowed string view in another reference or slice. */
 export const invalidStringViewTypeCode = 'SEM0094' as const
+/** Stable code for a float literal spelling no floating-point value can represent. */
+export const invalidFloatLiteralCode = 'SEM0095' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -207,6 +212,7 @@ export type Code =
   | typeof unterminatedStaticLiteralCode
   | typeof missingBaseDigitsCode
   | typeof invalidDigitSeparatorCode
+  | typeof missingExponentDigitsCode
   | typeof missingTokenCode
   | typeof unexpectedTokensCode
   | typeof reservedTemplateSyntaxCode
@@ -308,6 +314,7 @@ export type Code =
   | typeof invalidReturnedBorrowOriginCode
   | typeof intrinsicTargetUnavailableCode
   | typeof invalidStringViewTypeCode
+  | typeof invalidFloatLiteralCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -349,6 +356,7 @@ export type Reason =
     }
   | { readonly _tag: 'MissingBaseDigits'; readonly radix: 2 | 8 | 16 }
   | { readonly _tag: 'InvalidDigitSeparator' }
+  | { readonly _tag: 'MissingExponentDigits' }
   | { readonly _tag: 'MissingToken'; readonly expected: Token.TokenKind }
   | {
       readonly _tag: 'UnexpectedTokens'
@@ -393,6 +401,7 @@ export type Reason =
     }
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
+  | { readonly _tag: 'InvalidFloatLiteral'; readonly spelling: string }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
@@ -836,6 +845,18 @@ export const invalidDigitSeparator = (span: SourceSpan.SourceSpan): Diagnostic =
     span,
   })
 
+/** Creates the lexical diagnostic for one exponent marker that no exponent digit follows. */
+export const missingExponentDigits = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'lexical',
+    code: missingExponentDigitsCode,
+    severity: 'error',
+    message: 'Float literal exponent must have at least one digit',
+    reason: Object.freeze({ _tag: 'MissingExponentDigits' }),
+    span,
+  })
+
 /** Creates the semantic diagnostic for a static literal that cannot decode atomically. */
 export const invalidStaticLiteral = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
@@ -845,6 +866,18 @@ export const invalidStaticLiteral = (detail: string, span: SourceSpan.SourceSpan
     severity: 'error',
     message: `Invalid static literal: ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidStaticLiteral', detail }),
+    span,
+  })
+
+/** Creates the semantic diagnostic for a float spelling no floating-point value can represent. */
+export const invalidFloatLiteral = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidFloatLiteralCode,
+    severity: 'error',
+    message: `Invalid float literal: ${spelling}`,
+    reason: Object.freeze({ _tag: 'InvalidFloatLiteral', spelling }),
     span,
   })
 

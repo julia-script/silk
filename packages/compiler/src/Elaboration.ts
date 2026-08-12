@@ -1214,9 +1214,16 @@ const analyzeFloating = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
   expected?: SemanticType,
-): FloatingExpressionFact => {
+): {
+  readonly fact: FloatingExpressionFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const unavailable = (
+    diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
+  ): { readonly fact: FloatingExpressionFact; readonly diagnostics: typeof diagnostics } =>
+    Object.freeze({ fact: Object.freeze({ _tag: 'Unavailable', syntax: node }), diagnostics })
   const token = directToken(node, 'DecimalFloat')
-  if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: node })
+  if (token === undefined) return unavailable(Object.freeze([]))
   const bytes = Option.getOrThrowWith(
     SourceFile.slice(source, token.span),
     () => new RangeError(`Semantic float span does not belong to source ${source.id}`),
@@ -1225,16 +1232,21 @@ const analyzeFloating = (
   const spelling = directToken(node, 'Minus') === undefined ? unsigned : `-${unsigned}`
   const selected = Scalar.isFloatSpelling(expected) ? expected : Scalar.defaultFloat.spelling
   const encoded = FloatingPoint.fromDecimal(spelling, selected === 'f32' ? 32 : 64)
-  return encoded === undefined
-    ? Object.freeze({ _tag: 'Unavailable', syntax: node })
-    : Object.freeze({
-        _tag: 'Available',
-        type: selected,
-        bits: encoded.bits,
-        spelling,
-        token,
-        syntax: node,
-      })
+  // A spelling the lexer accepted but no float can represent must never pass silently.
+  if (encoded === undefined) {
+    return unavailable(Object.freeze([Diagnostic.invalidFloatLiteral(spelling, node.span)]))
+  }
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Available',
+      type: selected,
+      bits: encoded.bits,
+      spelling,
+      token,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze([]),
+  })
 }
 
 const analyzeConstant = (
@@ -5348,14 +5360,13 @@ function analyzeExpression(
 
   if (node.kind === 'FloatingLiteralExpression') {
     const floating = analyzeFloating(source, node, expected)
+    const fact = floating.fact
     const type =
-      floating._tag === 'Available'
-        ? availableExpressionType(floating.type)
-        : unavailableExpressionType
+      fact._tag === 'Available' ? availableExpressionType(fact.type) : unavailableExpressionType
     return Object.freeze({
-      fact: Object.freeze({ _tag: 'Floating', floating, type, syntax: node }),
-      diagnostics: Object.freeze([]),
-      type: floating._tag === 'Available' ? floating.type : undefined,
+      fact: Object.freeze({ _tag: 'Floating', floating: fact, type, syntax: node }),
+      diagnostics: floating.diagnostics,
+      type: fact._tag === 'Available' ? fact.type : undefined,
     })
   }
 

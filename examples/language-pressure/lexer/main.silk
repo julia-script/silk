@@ -327,6 +327,7 @@ fn scanNumber(source: &[u8], start: usize) -> Decision {
       }
     }
   }
+  let mut exponentDigits = true
   let exponent = byteAtOrZero(source, index)
   if exponent == 101 {
     floating = true
@@ -334,6 +335,7 @@ fn scanNumber(source: &[u8], start: usize) -> Decision {
     let sign = byteAtOrZero(source, index)
     if sign == 43 { index = index + 1 }
     if sign == 45 { index = index + 1 }
+    exponentDigits = isDecimalDigit(byteAtOrZero(source, index))
     while index < source.length {
       if !isDecimalDigit(source[index]) { break }
       index = index + 1
@@ -345,12 +347,14 @@ fn scanNumber(source: &[u8], start: usize) -> Decision {
       let sign = byteAtOrZero(source, index)
       if sign == 43 { index = index + 1 }
       if sign == 45 { index = index + 1 }
+      exponentDigits = isDecimalDigit(byteAtOrZero(source, index))
       while index < source.length {
         if !isDecimalDigit(source[index]) { break }
         index = index + 1
       }
     }
   }
+  if !exponentDigits { return Decision { kind: 65, end: index, invalid: true } }
   if floating { return Decision { kind: 6, end: index, invalid: false } }
   return Decision { kind: 5, end: index, invalid: false }
 }
