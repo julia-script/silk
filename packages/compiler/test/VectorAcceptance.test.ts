@@ -916,11 +916,12 @@ impl Drop for Entry {
   }
 }
 
-// Consumes an owned element without reading its fields, so the check stays on ownership
-// accounting rather than field values.
-fn release(entry: Entry) -> () {
+// Reads the scalar field off the owned element before consuming it, so the exit value every
+// engine checks depends on what the vector actually stored.
+fn release(entry: Entry) -> i32 {
+  let read = entry.value
   drop entry
-  return ()
+  return read
 }
 
 effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemory ? &mut Allocator {
@@ -939,12 +940,15 @@ effect fn build() -> i32 ! OutOfMemory {
   let taken = pop<Entry>(&mut values)
   let popped = match move taken {
     Some<Entry> { value } => release(move value)
-    None missing => ()
+    None missing => 0
   }
-  if length<Entry>(&values) == 3 {} else { return 1 }
+  // The popped element is the last one appended, and the removed one is the first.
+  if popped == 9 {} else { return 1 }
+  if length<Entry>(&values) == 3 {} else { return 2 }
   let pulled = remove<Entry>(&mut values, 0)
   let removed = release(move pulled)
-  if length<Entry>(&values) == 2 {} else { return 2 }
+  if removed == 3 {} else { return 3 }
+  if length<Entry>(&values) == 2 {} else { return 4 }
   return 42
 }
 
@@ -1023,5 +1027,155 @@ it.effect(
       assert.strictEqual(acquires.length, 1)
       assert.strictEqual(releases.length, 1)
     }),
+  60_000,
+)
+
+// An owner that is live across an effect call and carries a Drop hook needs frame storage for
+// that hook, but its address never leaves the frame — the value itself stays in registers. The
+// Wasm backend used to reload every frame root after an effect call, which overwrote such an
+// owner with frame bytes nothing had written yet, so the element the append went on to store
+// was all-zero. Only the appends that grow reach an effect call while holding the element, which
+// is why index 0 and the index that triggers the next growth were the ones that read back zero.
+const moveOnlyElementZero = `import silk.vector { Vector, make, append, asSlice }
+
+struct Entry {
+  value: i32
+  marker: Vector<i32>
+}
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut values = make<Entry>()
+  let entry = Entry { value: 42, marker: make<i32>() }
+  let pending = append<Entry>(&mut values, move entry) |> Effect.provideMut(&mut allocator)
+  let appended = run pending
+  let readable = asSlice<Entry>(&values)
+  return readable[0].value
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+
+it.effect(
+  'reads back element zero of a move-only element on all three engines',
+  () => acceptOnAllEngines('move-only-element-zero', moveOnlyElementZero),
+  60_000,
+)
+
+const moveOnlyAppendSequence = `import silk.vector { Vector, make, append, asSlice, length }
+
+struct Entry {
+  value: i32
+  marker: Vector<i32>
+}
+
+effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemory ? &mut Allocator {
+  let entry = Entry { value: value, marker: make<i32>() }
+  let appended = run append<Entry>(move values, move entry)
+  return ()
+}
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut values = make<Entry>()
+  let s0 = run (seed(&mut values, 1) |> Effect.provideMut(&mut allocator))
+  let s1 = run (seed(&mut values, 2) |> Effect.provideMut(&mut allocator))
+  let s2 = run (seed(&mut values, 3) |> Effect.provideMut(&mut allocator))
+  if length<Entry>(&values) == 3 {} else { return 1 }
+  let readable = asSlice<Entry>(&values)
+  if readable[0].value == 1 {} else { return 2 }
+  if readable[1].value == 2 {} else { return 3 }
+  if readable[2].value == 3 {} else { return 4 }
+  return 42
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+
+it.effect(
+  'reads back every element of a move-only append sequence on all three engines',
+  () => acceptOnAllEngines('move-only-append-sequence', moveOnlyAppendSequence),
+  60_000,
+)
+
+// Five appends cross both growths (0 -> 4 -> 8), so two of them hold the element across the
+// allocating effect call rather than one.
+const moveOnlyGrowthSequence = `import silk.vector { Vector, make, append, asSlice, length, capacity }
+
+struct Entry {
+  value: i32
+  marker: Vector<i32>
+}
+
+effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemory ? &mut Allocator {
+  let entry = Entry { value: value, marker: make<i32>() }
+  let appended = run append<Entry>(move values, move entry)
+  return ()
+}
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut values = make<Entry>()
+  let s0 = run (seed(&mut values, 1) |> Effect.provideMut(&mut allocator))
+  let s1 = run (seed(&mut values, 2) |> Effect.provideMut(&mut allocator))
+  let s2 = run (seed(&mut values, 3) |> Effect.provideMut(&mut allocator))
+  let s3 = run (seed(&mut values, 4) |> Effect.provideMut(&mut allocator))
+  let s4 = run (seed(&mut values, 5) |> Effect.provideMut(&mut allocator))
+  if length<Entry>(&values) == 5 {} else { return 1 }
+  if capacity<Entry>(&values) == 8 {} else { return 2 }
+  let readable = asSlice<Entry>(&values)
+  if readable[0].value == 1 {} else { return 3 }
+  if readable[1].value == 2 {} else { return 4 }
+  if readable[2].value == 3 {} else { return 5 }
+  if readable[3].value == 4 {} else { return 6 }
+  if readable[4].value == 5 {} else { return 7 }
+  return 42
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 8 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+
+it.effect(
+  'reads back every element across both growths of a move-only vector on all three engines',
+  () => acceptOnAllEngines('move-only-growth-sequence', moveOnlyGrowthSequence),
+  60_000,
+)
+
+// Any move-only field reaches the same path, so the element type is pinned with Bytes rather
+// than a nested Vector.
+const moveOnlyBytesField = `import silk.vector { Vector, make, append, asSlice, length }
+import silk.bytes { Bytes, make as bytesMake }
+
+struct Entry {
+  marker: Bytes
+  value: i32
+}
+
+effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemory ? &mut Allocator {
+  let entry = Entry { marker: bytesMake(), value: value }
+  let appended = run append<Entry>(move values, move entry)
+  return ()
+}
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut values = make<Entry>()
+  let s0 = run (seed(&mut values, 20) |> Effect.provideMut(&mut allocator))
+  let s1 = run (seed(&mut values, 22) |> Effect.provideMut(&mut allocator))
+  if length<Entry>(&values) == 2 {} else { return 1 }
+  let readable = asSlice<Entry>(&values)
+  return readable[0].value + readable[1].value
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+
+it.effect(
+  'reads back element zero when the move-only field is Bytes on all three engines',
+  () => acceptOnAllEngines('move-only-bytes-field', moveOnlyBytesField),
   60_000,
 )

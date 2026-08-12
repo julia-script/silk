@@ -107,6 +107,14 @@ interface FrameRoot {
 
 interface FramePlan {
   readonly roots: ReadonlyMap<number, FrameRoot>
+  /**
+   * The roots whose address leaves the frame — borrow formations and borrow-shaped captures.
+   * A callee reaches exactly these through the pointer it was handed, so exactly these have to
+   * reload after a call. The remaining roots are addressed only by the cleanup sequence that
+   * materializes and reloads them itself, and reloading one after a call would overwrite a live
+   * value with frame bytes nothing ever wrote.
+   */
+  readonly escaping: ReadonlySet<number>
   readonly sliceRoots: ReadonlyMap<number, number>
   readonly size: number
   readonly alignment: number
@@ -117,7 +125,7 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
     (operation): operation is Extract<Mir.Operation, { readonly _tag: 'BeginLoan' }> =>
       operation._tag === 'BeginLoan',
   )
-  const rootOrdinals = new Set([
+  const escaping = new Set([
     ...formations.flatMap((operation) =>
       operation.sourceType._tag === 'Slice' ||
       fn.localTypes.at(operation.root.ordinal)?._tag === 'Reference'
@@ -136,6 +144,9 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
           )
         : [],
     ),
+  ])
+  const rootOrdinals = new Set([
+    ...escaping,
     // A hook-bearing drop passes `&mut self` into its hook, so the owner needs frame storage.
     ...Mir.operations(fn).flatMap((operation) => {
       const dropped =
@@ -184,6 +195,7 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
   }
   return Object.freeze({
     roots,
+    escaping,
     sliceRoots: new Map(
       formations.map((operation) => [operation.destination.ordinal, operation.root.ordinal]),
     ),
@@ -1165,6 +1177,12 @@ const emitOperation = (
       ]
     })
   }
+  /**
+   * Reloads the roots a call could have written through the pointer it was handed. Roots that
+   * never gave their address away keep their authoritative value in slots, so they stay put.
+   */
+  const reloadEscapingRoots = (): ReadonlyArray<Instr.Instr> =>
+    [...(memory?.frame.escaping ?? [])].sort((left, right) => left - right).flatMap(reloadRoot)
   /**
    * Runs every Drop hook one cleanup plan invokes: the owner materializes to its frame root,
    * each hook receives the address of its (possibly nested) value, and the owner's slots
@@ -2590,9 +2608,7 @@ const emitOperation = (
         ),
         Instr.call(resolve(operation.runner, operation.runnerTypeArguments)),
         ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
-        ...[...(memory?.frame.roots.keys() ?? [])]
-          .sort((left, right) => left - right)
-          .flatMap(reloadRoot),
+        ...reloadEscapingRoots(),
       ]
       const success = copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots)
       if (operation.propagationType === undefined) return [...invoke, ...success]
@@ -2645,9 +2661,7 @@ const emitOperation = (
         ),
         Instr.call(resolve(operation.runner, operation.runnerTypeArguments)),
         ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
-        ...[...(memory?.frame.roots.keys() ?? [])]
-          .sort((left, right) => left - right)
-          .flatMap(reloadRoot),
+        ...reloadEscapingRoots(),
       ]
       const writePayload = (
         source: ReadonlyArray<number>,
