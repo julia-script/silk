@@ -155,3 +155,97 @@ because its body calls an intrinsic.
 
 - **WHEN** definition is requested on `Intrinsic.i32Add`
 - **THEN** no source location is invented and the intrinsic semantic identity remains available
+
+### Requirement: References enumerate one semantic identity across the project
+
+The language server SHALL advertise references support and SHALL answer a references request with
+every occurrence in the accepted project revision whose semantic identity equals the identity
+selected at the request position, rather than every token that shares its spelling. Occurrences
+SHALL be returned in canonical module order and, within a module, in source order. The
+declaration-site occurrence SHALL be included when the client sets `includeDeclaration` and
+excluded otherwise. A position with no available semantic occurrence SHALL produce no references.
+
+#### Scenario: Client initializes the server
+
+- **WHEN** a compatible client initializes a Silk language-server session
+- **THEN** the returned capabilities advertise references support
+
+#### Scenario: Uses in another module
+
+- **WHEN** references are requested on a declaration used from a second module
+- **THEN** the response contains that module's uses at their exact ranges together with the uses in the declaring module
+
+#### Scenario: Selected member and its local alias
+
+- **WHEN** references are requested through an aliased selected-member import
+- **THEN** the response contains the declaration, the imported source name, the local alias, and every use of that alias, because all of them carry one semantic identity
+
+#### Scenario: Declaration excluded on request
+
+- **WHEN** a references request clears `includeDeclaration`
+- **THEN** the declaration-site occurrence is the only occurrence removed from the response
+
+### Requirement: Rename rewrites one semantic identity in one workspace edit
+
+The language server SHALL advertise rename support with `prepareProvider` enabled. A prepare-rename
+request SHALL return the range of the selected name token, and SHALL fail for a token with no
+source-backed declaration, including keywords, trivia, and intrinsics that have no Silk
+declaration. A rename SHALL return one `WorkspaceEdit` covering every module of the accepted
+project revision, and SHALL edit only the occurrences whose analyzed spelling equals the selected
+name so that an aliased import keeps the local name its own module chose. A rename SHALL be refused
+rather than partially applied when an occurrence cannot be placed in a document.
+
+The accepted project revision is the rename's outer bound: the open documents that serve as roots
+plus every module they transitively import, closed project files included, resolved from disk. A
+closed module that imports the renamed declaration but is reachable from no open root is therefore
+outside that revision and SHALL NOT be edited. Rooting analysis at open documents is what the
+`language-server-synchronization` capability specifies, so widening the root set is a change to
+synchronization rather than to navigation. The resulting failure is visible — the unedited module
+stops compiling — rather than silent.
+
+Within that revision, an `as` clause binds a name in one module only, so a rename selected through
+such a binding SHALL be confined to the module that wrote the clause. Two modules that alias one
+declaration to the same spelling agree on both identity and spelling, and neither owns the other's
+choice of name. The declaration site and the source half of an import clause name the declaration
+itself and SHALL stay project-wide. This confinement applies to rename alone; references are
+read-only and SHALL continue to report every occurrence of the identity.
+
+Because Silk has one flat non-shadowing module namespace, a rename of a name that occupies that
+namespace SHALL be refused when the new spelling is already bound in any module whose flat namespace
+the rename would extend. The refusal SHALL carry the existing `SEM0016` binding-collision code and
+message rather than a rename-specific diagnostic.
+
+#### Scenario: Client initializes the server
+
+- **WHEN** a compatible client initializes a Silk language-server session
+- **THEN** the returned capabilities advertise rename support with prepare support enabled
+
+#### Scenario: Prepare a rename on a keyword
+
+- **WHEN** a prepare-rename request selects a keyword token
+- **THEN** the request fails instead of returning a range
+
+#### Scenario: Rename a declaration used in another module
+
+- **WHEN** a top-level declaration used from a second module is renamed
+- **THEN** one workspace edit changes the declaration and every use in both modules
+
+#### Scenario: Rename an imported source name
+
+- **WHEN** a declaration reached through an aliased selected-member import is renamed
+- **THEN** the imported source name changes and the local alias and its uses keep their own spelling
+
+#### Scenario: Two modules alias one declaration to the same spelling
+
+- **WHEN** an alias is renamed in a module while a second module aliases the same declaration to the same spelling
+- **THEN** only the selecting module's clause and uses change, and the second module keeps the name it chose
+
+#### Scenario: Rename a project alias of a standard-library member
+
+- **WHEN** a project module's alias of a standard-library member is renamed and the installation aliases that member to the same spelling
+- **THEN** the edit covers the project module alone and reaches no file inside the installed toolchain
+
+#### Scenario: Rename onto an existing top-level name
+
+- **WHEN** a rename would give a declaration a spelling already bound in a module's flat namespace
+- **THEN** the rename is refused with the `SEM0016` collision reason and no edit is returned

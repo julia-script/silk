@@ -1,8 +1,13 @@
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as SourceOrigin from '@silk-effect/compiler/SourceOrigin'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
+import * as Stdlib from '@silk-effect/compiler/Stdlib'
 import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import { SymbolKind } from 'vscode-languageserver-types'
 import * as Document from '../src/Document.js'
 
@@ -28,12 +33,16 @@ const open = (
     return { document, snapshot }
   })
 
-const positionOf = (source: string, spelling: string, occurrence = 0) => {
-  let offset = -1
-  for (let index = 0; index <= occurrence; index += 1) offset = source.indexOf(spelling, offset + 1)
+const positionAt = (source: string, offset: number) => {
   const before = source.slice(0, offset)
   const lineStart = before.lastIndexOf('\n') + 1
   return { line: before.split('\n').length - 1, character: offset - lineStart }
+}
+
+const positionOf = (source: string, spelling: string, occurrence = 0) => {
+  let offset = -1
+  for (let index = 0; index <= occurrence; index += 1) offset = source.indexOf(spelling, offset + 1)
+  return positionAt(source, offset)
 }
 
 it.effect('publishes compiler errors as protocol diagnostics', () =>
@@ -590,6 +599,472 @@ it.effect('returns no definition for unavailable targets and trivia', () =>
     )
     assert.isUndefined(
       Document.definition(document, snapshot, { line: 0, character: 3 }, () => undefined),
+    )
+  }),
+)
+
+interface ProjectModule {
+  readonly module: string
+  readonly text: string
+}
+
+/**
+ * Mirrors `Workspace.uriOf`: a toolchain-shipped module answers with its real installed
+ * `file://` href, so an edit aimed at the standard library is visible as such in a test.
+ */
+const uriOfModule = (module: string): string =>
+  Stdlib.find(module)?.sourceUrl.href ?? `file:///project/${module}.silk`
+
+/**
+ * Mirrors the installed toolchain resolver: project modules come from memory while reserved
+ * standard-library modules carry the `ToolchainFile` origin a real installation reports.
+ */
+const toolchainResolver = (
+  sources: ReadonlyMap<string, Uint8Array>,
+): Layer.Layer<SourceResolver.SourceResolver> =>
+  Layer.succeed(SourceResolver.SourceResolver, {
+    resolve: (module) => {
+      const bytes = sources.get(module)
+      return Effect.succeed(
+        bytes === undefined
+          ? Option.none()
+          : Option.some(SourceResolver.resolved(bytes, SourceOrigin.memory())),
+      )
+    },
+    resolveStandardLibrary: (module) => {
+      const entry = Stdlib.find(module)
+      return Effect.succeed(
+        entry === undefined
+          ? Option.none()
+          : Option.some(
+              SourceResolver.resolved(
+                entry.bytes,
+                SourceOrigin.toolchainFile(entry.sourceUrl.href),
+              ),
+            ),
+      )
+    },
+  })
+
+/** Opens several modules as one analyzed project and focuses one of them as the request document. */
+const openProject = (
+  modules: ReadonlyArray<ProjectModule>,
+  focus: string,
+): Effect.Effect<{
+  readonly document: Document.Document
+  readonly snapshot: Analysis.FrontendSnapshot
+}> =>
+  Effect.gen(function* () {
+    const bytes = new Map(
+      modules.map(({ module, text }) => [module, encoder.encode(text)] as const),
+    )
+    const project = yield* ProjectAnalysis.make(
+      modules.map(({ module }) => SourceFile.make(module, bytes.get(module) ?? new Uint8Array())),
+    ).pipe(Effect.provide(toolchainResolver(bytes)))
+    const snapshot = ProjectAnalysis.view(project, focus)
+    if (snapshot === undefined) throw new Error(`Project analysis lost focused root ${focus}`)
+    return {
+      document: Document.make({
+        uri: uriOfModule(focus),
+        version: 1,
+        workspace: 'project:/project/silk.toml',
+        module: focus,
+        sourceRoot: '/project',
+        bytes: bytes.get(focus) ?? new Uint8Array(),
+      }),
+      snapshot,
+    }
+  })
+
+const geometry = 'pub fn area(width: i32, height: i32) -> i32 { return width }'
+const consumer =
+  'import geometry\npub fn main() -> i32 { return geometry.area(2, 3) + geometry.area(4, 5) }'
+
+it.effect('finds every use of one declaration across two modules', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'main', text: consumer },
+      ],
+      'geometry',
+    )
+    const position = positionOf(geometry, 'area')
+    assert.deepEqual(
+      Document.references(document, snapshot, position, true, uriOfModule)?.map(
+        ({ uri, range }) => ({ uri, line: range.start.line, character: range.start.character }),
+      ),
+      [
+        { uri: uriOfModule('geometry'), line: 0, character: geometry.indexOf('area') },
+        { uri: uriOfModule('main'), line: 1, character: consumer.split('\n')[1]?.indexOf('area') },
+        {
+          uri: uriOfModule('main'),
+          line: 1,
+          character: consumer.split('\n')[1]?.indexOf('area', 40),
+        },
+      ],
+    )
+    // Excluding the declaration drops exactly the declaration-site occurrence.
+    assert.deepEqual(
+      Document.references(document, snapshot, position, false, uriOfModule)?.map(({ uri }) => uri),
+      [uriOfModule('main'), uriOfModule('main')],
+    )
+  }),
+)
+
+it.effect('renames a declaration with one workspace edit covering both modules', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'main', text: consumer },
+      ],
+      'geometry',
+    )
+    const renamed = Document.rename(
+      document,
+      snapshot,
+      positionOf(geometry, 'area'),
+      'surface',
+      uriOfModule,
+    )
+    assert.strictEqual(renamed?._tag, 'RenameEdit')
+    if (renamed?._tag !== 'RenameEdit') return
+    const changes = renamed.edit.changes ?? {}
+    assert.deepEqual(Object.keys(changes).sort(), [uriOfModule('geometry'), uriOfModule('main')])
+    assert.deepEqual(
+      changes[uriOfModule('geometry')]?.map((edit) => edit.newText),
+      ['surface'],
+    )
+    assert.deepEqual(
+      changes[uriOfModule('main')]?.map((edit) => edit.newText),
+      ['surface', 'surface'],
+    )
+  }),
+)
+
+it.effect('refuses a rename that collides with a top-level name in any edited module', () =>
+  Effect.gen(function* () {
+    const local = yield* openProject(
+      [{ module: 'geometry', text: `${geometry}\npub fn surface() -> i32 { return 1 }` }],
+      'geometry',
+    )
+    const refusedLocally = Document.rename(
+      local.document,
+      local.snapshot,
+      positionOf(geometry, 'area'),
+      'surface',
+      uriOfModule,
+    )
+    assert.deepEqual(refusedLocally, {
+      _tag: 'RenameRefusal',
+      code: 'SEM0016',
+      message: 'Multiple bindings claim surface',
+    })
+
+    // The importing module's flat namespace counts too: its selected member would collide there.
+    const importer = 'import geometry { area }\npub fn surface() -> i32 { return area(1, 2) }'
+    const across = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'main', text: importer },
+      ],
+      'geometry',
+    )
+    assert.deepEqual(
+      Document.rename(
+        across.document,
+        across.snapshot,
+        positionOf(geometry, 'area'),
+        'surface',
+        uriOfModule,
+      ),
+      { _tag: 'RenameRefusal', code: 'SEM0016', message: 'Multiple bindings claim surface' },
+    )
+  }),
+)
+
+it.effect('prepares a rename on a name token but fails on a keyword', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [{ module: 'geometry', text: geometry }],
+      'geometry',
+    )
+    assert.deepEqual(Document.prepareRename(document, snapshot, positionOf(geometry, 'area')), {
+      range: {
+        start: { line: 0, character: geometry.indexOf('area') },
+        end: { line: 0, character: geometry.indexOf('area') + 'area'.length },
+      },
+      placeholder: 'area',
+    })
+    assert.isUndefined(
+      Document.prepareRename(document, snapshot, positionOf(geometry, 'pub')),
+      'a keyword token has no renameable declaration',
+    )
+    assert.isUndefined(Document.prepareRename(document, snapshot, positionOf(geometry, 'return')))
+  }),
+)
+
+it.effect('renames the imported source name without disturbing a local alias', () =>
+  Effect.gen(function* () {
+    const aliased =
+      'import geometry { area as region }\npub fn main() -> i32 { return region(1, 2) }'
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'main', text: aliased },
+      ],
+      'geometry',
+    )
+    const renamed = Document.rename(
+      document,
+      snapshot,
+      positionOf(geometry, 'area'),
+      'surface',
+      uriOfModule,
+    )
+    assert.strictEqual(renamed?._tag, 'RenameEdit')
+    if (renamed?._tag !== 'RenameEdit') return
+    const changes = renamed.edit.changes ?? {}
+    // Only the `area` half of `area as region` moves; `region` and its uses keep their spelling.
+    assert.deepEqual(
+      changes[uriOfModule('main')]?.map((edit) => ({
+        line: edit.range.start.line,
+        character: edit.range.start.character,
+        newText: edit.newText,
+      })),
+      [{ line: 0, character: aliased.indexOf('area'), newText: 'surface' }],
+    )
+  }),
+)
+
+const toolchainUri = Stdlib.find('silk/bool')?.sourceUrl.href
+const boolConsumer =
+  'import silk.bool { equals }\npub fn main() -> bool { return equals(true, true) }'
+
+it.effect('refuses to rename a declaration the installed toolchain owns', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [{ module: 'main', text: boolConsumer }],
+      'main',
+    )
+    assert.isDefined(toolchainUri)
+    // The import binding and the call site both reach the same toolchain-owned declaration.
+    for (const occurrence of [0, 1]) {
+      const position = positionOf(boolConsumer, 'equals', occurrence)
+      const renamed = Document.rename(document, snapshot, position, 'sameAs', uriOfModule)
+      assert.strictEqual(renamed?._tag, 'RenameRefusal')
+      if (renamed?._tag !== 'RenameRefusal') return
+      assert.strictEqual(renamed.code, 'LSP0002')
+      assert.include(renamed.message, 'silk/bool')
+      // The editor is never offered the rename UI for a toolchain-owned declaration either.
+      assert.isUndefined(Document.prepareRename(document, snapshot, position))
+    }
+  }),
+)
+
+const boolAlias =
+  'import silk.bool { equals as eq }\npub fn main() -> bool { return eq(true, true) }'
+// `eq` never spells `equals`, so these two offsets are the whole extent of the alias.
+const aliasBinding = boolAlias.indexOf(' as eq') + ' as '.length
+const aliasCall = boolAlias.indexOf('eq(')
+
+it.effect('renames a local alias of a toolchain import, which the project owns', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject([{ module: 'main', text: boolAlias }], 'main')
+    assert.isDefined(toolchainUri)
+    // The alias is renameable from its binding and from its use: both name `main`'s own binding.
+    for (const offset of [aliasBinding, aliasCall]) {
+      const position = positionAt(boolAlias, offset)
+      const renamed = Document.rename(document, snapshot, position, 'same', uriOfModule)
+      assert.strictEqual(renamed?._tag, 'RenameEdit')
+      if (renamed?._tag !== 'RenameEdit') return
+      const changes = renamed.edit.changes ?? {}
+      // Only the project module is edited: the `equals` half of the clause keeps its spelling.
+      assert.deepEqual(Object.keys(changes), [uriOfModule('main')])
+      assert.deepEqual(
+        changes[uriOfModule('main')]?.map((edit) => ({
+          ...edit.range.start,
+          newText: edit.newText,
+        })),
+        [
+          { ...positionAt(boolAlias, aliasBinding), newText: 'same' },
+          { ...positionAt(boolAlias, aliasCall), newText: 'same' },
+        ],
+      )
+      // Prepare must never grey out F2 where the rename itself succeeds.
+      assert.deepEqual(Document.prepareRename(document, snapshot, position), {
+        range: {
+          start: position,
+          end: { line: position.line, character: position.character + 'eq'.length },
+        },
+        placeholder: 'eq',
+      })
+    }
+  }),
+)
+
+it.effect('refuses a toolchain-owned rename before any flat-namespace collision', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [{ module: 'main', text: boolConsumer }],
+      'main',
+    )
+    // `main` already occupies this module's flat namespace, so both refusals apply at once and
+    // the toolchain one must win: no new spelling can make this rename legal.
+    const both = Document.rename(
+      document,
+      snapshot,
+      positionOf(boolConsumer, 'equals'),
+      'main',
+      uriOfModule,
+    )
+    assert.strictEqual(both?._tag, 'RenameRefusal')
+    if (both?._tag !== 'RenameRefusal') return
+    assert.strictEqual(both.code, 'LSP0002')
+    // A collision with no toolchain edit behind it still reports the binding conflict.
+    assert.deepEqual(
+      Document.rename(document, snapshot, positionOf(boolConsumer, 'main'), 'equals', uriOfModule),
+      { _tag: 'RenameRefusal', code: 'SEM0016', message: 'Multiple bindings claim equals' },
+    )
+  }),
+)
+
+const boolHelper =
+  'import silk.bool { equals }\npub fn same(left: bool, right: bool) -> bool { return equals(left, right) }'
+const boolCaller = 'import helper { same }\npub fn main() -> bool { return same(true, true) }'
+
+it.effect('renames a project declaration used beside toolchain imports without touching them', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'helper', text: boolHelper },
+        { module: 'main', text: boolCaller },
+      ],
+      'helper',
+    )
+    const renamed = Document.rename(
+      document,
+      snapshot,
+      positionOf(boolHelper, 'same'),
+      'identical',
+      uriOfModule,
+    )
+    assert.strictEqual(renamed?._tag, 'RenameEdit')
+    if (renamed?._tag !== 'RenameEdit') return
+    const changes = renamed.edit.changes ?? {}
+    assert.deepEqual(Object.keys(changes).sort(), [uriOfModule('helper'), uriOfModule('main')])
+    // No edit may land in the toolchain installation, whatever the project's closure contains.
+    assert.isEmpty(
+      Object.keys(changes).filter((uri) => uri === toolchainUri || uri.includes('/stdlib/')),
+    )
+  }),
+)
+
+it.effect('still lists the toolchain declaration among a standard-library name references', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [{ module: 'main', text: boolConsumer }],
+      'main',
+    )
+    const locations = Document.references(
+      document,
+      snapshot,
+      positionOf(boolConsumer, 'equals'),
+      true,
+      uriOfModule,
+    )
+    assert.isDefined(locations)
+    // References stay read-only and complete: the toolchain declaration is useful to show.
+    assert.include(
+      locations?.map(({ uri }) => uri),
+      toolchainUri,
+    )
+    assert.include(
+      locations?.map(({ uri }) => uri),
+      uriOfModule('main'),
+    )
+  }),
+)
+
+const stdlibAliases =
+  'import silk.bytes { make as bytesMake }\nimport silk.vector { make as vectorMake }\npub fn main() -> i32 { return 0 }'
+// `make` is a prefix of neither alias, but the alias spellings repeat across the standard library,
+// so the offsets are taken from the clause itself rather than searched for by spelling.
+const vectorAliasBinding = stdlibAliases.indexOf('make as vectorMake') + 'make as '.length
+
+it.effect('renames the project alias of a standard-library member the toolchain also aliases', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [{ module: 'main', text: stdlibAliases }],
+      'main',
+    )
+    const position = positionAt(stdlibAliases, vectorAliasBinding)
+    // `silk/bytes` and `silk/os_filesystem` spell their own alias of `silk.vector.make`
+    // `vectorMake` too: identity and spelling both coincide, and only the module that wrote the
+    // clause owns this binding.
+    const renamed = Document.rename(document, snapshot, position, 'newVector', uriOfModule)
+    assert.strictEqual(renamed?._tag, 'RenameEdit')
+    if (renamed?._tag !== 'RenameEdit') return
+    const changes = renamed.edit.changes ?? {}
+    assert.deepEqual(Object.keys(changes), [uriOfModule('main')])
+    assert.deepEqual(
+      changes[uriOfModule('main')]?.map((edit) => ({ ...edit.range.start, newText: edit.newText })),
+      [{ ...position, newText: 'newVector' }],
+    )
+    // No edit may reach the installation under any module name it ships.
+    assert.isEmpty(Object.keys(changes).filter((uri) => uri.includes('/stdlib/')))
+    // Prepare answers from the same facts, so the editor offers the rename it will accept.
+    assert.deepEqual(Document.prepareRename(document, snapshot, position), {
+      range: {
+        start: position,
+        end: { line: position.line, character: position.character + 'vectorMake'.length },
+      },
+      placeholder: 'vectorMake',
+    })
+    // Confining the *rename* leaves the read-only reference list whole: every occurrence of the
+    // declaration, standard-library ones included, is still worth showing.
+    const locations = Document.references(document, snapshot, position, true, uriOfModule)
+    assert.isDefined(locations)
+    assert.include(
+      locations?.map(({ uri }) => uri),
+      uriOfModule('main'),
+    )
+    assert.isNotEmpty(
+      (locations ?? []).filter(({ uri }) => uri === Stdlib.find('silk/vector')?.sourceUrl.href),
+    )
+  }),
+)
+
+const alphaAlias = 'import geometry { area as region }\npub fn one() -> i32 { return region(1, 2) }'
+const betaAlias = 'import geometry { area as region }\npub fn two() -> i32 { return region(3, 4) }'
+
+it.effect('keeps one module alias rename out of another module that chose the same alias', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'alpha', text: alphaAlias },
+        { module: 'beta', text: betaAlias },
+      ],
+      'alpha',
+    )
+    const binding = positionAt(alphaAlias, alphaAlias.indexOf('area as region') + 'area as '.length)
+    const renamed = Document.rename(document, snapshot, binding, 'zone', uriOfModule)
+    assert.strictEqual(renamed?._tag, 'RenameEdit')
+    if (renamed?._tag !== 'RenameEdit') return
+    const changes = renamed.edit.changes ?? {}
+    // `beta` chose the same spelling for the same declaration; it is not `alpha`'s name to change.
+    assert.deepEqual(Object.keys(changes), [uriOfModule('alpha')])
+    assert.deepEqual(
+      changes[uriOfModule('alpha')]?.map((edit) => ({
+        ...edit.range.start,
+        newText: edit.newText,
+      })),
+      [
+        { ...binding, newText: 'zone' },
+        { ...positionAt(alphaAlias, alphaAlias.indexOf('region(1, 2)')), newText: 'zone' },
+      ],
     )
   }),
 )

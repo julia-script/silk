@@ -73,6 +73,14 @@ const connect = (): Client => {
 const response = (message: Record<string, unknown>, id: number): unknown =>
   message.id === id && 'result' in message ? message.result : undefined
 
+const failure = (
+  message: Record<string, unknown>,
+  id: number,
+): { readonly message: string } | undefined =>
+  message.id === id && 'error' in message
+    ? (message.error as { readonly message: string })
+    : undefined
+
 const publishedDiagnostics = (
   message: Record<string, unknown>,
   uri: string,
@@ -567,6 +575,136 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
       (message) => publishedDiagnosticReport(message, mainUri) !== undefined,
     ).length
     assert.strictEqual(reportsAfterUnrelated, reportsBeforeUnrelated)
+  } finally {
+    await client.close()
+  }
+})
+
+it('serves project-wide references and renames over real stdio', { timeout: 30_000 }, async () => {
+  const client = connect()
+  try {
+    client.send({
+      id: 1,
+      method: 'initialize',
+      params: { processId: null, rootUri: null, capabilities: {} },
+    })
+    const initialized = (await client.waitFor((message) => response(message, 1))) as {
+      capabilities: Record<string, unknown>
+    }
+    assert.strictEqual(initialized.capabilities.referencesProvider, true)
+    assert.deepEqual(initialized.capabilities.renameProvider, { prepareProvider: true })
+    client.send({ method: 'initialized', params: {} })
+
+    const geometryUri = 'file:///silk-lsp-e2e/rename/Geometry.silk'
+    const mainUri = 'file:///silk-lsp-e2e/rename/Main.silk'
+    const geometryText =
+      'pub fn area(width: i32, height: i32) -> i32 { return width }\npub fn perimeter() -> i32 { return 1 }'
+    const mainText = 'import Geometry\npub fn main() -> i32 { return Geometry.area(2, 3) }'
+    didOpen(client, geometryUri, geometryText)
+    didOpen(client, mainUri, mainText)
+    await client.waitFor((message) => {
+      const diagnostics = publishedDiagnostics(message, mainUri)
+      return diagnostics !== undefined && diagnostics.length === 0 ? diagnostics : undefined
+    })
+
+    const declaration = { line: 0, character: geometryText.indexOf('area') }
+    client.send({
+      id: 2,
+      method: 'textDocument/references',
+      params: {
+        textDocument: { uri: geometryUri },
+        position: declaration,
+        context: { includeDeclaration: true },
+      },
+    })
+    const locations = (await client.waitFor((message) => response(message, 2))) as Array<{
+      uri: string
+    }>
+    assert.deepEqual(
+      locations.map((location) => location.uri),
+      [geometryUri, mainUri],
+    )
+
+    client.send({
+      id: 3,
+      method: 'textDocument/rename',
+      params: {
+        textDocument: { uri: geometryUri },
+        position: declaration,
+        newName: 'surface',
+      },
+    })
+    const edit = (await client.waitFor((message) => response(message, 3))) as {
+      changes: Record<string, Array<{ newText: string }>>
+    }
+    assert.deepEqual(Object.keys(edit.changes).sort(), [geometryUri, mainUri])
+    assert.deepEqual(
+      edit.changes[mainUri]?.map((change) => change.newText),
+      ['surface'],
+    )
+
+    client.send({
+      id: 4,
+      method: 'textDocument/rename',
+      params: { textDocument: { uri: geometryUri }, position: declaration, newName: 'perimeter' },
+    })
+    const refused = await client.waitFor((message) => failure(message, 4))
+    assert.include(refused.message, 'SEM0016')
+
+    client.send({
+      id: 5,
+      method: 'textDocument/prepareRename',
+      params: { textDocument: { uri: geometryUri }, position: { line: 0, character: 1 } },
+    })
+    const unrenameable = await client.waitFor((message) => failure(message, 5))
+    assert.include(unrenameable.message, 'no renameable declaration')
+
+    // A name the installed toolchain declares is refused outright: applying the edit would rewrite
+    // the standard library shipped with the compiler, for this project and every other one.
+    const toolchainUri = 'file:///silk-lsp-e2e/rename/Toolchain.silk'
+    const toolchainText =
+      'import silk.bool { equals }\npub fn same() -> bool { return equals(true, true) }'
+    didOpen(client, toolchainUri, toolchainText)
+    await client.waitFor((message) => {
+      const diagnostics = publishedDiagnostics(message, toolchainUri)
+      return diagnostics !== undefined && diagnostics.length === 0 ? diagnostics : undefined
+    })
+    const imported = { line: 0, character: toolchainText.indexOf('equals') }
+
+    client.send({
+      id: 6,
+      method: 'textDocument/rename',
+      params: { textDocument: { uri: toolchainUri }, position: imported, newName: 'sameAs' },
+    })
+    const toolchainRefusal = await client.waitFor((message) => failure(message, 6))
+    assert.include(toolchainRefusal.message, 'LSP0002')
+    assert.include(toolchainRefusal.message, 'silk/bool')
+
+    client.send({
+      id: 7,
+      method: 'textDocument/prepareRename',
+      params: { textDocument: { uri: toolchainUri }, position: imported },
+    })
+    const unofferable = await client.waitFor((message) => failure(message, 7))
+    assert.include(unofferable.message, 'no renameable declaration')
+
+    // References stay read-only, so the toolchain declaration is still listed for the same name.
+    client.send({
+      id: 8,
+      method: 'textDocument/references',
+      params: {
+        textDocument: { uri: toolchainUri },
+        position: imported,
+        context: { includeDeclaration: true },
+      },
+    })
+    const toolchainLocations = (await client.waitFor((message) => response(message, 8))) as Array<{
+      uri: string
+    }>
+    assert.isTrue(
+      toolchainLocations.some((location) => location.uri.endsWith('/stdlib/silk/bool.silk')),
+      JSON.stringify(toolchainLocations),
+    )
   } finally {
     await client.close()
   }
