@@ -11,8 +11,9 @@ native self-hosting compiler—clear enough to hand each implementation stage to
 ## Notes
 
 - Domain: low-level systems language design and compiler bootstrapping.
-- Treat [`VISION.md`](../../VISION.md) and [`CONTEXT.md`](../../CONTEXT.md) as standing constraints
-  and vocabulary; do not restate or weaken them in tickets.
+- Treat [`CONTEXT.md`](../../CONTEXT.md) as the repository-local standing constraint and vocabulary;
+  do not restate or weaken it in tickets. The long-range personal vision is maintained outside the
+  repository and is intentionally not a repository-local implementation specification.
 - Consult the `grilling` and `domain-modeling` skills for decisions, `prototype` for concrete syntax,
   and `research` for facts outside the repository.
 - The compiler is the feature-driving bootstrap program. The milestone is single-threaded and may
