@@ -2316,7 +2316,7 @@ One shape note for that composition: the finalizer consumes the directory, so th
 Effect cannot still be borrowing it. Derive whatever paths the work needs from `path` first,
 then hand the owner to the finalizer:
 
-```silk
+```silk,ignore
 let scope = run temporaryDirectory(&parent, "silk-build-")
 let artifact = run join(&scope.path, "output.bin")
 let value = run Effect.ensuring(build(&artifact), releaseIgnored(move scope))
@@ -5405,6 +5405,18 @@ Returns the present value, or the fallback value when the option is absent.
 
 Only the absent arm consumes the fallback. The present arm releases it, so exactly one of the
 two owned values leaves this call and the other drops.
+
+# Examples
+
+```silk
+import silk.option { none, some, unwrapOr }
+
+pub fn main() -> i32 {
+  let present = some<i32>(7)
+  let absent = none<i32>()
+  return unwrapOr<i32>(move present, 0) + unwrapOr<i32>(move absent, 5)
+}
+```
 
 
 ## silk/order
