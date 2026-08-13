@@ -1416,9 +1416,26 @@ const emitOperation = (
     if (field === undefined) throw new RangeError(`Wasm raw storage lost field ${name}`)
     return field.offset
   }
-  const loadAt = (address: number, offset = 0): ReadonlyArray<Instr.Instr> => {
+  /**
+   * A lane-less load reads a four-byte compiler field — a count, a base pointer, a union tag.
+   * A load that lands in an element lane must pass that lane, so the access is exactly as wide
+   * as the element: a narrow lane shares its four-byte window with its neighbours, and a fixed
+   * `i32.load` would read theirs along with its own.
+   */
+  const loadAt = (
+    address: number,
+    offset = 0,
+    lane?: LayoutPlan.CallingLane,
+  ): ReadonlyArray<Instr.Instr> => {
     const context = requireMemory()
-    return [Instr.localGet(address), Instr.memoryAccess('i32.load', context.memory, { offset })]
+    return [
+      Instr.localGet(address),
+      Instr.memoryAccess(
+        lane === undefined ? 'i32.load' : laneLoadMnemonic(plan, lane),
+        context.memory,
+        { offset },
+      ),
+    ]
   }
   const storeAt = (
     address: number,
@@ -1901,7 +1918,7 @@ const emitOperation = (
         Instr.localGet(pointer),
         ...(offset === 0 ? [] : [Instr.i32Const(offset), Instr.op('i32.add')]),
         Instr.localGet(source),
-        Instr.memoryAccess('i32.store', memory.memory),
+        Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
       ]
     })
   }
@@ -2454,7 +2471,7 @@ const emitOperation = (
         if (destination === undefined || offset === undefined) {
           throw new RangeError('Wasm Slot.take lost an element lane')
         }
-        return [...loadAt(address, offset), Instr.localSet(destination)]
+        return [...loadAt(address, offset, lane), Instr.localSet(destination)]
       })
     }
     case 'SlotDrop':
@@ -2737,7 +2754,7 @@ const emitOperation = (
           const offset = LayoutPlan.laneOffset(plan, target, [...staticSelectors, ...lane.path])
           if (destination === undefined || offset === undefined)
             throw new RangeError('Wasm reference read lost a lane offset')
-          return [...loadAt(address, offset), Instr.localSet(destination)]
+          return [...loadAt(address, offset, lane), Instr.localSet(destination)]
         })
       }
       if (rootSemantic !== undefined && SilkType.isSlice(rootSemantic)) {
