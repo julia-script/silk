@@ -12,6 +12,7 @@ import * as Table from '../src/Table.js'
 import * as Type from '../src/Type.js'
 import * as ValType from '../src/ValType.js'
 import type { WasmError } from '../src/WasmError.js'
+import { mixedMemoryCopy, requiring } from './support/hostCapability.js'
 
 const failure = <A>(effect: Effect.Effect<A, WasmError>) =>
   effect.pipe(
@@ -154,33 +155,58 @@ it.effect('rejects a shared memory without a maximum', () =>
   }),
 )
 
+/**
+ * An i64-address memory beside an i32-address one, an i32 index the i64 memory must reject, and a
+ * body that copies between the two memories, loads above 2^32, and reads the wide memory's size.
+ *
+ * Encoding it is one test and asking the host to validate it is another, because only the second
+ * depends on the host implementing mixed-address `memory.copy`.
+ */
+const addressThreadedModule = Effect.fnUntraced(function* () {
+  const builder = yield* Builder.make()
+  const wide = yield* Memory.make(builder, { min: 1 }, { addressType: 'i64', name: 'wide' })
+  const narrow = yield* Memory.make(builder, { min: 1 }, { name: 'narrow' })
+  const type = yield* Type.func(builder, [], [ValType.i64])
+  const func = yield* Func.declare(builder, type, { name: 'probe' })
+  const wrongAddress = yield* failure(
+    Func.define(builder, func, {
+      body: [Instr.i32Const(0), Instr.memoryAccess('i64.load', wide)],
+    }),
+  )
+  yield* Func.define(builder, func, {
+    body: [
+      Instr.i64Const(8n),
+      Instr.i32Const(0),
+      Instr.i32Const(4),
+      // Mixed 64/32-bit copy takes an i32 count.
+      Instr.memoryCopy(wide, narrow),
+      Instr.i64Const(0n),
+      Instr.memoryAccess('i64.load', wide, { offset: 2n ** 32n }),
+      Instr.memorySize(wide),
+      Instr.op('i64.add'),
+    ],
+  })
+  return { wrongAddress, bytes: yield* Binary.encode(builder) }
+})
+
+const hostValidatesAddressThreaded = requiring(
+  mixedMemoryCopy,
+  'the host validates a module threading address types through memory instructions',
+)
+
 it.effect('threads address types through memory instructions', () =>
   Effect.gen(function* () {
-    const builder = yield* Builder.make()
-    const wide = yield* Memory.make(builder, { min: 1 }, { addressType: 'i64', name: 'wide' })
-    const narrow = yield* Memory.make(builder, { min: 1 }, { name: 'narrow' })
-    const type = yield* Type.func(builder, [], [ValType.i64])
-    const func = yield* Func.declare(builder, type, { name: 'probe' })
-    const wrongAddress = yield* failure(
-      Func.define(builder, func, {
-        body: [Instr.i32Const(0), Instr.memoryAccess('i64.load', wide)],
-      }),
-    )
+    const { wrongAddress, bytes } = yield* addressThreadedModule()
     assert.strictEqual(wrongAddress?.reason._tag, 'ValidationFailed')
-    yield* Func.define(builder, func, {
-      body: [
-        Instr.i64Const(8n),
-        Instr.i32Const(0),
-        Instr.i32Const(4),
-        // Mixed 64/32-bit copy takes an i32 count.
-        Instr.memoryCopy(wide, narrow),
-        Instr.i64Const(0n),
-        Instr.memoryAccess('i64.load', wide, { offset: 2n ** 32n }),
-        Instr.memorySize(wide),
-        Instr.op('i64.add'),
-      ],
-    })
-    const bytes = yield* Binary.encode(builder)
+    assert.isDefined(bytes)
+  }),
+)
+
+it.effect.skipIf(hostValidatesAddressThreaded.skip)(hostValidatesAddressThreaded.name, () =>
+  Effect.gen(function* () {
+    if (hostValidatesAddressThreaded.failure !== undefined)
+      return assert.fail(hostValidatesAddressThreaded.failure)
+    const { bytes } = yield* addressThreadedModule()
     assert.isTrue(WebAssembly.validate(bytes))
   }),
 )
