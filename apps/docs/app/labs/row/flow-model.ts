@@ -682,6 +682,8 @@ const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
       return 'MissingStandardInput: no host provider was supplied'
     case 'MissingChildProcess':
       return 'MissingChildProcess: no host provider was supplied'
+    case 'MissingHostInput':
+      return 'MissingHostInput: no host provider was supplied'
     case 'MissingOsFileSystemHost':
       return 'MissingOsFileSystemHost: no OS filesystem host provider was supplied'
     case 'IntrinsicTargetUnavailable':
@@ -708,6 +710,8 @@ const blockedSpan = (
     case 'MissingStandardInput':
       return undefined
     case 'MissingChildProcess':
+      return undefined
+    case 'MissingHostInput':
       return undefined
     case 'MissingOsFileSystemHost':
       return undefined

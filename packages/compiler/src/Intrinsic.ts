@@ -532,6 +532,73 @@ const legacyActors = Object.freeze([
         invariant:
           'stream selects zero for standard output or one for standard error, offset is within the retained capture of the immediately preceding execute, and output is initialized writable storage',
       }),
+      osBuiltin({
+        name: 'hostArgumentCount',
+        operation: 'OsHostArgumentCount',
+        parameters: Object.freeze([
+          valueParameter('count', '&mut usize'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([mutableUsize, mutableI32, mutableU32]),
+        result: 'Effect<bool>',
+        semanticResult: 'bool',
+        invariant: 'count output is initialized and reports the received argument count on success',
+      }),
+      osBuiltin({
+        name: 'hostArgument',
+        operation: 'OsHostArgument',
+        parameters: Object.freeze([
+          valueParameter('index', 'usize'),
+          valueParameter('output', '&mut [u8]'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([
+          'usize',
+          Type.slice('Exclusive', 'u8'),
+          mutableI32,
+          mutableU32,
+        ]),
+        result: 'Effect<Option<usize>>',
+        semanticResult: Type.option('usize'),
+        invariant:
+          'output is initialized writable storage; success reports the complete argument byte length and copies the prefix that fits, and absence reports the not-found reason',
+      }),
+      osBuiltin({
+        name: 'hostVariable',
+        operation: 'OsHostVariable',
+        parameters: Object.freeze([
+          valueParameter('name', '&[u8]'),
+          valueParameter('output', '&mut [u8]'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([
+          byteSlice,
+          Type.slice('Exclusive', 'u8'),
+          mutableI32,
+          mutableU32,
+        ]),
+        result: 'Effect<Option<usize>>',
+        semanticResult: Type.option('usize'),
+        invariant:
+          'output is initialized writable storage; success reports the complete value byte length and copies the prefix that fits, and an unset name reports the not-found reason',
+      }),
+      osBuiltin({
+        name: 'hostWorkingDirectory',
+        operation: 'OsHostWorkingDirectory',
+        parameters: Object.freeze([
+          valueParameter('output', '&mut [u8]'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([Type.slice('Exclusive', 'u8'), mutableI32, mutableU32]),
+        result: 'Effect<Option<usize>>',
+        semanticResult: Type.option('usize'),
+        invariant:
+          'output is initialized writable storage; success reports the complete working-directory byte length and copies the prefix that fits',
+      }),
     ]),
   ),
   actor(
@@ -862,6 +929,16 @@ const flatSpelling = (actor_: string, operation: string): string => {
   return `${actor_.slice(0, 1).toLowerCase()}${actor_.slice(1)}${upperInitial(operation)}`
 }
 
+/** The canonical standard-library consumer of one OS boundary operation. */
+const osConsumer = (spelling: string): string => {
+  if (spelling === 'standardInputRead') return 'silk/os-standard-input.read'
+  if (spelling === 'processExecute') return 'silk/os-child-process.execute'
+  if (spelling === 'processCapture') return 'silk/os-child-process.capture'
+  if (spelling.startsWith('host'))
+    return `silk/os-host-input.${spelling.slice(4, 5).toLowerCase()}${spelling.slice(5)}`
+  return `silk/os-filesystem.${spelling}`
+}
+
 const flatOperations = Object.freeze(
   legacyActors.flatMap((actor_) =>
     actor_.operations.map((operation) => {
@@ -886,13 +963,7 @@ const flatOperations = Object.freeze(
             : actor_.spelling === 'Host'
               ? 'silk/core.writeAll'
               : actor_.spelling === 'Os'
-                ? operation.spelling === 'standardInputRead'
-                  ? 'silk/os-standard-input.read'
-                  : operation.spelling === 'processExecute'
-                    ? 'silk/os-child-process.execute'
-                    : operation.spelling === 'processCapture'
-                      ? 'silk/os-child-process.capture'
-                      : `silk/os-filesystem.${operation.spelling}`
+                ? osConsumer(operation.spelling)
                 : actor_.spelling === 'Place'
                   ? 'language:place-replacement'
                   : `silk/${actor_.spelling.replaceAll(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}.${operation.spelling}`

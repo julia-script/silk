@@ -1286,6 +1286,8 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return 'missing StandardInput host provider'
     case 'MissingChildProcess':
       return 'missing ChildProcess host provider'
+    case 'MissingHostInput':
+      return 'missing HostInput host provider'
     case 'MissingOsFileSystemHost':
       return 'missing OS filesystem host provider'
     case 'IntrinsicTargetUnavailable':

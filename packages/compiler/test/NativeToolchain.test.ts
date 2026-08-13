@@ -89,6 +89,22 @@ it('generates effect-reporting shims from byte arrays with closed status handlin
   assert.include(source, 'default:\n      return 2;')
 })
 
+it('captures the process command line in both entry shapes without changing termination', () => {
+  const passThrough = ToolchainPlan.shimSource({ _tag: 'PassThrough' })
+  const reporting = ToolchainPlan.shimSource({ _tag: 'EffectReports', reports: ['module.Error'] })
+  for (const source of [passThrough, reporting]) {
+    assert.include(source, 'int main(int argc, char **argv) {')
+    assert.include(source, 'silk_host_argc_v1 = argc;')
+    assert.include(source, 'silk_host_argv_v1 = argv;')
+    assert.notInclude(source, 'int main(void)')
+    // Silk `main` keeps its zero-parameter shape: arguments reach a program through a service.
+    assert.include(source, 'extern int silk_main(void);')
+  }
+  assert.include(passThrough, 'return silk_main();')
+  assert.include(reporting, 'const int tag = silk_main();')
+  assert.include(reporting, 'if (tag == 0) return 0;')
+})
+
 it('plans every native profile for each canonical native target', () => {
   for (const target of Target.native) {
     const object = ToolchainPlan.objectCommand(clang, target, 'release', 'in.bc', 'out.o')

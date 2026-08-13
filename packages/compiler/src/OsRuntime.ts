@@ -16,6 +16,10 @@ export const symbols = Object.freeze([
   'silk_os_standard_input_read_v1',
   'silk_os_process_execute_v1',
   'silk_os_process_capture_v1',
+  'silk_os_host_argument_count_v1',
+  'silk_os_host_argument_v1',
+  'silk_os_host_variable_v1',
+  'silk_os_host_working_directory_v1',
 ] as const)
 
 export type Symbol = (typeof symbols)[number]
@@ -306,6 +310,35 @@ static void silk_child_failed(int channel, int value) {
   do { ignored = write(channel, &value, sizeof(int)); } while (ignored < 0 && errno == EINTR);
   (void)ignored;
   _exit(127);
+}
+/* The command line the entry point captured. The shim defines the storage and fills it before it
+   calls silk_main, so a host-input read never consults an ambient global of its own. */
+extern int silk_host_argc_v1;
+extern char **silk_host_argv_v1;
+
+#if defined(__APPLE__)
+#include <crt_externs.h>
+#define silk_host_environ (*_NSGetEnviron())
+#else
+extern char **environ;
+#define silk_host_environ environ
+#endif
+
+/* Copies the prefix of one host value that fits and reports the value's complete byte length, so a
+   caller that received a short buffer can size an exact one and ask again. */
+static silk_option_usize silk_host_copy(const unsigned char *value, size_t length,
+                                        unsigned char *output, size_t capacity,
+                                        int *reason, uint32_t *native_code) {
+  size_t committed = length < capacity ? length : capacity;
+  if (committed > 0) memcpy(output, value, committed);
+  silk_success(reason, native_code);
+  return silk_transfer(length);
+}
+
+/* An absent value: an index past the last argument, or an unset variable name. */
+static silk_option_usize silk_host_absent(int *reason, uint32_t *native_code) {
+  silk_protocol_failure(reason, native_code, SILK_NOT_FOUND);
+  return silk_transfer_failure();
 }
 `
 
@@ -725,6 +758,79 @@ silk_option_usize silk_os_process_capture_v1(int stream, size_t offset, unsigned
   if (transferred != 0) memcpy(output, capture->bytes + offset, transferred);
   silk_success(reason, native_code);
   return silk_transfer(transferred);
+}
+`,
+  silk_os_host_argument_count_v1: `
+int silk_os_host_argument_count_v1(size_t *count, int *reason, uint32_t *native_code) {
+  if (silk_host_argc_v1 < 0 || silk_host_argv_v1 == NULL) {
+    silk_protocol_failure(reason, native_code, SILK_UNSUPPORTED);
+    return 0;
+  }
+  *count = (size_t)silk_host_argc_v1;
+  silk_success(reason, native_code);
+  return 1;
+}
+`,
+  silk_os_host_argument_v1: `
+silk_option_usize silk_os_host_argument_v1(size_t index, unsigned char *output, size_t capacity,
+                                           int *reason, uint32_t *native_code) {
+  if (silk_host_argv_v1 == NULL || silk_host_argc_v1 < 0 ||
+      index >= (size_t)silk_host_argc_v1) {
+    return silk_host_absent(reason, native_code);
+  }
+  const char *selected = silk_host_argv_v1[index];
+  if (selected == NULL) return silk_host_absent(reason, native_code);
+  return silk_host_copy((const unsigned char *)selected, strlen(selected), output, capacity,
+                        reason, native_code);
+}
+`,
+  silk_os_host_variable_v1: `
+silk_option_usize silk_os_host_variable_v1(const unsigned char *name, size_t name_length,
+                                           unsigned char *output, size_t capacity,
+                                           int *reason, uint32_t *native_code) {
+  char **entries = silk_host_environ;
+  if (entries == NULL) return silk_host_absent(reason, native_code);
+  /* The environment block is scanned by raw bytes rather than through getenv, so a name or value
+     that is not valid UTF-8 is matched and returned exactly as the process received it. */
+  for (size_t entry = 0; entries[entry] != NULL; entry += 1) {
+    const unsigned char *text = (const unsigned char *)entries[entry];
+    const unsigned char *separator = (const unsigned char *)strchr(entries[entry], '=');
+    if (separator == NULL) continue;
+    if ((size_t)(separator - text) != name_length) continue;
+    if (name_length > 0 && memcmp(text, name, name_length) != 0) continue;
+    const unsigned char *value = separator + 1;
+    return silk_host_copy(value, strlen((const char *)value), output, capacity, reason,
+                          native_code);
+  }
+  return silk_host_absent(reason, native_code);
+}
+`,
+  silk_os_host_working_directory_v1: `
+silk_option_usize silk_os_host_working_directory_v1(unsigned char *output, size_t capacity,
+                                                    int *reason, uint32_t *native_code) {
+  size_t room = 256;
+  while (room <= ((size_t)1 << 20)) {
+    char *buffer = (char *)malloc(room);
+    if (buffer == NULL) {
+      silk_protocol_failure(reason, native_code, SILK_NO_SPACE);
+      return silk_transfer_failure();
+    }
+    if (getcwd(buffer, room) != NULL) {
+      silk_option_usize result = silk_host_copy((const unsigned char *)buffer, strlen(buffer),
+                                                output, capacity, reason, native_code);
+      free(buffer);
+      return result;
+    }
+    int selected = errno;
+    free(buffer);
+    if (selected != ERANGE) {
+      silk_failure(reason, native_code, selected);
+      return silk_transfer_failure();
+    }
+    room *= 2;
+  }
+  silk_protocol_failure(reason, native_code, SILK_TOO_LARGE);
+  return silk_transfer_failure();
 }
 `,
 })

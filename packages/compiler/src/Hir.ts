@@ -123,6 +123,10 @@ export type BuiltinOperation =
   | 'OsStandardInputRead'
   | 'OsProcessExecute'
   | 'OsProcessCapture'
+  | 'OsHostArgumentCount'
+  | 'OsHostArgument'
+  | 'OsHostVariable'
+  | 'OsHostWorkingDirectory'
 
 export type BoundsMode =
   | { readonly _tag: 'Proven'; readonly index: number; readonly length: number }

@@ -265,5 +265,21 @@ it.effect('reports an unhandled effect entry through the native shim', () =>
     const successRun = spawnSync(succeeded.path, [], { encoding: 'utf8' })
     assert.strictEqual(successRun.status, 0)
     assert.strictEqual(successRun.stderr, '')
+
+    // The native entry receives the process command line so a host-input provider can read it. A
+    // program that never reads it keeps the exact same statuses and report bytes with arguments
+    // present, so the entry shape change is invisible to every existing program.
+    const withArguments = spawnSync(compiled.path, ['one', 'two', 'three'], { encoding: 'utf8' })
+    assert.strictEqual(withArguments.status, 1)
+    assert.strictEqual(withArguments.stderr, 'Error: effect-entry/native.SomeError\n')
+    const closedWithArguments = spawnSync(
+      '/bin/sh',
+      ['-c', 'exec 2>&-; exec "$1" one two', 'silk-effect-entry', compiled.path],
+      { encoding: 'utf8' },
+    )
+    assert.strictEqual(closedWithArguments.status, 2)
+    const successWithArguments = spawnSync(succeeded.path, ['one', 'two'], { encoding: 'utf8' })
+    assert.strictEqual(successWithArguments.status, 0)
+    assert.strictEqual(successWithArguments.stderr, '')
   }),
 )

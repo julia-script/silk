@@ -365,6 +365,16 @@ read failure. The service does not imply terminal control, raw mode, line editin
 non-blocking reads.
 _Avoid_: console service, stdin stream, reader service
 
+**Host-input service**:
+The narrow bootstrap host capability for reading what the process was started with: its ordered
+command-line arguments, the value of a named environment variable, and its working directory. It
+reads only — it never sets a variable or changes the directory. Every value is raw bytes, exactly as
+the process received them, because neither an argument nor an environment value is required to be
+valid UTF-8; a checked textual view layers on top and stays fallible. An index past the last
+argument and an unset name are absence rather than typed failure. Argument parsing, flag grammar,
+and configuration layering happen above the boundary.
+_Avoid_: argv service, environment service, process service
+
 **Log invocation**:
 One complete semantic observability message submitted to a Logger with a separate closed severity.
 It is one provider call rather than a sequence of stream fragments. The bootstrap message is a

@@ -5064,6 +5064,42 @@
       "invariant": "stream selects zero for standard output or one for standard error, offset is within the retained capture of the immediately preceding execute, and output is initialized writable storage"
     },
     {
+      "operation": "Intrinsic.osHostArgumentCount",
+      "signature": "unsafe fn Intrinsic.osHostArgumentCount(count: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-host-input.argumentCount",
+      "identity": "OsHostArgumentCount",
+      "invariant": "count output is initialized and reports the received argument count on success"
+    },
+    {
+      "operation": "Intrinsic.osHostArgument",
+      "signature": "unsafe fn Intrinsic.osHostArgument(index: usize, output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-host-input.argument",
+      "identity": "OsHostArgument",
+      "invariant": "output is initialized writable storage; success reports the complete argument byte length and copies the prefix that fits, and absence reports the not-found reason"
+    },
+    {
+      "operation": "Intrinsic.osHostVariable",
+      "signature": "unsafe fn Intrinsic.osHostVariable(name: &[u8], output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-host-input.variable",
+      "identity": "OsHostVariable",
+      "invariant": "output is initialized writable storage; success reports the complete value byte length and copies the prefix that fits, and an unset name reports the not-found reason"
+    },
+    {
+      "operation": "Intrinsic.osHostWorkingDirectory",
+      "signature": "unsafe fn Intrinsic.osHostWorkingDirectory(output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-host-input.workingDirectory",
+      "identity": "OsHostWorkingDirectory",
+      "invariant": "output is initialized writable storage; success reports the complete working-directory byte length and copies the prefix that fits"
+    },
+    {
       "operation": "Intrinsic.layoutOf",
       "signature": "fn Intrinsic.layoutOf<T>() -> Layout",
       "unsafe": false,

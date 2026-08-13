@@ -98,6 +98,22 @@ copies the completed capture out through `Intrinsic.osProcessCapture`, the same 
 reason-and-native-code OS boundary `OsFileSystem` uses, and is native-only for the same reason. Any
 pure in-source provider implements the same service without an intrinsic.
 
+`HostInput` is the portable process-input boundary: the ordered command-line arguments, the value of
+a named environment variable, and the working directory. It reads only, so it has no operation that
+sets a variable or changes the directory. Every value is raw bytes, exactly as the process received
+them — a POSIX argument or environment value is an arbitrary byte string, and a program must be able
+to read one and pass it through unchanged — and `text` is the checked, fallible textual view that
+layers on top without replacing or discarding those bytes. An index at or past `argumentCount` and an
+unset name are `None`, not failures; only a host that cannot answer at all is `HostInputFailure`.
+Argument parsing and flag grammar belong above this boundary.
+
+`OsHostInput` is the native provider. It reads the process command line, environment block, and
+working directory through the same unsafe reason-and-native-code OS boundary `OsFileSystem` uses, and
+is native-only for the same reason. The native entry point receives `argc` and `argv` and holds them
+for that provider; Silk `main` keeps its zero-parameter shape, so arguments reach a program through
+the service rather than through the entry signature. Any pure in-source provider implements the same
+service without an intrinsic.
+
 `Path` and `FileSystem` are the portable whole-file boundary. A `Path` is owned, normalized UTF-8
 inside the selected provider namespace: it is always absolute, never consults a process working
 directory, rejects NUL and lexical root escape, accepts textual construction and resolution inputs,

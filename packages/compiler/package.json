@@ -86,6 +86,10 @@
       "types": "./dist/ChildProcess.d.ts",
       "import": "./dist/ChildProcess.js"
     },
+    "./HostInput": {
+      "types": "./dist/HostInput.d.ts",
+      "import": "./dist/HostInput.js"
+    },
     "./StandardInput": {
       "types": "./dist/StandardInput.d.ts",
       "import": "./dist/StandardInput.js"

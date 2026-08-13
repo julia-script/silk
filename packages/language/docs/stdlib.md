@@ -12,7 +12,7 @@ each signature and description below is the `///` comment on the declaration in
 $ pnpm --filter @silk-effect/compiler documentation:generate
 ```
 
-The library has 33 modules.
+The library has 35 modules.
 
 ## Modules
 
@@ -27,6 +27,7 @@ The library has 33 modules.
 | [`silk/f32`](#silk-f32) | `f32` | 41 |
 | [`silk/f64`](#silk-f64) | `f64` | 41 |
 | [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 76 |
+| [`silk/host_input`](#silk-host-input) | `HostInput` | 12 |
 | [`silk/i16`](#silk-i16) | `i16` | 58 |
 | [`silk/i32`](#silk-i32) | `i32` | 58 |
 | [`silk/i64`](#silk-i64) | `i64` | 58 |
@@ -39,6 +40,7 @@ The library has 33 modules.
 | [`silk/option`](#silk-option) | `Option` | 5 |
 | [`silk/os_child_process`](#silk-os-child-process) | `OsChildProcess` | 9 |
 | [`silk/os_filesystem`](#silk-os-filesystem) | `OsFileSystem` | 35 |
+| [`silk/os_host_input`](#silk-os-host-input) | `OsHostInput` | 14 |
 | [`silk/os_standard_input`](#silk-os-standard-input) | `OsStandardInput` | 6 |
 | [`silk/raw-buffer`](#silk-raw-buffer) | `RawBuffer` | 8 |
 | [`silk/result`](#silk-result) | `Result` | 5 |
@@ -1898,6 +1900,102 @@ pub effect fn exists(path: &silk/filesystem.Path) -> bool ! FileError ? &mut Fil
 ```
 
 Returns false only for NotFound and propagates every other provider failure.
+
+
+## silk/host_input
+
+Import as `HostInput` with `import silk.host_input`.
+
+### `HostInputFailure`
+
+```silk
+pub struct HostInputFailure
+```
+
+Failure to complete one host-input lookup.
+
+### `inputFailure`
+
+```silk
+pub fn inputFailure() -> HostInputFailure
+```
+
+Constructs the typed failure of one host lookup that could not complete.
+
+### `HostInput`
+
+```silk
+pub service HostInput
+```
+
+Portable read-only process-input contract.
+
+The service reads and never writes: it has no operation that sets an environment variable or
+changes the working directory. An absent argument index and an unset variable name are `None`
+rather than typed failures, because absence is an ordinary answer; only a host that cannot
+answer at all is `HostInputFailure`.
+
+### `argumentCount`
+
+```silk
+pub effect fn argumentCount() -> usize ! HostInputFailure ? &mut HostInput
+```
+
+Builds the argument-count effect.
+
+### `argument`
+
+```silk
+pub effect fn argument(index: usize) -> Option<silk/bytes.Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+```
+
+Builds one argument lookup effect.
+
+### `variable`
+
+```silk
+pub effect fn variable(name: &[u8]) -> Option<silk/bytes.Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+```
+
+Builds one environment lookup effect for a raw byte name.
+
+### `variableNamed`
+
+```silk
+pub effect fn variableNamed(name: string) -> Option<silk/bytes.Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+```
+
+Looks one environment variable up by its textual name.
+
+### `workingDirectory`
+
+```silk
+pub effect fn workingDirectory() -> Bytes ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+```
+
+Builds the working-directory effect.
+
+### `arguments`
+
+```silk
+pub effect fn arguments() -> silk/vector.Vector<silk/bytes.Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+```
+
+Collects every command-line argument, in the order the process received them.
+
+A host that reports a count it cannot then supply is a broken host, so a missing index below the
+count is `HostInputFailure` rather than a silently shorter sequence.
+
+### `text`
+
+```silk
+pub fn text(values: &[u8]) -> silk/result.Result<string, silk/string.InvalidUtf8>
+```
+
+The checked textual view of raw host bytes.
+
+Host input is not required to be UTF-8, so the view is fallible. A failure leaves the bytes
+untouched and readable, which is how a program passes a value it cannot decode through unchanged.
 
 
 ## silk/i16
@@ -4593,6 +4691,28 @@ pub effect fn make(root: string) -> OsFileSystem ! OutOfMemory ? &mut Allocator
 ```
 
 Copies one absolute native root. A relative or NUL-containing root violates the constructor precondition.
+
+
+## silk/os_host_input
+
+Import as `OsHostInput` with `import silk.os_host_input`.
+
+### `OsHostInput`
+
+```silk
+pub struct OsHostInput
+```
+
+Native provider reading the process command line, environment, and working directory. It owns no
+state; all three belong to the process rather than to the value.
+
+### `make`
+
+```silk
+pub fn make() -> OsHostInput
+```
+
+Constructs the process-backed input provider.
 
 
 ## silk/os_standard_input
