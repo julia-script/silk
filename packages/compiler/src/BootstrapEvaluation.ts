@@ -1,3 +1,4 @@
+import type * as ChildProcess from './ChildProcess.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
@@ -491,6 +492,7 @@ export type BlockedReason =
     }
   | { readonly _tag: 'MissingStandardStreams' }
   | { readonly _tag: 'MissingStandardInput' }
+  | { readonly _tag: 'MissingChildProcess' }
   | { readonly _tag: 'MissingOsFileSystemHost' }
   | {
       readonly _tag: 'IntrinsicTargetUnavailable'
@@ -652,6 +654,9 @@ interface EvaluationState {
   readonly stringLoans: Set<string>
   readonly standardStreams?: StandardStreams.Provider
   readonly standardInput?: StandardInput.Provider
+  readonly childProcess?: ChildProcess.Provider
+  /** The captured streams of the most recent completed execution, indexed by stream selector. */
+  readonly processCaptures: Array<ReadonlyArray<number>>
   readonly osFileSystem?: OsFileSystemHost.Provider
 }
 
@@ -2648,6 +2653,129 @@ function* executeFunction(
               )
               break
             }
+            if (name === 'osProcessExecute') {
+              const child = state.childProcess
+              if (child === undefined) return blockedStep({ _tag: 'MissingChildProcess' })
+              const program = arguments_.at(0)
+              const argumentBlock = arguments_.at(1)
+              const environmentBlock = arguments_.at(2)
+              const workingDirectory = arguments_.at(3)
+              const processStatus = arguments_.at(4)
+              const processCode = arguments_.at(5)
+              const outputLength = arguments_.at(6)
+              const errorLength = arguments_.at(7)
+              if (
+                program === undefined ||
+                argumentBlock === undefined ||
+                environmentBlock === undefined ||
+                workingDirectory === undefined ||
+                processStatus === undefined ||
+                processCode === undefined ||
+                outputLength === undefined ||
+                errorLength === undefined
+              )
+                throw new RangeError('OS execute omitted arguments')
+              const directory = byteView(workingDirectory)
+              const entries = (
+                block: ReadonlyArray<number>,
+              ): ReadonlyArray<ReadonlyArray<number>> | null => {
+                if (block.length === 0) return Object.freeze([])
+                if (block.at(-1) !== 0) return null
+                const collected: Array<ReadonlyArray<number>> = []
+                let start = 0
+                for (const [index, byte] of block.entries()) {
+                  if (byte !== 0) continue
+                  collected.push(Object.freeze(block.slice(start, index)))
+                  start = index + 1
+                }
+                return Object.freeze(collected)
+              }
+              const requestArguments = entries(byteView(argumentBlock))
+              const requestEnvironment = entries(byteView(environmentBlock))
+              const programBytes = byteView(program)
+              // The block protocol is the intrinsic's precondition, so a malformed request is a
+              // typed start failure rather than an execution the host never saw.
+              if (
+                requestArguments === null ||
+                requestEnvironment === null ||
+                programBytes.length === 0 ||
+                programBytes.includes(0) ||
+                directory.includes(0)
+              ) {
+                state.processCaptures[0] = Object.freeze([])
+                state.processCaptures[1] = Object.freeze([])
+                status({ _tag: 'Failure', reason: 'InvalidPath' })
+                commit(value(0))
+                break
+              }
+              const result = child.execute(
+                Object.freeze({
+                  program: programBytes,
+                  arguments: requestArguments,
+                  environment: requestEnvironment,
+                  ...(directory.length === 0 ? {} : { workingDirectory: directory }),
+                }),
+              )
+              if (result._tag === 'ExecuteFailure') {
+                state.processCaptures[0] = Object.freeze([])
+                state.processCaptures[1] = Object.freeze([])
+                status({
+                  _tag: 'Failure',
+                  reason: result.reason,
+                  ...(result.nativeCode === undefined ? {} : { nativeCode: result.nativeCode }),
+                })
+                commit(value(0))
+                break
+              }
+              state.processCaptures[0] = result.output
+              state.processCaptures[1] = result.errors
+              replaceReferenced(processStatus, value(result._tag === 'Exited' ? 0 : 1))
+              replaceReferenced(
+                processCode,
+                value(result._tag === 'Exited' ? result.code : result.signal),
+              )
+              replaceReferenced(
+                outputLength,
+                Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.output.length) }),
+              )
+              replaceReferenced(
+                errorLength,
+                Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.errors.length) }),
+              )
+              status()
+              commit(value(1))
+              break
+            }
+            if (name === 'osProcessCapture') {
+              const stream = arguments_.at(0)
+              const offset = arguments_.at(1)
+              const output = arguments_.at(2)
+              if (stream === undefined || offset === undefined || output === undefined)
+                throw new RangeError('OS capture omitted arguments')
+              const selector = readI32(stream).value
+              const captured = state.processCaptures.at(selector)
+              const start = Number(readUsize(offset).value)
+              if (selector !== 0 && selector !== 1) {
+                status({ _tag: 'Failure', reason: 'WrongType' })
+                commit(optionValue('usize'))
+                break
+              }
+              if (captured === undefined || start > captured.length) {
+                status({ _tag: 'Failure', reason: 'InvalidPath' })
+                commit(optionValue('usize'))
+                break
+              }
+              const transferred = captured.slice(start, start + byteView(output).length)
+              writeByteView(output, transferred)
+              status()
+              commit(
+                optionValue(
+                  'usize',
+                  Object.freeze({ _tag: 'UsizeValue', value: BigInt(transferred.length) }),
+                ),
+              )
+              break
+            }
             const host = state.osFileSystem
             if (host === undefined) return blockedStep({ _tag: 'MissingOsFileSystemHost' })
             try {
@@ -4615,6 +4743,7 @@ const evaluationLimitOption = (
 export interface Options {
   readonly standardStreams?: StandardStreams.Provider
   readonly standardInput?: StandardInput.Provider
+  readonly childProcess?: ChildProcess.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
   readonly maxSteps?: number
   readonly maxCallDepth?: number
@@ -4693,6 +4822,8 @@ export const evaluate = (
     stringLoans: new Set(),
     ...(options.standardStreams === undefined ? {} : { standardStreams: options.standardStreams }),
     ...(options.standardInput === undefined ? {} : { standardInput: options.standardInput }),
+    ...(options.childProcess === undefined ? {} : { childProcess: options.childProcess }),
+    processCaptures: [Object.freeze([]), Object.freeze([])],
     ...(options.osFileSystem === undefined ? {} : { osFileSystem: options.osFileSystem }),
   })
   if (result._tag === 'Blocked') {

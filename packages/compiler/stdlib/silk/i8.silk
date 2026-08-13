@@ -1,5 +1,14 @@
 import silk.option { Option }
 
+/// The largest i8. The checked arithmetic intrinsics reject every result above this bound.
+pub const MAX: i8 = 127
+
+/// The smallest i8. The checked arithmetic intrinsics reject every result below this bound.
+pub const MIN: i8 = -128
+
+/// The width of i8 in bits.
+pub const BITS: u32 = 8
+
 /// Calls the concrete i8 negate primitive.
 pub fn negate(value: i8) -> i8 {
   return Intrinsic.i8Negate(value)

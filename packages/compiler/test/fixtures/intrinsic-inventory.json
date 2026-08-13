@@ -5046,6 +5046,24 @@
       "invariant": "output is initialized writable storage; success reports the exact transferred byte count and zero means end of input"
     },
     {
+      "operation": "Intrinsic.osProcessExecute",
+      "signature": "unsafe fn Intrinsic.osProcessExecute(program: &[u8], arguments: &[u8], environment: &[u8], workingDirectory: &[u8], status: &mut i32, code: &mut i32, outputLength: &mut usize, errorLength: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-child-process.execute",
+      "identity": "OsProcessExecute",
+      "invariant": "arguments and environment are NUL-terminated entry blocks and an empty workingDirectory inherits the caller directory; the child never interprets a shell and reads closed standard input; success retains exactly one capture until the next execute and reports its exact lengths with status zero for exit and one for signal"
+    },
+    {
+      "operation": "Intrinsic.osProcessCapture",
+      "signature": "unsafe fn Intrinsic.osProcessCapture(stream: i32, offset: usize, output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-child-process.capture",
+      "identity": "OsProcessCapture",
+      "invariant": "stream selects zero for standard output or one for standard error, offset is within the retained capture of the immediately preceding execute, and output is initialized writable storage"
+    },
+    {
       "operation": "Intrinsic.layoutOf",
       "signature": "fn Intrinsic.layoutOf<T>() -> Layout",
       "unsafe": false,

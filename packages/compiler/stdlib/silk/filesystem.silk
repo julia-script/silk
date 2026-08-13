@@ -294,6 +294,19 @@ pub effect fn make(value: string) -> Path ! FileError | OutOfMemory ? &mut Alloc
   return run finishPath(move copied)
 }
 
+/// Constructs an owned normalized provider-absolute Path from exact platform bytes.
+///
+/// Platform paths are byte sequences, and a caller that received one from the platform — a
+/// directory entry, an argument, an environment value — must be able to hand it back unchanged.
+/// The same normalization applies as for textual construction: the value is absolute, rejects NUL,
+/// and rejects `.`, `..`, empty components, and trailing separators. Well-formed text is not
+/// required, so a Path built this way may have no `string` view.
+pub effect fn fromBytes(values: &[u8]) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+  if validAbsolute(values) == false { return run rejectPath() }
+  let copied = run appendRange(bytesMake(), values, usize.ZERO, values.length)
+  return run finishPath(move copied)
+}
+
 /// Constructs the selected provider's root Path.
 pub effect fn root() -> Path ! OutOfMemory ? &mut Allocator {
   let mut copied = bytesMake()
@@ -302,6 +315,14 @@ pub effect fn root() -> Path ! OutOfMemory ? &mut Allocator {
 }
 
 fn pathBytes(self: &Path) -> &[u8] { return bytesAsSlice(&self.bytes) }
+
+/// Borrows the complete normalized path as exact platform bytes.
+///
+/// This is the lossless view. It round-trips a Path built from platform bytes even when those
+/// bytes are not well-formed text, which the `string` view cannot promise.
+pub fn rawBytes(self: &Path) -> &[u8] {
+  return pathBytes(self)
+}
 
 /// Borrows the complete normalized path as semantic text.
 pub fn view(self: &Path) -> string {

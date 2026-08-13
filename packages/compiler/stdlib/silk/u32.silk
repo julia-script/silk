@@ -1,5 +1,14 @@
 import silk.option { Option }
 
+/// The largest u32. The checked arithmetic intrinsics reject every result above this bound.
+pub const MAX: u32 = 4294967295
+
+/// The smallest u32. The checked arithmetic intrinsics reject every result below this bound.
+pub const MIN: u32 = 0
+
+/// The width of u32 in bits.
+pub const BITS: u32 = 32
+
 /// Calls the concrete u32 toU8 primitive.
 pub fn toU8(value: u32) -> u8 {
   return Intrinsic.u32ToU8(value)

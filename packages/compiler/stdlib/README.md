@@ -75,6 +75,29 @@ non-blocking reads.
 uses, and is native-only for the same reason. Any pure in-source provider implements the same
 service without an intrinsic.
 
+`ChildProcess` is the portable child-process boundary: one blocking `execute` that runs a
+`ProcessRequest` to completion and owns everything the child wrote. The request carries an
+executable path, ordered arguments, an exact environment, and an optional working directory; nothing
+in it is ever parsed as a command line, so this is not a shell and a space, a quote, or a
+metacharacter inside an argument reaches the child as data. The child's standard input is closed.
+`ProcessOutcome` is `Exited { code output errors }` or `Signaled { signal output errors }`, so an
+exit code and a terminating signal are separate members rather than one integer. A nonzero exit code
+is outcome data — a caller that runs a failing tool reads its code and its diagnostics off the
+success channel. Only a failure to start, to wait, or to capture is `ProcessFailure`, which is
+allocation-free and carries a closed stage/reason pair plus an optional numeric provider detail.
+Asynchronous processes, pipes, streaming, interactive child input, process groups, and job control
+are all outside this service.
+
+Arguments and environment values are exact platform bytes rather than checked text, because a value
+received from the platform must be presentable to a child unchanged. `ProcessRequest.addArgument`
+and `ProcessRequest.setVariable` take `&[u8]`, and the environment starts empty: a child sees no
+variable this request did not name, and never the caller's own environment by default.
+
+`OsChildProcess` is the native provider. It runs one child through `Intrinsic.osProcessExecute` and
+copies the completed capture out through `Intrinsic.osProcessCapture`, the same unsafe
+reason-and-native-code OS boundary `OsFileSystem` uses, and is native-only for the same reason. Any
+pure in-source provider implements the same service without an intrinsic.
+
 `Path` and `FileSystem` are the portable whole-file boundary. A `Path` is owned, normalized UTF-8
 inside the selected provider namespace: it is always absolute, never consults a process working
 directory, rejects NUL and lexical root escape, accepts textual construction and resolution inputs,
@@ -83,7 +106,11 @@ the conservative returned-borrow subset cannot
 wrap a borrow in `Option`; `Path.isRoot` distinguishes it unambiguously.
 
 `Path.make`, `Path.join`, and `Path.resolve` accept `string`; `Path.view` and `Path.name` return
-borrowed `string`. The explicitly named `Path.joinUtf8` is reserved for provider boundaries such
+borrowed `string`. `Path.fromBytes` and `Path.rawBytes` are the byte-level escape: platform paths
+are byte sequences, so a path received from the platform round-trips through them unchanged even
+when it is not well-formed text. They apply the same normalization and NUL rejection as the textual
+constructors; only the well-formed-text requirement is lifted, and a Path built that way may have no
+`string` view. The explicitly named `Path.joinUtf8` is reserved for provider boundaries such
 as native directory enumeration: it validates arbitrary bytes before admitting them as portable
 path text.
 

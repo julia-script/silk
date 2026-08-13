@@ -45,6 +45,27 @@ export interface CanonicalId {
   readonly name: string
 }
 
+/**
+ * The interface one type parameter is bounded by. A bound starts as the bare spelling its syntax
+ * retains and becomes `ResolvedBound` once header completion finds the interface that spelling
+ * names in the bounded declaration's own module scope — which is what lets a bound name an
+ * interface another module declares. A resolved bound carries the interface's complete ordered
+ * operation contract, so every consumer reads one fact instead of re-deriving it from a name.
+ */
+export type BoundFact =
+  | {
+      readonly _tag: 'ResolvedBound'
+      readonly spelling: string
+      readonly path: TypePathFact
+      readonly capability: CanonicalId
+      readonly operations: ReadonlyArray<string>
+    }
+  | {
+      readonly _tag: 'UnresolvedBound'
+      readonly spelling: string
+      readonly path: TypePathFact
+    }
+
 /** One ordered, declaration-owned generic type parameter with exact source provenance. */
 export interface TypeParameterFact {
   readonly _tag: 'TypeParameterDeclaration'
@@ -52,7 +73,7 @@ export interface TypeParameterFact {
   readonly name: DeclaredName
   readonly syntax: SyntaxTree.Node
   readonly duplicateOf?: Type.Parameter
-  readonly bound?: string
+  readonly bound?: BoundFact
 }
 
 /** The canonical, duplicate, or unidentified canonical-identity state of one header. */
@@ -1505,14 +1526,31 @@ const collectTypeParameters = (
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const facts = SyntaxTree.directNodes(list, 'TypeParameter').map((parameterNode, ordinal) => {
     const name = presentName(source, parameterNode)
-    const boundToken = SyntaxTree.directToken(
-      SyntaxTree.directNode(parameterNode, 'TypePath') ?? parameterNode,
-      'Identifier',
-    )
-    const bound =
-      SyntaxTree.directToken(parameterNode, 'Colon') === undefined || boundToken === undefined
+    // A bound is the one type node the parameter carries after its colon. Taking the node rather
+    // than the parameter's own identifier keeps a damaged or applied bound from being read as a
+    // bound on the parameter's own name.
+    const boundNode = parameterNode.children.find(SyntaxTree.isNode)
+    const boundToken =
+      boundNode === undefined
         ? undefined
-        : spelling(source, boundToken)
+        : SyntaxTree.tokens(boundNode).find((token) => token.kind === 'Identifier')
+    const bound: BoundFact | undefined =
+      SyntaxTree.directToken(parameterNode, 'Colon') === undefined ||
+      boundNode === undefined ||
+      boundToken === undefined
+        ? undefined
+        : Object.freeze({
+            _tag: 'UnresolvedBound' as const,
+            spelling: spelling(source, boundToken),
+            path: Object.freeze({
+              _tag: 'TypePath' as const,
+              spelling: spelling(source, boundToken),
+              segments: Object.freeze([
+                Object.freeze({ spelling: spelling(source, boundToken), token: boundToken }),
+              ]),
+              syntax: boundNode,
+            }),
+          })
     const duplicateOf = name._tag === 'Present' ? environment.get(name.spelling) : undefined
     const type =
       duplicateOf ??
@@ -2629,6 +2667,54 @@ const memberByNominal = (
   )
 }
 
+/**
+ * Resolves every type parameter's bound to the interface its spelling names in the bounded
+ * declaration's own module scope, recording that interface's ordered operation contract.
+ *
+ * The resolver's own diagnostics are deliberately dropped: a bound that names nothing, or names a
+ * declaration that is not an interface, stays `UnresolvedBound` and is reported once at the
+ * specialization that would have had to satisfy it, where the type argument is known.
+ */
+const resolveBounds = (
+  module: string,
+  typeParameters: ReadonlyArray<TypeParameterFact>,
+  resolver: TypeResolver,
+  modules: ReadonlyArray<ModuleHeaders>,
+): ReadonlyArray<TypeParameterFact> => {
+  if (typeParameters.every((parameter) => parameter.bound === undefined)) return typeParameters
+  return Object.freeze(
+    typeParameters.map((parameter): TypeParameterFact => {
+      const bound = parameter.bound
+      if (bound === undefined) return parameter
+      const resolved = resolver(module, bound.path).fact
+      const capability =
+        resolved._tag === 'Resolved' && Type.isNominal(resolved.type) ? resolved.type : undefined
+      const declaration =
+        capability === undefined ? undefined : memberByNominal(modules, capability)
+      if (
+        capability === undefined ||
+        declaration?._tag !== 'InterfaceDeclaration' ||
+        declaration.canonical._tag !== 'Canonical'
+      )
+        return Object.freeze({ ...parameter, bound })
+      return Object.freeze({
+        ...parameter,
+        bound: Object.freeze({
+          _tag: 'ResolvedBound' as const,
+          spelling: bound.spelling,
+          path: bound.path,
+          capability: declaration.canonical.id,
+          operations: Object.freeze(
+            declaration.operations.flatMap((operation) =>
+              operation.name._tag === 'Present' ? [operation.name.spelling] : [],
+            ),
+          ),
+        }),
+      })
+    }),
+  )
+}
+
 /** Resolves one retained type fact through a supplied module resolver and complete index. */
 export const resolveTypeFact = (
   index: Index,
@@ -2864,6 +2950,12 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         diagnostics.push(...requirementRow.diagnostics)
         return Object.freeze({
           ...member,
+          typeParameters: resolveBounds(
+            module.module,
+            member.typeParameters,
+            resolver,
+            self.modules,
+          ),
           parameters: Object.freeze(parameters),
           returnType: result.fact,
           failureRow: failureRow.fact,
@@ -2925,7 +3017,11 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         diagnostics.push(...resolved.diagnostics)
         return Object.freeze({ ...field, declaredType: resolved.fact })
       })
-      return Object.freeze({ ...member, fields: Object.freeze(fields) })
+      return Object.freeze({
+        ...member,
+        typeParameters: resolveBounds(module.module, member.typeParameters, resolver, self.modules),
+        fields: Object.freeze(fields),
+      })
     })
     const conformances = module.conformances.map((conformance) => {
       const capability = resolveDeclaredType(
@@ -3772,27 +3868,64 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
   })
 }
 
-/** Tests whether one nominal provider has a compiler-shipped or source-declared witness. */
-export const conforms = (self: Index, provider: Type.Type, capability: Type.Nominal): boolean => {
-  const interface_ = self.modules
+const interfaceByCapability = (self: Index, capability: Type.Nominal): InterfaceFact | undefined =>
+  self.modules
     .find((module) => module.module === capability.module)
     ?.interfaces.find(
       (candidate) =>
         candidate.canonical._tag === 'Canonical' && candidate.canonical.id.name === capability.name,
     )
-  if (interface_ !== undefined) {
-    const matches = self.modules.flatMap((module) =>
-      module.conformances.filter(
-        (conformance) =>
-          conformance.capability._tag === 'Resolved' &&
-          Type.equals(conformance.capability.type, capability) &&
-          conformance.provider._tag === 'Resolved' &&
-          Type.equals(conformance.provider.type, provider),
-      ),
-    )
-    return matches.length === 1
-  }
-  return witness(self, provider, capability) !== undefined
+
+const interfaceConformance = (
+  self: Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+): ConformanceFact | undefined => {
+  const matches = self.modules.flatMap((module) =>
+    module.conformances.filter(
+      (conformance) =>
+        conformance.capability._tag === 'Resolved' &&
+        Type.equals(conformance.capability.type, capability) &&
+        conformance.provider._tag === 'Resolved' &&
+        Type.equals(conformance.provider.type, provider),
+    ),
+  )
+  return matches.length === 1 ? matches.at(0) : undefined
+}
+
+/** Tests whether one nominal provider has a compiler-shipped or source-declared witness. */
+export const conforms = (self: Index, provider: Type.Type, capability: Type.Nominal): boolean =>
+  interfaceByCapability(self, capability) !== undefined
+    ? interfaceConformance(self, provider, capability) !== undefined
+    : witness(self, provider, capability) !== undefined
+
+/**
+ * Returns, in declaration order, the operations one interface declares that the provider's selected
+ * conformance leaves unmapped. An empty result means the witness covers the whole contract — which
+ * is the only state under which specialization may substitute the provider for a bounded parameter.
+ * A capability that is not an interface, or a provider with no single conformance, has no partial
+ * witness to report and returns nothing.
+ */
+export const unmappedInterfaceOperations = (
+  self: Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+): ReadonlyArray<string> => {
+  const interface_ = interfaceByCapability(self, capability)
+  const conformance = interfaceConformance(self, provider, capability)
+  if (interface_ === undefined || conformance === undefined) return Object.freeze([])
+  const mapped = new Set(
+    conformance.operations.flatMap((mapping) =>
+      mapping.name._tag === 'Present' ? [mapping.name.spelling] : [],
+    ),
+  )
+  return Object.freeze(
+    interface_.operations.flatMap((operation) =>
+      operation.name._tag === 'Present' && !mapped.has(operation.name.spelling)
+        ? [operation.name.spelling]
+        : [],
+    ),
+  )
 }
 
 /** Selects the unique compiler-shipped or source-declared witness for one provider. */
