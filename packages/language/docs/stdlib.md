@@ -23,13 +23,13 @@ The library has 32 modules.
 | [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
 | [`silk/core`](#silk-core) | `Allocator` | 17 |
 | [`silk/effects`](#silk-effects) | `Effect` | 20 |
-| [`silk/f32`](#silk-f32) | `f32` | 35 |
-| [`silk/f64`](#silk-f64) | `f64` | 35 |
+| [`silk/f32`](#silk-f32) | `f32` | 41 |
+| [`silk/f64`](#silk-f64) | `f64` | 41 |
 | [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 76 |
-| [`silk/i16`](#silk-i16) | `i16` | 55 |
-| [`silk/i32`](#silk-i32) | `i32` | 55 |
-| [`silk/i64`](#silk-i64) | `i64` | 55 |
-| [`silk/i8`](#silk-i8) | `i8` | 55 |
+| [`silk/i16`](#silk-i16) | `i16` | 58 |
+| [`silk/i32`](#silk-i32) | `i32` | 58 |
+| [`silk/i64`](#silk-i64) | `i64` | 58 |
+| [`silk/i8`](#silk-i8) | `i8` | 58 |
 | [`silk/isize`](#silk-isize) | `isize` | 55 |
 | [`silk/layout`](#silk-layout) | `Layout` | 6 |
 | [`silk/logging`](#silk-logging) | `Logger` | 30 |
@@ -44,10 +44,10 @@ The library has 32 modules.
 | [`silk/slot`](#silk-slot) | `Slot` | 4 |
 | [`silk/standard_input`](#silk-standard-input) | `StandardInput` | 12 |
 | [`silk/string`](#silk-string) | `String` | 23 |
-| [`silk/u16`](#silk-u16) | `u16` | 52 |
-| [`silk/u32`](#silk-u32) | `u32` | 52 |
-| [`silk/u64`](#silk-u64) | `u64` | 52 |
-| [`silk/u8`](#silk-u8) | `u8` | 52 |
+| [`silk/u16`](#silk-u16) | `u16` | 55 |
+| [`silk/u32`](#silk-u32) | `u32` | 55 |
+| [`silk/u64`](#silk-u64) | `u64` | 55 |
+| [`silk/u8`](#silk-u8) | `u8` | 55 |
 | [`silk/usize`](#silk-usize) | `usize` | 54 |
 | [`silk/vector`](#silk-vector) | `Vector` | 45 |
 
@@ -748,6 +748,57 @@ provider is gone, so a recovering caller never observes it.
 
 Import as `f32` with `import silk.f32`.
 
+### `MAX`
+
+```silk
+pub const MAX: f32
+```
+
+The largest finite f32.
+
+### `MIN`
+
+```silk
+pub const MIN: f32
+```
+
+The smallest finite f32, which is the negation of MAX.
+
+### `EPSILON`
+
+```silk
+pub const EPSILON: f32
+```
+
+The distance from 1.0 to the next larger f32.
+
+### `INFINITY`
+
+```silk
+pub const INFINITY: f32
+```
+
+Positive infinity. A constant initializer must be one literal, and no literal spells infinity
+directly, so this spelling overflows f32 on purpose: the decimal conversion rounds an
+overflowing magnitude to the infinity bit pattern. The value therefore depends on that rounding
+behavior, and a test pins the exact bits 0x7F800000 so a change to it cannot pass silently.
+
+### `PI`
+
+```silk
+pub const PI: f32
+```
+
+The ratio of a circle's circumference to its diameter, rounded to the nearest f32.
+
+### `E`
+
+```silk
+pub const E: f32
+```
+
+Euler's number, the base of the natural logarithm, rounded to the nearest f32.
+
 ### `negate`
 
 ```silk
@@ -1032,6 +1083,57 @@ Calls the concrete f32 toIsize primitive.
 ## silk/f64
 
 Import as `f64` with `import silk.f64`.
+
+### `MAX`
+
+```silk
+pub const MAX: f64
+```
+
+The largest finite f64.
+
+### `MIN`
+
+```silk
+pub const MIN: f64
+```
+
+The smallest finite f64, which is the negation of MAX.
+
+### `EPSILON`
+
+```silk
+pub const EPSILON: f64
+```
+
+The distance from 1.0 to the next larger f64.
+
+### `INFINITY`
+
+```silk
+pub const INFINITY: f64
+```
+
+Positive infinity. A constant initializer must be one literal, and no literal spells infinity
+directly, so this spelling overflows f64 on purpose: the decimal conversion rounds an
+overflowing magnitude to the infinity bit pattern. The value therefore depends on that rounding
+behavior, and a test pins the exact bits 0x7FF0000000000000 so a change to it cannot pass silently.
+
+### `PI`
+
+```silk
+pub const PI: f64
+```
+
+The ratio of a circle's circumference to its diameter, rounded to the nearest f64.
+
+### `E`
+
+```silk
+pub const E: f64
+```
+
+Euler's number, the base of the natural logarithm, rounded to the nearest f64.
 
 ### `negate`
 
@@ -1748,6 +1850,30 @@ Returns false only for NotFound and propagates every other provider failure.
 
 Import as `i16` with `import silk.i16`.
 
+### `MAX`
+
+```silk
+pub const MAX: i16
+```
+
+The largest i16. The checked arithmetic intrinsics reject every result above this bound.
+
+### `MIN`
+
+```silk
+pub const MIN: i16
+```
+
+The smallest i16. The checked arithmetic intrinsics reject every result below this bound.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of i16 in bits.
+
 ### `negate`
 
 ```silk
@@ -2192,6 +2318,30 @@ Calls the concrete i16 greaterOrEqual primitive.
 ## silk/i32
 
 Import as `i32` with `import silk.i32`.
+
+### `MAX`
+
+```silk
+pub const MAX: i32
+```
+
+The largest i32. The checked arithmetic intrinsics reject every result above this bound.
+
+### `MIN`
+
+```silk
+pub const MIN: i32
+```
+
+The smallest i32. The checked arithmetic intrinsics reject every result below this bound.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of i32 in bits.
 
 ### `negate`
 
@@ -2638,6 +2788,30 @@ Calls the concrete i32 greaterOrEqual primitive.
 
 Import as `i64` with `import silk.i64`.
 
+### `MAX`
+
+```silk
+pub const MAX: i64
+```
+
+The largest i64. The checked arithmetic intrinsics reject every result above this bound.
+
+### `MIN`
+
+```silk
+pub const MIN: i64
+```
+
+The smallest i64. The checked arithmetic intrinsics reject every result below this bound.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of i64 in bits.
+
 ### `negate`
 
 ```silk
@@ -3082,6 +3256,30 @@ Calls the concrete i64 greaterOrEqual primitive.
 ## silk/i8
 
 Import as `i8` with `import silk.i8`.
+
+### `MAX`
+
+```silk
+pub const MAX: i8
+```
+
+The largest i8. The checked arithmetic intrinsics reject every result above this bound.
+
+### `MIN`
+
+```silk
+pub const MIN: i8
+```
+
+The smallest i8. The checked arithmetic intrinsics reject every result below this bound.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of i8 in bits.
 
 ### `negate`
 
@@ -4772,6 +4970,30 @@ Decodes the scalar at a cursor, or returns None at the end of the string.
 
 Import as `u16` with `import silk.u16`.
 
+### `MAX`
+
+```silk
+pub const MAX: u16
+```
+
+The largest u16. The checked arithmetic intrinsics reject every result above this bound.
+
+### `MIN`
+
+```silk
+pub const MIN: u16
+```
+
+The smallest u16. The checked arithmetic intrinsics reject every result below this bound.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of u16 in bits.
+
 ### `toU8`
 
 ```silk
@@ -5192,6 +5414,30 @@ Calls the concrete u16 greaterOrEqual primitive.
 ## silk/u32
 
 Import as `u32` with `import silk.u32`.
+
+### `MAX`
+
+```silk
+pub const MAX: u32
+```
+
+The largest u32. The checked arithmetic intrinsics reject every result above this bound.
+
+### `MIN`
+
+```silk
+pub const MIN: u32
+```
+
+The smallest u32. The checked arithmetic intrinsics reject every result below this bound.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of u32 in bits.
 
 ### `toU8`
 
@@ -5614,6 +5860,30 @@ Calls the concrete u32 greaterOrEqual primitive.
 
 Import as `u64` with `import silk.u64`.
 
+### `MAX`
+
+```silk
+pub const MAX: u64
+```
+
+The largest u64. The checked arithmetic intrinsics reject every result above this bound.
+
+### `MIN`
+
+```silk
+pub const MIN: u64
+```
+
+The smallest u64. The checked arithmetic intrinsics reject every result below this bound.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of u64 in bits.
+
 ### `toU8`
 
 ```silk
@@ -6034,6 +6304,30 @@ Calls the concrete u64 greaterOrEqual primitive.
 ## silk/u8
 
 Import as `u8` with `import silk.u8`.
+
+### `MAX`
+
+```silk
+pub const MAX: u8
+```
+
+The largest u8. The checked arithmetic intrinsics reject every result above this bound.
+
+### `MIN`
+
+```silk
+pub const MIN: u8
+```
+
+The smallest u8. The checked arithmetic intrinsics reject every result below this bound.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of u8 in bits.
 
 ### `toU8`
 
