@@ -676,3 +676,39 @@ pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
     [],
   )
 })
+
+it('publishes an effect fn body pattern binding as a deferred fact that allBindings joins', () => {
+  const source = (modifiers: string): string =>
+    `struct Left { value: i32 }
+struct Right { value: i32 }
+${modifiers} fn inspect(input: Left | Right) -> i32 {
+  return match &input {
+    Left { value } => value
+    Right { value } => value
+  }
+}`
+  const plain = check('ownership://pattern-plain.silk', source('pub'))
+  const deferred = check('ownership://pattern-effect.silk', source('pub effect'))
+  const names = (facts: ReadonlyArray<Ownership.BindingFact>): ReadonlyArray<string | undefined> =>
+    facts.filter((binding) => binding.site._tag === 'Pattern').map((binding) => binding.name)
+
+  assert.deepEqual(plain.diagnostics, [])
+  assert.deepEqual(deferred.diagnostics, [])
+
+  // A plain body's pattern bindings reach the enclosing fact set.
+  const inspected = plain.functions.at(0)
+  assert.deepEqual(names(inspected?.bindings ?? []), ['value', 'value'])
+  assert.deepEqual(names(inspected?.deferredBindings ?? []), [])
+
+  // An effect fn is entirely a deferred body, so the same patterns publish on the other field.
+  // This is the documented publication boundary, not a tracking hole — see FunctionOwnership.
+  const lazy = deferred.functions.at(0)
+  assert.deepEqual(names(lazy?.bindings ?? []), [])
+  assert.deepEqual(names(lazy?.deferredBindings ?? []), ['value', 'value'])
+
+  // allBindings is the join a consumer needing completeness must use: it answers the same for
+  // both shapes, where reading `bindings` alone does not.
+  assert.deepEqual(names(Ownership.allBindings(inspected)), ['value', 'value'])
+  assert.deepEqual(names(Ownership.allBindings(lazy)), ['value', 'value'])
+  assert.deepEqual(Ownership.allBindings(undefined), [])
+})

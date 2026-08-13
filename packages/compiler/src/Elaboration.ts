@@ -18,6 +18,7 @@ import * as SourceSpan from './SourceSpan.js'
 import * as StaticText from './StaticText.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
+import * as TargetConstant from './TargetConstant.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
@@ -499,7 +500,14 @@ export interface ConstantExpressionFact {
   readonly token: Token.Token
   readonly value?:
     | { readonly _tag: 'Boolean'; readonly value: boolean }
-    | { readonly _tag: 'Integer'; readonly value: bigint; readonly type: SemanticType }
+    | {
+        readonly _tag: 'Integer'
+        readonly value: bigint
+        readonly type: SemanticType
+        // Present when the declaration named a pointer-width fact instead of spelling a literal.
+        // `value` then holds the widest selection; `Lower` re-selects it for the chosen target.
+        readonly target?: TargetConstant.Selector
+      }
     | {
         readonly _tag: 'Floating'
         readonly bits: bigint
@@ -1318,6 +1326,21 @@ const analyzeConstant = (
         type = declared.type
         value = Object.freeze({ _tag: 'Integer', value: literal.value, type })
       }
+    }
+  } else if (literal._tag === 'TargetConstant') {
+    // The pointer width is not known here — elaboration precedes target selection — so the fact is
+    // recorded with its widest value and its selector. `Lower` narrows it once the target is fixed.
+    const expected = TargetConstant.declaredType(literal.selector)
+    if (declared.type !== expected) {
+      detail = `${TargetConstant.root}.${literal.selector} is ${expected}, not ${Type.encode(declared.type)}`
+    } else {
+      type = expected
+      value = Object.freeze({
+        _tag: 'Integer',
+        value: TargetConstant.unselected(literal.selector),
+        type,
+        target: literal.selector,
+      })
     }
   } else if (Scalar.isFloatSpelling(declared.type) && literal._tag === 'FloatingLiteral') {
     const selected = declared.type
@@ -7274,6 +7297,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
         ...(fact.declaration.canonical._tag === 'Canonical'
           ? { constant: fact.declaration.canonical.id }
           : {}),
+        ...(fact.value.target === undefined ? {} : { targetConstant: fact.value.target }),
         span: fact.syntax.span,
       })
     if (fact.value?._tag === 'Floating')

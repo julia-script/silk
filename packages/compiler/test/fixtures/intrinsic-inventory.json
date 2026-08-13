@@ -4474,6 +4474,14 @@
       "identity": "FromBits"
     },
     {
+      "operation": "Intrinsic.f32Sqrt",
+      "signature": "fn Intrinsic.f32Sqrt(value: f32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.sqrt",
+      "identity": "Sqrt"
+    },
+    {
       "operation": "Intrinsic.f32Sin",
       "signature": "fn Intrinsic.f32Sin(value: f32) -> f32",
       "unsafe": false,
@@ -4754,6 +4762,14 @@
       "identity": "FromBits"
     },
     {
+      "operation": "Intrinsic.f64Sqrt",
+      "signature": "fn Intrinsic.f64Sqrt(value: f64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.sqrt",
+      "identity": "Sqrt"
+    },
+    {
       "operation": "Intrinsic.f64Sin",
       "signature": "fn Intrinsic.f64Sin(value: f64) -> f64",
       "unsafe": false,
@@ -4999,6 +5015,15 @@
       "consumer": "silk/os-filesystem.pathInspect",
       "identity": "OsPathInspect",
       "invariant": "root and path satisfy confined traversal; kind and byteLength outputs are initialized"
+    },
+    {
+      "operation": "Intrinsic.osDirectoryCreateUnique",
+      "signature": "unsafe fn Intrinsic.osDirectoryCreateUnique(root: &[u8], parent: &[u8], prefix: &[u8], output: &mut [u8], requiredCapacity: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-filesystem.directoryCreateUnique",
+      "identity": "OsDirectoryCreateUnique",
+      "invariant": "root and parent satisfy confined traversal; prefix is one valid final component fragment; the provider chooses the unique suffix, creates exactly one directory no other caller holds, and writes its complete final component name; buffer-too-small creates nothing and reports required capacity"
     },
     {
       "operation": "Intrinsic.osDirectoryCreate",

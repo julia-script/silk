@@ -135,6 +135,8 @@ const floatArguments = (scalar: Scalar.FloatScalar, operation: Scalar.Operation)
       return '-42.0'
     case 'TotalOrder':
       return `${scalar.spelling}.fromBits(${scalar.spelling === 'f32' ? '2147483648' : '9223372036854775808'}), 0.0`
+    case 'Sqrt':
+      return '1764.0'
     case 'Sin':
     case 'Cos':
       return '0.0'

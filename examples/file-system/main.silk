@@ -10,9 +10,11 @@ import silk.filesystem {
   exists,
   fileInfo,
   make as path,
+  createTemporaryDirectoryOperation,
   notFound,
   readFileOperation,
   statOperation,
+  unsupported,
   writeFileOperation,
   writeFileWithParents,
 }
@@ -82,6 +84,15 @@ effect fn removeDirectory(self: &mut MemoryFileSystem, target: &Path) -> () ! Fi
   return ()
 }
 
+/// This example holds one file, so there is no namespace to make a unique name in.
+effect fn createTemporaryDirectory(
+  self: &mut MemoryFileSystem,
+  parent: &Path,
+  prefix: &[u8],
+) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+  fail error(createTemporaryDirectoryOperation(), unsupported())
+}
+
 impl FileSystem for MemoryFileSystem {
   readFile: MemoryFileSystem.read
   writeFile: MemoryFileSystem.write
@@ -90,6 +101,7 @@ impl FileSystem for MemoryFileSystem {
   createDirectory: MemoryFileSystem.create
   removeFile: MemoryFileSystem.removeFile
   removeDirectory: MemoryFileSystem.removeDirectory
+  createTemporaryDirectory: MemoryFileSystem.createTemporaryDirectory
 }
 
 fn checksum(bytes: &[u8]) -> i32 {

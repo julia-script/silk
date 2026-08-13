@@ -7,6 +7,7 @@ import * as Mir from './Mir.js'
 import * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as TargetConstant from './TargetConstant.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
@@ -1060,12 +1061,21 @@ function lowerExpressionInner(
       const type = fn.type(expression.type)
       if (type === undefined || !Type.isBuiltin(Mir.semanticType(type))) return undefined
       const destination = fn.alloc(type)
+      // Lowering is the first phase that holds the selected target, and every engine reads the MIR
+      // it produces, so this is where a pointer-width fact becomes one exact number.
+      const value =
+        expression.targetConstant === undefined
+          ? expression.value
+          : TargetConstant.value(
+              expression.targetConstant,
+              TargetConstant.pointerBits(fn.layout.target),
+            )
       fn.emit(
         Object.freeze({
           _tag: 'Literal',
           destination,
           type,
-          value: expression.value,
+          value,
           provenance: Object.freeze({ span: expression.span, generated: false }),
         }),
       )
@@ -3057,6 +3067,7 @@ function lowerExpressionInner(
         expression.operation === 'IsNormal' ||
         expression.operation === 'IsSubnormal' ||
         expression.operation === 'IsSignNegative' ||
+        expression.operation === 'Sqrt' ||
         (expression.operation === 'Negate' &&
           argumentLocals.some((local) => {
             const type = fn.localTypes.at(local.ordinal)
@@ -3714,7 +3725,7 @@ const lowerSequence = (
       droppedExpression._tag === 'BindingReference' ? droppedExpression.binding.ordinal : undefined
     const bindingFact =
       droppedBinding !== undefined
-        ? [...(fn.ownership?.bindings ?? []), ...(fn.ownership?.deferredBindings ?? [])].find(
+        ? Ownership.allBindings(fn.ownership).find(
             (binding) =>
               binding.site._tag === 'Let' && binding.site.binding.ordinal === droppedBinding,
           )
