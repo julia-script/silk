@@ -351,6 +351,7 @@ export type Operation =
       readonly _tag: 'FloatUnary'
       readonly operation:
         | 'Negate'
+        | 'Sqrt'
         | 'IsNaN'
         | 'IsInfinite'
         | 'IsFinite'
@@ -2497,7 +2498,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const unary =
             operation._tag !== 'FloatUnary' ||
             (sourceScalar?.category === 'Floating' &&
-              (operation.operation === 'Negate'
+              (operation.operation === 'Negate' || operation.operation === 'Sqrt'
                 ? targetScalar?.spelling === sourceScalar.spelling
                 : targetScalar?.category === 'Boolean'))
           const transcendental =

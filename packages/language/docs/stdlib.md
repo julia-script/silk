@@ -25,26 +25,26 @@ The library has 36 modules.
 | [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
 | [`silk/core`](#silk-core) | `Allocator` | 17 |
 | [`silk/effects`](#silk-effects) | `Effect` | 21 |
-| [`silk/f32`](#silk-f32) | `f32` | 41 |
-| [`silk/f64`](#silk-f64) | `f64` | 41 |
+| [`silk/f32`](#silk-f32) | `f32` | 51 |
+| [`silk/f64`](#silk-f64) | `f64` | 51 |
 | [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 85 |
 | [`silk/host_input`](#silk-host-input) | `HostInput` | 12 |
 | [`silk/i16`](#silk-i16) | `i16` | 58 |
 | [`silk/i32`](#silk-i32) | `i32` | 58 |
 | [`silk/i64`](#silk-i64) | `i64` | 58 |
 | [`silk/i8`](#silk-i8) | `i8` | 58 |
-| [`silk/isize`](#silk-isize) | `isize` | 55 |
+| [`silk/isize`](#silk-isize) | `isize` | 58 |
 | [`silk/layout`](#silk-layout) | `Layout` | 6 |
 | [`silk/logging`](#silk-logging) | `Logger` | 30 |
 | [`silk/metrics`](#silk-metrics) | `AllocationMetrics` | 6 |
 | [`silk/numeric`](#silk-numeric) | `Integer` | 12 |
-| [`silk/option`](#silk-option) | `Option` | 5 |
+| [`silk/option`](#silk-option) | `Option` | 9 |
 | [`silk/os_child_process`](#silk-os-child-process) | `OsChildProcess` | 9 |
 | [`silk/os_filesystem`](#silk-os-filesystem) | `OsFileSystem` | 37 |
 | [`silk/os_host_input`](#silk-os-host-input) | `OsHostInput` | 14 |
 | [`silk/os_standard_input`](#silk-os-standard-input) | `OsStandardInput` | 6 |
 | [`silk/raw-buffer`](#silk-raw-buffer) | `RawBuffer` | 8 |
-| [`silk/result`](#silk-result) | `Result` | 5 |
+| [`silk/result`](#silk-result) | `Result` | 13 |
 | [`silk/slot`](#silk-slot) | `Slot` | 4 |
 | [`silk/standard_input`](#silk-standard-input) | `StandardInput` | 12 |
 | [`silk/string`](#silk-string) | `String` | 23 |
@@ -52,7 +52,7 @@ The library has 36 modules.
 | [`silk/u32`](#silk-u32) | `u32` | 55 |
 | [`silk/u64`](#silk-u64) | `u64` | 55 |
 | [`silk/u8`](#silk-u8) | `u8` | 55 |
-| [`silk/usize`](#silk-usize) | `usize` | 54 |
+| [`silk/usize`](#silk-usize) | `usize` | 57 |
 | [`silk/vector`](#silk-vector) | `Vector` | 48 |
 
 ## silk/bool
@@ -1101,6 +1101,97 @@ pub fn fromBits(value: u32) -> f32
 
 Calls the concrete f32 fromBits primitive.
 
+### `sqrt`
+
+```silk
+pub fn sqrt(value: f32) -> f32
+```
+
+The square root of `value`, correctly rounded.
+
+IEEE-754 requires the square root be correctly rounded, so the hardware instruction is the
+exact result rather than an approximation of it. This is why `sqrt` may lower to `llvm.sqrt`
+on the native backend and `f32.sqrt` on Wasm while `pow` and `log`, whose results are
+implementation-defined, may not. The evaluator reproduces the same bits by rounding an exact
+integer root.
+
+That guarantee covers numeric results only. IEEE-754 leaves the *sign* of a NaN produced by an
+invalid operation unspecified, and the hosts disagree: an x86 square root of a negative operand
+yields `0xFFC00000` while AArch64's default NaN yields `0x7FC00000`. Both NaN-producing inputs
+are therefore screened here, before the primitive runs, so the primitive only ever sees the
+domain on which it is bit-exact.
+
+### `abs`
+
+```silk
+pub fn abs(value: f32) -> f32
+```
+
+The magnitude of `value`, which clears the sign bit. A NaN input gives the canonical NaN.
+
+### `copysign`
+
+```silk
+pub fn copysign(magnitude: f32, sign: f32) -> f32
+```
+
+The magnitude of `magnitude` carrying the sign bit of `sign`. Requirement 10 outranks sign
+transfer here, so a NaN `magnitude` gives the canonical NaN rather than a signed NaN.
+
+### `trunc`
+
+```silk
+pub fn trunc(value: f32) -> f32
+```
+
+`value` rounded toward zero, which discards the fraction bits the exponent does not reach.
+The sign survives, so a value in `(-1.0, -0.0]` gives negative zero. A NaN input gives the
+canonical NaN, and either infinity is already integral and returns unchanged.
+
+### `floor`
+
+```silk
+pub fn floor(value: f32) -> f32
+```
+
+The largest integral f32 no greater than `value`. A NaN input gives the canonical NaN.
+
+### `ceil`
+
+```silk
+pub fn ceil(value: f32) -> f32
+```
+
+The smallest integral f32 no less than `value`. A NaN input gives the canonical NaN.
+
+### `round`
+
+```silk
+pub fn round(value: f32) -> f32
+```
+
+`value` rounded to the nearest integral f32, with a half rounding away from zero. That is the
+reading `round` carries in C and Rust; the ties-to-even form is a separate operation this
+module does not yet offer. A NaN input gives the canonical NaN.
+
+### `min`
+
+```silk
+pub fn min(left: f32, right: f32) -> f32
+```
+
+The lesser of two values, ordering negative zero below positive zero. Either operand being NaN
+gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `minimum`.
+
+### `max`
+
+```silk
+pub fn max(left: f32, right: f32) -> f32
+```
+
+The greater of two values, ordering positive zero above negative zero. Either operand being NaN
+gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `maximum`.
+
 ### `sin`
 
 ```silk
@@ -1436,6 +1527,97 @@ pub fn fromBits(value: u64) -> f64
 ```
 
 Calls the concrete f64 fromBits primitive.
+
+### `sqrt`
+
+```silk
+pub fn sqrt(value: f64) -> f64
+```
+
+The square root of `value`, correctly rounded.
+
+IEEE-754 requires the square root be correctly rounded, so the hardware instruction is the
+exact result rather than an approximation of it. This is why `sqrt` may lower to `llvm.sqrt`
+on the native backend and `f64.sqrt` on Wasm while `pow` and `log`, whose results are
+implementation-defined, may not. The evaluator reproduces the same bits by rounding an exact
+integer root.
+
+That guarantee covers numeric results only. IEEE-754 leaves the *sign* of a NaN produced by an
+invalid operation unspecified, and the hosts disagree: an x86 square root of a negative operand
+yields `0xFFF8000000000000` while AArch64's default NaN yields `0x7FF8000000000000`. Both
+NaN-producing inputs are therefore screened here, before the primitive runs, so the primitive
+only ever sees the domain on which it is bit-exact.
+
+### `abs`
+
+```silk
+pub fn abs(value: f64) -> f64
+```
+
+The magnitude of `value`, which clears the sign bit. A NaN input gives the canonical NaN.
+
+### `copysign`
+
+```silk
+pub fn copysign(magnitude: f64, sign: f64) -> f64
+```
+
+The magnitude of `magnitude` carrying the sign bit of `sign`. Requirement 10 outranks sign
+transfer here, so a NaN `magnitude` gives the canonical NaN rather than a signed NaN.
+
+### `trunc`
+
+```silk
+pub fn trunc(value: f64) -> f64
+```
+
+`value` rounded toward zero, which discards the fraction bits the exponent does not reach.
+The sign survives, so a value in `(-1.0, -0.0]` gives negative zero. A NaN input gives the
+canonical NaN, and either infinity is already integral and returns unchanged.
+
+### `floor`
+
+```silk
+pub fn floor(value: f64) -> f64
+```
+
+The largest integral f64 no greater than `value`. A NaN input gives the canonical NaN.
+
+### `ceil`
+
+```silk
+pub fn ceil(value: f64) -> f64
+```
+
+The smallest integral f64 no less than `value`. A NaN input gives the canonical NaN.
+
+### `round`
+
+```silk
+pub fn round(value: f64) -> f64
+```
+
+`value` rounded to the nearest integral f64, with a half rounding away from zero. That is the
+reading `round` carries in C and Rust; the ties-to-even form is a separate operation this
+module does not yet offer. A NaN input gives the canonical NaN.
+
+### `min`
+
+```silk
+pub fn min(left: f64, right: f64) -> f64
+```
+
+The lesser of two values, ordering negative zero below positive zero. Either operand being NaN
+gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `minimum`.
+
+### `max`
+
+```silk
+pub fn max(left: f64, right: f64) -> f64
+```
+
+The greater of two values, ordering positive zero above negative zero. Either operand being NaN
+gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `maximum`.
 
 ### `sin`
 
@@ -4048,6 +4230,33 @@ Calls the concrete i8 greaterOrEqual primitive.
 
 Import as `isize` with `import silk.isize`.
 
+### `MAX`
+
+```silk
+pub const MAX: isize
+```
+
+The largest isize. The checked arithmetic intrinsics reject every result above this bound. No
+literal spells it: isize is as wide as a pointer, so the bound is 2147483647 on a 32-bit target
+and 9223372036854775807 on a 64-bit one, and the compiler selects between them.
+
+### `MIN`
+
+```silk
+pub const MIN: isize
+```
+
+The smallest isize. The checked arithmetic intrinsics reject every result below this bound. It
+is -2147483648 on a 32-bit target and -9223372036854775808 on a 64-bit one.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of isize in bits, which is the selected target's pointer width.
+
 ### `negate`
 
 ```silk
@@ -4819,6 +5028,34 @@ pub fn some<T>(value: T) -> Option<T>
 
 Constructs a present optional value.
 
+### `map`
+
+```silk
+pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> Option<U>
+```
+
+Applies a transform to a present value and keeps an absent value absent.
+
+### `flatMap`
+
+```silk
+pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> Option<U>) -> Option<U>
+```
+
+Continues a present value with a transform that itself answers with an Option, so the
+outcome stays one Option deep instead of nesting.
+
+### `unwrapOr`
+
+```silk
+pub fn unwrapOr<T>(self: Option<T>, fallback: T) -> T
+```
+
+Returns the present value, or the fallback value when the option is absent.
+
+Only the absent arm consumes the fallback. The present arm releases it, so exactly one of the
+two owned values leaves this call and the other drops.
+
 
 ## silk/os_child_process
 
@@ -5025,6 +5262,58 @@ pub fn failResult<A, F>(error: F) -> silk/result.Result<A, F>
 ```
 
 Constructs a completed failed outcome.
+
+### `map`
+
+```silk
+pub fn map<A, B, F>(self: silk/result.Result<A, F>, transform: once fn(A) -> B) -> silk/result.Result<B, F>
+```
+
+Applies a transform to a success value and carries a failure through unchanged.
+
+### `mapError`
+
+```silk
+pub fn mapError<A, F, G>(self: silk/result.Result<A, F>, transform: once fn(F) -> G) -> silk/result.Result<A, G>
+```
+
+Applies a transform to a failure value and carries a success through unchanged.
+
+### `flatMap`
+
+```silk
+pub fn flatMap<A, B, F>(self: silk/result.Result<A, F>, transform: once fn(A) -> silk/result.Result<B, F>) -> silk/result.Result<B, F>
+```
+
+Continues a success with a transform that answers with a Result of its own, so the outcome
+stays one Result deep instead of nesting.
+
+### `unwrapOr`
+
+```silk
+pub fn unwrapOr<A, F>(self: silk/result.Result<A, F>, fallback: A) -> A
+```
+
+Returns the success value, or the fallback value when the outcome is a failure.
+
+Only the failure arm consumes the fallback. The success arm releases it, and the failure arm
+releases the error, so exactly one owned value leaves this call and the other drops.
+
+### `isSuccess`
+
+```silk
+pub fn isSuccess<A, F>(self: &silk/result.Result<A, F>) -> bool
+```
+
+Answers whether the outcome succeeded, without consuming it.
+
+### `isFailure`
+
+```silk
+pub fn isFailure<A, F>(self: &silk/result.Result<A, F>) -> bool
+```
+
+Answers whether the outcome failed, without consuming it.
 
 
 ## silk/slot
@@ -7111,6 +7400,32 @@ Calls the concrete u8 greaterOrEqual primitive.
 ## silk/usize
 
 Import as `usize` with `import silk.usize`.
+
+### `MAX`
+
+```silk
+pub const MAX: usize
+```
+
+The largest usize. The checked arithmetic intrinsics reject every result above this bound. No
+literal spells it: usize is as wide as a pointer, so the bound is 4294967295 on a 32-bit target
+and 18446744073709551615 on a 64-bit one, and the compiler selects between them.
+
+### `MIN`
+
+```silk
+pub const MIN: usize
+```
+
+The smallest usize. An unsigned bound is zero at every pointer width, so this one is a literal.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of usize in bits, which is the selected target's pointer width.
 
 ### `ZERO`
 
