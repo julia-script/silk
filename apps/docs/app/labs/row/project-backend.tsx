@@ -829,6 +829,10 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = read ${localText(operation.buffer)}[${localText(operation.index)}]`
     case 'RawBufferView':
       return `${localText(operation.destination)} = ${operation.access.toLowerCase()} view ${localText(operation.buffer)}[${localText(operation.offset)}..+${localText(operation.length)}]`
+    case 'RawBufferCopy':
+      return `${localText(operation.destination)} = copy ${localText(operation.source)} into ${localText(operation.buffer)}[${localText(operation.offset)}..+${localText(operation.length)}]`
+    case 'RawBufferFill':
+      return `${localText(operation.destination)} = fill ${localText(operation.buffer)}[${localText(operation.offset)}..+${localText(operation.length)}] = ${localText(operation.value)}`
     case 'SlotWrite':
       return `${localText(operation.destination)} = write ${localText(operation.slot)} = ${localText(operation.value)}`
     case 'SlotTake':
@@ -1176,6 +1180,10 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `copy slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'RawBufferRead':
       return `read raw buffer #${event.ticket}[${event.index?.toString() ?? '?'}]`
+    case 'RawBufferCopy':
+      return `copy ${event.count?.toString() ?? '?'} into raw buffer #${event.ticket}[${event.index?.toString() ?? '?'}]`
+    case 'RawBufferFill':
+      return `fill raw buffer #${event.ticket}[${event.index?.toString() ?? '?'}] × ${event.count?.toString() ?? '?'}`
     case 'SlotDrop':
       return `drop slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'AllocationRelease':
@@ -1241,6 +1249,8 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'SlotTake':
     case 'SlotCopy':
     case 'RawBufferRead':
+    case 'RawBufferCopy':
+    case 'RawBufferFill':
     case 'SlotDrop':
     case 'AllocationRelease':
     case 'HostWrite':
@@ -1274,6 +1284,8 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return 'missing StandardStreams host provider'
     case 'MissingStandardInput':
       return 'missing StandardInput host provider'
+    case 'MissingChildProcess':
+      return 'missing ChildProcess host provider'
     case 'MissingOsFileSystemHost':
       return 'missing OS filesystem host provider'
     case 'IntrinsicTargetUnavailable':

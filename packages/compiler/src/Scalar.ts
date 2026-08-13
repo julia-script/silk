@@ -13,8 +13,11 @@ export type IntegerSpelling =
 
 export type FloatSpelling = 'f32' | 'f64'
 
+/** The spelling of the scalar that holds one Unicode scalar value. */
+export type CharacterSpelling = 'char'
+
 /** Every compiler-known scalar spelling, including the canonical Boolean. */
-export type Spelling = 'bool' | IntegerSpelling | FloatSpelling
+export type Spelling = 'bool' | CharacterSpelling | IntegerSpelling | FloatSpelling
 
 export type FixedBits = 8 | 16 | 32 | 64
 export type ByteWidth = 1 | 2 | 4 | 8
@@ -156,8 +159,26 @@ export interface FloatScalar {
   readonly operations: ReadonlyArray<Operation>
 }
 
+/**
+ * The immutable Unicode scalar entry in the authoritative scalar catalog.
+ *
+ * `char` is its own category rather than an integer, because every `category === 'Integer'`
+ * guard in the compiler admits arithmetic and the checked and unchecked integer conversions.
+ * A Unicode scalar value admits neither: arithmetic can leave the valid range, and a
+ * conversion in either direction must be written out in source.
+ */
+export interface CharacterScalar {
+  readonly spelling: CharacterSpelling
+  readonly category: 'Character'
+  readonly width: Extract<Width, { readonly _tag: 'FixedWidth' }>
+  readonly signedness: undefined
+  readonly layout: Extract<Layout, { readonly _tag: 'FixedLayout' }>
+  readonly lanes: BackendLanes
+  readonly operations: ReadonlyArray<Operation>
+}
+
 /** One immutable source of truth for a compiler-known scalar. */
-export type Scalar = IntegerScalar | FloatScalar | BooleanScalar
+export type Scalar = IntegerScalar | FloatScalar | BooleanScalar | CharacterScalar
 
 const fixedWidth = (bits: FixedBits): Extract<Width, { readonly _tag: 'FixedWidth' }> =>
   Object.freeze({ _tag: 'FixedWidth', bits })
@@ -393,6 +414,28 @@ export const boolean: BooleanScalar = Object.freeze({
   operations: Object.freeze([...equalityOperations, operation('not', 'Not', 1, 'Self')]),
 })
 
+/**
+ * The canonical Unicode scalar value.
+ *
+ * The value occupies exactly 32 bits so that it never moves a field or changes an ABI relative
+ * to the `u32` a decoder produces today, and it orders by Unicode scalar value, which for the
+ * range `0` to `0x10ffff` is exactly the unsigned 32-bit order.
+ *
+ * The catalog states equality and ordering and nothing else. Arithmetic is absent by design:
+ * `char` names a value inside a fixed range that excludes the surrogates `0xd800` to `0xdfff`,
+ * and every arithmetic operation can leave that range. The conversions to and from `u32` are
+ * absent for a separate reason: representing the surrogate hole is the work of a follow-up.
+ */
+export const character: CharacterScalar = Object.freeze({
+  spelling: 'char',
+  category: 'Character',
+  width: fixedWidth(32),
+  signedness: undefined,
+  layout: fixedLayout(4),
+  lanes: Object.freeze({ llvm: 'LogicalWidth', wasm: 'I32' }),
+  operations: Object.freeze([...comparisonOperations]),
+})
+
 const catalog: ReadonlyArray<Scalar> = Object.freeze([
   boolean,
   u8,
@@ -407,6 +450,7 @@ const catalog: ReadonlyArray<Scalar> = Object.freeze([
   isize,
   f32,
   defaultFloat,
+  character,
 ])
 
 /** Returns every scalar in stable source-presentation order. */
@@ -433,6 +477,10 @@ export const isIntegerSpelling = (value: unknown): value is IntegerSpelling =>
 
 export const isFloatSpelling = (value: unknown): value is FloatSpelling =>
   typeof value === 'string' && find(value)?.category === 'Floating'
+
+/** Tests whether an unknown value is the accepted Unicode scalar spelling. */
+export const isCharacterSpelling = (value: unknown): value is CharacterSpelling =>
+  typeof value === 'string' && find(value)?.category === 'Character'
 
 /** Resolves the destination of one explicit integer conversion operation. */
 export const conversionTarget = (operation: string): IntegerScalar | undefined => {

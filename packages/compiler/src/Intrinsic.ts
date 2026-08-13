@@ -478,6 +478,60 @@ const legacyActors = Object.freeze([
         invariant:
           'output is initialized writable storage; success reports the exact transferred byte count and zero means end of input',
       }),
+      osBuiltin({
+        name: 'processExecute',
+        operation: 'OsProcessExecute',
+        parameters: Object.freeze([
+          valueParameter('program', '&[u8]'),
+          valueParameter('arguments', '&[u8]'),
+          valueParameter('environment', '&[u8]'),
+          valueParameter('workingDirectory', '&[u8]'),
+          valueParameter('status', '&mut i32'),
+          valueParameter('code', '&mut i32'),
+          valueParameter('outputLength', '&mut usize'),
+          valueParameter('errorLength', '&mut usize'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([
+          byteSlice,
+          byteSlice,
+          byteSlice,
+          byteSlice,
+          mutableI32,
+          mutableI32,
+          mutableUsize,
+          mutableUsize,
+          mutableI32,
+          mutableU32,
+        ]),
+        result: 'Effect<bool>',
+        semanticResult: 'bool',
+        invariant:
+          'arguments and environment are NUL-terminated entry blocks and an empty workingDirectory inherits the caller directory; the child never interprets a shell and reads closed standard input; success retains exactly one capture until the next execute and reports its exact lengths with status zero for exit and one for signal',
+      }),
+      osBuiltin({
+        name: 'processCapture',
+        operation: 'OsProcessCapture',
+        parameters: Object.freeze([
+          valueParameter('stream', 'i32'),
+          valueParameter('offset', 'usize'),
+          valueParameter('output', '&mut [u8]'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([
+          'i32',
+          'usize',
+          Type.slice('Exclusive', 'u8'),
+          mutableI32,
+          mutableU32,
+        ]),
+        result: 'Effect<Option<usize>>',
+        semanticResult: Type.option('usize'),
+        invariant:
+          'stream selects zero for standard output or one for standard error, offset is within the retained capture of the immediately preceding execute, and output is initialized writable storage',
+      }),
     ]),
   ),
   actor(
@@ -649,6 +703,48 @@ const legacyActors = Object.freeze([
         semanticResult: rawElement,
         unsafe: true,
       }),
+      builtin({
+        actor: 'RawBuffer',
+        name: 'copy',
+        operation: 'RawBufferCopy',
+        typeParameters: Object.freeze(['T']),
+        semanticTypeParameters: rawTypeParameters,
+        parameters: Object.freeze([
+          valueParameter('destination', '&mut RawBuffer<T>'),
+          valueParameter('destinationOffset', 'usize'),
+          valueParameter('source', '&[T]'),
+          valueParameter('length', 'usize'),
+        ]),
+        semanticParameters: Object.freeze([
+          Type.reference('Exclusive', Type.rawBuffer(rawElement)),
+          'usize',
+          Type.slice('Shared', rawElement),
+          'usize',
+        ]),
+        result: '()',
+        semanticResult: Type.unit,
+        unsafe: true,
+      }),
+      builtin({
+        actor: 'RawBuffer',
+        name: 'fill',
+        operation: 'RawBufferFill',
+        parameters: Object.freeze([
+          valueParameter('buffer', '&mut RawBuffer<u8>'),
+          valueParameter('offset', 'usize'),
+          valueParameter('length', 'usize'),
+          valueParameter('value', 'u8'),
+        ]),
+        semanticParameters: Object.freeze([
+          Type.reference('Exclusive', Type.rawBuffer('u8')),
+          'usize',
+          'usize',
+          'u8',
+        ]),
+        result: '()',
+        semanticResult: Type.unit,
+        unsafe: true,
+      }),
     ]),
   ),
   actor(
@@ -792,7 +888,11 @@ const flatOperations = Object.freeze(
               : actor_.spelling === 'Os'
                 ? operation.spelling === 'standardInputRead'
                   ? 'silk/os-standard-input.read'
-                  : `silk/os-filesystem.${operation.spelling}`
+                  : operation.spelling === 'processExecute'
+                    ? 'silk/os-child-process.execute'
+                    : operation.spelling === 'processCapture'
+                      ? 'silk/os-child-process.capture'
+                      : `silk/os-filesystem.${operation.spelling}`
                 : actor_.spelling === 'Place'
                   ? 'language:place-replacement'
                   : `silk/${actor_.spelling.replaceAll(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}.${operation.spelling}`

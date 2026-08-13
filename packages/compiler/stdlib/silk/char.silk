@@ -1,0 +1,29 @@
+/// Calls the concrete char equals primitive.
+pub fn equals(left: char, right: char) -> bool {
+  return Intrinsic.charEquals(left, right)
+}
+
+/// Calls the concrete char notEquals primitive.
+pub fn notEquals(left: char, right: char) -> bool {
+  return Intrinsic.charNotEquals(left, right)
+}
+
+/// Calls the concrete char lessThan primitive, which orders by Unicode scalar value.
+pub fn lessThan(left: char, right: char) -> bool {
+  return Intrinsic.charLessThan(left, right)
+}
+
+/// Calls the concrete char lessOrEqual primitive, which orders by Unicode scalar value.
+pub fn lessOrEqual(left: char, right: char) -> bool {
+  return Intrinsic.charLessOrEqual(left, right)
+}
+
+/// Calls the concrete char greaterThan primitive, which orders by Unicode scalar value.
+pub fn greaterThan(left: char, right: char) -> bool {
+  return Intrinsic.charGreaterThan(left, right)
+}
+
+/// Calls the concrete char greaterOrEqual primitive, which orders by Unicode scalar value.
+pub fn greaterOrEqual(left: char, right: char) -> bool {
+  return Intrinsic.charGreaterOrEqual(left, right)
+}

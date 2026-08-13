@@ -6,10 +6,32 @@ import * as Type from '../src/Type.js'
 it('owns the current scalar vocabulary in stable presentation order', () => {
   assert.deepEqual(
     Scalar.all().map((scalar) => scalar.spelling),
-    ['bool', 'u8', 'u16', 'u32', 'u64', 'usize', 'i8', 'i16', 'i32', 'i64', 'isize', 'f32', 'f64'],
+    [
+      'bool',
+      'u8',
+      'u16',
+      'u32',
+      'u64',
+      'usize',
+      'i8',
+      'i16',
+      'i32',
+      'i64',
+      'isize',
+      'f32',
+      'f64',
+      'char',
+    ],
   )
   assert.strictEqual(Scalar.isSpelling('i32'), true)
   assert.strictEqual(Scalar.isSpelling('String'), false)
+  assert.strictEqual(Scalar.isSpelling('char'), true)
+  assert.strictEqual(Scalar.isCharacterSpelling('char'), true)
+  assert.strictEqual(Scalar.isIntegerSpelling('char'), false)
+  assert.notInclude(
+    Scalar.integers().map((scalar): string => scalar.spelling),
+    'char',
+  )
   assert.strictEqual(Type.isBuiltin('usize'), true)
   assert.strictEqual(Object.isFrozen(Scalar.all()), true)
   assert.strictEqual(Scalar.all().every(Object.isFrozen), true)
@@ -86,6 +108,12 @@ it('resolves fixed and target-width scalar facts without phase-specific cases', 
       'greaterOrEqual',
     ],
   )
+  assert.deepEqual(
+    Scalar.character.operations.map((candidate) => candidate.spelling),
+    ['equals', 'notEquals', 'lessThan', 'lessOrEqual', 'greaterThan', 'greaterOrEqual'],
+  )
+  assert.deepEqual(Scalar.character.width, { _tag: 'FixedWidth', bits: 32 })
+  assert.deepEqual(Scalar.resolveLayout(Scalar.character, 8, 8), { size: 4, alignment: 4 })
   const intrinsic = Intrinsic.findActor('Intrinsic')
   assert.notStrictEqual(intrinsic, undefined)
   for (const scalar of Scalar.all()) {

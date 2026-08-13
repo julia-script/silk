@@ -37,6 +37,62 @@ const planHasHook = (plan: Ownership.CleanupPlan): boolean =>
   (plan._tag === 'RawBufferCleanup' && planHasHook(plan.allocation))
 
 /**
+ * Tests whether one cleanup plan consumes a reclaim ticket at any nesting depth. A plan can
+ * reclaim without invoking a hook — a bare `Allocation` drop is exactly that — so this is the
+ * second half of "this release has an effect", beside `planHasHook`.
+ */
+const planReclaims = (plan: Ownership.CleanupPlan): boolean =>
+  plan._tag === 'AllocationCleanup' ||
+  plan._tag === 'RawBufferCleanup' ||
+  (plan._tag === 'HookCleanup' && planReclaims(plan.inner)) ||
+  (plan._tag === 'StructCleanup' && plan.fields.some((field) => planReclaims(field.cleanup))) ||
+  (plan._tag === 'ArrayCleanup' && planReclaims(plan.element)) ||
+  (plan._tag === 'UnionCleanup' && plan.cases.some((entry) => planReclaims(entry.cleanup))) ||
+  ((plan._tag === 'CallableCleanup' || plan._tag === 'EffectCleanup') &&
+    plan.slots.some((slot) => planReclaims(slot.cleanup)))
+
+/**
+ * The Wasm backend's heap is a size-class free list over one bump region, so a released block
+ * returns to the list its size class owns and the next request of that class reuses it. Repeated
+ * acquire/release cycles therefore keep a bounded heap for arbitrary interleaved patterns, not
+ * only for the nested ones a LIFO unwind would cover. Nothing here schedules, collects, moves, or
+ * compacts: release is an O(1) push driven entirely by the owner that consumed the ticket.
+ *
+ * Memory above the static data and the shadow stack is laid out as
+ *
+ * ```text
+ * [ 65536 .. heapBase )   one i32 free-list head per size class, plus the irregular list
+ * [ heapBase ..       )   blocks, each a 16-byte header followed by its payload
+ * ```
+ *
+ * and one block is
+ *
+ * ```text
+ * header+0   payload capacity in bytes
+ * header+4   size-class index, or -1 for an irregular block
+ * header+8   next free block while the block sits on a free list
+ * header+12  reserved, keeping the payload 16-byte aligned
+ * ```
+ *
+ * A block's payload therefore always begins 16 bytes past its header, which is what lets the
+ * compiler-private `$context` reclaim-authority lane carry the header address: release needs no
+ * lookup structure to find the block a base pointer belongs to.
+ *
+ * `heapHeaderBytes` is both the header's size and the alignment every block start keeps.
+ */
+const heapHeaderBytes = 16
+/** Size classes hold payload capacities `1 << (4 + index)`, so class 0 is 16 bytes. */
+const heapClassShift = 4
+const heapClassCount = 27
+/** Blocks too large or too over-aligned for a class share one irregular list. */
+const heapIrregularClass = heapClassCount
+const heapLargestClassBytes = 1 << (heapClassShift + heapClassCount - 1)
+/** The free-list head table sits at the first heap page; wasm memory starts it zeroed. */
+const heapTableBase = 65536
+const heapBase =
+  heapTableBase + Math.ceil(((heapIrregularClass + 1) * 4) / heapHeaderBytes) * heapHeaderBytes
+
+/**
  * A second `Backend` implementation emitting WebAssembly through the Silk wasm builder, for the
  * same MIR subset the bootstrap LLVM backend covers: logical scalar/aggregate locals, trapping
  * arithmetic, direct calls, checked replacement, and canonical structured control regions.
@@ -943,6 +999,248 @@ interface MemoryContext {
   readonly plan: LayoutPlan.Plan
   readonly staticOffsets: ReadonlyMap<string, number>
   readonly standardWrite?: FuncActor.Func
+  /** `(bytes, alignment) -> payload address`, answering 0 when the request cannot be served. */
+  readonly heapAllocate?: FuncActor.Func
+  /** `(header address) -> ()`, returning one block to its size class. Ignores a null header. */
+  readonly heapRelease?: FuncActor.Func
+}
+
+/**
+ * The body of the synthesized allocator. It serves a request from the head of the matching free
+ * list when that block fits, and otherwise carves a fresh block off the bump region, growing
+ * memory only when the region runs past what is already mapped.
+ */
+const heapAllocateBody = (
+  memory: Memory.Memory,
+  heapPointer: Global.Global,
+): ReadonlyArray<Instr.Instr> => {
+  const [bytes, alignment, align, klass, capacity, listAddress, block, payload, cursor] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8,
+  ]
+  const load = (address: number, offset = 0): ReadonlyArray<Instr.Instr> => [
+    Instr.localGet(address),
+    Instr.memoryAccess('i32.load', memory, { offset }),
+  ]
+  const store = (
+    address: number,
+    value: ReadonlyArray<Instr.Instr>,
+    offset = 0,
+  ): ReadonlyArray<Instr.Instr> => [
+    Instr.localGet(address),
+    ...value,
+    Instr.memoryAccess('i32.store', memory, { offset }),
+  ]
+  /** Pages spanning `[0, cursor)`, as the existing bump growth check computed them. */
+  const pagesForCursor: ReadonlyArray<Instr.Instr> = [
+    Instr.localGet(cursor),
+    Instr.i32Const(1),
+    Instr.op('i32.sub'),
+    Instr.i32Const(16),
+    Instr.op('i32.shr_u'),
+    Instr.i32Const(1),
+    Instr.op('i32.add'),
+  ]
+  const refuse: ReadonlyArray<Instr.Instr> = [Instr.i32Const(0), Instr.op('return')]
+  return [
+    // align = max(alignment, 16). A block start is always 16-aligned, and a zero alignment — which
+    // `Layout` construction already rejects — must never widen the mask into every address.
+    Instr.i32Const(heapHeaderBytes),
+    Instr.localGet(alignment),
+    Instr.localGet(alignment),
+    Instr.i32Const(heapHeaderBytes),
+    Instr.op('i32.lt_u'),
+    Instr.op('select'),
+    Instr.localSet(align),
+    // A request is classified when the block's own 16-byte alignment already satisfies it and its
+    // capacity fits the largest class. Everything else shares the irregular list.
+    Instr.localGet(align),
+    Instr.i32Const(heapHeaderBytes),
+    Instr.op('i32.eq'),
+    Instr.localGet(bytes),
+    Instr.i32Const(heapLargestClassBytes),
+    Instr.op('i32.le_u'),
+    Instr.op('i32.and'),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      [
+        // klass = bytes <= 16 ? 0 : ceil(log2(bytes)) - 4, capacity = 1 << (klass + 4)
+        Instr.i32Const(0),
+        Instr.i32Const(32),
+        Instr.localGet(bytes),
+        Instr.i32Const(1),
+        Instr.op('i32.sub'),
+        Instr.op('i32.clz'),
+        Instr.op('i32.sub'),
+        Instr.i32Const(heapClassShift),
+        Instr.op('i32.sub'),
+        Instr.localGet(bytes),
+        Instr.i32Const(1 << heapClassShift),
+        Instr.op('i32.le_u'),
+        Instr.op('select'),
+        Instr.localSet(klass),
+        Instr.i32Const(1),
+        Instr.localGet(klass),
+        Instr.i32Const(heapClassShift),
+        Instr.op('i32.add'),
+        Instr.op('i32.shl'),
+        Instr.localSet(capacity),
+        Instr.localGet(klass),
+        Instr.i32Const(2),
+        Instr.op('i32.shl'),
+        Instr.i32Const(heapTableBase),
+        Instr.op('i32.add'),
+        Instr.localSet(listAddress),
+      ],
+      [
+        Instr.i32Const(-1),
+        Instr.localSet(klass),
+        Instr.localGet(bytes),
+        Instr.localSet(capacity),
+        Instr.i32Const(heapTableBase + heapIrregularClass * 4),
+        Instr.localSet(listAddress),
+      ],
+    ),
+    // Reuse the head of the list when it serves the request. Every classified block in a list has
+    // the class's capacity and a 16-aligned payload, so only an irregular head needs measuring.
+    ...load(listAddress),
+    Instr.localTee(block),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      [
+        Instr.localGet(klass),
+        Instr.i32Const(0),
+        Instr.op('i32.ge_s'),
+        ...load(block),
+        Instr.localGet(bytes),
+        Instr.op('i32.ge_u'),
+        Instr.localGet(block),
+        Instr.i32Const(heapHeaderBytes),
+        Instr.op('i32.add'),
+        Instr.localGet(align),
+        Instr.i32Const(1),
+        Instr.op('i32.sub'),
+        Instr.op('i32.and'),
+        Instr.op('i32.eqz'),
+        Instr.op('i32.and'),
+        Instr.op('i32.or'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          [
+            ...store(listAddress, load(block, 8)),
+            ...store(block, [Instr.i32Const(0)], 8),
+            Instr.localGet(block),
+            Instr.i32Const(heapHeaderBytes),
+            Instr.op('i32.add'),
+            Instr.op('return'),
+          ],
+          [],
+        ),
+      ],
+      [],
+    ),
+    // Carve a fresh block. The bump cursor stays 16-aligned so every block start is, which is what
+    // keeps a classified payload's 16-byte alignment an invariant rather than a coincidence.
+    Instr.globalGet(heapPointer),
+    Instr.i32Const(heapHeaderBytes - 1),
+    Instr.op('i32.add'),
+    Instr.i32Const(-heapHeaderBytes),
+    Instr.op('i32.and'),
+    Instr.localSet(cursor),
+    Instr.localGet(cursor),
+    Instr.i32Const(heapHeaderBytes),
+    Instr.op('i32.add'),
+    Instr.localGet(align),
+    Instr.i32Const(1),
+    Instr.op('i32.sub'),
+    Instr.op('i32.add'),
+    Instr.i32Const(0),
+    Instr.localGet(align),
+    Instr.op('i32.sub'),
+    Instr.op('i32.and'),
+    Instr.localTee(payload),
+    Instr.localGet(cursor),
+    Instr.op('i32.lt_u'),
+    Instr.ifElse(Instr.emptyBlockType, refuse, []),
+    Instr.localGet(payload),
+    Instr.i32Const(heapHeaderBytes),
+    Instr.op('i32.sub'),
+    Instr.localSet(block),
+    Instr.localGet(payload),
+    Instr.localGet(capacity),
+    Instr.op('i32.add'),
+    Instr.i32Const(heapHeaderBytes - 1),
+    Instr.op('i32.add'),
+    Instr.localTee(cursor),
+    Instr.localGet(payload),
+    Instr.op('i32.lt_u'),
+    Instr.ifElse(Instr.emptyBlockType, refuse, []),
+    Instr.localGet(cursor),
+    Instr.i32Const(-heapHeaderBytes),
+    Instr.op('i32.and'),
+    Instr.localSet(cursor),
+    ...pagesForCursor,
+    Instr.memorySize(memory),
+    Instr.op('i32.gt_u'),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      [
+        ...pagesForCursor,
+        Instr.memorySize(memory),
+        Instr.op('i32.sub'),
+        Instr.memoryGrow(memory),
+        Instr.i32Const(-1),
+        Instr.op('i32.eq'),
+        Instr.ifElse(Instr.emptyBlockType, refuse, []),
+      ],
+      [],
+    ),
+    Instr.localGet(cursor),
+    Instr.globalSet(heapPointer),
+    ...store(block, [Instr.localGet(capacity)]),
+    ...store(block, [Instr.localGet(klass)], 4),
+    ...store(block, [Instr.i32Const(0)], 8),
+    ...store(block, [Instr.i32Const(0)], 12),
+    Instr.localGet(payload),
+  ]
+}
+
+/**
+ * The body of the synthesized release. It pushes one block onto the head of its size class's free
+ * list and returns. A null header is a no-op, which is what lets a union's conditional cleanup
+ * select the inactive case's reclaim context to zero instead of branching around the call — the
+ * same shortcut the LLVM backend takes through libc `free`.
+ */
+const heapReleaseBody = (memory: Memory.Memory): ReadonlyArray<Instr.Instr> => {
+  const [header, listAddress] = [0, 1]
+  const klass: ReadonlyArray<Instr.Instr> = [
+    Instr.localGet(header),
+    Instr.memoryAccess('i32.load', memory, { offset: 4 }),
+  ]
+  return [
+    Instr.localGet(header),
+    Instr.op('i32.eqz'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('return')], []),
+    // An unsigned comparison folds the irregular block's -1 class in with any out-of-range index,
+    // so a header can never steer the push past the end of the head table.
+    ...klass,
+    Instr.i32Const(heapIrregularClass),
+    ...klass,
+    Instr.i32Const(heapClassCount),
+    Instr.op('i32.lt_u'),
+    Instr.op('select'),
+    Instr.i32Const(2),
+    Instr.op('i32.shl'),
+    Instr.i32Const(heapTableBase),
+    Instr.op('i32.add'),
+    Instr.localSet(listAddress),
+    Instr.localGet(header),
+    Instr.localGet(listAddress),
+    Instr.memoryAccess('i32.load', memory),
+    Instr.memoryAccess('i32.store', memory, { offset: 8 }),
+    Instr.localGet(listAddress),
+    Instr.localGet(header),
+    Instr.memoryAccess('i32.store', memory),
+  ]
 }
 
 /** Local names reach the `name` custom section, so release builds declare them unnamed. */
@@ -1186,7 +1484,7 @@ const emitOperation = (
   /**
    * Runs every Drop hook one cleanup plan invokes: the owner materializes to its frame root,
    * each hook receives the address of its (possibly nested) value, and the owner's slots
-   * reload afterward. Allocation and raw-buffer releases stay no-ops on the bump allocator.
+   * reload afterward. The blocks the plan still owns are reclaimed separately, after the hooks.
    */
   const hookReleaseInstructions = (
     cleanup: Ownership.CleanupPlan,
@@ -1379,6 +1677,213 @@ const emitOperation = (
     }
     return walk(cleanup, 0)
   }
+  const semanticLanesOf = (type: SilkType.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
+    const shape = LayoutPlan.callingShape(plan, type)
+    if (shape === undefined) {
+      throw new RangeError(`Wasm cleanup lost calling shape for ${SilkType.encode(type)}`)
+    }
+    return shape.lanes
+  }
+  const requireRelease = (): FuncActor.Func => {
+    const release = memory?.heapRelease
+    if (release === undefined) throw new RangeError('Wasm reclaim lost its heap release helper')
+    return release
+  }
+  /**
+   * Returns every block one cleanup plan still owns, reading each `$context` lane out of the
+   * owner's own slots. Hooks are not this walk's business — `hookReleaseInstructions` has already
+   * run them and reloaded the slots, so a context read here is the post-hook one, which is the
+   * order the LLVM backend's single lane-driven walk produces too.
+   */
+  const reclaimReleaseInstructions = (
+    cleanup: Ownership.CleanupPlan,
+    values: ReadonlyArray<number>,
+  ): ReadonlyArray<Instr.Instr> => {
+    if (!planReclaims(cleanup)) return []
+    switch (cleanup._tag) {
+      case 'AllocationCleanup':
+      case 'RawBufferCleanup': {
+        const context = values.at(4)
+        if (context === undefined) {
+          throw new RangeError('Wasm allocation cleanup lost its reclaim context')
+        }
+        return [Instr.localGet(context), Instr.call(requireRelease())]
+      }
+      case 'HookCleanup':
+        return reclaimReleaseInstructions(cleanup.inner, values)
+      case 'EffectCleanup':
+        return cleanup.slots.flatMap((slot) =>
+          reclaimReleaseInstructions(
+            slot.cleanup,
+            values.slice(slot.laneOffset, slot.laneOffset + slot.laneCount),
+          ),
+        )
+      case 'StructCleanup': {
+        const lanes = semanticLanesOf(cleanup.type)
+        return cleanup.fields.flatMap((field) =>
+          reclaimReleaseInstructions(
+            field.cleanup,
+            lanes.flatMap((lane, ordinal) => {
+              const first = lane.path.at(0)
+              const value = values.at(ordinal)
+              return first !== undefined &&
+                first._tag === 'FieldId' &&
+                value !== undefined &&
+                first.ordinal === field.field.ordinal &&
+                first.struct.ordinal === field.field.struct.ordinal &&
+                first.struct.sourceId === field.field.struct.sourceId
+                ? [value]
+                : []
+            }),
+          ),
+        )
+      }
+      case 'ArrayCleanup': {
+        const lanes = semanticLanesOf(cleanup.type)
+        return Array.from({ length: cleanup.length }, (_, index) =>
+          reclaimReleaseInstructions(
+            cleanup.element,
+            lanes.flatMap((lane, ordinal) => {
+              const first = lane.path.at(0)
+              const value = values.at(ordinal)
+              return first !== undefined &&
+                first._tag === 'ElementSelector' &&
+                first.index === index &&
+                value !== undefined
+                ? [value]
+                : []
+            }),
+          ),
+        ).flat()
+      }
+      case 'UnionCleanup': {
+        const shape = LayoutPlan.callingShape(plan, cleanup.type)
+        const tag = values.at(0)
+        if (shape === undefined || tag === undefined) {
+          throw new RangeError('Wasm union cleanup lost its shape')
+        }
+        // Only the live case owns the payload, so each reclaiming case runs guarded on the tag.
+        return cleanup.cases.flatMap((caseEntry) => {
+          const physical = LayoutPlan.memberFieldSlots(shape, caseEntry.member, [])
+          const memberLanes = semanticLanesOf(caseEntry.member)
+          if (physical === undefined || physical.length !== memberLanes.length) return []
+          // A member's lane can sit in a physically wider union slot. This backend reads slots
+          // directly rather than coercing them, so a widened lane is left to the owner that
+          // eventually destructures the union.
+          const selected = physical.flatMap((ordinal, index) => {
+            const value = values.at(ordinal)
+            const physicalLane = shape.lanes.at(ordinal)
+            const memberLane = memberLanes.at(index)
+            return value === undefined ||
+              physicalLane === undefined ||
+              memberLane === undefined ||
+              laneValueType(plan, physicalLane) !== laneValueType(plan, memberLane)
+              ? []
+              : [value]
+          })
+          if (selected.length !== memberLanes.length) return []
+          const inner = reclaimReleaseInstructions(caseEntry.cleanup, selected)
+          return inner.length === 0
+            ? []
+            : [
+                Instr.localGet(tag),
+                Instr.i32Const(caseEntry.ordinal),
+                Instr.op('i32.eq'),
+                Instr.ifElse(Instr.emptyBlockType, inner, []),
+              ]
+        })
+      }
+      default:
+        return []
+    }
+  }
+  /** The same reclaim walk for a value the backend only holds the address of. */
+  const reclaimReleaseAtAddress = (
+    cleanup: Ownership.CleanupPlan,
+    address: number,
+    byteOffset = 0,
+  ): ReadonlyArray<Instr.Instr> => {
+    if (!planReclaims(cleanup)) return []
+    if (memory === undefined) throw new RangeError('Wasm slot reclaim has no private memory')
+    switch (cleanup._tag) {
+      case 'AllocationCleanup':
+      case 'RawBufferCleanup': {
+        const contextOffset = SilkType.isRawBuffer(cleanup.type)
+          ? aggregateFieldOffset(cleanup.type, '$allocation') +
+            aggregateFieldOffset(SilkType.allocation, '$context')
+          : aggregateFieldOffset(SilkType.allocation, '$context')
+        return [...loadAt(address, byteOffset + contextOffset), Instr.call(requireRelease())]
+      }
+      case 'HookCleanup':
+        return reclaimReleaseAtAddress(cleanup.inner, address, byteOffset)
+      case 'StructCleanup': {
+        const representation = LayoutPlan.entry(memory.plan, cleanup.type)?.representation
+        if (representation?._tag !== 'Aggregate') return []
+        return cleanup.fields.flatMap((field) => {
+          const layoutField = representation.fields.find(
+            (candidate) =>
+              candidate.id.ordinal === field.field.ordinal &&
+              candidate.id.struct.ordinal === field.field.struct.ordinal &&
+              candidate.id.struct.sourceId === field.field.struct.sourceId,
+          )
+          return layoutField === undefined
+            ? []
+            : reclaimReleaseAtAddress(field.cleanup, address, byteOffset + layoutField.offset)
+        })
+      }
+      case 'ArrayCleanup': {
+        const representation = LayoutPlan.entry(memory.plan, cleanup.type)?.representation
+        if (representation?._tag !== 'Repeated') return []
+        return Array.from({ length: cleanup.length }, (_, index) =>
+          reclaimReleaseAtAddress(
+            cleanup.element,
+            address,
+            byteOffset + index * representation.stride,
+          ),
+        ).flat()
+      }
+      case 'UnionCleanup': {
+        const representation = LayoutPlan.entry(memory.plan, cleanup.type)?.representation
+        if (representation?._tag !== 'Union') return []
+        return cleanup.cases.flatMap((caseEntry) => {
+          const inner = reclaimReleaseAtAddress(
+            caseEntry.cleanup,
+            address,
+            byteOffset + representation.payloadOffset,
+          )
+          return inner.length === 0
+            ? []
+            : [
+                ...loadAt(address, byteOffset),
+                Instr.i32Const(caseEntry.ordinal),
+                Instr.op('i32.eq'),
+                Instr.ifElse(Instr.emptyBlockType, inner, []),
+              ]
+        })
+      }
+      default:
+        return []
+    }
+  }
+  /**
+   * One owned value's complete release: its Drop hooks, then the blocks its reclaim tickets still
+   * hold. Both halves are conditional on the plan actually carrying them, so a bare allocation
+   * drop — which invokes no hook at all — still emits its reclaim.
+   */
+  const releaseInstructions = (
+    cleanup: Ownership.CleanupPlan,
+    local: Mir.LocalId,
+  ): ReadonlyArray<Instr.Instr> => [
+    ...hookReleaseInstructions(cleanup, local),
+    ...reclaimReleaseInstructions(cleanup, slots(local)),
+  ]
+  const releaseAtAddress = (
+    cleanup: Ownership.CleanupPlan,
+    address: number,
+  ): ReadonlyArray<Instr.Instr> => [
+    ...hookReleaseAtAddress(cleanup, address),
+    ...reclaimReleaseAtAddress(cleanup, address),
+  ]
   const flushBorrowRoot = (root: Mir.LocalId): ReadonlyArray<Instr.Instr> => {
     const pointer = layout.borrowPointers.get(root.ordinal)
     if (pointer === undefined) return []
@@ -1654,61 +2159,30 @@ const emitOperation = (
         ...Array.from({ length: propagationShape.laneCount - 1 }, () => Instr.i32Const(0)),
         Instr.op('return'),
       ]
+      if (context.heapAllocate === undefined) {
+        throw new RangeError('Wasm allocation lost its heap allocator')
+      }
       return [
-        Instr.globalGet(context.heapPointer),
-        Instr.localGet(alignment),
-        Instr.i32Const(1),
-        Instr.op('i32.sub'),
-        Instr.op('i32.add'),
-        Instr.i32Const(0),
-        Instr.localGet(alignment),
-        Instr.op('i32.sub'),
-        Instr.op('i32.and'),
-        Instr.localSet(base),
-        Instr.localGet(base),
         Instr.localGet(bytes),
-        Instr.op('i32.add'),
-        Instr.localTee(layout.scratch),
-        Instr.localGet(base),
-        Instr.op('i32.lt_u'),
+        Instr.localGet(alignment),
+        Instr.call(context.heapAllocate),
+        Instr.localTee(base),
+        // No block payload can sit at address zero, so zero is the allocator's whole refusal
+        // vocabulary: an unserviceable request leaves through the same typed failure as before.
+        Instr.op('i32.eqz'),
         Instr.ifElse(Instr.emptyBlockType, fail, []),
-        Instr.localGet(layout.scratch),
-        Instr.i32Const(1),
-        Instr.op('i32.sub'),
-        Instr.i32Const(16),
-        Instr.op('i32.shr_u'),
-        Instr.i32Const(1),
-        Instr.op('i32.add'),
-        Instr.memorySize(context.memory),
-        Instr.op('i32.gt_u'),
-        Instr.ifElse(
-          Instr.emptyBlockType,
-          [
-            Instr.localGet(layout.scratch),
-            Instr.i32Const(1),
-            Instr.op('i32.sub'),
-            Instr.i32Const(16),
-            Instr.op('i32.shr_u'),
-            Instr.i32Const(1),
-            Instr.op('i32.add'),
-            Instr.memorySize(context.memory),
-            Instr.op('i32.sub'),
-            Instr.memoryGrow(context.memory),
-            Instr.i32Const(-1),
-            Instr.op('i32.eq'),
-            Instr.ifElse(Instr.emptyBlockType, fail, []),
-          ],
-          [],
-        ),
-        Instr.localGet(layout.scratch),
-        Instr.globalSet(context.heapPointer),
         Instr.localGet(bytes),
         Instr.localSet(destinationBytes),
         Instr.localGet(alignment),
         Instr.localSet(destinationAlignment),
         Instr.i32Const(1),
         Instr.localSet(reclaim),
-        Instr.i32Const(0),
+        // The reclaim-authority lane carries this block's header address. A payload always begins
+        // one header past its block, so release recovers the block with a subtraction the backend
+        // already knows, and needs no side table keyed by base pointer.
+        Instr.localGet(base),
+        Instr.i32Const(heapHeaderBytes),
+        Instr.op('i32.sub'),
         Instr.localSet(rawContext),
         Instr.i32Const(1),
         Instr.localSet(active),
@@ -1884,6 +2358,78 @@ const emitOperation = (
         Instr.localSet(destinationLength),
       ]
     }
+    case 'RawBufferCopy': {
+      const address = scalar(operation.buffer)
+      const offset = scalar(operation.offset)
+      const length = scalar(operation.length)
+      const sourceLanes = slots(operation.source)
+      const sourceAddress = sourceLanes.at(0)
+      const sourceLength = sourceLanes.at(1)
+      const rawBuffer = SilkType.rawBuffer(operation.element)
+      const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
+      const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+      const countOffset = aggregateFieldOffset(rawBuffer, 'count')
+      if (sourceAddress === undefined || sourceLength === undefined) {
+        throw new RangeError('Wasm RawBuffer.copy lost its source slice lanes')
+      }
+      const context = requireMemory()
+      return [
+        Instr.localGet(offset),
+        ...loadAt(address, countOffset),
+        Instr.op('i32.gt_u'),
+        Instr.localGet(length),
+        ...loadAt(address, countOffset),
+        Instr.localGet(offset),
+        Instr.op('i32.sub'),
+        Instr.op('i32.gt_u'),
+        Instr.op('i32.or'),
+        Instr.localGet(length),
+        Instr.localGet(sourceLength),
+        Instr.op('i32.gt_u'),
+        Instr.op('i32.or'),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        ...loadAt(address, baseOffset),
+        Instr.localGet(offset),
+        Instr.i32Const(operation.stride),
+        Instr.op('i32.mul'),
+        Instr.op('i32.add'),
+        Instr.localGet(sourceAddress),
+        Instr.localGet(length),
+        Instr.i32Const(operation.stride),
+        Instr.op('i32.mul'),
+        // memory.copy is defined for overlapping ranges, which is the copy intrinsic's contract.
+        Instr.memoryCopy(context.memory, context.memory),
+      ]
+    }
+    case 'RawBufferFill': {
+      const address = scalar(operation.buffer)
+      const offset = scalar(operation.offset)
+      const length = scalar(operation.length)
+      const value = scalar(operation.value)
+      const rawBuffer = SilkType.rawBuffer('u8')
+      const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
+      const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+      const countOffset = aggregateFieldOffset(rawBuffer, 'count')
+      const context = requireMemory()
+      return [
+        Instr.localGet(offset),
+        ...loadAt(address, countOffset),
+        Instr.op('i32.gt_u'),
+        Instr.localGet(length),
+        ...loadAt(address, countOffset),
+        Instr.localGet(offset),
+        Instr.op('i32.sub'),
+        Instr.op('i32.gt_u'),
+        Instr.op('i32.or'),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        ...loadAt(address, baseOffset),
+        Instr.localGet(offset),
+        Instr.op('i32.add'),
+        Instr.localGet(value),
+        Instr.localGet(length),
+        Instr.memoryFill(context.memory),
+      ]
+    }
     case 'SlotWrite': {
       const address = scalar(operation.slot)
       const shape = LayoutPlan.callingShape(plan, operation.element)
@@ -1912,7 +2458,7 @@ const emitOperation = (
       })
     }
     case 'SlotDrop':
-      return hookReleaseAtAddress(operation.cleanup, scalar(operation.slot))
+      return releaseAtAddress(operation.cleanup, scalar(operation.slot))
     case 'ShortCircuit': {
       const right = [
         ...operation.right.operations.flatMap((nested) =>
@@ -2513,8 +3059,7 @@ const emitOperation = (
       return [...instructions, ...flushBorrowRoot(operation.root)]
     }
     case 'Drop':
-      // The bump allocator owns no host resources, so only Drop hooks have a Wasm effect.
-      return hookReleaseInstructions(operation.cleanup, operation.local)
+      return releaseInstructions(operation.cleanup, operation.local)
     case 'MakeEffect':
     case 'MakeCallable': {
       const destination = slots(operation.destination)
@@ -2626,9 +3171,9 @@ const emitOperation = (
       ]
       const propagationPayloadCount = operation.propagationLaneCount - 1
       const failure = [
-        // Owners still live at this site run their Drop hooks before the failure leaves.
+        // Owners still live at this site release before the failure leaves.
         ...(operation.releases ?? []).flatMap((release) =>
-          hookReleaseInstructions(release.cleanup, release.local),
+          releaseInstructions(release.cleanup, release.local),
         ),
         ...mapTag,
         Instr.localGet(layout.scratch),
@@ -2689,9 +3234,9 @@ const emitOperation = (
       ]
       const propagationPayloadCount = operation.propagationLaneCount - 1
       const failure = [
-        // Owners still live at this site run their Drop hooks before the failure leaves.
+        // Owners still live at this site release before the failure leaves.
         ...(operation.releases ?? []).flatMap((release) =>
-          hookReleaseInstructions(release.cleanup, release.local),
+          releaseInstructions(release.cleanup, release.local),
         ),
         ...mapTag,
         Instr.localGet(layout.scratch),
@@ -2793,7 +3338,7 @@ const emitOperation = (
             Instr.emptyBlockType,
             [
               ...copy(selected, payload),
-              ...hookReleaseInstructions(failure.cleanup, failure.payload),
+              ...releaseInstructions(failure.cleanup, failure.payload),
               Instr.i32Const(failure.tag),
               Instr.localSet(destination),
             ],
@@ -3995,6 +4540,9 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       staticEnd += data.bytes.length
     }
     staticEnd = alignUp(staticEnd, 16)
+    // A cleanup plan can reclaim a block this module never allocated itself — a caller's owner
+    // dropped here — so the release helper is needed wherever a reclaim ticket is consumed too.
+    const releasesBlocks = (plan: Ownership.CleanupPlan): boolean => planReclaims(plan)
     const needsHeap = program.functions.some((fn) =>
       Mir.operations(fn).some(
         (operation) =>
@@ -4004,10 +4552,19 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           operation._tag === 'RawBufferSlot' ||
           operation._tag === 'RawBufferRead' ||
           operation._tag === 'RawBufferView' ||
+          operation._tag === 'RawBufferCopy' ||
+          operation._tag === 'RawBufferFill' ||
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
           operation._tag === 'SlotCopy' ||
-          operation._tag === 'SlotDrop',
+          operation._tag === 'SlotDrop' ||
+          (operation._tag === 'Drop' && releasesBlocks(operation.cleanup)) ||
+          ((operation._tag === 'RunEffect' ||
+            operation._tag === 'RunEffectValue' ||
+            operation._tag === 'RunStaticEffect') &&
+            (operation.releases ?? []).some((release) => releasesBlocks(release.cleanup))) ||
+          (operation._tag === 'CloseEffectEntry' &&
+            operation.failures.some((failure) => releasesBlocks(failure.cleanup))),
       ),
     )
     const needsHostWrite = program.functions.some((fn) =>
@@ -4025,7 +4582,10 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           debug ? { name: 'silk_memory' } : {},
         )
       : undefined
-    if (needsHostWrite && privateMemory !== undefined) {
+    // Every function is exported so the artifact is directly instantiable for inspection; the
+    // private memory is exported for the same reason, and because a host that only wants to watch
+    // the heap should not have to import a standard-stream write to see it.
+    if (privateMemory !== undefined) {
       yield* ExportActor.memory(builder, StandardStreams.wasmMemoryExport, privateMemory)
     }
     const stackPointer = needsMemory
@@ -4051,15 +4611,32 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           )
       }
     }
+    // The bump region begins past the free-list head table, which wasm memory already zeroes.
     const heapPointer = needsMemory
       ? yield* Global.make(
           builder,
           i32,
           true,
-          [Instr.i32Const(65536)],
+          [Instr.i32Const(heapBase)],
           debug ? { name: 'silk_heap_pointer' } : {},
         )
       : undefined
+    const heapAllocate =
+      needsHeap && privateMemory !== undefined && heapPointer !== undefined
+        ? yield* FuncActor.declare(
+            builder,
+            yield* WasmType.func(builder, [i32, i32], [i32]),
+            debug ? { name: 'silk_heap_allocate' } : {},
+          )
+        : undefined
+    const heapRelease =
+      needsHeap && privateMemory !== undefined
+        ? yield* FuncActor.declare(
+            builder,
+            yield* WasmType.func(builder, [i32], []),
+            debug ? { name: 'silk_heap_release' } : {},
+          )
+        : undefined
     const standardWrite = needsHostWrite
       ? yield* Import.func(
           builder,
@@ -4069,6 +4646,19 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           debug ? { name: 'silk_standard_stream_write_v1' } : {},
         )
       : undefined
+    if (heapAllocate !== undefined && privateMemory !== undefined && heapPointer !== undefined) {
+      const named = (name: string): FuncActor.Local => (debug ? { type: i32, name } : { type: i32 })
+      yield* FuncActor.define(builder, heapAllocate, {
+        locals: ['align', 'class', 'capacity', 'list', 'block', 'payload', 'cursor'].map(named),
+        body: heapAllocateBody(privateMemory, heapPointer),
+      })
+    }
+    if (heapRelease !== undefined && privateMemory !== undefined) {
+      yield* FuncActor.define(builder, heapRelease, {
+        locals: [debug ? { type: i32, name: 'list' } : { type: i32 }],
+        body: heapReleaseBody(privateMemory),
+      })
+    }
 
     // Declare every function first so calls resolve regardless of definition order, mirroring the
     // LLVM backend's declare-then-define pass structure.
@@ -4159,6 +4749,8 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
               plan: program.layout,
               staticOffsets,
               ...(standardWrite === undefined ? {} : { standardWrite }),
+              ...(heapAllocate === undefined ? {} : { heapAllocate }),
+              ...(heapRelease === undefined ? {} : { heapRelease }),
             })
       // A body-less function is a declaration the frontend could not resolve; the LLVM backend
       // leaves it undefined, but wasm rejects an undefined function at emission, so it becomes a

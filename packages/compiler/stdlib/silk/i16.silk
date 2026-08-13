@@ -1,5 +1,14 @@
 import silk.option { Option }
 
+/// The largest i16. The checked arithmetic intrinsics reject every result above this bound.
+pub const MAX: i16 = 32767
+
+/// The smallest i16. The checked arithmetic intrinsics reject every result below this bound.
+pub const MIN: i16 = -32768
+
+/// The width of i16 in bits.
+pub const BITS: u32 = 16
+
 /// Calls the concrete i16 negate primitive.
 pub fn negate(value: i16) -> i16 {
   return Intrinsic.i16Negate(value)

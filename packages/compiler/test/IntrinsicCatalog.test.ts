@@ -35,6 +35,16 @@ const acceptedSources = Object.freeze([
     })
     return `pub fn floating${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
   }),
+  // `char` has no literal yet, so its operands arrive as parameters rather than constants.
+  ...Scalar.all()
+    .filter((scalar) => scalar.category === 'Character')
+    .map((scalar, scalarOrdinal) => {
+      const calls = scalar.operations.map(
+        (operation, operationOrdinal) =>
+          `  let v${operationOrdinal} = ${scalar.spelling}.${operation.spelling}(left, right)`,
+      )
+      return `pub fn character${scalarOrdinal}(left: ${scalar.spelling}, right: ${scalar.spelling}) -> i32 {\n${calls.join('\n')}\n  return 0\n}`
+    }),
   `pub fn main() -> i32 {
   let i00 = i32.negate(1)
   let i01 = i32.add(1, 2)
@@ -202,6 +212,14 @@ effect fn close(handle: OsHandle, reason: &mut i32, code: &mut u32) -> bool {
 }
 effect fn standardInputRead(output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
   unsafe { return run Intrinsic.osStandardInputRead(move output, reason, code) }
+  return none<usize>()
+}
+effect fn processExecute(program: &[u8], arguments: &[u8], environment: &[u8], directory: &[u8], status: &mut i32, exit: &mut i32, outputLength: &mut usize, errorLength: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osProcessExecute(program, arguments, environment, directory, status, exit, outputLength, errorLength, reason, code) }
+  return false
+}
+effect fn processCapture(output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
+  unsafe { return run Intrinsic.osProcessCapture(0, usize.ZERO, move output, reason, code) }
   return none<usize>()
 }`,
 ])

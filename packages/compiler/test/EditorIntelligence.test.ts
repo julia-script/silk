@@ -298,7 +298,10 @@ pub fn main() -> i32 {
       for (const [name, documentation] of [
         ['make', '/// Constructs empty Bytes without allocating.'],
         ['copy', '/// Copies one borrowed byte sequence into independently owned storage.'],
-        ['append', '/// Appends one complete borrowed byte sequence in source order.'],
+        [
+          'append',
+          '/// Appends one complete borrowed byte sequence in source order with one bulk copy.',
+        ],
         ['length', '/// Returns the initialized byte count.'],
         ['asSlice', '/// Borrows the initialized octets as one shared lexical slice.'],
         ['asMutSlice', '/// Borrows the initialized octets as one exclusive lexical slice.'],

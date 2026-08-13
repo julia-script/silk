@@ -1,5 +1,14 @@
 import silk.option { Option }
 
+/// The largest i32. The checked arithmetic intrinsics reject every result above this bound.
+pub const MAX: i32 = 2147483647
+
+/// The smallest i32. The checked arithmetic intrinsics reject every result below this bound.
+pub const MIN: i32 = -2147483648
+
+/// The width of i32 in bits.
+pub const BITS: u32 = 32
+
 /// Calls the concrete i32 negate primitive.
 pub fn negate(value: i32) -> i32 {
   return Intrinsic.i32Negate(value)
