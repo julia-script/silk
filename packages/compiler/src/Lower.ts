@@ -2128,6 +2128,30 @@ function lowerExpressionInner(
       )
       return Object.freeze({ result: destination })
     }
+    case 'ShortCircuit': {
+      const type = fn.type(expression.type)
+      if (type?._tag !== 'bool') return undefined
+      const left = lowerExpression(fn, expression.left)
+      if (left === undefined) return undefined
+      // The right operand's operations stay nested so that the engines can emit them under the
+      // branch instead of before it. It is pure by elaboration, so nothing there needs releasing
+      // on the path that skips it.
+      const [right, rightOperations] = fn.capture(() => lowerExpression(fn, expression.right))
+      if (right === undefined) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'ShortCircuit',
+          operator: expression.operator,
+          destination,
+          left: left.result,
+          right: Object.freeze({ operations: rightOperations, result: right.result }),
+          type,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
     case 'Match': {
       if (expression.scrutinee._tag === 'Unavailable') return undefined
       const scrutinee = lowerExpression(fn, expression.scrutinee)

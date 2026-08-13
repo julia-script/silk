@@ -13,6 +13,8 @@ const tokenService: u8 = 69
 const tokenInterface: u8 = 70
 const tokenCaret: u8 = 71
 const tokenTilde: u8 = 72
+const tokenAmpersandAmpersand: u8 = 73
+const tokenPipePipe: u8 = 74
 
 struct Token {
   kind: u8
@@ -130,6 +132,8 @@ fn isCompoundPunctuation(source: &[u8], index: usize) -> bool {
   if hasPair(source, index, 60, 61) { return true }
   if hasPair(source, index, 62, 61) { return true }
   if hasPair(source, index, 124, 62) { return true }
+  if hasPair(source, index, 124, 124) { return true }
+  if hasPair(source, index, 38, 38) { return true }
   return hasPair(source, index, 46, 46)
 }
 
@@ -222,6 +226,8 @@ fn compoundPunctuationKind(source: &[u8], index: usize) -> u8 {
   if hasPair(source, index, 60, 61) { return 56 }
   if hasPair(source, index, 62, 61) { return 58 }
   if hasPair(source, index, 124, 62) { return 60 }
+  if hasPair(source, index, 124, 124) { return tokenPipePipe }
+  if hasPair(source, index, 38, 38) { return tokenAmpersandAmpersand }
   if hasPair(source, index, 46, 46) { return 63 }
   if hasPair(source, index, 45, 62) { return 64 }
   return 65

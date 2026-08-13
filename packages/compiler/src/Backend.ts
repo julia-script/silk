@@ -298,7 +298,7 @@ type LinearTerminator =
   | { readonly _tag: 'Trap'; readonly reason: string; readonly provenance: Mir.Provenance }
 
 type LinearOperation =
-  | Exclude<Mir.Operation, { readonly _tag: 'Match' }>
+  | Exclude<Mir.Operation, { readonly _tag: 'Match' | 'ShortCircuit' }>
   | {
       readonly _tag: 'BindMatch'
       readonly scrutinee: Mir.LocalId
@@ -426,8 +426,10 @@ const expandMatches = (
     operations: ReadonlyArray<Mir.Operation | LinearOperation>,
     terminator: LinearTerminator,
   ): void => {
-    const matchIndex = operations.findIndex((operation) => operation._tag === 'Match')
-    if (matchIndex < 0) {
+    const structuredIndex = operations.findIndex(
+      (operation) => operation._tag === 'Match' || operation._tag === 'ShortCircuit',
+    )
+    if (structuredIndex < 0) {
       blocks.push(
         Object.freeze({
           id,
@@ -439,6 +441,66 @@ const expandMatches = (
       )
       return
     }
+    const structured = operations.at(structuredIndex)
+    if (structured?._tag === 'ShortCircuit') {
+      const following = reserve()
+      const evaluateRight = reserve()
+      const decided = reserve()
+      blocks.push(
+        Object.freeze({
+          id,
+          origin,
+          kind,
+          operations: Object.freeze(
+            operations.slice(0, structuredIndex) as ReadonlyArray<LinearOperation>,
+          ),
+          // `&&` reaches its right operand on a true left operand; `||` on a false one. The other
+          // edge writes the operator's decided value without evaluating the right operand at all.
+          terminator: Object.freeze({
+            _tag: 'Branch',
+            condition: structured.left,
+            taken: structured.operator === 'And' ? evaluateRight : decided,
+            otherwise: structured.operator === 'And' ? decided : evaluateRight,
+            provenance: structured.provenance,
+          }),
+        }),
+      )
+      lowerSequence(following, origin, kind, operations.slice(structuredIndex + 1), terminator)
+      lowerSequence(
+        evaluateRight,
+        origin,
+        'Normal',
+        [
+          ...structured.right.operations,
+          Object.freeze({
+            _tag: 'Move' as const,
+            destination: structured.destination,
+            source: structured.right.result,
+            provenance: structured.provenance,
+          }),
+        ],
+        jump(following, structured.provenance),
+      )
+      blocks.push(
+        Object.freeze({
+          id: decided,
+          origin,
+          kind: 'Normal',
+          operations: Object.freeze([
+            Object.freeze({
+              _tag: 'Literal' as const,
+              destination: structured.destination,
+              type: structured.type,
+              value: structured.operator === 'And' ? 0 : 1,
+              provenance: structured.provenance,
+            }),
+          ]),
+          terminator: jump(following, structured.provenance),
+        }),
+      )
+      return
+    }
+    const matchIndex = structuredIndex
     const match = operations.at(matchIndex)
     if (match?._tag !== 'Match') throw new RangeError('LLVM match expansion lost its operation')
     const dispatch = reserve()

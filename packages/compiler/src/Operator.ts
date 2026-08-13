@@ -20,6 +20,19 @@ export type Infix =
   | 'BitAnd'
   | 'BitOr'
   | 'BitXor'
+  | 'And'
+  | 'Or'
+
+/**
+ * The two short-circuit operators. They take and give `bool` and never reach an actor operation:
+ * the right operand is conditional, so operator elaboration lowers them to a conditional instead
+ * of to a call that evaluates both operands.
+ */
+export type ShortCircuit = 'And' | 'Or'
+
+/** True only for the operators whose right operand is conditionally evaluated. */
+export const isShortCircuit = (self: Prefix | Infix): self is ShortCircuit =>
+  self === 'And' || self === 'Or'
 
 /** The associativity used when parsing one infix precedence level. */
 export type Associativity = 'Left' | 'None'
@@ -121,6 +134,18 @@ const infixByToken: Readonly<Partial<Record<Token.TokenKind, InfixInfo>>> = Obje
     precedence: 20,
     associativity: 'None',
   }),
+  AmpersandAmpersand: Object.freeze({
+    operator: 'And',
+    spelling: '&&',
+    precedence: 18,
+    associativity: 'Left',
+  }),
+  PipePipe: Object.freeze({
+    operator: 'Or',
+    spelling: '||',
+    precedence: 16,
+    associativity: 'Left',
+  }),
 })
 
 /** Returns the prefix operator represented by one token kind. */
@@ -139,7 +164,7 @@ export const prefixSpelling = (self: Prefix): string =>
   self === 'Negate' ? '-' : self === 'Not' ? '!' : '~'
 
 const operationByOperator: Readonly<
-  Record<Exclude<Prefix | Infix, 'Equals' | 'NotEquals'>, string>
+  Record<Exclude<Prefix | Infix, 'Equals' | 'NotEquals' | ShortCircuit>, string>
 > = Object.freeze({
   Negate: 'negate',
   Not: 'not',
@@ -169,9 +194,14 @@ const operationByOperator: Readonly<
 const isBitwise = (self: Prefix | Infix): boolean =>
   self === 'BitAnd' || self === 'BitOr' || self === 'BitXor' || self === 'BitNot'
 
-/** Returns the canonical actor operation for an operator and its selected equality actor. */
+/**
+ * Returns the canonical actor operation for an operator and its selected equality actor.
+ *
+ * The short-circuit operators have no actor operation: their right operand is conditional, so
+ * they never reach this table.
+ */
 export const target = (
-  self: Prefix | Infix,
+  self: Exclude<Prefix | Infix, ShortCircuit>,
   equalityActor: Actor = Scalar.defaultInteger.spelling,
 ): Target => {
   if (self === 'Equals' || self === 'NotEquals') {

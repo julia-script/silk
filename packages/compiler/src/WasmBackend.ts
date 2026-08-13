@@ -1873,6 +1873,27 @@ const emitOperation = (
     }
     case 'SlotDrop':
       return hookReleaseAtAddress(operation.cleanup, scalar(operation.slot))
+    case 'ShortCircuit': {
+      const right = [
+        ...operation.right.operations.flatMap((nested) =>
+          emitOperation(nested, layout, plan, resolve, memory),
+        ),
+        ...copy(slots(operation.right.result), slots(operation.destination)),
+      ]
+      const decided = [
+        Instr.i32Const(operation.operator === 'Or' ? 1 : 0),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+      return [
+        Instr.localGet(scalar(operation.left)),
+        // `&&` takes the right operand on a true left operand; `||` takes it on a false one.
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          operation.operator === 'And' ? right : decided,
+          operation.operator === 'And' ? decided : right,
+        ),
+      ]
+    }
     case 'Match': {
       const emitMany = (operations: ReadonlyArray<Mir.Operation>): ReadonlyArray<Instr.Instr> =>
         operations.flatMap((nested) => emitOperation(nested, layout, plan, resolve, memory))

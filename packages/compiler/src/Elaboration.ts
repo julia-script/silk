@@ -519,6 +519,20 @@ export interface BuiltinArgumentMappingFact {
   readonly expected: SemanticType
 }
 
+/**
+ * `&&` or `||`. Both operands are `bool` and the result is `bool`, but the operator reaches no
+ * actor operation: an actor call evaluates both operands, and the right operand here evaluates
+ * only when the left one does not already decide the result.
+ */
+export interface ShortCircuitExpressionFact {
+  readonly _tag: 'ShortCircuit'
+  readonly operator: Operator.ShortCircuit
+  /** The left operand first, then the conditionally evaluated right operand. */
+  readonly arguments: ReadonlyArray<ArgumentFact>
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
 /** One prefix or infix operator and its canonical builtin resolution. */
 export interface OperatorExpressionFact {
   readonly _tag: 'Operator'
@@ -654,6 +668,7 @@ export type ExpressionFact =
   | IndexProjectionExpressionFact
   | GroupedExpressionFact
   | OperatorExpressionFact
+  | ShortCircuitExpressionFact
   | FunctionItemExpressionFact
   | CallableSectionExpressionFact
   | CallableApplyExpressionFact
@@ -4514,6 +4529,89 @@ const analyzeGroupedExpression = (
   })
 }
 
+/**
+ * Names the impurity `detail` reports, or `undefined` when the expression tree performs nothing
+ * and consumes nothing. `&&` and `||` skip their right operand, so an effect performed or a
+ * value consumed there would depend on the left operand's value.
+ */
+const impurityOf = (expression: ExpressionFact): string | undefined => {
+  if (expression._tag === 'Run') return 'an effect site'
+  if (expression._tag === 'EffectResult') return 'an effect site'
+  if (expression._tag === 'Move') return 'a move'
+  for (const child of directExpressionChildren(expression)) {
+    const found = impurityOf(child)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+/**
+ * Analyzes `&&` or `||`. Both operands must be `bool` and the result is `bool`. The right operand
+ * must additionally be pure, because it evaluates only when the left operand does not already
+ * decide the result.
+ */
+const analyzeShortCircuitExpression = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  operator: Operator.ShortCircuit,
+  operandNodes: ReadonlyArray<SyntaxTree.Node>,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+): ExpressionResult => {
+  const boolean: SemanticType = Scalar.boolean.spelling
+  const spelling = operator === 'And' ? '`&&`' : '`||`'
+  const argumentsResult = analyzeArgumentNodes(
+    source,
+    node,
+    operandNodes,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+    Object.freeze(operandNodes.map(() => boolean)),
+  )
+  const operandDiagnostics = argumentsResult.facts.flatMap((argument) =>
+    argument.type._tag === 'Available' && !Type.equals(argument.type.type, boolean)
+      ? [
+          Diagnostic.argumentTypeMismatch(
+            Type.encode(boolean),
+            Type.encode(argument.type.type),
+            argument.syntax.span,
+          ),
+        ]
+      : [],
+  )
+  const right = argumentsResult.facts.at(1)
+  const impurity = right === undefined ? undefined : impurityOf(right.expression)
+  const purityDiagnostics =
+    right === undefined || impurity === undefined
+      ? Object.freeze([])
+      : Object.freeze([Diagnostic.impureShortCircuitOperand(spelling, impurity, right.syntax.span)])
+  const rejected =
+    operandDiagnostics.length > 0 ||
+    purityDiagnostics.length > 0 ||
+    argumentsResult.facts.length !== 2 ||
+    argumentsResult.facts.some((argument) => argument.type._tag !== 'Available')
+  const type = rejected ? unavailableExpressionType : availableExpressionType(boolean)
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'ShortCircuit',
+      operator,
+      arguments: argumentsResult.facts,
+      type,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze([
+      ...argumentsResult.diagnostics,
+      ...operandDiagnostics,
+      ...purityDiagnostics,
+    ]),
+    type: type._tag === 'Available' ? type.type : undefined,
+  })
+}
+
 const analyzeOperatorExpression = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -4537,6 +4635,18 @@ const analyzeOperatorExpression = (
         ? Operator.prefix(operatorToken.kind)
         : Operator.infix(operatorToken.kind)?.operator
   const operandNodes = node.children.filter(isExpressionNode)
+  if (operator !== undefined && Operator.isShortCircuit(operator)) {
+    return analyzeShortCircuitExpression(
+      source,
+      node,
+      operator,
+      operandNodes,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+    )
+  }
   const initialExpected =
     typeof expected === 'string' && Scalar.isSpelling(expected) && node.kind === 'InfixExpression'
       ? Object.freeze(operandNodes.map(() => expected))
@@ -5161,6 +5271,7 @@ const effectCaptureFacts = (
         }
         return
       case 'Operator':
+      case 'ShortCircuit':
       case 'Call':
         for (const argument of fact.arguments) expression(argument.expression)
         return
@@ -7013,6 +7124,25 @@ const hirCallableTarget = (reference: CallReferenceFact): Hir.CallableTarget | u
 }
 
 const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Expression => {
+  if (fact._tag === 'ShortCircuit') {
+    const left = fact.arguments.at(0)
+    const right = fact.arguments.at(1)
+    if (left === undefined || right === undefined || fact.type._tag !== 'Available') {
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    }
+    const loweredLeft = hirExpression(left.expression)
+    const loweredRight = hirExpression(right.expression)
+    return loweredLeft._tag === 'Unavailable' || loweredRight._tag === 'Unavailable'
+      ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+      : Object.freeze({
+          _tag: 'ShortCircuit',
+          operator: fact.operator,
+          left: loweredLeft,
+          right: loweredRight,
+          type: fact.type.type,
+          span: fact.syntax.span,
+        })
+  }
   if (fact._tag === 'Integer') {
     return fact.integer._tag === 'Available'
       ? Object.freeze({
@@ -8115,6 +8245,7 @@ const directExpressionChildren = (expression: ExpressionFact): ReadonlyArray<Exp
         ...expression.arguments.map((argument) => argument.expression),
       ])
     case 'Operator':
+    case 'ShortCircuit':
     case 'Call':
       return Object.freeze(expression.arguments.map((argument) => argument.expression))
     case 'EffectBlock':

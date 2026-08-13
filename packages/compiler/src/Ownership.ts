@@ -489,6 +489,12 @@ const checkExpression = (
         escaping,
       )
       return
+    case 'ShortCircuit':
+      // Both operands are checked as if both evaluate. The right operand carries no move and no
+      // effect site, so treating it as evaluated only over-approximates reads, never releases.
+      checkExpression(state, live, expression.left, false, guard, escaping)
+      checkExpression(state, live, expression.right, false, guard, escaping)
+      return
     case 'Construct': {
       const fields = new Map(
         expression.fields.map((field) => [field.field.ordinal, field.value] as const),
@@ -959,6 +965,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         }
         return
       case 'Operator':
+      case 'ShortCircuit':
       case 'Call':
         for (const argument of expression.arguments) scanRunEnds(argument.expression, region)
         return
@@ -1196,6 +1203,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         }
         return
       case 'Operator':
+      case 'ShortCircuit':
         for (const argument of expression.arguments) {
           inspect(argument.expression, region, active, 'Read')
         }

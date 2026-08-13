@@ -1046,6 +1046,10 @@ const addExpressionTypes = (
   if (expression._tag === 'Move') addExpressionTypes(types, expression.subject, substitution)
   if (expression._tag === 'RuntimeStringView')
     addExpressionTypes(types, expression.source, substitution)
+  if (expression._tag === 'ShortCircuit') {
+    addExpressionTypes(types, expression.left, substitution)
+    addExpressionTypes(types, expression.right, substitution)
+  }
   if (expression._tag === 'StringEquality') {
     addExpressionTypes(types, expression.left, substitution)
     addExpressionTypes(types, expression.right, substitution)

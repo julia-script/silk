@@ -94,6 +94,8 @@ const tokenKinds = [
   'InvalidStaticLiteral',
   'ServiceKeyword',
   'InterfaceKeyword',
+  'AmpersandAmpersand',
+  'PipePipe',
 ] as const satisfies ReadonlyArray<Token.TokenKind>
 
 const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
@@ -170,6 +172,8 @@ const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
   InterfaceKeyword: 70,
   Caret: 71,
   Tilde: 72,
+  AmpersandAmpersand: 73,
+  PipePipe: 74,
 })
 
 interface ExpectedToken {
@@ -279,7 +283,7 @@ const corpus = [
   }),
   Object.freeze({
     id: 'punctuation',
-    input: '( ) { } [ ] : ; , = == => - + * / % ! != ? @ < <= > >= | |> & ^ ~ . .. ->',
+    input: '( ) { } [ ] : ; , = == => - + * / % ! != ? @ < <= > >= | |> || & && ^ ~ . .. ->',
   }),
   Object.freeze({ id: 'invalid', input: '#~ pub \u0000? $x' }),
 ] as const

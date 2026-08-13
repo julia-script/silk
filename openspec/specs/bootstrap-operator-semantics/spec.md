@@ -29,20 +29,79 @@ Arithmetic, bitwise, and comparison operators SHALL resolve only for compatible 
 - **WHEN** operands of `&` have types `u32` and `i32`
 - **THEN** operator analysis rejects them exactly as it rejects the same pair passed to `u32.bitAnd`
 
+### Requirement: Short-circuit operators evaluate their right operand conditionally
+
+`&&` and `||` SHALL accept `bool` operands only and SHALL give `bool`. Unlike every other infix
+operator, they SHALL NOT resolve to an actor operation, because an actor call evaluates both
+operands. `&&` SHALL NOT evaluate its right operand when its left operand is `false`, and `||`
+SHALL NOT evaluate its right operand when its left operand is `true`; in both cases the result is
+the left operand's value. The guarantee is observable rather than an optimization: a right operand
+that would trap SHALL NOT trap on the path that skips it.
+
+The right operand SHALL be a pure expression. An effect site (`run`) or a `move` anywhere inside
+it SHALL be rejected with a dedicated diagnostic, so no effect is conditionally performed and no
+value is conditionally consumed. The left operand carries no such restriction, because it always
+evaluates. Programs needing a conditionally performed effect SHALL spell it as a statement-level
+`if`, which already carries the ownership rules for a value produced on one path only.
+
+#### Scenario: Skip the right operand that the left operand decides
+
+- **WHEN** a body evaluates `index < values.length && values[index] > 0` and `index` is not less
+  than `values.length`
+- **THEN** the expression gives `false` without indexing `values`, and so without trapping
+
+#### Scenario: Skip the right operand of a decided disjunction
+
+- **WHEN** a body evaluates `index >= values.length || values[index] > 0` and `index` is not less
+  than `values.length`
+- **THEN** the expression gives `true` without indexing `values`
+
+#### Scenario: Reject an effect site in the right operand
+
+- **WHEN** a body spells `flag && run decide()`
+- **THEN** operator analysis rejects the right operand as impure, while the same `run` spelled as
+  the left operand is accepted
+
+#### Scenario: Reject a move in the right operand
+
+- **WHEN** a body spells `gate && unwrap(move flag)`
+- **THEN** operator analysis rejects the right operand as impure
+
+#### Scenario: Reject a non-`bool` operand
+
+- **WHEN** either operand of `&&` or `||` has a type other than `bool`
+- **THEN** operator analysis rejects it without truthiness or conversion
+
 ### Requirement: The bootstrap operator surface is closed and ordered
 
 The language SHALL recognize prefix `-`, `!`, and `~`; multiplicative `*`, `/`, and `%`; additive
 `+` and `-`; relational `<`, `<=`, `>`, and `>=`; equality `==` and `!=`; bitwise `&`, `^`, and
-`|`; and pipeline `|>`. Grouping parentheses SHALL override precedence.
+`|`; short-circuit `&&` and `||`; and pipeline `|>`. Grouping parentheses SHALL override
+precedence.
 Primary and grouped expressions SHALL bind most tightly,
 followed by right-associative prefix operators, left-associative multiplicative operators,
 left-associative additive operators, the three left-associative bitwise operators, non-associative
-relational operators, non-associative equality operators, and left-associative pipelines. The
+relational operators, non-associative equality operators, the two left-associative short-circuit
+operators, and left-associative pipelines. The
 bitwise operators SHALL occupy three distinct precedence levels that bind tighter than every
 comparison and looser than every additive operator, ordered `&` tighter than `^` and `^` tighter
 than `|`, so `a | b & c` groups as `a | (b & c)` and `a & b == c` groups as `(a & b) == c`.
+The short-circuit operators SHALL occupy two distinct precedence levels that bind looser than
+every equality operator and tighter than the pipeline, ordered `&&` tighter than `||`, so
+`a && b || c` groups as `(a && b) || c`, `a || b && c` groups as `a || (b && c)`, and
+`a == b && c == d` groups as `(a == b) && (c == d)`.
 Chaining a non-associative comparison without explicit
 grouping SHALL be a parser error rather than an implicit multi-way comparison.
+
+#### Scenario: Order the two short-circuit levels against one another
+
+- **WHEN** a body returns `a && b || c`
+- **THEN** the expression groups as `(a && b) || c`
+
+#### Scenario: Bind the short-circuit operators below equality
+
+- **WHEN** a body returns `a == b && a != b`
+- **THEN** both equality comparisons nest inside `&&`, and the operands of `&&` are `bool`
 
 #### Scenario: Bind bitwise operators above comparison and above pipelines
 

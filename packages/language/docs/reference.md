@@ -93,12 +93,16 @@ Higher binds tighter.
 | 33 | `\|` | left |
 | 30 | `<` `<=` `>` `>=` | **none** |
 | 20 | `==` `!=` | **none** |
+| 18 | `&&` | left |
+| 16 | `\|\|` | left |
 | 10 | `\|>` | left |
 
 Comparison operators are non-associative, so an ungrouped chain such as `1 < 2 < 3` is rejected.
 The bitwise operators occupy three separate levels rather than one.
 
-Operators are not overloadable. Each lowers to a compiler-known operation chosen by operand type.
+Operators are not overloadable. Each lowers to a compiler-known operation chosen by operand type —
+except `&&` and `||`, which lower to a conditional instead, because a call would evaluate both
+operands. See [1.7](#17-short-circuit-operators).
 
 `|>` is the pipeline operator: it inserts its left operand as the *leading* argument of the
 callable on its right.
@@ -116,6 +120,32 @@ pub fn main() -> i32 {
 
 A `<` immediately followed by a tag identifier or `>` at the start of a primary expression is
 reserved for future template syntax and is a parse error.
+
+### 1.7 Short-circuit operators
+
+`&&` and `||` take `bool` operands and give `bool`. There is no truthiness: no other type is
+accepted on either side. `&&` does not evaluate its right operand when its left operand is
+`false`, and `||` does not evaluate its right operand when its left operand is `true`. This is a
+guarantee about what runs, not an optimization — a right operand that would trap does not trap on
+the path that skips it, which is what makes a bounds check like the one below correct:
+
+```silk
+pub fn inRange(values: &[i32], index: usize) -> bool {
+  return index < values.length && values[index] > 0
+}
+
+pub fn main() -> i32 {
+  let values = [1, 0, 3]
+  if inRange(&values, 4000) { return 1 }
+  return 0
+}
+```
+
+The right operand must be a **pure** expression. An effect site (`run`) or a `move` anywhere
+inside it is rejected, so no effect is conditionally performed and no value is conditionally
+consumed. The left operand carries no such restriction, because it always evaluates. To perform an
+effect conditionally, use a statement-level `if`, which already carries the ownership rules for a
+value produced on one path only.
 
 ## 2. Declarations
 
