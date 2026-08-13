@@ -10,6 +10,7 @@ import type * as SourceSpan from './SourceSpan.js'
 import * as StaticText from './StaticText.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
+import * as TargetConstant from './TargetConstant.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
@@ -336,6 +337,14 @@ export type ConstantLiteralFact =
   | {
       readonly _tag: 'StringLiteral'
       readonly data: StaticText.Data
+      readonly token: Token.Token
+    }
+  // One pointer-width fact named below `Target`. It is not a literal the source spells; it selects
+  // between literals the compiler already holds, because no single number bounds a pointer-width
+  // integer on both a 32-bit and a 64-bit target.
+  | {
+      readonly _tag: 'TargetConstant'
+      readonly selector: TargetConstant.Selector
       readonly token: Token.Token
     }
   // A literal the lexer accepted but no value can be decoded from; it carries its own detail so
@@ -681,7 +690,36 @@ const constantLiteral = (
       ? Object.freeze({ _tag: 'StringLiteral', data: decoded.data, token })
       : Object.freeze({ _tag: 'Malformed', detail: decoded.detail, syntax: initializer })
   }
+  const target = targetConstant(source, initializer)
+  if (target !== undefined) return target
   return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+}
+
+/**
+ * Recognizes `Target.<fact>`, the one initializer form that is not a source literal. The projection
+ * is matched on syntax alone — `Target` names no declaration and resolves to nothing — so a form
+ * that is already rejected today is the only form whose meaning changes.
+ */
+const targetConstant = (
+  source: SourceFile.SourceFile,
+  initializer: SyntaxTree.Node,
+): ConstantLiteralFact | undefined => {
+  if (initializer.kind !== 'FieldProjectionExpression') return undefined
+  const base = SyntaxTree.directNode(initializer, 'IdentifierExpression')
+  const baseToken = base === undefined ? undefined : SyntaxTree.directToken(base, 'Identifier')
+  if (baseToken === undefined || spelling(source, baseToken) !== TargetConstant.root)
+    return undefined
+  const member = SyntaxTree.directToken(initializer, 'Identifier')
+  if (member === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+  const memberSpelling = spelling(source, member)
+  const selector = TargetConstant.find(memberSpelling)
+  return selector === undefined
+    ? Object.freeze({
+        _tag: 'Malformed',
+        detail: `${TargetConstant.root}.${memberSpelling} names no target fact; the target facts are ${TargetConstant.all.map((candidate) => `${TargetConstant.root}.${candidate}`).join(', ')}`,
+        syntax: initializer,
+      })
+    : Object.freeze({ _tag: 'TargetConstant', selector, token: member })
 }
 
 /** Retains and initially resolves one concrete type path against built-in types only. */

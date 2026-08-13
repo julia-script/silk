@@ -187,6 +187,27 @@ pub fn main() -> i32 {
 }
 ```
 
+An initializer may also name one **target fact** instead of a literal. A bound on a pointer-width
+integer has no literal spelling — `wasm32-unknown-unknown` words its pointers at 32 bits and every
+native triple at 64 — so the compiler selects the value once the target is chosen. The vocabulary is
+closed, and each fact carries its own type:
+
+| Fact                  | Type    | Value                                    |
+| --------------------- | ------- | ---------------------------------------- |
+| `Target.usizeMax`     | `usize` | The largest `usize` at the pointer width |
+| `Target.isizeMax`     | `isize` | The largest `isize` at the pointer width |
+| `Target.isizeMin`     | `isize` | The smallest `isize` at the pointer width |
+| `Target.pointerBits`  | `u32`   | The target pointer width in bits         |
+
+```silk
+pub const MAX: usize = Target.usizeMax
+pub const BITS: u32 = Target.pointerBits
+```
+
+This is the only non-literal initializer. `Target` is recognized in this position alone, and an
+expression over a target fact — `Target.pointerBits + 1` — is rejected like any other computed
+initializer.
+
 ### 2.3 Functions
 
 ```
