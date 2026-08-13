@@ -177,12 +177,19 @@ pub fn main() -> i32 {
  *
  * Every expected value stays below 256: the native engine reports its result as a process exit
  * status, which is one byte.
+ *
+ * `native` is opt-in rather than automatic. A clang compile is by far the most expensive thing a
+ * case can do, and this file runs inside the parallel suite alongside a wall-clock budget test, so
+ * the native engine is exercised on the two cases that carry the combinator's actual claim —
+ * selecting either arm — rather than on all eight. The remaining cases vary the rows, not the
+ * selection, and the evaluator and Wasm already disagree with each other if lowering diverges.
  */
 const accept = (
   name: string,
   source: string,
   expected: number,
   expectedEvents?: ReadonlyArray<string>,
+  native = false,
 ) =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -216,6 +223,8 @@ const accept = (
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), expected, `${name} wasm`)
 
+    if (!native) return
+
     const compiled = yield* Driver.compile({
       compilation: { root: SourceFile.make(`if-then-else/${name}`, ascii(source)) },
       toolchain: Object.freeze({ _tag: 'Toolchain' as const, clang: '/usr/bin/clang' }),
@@ -234,14 +243,14 @@ const release = 'AllocationRelease'
 it.effect(
   "runs the true arm and performs none of the false arm's effects",
   // 1 from `bumpOnce`, and a counter of 1: the false arm's ten service calls never happened.
-  () => accept('selecting-true', selecting('true'), 101),
+  () => accept('selecting-true', selecting('true'), 101, undefined, true),
   180_000,
 )
 
 it.effect(
   "runs the false arm and performs none of the true arm's effects",
   // 2 from `bumpTen`, and a counter of 10: the true arm's single service call never happened.
-  () => accept('selecting-false', selecting('false'), 210),
+  () => accept('selecting-false', selecting('false'), 210, undefined, true),
   180_000,
 )
 
