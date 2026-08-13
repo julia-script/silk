@@ -861,7 +861,11 @@ Runs an effectful callback while preserving its returned success value.
 pub effect fn catchAll<A, !E, !F, ?R, ?S>(self: once Effect<A ! E ? R>, onFailure: once fn(Row<! E>) -> Effect<A ! F ? S>) -> A ! F ? R | S
 ```
 
-Recovers every typed failure with another Effect.
+Recovers every typed failure in the protected row with another Effect.
+
+The handler receives the whole row as one value and always runs on failure, so the protected
+row is removed in full and only the handler's own failures remain. Success bypasses the
+handler. Use `catch<E>` to recover a single member and leave the rest propagating.
 
 ### `catch`
 
@@ -869,7 +873,22 @@ Recovers every typed failure with another Effect.
 pub effect fn catch<A, !E, !F, ?R, ?S>(self: once Effect<A ! E ? R>, onFailure: once fn(Row<! E>) -> Effect<A ! F ? S>) -> A ! F ? R | S
 ```
 
-Recovers every typed failure with another Effect.
+Recovers one selected typed failure, or the whole row when no member is selected.
+
+`Effect.catch<E>(protected, handler)` names one member of the protected row. The handler runs
+only for that member, its own failures join the result row, and every nonmatching member of
+the protected row propagates unchanged as the residual. Success bypasses the handler.
+
+The residual row — the protected row minus the selected member — is computed by the compiler,
+because no source-level type can spell it. That makes the selector form a compiler primitive
+rather than ordinary Silk; see `reference.md` §5.4.
+
+Without a selector, `Effect.catch(protected, handler)` recovers the whole row and is the alias
+for `catchAll` that this declaration provides.
+
+The selector form is analyzed but not yet executable: no engine lowers the residual dispatch,
+so writing it reports `SEM0098` at the call and the program does not build. The whole-row form
+is unaffected.
 
 ### `ensuring`
 

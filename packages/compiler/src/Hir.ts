@@ -517,6 +517,22 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      /**
+       * Member-selective recovery, carrying the four rows the semantic-fact surface records.
+       * `residualRow` is the protected row minus `selected`; it is stored rather than derived
+       * because no source-level type can spell it.
+       */
+      readonly _tag: 'EffectCatch'
+      readonly protected: Expression
+      readonly handler: Expression
+      readonly selected: Type.Nominal
+      readonly protectedRow: ReadonlyArray<Type.Nominal>
+      readonly handlerRow: ReadonlyArray<Type.Nominal>
+      readonly residualRow: ReadonlyArray<Type.Nominal>
+      readonly type: Type.Effect
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'EffectBindRequirement'
       readonly protected: Expression
       readonly provider: {
@@ -763,6 +779,8 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
         return [expression.protected]
       case 'EffectBindRequirement':
         return [expression.protected]
+      case 'EffectCatch':
+        return [expression.protected, expression.handler]
       case 'Match':
         return [
           expression.scrutinee,
@@ -826,6 +844,8 @@ export const hasUnavailable = (self: HirFunction): boolean => {
         return walk(expression.protected)
       case 'EffectBindRequirement':
         return walk(expression.protected)
+      case 'EffectCatch':
+        return walk(expression.protected) || walk(expression.handler)
       case 'Match':
         return (
           walk(expression.scrutinee) ||
@@ -915,6 +935,8 @@ export const firstUnavailable = (
         return walk(expression.protected)
       case 'EffectBindRequirement':
         return walk(expression.protected)
+      case 'EffectCatch':
+        return walk(expression.protected) ?? walk(expression.handler)
       case 'Match': {
         const scrutinee = walk(expression.scrutinee)
         if (scrutinee !== undefined) return scrutinee
@@ -1302,6 +1324,12 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       return [
         `${indent}effect-result : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.protected, depth + 1),
+      ].join('\n')
+    case 'EffectCatch':
+      return [
+        `${indent}effect-catch ${Type.encode(expression.selected)} protected=${expression.protectedRow.map(Type.encode).join('|') || 'never'} handler=${expression.handlerRow.map(Type.encode).join('|') || 'never'} residual=${expression.residualRow.map(Type.encode).join('|') || 'never'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        encodeExpression(expression.protected, depth + 1),
+        encodeExpression(expression.handler, depth + 1),
       ].join('\n')
     case 'EffectBindRequirement':
       return [
