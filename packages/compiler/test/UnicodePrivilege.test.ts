@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
@@ -65,7 +65,11 @@ it('carries no Unicode policy anywhere in the compiler’s own sources', () => {
       unicodeShaped.test(line) ? [`${name}:${index + 1}: ${line.trim()}`] : [],
     )
   })
-  assert.deepEqual(offenders, [], `compiler sources naming Unicode policy:\n${offenders.join('\n')}`)
+  assert.deepEqual(
+    offenders,
+    [],
+    `compiler sources naming Unicode policy:\n${offenders.join('\n')}`,
+  )
 })
 
 it('provides no Unicode operation to any engine', () => {
@@ -112,7 +116,10 @@ pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect('lowers a normalizing program to a MIR that names no Unicode operation', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized('unicode-privilege/normalize', ascii(normalizing))
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'unicode-privilege/normalize',
+      ascii(normalizing),
+    )
     assert.deepEqual(messages(snapshot), [])
 
     // The program really runs, so the MIR examined below is the MIR of working normalization rather
@@ -138,7 +145,10 @@ it.effect('lowers a normalizing program to a MIR that names no Unicode operation
 
 it.effect('normalizes through ordinary Silk functions reached by ordinary calls', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized('unicode-privilege/normalize', ascii(normalizing))
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'unicode-privilege/normalize',
+      ascii(normalizing),
+    )
     assert.deepEqual(messages(snapshot), [])
     const mir = Analysis.mirOf(snapshot)
     assert.strictEqual(mir._tag, 'Available')
@@ -225,7 +235,10 @@ pub fn main() -> i32 {
 
 it.effect('treats a Unicode table as ordinary data rather than by its spelling', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized('unicode-privilege/own-table', ascii(ownTable))
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'unicode-privilege/own-table',
+      ascii(ownTable),
+    )
     assert.deepEqual(messages(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')

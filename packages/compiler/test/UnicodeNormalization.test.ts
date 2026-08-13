@@ -32,11 +32,7 @@ const diagnosticSummary = (snapshot: Analysis.Snapshot) =>
 /** Runs one program on the evaluator, on compiled wasm, and as a native binary. */
 const onEveryEngine = (name: string, source: string, expected: number) =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      name,
-      ascii(source),
-      'wasm32-unknown-unknown',
-    )
+    const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
     assert.deepEqual(diagnosticSummary(snapshot), [])
 
     const evaluated = Analysis.evaluate(snapshot)

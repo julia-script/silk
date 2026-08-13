@@ -68,7 +68,8 @@ const utf8 = (points: ReadonlyArray<number>): Uint8Array =>
 const encode = (entry: Case): ReadonlyArray<number> =>
   [entry.source, entry.nfc, entry.nfd].flatMap((points) => {
     const bytes = utf8(points)
-    if (bytes.length > 255) throw new Error(`conformance field at line ${entry.line} exceeds a byte`)
+    if (bytes.length > 255)
+      throw new Error(`conformance field at line ${entry.line} exceeds a byte`)
     return [bytes.length, ...bytes]
   })
 
@@ -81,7 +82,9 @@ const literal = (bytes: ReadonlyArray<number>): string =>
  * The harness is ordinary Silk calling the same public API a user program would, comparing with
  * ordinary exact `string` equality — the equality this issue must leave alone.
  */
-const program = (cases: ReadonlyArray<Case>): string => `import silk.result { Result, Success, Failure }
+const program = (
+  cases: ReadonlyArray<Case>,
+): string => `import silk.result { Result, Success, Failure }
 import silk.string { String, InvalidUtf8, fromUtf8, ownedUtf8Bytes }
 import silk.unicode { normalizeNfc, normalizeNfd }
 import silk.vector { Vector, make as vectorMake, append as vectorAppend, asSlice as vectorAsSlice }

@@ -15,10 +15,10 @@
 //   node scripts/vendor-unicode-data.mjs            # download and rewrite
 //   node scripts/vendor-unicode-data.mjs --check    # fail if the vendored files would change
 
-import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -42,7 +42,9 @@ const download = async () => {
   const metadata = await fetchJson(`${registry}/ucd-full`)
   const release = metadata.versions?.[unicodeVersion]
   if (release === undefined) {
-    throw new Error(`ucd-full has no ${unicodeVersion} release; the Unicode version is not published`)
+    throw new Error(
+      `ucd-full has no ${unicodeVersion} release; the Unicode version is not published`,
+    )
   }
   const response = await fetch(release.dist.tarball)
   if (!response.ok) throw new Error(`tarball responded ${response.status}`)
@@ -50,7 +52,9 @@ const download = async () => {
   const digest = createHash('sha512').update(tarball).digest('base64')
   const expected = release.dist.integrity
   if (expected !== `sha512-${digest}`) {
-    throw new Error(`ucd-full@${unicodeVersion} tarball does not match the published integrity hash`)
+    throw new Error(
+      `ucd-full@${unicodeVersion} tarball does not match the published integrity hash`,
+    )
   }
   return tarball
 }
@@ -118,7 +122,8 @@ const rangeLines = (entries, predicate, label) => {
   for (const entry of entries) {
     if (!predicate(entry)) continue
     const [first, last] = entry.range
-    const span = last === undefined ? spell(point(first)) : `${spell(point(first))}..${spell(point(last))}`
+    const span =
+      last === undefined ? spell(point(first)) : `${spell(point(first))}..${spell(point(last))}`
     lines.push(label === undefined ? span : `${span}; ${label(entry)}`)
   }
   return lines
@@ -181,7 +186,11 @@ const files = (ucd) => ({
   'GraphemeBreakProperty.txt': `${header(
     'GraphemeBreakProperty.txt',
     'Fields: code point range; Grapheme_Cluster_Break value.',
-  )}${rangeLines(ucd.graphemeBreakProperty, () => true, (entry) => entry.property).join('\n')}\n`,
+  )}${rangeLines(
+    ucd.graphemeBreakProperty,
+    () => true,
+    (entry) => entry.property,
+  ).join('\n')}\n`,
   'ExtendedPictographic.txt': `${header(
     'ExtendedPictographic.txt',
     'Code point ranges with Extended_Pictographic=Yes, from emoji-data.',
