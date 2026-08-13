@@ -5142,6 +5142,24 @@
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
     {
+      "operation": "Intrinsic.rawBufferCopy",
+      "signature": "unsafe fn Intrinsic.rawBufferCopy<T>(destination: &mut RawBuffer<T>, destinationOffset: usize, source: &[T], length: usize) -> ()",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/raw-buffer.copy",
+      "identity": "RawBufferCopy",
+      "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
+    },
+    {
+      "operation": "Intrinsic.rawBufferFill",
+      "signature": "unsafe fn Intrinsic.rawBufferFill(buffer: &mut RawBuffer<u8>, offset: usize, length: usize, value: u8) -> ()",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/raw-buffer.fill",
+      "identity": "RawBufferFill",
+      "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
+    },
+    {
       "operation": "Intrinsic.slotWrite",
       "signature": "unsafe fn Intrinsic.slotWrite<T>(slot: Slot<T>, value: T) -> ()",
       "unsafe": true,

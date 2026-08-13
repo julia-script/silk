@@ -2358,6 +2358,78 @@ const emitOperation = (
         Instr.localSet(destinationLength),
       ]
     }
+    case 'RawBufferCopy': {
+      const address = scalar(operation.buffer)
+      const offset = scalar(operation.offset)
+      const length = scalar(operation.length)
+      const sourceLanes = slots(operation.source)
+      const sourceAddress = sourceLanes.at(0)
+      const sourceLength = sourceLanes.at(1)
+      const rawBuffer = SilkType.rawBuffer(operation.element)
+      const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
+      const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+      const countOffset = aggregateFieldOffset(rawBuffer, 'count')
+      if (sourceAddress === undefined || sourceLength === undefined) {
+        throw new RangeError('Wasm RawBuffer.copy lost its source slice lanes')
+      }
+      const context = requireMemory()
+      return [
+        Instr.localGet(offset),
+        ...loadAt(address, countOffset),
+        Instr.op('i32.gt_u'),
+        Instr.localGet(length),
+        ...loadAt(address, countOffset),
+        Instr.localGet(offset),
+        Instr.op('i32.sub'),
+        Instr.op('i32.gt_u'),
+        Instr.op('i32.or'),
+        Instr.localGet(length),
+        Instr.localGet(sourceLength),
+        Instr.op('i32.gt_u'),
+        Instr.op('i32.or'),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        ...loadAt(address, baseOffset),
+        Instr.localGet(offset),
+        Instr.i32Const(operation.stride),
+        Instr.op('i32.mul'),
+        Instr.op('i32.add'),
+        Instr.localGet(sourceAddress),
+        Instr.localGet(length),
+        Instr.i32Const(operation.stride),
+        Instr.op('i32.mul'),
+        // memory.copy is defined for overlapping ranges, which is the copy intrinsic's contract.
+        Instr.memoryCopy(context.memory, context.memory),
+      ]
+    }
+    case 'RawBufferFill': {
+      const address = scalar(operation.buffer)
+      const offset = scalar(operation.offset)
+      const length = scalar(operation.length)
+      const value = scalar(operation.value)
+      const rawBuffer = SilkType.rawBuffer('u8')
+      const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
+      const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+      const countOffset = aggregateFieldOffset(rawBuffer, 'count')
+      const context = requireMemory()
+      return [
+        Instr.localGet(offset),
+        ...loadAt(address, countOffset),
+        Instr.op('i32.gt_u'),
+        Instr.localGet(length),
+        ...loadAt(address, countOffset),
+        Instr.localGet(offset),
+        Instr.op('i32.sub'),
+        Instr.op('i32.gt_u'),
+        Instr.op('i32.or'),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        ...loadAt(address, baseOffset),
+        Instr.localGet(offset),
+        Instr.op('i32.add'),
+        Instr.localGet(value),
+        Instr.localGet(length),
+        Instr.memoryFill(context.memory),
+      ]
+    }
     case 'SlotWrite': {
       const address = scalar(operation.slot)
       const shape = LayoutPlan.callingShape(plan, operation.element)
@@ -4480,6 +4552,8 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           operation._tag === 'RawBufferSlot' ||
           operation._tag === 'RawBufferRead' ||
           operation._tag === 'RawBufferView' ||
+          operation._tag === 'RawBufferCopy' ||
+          operation._tag === 'RawBufferFill' ||
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
           operation._tag === 'SlotCopy' ||

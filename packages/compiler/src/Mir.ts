@@ -80,7 +80,11 @@ const isCopyType = (type: DeclarationIndex.SemanticType): boolean =>
   SilkType.isString(type) ||
   (SilkType.isFixedArray(type) && isCopyType(type.element))
 
-const isStructurallyCopyType = (
+/**
+ * Reports whether every reachable field of one element type is Copy, so duplicating its bytes
+ * duplicates no ownership. Lowering, verification, and evaluation all decide the same way.
+ */
+export const isStructurallyCopy = (
   layout: Layout.Plan,
   type: DeclarationIndex.SemanticType,
   visiting = new Set<string>(),
@@ -92,9 +96,9 @@ const isStructurallyCopyType = (
     SilkType.isSlice(type)
   )
     return true
-  if (SilkType.isFixedArray(type)) return isStructurallyCopyType(layout, type.element, visiting)
+  if (SilkType.isFixedArray(type)) return isStructurallyCopy(layout, type.element, visiting)
   if (SilkType.isUnion(type))
-    return type.members.every((member) => isStructurallyCopyType(layout, member, visiting))
+    return type.members.every((member) => isStructurallyCopy(layout, member, visiting))
   if (SilkType.equals(type, SilkType.unit)) return true
   if (!SilkType.isNominal(type) || SilkType.isIntrinsicNominal(type)) return false
   const key = SilkType.key(type)
@@ -102,9 +106,7 @@ const isStructurallyCopyType = (
   const entry = Layout.entry(layout, type)
   if (entry?.representation._tag !== 'Aggregate') return false
   const next = new Set(visiting).add(key)
-  return entry.representation.fields.every((field) =>
-    isStructurallyCopyType(layout, field.type, next),
-  )
+  return entry.representation.fields.every((field) => isStructurallyCopy(layout, field.type, next))
 }
 
 const callingScalarEquals = (left: Layout.CallingScalar, right: Layout.CallingScalar): boolean =>
@@ -478,6 +480,39 @@ export type Operation =
       readonly stride: number
       readonly access: SilkType.Slice['access']
       readonly type: Extract<Type, { readonly _tag: 'Slice' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /**
+       * Bulk ownership transfer of a caller-proven range into raw storage. The result is as if
+       * the range travelled through an intermediate buffer, so an overlapping source and
+       * destination is a correct move rather than undefined behavior.
+       */
+      readonly _tag: 'RawBufferCopy'
+      readonly destination: LocalId
+      readonly buffer: LocalId
+      readonly offset: LocalId
+      readonly source: LocalId
+      readonly length: LocalId
+      readonly element: DeclarationIndex.SemanticType
+      readonly stride: number
+      /**
+       * True when the element type is structurally Copy. A move of a Copy element leaves the
+       * source range readable, which is what the byte-level backends do for every element type.
+       */
+      readonly retainsSource: boolean
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** Sets a caller-proven byte range of raw storage to one repeated byte value. */
+      readonly _tag: 'RawBufferFill'
+      readonly destination: LocalId
+      readonly buffer: LocalId
+      readonly offset: LocalId
+      readonly length: LocalId
+      readonly value: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
       readonly provenance: Provenance
     }
   | {
@@ -1217,6 +1252,22 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination, operation.buffer, operation.index]
     case 'RawBufferView':
       return [operation.destination, operation.buffer, operation.offset, operation.length]
+    case 'RawBufferCopy':
+      return [
+        operation.destination,
+        operation.buffer,
+        operation.offset,
+        operation.source,
+        operation.length,
+      ]
+    case 'RawBufferFill':
+      return [
+        operation.destination,
+        operation.buffer,
+        operation.offset,
+        operation.length,
+        operation.value,
+      ]
     case 'SlotWrite':
       return [operation.destination, operation.slot, operation.value]
     case 'SlotTake':
@@ -1501,10 +1552,13 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'RawBufferSlot':
     case 'RawBufferRead':
     case 'RawBufferView':
+    case 'RawBufferCopy':
     case 'SlotWrite':
     case 'SlotTake':
     case 'SlotCopy':
       return [semanticType(operation.type), operation.element]
+    case 'RawBufferFill':
+      return [semanticType(operation.type)]
     case 'SlotDrop':
       return [semanticType(operation.type), operation.element, ...cleanupTypes(operation.cleanup)]
     case 'BeginLoan':
@@ -1660,6 +1714,10 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.buffer, operation.index]
     case 'RawBufferView':
       return [operation.buffer, operation.offset, operation.length]
+    case 'RawBufferCopy':
+      return [operation.buffer, operation.offset, operation.source, operation.length]
+    case 'RawBufferFill':
+      return [operation.buffer, operation.offset, operation.length, operation.value]
     case 'SlotWrite':
       return [operation.slot, operation.value]
     case 'SlotTake':
@@ -2736,7 +2794,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             bufferElement === undefined ||
             !SilkType.equals(bufferElement, operation.element) ||
             !SilkType.equals(semanticType(destination), operation.element) ||
-            !isStructurallyCopyType(self.layout, operation.element)
+            !isStructurallyCopy(self.layout, operation.element)
           )
             violations.push(
               Object.freeze({
@@ -2787,6 +2845,80 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             )
           }
         }
+        if (operation._tag === 'RawBufferCopy') {
+          const buffer = fn.localTypes.at(operation.buffer.ordinal)
+          const offset = fn.localTypes.at(operation.offset.ordinal)
+          const source = fn.localTypes.at(operation.source.ordinal)
+          const length = fn.localTypes.at(operation.length.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const bufferElement =
+            buffer?._tag === 'Reference' && SilkType.isRawBuffer(buffer.type.target)
+              ? buffer.type.target.arguments[0]
+              : undefined
+          const elementLayout = Layout.entry(self.layout, operation.element)
+          const expectedStride =
+            elementLayout === undefined
+              ? undefined
+              : Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment
+          if (
+            buffer?._tag !== 'Reference' ||
+            buffer.type.access !== 'Exclusive' ||
+            offset?._tag !== 'usize' ||
+            length?._tag !== 'usize' ||
+            source?._tag !== 'Slice' ||
+            source.type.access !== 'Shared' ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.equals(destination.type, SilkType.unit) ||
+            bufferElement === undefined ||
+            !SilkType.equals(bufferElement, operation.element) ||
+            !SilkType.equals(source.type.element, operation.element) ||
+            operation.stride !== expectedStride ||
+            operation.retainsSource !== isStructurallyCopy(self.layout, operation.element)
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidRawStorageOperation',
+                function: fn.id,
+                region: region.id,
+                detail:
+                  'RawBuffer copy lost its exclusive destination, shared source range, element, or layout provenance',
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'RawBufferFill') {
+          const buffer = fn.localTypes.at(operation.buffer.ordinal)
+          const offset = fn.localTypes.at(operation.offset.ordinal)
+          const length = fn.localTypes.at(operation.length.ordinal)
+          const value = fn.localTypes.at(operation.value.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const bufferElement =
+            buffer?._tag === 'Reference' && SilkType.isRawBuffer(buffer.type.target)
+              ? buffer.type.target.arguments[0]
+              : undefined
+          if (
+            buffer?._tag !== 'Reference' ||
+            buffer.type.access !== 'Exclusive' ||
+            offset?._tag !== 'usize' ||
+            length?._tag !== 'usize' ||
+            value?._tag !== 'u8' ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.equals(destination.type, SilkType.unit) ||
+            bufferElement === undefined ||
+            !SilkType.equals(bufferElement, 'u8')
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidRawStorageOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'RawBuffer fill lost its exclusive byte buffer, range, or byte value',
+              }),
+            )
+          }
+        }
         if (
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
@@ -2807,8 +2939,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !(operation._tag === 'SlotTake' || operation._tag === 'SlotCopy') ||
             (destination !== undefined &&
               SilkType.equals(semanticType(destination), operation.element) &&
-              (operation._tag !== 'SlotCopy' ||
-                isStructurallyCopyType(self.layout, operation.element)))
+              (operation._tag !== 'SlotCopy' || isStructurallyCopy(self.layout, operation.element)))
           const writeValue =
             operation._tag !== 'SlotWrite' ||
             (() => {
@@ -3239,7 +3370,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             selected === undefined ||
             !SilkType.equals(selected, semanticType(operation.type)) ||
             (operation._tag === 'ReadPlace' &&
-              !isStructurallyCopyType(self.layout, selected) &&
+              !isStructurallyCopy(self.layout, selected) &&
               operation.consume !== true &&
               !sharedMatchProjection)
           ) {
@@ -3855,6 +3986,10 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = raw-buffer-read ${localText(operation.buffer)}[${localText(operation.index)}] element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferView':
       return `${localText(operation.destination)} = raw-buffer-view ${localText(operation.buffer)} offset=${localText(operation.offset)} length=${localText(operation.length)} element=${SilkType.encode(operation.element)} access=${operation.access.toLowerCase()} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'RawBufferCopy':
+      return `${localText(operation.destination)} = raw-buffer-copy ${localText(operation.buffer)} offset=${localText(operation.offset)} source=${localText(operation.source)} length=${localText(operation.length)} element=${SilkType.encode(operation.element)} stride=${operation.stride} retains-source=${operation.retainsSource} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'RawBufferFill':
+      return `${localText(operation.destination)} = raw-buffer-fill ${localText(operation.buffer)} offset=${localText(operation.offset)} length=${localText(operation.length)} value=${localText(operation.value)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SlotWrite':
       return `${localText(operation.destination)} = slot-write ${localText(operation.slot)}, ${localText(operation.value)} element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SlotTake':
