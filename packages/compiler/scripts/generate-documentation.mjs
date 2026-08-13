@@ -126,6 +126,7 @@ const diagnosticsPage = () => {
   const source = readFileSync(diagnosticSource, 'utf8')
 
   const documented = new Map()
+  const collisions = new Map()
   // `[^*]` in the comment body keeps the match from reaching back past an earlier `*/`.
   const declaration =
     /(?:\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*)?export const (\w+)Code = '([A-Z]{3}[0-9]{4})' as const/g
@@ -134,7 +135,24 @@ const diagnosticsPage = () => {
       .replace(/^\s*\*\s?/gm, '')
       .replace(/\s+/g, ' ')
       .trim()
+    // Keyed by code, so a second constant claiming a taken code would silently displace the first
+    // and this page would document one meaning while the compiler reports two. Refuse instead: a
+    // published index that resolves a collision by dropping a diagnostic is worse than no index.
+    const taken = documented.get(match[3])
+    if (taken !== undefined)
+      collisions.set(match[3], [
+        ...(collisions.get(match[3]) ?? [`${taken.name}Code`]),
+        `${match[2]}Code`,
+      ])
     documented.set(match[3], { name: match[2], comment })
+  }
+
+  if (collisions.size > 0) {
+    console.error('Duplicate stable diagnostic codes in src/Diagnostic.ts:')
+    for (const [code, names] of collisions)
+      console.error(`  ${code} is held by ${names.join(' and ')}`)
+    console.error('A stable code identifies one condition. Renumber the newer constant.')
+    process.exit(1)
   }
 
   // The constructor bodies carry the user-visible message template, which is the most precise
@@ -231,5 +249,10 @@ const write = (name, contents) => {
   writeFileSync(destination, contents)
 }
 
-write('stdlib.md', await stdlibPage())
-write('diagnostics.md', diagnosticsPage())
+// Both pages are rendered before either is written, so a rejected diagnostic index leaves the
+// documentation exactly as it was rather than half-regenerated.
+const stdlib = await stdlibPage()
+const diagnostics = diagnosticsPage()
+
+write('stdlib.md', stdlib)
+write('diagnostics.md', diagnostics)
