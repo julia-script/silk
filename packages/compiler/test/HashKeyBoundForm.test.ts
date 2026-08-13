@@ -186,20 +186,19 @@ pub fn main() -> i32 { return 0 }`,
 )
 
 /**
- * The combination `HashKey.hash` actually needs, and the one that does not work.
+ * The combination `HashKey.hash` actually needs: the non-operator operation over a user-defined
+ * provider, whose witness is a function of the provider's own actor rather than a sealed intrinsic.
  *
- * `Bound.operation(args)` (#118, PR #141) lowers by reading the intrinsic the witness names.
- * A source witness (#129, PR #142) is read only from the operator path. The two landed
- * independently and neither wired the other's case, so a non-operator operation over a
- * user-defined provider is admitted by analysis and then lowers to nothing: the call's result
- * local keeps its placeholder type and the specialized instance fails MIR validation.
- *
- * Asserted rather than skipped. When the gap closes this test fails, which is the signal that
- * `HashMap` over a user-defined key can be written.
+ * This case was written asserting the failure it found — `Bound.operation(args)` (#118, PR #141)
+ * lowered by reading only the intrinsic a witness names, while a source witness (#129, PR #142) was
+ * read only from the operator path, so the call passed analysis and then lowered to nothing. #155
+ * (PR #157) taught lowering the fallback the operator path already had, and the assertion is
+ * inverted here to the working outcome. The case is kept rather than deleted: this is the exact
+ * path every `HashKey.hash` call over a user-defined key takes.
  */
-it.effect('does not yet reach a source witness through the bound-operation call', () =>
+it.effect('reaches a source witness through the bound-operation call', () =>
   Effect.gen(function* () {
-    const snapshot = yield* analyzed(
+    const value = yield* evaluatedValue(
       'hash-key-bound/user-digest',
       `${userKey}
 fn digestOf<T: HashKey>(left: T, right: T) -> u64 { return HashKey.digest(left, right) }
@@ -209,17 +208,6 @@ pub fn main() -> i32 {
   return 1
 }`,
     )
-    // Analysis is clean: the conformance covers both operations and the call checks against the
-    // contract. Nothing reports that the call cannot be lowered.
-    assert.deepEqual(messages(snapshot), [])
-    const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Blocked', describe(outcome))
-    if (outcome._tag !== 'Blocked') return
-    assert.strictEqual(outcome.reason._tag, 'InvalidMir', describe(outcome.reason))
-    if (outcome.reason._tag !== 'InvalidMir') return
-    assert.deepEqual(
-      outcome.reason.violations.map((violation) => violation.rule),
-      ['InvalidCallShape'],
-    )
+    assert.strictEqual(value, 42)
   }),
 )
