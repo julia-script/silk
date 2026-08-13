@@ -82,6 +82,10 @@
       "types": "./dist/Stdlib.d.ts",
       "import": "./dist/Stdlib.js"
     },
+    "./ChildProcess": {
+      "types": "./dist/ChildProcess.d.ts",
+      "import": "./dist/ChildProcess.js"
+    },
     "./StandardInput": {
       "types": "./dist/StandardInput.d.ts",
       "import": "./dist/StandardInput.js"
