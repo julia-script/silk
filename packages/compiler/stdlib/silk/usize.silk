@@ -265,3 +265,13 @@ pub fn greaterThan(left: usize, right: usize) -> bool {
 pub fn greaterOrEqual(left: usize, right: usize) -> bool {
   return Intrinsic.usizeGreaterOrEqual(left, right)
 }
+
+/// Renders the value as decimal text in freshly owned storage.
+pub effect fn toText(value: usize) -> String ! OutOfMemory ? &mut Allocator {
+  return run Format.unsignedText(toU64(value))
+}
+
+/// Reads complete decimal text as a `usize`, or reports why the text is not one.
+pub fn parse(text: string) -> Result<usize, ParseFailure> {
+  return Format.usizeValue(text)
+}
