@@ -433,6 +433,24 @@ const hookCalls = (cleanup: Ownership.CleanupPlan): ReadonlyArray<CallTarget> =>
   }
 }
 
+/**
+ * Reports whether a call must carry hidden identity arguments to be lowerable.
+ *
+ * Effect and callable values are both compiler-private: neither has a target layout, and both are
+ * erased by monomorphizing the target on the argument's hidden concrete identity. A call passing
+ * either therefore cannot be specialized on its explicit type arguments alone — the target would
+ * be instantiated without the identity, and lowering would drop the parameter it cannot type.
+ */
+const carriesHiddenIdentity = (
+  expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
+): boolean =>
+  Type.isEffect(expression.type) ||
+  expression.arguments.some(
+    (argument) =>
+      argument._tag !== 'Unavailable' &&
+      (Type.isEffect(argument.type) || Type.isCallable(argument.type)),
+  )
+
 const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
   if (expression._tag === 'Run') return callTargets(expression.subject)
   if (expression._tag === 'EffectResult') return callTargets(expression.protected)
@@ -498,10 +516,7 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
     return []
   const nested = expression.arguments.flatMap((argument) => callTargets(argument))
   if (expression._tag === 'ServiceEffectConstruct') return nested
-  return Type.isEffect(expression.type) ||
-    expression.arguments.some(
-      (argument) => argument._tag !== 'Unavailable' && Type.isEffect(argument.type),
-    )
+  return carriesHiddenIdentity(expression)
     ? nested
     : [
         Object.freeze({ declaration: expression.target, typeArguments: expression.typeArguments }),
@@ -979,15 +994,10 @@ const directCallInstances = (
         ]
       }
       if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return []
-      // Ordinary calls without Effect values remain on the original finite-specialization path.
-      // Resolving them here as well would bypass its polymorphic-recursion guard.
-      if (
-        !Type.isEffect(expression.type) &&
-        !expression.arguments.some(
-          (argument) => argument._tag !== 'Unavailable' && Type.isEffect(argument.type),
-        )
-      )
-        return []
+      // Calls carrying neither an Effect nor a callable value remain on the original
+      // finite-specialization path. Resolving them here as well would bypass its
+      // polymorphic-recursion guard.
+      if (!carriesHiddenIdentity(expression)) return []
       const target = targetKeyOfCall(expression, context)
       const targetFn = target === undefined ? undefined : targetFunction(results, expression.target)
       if (target === undefined || targetFn === undefined) return []

@@ -204,6 +204,14 @@ effect fn standardInputRead(output: &mut [u8], reason: &mut i32, code: &mut u32)
   unsafe { return run Intrinsic.osStandardInputRead(move output, reason, code) }
   return none<usize>()
 }
+effect fn processExecute(program: &[u8], arguments: &[u8], environment: &[u8], directory: &[u8], status: &mut i32, exit: &mut i32, outputLength: &mut usize, errorLength: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osProcessExecute(program, arguments, environment, directory, status, exit, outputLength, errorLength, reason, code) }
+  return false
+}
+effect fn processCapture(output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
+  unsafe { return run Intrinsic.osProcessCapture(0, usize.ZERO, move output, reason, code) }
+  return none<usize>()
+}
 effect fn hostArgumentCount(count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
   unsafe { return run Intrinsic.osHostArgumentCount(count, reason, code) }
   return false

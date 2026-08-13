@@ -1,5 +1,14 @@
 import silk.option { Option }
 
+/// The largest i64. The checked arithmetic intrinsics reject every result above this bound.
+pub const MAX: i64 = 9223372036854775807
+
+/// The smallest i64. The checked arithmetic intrinsics reject every result below this bound.
+pub const MIN: i64 = -9223372036854775808
+
+/// The width of i64 in bits.
+pub const BITS: u32 = 64
+
 /// Calls the concrete i64 negate primitive.
 pub fn negate(value: i64) -> i64 {
   return Intrinsic.i64Negate(value)

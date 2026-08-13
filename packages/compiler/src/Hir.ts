@@ -119,6 +119,8 @@ export type BuiltinOperation =
   | 'OsDirectoryRemove'
   | 'OsHandleClose'
   | 'OsStandardInputRead'
+  | 'OsProcessExecute'
+  | 'OsProcessCapture'
   | 'OsHostArgumentCount'
   | 'OsHostArgument'
   | 'OsHostVariable'

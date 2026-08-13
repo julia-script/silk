@@ -16,5 +16,5 @@ fn golden/operator.main params=0 locals=7 -> i32 entry=r0
     return %6 [29, 53)
 fn silk/i32.add params=2 locals=3 -> i32 entry=r0
   r0 operation:
-    %2 = add %0, %1 : i32 [3393, 3423)
-    return %2 [3393, 3423)
+    %2 = add %0, %1 : i32 [3703, 3733)
+    return %2 [3703, 3733)

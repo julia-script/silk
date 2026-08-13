@@ -479,6 +479,60 @@ const legacyActors = Object.freeze([
           'output is initialized writable storage; success reports the exact transferred byte count and zero means end of input',
       }),
       osBuiltin({
+        name: 'processExecute',
+        operation: 'OsProcessExecute',
+        parameters: Object.freeze([
+          valueParameter('program', '&[u8]'),
+          valueParameter('arguments', '&[u8]'),
+          valueParameter('environment', '&[u8]'),
+          valueParameter('workingDirectory', '&[u8]'),
+          valueParameter('status', '&mut i32'),
+          valueParameter('code', '&mut i32'),
+          valueParameter('outputLength', '&mut usize'),
+          valueParameter('errorLength', '&mut usize'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([
+          byteSlice,
+          byteSlice,
+          byteSlice,
+          byteSlice,
+          mutableI32,
+          mutableI32,
+          mutableUsize,
+          mutableUsize,
+          mutableI32,
+          mutableU32,
+        ]),
+        result: 'Effect<bool>',
+        semanticResult: 'bool',
+        invariant:
+          'arguments and environment are NUL-terminated entry blocks and an empty workingDirectory inherits the caller directory; the child never interprets a shell and reads closed standard input; success retains exactly one capture until the next execute and reports its exact lengths with status zero for exit and one for signal',
+      }),
+      osBuiltin({
+        name: 'processCapture',
+        operation: 'OsProcessCapture',
+        parameters: Object.freeze([
+          valueParameter('stream', 'i32'),
+          valueParameter('offset', 'usize'),
+          valueParameter('output', '&mut [u8]'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([
+          'i32',
+          'usize',
+          Type.slice('Exclusive', 'u8'),
+          mutableI32,
+          mutableU32,
+        ]),
+        result: 'Effect<Option<usize>>',
+        semanticResult: Type.option('usize'),
+        invariant:
+          'stream selects zero for standard output or one for standard error, offset is within the retained capture of the immediately preceding execute, and output is initialized writable storage',
+      }),
+      osBuiltin({
         name: 'hostArgumentCount',
         operation: 'OsHostArgumentCount',
         parameters: Object.freeze([
@@ -836,6 +890,8 @@ const flatSpelling = (actor_: string, operation: string): string => {
 /** The canonical standard-library consumer of one OS boundary operation. */
 const osConsumer = (spelling: string): string => {
   if (spelling === 'standardInputRead') return 'silk/os-standard-input.read'
+  if (spelling === 'processExecute') return 'silk/os-child-process.execute'
+  if (spelling === 'processCapture') return 'silk/os-child-process.capture'
   if (spelling.startsWith('host'))
     return `silk/os-host-input.${spelling.slice(4, 5).toLowerCase()}${spelling.slice(5)}`
   return `silk/os-filesystem.${spelling}`

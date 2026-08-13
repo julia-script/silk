@@ -342,11 +342,11 @@ _Avoid_: temporary path, global temp file
 
 **Child-process service**:
 The narrow bootstrap host capability for synchronously executing a program from structured input
-and returning structured output. Requests provide an executable path, ordered OS-string arguments,
-optional explicit working directory, exact environment, and closed standard input; results own
-captured output and distinguish exit codes from signal termination. Nonzero exit is result data,
-while failure to start, wait, or capture is typed process failure. It never interprets a shell
-command string.
+and returning structured output. Requests provide an executable path, ordered arguments as exact
+platform bytes, optional explicit working directory, exact environment, and closed standard input;
+results own captured output and distinguish exit codes from signal termination. Nonzero exit is
+result data, while failure to start, wait, or capture is typed process failure. It never interprets
+a shell command string.
 _Avoid_: shell service, process manager
 
 **Standard-streams service**:
