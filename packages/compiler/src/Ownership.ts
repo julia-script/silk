@@ -619,7 +619,8 @@ const checkExpression = (
       }
       return
     }
-    case 'BuiltinCall': {
+    case 'BuiltinCall':
+    case 'BoundOperationCall': {
       for (const argument of expression.arguments)
         checkExpression(state, live, argument, false, guard, escaping)
       return

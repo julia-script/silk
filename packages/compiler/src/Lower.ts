@@ -2517,6 +2517,38 @@ function lowerExpressionInner(
       }
       return { result: destination }
     }
+    case 'BoundOperationCall': {
+      // The bound named the operation; the specialization names the witness. Only here is the type
+      // argument known, so only here can the conformance say which compiler-known operation the
+      // call runs — two providers of one interface may answer one operation with two unrelated
+      // instructions, and an operator's width-neutral lowering cannot stand in for that.
+      const capability = fn.semantic(expression.capability)
+      const provider = fn.semantic(expression.provider)
+      if (!Type.isNominal(capability)) return undefined
+      const selected = DeclarationIndex.interfaceOperationIntrinsic(
+        fn.index,
+        provider,
+        capability,
+        expression.operation,
+      )
+      if (selected?.rule._tag !== 'BuiltinRule') return undefined
+      // The call the witness names, at this call's own span: the enclosing `lowerExpression` ends
+      // this span's returned-view loans once, after the operation it selected has been lowered.
+      return lowerExpressionInner(
+        fn,
+        Object.freeze({
+          _tag: 'BuiltinCall',
+          operation: selected.rule.operation,
+          intrinsic: selected.id,
+          typeArguments: Object.freeze([]),
+          arguments: expression.arguments,
+          loanEnds: expression.loanEnds,
+          heldLoans: Object.freeze([]),
+          type: expression.type,
+          span: expression.span,
+        }),
+      )
+    }
     case 'BuiltinCall': {
       const argumentLocals: Array<Mir.LocalId> = []
       for (const argument of expression.arguments) {

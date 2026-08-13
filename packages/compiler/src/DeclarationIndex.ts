@@ -4096,6 +4096,35 @@ export const unmappedInterfaceOperations = (
   )
 }
 
+/**
+ * Selects the compiler-known operation one provider's interface conformance maps an operation to.
+ *
+ * An operator on a bound-typed operand needs no witness: its lowering is width-neutral, and the
+ * specialized operand type alone selects the concrete instruction. An operation no operator spells
+ * has no such lowering, so its call reads the witness the specialization selected — two providers
+ * of one interface may map one operation to two unrelated instructions, and only the conformance
+ * says which. A provider with no single conformance, or a mapping that is not a two-segment
+ * `Intrinsic` path, selects nothing.
+ */
+export const interfaceOperationIntrinsic = (
+  self: Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+  operation: string,
+): Intrinsic.Operation | undefined => {
+  const mapping = interfaceConformance(self, provider, capability)?.operations.find(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === operation,
+  )
+  const target = mapping?.target
+  if (
+    target?._tag !== 'TypePath' ||
+    target.segments.length !== 2 ||
+    target.segments.at(0)?.spelling !== 'Intrinsic'
+  )
+    return undefined
+  return Intrinsic.findOperation('Intrinsic', target.segments.at(1)?.spelling ?? '')
+}
+
 /** Selects the unique compiler-shipped or source-declared witness for one provider. */
 export const witness = (
   self: Index,

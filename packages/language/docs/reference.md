@@ -312,6 +312,30 @@ pub fn main() -> i32 {
 The `T: Integer` bound on `add` is what makes `left + right` legal inside its body: a generic body
 may use only the operations its bounds promise.
 
+An operation whose name an operator spells is reached through that operator. Every other operation
+is reached by qualifying through the bound's own name, `Bound.operation(args)`, the same shape a
+service operation takes:
+
+```silk
+pub interface Mixer<T> {
+  fn mix(left: T, right: T) -> T
+}
+
+impl Mixer<i32> for i32 { mix: Intrinsic.i32WrappingAdd }
+impl Mixer<u8> for u8 { mix: Intrinsic.u8SaturatingAdd }
+
+pub fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.mix(left, right) }
+```
+
+One body, two specializations, two instructions: `blend<i32>` wraps and `blend<u8>` saturates,
+because each reads the operation its own witness maps. The call is still specialization-time only —
+no dispatch, no provider slot, no row.
+
+Inside a body bounded by an interface, that name selects the bound's operation even when the
+interface's module also declares a public function of the same name; the module function stays
+reachable through its module everywhere else. A declaration that bounds two of its type parameters
+by one interface leaves the receiver naming neither, and the call is reported with `SEM0097`.
+
 ### 2.6 Services
 
 A `service` declares runtime capability contracts — operation signatures only, with no fields, no

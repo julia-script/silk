@@ -486,6 +486,23 @@ const callResolution = (
           : available(Object.freeze({ _tag: 'IntrinsicOperationIdentity', id: operation.id })),
     })
   }
+  if (reference._tag === 'ResolvedBoundOperation') {
+    // A bound operation is declared once, by the interface, and answered per specialization by a
+    // witness. The declaration is what a reader navigates to, so that is what the occurrence names.
+    const declaration = locationOfServiceOperation(reference.declaration)
+    return Object.freeze({
+      resolution:
+        reference.declaration.state._tag === 'Unique'
+          ? available(
+              Object.freeze({
+                _tag: 'ServiceOperationIdentity',
+                id: reference.declaration.state.id,
+              }),
+            )
+          : Object.freeze({ _tag: 'Unavailable' }),
+      ...(declaration === undefined ? {} : { declaration }),
+    })
+  }
   if (reference._tag === 'ResolvedServiceOperation') {
     const declaration = locationOfServiceOperation(reference.operation)
     return Object.freeze({
@@ -542,7 +559,9 @@ const collectCallReference = (
   push(
     pending,
     selected?.span,
-    reference._tag === 'ResolvedBuiltin' || reference._tag === 'ResolvedServiceOperation'
+    reference._tag === 'ResolvedBuiltin' ||
+      reference._tag === 'ResolvedServiceOperation' ||
+      reference._tag === 'ResolvedBoundOperation'
       ? 'Operation'
       : 'Value',
     resolved.resolution,
