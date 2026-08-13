@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import { llvmToolchain } from '../../../test/support/llvmToolchain.js'
 import * as Analysis from '../src/Analysis.js'
 import type * as Backend from '../src/Backend.js'
 
@@ -13,7 +14,7 @@ const ascii = (value: string): Uint8Array =>
 const directory = mkdtempSync(join(tmpdir(), 'silk-llvm-ir-round-trip-'))
 afterAll(() => rmSync(directory, { recursive: true, force: true }))
 
-const executable = (name: string, variable: string): string => process.env[variable] ?? name
+const toolchain = llvmToolchain(['llvm-as', 'llvm-dis', 'opt'], 'the compiler IR round-trip check')
 
 const write = (name: string, contents: Uint8Array | string): string => {
   const path = join(directory, name)
@@ -23,13 +24,13 @@ const write = (name: string, contents: Uint8Array | string): string => {
 
 const llvmAs = (name: string, source: string): Uint8Array => {
   const assembled = join(directory, name)
-  execFileSync(executable('llvm-as', 'LLVM_AS'), [source, '-o', assembled])
+  execFileSync(toolchain.command('llvm-as'), [source, '-o', assembled])
   return readFileSync(assembled)
 }
 
 const llvmDis = (name: string, bitcode: Uint8Array): string => {
   const output = join(directory, name)
-  execFileSync(executable('llvm-dis', 'LLVM_DIS'), [write(`${name}.bc`, bitcode), '-o', output])
+  execFileSync(toolchain.command('llvm-dis'), [write(`${name}.bc`, bitcode), '-o', output])
   // `llvm-dis` names the module after whichever file it read.
   return readFileSync(output, 'utf8')
     .split('\n')
@@ -52,7 +53,7 @@ const canonical = (name: string, bitcode: Uint8Array): string => {
     write(`${name}.dis.ll`, llvmDis(`${name}.dis`, bitcode)),
   )
   const stripped = join(directory, `${name}.stripped.bc`)
-  execFileSync(executable('opt', 'LLVM_OPT'), [
+  execFileSync(toolchain.command('opt'), [
     '-passes=strip',
     write(`${name}.materialized.input.bc`, materialized),
     '-o',
@@ -70,7 +71,7 @@ const canonical = (name: string, bitcode: Uint8Array): string => {
  */
 const assemble = (name: string, ir: string): string => {
   const assembled = llvmAs(`${name}.assembled.bc`, write(`${name}.source.ll`, ir))
-  execFileSync(executable('opt', 'LLVM_OPT'), [
+  execFileSync(toolchain.command('opt'), [
     '-passes=verify',
     write(`${name}.verify.bc`, assembled),
     '-disable-output',
@@ -200,6 +201,7 @@ for (const mode of ['debug', 'release'] as const) {
       `renders assemblable LLVM IR for the ${name} program in ${mode}`,
       () =>
         Effect.gen(function* () {
+          if (toolchain.unavailable()) return
           const artifact = yield* emit(
             `round-trip/${name}`,
             source,

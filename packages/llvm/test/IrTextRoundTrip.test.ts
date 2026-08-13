@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import { llvmToolchain } from '../../../test/support/llvmToolchain.js'
 import * as Bitcode from '../src/Bitcode.js'
 import * as Block from '../src/Block.js'
 import * as Builder from '../src/Builder.js'
@@ -19,7 +20,7 @@ import { raise } from './support/raise.js'
 const directory = mkdtempSync(join(tmpdir(), 'silk-effect-llvm-roundtrip-'))
 afterAll(() => rmSync(directory, { recursive: true, force: true }))
 
-const executable = (name: string, variable: string): string => process.env[variable] ?? name
+const toolchain = llvmToolchain(['llvm-as', 'llvm-dis', 'opt'], 'the IR round-trip check')
 
 const required = <A>(value: A | undefined, message: string): A => value ?? raise(message)
 
@@ -45,13 +46,13 @@ const write = (name: string, contents: Uint8Array | string): string => {
 
 const llvmAs = (name: string, source: string): Uint8Array => {
   const assembled = join(directory, name)
-  execFileSync(executable('llvm-as', 'LLVM_AS'), [source, '-o', assembled])
+  execFileSync(toolchain.command('llvm-as'), [source, '-o', assembled])
   return readFileSync(assembled)
 }
 
 const llvmDis = (name: string, bitcode: Uint8Array): string => {
   const output = join(directory, name)
-  execFileSync(executable('llvm-dis', 'LLVM_DIS'), [write(`${name}.bc`, bitcode), '-o', output])
+  execFileSync(toolchain.command('llvm-dis'), [write(`${name}.bc`, bitcode), '-o', output])
   // `llvm-dis` names the module after whichever file it read.
   return readFileSync(output, 'utf8')
     .split('\n')
@@ -72,7 +73,7 @@ const canonical = (name: string, bitcode: Uint8Array): Canonical => {
     write(`${name}.dis.ll`, llvmDis(`${name}.dis`, bitcode)),
   )
   const stripped = join(directory, `${name}.stripped.bc`)
-  execFileSync(executable('opt', 'LLVM_OPT'), [
+  execFileSync(toolchain.command('opt'), [
     '-passes=strip',
     write(`${name}.materialized.input.bc`, materialized),
     '-o',
@@ -95,7 +96,7 @@ const canonical = (name: string, bitcode: Uint8Array): Canonical => {
  */
 const assemble = (name: string, text: string): Canonical => {
   const assembled = llvmAs(`${name}.assembled.bc`, write(`${name}.source.ll`, text))
-  execFileSync(executable('opt', 'LLVM_OPT'), [
+  execFileSync(toolchain.command('opt'), [
     '-passes=verify',
     write(`${name}.verify.bc`, assembled),
     '-disable-output',
@@ -190,6 +191,7 @@ const collidingModule = Effect.fnUntraced(function* (options: { readonly named: 
 
 it.effect('assembles a name-colliding, zero-constant module into the bitcode module', () =>
   Effect.gen(function* () {
+    if (toolchain.unavailable()) return
     const builder = yield* collidingModule({ named: true })
     const text = yield* IrText.render(builder)
 
@@ -209,6 +211,7 @@ it.effect('assembles a name-colliding, zero-constant module into the bitcode mod
 
 it.effect('renders both required DIFile fields when neither operand is present', () =>
   Effect.gen(function* () {
+    if (toolchain.unavailable()) return
     const builder = yield* collidingModule({ named: false })
     const text = yield* IrText.render(builder)
 
