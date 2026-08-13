@@ -184,15 +184,16 @@ const operationByOperator: Readonly<
 })
 
 /**
- * True only for the operators that spell an integer bitwise operation.
+ * True only when the selected scalar itself declares the operation the operator spells.
  *
- * Only integers carry `bitAnd`, `bitOr`, `bitXor`, and `bitNot`, so a bitwise operator over a
- * float or Boolean operand selects the default integer instead. Analysis then reports the same
- * operand-type diagnostic the named function reports, rather than looking up an actor operation
- * that does not exist.
+ * An operand type carries only the operations its catalog entry lists: `bool` has no ordering,
+ * an unsigned integer has no `negate`, a float has no `bitAnd`, and `char` has neither
+ * arithmetic nor the bitwise operations. An operator over such an operand selects the default
+ * integer instead, so analysis reports the same operand-type diagnostic the named function
+ * reports rather than looking up an actor operation that does not exist.
  */
-const isBitwise = (self: Prefix | Infix): boolean =>
-  self === 'BitAnd' || self === 'BitOr' || self === 'BitXor' || self === 'BitNot'
+const declaresOperation = (self: Scalar.Scalar, operation: string): boolean =>
+  self.operations.some((candidate) => candidate.spelling === operation)
 
 /**
  * Returns the canonical actor operation for an operator and its selected equality actor.
@@ -220,19 +221,15 @@ export const target = (
     })
   }
   const selected = Scalar.find(equalityActor)
+  const operation = operationByOperator[self]
   return Object.freeze({
     actor:
       self === 'Not'
         ? Scalar.boolean.spelling
-        : selected === undefined ||
-            selected.category === 'Boolean' ||
-            (self === 'Negate' &&
-              selected.category === 'Integer' &&
-              selected.signedness !== 'Signed') ||
-            (isBitwise(self) && selected.category !== 'Integer')
+        : selected === undefined || !declaresOperation(selected, operation)
           ? Scalar.defaultInteger.spelling
           : equalityActor,
-    operation: operationByOperator[self],
+    operation,
   })
 }
 

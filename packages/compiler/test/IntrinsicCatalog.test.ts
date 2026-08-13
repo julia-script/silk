@@ -35,6 +35,16 @@ const acceptedSources = Object.freeze([
     })
     return `pub fn floating${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
   }),
+  // `char` has no literal yet, so its operands arrive as parameters rather than constants.
+  ...Scalar.all()
+    .filter((scalar) => scalar.category === 'Character')
+    .map((scalar, scalarOrdinal) => {
+      const calls = scalar.operations.map(
+        (operation, operationOrdinal) =>
+          `  let v${operationOrdinal} = ${scalar.spelling}.${operation.spelling}(left, right)`,
+      )
+      return `pub fn character${scalarOrdinal}(left: ${scalar.spelling}, right: ${scalar.spelling}) -> i32 {\n${calls.join('\n')}\n  return 0\n}`
+    }),
   `pub fn main() -> i32 {
   let i00 = i32.negate(1)
   let i01 = i32.add(1, 2)

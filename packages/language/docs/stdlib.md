@@ -12,7 +12,7 @@ each signature and description below is the `///` comment on the declaration in
 $ pnpm --filter @silk-effect/compiler documentation:generate
 ```
 
-The library has 32 modules.
+The library has 33 modules.
 
 ## Modules
 
@@ -20,6 +20,7 @@ The library has 32 modules.
 | --- | --- | --- |
 | [`silk/bool`](#silk-bool) | `bool` | 3 |
 | [`silk/bytes`](#silk-bytes) | `Bytes` | 8 |
+| [`silk/char`](#silk-char) | `char` | 6 |
 | [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
 | [`silk/core`](#silk-core) | `Allocator` | 17 |
 | [`silk/effects`](#silk-effects) | `Effect` | 20 |
@@ -147,6 +148,59 @@ pub fn asMutSlice(self: &mut silk/bytes.Bytes) -> &mut [u8]
 ```
 
 Borrows the initialized octets as one exclusive lexical slice.
+
+
+## silk/char
+
+Import as `char` with `import silk.char`.
+
+### `equals`
+
+```silk
+pub fn equals(left: char, right: char) -> bool
+```
+
+Calls the concrete char equals primitive.
+
+### `notEquals`
+
+```silk
+pub fn notEquals(left: char, right: char) -> bool
+```
+
+Calls the concrete char notEquals primitive.
+
+### `lessThan`
+
+```silk
+pub fn lessThan(left: char, right: char) -> bool
+```
+
+Calls the concrete char lessThan primitive, which orders by Unicode scalar value.
+
+### `lessOrEqual`
+
+```silk
+pub fn lessOrEqual(left: char, right: char) -> bool
+```
+
+Calls the concrete char lessOrEqual primitive, which orders by Unicode scalar value.
+
+### `greaterThan`
+
+```silk
+pub fn greaterThan(left: char, right: char) -> bool
+```
+
+Calls the concrete char greaterThan primitive, which orders by Unicode scalar value.
+
+### `greaterOrEqual`
+
+```silk
+pub fn greaterOrEqual(left: char, right: char) -> bool
+```
+
+Calls the concrete char greaterOrEqual primitive, which orders by Unicode scalar value.
 
 
 ## silk/child_process
