@@ -284,6 +284,52 @@ pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
   }),
 )
 
+it.effect('keeps probing through the marks a removal leaves behind', () =>
+  Effect.gen(function* () {
+    // The classic failure of a linear probe: a removal that vacates its slot outright cuts the run
+    // that carried later keys past it, and they become unreachable while still being held. Six
+    // rounds of filling and emptying, with the keys shifted each round so a run has to cross the
+    // marks the last round left, and the map is asked for every key it should still hold.
+    const value = yield* evaluatedValue(
+      'hashed-collections/tombstones',
+      program(
+        mapImports,
+        `  let mut map = make<Word, i32>(HashKey.seed(31))
+  let mut round = 0
+  while round < 6 {
+    let mut key = 0
+    while key < 6 {
+      let placed = run insert<Word, i32>(&mut map, HashKey.word(i32.toU64(round * 6 + key)), round * 6 + key)
+        |> Effect.provideMut(&mut allocator)
+      drop placed
+      key = key + 1
+    }
+    // Every key of this round must be present while the previous rounds' marks are still there.
+    let mut check = 0
+    while check < 6 {
+      let found = Option.unwrapOr<i32>(get<Word, i32>(&map, HashKey.word(i32.toU64(round * 6 + check))), -1)
+      if found != round * 6 + check { return 1 }
+      check = check + 1
+    }
+    if length<Word, i32>(&map) != 6 { return 2 }
+    // Empty it again, leaving six fresh marks for the next round to probe across.
+    let mut gone = 0
+    while gone < 6 {
+      let taken = remove<Word, i32>(&mut map, HashKey.word(i32.toU64(round * 6 + gone)))
+      let removed = Option.unwrapOr<i32>(move taken, -1)
+      if removed != round * 6 + gone { return 3 }
+      gone = gone + 1
+    }
+    if length<Word, i32>(&map) != usize.ZERO { return 4 }
+    round = round + 1
+  }
+  return 42`,
+      ),
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
 const setImports = `import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_set {
   HashSet,
