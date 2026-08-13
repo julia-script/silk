@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Result from 'effect/Result'
 import * as FormatWorkflow from '../src/FormatWorkflow.js'
+import { denying } from './fileSystemFailures.js'
 
 const canonical = 'pub fn main() -> i32 {\n  return 42\n}\n'
 const compact = 'pub fn main() -> i32 { return 42 }'
@@ -176,11 +177,13 @@ it.effect('reports storage failures, continues in order, and gives exit class tw
     yield* makeProject(root, canonical)
     yield* writeFile(`${root}/src/A-Unreadable.silk`, compact)
     yield* writeFile(`${root}/src/Zeta.silk`, compact)
+    const canonicalRoot = yield* fileSystem.realPath(root)
 
-    const summary = yield* Effect.acquireUseRelease(
-      fileSystem.chmod(`${root}/src/A-Unreadable.silk`, 0o000),
-      () => FormatWorkflow.run({ workingDirectory: root }),
-      () => fileSystem.chmod(`${root}/src/A-Unreadable.silk`, 0o644),
+    const summary = yield* FormatWorkflow.run({ workingDirectory: root }).pipe(
+      Effect.provideService(
+        FileSystem.FileSystem,
+        denying(fileSystem, { readFile: [`${canonicalRoot}/src/A-Unreadable.silk`] }),
+      ),
     )
 
     assert.deepEqual(
@@ -197,11 +200,13 @@ it.effect('reports an atomic commit failure without replacing the original file'
     const fileSystem = yield* FileSystem.FileSystem
     const root = yield* fileSystem.makeTempDirectoryScoped()
     yield* makeProject(root, compact)
+    const canonicalRoot = yield* fileSystem.realPath(root)
 
-    const summary = yield* Effect.acquireUseRelease(
-      fileSystem.chmod(`${root}/src`, 0o555),
-      () => FormatWorkflow.run({ workingDirectory: root }),
-      () => fileSystem.chmod(`${root}/src`, 0o755),
+    const summary = yield* FormatWorkflow.run({ workingDirectory: root }).pipe(
+      Effect.provideService(
+        FileSystem.FileSystem,
+        denying(fileSystem, { rename: [`${canonicalRoot}/src/Main.silk`] }),
+      ),
     )
 
     assert.deepEqual(
