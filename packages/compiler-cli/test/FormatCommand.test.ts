@@ -5,6 +5,7 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Result from 'effect/Result'
 import { Command } from 'effect/unstable/cli'
 import * as Cli from '../src/Cli.js'
+import { denying } from './fileSystemFailures.js'
 
 const compact = 'pub fn main() -> i32 { return 42 }'
 const canonical = 'pub fn main() -> i32 {\n  return 42\n}\n'
@@ -100,18 +101,26 @@ it.effect('maps read and write failures to exit class two without corrupting sou
     const readRoot = yield* fileSystem.makeTempDirectoryScoped()
     yield* makeProject(readRoot, canonical)
     yield* fileSystem.writeFileString(`${readRoot}/src/A-Unreadable.silk`, compact)
-    const readFailure = yield* Effect.acquireUseRelease(
-      fileSystem.chmod(`${readRoot}/src/A-Unreadable.silk`, 0o000),
-      () => execute(['format', '--manifest-path', `${readRoot}/silk.toml`]),
-      () => fileSystem.chmod(`${readRoot}/src/A-Unreadable.silk`, 0o644),
+    const canonicalReadRoot = yield* fileSystem.realPath(readRoot)
+    const readFailure = yield* execute(['format', '--manifest-path', `${readRoot}/silk.toml`]).pipe(
+      Effect.provideService(
+        FileSystem.FileSystem,
+        denying(fileSystem, { readFile: [`${canonicalReadRoot}/src/A-Unreadable.silk`] }),
+      ),
     )
 
     const writeRoot = yield* fileSystem.makeTempDirectoryScoped()
     yield* makeProject(writeRoot)
-    const writeFailure = yield* Effect.acquireUseRelease(
-      fileSystem.chmod(`${writeRoot}/src`, 0o555),
-      () => execute(['format', '--manifest-path', `${writeRoot}/silk.toml`]),
-      () => fileSystem.chmod(`${writeRoot}/src`, 0o755),
+    const canonicalWriteRoot = yield* fileSystem.realPath(writeRoot)
+    const writeFailure = yield* execute([
+      'format',
+      '--manifest-path',
+      `${writeRoot}/silk.toml`,
+    ]).pipe(
+      Effect.provideService(
+        FileSystem.FileSystem,
+        denying(fileSystem, { rename: [`${canonicalWriteRoot}/src/Main.silk`] }),
+      ),
     )
 
     assert.strictEqual(status(readFailure), 2)
