@@ -10,6 +10,20 @@
     "namespace": "Bytes"
   },
   {
+    "module": "silk/child_process",
+    "path": "silk/child_process.silk",
+    "namespace": "ChildProcess",
+    "aliases": [
+      "Exited",
+      "ProcessFailure",
+      "ProcessOperation",
+      "ProcessOutcome",
+      "ProcessReason",
+      "ProcessRequest",
+      "Signaled"
+    ]
+  },
+  {
     "module": "silk/core",
     "path": "silk/core.silk",
     "namespace": "Allocator",
@@ -105,6 +119,11 @@
     "path": "silk/option.silk",
     "namespace": "Option",
     "aliases": ["None", "Some"]
+  },
+  {
+    "module": "silk/os_child_process",
+    "path": "silk/os_child_process.silk",
+    "namespace": "OsChildProcess"
   },
   {
     "module": "silk/os_filesystem",

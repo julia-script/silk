@@ -12,7 +12,7 @@ each signature and description below is the `///` comment on the declaration in
 $ pnpm --filter @silk-effect/compiler documentation:generate
 ```
 
-The library has 30 modules.
+The library has 32 modules.
 
 ## Modules
 
@@ -20,11 +20,12 @@ The library has 30 modules.
 | --- | --- | --- |
 | [`silk/bool`](#silk-bool) | `bool` | 3 |
 | [`silk/bytes`](#silk-bytes) | `Bytes` | 8 |
+| [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
 | [`silk/core`](#silk-core) | `Allocator` | 17 |
 | [`silk/effects`](#silk-effects) | `Effect` | 20 |
 | [`silk/f32`](#silk-f32) | `f32` | 35 |
 | [`silk/f64`](#silk-f64) | `f64` | 35 |
-| [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 74 |
+| [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 76 |
 | [`silk/i16`](#silk-i16) | `i16` | 55 |
 | [`silk/i32`](#silk-i32) | `i32` | 55 |
 | [`silk/i64`](#silk-i64) | `i64` | 55 |
@@ -35,6 +36,7 @@ The library has 30 modules.
 | [`silk/metrics`](#silk-metrics) | `AllocationMetrics` | 6 |
 | [`silk/numeric`](#silk-numeric) | `Integer` | 12 |
 | [`silk/option`](#silk-option) | `Option` | 5 |
+| [`silk/os_child_process`](#silk-os-child-process) | `OsChildProcess` | 9 |
 | [`silk/os_filesystem`](#silk-os-filesystem) | `OsFileSystem` | 35 |
 | [`silk/os_standard_input`](#silk-os-standard-input) | `OsStandardInput` | 6 |
 | [`silk/raw-buffer`](#silk-raw-buffer) | `RawBuffer` | 6 |
@@ -145,6 +147,372 @@ pub fn asMutSlice(self: &mut silk/bytes.Bytes) -> &mut [u8]
 ```
 
 Borrows the initialized octets as one exclusive lexical slice.
+
+
+## silk/child_process
+
+Import as `ChildProcess` with `import silk.child_process`.
+
+### `ProcessOperation`
+
+```silk
+pub struct ProcessOperation
+```
+
+The stage of one execution that failed.
+
+### `ProcessReason`
+
+```silk
+pub struct ProcessReason
+```
+
+A closed portable child-process recovery reason.
+
+### `ProcessFailure`
+
+```silk
+pub struct ProcessFailure
+```
+
+An allocation-free typed failure to start, to wait for, or to capture one child.
+
+A child that ran and exited nonzero is not a failure: that is `ProcessOutcome` data.
+
+### `spawnOperation`
+
+```silk
+pub fn spawnOperation() -> ProcessOperation
+```
+
+Selects the start stage, which covers building the child and reaching its first instruction.
+
+### `waitOperation`
+
+```silk
+pub fn waitOperation() -> ProcessOperation
+```
+
+Selects the wait stage, which covers observing how the child terminated.
+
+### `captureOperation`
+
+```silk
+pub fn captureOperation() -> ProcessOperation
+```
+
+Selects the capture stage, which covers owning the child's completed output.
+
+### `operationCode`
+
+```silk
+pub fn operationCode(operation: ProcessOperation) -> i32
+```
+
+Returns the stable stage code.
+
+### `notFound`
+
+```silk
+pub fn notFound() -> ProcessReason
+```
+
+Selects NotFound: no executable exists at the requested path.
+
+### `permissionDenied`
+
+```silk
+pub fn permissionDenied() -> ProcessReason
+```
+
+Selects PermissionDenied.
+
+### `invalidRequest`
+
+```silk
+pub fn invalidRequest() -> ProcessReason
+```
+
+Selects InvalidRequest: the request cannot be presented to the platform at all.
+
+### `noSpace`
+
+```silk
+pub fn noSpace() -> ProcessReason
+```
+
+Selects NoSpace, which includes exhausting the storage that holds captured output.
+
+### `unsupported`
+
+```silk
+pub fn unsupported() -> ProcessReason
+```
+
+Selects Unsupported.
+
+### `other`
+
+```silk
+pub fn other() -> ProcessReason
+```
+
+Selects Other.
+
+### `reasonCode`
+
+```silk
+pub fn reasonCode(reason: ProcessReason) -> i32
+```
+
+Returns the stable portable reason code.
+
+### `failure`
+
+```silk
+pub fn failure(operation: ProcessOperation, reason: ProcessReason) -> ProcessFailure
+```
+
+Constructs one typed process failure without a provider detail.
+
+### `failureWithCode`
+
+```silk
+pub fn failureWithCode(operation: ProcessOperation, reason: ProcessReason, code: i32) -> ProcessFailure
+```
+
+Constructs one typed process failure that retains a provider-defined numeric detail.
+
+### `providerCode`
+
+```silk
+pub fn providerCode(error: &silk/child_process.ProcessFailure) -> Option<i32>
+```
+
+Returns the provider-defined numeric detail when one was retained.
+
+### `ProcessRequest`
+
+```silk
+pub struct ProcessRequest
+```
+
+One complete execution request.
+
+Arguments and environment entries are exact platform bytes rather than checked text, so a value
+received from the platform can be handed to a child unchanged. Entries are retained in the order
+they were added, and the environment starts empty: a child sees no variable that this request
+did not name.
+
+### `request`
+
+```silk
+pub effect fn request(program: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemory ? &mut Allocator
+```
+
+Builds a request that runs `program` with no arguments, an empty environment, and the caller's
+own working directory.
+
+### `requestWithin`
+
+```silk
+pub effect fn requestWithin(program: &silk/filesystem.Path, directory: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemory ? &mut Allocator
+```
+
+Builds a request that additionally runs the child in `directory` rather than the caller's own
+working directory.
+
+### `addArgument`
+
+```silk
+pub effect fn addArgument(self: &mut silk/child_process.ProcessRequest, value: &[u8]) -> () ! OutOfMemory ? &mut Allocator
+```
+
+Appends one argument as exact bytes, after every argument already added.
+
+### `setVariable`
+
+```silk
+pub effect fn setVariable(self: &mut silk/child_process.ProcessRequest, name: &[u8], value: &[u8]) -> () ! OutOfMemory ? &mut Allocator
+```
+
+Appends one environment entry as the exact bytes `name`, `=`, then `value`.
+
+### `program`
+
+```silk
+pub fn program(self: &silk/child_process.ProcessRequest) -> &[u8]
+```
+
+Borrows the executable path as exact platform bytes.
+
+### `arguments`
+
+```silk
+pub fn arguments(self: &silk/child_process.ProcessRequest) -> &[u8]
+```
+
+Borrows the ordered arguments as one block of NUL-terminated entries.
+
+### `argumentCount`
+
+```silk
+pub fn argumentCount(self: &silk/child_process.ProcessRequest) -> usize
+```
+
+Returns the number of arguments added so far.
+
+### `environment`
+
+```silk
+pub fn environment(self: &silk/child_process.ProcessRequest) -> &[u8]
+```
+
+Borrows the exact environment as one block of NUL-terminated entries.
+
+### `environmentCount`
+
+```silk
+pub fn environmentCount(self: &silk/child_process.ProcessRequest) -> usize
+```
+
+Returns the number of environment entries added so far.
+
+### `workingDirectory`
+
+```silk
+pub fn workingDirectory(self: &silk/child_process.ProcessRequest) -> &[u8]
+```
+
+Borrows the requested working directory as exact platform bytes, empty when the child inherits
+the caller's own directory.
+
+### `hasWorkingDirectory`
+
+```silk
+pub fn hasWorkingDirectory(self: &silk/child_process.ProcessRequest) -> bool
+```
+
+Reports whether the request selects a working directory of its own.
+
+### `Exited`
+
+```silk
+pub struct Exited
+```
+
+A child that ran to completion and returned an exit code.
+
+| Field | Description |
+| --- | --- |
+| `pub code: i32` | The code the child returned. Any value, including a nonzero one, is ordinary data. |
+| `pub output: Bytes` | The complete captured standard output, owned by this outcome. |
+| `pub errors: Bytes` | The complete captured standard error, owned by this outcome. |
+
+### `Signaled`
+
+```silk
+pub struct Signaled
+```
+
+A child that terminated because a signal reached it rather than by returning a code.
+
+| Field | Description |
+| --- | --- |
+| `pub signal: i32` | The platform signal number that terminated the child. |
+| `pub output: Bytes` | The complete captured standard output, owned by this outcome. |
+| `pub errors: Bytes` | The complete captured standard error, owned by this outcome. |
+
+### `ProcessOutcome`
+
+```silk
+pub struct ProcessOutcome
+```
+
+One completed execution outcome, narrowed with `match`.
+
+An exit code and a terminating signal are distinct members rather than one integer, so a caller
+can never read a signal number as though it were an exit code.
+
+| Field | Description |
+| --- | --- |
+| `pub value: silk/child_process.Exited \| silk/child_process.Signaled` | The completed outcome. |
+
+### `ChildProcess`
+
+```silk
+pub service ChildProcess
+```
+
+Portable blocking child-process contract.
+
+One `execute` runs the request to completion with the child's standard input closed, and owns
+the complete captured output and errors when it returns. A nonzero exit code is outcome data; a
+failure to start, to wait, or to capture is `ProcessFailure`.
+
+### `exited`
+
+```silk
+pub fn exited(code: i32, output: Bytes, errors: Bytes) -> ProcessOutcome
+```
+
+Constructs the outcome of a child that returned `code`.
+
+### `signaled`
+
+```silk
+pub fn signaled(signal: i32, output: Bytes, errors: Bytes) -> ProcessOutcome
+```
+
+Constructs the outcome of a child that a signal terminated.
+
+### `isSignaled`
+
+```silk
+pub fn isSignaled(outcome: &silk/child_process.ProcessOutcome) -> bool
+```
+
+Reports whether a signal terminated the child.
+
+### `exitCode`
+
+```silk
+pub fn exitCode(outcome: &silk/child_process.ProcessOutcome) -> Option<i32>
+```
+
+Returns the exit code, or None when a signal terminated the child.
+
+### `terminatingSignal`
+
+```silk
+pub fn terminatingSignal(outcome: &silk/child_process.ProcessOutcome) -> Option<i32>
+```
+
+Returns the terminating signal number, or None when the child returned an exit code.
+
+### `outputBytes`
+
+```silk
+pub fn outputBytes(outcome: &silk/child_process.ProcessOutcome) -> &[u8]
+```
+
+Borrows the complete captured standard output.
+
+### `errorBytes`
+
+```silk
+pub fn errorBytes(outcome: &silk/child_process.ProcessOutcome) -> &[u8]
+```
+
+Borrows the complete captured standard error.
+
+### `submit`
+
+```silk
+pub effect fn submit(request: &silk/child_process.ProcessRequest) -> ProcessOutcome ! ProcessFailure | OutOfMemory ? &mut ChildProcess | &mut Allocator
+```
+
+Builds one service execute effect.
 
 
 ## silk/core
@@ -1254,6 +1622,20 @@ pub effect fn make(value: string) -> Path ! FileError | OutOfMemory ? &mut Alloc
 
 Constructs an owned normalized provider-absolute Path from semantic text.
 
+### `fromBytes`
+
+```silk
+pub effect fn fromBytes(values: &[u8]) -> Path ! FileError | OutOfMemory ? &mut Allocator
+```
+
+Constructs an owned normalized provider-absolute Path from exact platform bytes.
+
+Platform paths are byte sequences, and a caller that received one from the platform — a
+directory entry, an argument, an environment value — must be able to hand it back unchanged.
+The same normalization applies as for textual construction: the value is absolute, rejects NUL,
+and rejects `.`, `..`, empty components, and trailing separators. Well-formed text is not
+required, so a Path built this way may have no `string` view.
+
 ### `root`
 
 ```silk
@@ -1261,6 +1643,17 @@ pub effect fn root() -> Path ! OutOfMemory ? &mut Allocator
 ```
 
 Constructs the selected provider's root Path.
+
+### `rawBytes`
+
+```silk
+pub fn rawBytes(self: &silk/filesystem.Path) -> &[u8]
+```
+
+Borrows the complete normalized path as exact platform bytes.
+
+This is the lossless view. It round-trips a Path built from platform bytes even when those
+bytes are not well-formed text, which the `string` view cannot promise.
 
 ### `view`
 
@@ -3905,6 +4298,28 @@ pub fn some<T>(value: T) -> Option<T>
 ```
 
 Constructs a present optional value.
+
+
+## silk/os_child_process
+
+Import as `OsChildProcess` with `import silk.os_child_process`.
+
+### `OsChildProcess`
+
+```silk
+pub struct OsChildProcess
+```
+
+Native provider that runs one child through the platform process boundary. It owns no state; a
+completed execution's captured streams belong to the outcome it returns.
+
+### `make`
+
+```silk
+pub fn make() -> OsChildProcess
+```
+
+Constructs the process-backed child-process provider.
 
 
 ## silk/os_filesystem
