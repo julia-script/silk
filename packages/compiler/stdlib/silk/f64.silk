@@ -124,6 +124,118 @@ pub fn fromBits(value: u64) -> f64 {
   return Intrinsic.f64FromBits(value)
 }
 
+/// The one NaN encoding every f64 operation in this module reports, so a NaN result carries no
+/// payload that could differ between the evaluator, the Wasm backend, and the native backend.
+fn canonicalNaN() -> f64 {
+  return fromBits(9221120237041090560)
+}
+
+/// The square root of `value`, correctly rounded.
+///
+/// IEEE-754 requires the square root be correctly rounded, so the hardware instruction is the
+/// exact result rather than an approximation of it. This is why `sqrt` may lower to `llvm.sqrt`
+/// on the native backend and `f64.sqrt` on Wasm while `pow` and `log`, whose results are
+/// implementation-defined, may not. The evaluator reproduces the same bits by rounding an exact
+/// integer root.
+///
+/// That guarantee covers numeric results only. IEEE-754 leaves the *sign* of a NaN produced by an
+/// invalid operation unspecified, and the hosts disagree: an x86 square root of a negative operand
+/// yields `0xFFF8000000000000` while AArch64's default NaN yields `0x7FF8000000000000`. Both
+/// NaN-producing inputs are therefore screened here, before the primitive runs, so the primitive
+/// only ever sees the domain on which it is bit-exact.
+pub fn sqrt(value: f64) -> f64 {
+  if Intrinsic.f64IsNaN(value) { return canonicalNaN() }
+  // Negative zero compares equal to zero and so passes through to the primitive, which returns it
+  // unchanged as IEEE-754 requires.
+  if value < 0.0 { return canonicalNaN() }
+  return Intrinsic.f64Sqrt(value)
+}
+
+/// The magnitude of `value`, which clears the sign bit. A NaN input gives the canonical NaN.
+pub fn abs(value: f64) -> f64 {
+  if Intrinsic.f64IsNaN(value) { return canonicalNaN() }
+  return fromBits(u64.bitAnd(toBits(value), 9223372036854775807))
+}
+
+/// The magnitude of `magnitude` carrying the sign bit of `sign`. Requirement 10 outranks sign
+/// transfer here, so a NaN `magnitude` gives the canonical NaN rather than a signed NaN.
+pub fn copysign(magnitude: f64, sign: f64) -> f64 {
+  if Intrinsic.f64IsNaN(magnitude) { return canonicalNaN() }
+  let carried = u64.bitAnd(toBits(magnitude), 9223372036854775807)
+  let transferred = u64.bitAnd(toBits(sign), 9223372036854775808)
+  return fromBits(u64.bitOr(carried, transferred))
+}
+
+/// `value` rounded toward zero, which discards the fraction bits the exponent does not reach.
+/// The sign survives, so a value in `(-1.0, -0.0]` gives negative zero. A NaN input gives the
+/// canonical NaN, and either infinity is already integral and returns unchanged.
+pub fn trunc(value: f64) -> f64 {
+  if Intrinsic.f64IsNaN(value) { return canonicalNaN() }
+  let bits = toBits(value)
+  let biased = u64.bitAnd(u64.shiftRight(bits, 52), 2047)
+  // Below 1.0 nothing integral survives, so only the sign is kept.
+  if biased < 1023 { return fromBits(u64.bitAnd(bits, 9223372036854775808)) }
+  // At or past 2^52 every representable value is already an integer, infinities included.
+  if biased >= 1075 { return value }
+  let discarded = u64.subtract(1075, biased)
+  let kept = u64.bitNot(u64.shiftLeft(1, discarded) - 1)
+  return fromBits(u64.bitAnd(bits, kept))
+}
+
+/// The largest integral f64 no greater than `value`. A NaN input gives the canonical NaN.
+pub fn floor(value: f64) -> f64 {
+  if Intrinsic.f64IsNaN(value) { return canonicalNaN() }
+  let truncated = trunc(value)
+  // Only a negative non-integral value truncates upward, and it is always below 2^52, so the
+  // subtraction is exact.
+  if truncated > value { return truncated - 1.0 }
+  return truncated
+}
+
+/// The smallest integral f64 no less than `value`. A NaN input gives the canonical NaN.
+pub fn ceil(value: f64) -> f64 {
+  if Intrinsic.f64IsNaN(value) { return canonicalNaN() }
+  let truncated = trunc(value)
+  if truncated < value { return truncated + 1.0 }
+  return truncated
+}
+
+/// `value` rounded to the nearest integral f64, with a half rounding away from zero. That is the
+/// reading `round` carries in C and Rust; the ties-to-even form is a separate operation this
+/// module does not yet offer. A NaN input gives the canonical NaN.
+pub fn round(value: f64) -> f64 {
+  if Intrinsic.f64IsNaN(value) { return canonicalNaN() }
+  let truncated = trunc(value)
+  // Exact: below 2^52 the difference is representable, and at or past it the fraction is zero.
+  // An infinity leaves a NaN here, whose comparison is false, so the truncated infinity stands.
+  let fraction = value - truncated
+  if abs(fraction) < 0.5 { return truncated }
+  return truncated + copysign(1.0, value)
+}
+
+/// The lesser of two values, ordering negative zero below positive zero. Either operand being NaN
+/// gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `minimum`.
+pub fn min(left: f64, right: f64) -> f64 {
+  if Intrinsic.f64IsNaN(left) { return canonicalNaN() }
+  if Intrinsic.f64IsNaN(right) { return canonicalNaN() }
+  if left < right { return left }
+  if right < left { return right }
+  // The operands compare equal, so only a zero's sign is left to separate them.
+  if Intrinsic.f64IsSignNegative(left) { return left }
+  return right
+}
+
+/// The greater of two values, ordering positive zero above negative zero. Either operand being NaN
+/// gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `maximum`.
+pub fn max(left: f64, right: f64) -> f64 {
+  if Intrinsic.f64IsNaN(left) { return canonicalNaN() }
+  if Intrinsic.f64IsNaN(right) { return canonicalNaN() }
+  if left > right { return left }
+  if right > left { return right }
+  if Intrinsic.f64IsSignNegative(left) { return right }
+  return left
+}
+
 /// Calls the concrete f64 sin primitive.
 pub fn sin(value: f64) -> f64 {
   return Intrinsic.f64Sin(value)

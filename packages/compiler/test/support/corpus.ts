@@ -4,6 +4,7 @@
  * results against compiled output. Expected results were pinned against the fact-based
  * evaluator before the MIR retarget.
  */
+import { floatMathPrograms } from './floatMath.js'
 
 export interface CorpusProgram {
   readonly name: string
@@ -439,6 +440,13 @@ pub fn main() -> i32 {
     source: 'pub fn main(value: i32) -> i32 { return value }',
     expected: { _tag: 'UnavailableEntry', reason: 'ParameterizedEntry' },
   },
+  // The float math conformance programs join the corpus so the native differential compiles and
+  // runs each one, which is the third engine behind the evaluator and direct WebAssembly.
+  ...floatMathPrograms.map((program) => ({
+    name: program.name,
+    source: program.source,
+    expected: { _tag: 'Completes', result: 42 } as const,
+  })),
 ]
 
 /** Invalid generic programs that must stop before target layout and MIR. */

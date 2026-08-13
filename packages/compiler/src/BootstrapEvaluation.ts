@@ -564,6 +564,7 @@ const floatingUnary = (
   const bits = floatingBits(self)
   if (operation === 'Negate')
     return floatValue(self.type, self.bits ^ (1n << BigInt(bits.width - 1)))
+  if (operation === 'Sqrt') return floatValue(self.type, FloatingPoint.squareRoot(bits).bits)
   const result =
     operation === 'IsNaN'
       ? FloatingPoint.isNotANumber(bits)

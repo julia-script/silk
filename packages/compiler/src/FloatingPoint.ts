@@ -159,6 +159,66 @@ export const isSubnormal = (value: Bits): boolean => {
 export const isSignNegative = (value: Bits): boolean =>
   (value.bits & (1n << BigInt(value.width - 1))) !== 0n
 
+/** Floor of the exact square root, by Newton descent from an upper bound. */
+const integerSquareRoot = (value: bigint): bigint => {
+  if (value < 2n) return value
+  let guess = 1n << BigInt(Math.ceil(bitLength(value) / 2))
+  for (;;) {
+    const next = (guess + value / guess) >> 1n
+    if (next >= guess) return guess
+    guess = next
+  }
+}
+
+/**
+ * The correctly rounded IEEE-754 square root, computed on exact integers.
+ *
+ * IEEE-754 requires `sqrt` be correctly rounded, so this reproduces the bits that a conforming
+ * hardware instruction produces. It never consults the host `Math.sqrt`, whose ECMAScript
+ * definition is only implementation-approximated.
+ *
+ * A tie is unreachable here. Rounding the significand to `precision` bits compares the exact root
+ * of an integer `N` against `r + 1/2`, and `sqrt(N) = r + 1/2` would force `N = r^2 + r + 1/4`,
+ * which no integer satisfies. Nearest-even therefore collapses to the strict test `N > r^2 + r`.
+ */
+export const squareRoot = (value: Bits): Bits => {
+  const spec = specification(value.width)
+  const canonicalNaN = value.width === 32 ? 0x7fc00000n : 0x7ff8000000000000n
+  const exponentField =
+    (value.bits >> BigInt(spec.precision - 1)) & ((1n << BigInt(spec.exponentBits)) - 1n)
+  const fractionField = value.bits & ((1n << BigInt(spec.precision - 1)) - 1n)
+  const negative = isSignNegative(value)
+  if (exponentField === (1n << BigInt(spec.exponentBits)) - 1n)
+    return fractionField !== 0n || negative
+      ? Object.freeze({ width: value.width, bits: canonicalNaN })
+      : value
+  // IEEE-754 keeps the sign of a zero root, so -0 squares back to -0.
+  if (exponentField === 0n && fractionField === 0n) return value
+  if (negative) return Object.freeze({ width: value.width, bits: canonicalNaN })
+
+  const significand =
+    exponentField === 0n ? fractionField : fractionField | (1n << BigInt(spec.precision - 1))
+  const exponent =
+    (exponentField === 0n ? 1 : Number(exponentField)) - spec.bias - (spec.precision - 1)
+  const magnitude = bitLength(significand) - 1 + exponent
+  // Floor division survives a negative magnitude, where the truncating `/` would not.
+  const rootExponent = Math.floor(magnitude / 2)
+  // A subnormal input still roots into the normal range, so the result never needs gradual encoding.
+  const shift = exponent + 2 * (spec.precision - 1 - rootExponent)
+  const scaled = significand << BigInt(shift)
+  const floorRoot = integerSquareRoot(scaled)
+  const rounded = scaled > floorRoot * floorRoot + floorRoot ? floorRoot + 1n : floorRoot
+  const carried = rounded === 1n << BigInt(spec.precision)
+  const finalRoot = carried ? 1n << BigInt(spec.precision - 1) : rounded
+  const finalExponent = BigInt((carried ? rootExponent + 1 : rootExponent) + spec.bias)
+  return Object.freeze({
+    width: value.width,
+    bits:
+      (finalExponent << BigInt(spec.precision - 1)) |
+      (finalRoot & ((1n << BigInt(spec.precision - 1)) - 1n)),
+  })
+}
+
 /** IEEE totalOrder key: negatives reverse their payload ordering, positives set the sign key. */
 export const totalOrderKey = (value: Bits): bigint => {
   const mask = (1n << BigInt(value.width)) - 1n

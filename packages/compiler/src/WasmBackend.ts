@@ -3830,6 +3830,9 @@ const emitOperation = (
       const prefix = source.spelling
       if (operation.operation === 'Negate')
         return [Instr.localGet(input), Instr.op(`${prefix}.neg`), Instr.localSet(destination)]
+      // IEEE-754 mandates a correctly rounded square root, so the native opcode is bit-exact.
+      if (operation.operation === 'Sqrt')
+        return [Instr.localGet(input), Instr.op(`${prefix}.sqrt`), Instr.localSet(destination)]
       if (operation.operation === 'IsSignNegative') {
         return prefix === 'f32'
           ? [
