@@ -134,6 +134,10 @@
     "./Value": {
       "types": "./dist/Value.d.ts",
       "import": "./dist/Value.js"
+    },
+    "./Verify": {
+      "types": "./dist/Verify.d.ts",
+      "import": "./dist/Verify.js"
     }
   },
   "scripts": {

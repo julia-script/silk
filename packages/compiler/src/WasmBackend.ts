@@ -8,6 +8,7 @@ import * as Import from '@silk-effect/wasm/Import'
 import * as Instr from '@silk-effect/wasm/Instr'
 import * as Memory from '@silk-effect/wasm/Memory'
 import * as WasmType from '@silk-effect/wasm/Type'
+import * as Validate from '@silk-effect/wasm/Validate'
 import * as ValType from '@silk-effect/wasm/ValType'
 import * as WatText from '@silk-effect/wasm/WatText'
 import * as Effect from 'effect/Effect'
@@ -4867,12 +4868,49 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
         entry.fn.regions.length === 0
           ? [Instr.op('unreachable')]
           : emitBody(entry.fn, layout, program.layout, resolve, memory)
+      // Body validation happens here, inside the wasm builder, and its failure names only the
+      // operation. Naming the function turns "expected i64, found i32" into a report that points
+      // at the one body that produced it.
       yield* FuncActor.define(builder, entry.handle, {
         locals: entry.fn.regions.length === 0 ? [] : layout.declared,
         body,
-      })
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new Backend.BackendError({
+              operation: 'Backend.emit',
+              backend: 'WebAssembly',
+              message: `WebAssembly emitted an invalid body for ${program.module} (1 violation(s)):\n${Backend.formatModuleViolations(
+                [{ function: entry.symbol, message: cause.message, detail: [] }],
+              )}`,
+              reason: {
+                _tag: 'InvalidModule',
+                violations: [
+                  Object.freeze({
+                    function: entry.symbol,
+                    message: cause.message,
+                    detail: Object.freeze([]),
+                  }),
+                ],
+              },
+            }),
+        ),
+      )
       // Every function is exported so the artifact is directly instantiable for inspection.
       yield* ExportActor.func(builder, entry.symbol, entry.handle)
+    }
+
+    const bitcode = yield* Binary.encode(builder)
+    // The host validates what was just encoded, so a module that could not be instantiated fails
+    // at the emission that produced it rather than wherever it is finally loaded.
+    const violations = yield* Validate.validate(bitcode)
+    if (violations.length > 0) {
+      return yield* new Backend.BackendError({
+        operation: 'Backend.emit',
+        backend: 'WebAssembly',
+        message: `WebAssembly emitted an invalid module for ${program.module} (${violations.length} violation(s)):\n${Backend.formatModuleViolations(violations)}`,
+        reason: { _tag: 'InvalidModule', violations },
+      })
     }
 
     return {
@@ -4884,7 +4922,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
         }),
       ),
       ir: yield* WatText.render(builder),
-      bitcode: yield* Binary.encode(builder),
+      bitcode,
     }
   })
 
