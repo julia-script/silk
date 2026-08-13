@@ -158,6 +158,43 @@ const renderTypedConstant = (state: BuilderState.Snapshot, index: number): strin
   return `${renderType(state, description.type)} ${renderConstant(state, index)}`
 }
 
+/**
+ * Spells the canonical zero of a type.
+ *
+ * `Constant.nullValue`, `Constant.none`, and `Constant.zero` all encode to the same bitcode record,
+ * so the textual spelling has to come from the type rather than from the constructor that was used:
+ * `null` is only accepted for pointers, `none` only for tokens, and integers and floats reject
+ * `zeroinitializer`.
+ *
+ * @internal
+ */
+const zeroSpelling = (state: BuilderState.Snapshot, type: number): string => {
+  const description = typeAt(state, type)
+  if (description._tag === 'Pointer') return 'null'
+  if (description._tag === 'Integer') return '0'
+  if (description._tag === 'Simple') {
+    switch (description.tag) {
+      case 'Half':
+      case 'BFloat':
+      case 'Float':
+      case 'Double':
+        return '0.0'
+      // The extended formats reject decimal literals outright and are only spelled in hexadecimal.
+      case 'X86Fp80':
+        return `0xK${'0'.repeat(20)}`
+      case 'Fp128':
+        return `0xL${'0'.repeat(32)}`
+      case 'PpcFp128':
+        return `0xM${'0'.repeat(32)}`
+      case 'Token':
+        return 'none'
+      default:
+        return 'zeroinitializer'
+    }
+  }
+  return 'zeroinitializer'
+}
+
 /** @internal */
 const renderConstant = (state: BuilderState.Snapshot, index: number): string => {
   const description = constantAt(state, index)
@@ -176,7 +213,9 @@ const renderConstant = (state: BuilderState.Snapshot, index: number): string => 
     case 'Float':
       return floatHex(description)
     case 'Special':
-      return description.kind
+      return description.kind === 'undef' || description.kind === 'poison'
+        ? description.kind
+        : zeroSpelling(state, description.type)
     case 'String':
       return `c${quoted(description.bytes)}`
     case 'Aggregate': {
@@ -401,9 +440,11 @@ const renderMetadataNode = (
     case 'Local':
       return `!{!${quoted(node.label)}}`
     case 'File':
+      // Both fields are required by the textual parser; bitcode stores an absent operand as a
+      // null string, which reads back as the empty string.
       return `!DIFile(${metadataFields([
-        ['filename', string(node.filename)],
-        ['directory', string(node.directory)],
+        ['filename', string(node.filename) ?? '""'],
+        ['directory', string(node.directory) ?? '""'],
       ])})`
     case 'CompileUnit':
       return `!DICompileUnit(${metadataFields([
@@ -619,31 +660,78 @@ const functionSuffix = (description: GlobalDescription.GlobalDescription): strin
   return values.length === 0 ? '' : ` ${values.join(' ')}`
 }
 
+interface LocalNames {
+  readonly values: ReadonlyMap<number, string>
+  readonly blocks: ReadonlyMap<number, string>
+}
+
+/** @internal */
+const localNameCache = new WeakMap<FunctionBodyDescription.Snapshot, LocalNames>()
+
+/**
+ * Assigns every local a name that is unique within its function.
+ *
+ * **Details**
+ *
+ * Values and blocks share one symbol table in LLVM, so a block label collides with an instruction
+ * result of the same name just as two instruction results do. Requested names are kept whenever
+ * they are still free and otherwise disambiguated with a `.N` suffix, in value-then-block index
+ * order so the mapping is a pure function of the snapshot. Resolved forward references are skipped:
+ * they render as the value they resolve to and never define a name of their own.
+ *
+ * @internal
+ */
+const computeLocalNames = (body: FunctionBodyDescription.Snapshot): LocalNames => {
+  const used = new Set<string>()
+  const assign = (name: ByteString.ByteString, fallback: string): string => {
+    const base = ByteString.isEmpty(name) ? ByteString.fromString(fallback) : name
+    let rendered = identifier('%', base)
+    let suffix = 1
+    while (used.has(rendered)) {
+      rendered = identifier('%', ByteString.concat([base, ByteString.fromString(`.${suffix}`)]))
+      suffix += 1
+    }
+    used.add(rendered)
+    return rendered
+  }
+  const values = new Map<number, string>()
+  body.values.forEach((value, index) => {
+    if (value.source._tag === 'Forward' && value.source.resolved !== undefined) return
+    values.set(index, assign(value.name, `v${index}`))
+  })
+  const blocks = new Map<number, string>()
+  body.blocks.forEach((block, index) => {
+    blocks.set(index, assign(block.name, `bb${index}`))
+  })
+  return { values, blocks }
+}
+
+/** @internal */
+const localNames = (body: FunctionBodyDescription.Snapshot): LocalNames => {
+  const cached = localNameCache.get(body)
+  if (cached !== undefined) return cached
+  const computed = computeLocalNames(body)
+  localNameCache.set(body, computed)
+  return computed
+}
+
 /** @internal */
 const localIdentifier = (body: FunctionBodyDescription.Snapshot, index: number): string => {
-  const name = body.values[index]?.name
-  return identifier(
-    '%',
-    name === undefined || ByteString.isEmpty(name) ? ByteString.fromString(`v${index}`) : name,
-  )
+  const name = localNames(body).values.get(index)
+  if (name === undefined) throw new Error(`missing value ${index}`)
+  return name
 }
 
 /** @internal */
 const blockIdentifier = (body: FunctionBodyDescription.Snapshot, index: number): string => {
-  const name = body.blocks[index]?.name
-  return identifier(
-    '%',
-    name === undefined || ByteString.isEmpty(name) ? ByteString.fromString(`bb${index}`) : name,
-  )
+  const name = localNames(body).blocks.get(index)
+  if (name === undefined) throw new Error(`missing block ${index}`)
+  return name
 }
 
 /** @internal */
-const blockLabel = (body: FunctionBodyDescription.Snapshot, index: number): string => {
-  const name = body.blocks[index]?.name
-  const value =
-    name === undefined || ByteString.isEmpty(name) ? ByteString.fromString(`bb${index}`) : name
-  return identifier('%', value).slice(1)
-}
+const blockLabel = (body: FunctionBodyDescription.Snapshot, index: number): string =>
+  blockIdentifier(body, index).slice(1)
 
 /** @internal */
 const resolvedOperand = (
