@@ -482,6 +482,7 @@ export const realize = (
     Instances.violationDiagnostics(instances),
     Instances.copyDropViolations(instances, self.index),
     Instances.requirementBindingViolations(instances, self.index),
+    Instances.unlowerableWitnessViolations(instances, self.index),
   )
   const specializationError =
     specializationInvalid || Diagnostic.hasGenericSpecializationErrors(baseDiagnostics)
@@ -588,6 +589,7 @@ export const prepare = (
     Instances.violationDiagnostics(discovery),
     Instances.copyDropViolations(discovery, self.index),
     Instances.requirementBindingViolations(discovery, self.index),
+    Instances.unlowerableWitnessViolations(discovery, self.index),
   )
   if (Diagnostic.hasErrors(diagnostics))
     return Object.freeze({

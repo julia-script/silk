@@ -219,6 +219,59 @@ export const requirementBindingViolations = (
     ),
   )
 
+/**
+ * Rejects reachable bound operation calls whose specialization selects no witness that lowers.
+ *
+ * A bound operation names its answer twice over: the conformance says which witness answers it, and
+ * the witness kind says how — a sealed intrinsic, or a function of the provider's own actor. Both
+ * are lowered, so a conformance that selects neither leaves the call with nothing to run. Lowering
+ * has no diagnostic channel and would drop the call, leaving the specialized instance to fail MIR
+ * validation with no user-visible cause, so the check runs here, where the substitution is already
+ * known and diagnostics are already reported.
+ *
+ * Every witness today's conformance checker admits is one of the two kinds, so this reports nothing
+ * for source the frontend accepts. That agreement is the invariant worth pinning: it is what broke
+ * when witness admissibility widened and lowering was not taught to look, and a call that passes
+ * analysis and produces no code is a reported error rather than a silent miscompile.
+ */
+export const unlowerableWitnessViolations = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<Diagnostic.Diagnostic> =>
+  Object.freeze(
+    self.instances.flatMap((instance) =>
+      instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .flatMap((expression) => {
+          if (expression._tag !== 'BoundOperationCall') return []
+          const capability = Type.substitute(expression.capability, instance.substitution)
+          const provider = Type.substitute(expression.provider, instance.substitution)
+          if (!Type.isNominal(capability)) return []
+          const intrinsic = DeclarationIndex.interfaceOperationIntrinsic(
+            index,
+            provider,
+            capability,
+            expression.operation,
+          )
+          const witness = DeclarationIndex.interfaceWitnessImplementation(
+            index,
+            provider,
+            capability,
+            expression.operation,
+          )
+          if (intrinsic?.rule._tag === 'BuiltinRule' || witness !== undefined) return []
+          return [
+            Diagnostic.unlowerableBoundWitness(
+              `${capability.name}.${expression.operation}`,
+              Type.encode(provider),
+              expression.span,
+            ),
+          ]
+        }),
+    ),
+  )
+
 /** Produces semantic diagnostics for every finite-discovery violation. */
 export const violationDiagnostics = (self: Discovery): ReadonlyArray<Diagnostic.Diagnostic> =>
   Object.freeze(

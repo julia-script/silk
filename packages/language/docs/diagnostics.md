@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 96 |
+| `SEM` | Semantic | 97 |
 | `OWN` | Ownership | 12 |
 | `LAY` | Layout | 1 |
 
-There are 124 codes in total.
+There are 125 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -152,6 +152,7 @@ There are 124 codes in total.
 | `SEM0095` | Stable code for a float literal spelling no floating-point value can represent. | `Invalid float literal: <spelling>` |
 | `SEM0096` | Stable code for an effect site or a move inside the conditional right operand of `&&` or `\|\|`. | `The right operand of <operator> must be pure, found <detail>` |
 | `SEM0097` | Stable code for a bound operation call whose receiver names more than one bounded parameter. | `<spelling> is ambiguous across bounded type parameters <join>` |
+| `SEM0101` | Stable code for a bound operation whose selected witness has no lowering. | `<spelling> has no witness that can be lowered for <provider>` |
 
 ## Ownership (`OWN`)
 

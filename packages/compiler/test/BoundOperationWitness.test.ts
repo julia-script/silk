@@ -6,6 +6,7 @@ import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Driver from '../src/Driver.js'
+import * as Instances from '../src/Instances.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 
@@ -234,5 +235,91 @@ pub fn main() -> i32 {
 }`,
     )
     assert.strictEqual(value, 42)
+  }),
+)
+
+/**
+ * The second half of #155, which outlives the lowering fix: a call that passes analysis and lowers
+ * to nothing is a silent miscompile, because lowering answers an unlowerable call by dropping it
+ * and the specialized instance then fails MIR validation with no diagnostic naming a cause.
+ *
+ * The conformance checker admits exactly the two witness kinds lowering knows, so no source the
+ * frontend accepts reaches the state today — that agreement is the invariant, and it is precisely
+ * what broke when witness admissibility widened in #142 while lowering kept reading only intrinsics.
+ * The check is therefore driven against an index in which the named witness is absent, which is the
+ * shape any future disagreement takes.
+ */
+const module = 'bound-operation-witness/unlowerable'
+
+const witnessed = `interface Keyed<T> {
+  fn digest(left: T, right: T) -> u64
+}
+
+struct Cell { weight: i32 }
+
+fn cellDigest(left: &Cell, right: &Cell) -> u64 { return 7 }
+
+impl Keyed<Cell> for Cell { digest: Cell.cellDigest }
+
+fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(left, right) }
+
+pub fn main() -> i32 {
+  let out = digestOf<Cell>(Cell { weight: 1 }, Cell { weight: 2 })
+  if out == 7 { return 42 }
+  return 1
+}`
+
+it.effect('reports a bound operation whose selected witness cannot be lowered', () =>
+  Effect.gen(function* () {
+    const reachable = yield* analyzed(module, witnessed)
+    assert.deepEqual(messages(reachable), [])
+    // The same program with the witness function absent: the conformance still names it, so the
+    // call still checks, and the index has nothing to lower the call to.
+    const absent = yield* analyzed(module, witnessed.replace('fn cellDigest', 'fn cellDigested'))
+    const violations = Instances.unlowerableWitnessViolations(
+      Analysis.instancesOf(reachable),
+      Analysis.declarationIndex(absent),
+    )
+    assert.deepEqual(
+      violations.map((violation) => `${violation.code}: ${violation.message}`),
+      [`SEM0101: Keyed.digest has no witness that can be lowered for ${module}.Cell`],
+    )
+    // The diagnostic points at the call the specialization cannot run, not at the conformance.
+    assert.deepEqual(
+      violations.map((violation) =>
+        witnessed.slice(violation.span.start, violation.span.end).trim(),
+      ),
+      ['Keyed.digest(left, right)'],
+    )
+  }),
+)
+
+it.effect('reports nothing for either witness kind a conformance may name', () =>
+  Effect.gen(function* () {
+    // The check must not fire on source that lowers: a source witness, an intrinsic witness, and
+    // the operator spelling of both.
+    const sourceWitness = yield* analyzed(module, witnessed)
+    const intrinsicWitness = yield* analyzed(
+      'bound-operation-witness/intrinsic-unlowerable',
+      `interface Keyed<T> {
+  fn digest(left: T, right: T) -> T
+}
+
+impl Keyed<i32> for i32 { digest: Intrinsic.i32WrappingAdd }
+
+fn digestOf<T: Keyed>(left: T, right: T) -> T { return Keyed.digest(left, right) }
+
+pub fn main() -> i32 { return digestOf<i32>(20, 22) }`,
+    )
+    for (const snapshot of [sourceWitness, intrinsicWitness]) {
+      assert.deepEqual(messages(snapshot), [])
+      assert.deepEqual(
+        Instances.unlowerableWitnessViolations(
+          Analysis.instancesOf(snapshot),
+          Analysis.declarationIndex(snapshot),
+        ),
+        [],
+      )
+    }
   }),
 )
