@@ -117,6 +117,32 @@ identities merely because their public callable signatures match.
 - **WHEN** a generic function promises to call its callback repeatedly but receives a `once fn`
 - **THEN** its callable contract rejects the argument before lowering
 
+#### Scenario: Call through a function-typed parameter of an ordinary function
+
+- **WHEN** a non-effect `fn` declares a `once fn(i32) -> i32` parameter and calls it, and `main`
+  passes a named function
+- **THEN** the call lowers and the evaluator, LLVM, and Wasm agree on its result
+
+#### Scenario: Call through a function-typed parameter of a generic function
+
+- **WHEN** `fn apply<A, B>(transform: once fn(A) -> B, value: A) -> B` calls `transform`
+- **THEN** the callable's hidden identity accompanies the explicit type arguments in the target's
+  instance key, and the call lowers for named functions and leading-argument sections alike
+
+### Requirement: Callable arguments monomorphize their target
+
+A call passing a callable value SHALL specialize its target on that callable's hidden concrete
+identity, exactly as a call passing an Effect value does. Callable and Effect values are both
+compiler-private and have no target layout, so a target reached only through its explicit type
+arguments would carry a parameter no backend can represent. Discovery SHALL therefore route such a
+call off the finite-specialization path in both ordinary and effect-involving positions.
+
+#### Scenario: Distinguish two callables behind one signature
+
+- **WHEN** one function taking a `once fn(i32) -> i32` is called with two different named functions
+- **THEN** each call reaches its own specialized instance naming its target statically, and neither
+  instance drops the callable parameter from its lowered contract
+
 ### Requirement: Floating actor operations are callable values
 
 `f32` and `f64` actor operations SHALL support ordinary named references and leading-argument sections while preserving width and operation identity.
