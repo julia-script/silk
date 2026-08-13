@@ -102,11 +102,7 @@ it.effect('refuses an input that is missing, malformed, or absent altogether', (
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
-it.effect(
-  'doctests the compiler-shipped standard library through the command',
-  () =>
-    Effect.gen(function* () {
-      assert.strictEqual(yield* Cli.run({ stdlib: true }), 0)
-    }).pipe(Effect.provide(NodeServices.layer)),
-  240_000,
-)
+// `--stdlib` is deliberately not exercised here. It would build the whole standard library's
+// documentation a second time in a second worker — minutes of CPU that `Stdlib.test.ts` already
+// spends on the same value — to cover a three-line branch whose two halves, `Stdlib.documentation`
+// and `Stdlib.sources`, that file covers directly.
