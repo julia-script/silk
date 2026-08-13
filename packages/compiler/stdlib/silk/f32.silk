@@ -1,3 +1,24 @@
+/// The largest finite f32.
+pub const MAX: f32 = 3.4028235e38
+
+/// The smallest finite f32, which is the negation of MAX.
+pub const MIN: f32 = -3.4028235e38
+
+/// The distance from 1.0 to the next larger f32.
+pub const EPSILON: f32 = 1.1920929e-7
+
+/// Positive infinity. A constant initializer must be one literal, and no literal spells infinity
+/// directly, so this spelling overflows f32 on purpose: the decimal conversion rounds an
+/// overflowing magnitude to the infinity bit pattern. The value therefore depends on that rounding
+/// behavior, and a test pins the exact bits 0x7F800000 so a change to it cannot pass silently.
+pub const INFINITY: f32 = 1e999
+
+/// The ratio of a circle's circumference to its diameter, rounded to the nearest f32.
+pub const PI: f32 = 3.1415927
+
+/// Euler's number, the base of the natural logarithm, rounded to the nearest f32.
+pub const E: f32 = 2.7182817
+
 /// Calls the concrete f32 negate primitive.
 pub fn negate(value: f32) -> f32 {
   return Intrinsic.f32Negate(value)
