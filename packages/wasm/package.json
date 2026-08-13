@@ -98,6 +98,10 @@
       "types": "./dist/ValType.d.ts",
       "import": "./dist/ValType.js"
     },
+    "./Validate": {
+      "types": "./dist/Validate.d.ts",
+      "import": "./dist/Validate.js"
+    },
     "./WasmError": {
       "types": "./dist/WasmError.d.ts",
       "import": "./dist/WasmError.js"

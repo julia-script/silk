@@ -13,6 +13,7 @@ import * as LlvmMetadata from '@silk-effect/llvm/Metadata'
 import * as LlvmType from '@silk-effect/llvm/Type'
 import * as Value from '@silk-effect/llvm/Value'
 import * as Variable from '@silk-effect/llvm/Variable'
+import * as Verify from '@silk-effect/llvm/Verify'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from './DeclarationIndex.js'
@@ -172,6 +173,39 @@ export interface WebAssemblyModuleArtifact extends ArtifactBase {
 /** The closed family of backend program artifacts. */
 export type Artifact = LlvmBitcodeArtifact | WebAssemblyModuleArtifact
 
+/**
+ * One violation found in a module the backend just emitted, naming the function it is in.
+ *
+ * Both backends verify their own output before it leaves `emit`: invalid LLVM IR reaches Clang as
+ * a crash in an arbitrary pass — Ubuntu's Clang runs no verifier on `-x ir` input — and an invalid
+ * wasm module fails at instantiation, far from the code that produced it.
+ */
+export interface ModuleViolation {
+  /** The offending function's backend-level name. */
+  readonly function: string
+  /** What the verifier objected to. */
+  readonly message: string
+  /** Indented lines naming the specific values, blocks, and instructions involved. */
+  readonly detail: ReadonlyArray<string>
+}
+
+/**
+ * Renders module violations for a failure message, keeping the first `limit` in full so the
+ * offending function and the violation are both visible without a rerun.
+ */
+export const formatModuleViolations = (
+  violations: ReadonlyArray<ModuleViolation>,
+  limit = 5,
+): string => {
+  const shown = violations
+    .slice(0, limit)
+    .map((violation) =>
+      [`${violation.message} (in ${violation.function})`, ...violation.detail].join('\n'),
+    )
+  const remaining = violations.length - shown.length
+  return [...shown, ...(remaining > 0 ? [`... and ${remaining} more violation(s)`] : [])].join('\n')
+}
+
 /** An expected failure at the backend boundary. */
 export class BackendError extends Data.TaggedError('BackendError')<{
   readonly operation: 'Backend.emit'
@@ -179,6 +213,7 @@ export class BackendError extends Data.TaggedError('BackendError')<{
   readonly message: string
   readonly reason:
     | { readonly _tag: 'InvalidMir'; readonly violations: ReadonlyArray<Mir.Violation> }
+    | { readonly _tag: 'InvalidModule'; readonly violations: ReadonlyArray<ModuleViolation> }
     | { readonly _tag: 'UnsupportedMir'; readonly detail: string }
     | { readonly _tag: 'UnsupportedTarget'; readonly target: Target.Id }
     | {
@@ -6989,6 +7024,18 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           }
         }),
       )
+    }
+
+    // The module is verified before it is encoded: what reaches Clang has already been checked
+    // for the SSA invariants Clang itself will not check on `-x ir` input.
+    const violations = yield* Verify.verify(builder)
+    if (violations.length > 0) {
+      return yield* new BackendError({
+        operation: 'Backend.emit',
+        backend: 'LLVM',
+        message: `LLVM emitted an invalid module for ${program.module} (${violations.length} violation(s)):\n${formatModuleViolations(violations)}`,
+        reason: { _tag: 'InvalidModule', violations },
+      })
     }
 
     return {
