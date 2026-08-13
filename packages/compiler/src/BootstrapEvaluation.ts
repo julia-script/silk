@@ -399,6 +399,8 @@ export interface AllocationTraceEvent {
     | 'SlotTake'
     | 'SlotCopy'
     | 'RawBufferRead'
+    | 'RawBufferCopy'
+    | 'RawBufferFill'
     | 'SlotDrop'
     | 'AllocationRelease'
   readonly function: DeclarationIndex.CanonicalId
@@ -3170,6 +3172,183 @@ function* executeFunction(
                 ticket: buffer.ticket,
                 index: index.value,
                 element: operation.element,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'RawBufferCopy': {
+            const buffer = referenced(operation.buffer).value
+            const offset = readUsize(operation.offset).value
+            const length = readUsize(operation.length).value
+            const source = read(operation.source).value
+            if (
+              buffer._tag !== 'RawBufferValue' ||
+              (source._tag !== 'SliceValue' && source._tag !== 'StaticViewValue')
+            ) {
+              throw new RangeError('MIR verifier allowed invalid RawBuffer.copy operands')
+            }
+            if (!Type.equals(buffer.element, operation.element)) {
+              throw new RangeError('MIR verifier allowed mismatched RawBuffer copy provenance')
+            }
+            if (
+              length > BigInt(source.length) ||
+              offset > buffer.count ||
+              length > buffer.count - offset ||
+              offset > BigInt(Number.MAX_SAFE_INTEGER) ||
+              length > BigInt(Number.MAX_SAFE_INTEGER)
+            ) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'RawBuffer copy range is out of bounds',
+                span: operation.provenance.span,
+              })
+            }
+            const destination = state.allocations.get(buffer.ticket)
+            if (destination === undefined || !destination.active) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'RawBuffer.copy requires live destination storage',
+                span: operation.provenance.span,
+              })
+            }
+            const count = Number(length)
+            // A source range is raw storage, a borrowed array cell, or immutable static data.
+            const sourceStorage =
+              source._tag === 'StaticViewValue' || source.ticket === undefined
+                ? undefined
+                : state.allocations.get(source.ticket)
+            const backing =
+              source._tag === 'SliceValue' && source.ticket === undefined
+                ? cell(source).value
+                : undefined
+            if (
+              source._tag === 'SliceValue' &&
+              source.ticket !== undefined &&
+              (sourceStorage === undefined || !sourceStorage.active)
+            ) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'RawBuffer.copy requires live initialized source storage',
+                span: operation.provenance.span,
+              })
+            }
+            if (backing !== undefined && backing._tag !== 'ArrayValue') {
+              throw new RangeError('MIR RawBuffer.copy source slice lost its array')
+            }
+            // Reading the whole range before any write makes an overlapping source and
+            // destination behave as if the elements travelled through an intermediate buffer.
+            const moved: Array<Value> = []
+            for (let index = 0; index < count; index += 1) {
+              const selected =
+                source._tag === 'StaticViewValue'
+                  ? (() => {
+                      const byte = source.bytes.at(index)
+                      return byte === undefined ? undefined : scalarIntegerValue('u8', BigInt(byte))
+                    })()
+                  : sourceStorage === undefined
+                    ? backing?._tag === 'ArrayValue'
+                      ? backing.elements.at(source.base + index)
+                      : undefined
+                    : sourceStorage.values.get(String(source.base + index))
+              if (selected === undefined) {
+                return blockedStep({
+                  _tag: 'Trap',
+                  function: fn.id,
+                  reason: 'RawBuffer.copy requires live initialized source storage',
+                  span: operation.provenance.span,
+                })
+              }
+              moved.push(selected)
+            }
+            // A move of a Copy element leaves the source readable, which is what the byte-level
+            // backends do for every element type. Only raw storage tracks per-slot initialization,
+            // so only a raw-storage-backed source range gives its slots up.
+            if (
+              !operation.retainsSource &&
+              sourceStorage !== undefined &&
+              source._tag === 'SliceValue'
+            ) {
+              for (let index = 0; index < count; index += 1) {
+                sourceStorage.values.delete(String(source.base + index))
+              }
+            }
+            for (const [index, selected] of moved.entries()) {
+              destination.values.set(String(offset + BigInt(index)), selected)
+            }
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'AggregateValue',
+                type: Type.unit,
+                fields: Object.freeze([]),
+              }),
+              fromCall: false,
+            })
+            trace.push(
+              Object.freeze({
+                _tag: 'RawBufferCopy',
+                function: fn.id,
+                ticket: buffer.ticket,
+                index: offset,
+                count: length,
+                element: operation.element,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'RawBufferFill': {
+            const buffer = referenced(operation.buffer).value
+            const offset = readUsize(operation.offset).value
+            const length = readUsize(operation.length).value
+            const value = readInteger(operation.value)
+            if (buffer._tag !== 'RawBufferValue' || value._tag !== 'ScalarIntegerValue') {
+              throw new RangeError('MIR verifier allowed invalid RawBuffer.fill operands')
+            }
+            if (
+              offset > buffer.count ||
+              length > buffer.count - offset ||
+              offset > BigInt(Number.MAX_SAFE_INTEGER) ||
+              length > BigInt(Number.MAX_SAFE_INTEGER)
+            ) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'RawBuffer fill range is out of bounds',
+                span: operation.provenance.span,
+              })
+            }
+            const allocation = state.allocations.get(buffer.ticket)
+            if (allocation === undefined || !allocation.active) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'RawBuffer.fill requires live storage',
+                span: operation.provenance.span,
+              })
+            }
+            const byte = scalarIntegerValue('u8', value.value)
+            for (let index = 0; index < Number(length); index += 1) {
+              allocation.values.set(String(offset + BigInt(index)), byte)
+            }
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'AggregateValue',
+                type: Type.unit,
+                fields: Object.freeze([]),
+              }),
+              fromCall: false,
+            })
+            trace.push(
+              Object.freeze({
+                _tag: 'RawBufferFill',
+                function: fn.id,
+                ticket: buffer.ticket,
+                index: offset,
+                count: length,
                 span: operation.provenance.span,
               }),
             )

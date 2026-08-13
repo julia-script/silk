@@ -4866,6 +4866,54 @@
       "identity": "ConvertToIsize"
     },
     {
+      "operation": "Intrinsic.charEquals",
+      "signature": "fn Intrinsic.charEquals(left: char, right: char) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/char.equals",
+      "identity": "Equals"
+    },
+    {
+      "operation": "Intrinsic.charNotEquals",
+      "signature": "fn Intrinsic.charNotEquals(left: char, right: char) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/char.notEquals",
+      "identity": "NotEquals"
+    },
+    {
+      "operation": "Intrinsic.charLessThan",
+      "signature": "fn Intrinsic.charLessThan(left: char, right: char) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/char.lessThan",
+      "identity": "LessThan"
+    },
+    {
+      "operation": "Intrinsic.charLessOrEqual",
+      "signature": "fn Intrinsic.charLessOrEqual(left: char, right: char) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/char.lessOrEqual",
+      "identity": "LessOrEqual"
+    },
+    {
+      "operation": "Intrinsic.charGreaterThan",
+      "signature": "fn Intrinsic.charGreaterThan(left: char, right: char) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/char.greaterThan",
+      "identity": "GreaterThan"
+    },
+    {
+      "operation": "Intrinsic.charGreaterOrEqual",
+      "signature": "fn Intrinsic.charGreaterOrEqual(left: char, right: char) -> bool",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/char.greaterOrEqual",
+      "identity": "GreaterOrEqual"
+    },
+    {
       "operation": "Intrinsic.stringFromUtf8Unchecked",
       "signature": "unsafe fn Intrinsic.stringFromUtf8Unchecked(bytes: &[u8]) -> string",
       "unsafe": true,
@@ -5127,6 +5175,24 @@
       "admission": "Ownership",
       "consumer": "silk/raw-buffer.read",
       "identity": "RawBufferRead",
+      "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
+    },
+    {
+      "operation": "Intrinsic.rawBufferCopy",
+      "signature": "unsafe fn Intrinsic.rawBufferCopy<T>(destination: &mut RawBuffer<T>, destinationOffset: usize, source: &[T], length: usize) -> ()",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/raw-buffer.copy",
+      "identity": "RawBufferCopy",
+      "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
+    },
+    {
+      "operation": "Intrinsic.rawBufferFill",
+      "signature": "unsafe fn Intrinsic.rawBufferFill(buffer: &mut RawBuffer<u8>, offset: usize, length: usize, value: u8) -> ()",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/raw-buffer.fill",
+      "identity": "RawBufferFill",
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
     {

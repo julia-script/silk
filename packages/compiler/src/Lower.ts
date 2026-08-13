@@ -2700,6 +2700,73 @@ function lowerExpressionInner(
         fn.slotLoans.set(destination.ordinal, expression.heldLoans)
         return finishBuiltin(destination)
       }
+      if (expression.operation === 'RawBufferCopy') {
+        const [buffer, offset, source, length] = argumentLocals
+        const sourceArgument = expression.arguments.at(2)
+        const sourceType = sourceArgument?._tag === 'Unavailable' ? undefined : sourceArgument?.type
+        const element =
+          sourceType !== undefined && Type.isSlice(sourceType) ? sourceType.element : undefined
+        const semanticElement = element === undefined ? undefined : fn.semantic(element)
+        const elementLayout =
+          semanticElement === undefined ? undefined : Layout.entry(fn.layout, semanticElement)
+        const type = fn.type(expression.type)
+        if (
+          buffer === undefined ||
+          offset === undefined ||
+          source === undefined ||
+          length === undefined ||
+          semanticElement === undefined ||
+          elementLayout === undefined ||
+          type?._tag !== 'Nominal' ||
+          !Type.equals(type.type, Type.unit)
+        )
+          return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'RawBufferCopy' as const,
+            destination,
+            buffer,
+            offset,
+            source,
+            length,
+            element: semanticElement,
+            stride:
+              Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
+            retainsSource: Mir.isStructurallyCopy(fn.layout, semanticElement),
+            type,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      if (expression.operation === 'RawBufferFill') {
+        const [buffer, offset, length, value] = argumentLocals
+        const type = fn.type(expression.type)
+        if (
+          buffer === undefined ||
+          offset === undefined ||
+          length === undefined ||
+          value === undefined ||
+          type?._tag !== 'Nominal' ||
+          !Type.equals(type.type, Type.unit)
+        )
+          return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'RawBufferFill' as const,
+            destination,
+            buffer,
+            offset,
+            length,
+            value,
+            type,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
       if (expression.operation === 'SlotWrite') {
         const [slot, value] = argumentLocals
         const slotArgument = expression.arguments.at(0)

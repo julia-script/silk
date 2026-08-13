@@ -477,8 +477,15 @@ describe('preset catalog', () => {
     )
     const tags = (label: (typeof ownedSequenceLabels)[number]) =>
       (outcomes.get(label) ?? []).map((event) => event._tag)
+    // Growth migrates its elements with one bulk copy, so the trace shows RawBufferCopy where it
+    // used to show one SlotTake per migrated element; the appended element still writes a slot.
     expect(tags('ok · Vector growing append')).toEqual(
-      expect.arrayContaining(['AllocationAcquire', 'SlotTake', 'SlotWrite', 'AllocationRelease']),
+      expect.arrayContaining([
+        'AllocationAcquire',
+        'RawBufferCopy',
+        'SlotWrite',
+        'AllocationRelease',
+      ]),
     )
     expect(tags('ok · Vector failed growth preserves contents')).toEqual(
       expect.arrayContaining(['EffectFailure', 'AllocationAcquire', 'AllocationRelease']),

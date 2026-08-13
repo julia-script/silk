@@ -12,7 +12,7 @@ each signature and description below is the `///` comment on the declaration in
 $ pnpm --filter @silk-effect/compiler documentation:generate
 ```
 
-The library has 34 modules.
+The library has 35 modules.
 
 ## Modules
 
@@ -20,6 +20,7 @@ The library has 34 modules.
 | --- | --- | --- |
 | [`silk/bool`](#silk-bool) | `bool` | 3 |
 | [`silk/bytes`](#silk-bytes) | `Bytes` | 8 |
+| [`silk/char`](#silk-char) | `char` | 6 |
 | [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
 | [`silk/core`](#silk-core) | `Allocator` | 17 |
 | [`silk/effects`](#silk-effects) | `Effect` | 20 |
@@ -41,7 +42,7 @@ The library has 34 modules.
 | [`silk/os_filesystem`](#silk-os-filesystem) | `OsFileSystem` | 35 |
 | [`silk/os_host_input`](#silk-os-host-input) | `OsHostInput` | 14 |
 | [`silk/os_standard_input`](#silk-os-standard-input) | `OsStandardInput` | 6 |
-| [`silk/raw-buffer`](#silk-raw-buffer) | `RawBuffer` | 6 |
+| [`silk/raw-buffer`](#silk-raw-buffer) | `RawBuffer` | 8 |
 | [`silk/result`](#silk-result) | `Result` | 5 |
 | [`silk/slot`](#silk-slot) | `Slot` | 4 |
 | [`silk/standard_input`](#silk-standard-input) | `StandardInput` | 12 |
@@ -51,7 +52,7 @@ The library has 34 modules.
 | [`silk/u64`](#silk-u64) | `u64` | 55 |
 | [`silk/u8`](#silk-u8) | `u8` | 55 |
 | [`silk/usize`](#silk-usize) | `usize` | 54 |
-| [`silk/vector`](#silk-vector) | `Vector` | 45 |
+| [`silk/vector`](#silk-vector) | `Vector` | 48 |
 
 ## silk/bool
 
@@ -132,7 +133,7 @@ Copies one borrowed byte sequence into independently owned storage.
 pub effect fn append(self: &mut silk/bytes.Bytes, values: &[u8]) -> () ! OutOfMemory ? &mut Allocator
 ```
 
-Appends one complete borrowed byte sequence in source order.
+Appends one complete borrowed byte sequence in source order with one bulk copy.
 
 ### `asSlice`
 
@@ -149,6 +150,59 @@ pub fn asMutSlice(self: &mut silk/bytes.Bytes) -> &mut [u8]
 ```
 
 Borrows the initialized octets as one exclusive lexical slice.
+
+
+## silk/char
+
+Import as `char` with `import silk.char`.
+
+### `equals`
+
+```silk
+pub fn equals(left: char, right: char) -> bool
+```
+
+Calls the concrete char equals primitive.
+
+### `notEquals`
+
+```silk
+pub fn notEquals(left: char, right: char) -> bool
+```
+
+Calls the concrete char notEquals primitive.
+
+### `lessThan`
+
+```silk
+pub fn lessThan(left: char, right: char) -> bool
+```
+
+Calls the concrete char lessThan primitive, which orders by Unicode scalar value.
+
+### `lessOrEqual`
+
+```silk
+pub fn lessOrEqual(left: char, right: char) -> bool
+```
+
+Calls the concrete char lessOrEqual primitive, which orders by Unicode scalar value.
+
+### `greaterThan`
+
+```silk
+pub fn greaterThan(left: char, right: char) -> bool
+```
+
+Calls the concrete char greaterThan primitive, which orders by Unicode scalar value.
+
+### `greaterOrEqual`
+
+```silk
+pub fn greaterOrEqual(left: char, right: char) -> bool
+```
+
+Calls the concrete char greaterOrEqual primitive, which orders by Unicode scalar value.
 
 
 ## silk/child_process
@@ -4719,6 +4773,24 @@ pub fn read<T>(buffer: &silk/core.RawBuffer<T>, index: usize) -> T
 
 Reads an unchecked initialized element. The caller proves initialization and bounds.
 
+### `copy`
+
+```silk
+pub fn copy<T>(destination: &mut silk/core.RawBuffer<T>, destinationOffset: usize, source: &[T], length: usize) -> ()
+```
+
+Moves a caller-proven initialized range into the selected storage in one bulk transfer. An
+overlapping source and destination is a correct move: the result is as if the elements
+travelled through an intermediate buffer.
+
+### `fill`
+
+```silk
+pub fn fill(buffer: &mut silk/core.RawBuffer<u8>, offset: usize, length: usize, value: u8) -> ()
+```
+
+Sets a caller-proven byte range of raw storage to one repeated byte value.
+
 ### `view`
 
 ```silk
@@ -7364,6 +7436,14 @@ Borrows the initialized elements as one exclusive lexical slice.
 ```silk
 pub effect fn append<T>(self: &mut silk/vector.Vector<T>, value: T) -> () ! OutOfMemory ? &mut Allocator
 ```
+
+### `appendBytes`
+
+```silk
+pub effect fn appendBytes(self: &mut silk/vector.Vector<u8>, values: &[u8]) -> () ! OutOfMemory ? &mut Allocator
+```
+
+Appends every byte of one borrowed sequence in source order with one bulk copy.
 
 ### `insert`
 
