@@ -268,16 +268,20 @@
     }
   },
   "scripts": {
-    "build": "pnpm stdlib:generate && pnpm clean && tsc -p tsconfig.json",
+    "build": "pnpm unicode:generate && pnpm stdlib:generate && pnpm clean && tsc -p tsconfig.json",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "lexer:bench": "pnpm build && node scripts/lexer-benchmark.mjs",
     "stdlib:check": "node scripts/generate-stdlib.mjs --check",
     "stdlib:generate": "node scripts/generate-stdlib.mjs",
-    "test": "pnpm stdlib:check && pnpm documentation:check && pnpm test:parallel && pnpm test:native-acceptance",
+    "unicode:check": "node scripts/generate-unicode-tables.mjs --check",
+    "unicode:generate": "node scripts/generate-unicode-tables.mjs",
+    "unicode:vendor": "node scripts/vendor-unicode-data.mjs",
+    "unicode:vendor:check": "node scripts/vendor-unicode-data.mjs --check",
+    "test": "pnpm unicode:check && pnpm stdlib:check && pnpm documentation:check && pnpm test:parallel && pnpm test:native-acceptance",
     "test:native-acceptance": "vitest run test/DriverNativeAcceptance.test.ts --passWithNoTests --maxWorkers=1",
     "test:parallel": "vitest run --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts",
-    "typecheck": "pnpm stdlib:check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "typecheck": "pnpm unicode:check && pnpm stdlib:check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "documentation:generate": "node scripts/generate-documentation.mjs",
     "documentation:check": "node scripts/generate-documentation.mjs --check"
   },

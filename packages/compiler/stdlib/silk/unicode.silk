@@ -1,0 +1,318 @@
+import silk.result { Result, Success, Failure }
+import silk.string { String, InvalidUtf8, copy as stringCopy, fromUtf8, utf8Bytes }
+import silk.unicode_tables {
+  Decomposition,
+  canonicalComposition,
+  canonicalDecomposition,
+  combiningClass,
+  dataVersion as tableDataVersion,
+  maximumDecompositionLength
+}
+import silk.vector {
+  Vector,
+  make as vectorMake,
+  append as vectorAppend,
+  asSlice as vectorAsSlice,
+  get as vectorGet,
+  length as vectorLength,
+  set as vectorSet,
+  truncate as vectorTruncate
+}
+
+// Unicode policy lives here rather than in the compiler, and it is explicitly invoked. Nothing on
+// this path runs unless a program calls it: ordinary `string` equality still compares exact bytes,
+// so a precomposed `é` and a decomposed `é` stay unequal until source normalizes them.
+//
+// The data these algorithms read is generated into `silk/unicode_tables` from a pinned Unicode
+// database. A later Unicode version regenerates that module and nothing else: no compiler type
+// identity and no target ABI mentions it.
+//
+// The scalar buffers move through the helpers rather than being borrowed into them, because a
+// borrow has to come from a direct binding and a reference parameter cannot be reborrowed. Moving
+// a Vector is a move of its three fields, not a copy of its storage, so the buffer is built once
+// and handed along.
+
+/// Hangul syllables decompose and compose arithmetically rather than through a table, so UAX #15
+/// names these constants instead of tabulating eleven thousand rows.
+const HANGUL_SYLLABLE_BASE: u32 = 44032
+const HANGUL_LEADING_BASE: u32 = 4352
+const HANGUL_VOWEL_BASE: u32 = 4449
+const HANGUL_TRAILING_BASE: u32 = 4519
+const HANGUL_LEADING_COUNT: u32 = 19
+const HANGUL_VOWEL_COUNT: u32 = 21
+const HANGUL_TRAILING_COUNT: u32 = 28
+const HANGUL_SYLLABLE_COUNT: u32 = 11172
+
+/// A combining class no scalar carries. Composition uses it for "the starter is still untouched".
+const NO_COMBINING_CLASS: u32 = 256
+
+/// Room for the trailing components a full decomposition can stack up.
+///
+/// A decomposition recurses through its first component only, so the stack holds one fewer entry
+/// than the longest full decomposition. `namesLongestDecomposition` in the test suite pins the
+/// generated bound against this constant, so a Unicode version that decomposes more deeply fails
+/// loudly rather than silently overrunning.
+const PENDING_CAPACITY: usize = 4
+
+/// Returns the Unicode version the tables were generated from.
+///
+/// The version is data, not identity: a later database changes what this returns and what the
+/// tables contain, and changes neither a compiler type nor a target ABI.
+pub fn dataVersion() -> string {
+  return tableDataVersion()
+}
+
+/// Returns the longest full canonical decomposition of a single scalar in the generated tables.
+pub fn longestDecomposition() -> usize {
+  return maximumDecompositionLength()
+}
+
+/// Returns a scalar's canonical combining class, zero for a starter.
+pub fn canonicalCombiningClass(scalar: u32) -> u32 {
+  return combiningClass(scalar)
+}
+
+fn isHangulSyllable(scalar: u32) -> bool {
+  if scalar < HANGUL_SYLLABLE_BASE { return false }
+  return scalar < HANGUL_SYLLABLE_BASE + HANGUL_SYLLABLE_COUNT
+}
+
+/// Appends one scalar, then moves it back past any preceding mark of a higher combining class.
+///
+/// Canonical ordering is a stable sort by combining class. Doing it as each scalar arrives keeps
+/// the buffer behind the cursor always in order, so no separate ordering pass is needed.
+effect fn appendOrdered(
+  buffer: Vector<u32>,
+  scalar: u32,
+) -> Vector<u32> ! OutOfMemory ? &mut Allocator {
+  let mut ordered = move buffer
+  let appended = run vectorAppend<u32>(&mut ordered, scalar)
+  let class = combiningClass(scalar)
+  if class == 0 { return move ordered }
+  let mut index = vectorLength<u32>(&ordered) - usize.ONE
+  while usize.ZERO < index {
+    let previous = vectorGet<u32>(&ordered, index - usize.ONE)
+    let previousClass = combiningClass(previous)
+    if previousClass == 0 { return move ordered }
+    if previousClass <= class { return move ordered }
+    vectorSet<u32>(&mut ordered, index - usize.ONE, scalar)
+    vectorSet<u32>(&mut ordered, index, previous)
+    index = index - usize.ONE
+  }
+  return move ordered
+}
+
+/// Appends a Hangul syllable's canonical decomposition, which is arithmetic rather than tabulated.
+effect fn decomposeHangul(
+  buffer: Vector<u32>,
+  scalar: u32,
+) -> Vector<u32> ! OutOfMemory ? &mut Allocator {
+  let index = scalar - HANGUL_SYLLABLE_BASE
+  let leading = HANGUL_LEADING_BASE + index / (HANGUL_VOWEL_COUNT * HANGUL_TRAILING_COUNT)
+  let vowel = HANGUL_VOWEL_BASE
+    + (index % (HANGUL_VOWEL_COUNT * HANGUL_TRAILING_COUNT)) / HANGUL_TRAILING_COUNT
+  let trailing = index % HANGUL_TRAILING_COUNT
+  let withLeading = run appendOrdered(move buffer, leading)
+  let withVowel = run appendOrdered(move withLeading, vowel)
+  if trailing == 0 { return move withVowel }
+  return run appendOrdered(move withVowel, HANGUL_TRAILING_BASE + trailing)
+}
+
+/// Appends one scalar's full canonical decomposition in canonical order.
+///
+/// Decomposition recurses through a mapping's first component only. The generator proves no second
+/// component decomposes further, so the trailing components collect on a small stack and unwind
+/// once the innermost starter is emitted.
+effect fn decomposeInto(
+  buffer: Vector<u32>,
+  scalar: u32,
+) -> Vector<u32> ! OutOfMemory ? &mut Allocator {
+  if isHangulSyllable(scalar) { return run decomposeHangul(move buffer, scalar) }
+  let mut pending = [scalar, scalar, scalar, scalar]
+  let mut depth = usize.ZERO
+  let mut current = scalar
+  while true {
+    let mapping = canonicalDecomposition(current)
+    if mapping.first == 0 { break }
+    if mapping.second != 0 {
+      pending[depth] = mapping.second
+      depth = depth + usize.ONE
+    }
+    current = mapping.first
+  }
+  let mut decomposed = run appendOrdered(move buffer, current)
+  while usize.ZERO < depth {
+    depth = depth - usize.ONE
+    let extended = run appendOrdered(move decomposed, pending[depth])
+    decomposed = move extended
+  }
+  return move decomposed
+}
+
+/// Composes a starter with the scalar following it, or returns zero when they do not compose.
+fn composePair(starter: u32, following: u32) -> u32 {
+  if HANGUL_LEADING_BASE <= starter {
+    if starter < HANGUL_LEADING_BASE + HANGUL_LEADING_COUNT {
+      if HANGUL_VOWEL_BASE <= following {
+        if following < HANGUL_VOWEL_BASE + HANGUL_VOWEL_COUNT {
+          let leading = starter - HANGUL_LEADING_BASE
+          let vowel = following - HANGUL_VOWEL_BASE
+          return HANGUL_SYLLABLE_BASE
+            + (leading * HANGUL_VOWEL_COUNT + vowel) * HANGUL_TRAILING_COUNT
+        }
+      }
+    }
+  }
+  if isHangulSyllable(starter) {
+    if (starter - HANGUL_SYLLABLE_BASE) % HANGUL_TRAILING_COUNT == 0 {
+      if HANGUL_TRAILING_BASE < following {
+        if following < HANGUL_TRAILING_BASE + HANGUL_TRAILING_COUNT {
+          return starter + (following - HANGUL_TRAILING_BASE)
+        }
+      }
+    }
+  }
+  return canonicalComposition(starter, following)
+}
+
+/// Rewrites a canonically ordered buffer as its canonical composition.
+///
+/// This is the UAX #15 composition pass. A starter absorbs each following scalar it composes with,
+/// and a scalar blocked from its starter by an equal or higher combining class is kept as written.
+fn composeInPlace(buffer: Vector<u32>) -> Vector<u32> {
+  let mut composed = move buffer
+  if vectorLength<u32>(&composed) == usize.ZERO { return move composed }
+  let mut starterIndex = usize.ZERO
+  let mut starter = vectorGet<u32>(&composed, usize.ZERO)
+  let mut written = usize.ONE
+  let mut lastClass = combiningClass(starter)
+  if lastClass != 0 { lastClass = NO_COMBINING_CLASS }
+  let mut index = usize.ONE
+  while index < vectorLength<u32>(&composed) {
+    let scalar = vectorGet<u32>(&composed, index)
+    let class = combiningClass(scalar)
+    let composite = composePair(starter, scalar)
+    let mut absorbed = false
+    if composite != 0 {
+      if lastClass < class { absorbed = true }
+      if lastClass == 0 { absorbed = true }
+    }
+    if absorbed {
+      vectorSet<u32>(&mut composed, starterIndex, composite)
+      starter = composite
+    } else {
+      if class == 0 {
+        starterIndex = written
+        starter = scalar
+      }
+      lastClass = class
+      vectorSet<u32>(&mut composed, written, scalar)
+      written = written + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  vectorTruncate<u32>(&mut composed, written)
+  return move composed
+}
+
+/// Appends one scalar's UTF-8 encoding.
+effect fn encodeScalar(bytes: Vector<u8>, scalar: u32) -> Vector<u8> ! OutOfMemory ? &mut Allocator {
+  let mut encoded = move bytes
+  if scalar < 128 {
+    let only = run vectorAppend<u8>(&mut encoded, u32.toU8(scalar))
+    return move encoded
+  }
+  if scalar < 2048 {
+    let lead = run vectorAppend<u8>(&mut encoded, u32.toU8(192 + scalar / 64))
+    let last = run vectorAppend<u8>(&mut encoded, u32.toU8(128 + scalar % 64))
+    return move encoded
+  }
+  if scalar < 65536 {
+    let lead = run vectorAppend<u8>(&mut encoded, u32.toU8(224 + scalar / 4096))
+    let middle = run vectorAppend<u8>(&mut encoded, u32.toU8(128 + (scalar / 64) % 64))
+    let last = run vectorAppend<u8>(&mut encoded, u32.toU8(128 + scalar % 64))
+    return move encoded
+  }
+  let lead = run vectorAppend<u8>(&mut encoded, u32.toU8(240 + scalar / 262144))
+  let second = run vectorAppend<u8>(&mut encoded, u32.toU8(128 + (scalar / 4096) % 64))
+  let third = run vectorAppend<u8>(&mut encoded, u32.toU8(128 + (scalar / 64) % 64))
+  let last = run vectorAppend<u8>(&mut encoded, u32.toU8(128 + scalar % 64))
+  return move encoded
+}
+
+/// Decodes valid UTF-8 into scalars, decomposing and canonically ordering as it goes.
+///
+/// The input is a `string`, so it is already valid UTF-8 and the decode needs no validation; the
+/// safe validating decoder is `silk/string`'s `fromUtf8`.
+effect fn decomposedScalars(value: string) -> Vector<u32> ! OutOfMemory ? &mut Allocator {
+  let bytes = utf8Bytes(value)
+  let mut buffer = vectorMake<u32>()
+  let mut offset = usize.ZERO
+  while offset < bytes.length {
+    let first = u8.toU32(bytes[offset])
+    let mut scalar = first
+    let mut width = usize.ONE
+    if first > 193 {
+      if first <= 223 {
+        scalar = (first - 192) * 64 + u8.toU32(bytes[offset + usize.ONE]) - 128
+        width = 2
+      } else {
+        if first <= 239 {
+          scalar = (first - 224) * 4096
+            + (u8.toU32(bytes[offset + usize.ONE]) - 128) * 64
+            + u8.toU32(bytes[offset + 2]) - 128
+          width = 3
+        } else {
+          scalar = (first - 240) * 262144
+            + (u8.toU32(bytes[offset + usize.ONE]) - 128) * 4096
+            + (u8.toU32(bytes[offset + 2]) - 128) * 64
+            + u8.toU32(bytes[offset + 3]) - 128
+          width = 4
+        }
+      }
+    }
+    let extended = run decomposeInto(move buffer, scalar)
+    buffer = move extended
+    offset = offset + width
+  }
+  return move buffer
+}
+
+/// Copies a scalar sequence into owned text.
+///
+/// The encoder only ever writes well-formed UTF-8, so the validation here cannot fail. The failing
+/// arm exists because `fromUtf8` is the safe constructor and normalization has no reason to reach
+/// for the unchecked one.
+effect fn encodeOwned(scalars: Vector<u32>) -> String ! OutOfMemory ? &mut Allocator {
+  let source = move scalars
+  let mut bytes = vectorMake<u8>()
+  let mut index = usize.ZERO
+  while index < vectorLength<u32>(&source) {
+    let extended = run encodeScalar(move bytes, vectorGet<u32>(&source, index))
+    bytes = move extended
+    index = index + usize.ONE
+  }
+  let validated = fromUtf8(vectorAsSlice<u8>(&bytes))
+  return match move validated {
+    Result<string, InvalidUtf8> { value: outcome } => match move outcome {
+      Success<string> { value } => run stringCopy(value)
+      Failure<InvalidUtf8> { error } => run stringCopy("")
+    }
+  }
+}
+
+/// Returns the Normalization Form D of text: fully decomposed, in canonical order.
+pub effect fn normalizeNfd(value: string) -> String ! OutOfMemory ? &mut Allocator {
+  let scalars = run decomposedScalars(value)
+  return run encodeOwned(move scalars)
+}
+
+/// Returns the Normalization Form C of text: decomposed, canonically ordered, then recomposed.
+///
+/// This is the operation that lets a precomposed `é` and a decomposed `é` compare equal, and it
+/// only does so where source asks for it.
+pub effect fn normalizeNfc(value: string) -> String ! OutOfMemory ? &mut Allocator {
+  let scalars = run decomposedScalars(value)
+  let composed = composeInPlace(move scalars)
+  return run encodeOwned(move composed)
+}
