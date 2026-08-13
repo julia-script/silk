@@ -1,0 +1,107 @@
+// One owned heap indirection holding exactly one value. Ordinary Silk: no compiler phase knows
+// this type, and every capability it uses is available to user code.
+//
+// A struct may reach itself through a Box because RawBuffer's representation is the same whatever
+// it holds, so the holder's layout never needs the held type's layout. The same fact is why the
+// Drop hook below has work to do: releasing a RawBuffer releases the block without descending into
+// the element, so a box that did not drop its own element would abandon every level beneath it.
+//
+// The occupancy marker is what lets the hook and `into` agree. `into` hands the value out and
+// marks the box vacant, so the hook that still runs when the emptied box leaves scope drops
+// nothing, and the buffer releases exactly once either way. The marker is deliberately not generic
+// over T: a `[T; 0]` anchor of the kind Vector uses would be an inline reach into T and would make
+// a struct holding `Box` of itself recursive again.
+
+pub struct Vacant {}
+
+pub struct Occupied {}
+
+pub struct Box<T> {
+  buffer: RawBuffer<T>
+  state: Vacant | Occupied
+}
+
+// Diverges on the arms the surrounding logic has already proven impossible.
+fn absurd<T>() -> T {
+  let boom = 1 / 0
+  return absurd<T>()
+}
+
+/// Moves one value onto the heap, allocating storage for exactly one element.
+pub effect fn make<T>(value: T) -> Box<T> ! OutOfMemory ? &mut Allocator {
+  let layout = Layout.of<T>()
+  let recipe = Allocator.allocate(move layout)
+  let allocation = run recipe
+  let buffer = freshBuffer<T>(move allocation)
+  return Box<T> { buffer: writeFirst<T>(move buffer, move value), state: Occupied {} }
+}
+
+fn freshBuffer<T>(allocation: Allocation) -> RawBuffer<T> {
+  unsafe {
+    let made = RawBuffer.from<T>(move allocation, usize.ONE)
+    return move made
+  }
+  return absurd<RawBuffer<T>>()
+}
+
+fn writeFirst<T>(buffer: RawBuffer<T>, value: T) -> RawBuffer<T> {
+  unsafe {
+    let mut owned = move buffer
+    let selected = RawBuffer.slot<T>(&mut owned, usize.ZERO)
+    let written = Slot.write<T>(move selected, move value)
+    return move owned
+  }
+  return absurd<RawBuffer<T>>()
+}
+
+// The held value is borrowed as a one-element view rather than as a bare reference: a function
+// may return a lexical slice borrowed from one parameter, and no Silk function may return `&T`.
+/// Borrows the held value as one shared element view.
+pub fn get<T>(self: &Box<T>) -> &[T] {
+  return RawBuffer.view<T>(&self.buffer, usize.ZERO, usize.ONE)
+}
+
+/// Borrows the held value as one exclusive element view.
+pub fn getMut<T>(self: &mut Box<T>) -> &mut [T] {
+  return RawBuffer.viewMut<T>(&mut self.buffer, usize.ZERO, usize.ONE)
+}
+
+// Marking the box vacant first is what keeps the value from being dropped twice: the box still
+// runs its hook when this scope ends, and by then it holds nothing to drop.
+/// Consumes the box and yields the value it held, releasing the storage.
+pub fn into<T>(self: Box<T>) -> T {
+  let mut owned = move self
+  let state = Intrinsic.replace(owned.state, Vacant {})
+  return match move state {
+    Vacant nothing => absurd<T>()
+    Occupied held => takeElement<T>(&mut owned.buffer)
+  }
+}
+
+fn takeElement<T>(buffer: &mut RawBuffer<T>) -> T {
+  unsafe {
+    let selected = RawBuffer.slot<T>(move buffer, usize.ZERO)
+    return Slot.take<T>(move selected)
+  }
+  return absurd<T>()
+}
+
+// The hook drops the element only. The buffer belongs to the field cleanup the plan runs straight
+// after this returns, so the storage releases exactly once whichever way the box was emptied.
+impl<T> Drop for Box<T> {
+  fn drop(self: &mut Box<T>) -> () {
+    let state = Intrinsic.replace(self.state, Vacant {})
+    return match move state {
+      Vacant nothing => ()
+      Occupied held => dropElement<T>(&mut self.buffer)
+    }
+  }
+}
+
+fn dropElement<T>(buffer: &mut RawBuffer<T>) -> () {
+  unsafe {
+    let selected = RawBuffer.slot<T>(move buffer, usize.ZERO)
+    let cleared = Slot.dropValue<T>(move selected)
+  }
+  return ()
+}
