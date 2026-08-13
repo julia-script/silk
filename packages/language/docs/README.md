@@ -5,6 +5,9 @@
 - **[Tutorial](./tutorial.md)** — start here: from `silk init` to a program that runs.
 - **[Language reference](./reference.md)** — the lexical form, the types, the memory and ownership
   rules, and the effect system.
+- **[Recursion and the machine stack](./recursion.md)** — what ordinary recursion does and does not
+  guarantee, how running out of stack looks on each engine, and the iterative pattern to use
+  instead.
 - **[Standard library](./stdlib.md)** — every module and public declaration, generated from the
   source doc comments.
 - **[Diagnostic index](./diagnostics.md)** — every compiler error code and what it means.

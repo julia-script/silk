@@ -834,6 +834,10 @@ pub fn main() -> i32 {
 }
 ```
 
+`while` is also the answer to depth. An ordinary recursive call costs a machine stack frame and Silk
+promises no bound on how many are available, so a traversal whose depth comes from input is written
+as a loop — see [Recursion and the machine stack](./recursion.md).
+
 ### 6.3 `match`
 
 `match` **is** an expression and is valid anywhere an expression is. Its access mode is part of the
@@ -917,5 +921,7 @@ Concurrency, networking, a package registry, broad FFI, and self-hosting are fut
 ## See also
 
 - [Tutorial](./tutorial.md) — from `silk init` to a running program.
+- [Recursion and the machine stack](./recursion.md) — the bound on ordinary recursion, and how it
+  fails on each engine.
 - [Standard library](./stdlib.md) — every module and public declaration.
 - [Diagnostic index](./diagnostics.md) — every error code, including those cited above.
