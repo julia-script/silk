@@ -3043,6 +3043,7 @@ function lowerExpressionInner(
         expression.operation === 'IsNormal' ||
         expression.operation === 'IsSubnormal' ||
         expression.operation === 'IsSignNegative' ||
+        expression.operation === 'Sqrt' ||
         (expression.operation === 'Negate' &&
           argumentLocals.some((local) => {
             const type = fn.localTypes.at(local.ordinal)

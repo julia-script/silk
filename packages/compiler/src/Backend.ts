@@ -4717,6 +4717,28 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     locals.set(operation.destination.ordinal, Object.freeze([result]))
                     break
                   }
+                  if (operation.operation === 'Sqrt') {
+                    // IEEE-754 mandates a correctly rounded square root, so `llvm.sqrt` is
+                    // bit-exact on every conforming target and matches the evaluator exactly.
+                    const floatType = source.spelling === 'f32' ? f32 : f64
+                    const signature = Object.freeze({
+                      returnType: floatType,
+                      parameters: Object.freeze([floatType]),
+                    })
+                    const result = yield* Intrinsic.call(
+                      body,
+                      'sqrt',
+                      [floatType],
+                      [subject],
+                      `sqrt${operation.destination.ordinal}`,
+                      { signature },
+                    )
+                    if (result === undefined)
+                      throw new RangeError('LLVM square root produced no value')
+                    yield* locate(operation.provenance.span, yield* Value.instruction(body, result))
+                    locals.set(operation.destination.ordinal, Object.freeze([result]))
+                    break
+                  }
                   const width = source.spelling === 'f32' ? 32 : 64
                   const integerType = integerTypes.get(width) ?? i32
                   const raw = yield* FunctionBody.cast(

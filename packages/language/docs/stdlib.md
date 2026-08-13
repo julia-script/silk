@@ -25,8 +25,8 @@ The library has 36 modules.
 | [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
 | [`silk/core`](#silk-core) | `Allocator` | 17 |
 | [`silk/effects`](#silk-effects) | `Effect` | 21 |
-| [`silk/f32`](#silk-f32) | `f32` | 41 |
-| [`silk/f64`](#silk-f64) | `f64` | 41 |
+| [`silk/f32`](#silk-f32) | `f32` | 51 |
+| [`silk/f64`](#silk-f64) | `f64` | 51 |
 | [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 76 |
 | [`silk/host_input`](#silk-host-input) | `HostInput` | 12 |
 | [`silk/i16`](#silk-i16) | `i16` | 58 |
@@ -1101,6 +1101,97 @@ pub fn fromBits(value: u32) -> f32
 
 Calls the concrete f32 fromBits primitive.
 
+### `sqrt`
+
+```silk
+pub fn sqrt(value: f32) -> f32
+```
+
+The square root of `value`, correctly rounded.
+
+IEEE-754 requires the square root be correctly rounded, so the hardware instruction is the
+exact result rather than an approximation of it. This is why `sqrt` may lower to `llvm.sqrt`
+on the native backend and `f32.sqrt` on Wasm while `pow` and `log`, whose results are
+implementation-defined, may not. The evaluator reproduces the same bits by rounding an exact
+integer root.
+
+That guarantee covers numeric results only. IEEE-754 leaves the *sign* of a NaN produced by an
+invalid operation unspecified, and the hosts disagree: an x86 square root of a negative operand
+yields `0xFFC00000` while AArch64's default NaN yields `0x7FC00000`. Both NaN-producing inputs
+are therefore screened here, before the primitive runs, so the primitive only ever sees the
+domain on which it is bit-exact.
+
+### `abs`
+
+```silk
+pub fn abs(value: f32) -> f32
+```
+
+The magnitude of `value`, which clears the sign bit. A NaN input gives the canonical NaN.
+
+### `copysign`
+
+```silk
+pub fn copysign(magnitude: f32, sign: f32) -> f32
+```
+
+The magnitude of `magnitude` carrying the sign bit of `sign`. Requirement 10 outranks sign
+transfer here, so a NaN `magnitude` gives the canonical NaN rather than a signed NaN.
+
+### `trunc`
+
+```silk
+pub fn trunc(value: f32) -> f32
+```
+
+`value` rounded toward zero, which discards the fraction bits the exponent does not reach.
+The sign survives, so a value in `(-1.0, -0.0]` gives negative zero. A NaN input gives the
+canonical NaN, and either infinity is already integral and returns unchanged.
+
+### `floor`
+
+```silk
+pub fn floor(value: f32) -> f32
+```
+
+The largest integral f32 no greater than `value`. A NaN input gives the canonical NaN.
+
+### `ceil`
+
+```silk
+pub fn ceil(value: f32) -> f32
+```
+
+The smallest integral f32 no less than `value`. A NaN input gives the canonical NaN.
+
+### `round`
+
+```silk
+pub fn round(value: f32) -> f32
+```
+
+`value` rounded to the nearest integral f32, with a half rounding away from zero. That is the
+reading `round` carries in C and Rust; the ties-to-even form is a separate operation this
+module does not yet offer. A NaN input gives the canonical NaN.
+
+### `min`
+
+```silk
+pub fn min(left: f32, right: f32) -> f32
+```
+
+The lesser of two values, ordering negative zero below positive zero. Either operand being NaN
+gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `minimum`.
+
+### `max`
+
+```silk
+pub fn max(left: f32, right: f32) -> f32
+```
+
+The greater of two values, ordering positive zero above negative zero. Either operand being NaN
+gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `maximum`.
+
 ### `sin`
 
 ```silk
@@ -1436,6 +1527,97 @@ pub fn fromBits(value: u64) -> f64
 ```
 
 Calls the concrete f64 fromBits primitive.
+
+### `sqrt`
+
+```silk
+pub fn sqrt(value: f64) -> f64
+```
+
+The square root of `value`, correctly rounded.
+
+IEEE-754 requires the square root be correctly rounded, so the hardware instruction is the
+exact result rather than an approximation of it. This is why `sqrt` may lower to `llvm.sqrt`
+on the native backend and `f64.sqrt` on Wasm while `pow` and `log`, whose results are
+implementation-defined, may not. The evaluator reproduces the same bits by rounding an exact
+integer root.
+
+That guarantee covers numeric results only. IEEE-754 leaves the *sign* of a NaN produced by an
+invalid operation unspecified, and the hosts disagree: an x86 square root of a negative operand
+yields `0xFFF8000000000000` while AArch64's default NaN yields `0x7FF8000000000000`. Both
+NaN-producing inputs are therefore screened here, before the primitive runs, so the primitive
+only ever sees the domain on which it is bit-exact.
+
+### `abs`
+
+```silk
+pub fn abs(value: f64) -> f64
+```
+
+The magnitude of `value`, which clears the sign bit. A NaN input gives the canonical NaN.
+
+### `copysign`
+
+```silk
+pub fn copysign(magnitude: f64, sign: f64) -> f64
+```
+
+The magnitude of `magnitude` carrying the sign bit of `sign`. Requirement 10 outranks sign
+transfer here, so a NaN `magnitude` gives the canonical NaN rather than a signed NaN.
+
+### `trunc`
+
+```silk
+pub fn trunc(value: f64) -> f64
+```
+
+`value` rounded toward zero, which discards the fraction bits the exponent does not reach.
+The sign survives, so a value in `(-1.0, -0.0]` gives negative zero. A NaN input gives the
+canonical NaN, and either infinity is already integral and returns unchanged.
+
+### `floor`
+
+```silk
+pub fn floor(value: f64) -> f64
+```
+
+The largest integral f64 no greater than `value`. A NaN input gives the canonical NaN.
+
+### `ceil`
+
+```silk
+pub fn ceil(value: f64) -> f64
+```
+
+The smallest integral f64 no less than `value`. A NaN input gives the canonical NaN.
+
+### `round`
+
+```silk
+pub fn round(value: f64) -> f64
+```
+
+`value` rounded to the nearest integral f64, with a half rounding away from zero. That is the
+reading `round` carries in C and Rust; the ties-to-even form is a separate operation this
+module does not yet offer. A NaN input gives the canonical NaN.
+
+### `min`
+
+```silk
+pub fn min(left: f64, right: f64) -> f64
+```
+
+The lesser of two values, ordering negative zero below positive zero. Either operand being NaN
+gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `minimum`.
+
+### `max`
+
+```silk
+pub fn max(left: f64, right: f64) -> f64
+```
+
+The greater of two values, ordering positive zero above negative zero. Either operand being NaN
+gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `maximum`.
 
 ### `sin`
 
