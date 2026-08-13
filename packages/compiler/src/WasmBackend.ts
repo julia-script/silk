@@ -4277,6 +4277,32 @@ const emitOperation = (
           Instr.localSet(scalar(operation.destination)),
         ]
       }
+      // A Unicode scalar value occupies one 32-bit lane and orders by that value, so its
+      // comparisons are the unsigned 32-bit comparisons and it declares nothing else.
+      if (scalarType?.category === 'Character') {
+        const comparison: Instr.PlainMnemonic | undefined =
+          operation.operator === 'Equals'
+            ? 'i32.eq'
+            : operation.operator === 'NotEquals'
+              ? 'i32.ne'
+              : operation.operator === 'LessThan'
+                ? 'i32.lt_u'
+                : operation.operator === 'LessOrEqual'
+                  ? 'i32.le_u'
+                  : operation.operator === 'GreaterThan'
+                    ? 'i32.gt_u'
+                    : operation.operator === 'GreaterOrEqual'
+                      ? 'i32.ge_u'
+                      : undefined
+        if (comparison === undefined)
+          throw new RangeError(`Wasm char operation ${operation.operator} is unavailable`)
+        return [
+          Instr.localGet(scalar(operation.left)),
+          Instr.localGet(scalar(operation.right)),
+          Instr.op(comparison),
+          Instr.localSet(scalar(operation.destination)),
+        ]
+      }
       const integer = scalarType
       if (integer === undefined || integer.category !== 'Integer')
         throw new RangeError(`Wasm binary operation ${operation.operator} lost its integer type`)

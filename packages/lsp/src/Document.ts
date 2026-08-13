@@ -869,6 +869,7 @@ const lexicalTokenType = (kind: Token.TokenKind): string | undefined => {
       return SemanticTokenTypes.comment
     case 'TextLiteral':
     case 'ByteStringLiteral':
+    case 'CharLiteral':
       return SemanticTokenTypes.string
     case 'DecimalInteger':
     case 'DecimalFloat':

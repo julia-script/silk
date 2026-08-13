@@ -322,6 +322,7 @@ export const returnedBorrow = (declaration: DeclarationFact): ReturnedBorrowFact
 /** The source-retained literal carried by one compile-time constant header. */
 export type ConstantLiteralFact =
   | { readonly _tag: 'BooleanLiteral'; readonly value: boolean; readonly token: Token.Token }
+  | { readonly _tag: 'CharacterLiteral'; readonly value: number; readonly token: Token.Token }
   | {
       readonly _tag: 'IntegerLiteral'
       readonly value: bigint
@@ -641,6 +642,18 @@ const constantLiteral = (
     return token === undefined
       ? Object.freeze({ _tag: 'Unavailable', syntax: initializer })
       : Object.freeze({ _tag: 'BooleanLiteral', value: token.kind === 'TrueKeyword', token })
+  }
+  if (initializer.kind === 'CharacterLiteralExpression') {
+    const token = SyntaxTree.directToken(initializer, 'CharLiteral')
+    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const bytes = Option.getOrUndefined(SourceFile.slice(source, token.span))
+    const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
+    if (bytes === undefined || form === undefined)
+      return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const decoded = StaticText.decodeScalar(Array.from(bytes), form)
+    return decoded._tag === 'Scalar'
+      ? Object.freeze({ _tag: 'CharacterLiteral', value: decoded.value, token })
+      : Object.freeze({ _tag: 'Malformed', detail: decoded.detail, syntax: initializer })
   }
   if (initializer.kind === 'IntegerLiteralExpression') {
     const token = SyntaxTree.directToken(initializer, 'DecimalInteger')

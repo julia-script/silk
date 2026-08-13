@@ -275,6 +275,8 @@ const constantLiteral = (value: DeclarationIndex.ConstantLiteralFact): string =>
   switch (value._tag) {
     case 'BooleanLiteral':
       return record('BooleanLiteral', [boolean(value.value)])
+    case 'CharacterLiteral':
+      return record('CharacterLiteral', [value.value.toString()])
     case 'IntegerLiteral':
       return record('IntegerLiteral', [value.value.toString()])
     case 'FloatingLiteral':

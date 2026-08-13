@@ -56,6 +56,7 @@ export type NodeKind =
   | 'IntegerLiteralExpression'
   | 'FloatingLiteralExpression'
   | 'StaticTextLiteralExpression'
+  | 'CharacterLiteralExpression'
   | 'UnitExpression'
   | 'BooleanLiteralExpression'
   | 'IdentifierExpression'

@@ -55,11 +55,60 @@ it('recognizes every committed form longest-first', () => {
         escapePolicy: 'Escaped',
         tokenKind: 'TextLiteral',
       },
+      {
+        category: 'Character',
+        modifier: '',
+        delimiterWidth: 1,
+        escapePolicy: 'Escaped',
+        tokenKind: 'CharLiteral',
+      },
     ],
   )
   assert.strictEqual(LiteralForm.recognize(bytes('"""body"""'))?.delimiterWidth, 3)
   assert.strictEqual(LiteralForm.recognize(bytes('b"""body"""'))?.delimiterWidth, 3)
   assert.strictEqual(LiteralForm.recognize(bytes('r"""body"""'))?.delimiterWidth, 3)
+})
+
+it('recognizes the character form on its own delimiter alone', () => {
+  const form = LiteralForm.recognize(bytes("'a'"))
+  assert.strictEqual(form?.category, 'Character')
+  assert.strictEqual(form?.delimiter, 0x27)
+  assert.strictEqual(form?.tokenKind, 'CharLiteral')
+  // The apostrophe is not a modifier position, so no quote form and no reserved modifier claims it.
+  assert.strictEqual(LiteralForm.recognize(bytes('"a"'))?.category, 'Text')
+  assert.isUndefined(LiteralForm.recognizeUnknown(bytes("b'a'")))
+})
+
+it('scans a character boundary to its own delimiter and stops at a line ending', () => {
+  assert.deepEqual(LiteralForm.scanBoundary(bytes("'a' tail"), 1, 1, 'Escaped', 0x27), {
+    end: 3,
+    terminated: true,
+  })
+  // `'\''` escapes the delimiter, so the boundary is the fourth byte and not the third.
+  assert.deepEqual(LiteralForm.scanBoundary(bytes("'\\''"), 1, 1, 'Escaped', 0x27), {
+    end: 4,
+    terminated: true,
+  })
+  assert.deepEqual(LiteralForm.scanBoundary(bytes("'a\nnext"), 1, 1, 'Escaped', 0x27), {
+    end: 2,
+    terminated: false,
+  })
+})
+
+it('counts scalars rather than bytes in a character body', () => {
+  const count = (value: string): number =>
+    LiteralForm.scalarCount(bytes(value), 0, bytes(value).length)
+  assert.strictEqual(count(''), 0)
+  assert.strictEqual(count('a'), 1)
+  assert.strictEqual(count('ab'), 2)
+  // Two UTF-8 bytes, one scalar; four bytes, one scalar.
+  assert.strictEqual(count('é'), 1)
+  assert.strictEqual(count('😀'), 1)
+  assert.strictEqual(count('\\n'), 1)
+  assert.strictEqual(count('\\x41'), 1)
+  assert.strictEqual(count('\\u{2603}'), 1)
+  assert.strictEqual(count('\\u{2603}a'), 2)
+  assert.strictEqual(count("\\'"), 1)
 })
 
 it('scans a raw boundary without consulting a backslash', () => {

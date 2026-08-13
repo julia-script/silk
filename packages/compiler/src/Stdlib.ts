@@ -62,6 +62,7 @@ const inertKinds: ReadonlySet<Token.TokenKind> = new Set<Token.TokenKind>([
   'ModuleDocComment',
   'TextLiteral',
   'ByteStringLiteral',
+  'CharLiteral',
   'InvalidStaticLiteral',
 ])
 

@@ -78,7 +78,37 @@ The escapes are `\n`, `\r`, `\t`, `\0`, `\"`, `\\`, `\xNN` with exactly two hex 
 `\u{...}` for a Unicode scalar. Any other escape is an error, and a backslash may not continue a
 physical line.
 
-### 1.6 Operators and precedence
+### 1.6 Character literals
+
+A character literal is delimited by `'` and holds exactly one Unicode scalar. Its type is `char`,
+and no integer literal ever takes that type.
+
+```
+'a'        ' '        '\t'        '\u{2603}'        '\''        'é'
+```
+
+The escapes are the text escapes, plus `\'` for the delimiter. The rule is a scalar rule and never
+a byte rule: `'é'` is two UTF-8 bytes and one character. An empty body, a body of more than one
+scalar, and a body that runs to the line ending are each one lexical error.
+
+```silk
+const asciiSpace: char = ' '
+const asciiTab: char = '\t'
+const snowman: char = '\u{2603}'
+
+pub fn isSpace(value: char) -> bool {
+  return value == asciiSpace
+}
+
+pub fn main() -> i32 {
+  if isSpace(' ') {
+    if asciiTab < snowman { return 0 }
+  }
+  return 1
+}
+```
+
+### 1.7 Operators and precedence
 
 Higher binds tighter.
 
@@ -102,7 +132,7 @@ The bitwise operators occupy three separate levels rather than one.
 
 Operators are not overloadable. Each lowers to a compiler-known operation chosen by operand type —
 except `&&` and `||`, which lower to a conditional instead, because a call would evaluate both
-operands. See [1.7](#17-short-circuit-operators).
+operands. See [1.8](#18-short-circuit-operators).
 
 `|>` is the pipeline operator: it inserts its left operand as the *leading* argument of the
 callable on its right.
@@ -121,7 +151,7 @@ pub fn main() -> i32 {
 A `<` immediately followed by a tag identifier or `>` at the start of a primary expression is
 reserved for future template syntax and is a parse error.
 
-### 1.7 Short-circuit operators
+### 1.8 Short-circuit operators
 
 `&&` and `||` take `bool` operands and give `bool`. There is no truthiness: no other type is
 accepted on either side. `&&` does not evaluate its right operand when its left operand is
@@ -279,7 +309,11 @@ annotation — a local's type is always inferred. Assignment is a statement, nev
 
 The primitive spellings are lowercase and closed:
 
-`bool`, `i8`, `i16`, `i32`, `i64`, `isize`, `u8`, `u16`, `u32`, `u64`, `usize`, `f32`, `f64`.
+`bool`, `char`, `i8`, `i16`, `i32`, `i64`, `isize`, `u8`, `u16`, `u32`, `u64`, `usize`, `f32`,
+`f64`.
+
+`char` is one Unicode scalar value. It is not an integer: it has equality and ordering and no
+arithmetic, and a conversion to or from an integer has to be written out in source.
 
 `Bool` and `I32` are not aliases; they resolve as unknown user types. `()` is the unit type and its
 only value. `never` is the uninhabited type and joins into any other.

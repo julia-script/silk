@@ -104,7 +104,12 @@ it('publishes stable lexical identities for modifier and delimiter failures', ()
       {
         phase: 'lexical',
         code: 'LEX0003',
-        reason: { _tag: 'UnterminatedStaticLiteral', modifier: 'b', delimiterWidth: 3 },
+        reason: {
+          _tag: 'UnterminatedStaticLiteral',
+          modifier: 'b',
+          delimiter: '"',
+          delimiterWidth: 3,
+        },
       },
     ],
   )
