@@ -33,7 +33,7 @@ The library has 36 modules.
 | [`silk/i32`](#silk-i32) | `i32` | 58 |
 | [`silk/i64`](#silk-i64) | `i64` | 58 |
 | [`silk/i8`](#silk-i8) | `i8` | 58 |
-| [`silk/isize`](#silk-isize) | `isize` | 55 |
+| [`silk/isize`](#silk-isize) | `isize` | 58 |
 | [`silk/layout`](#silk-layout) | `Layout` | 6 |
 | [`silk/logging`](#silk-logging) | `Logger` | 30 |
 | [`silk/metrics`](#silk-metrics) | `AllocationMetrics` | 6 |
@@ -52,7 +52,7 @@ The library has 36 modules.
 | [`silk/u32`](#silk-u32) | `u32` | 55 |
 | [`silk/u64`](#silk-u64) | `u64` | 55 |
 | [`silk/u8`](#silk-u8) | `u8` | 55 |
-| [`silk/usize`](#silk-usize) | `usize` | 54 |
+| [`silk/usize`](#silk-usize) | `usize` | 57 |
 | [`silk/vector`](#silk-vector) | `Vector` | 48 |
 
 ## silk/bool
@@ -3956,6 +3956,33 @@ Calls the concrete i8 greaterOrEqual primitive.
 
 Import as `isize` with `import silk.isize`.
 
+### `MAX`
+
+```silk
+pub const MAX: isize
+```
+
+The largest isize. The checked arithmetic intrinsics reject every result above this bound. No
+literal spells it: isize is as wide as a pointer, so the bound is 2147483647 on a 32-bit target
+and 9223372036854775807 on a 64-bit one, and the compiler selects between them.
+
+### `MIN`
+
+```silk
+pub const MIN: isize
+```
+
+The smallest isize. The checked arithmetic intrinsics reject every result below this bound. It
+is -2147483648 on a 32-bit target and -9223372036854775808 on a 64-bit one.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of isize in bits, which is the selected target's pointer width.
+
 ### `negate`
 
 ```silk
@@ -7019,6 +7046,32 @@ Calls the concrete u8 greaterOrEqual primitive.
 ## silk/usize
 
 Import as `usize` with `import silk.usize`.
+
+### `MAX`
+
+```silk
+pub const MAX: usize
+```
+
+The largest usize. The checked arithmetic intrinsics reject every result above this bound. No
+literal spells it: usize is as wide as a pointer, so the bound is 4294967295 on a 32-bit target
+and 18446744073709551615 on a 64-bit one, and the compiler selects between them.
+
+### `MIN`
+
+```silk
+pub const MIN: usize
+```
+
+The smallest usize. An unsigned bound is zero at every pointer width, so this one is a literal.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of usize in bits, which is the selected target's pointer width.
 
 ### `ZERO`
 
