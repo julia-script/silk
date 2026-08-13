@@ -195,9 +195,15 @@ export const impureShortCircuitOperandCode = 'SEM0096' as const
 /** Stable code for a bound operation call whose receiver names more than one bounded parameter. */
 export const ambiguousBoundOperationCode = 'SEM0097' as const
 /** Stable code for one named type parameter left undetermined by an explicit prefix and the arguments. */
-export const uninferredTypeParameterCode = 'SEM0098' as const
+export const uninferredTypeParameterCode = 'SEM0099' as const
 /** Stable code for an explicit type argument contradicting the type its value arguments imply. */
-export const typeArgumentConflictCode = 'SEM0099' as const
+export const typeArgumentConflictCode = 'SEM0100' as const
+
+/** Stable code for a bound operation whose selected witness has no lowering. */
+export const unlowerableBoundWitnessCode = 'SEM0101' as const
+
+/** Stable code for a construct the front end analyzes fully but no engine can lower yet. */
+export const analysisOnlyConstructCode = 'SEM0098' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -329,8 +335,10 @@ export type Code =
   | typeof invalidFloatLiteralCode
   | typeof impureShortCircuitOperandCode
   | typeof ambiguousBoundOperationCode
+  | typeof analysisOnlyConstructCode
   | typeof uninferredTypeParameterCode
   | typeof typeArgumentConflictCode
+  | typeof unlowerableBoundWitnessCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -414,6 +422,11 @@ export type Reason =
       readonly spelling: string
       readonly parameters: ReadonlyArray<string>
     }
+  | {
+      readonly _tag: 'UnlowerableBoundWitness'
+      readonly spelling: string
+      readonly provider: string
+    }
   | { readonly _tag: 'InvalidServiceDeclaration'; readonly detail: string }
   | { readonly _tag: 'InvalidReturnedBorrowSignature' }
   | { readonly _tag: 'InvalidReturnedBorrowOrigin' }
@@ -422,6 +435,7 @@ export type Reason =
       readonly operation: string
       readonly target: 'Evaluator' | 'LLVM' | 'Wasm'
     }
+  | { readonly _tag: 'AnalysisOnlyConstruct'; readonly construct: string }
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
   | { readonly _tag: 'InvalidFloatLiteral'; readonly spelling: string }
@@ -2259,6 +2273,26 @@ export const intrinsicTargetUnavailable = (
     span,
   })
 
+/**
+ * Diagnoses a construct the front end analyzes completely but no execution surface can lower, at
+ * the site that writes it.
+ *
+ * This is deliberately a semantic-phase error rather than a backend failure: analysis is the only
+ * phase that still knows the source span, and a construct that types cleanly and then dies inside
+ * lowering costs its user an investigation to discover the front end accepted something no engine
+ * can build. Reporting here also means the editor shows it while the line is being written.
+ */
+export const analysisOnlyConstruct = (construct: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: analysisOnlyConstructCode,
+    severity: 'error',
+    message: `${construct} is analysis-only: it type-checks, but no engine lowers it yet, so a program that uses it cannot be built`,
+    reason: Object.freeze({ _tag: 'AnalysisOnlyConstruct', construct }),
+    span,
+  })
+
 export const invalidBorrowPosition = (span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
@@ -2315,6 +2349,31 @@ export const ambiguousBoundOperation = (
       spelling,
       parameters: Object.freeze([...parameters]),
     }),
+    span,
+  })
+
+/**
+ * Creates the diagnostic for a bound operation whose specialization selects a witness that has no
+ * lowering.
+ *
+ * A witness answers with a sealed intrinsic or with a function of the provider's own actor, and a
+ * bound operation call reaches both. A conformance that names neither leaves the call with nothing
+ * to run: it would lower to nothing, and the specialized instance would fail MIR validation with no
+ * user-visible cause. A call that passes analysis and produces no code is a reported error, because
+ * the alternative is a silent miscompile.
+ */
+export const unlowerableBoundWitness = (
+  spelling: string,
+  provider: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unlowerableBoundWitnessCode,
+    severity: 'error',
+    message: `${spelling} has no witness that can be lowered for ${provider}`,
+    reason: Object.freeze({ _tag: 'UnlowerableBoundWitness', spelling, provider }),
     span,
   })
 

@@ -8,6 +8,7 @@ import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
 import * as Project from '../src/Project.js'
 import * as Workflow from '../src/Workflow.js'
+import * as Timeouts from './timeouts.js'
 
 const source = 'pub fn main() -> i32 { return 42 }'
 
@@ -120,7 +121,7 @@ it.effect(
         true,
       )
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  30_000,
+  Timeouts.nativeBuild,
 )
 
 it.effect(
@@ -145,7 +146,7 @@ it.effect(
         true,
       )
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  30_000,
+  Timeouts.nativeBuild,
 )
 
 it.effect(
@@ -177,7 +178,7 @@ pub fn main() -> i32 {
         false,
       )
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  30_000,
+  Timeouts.nativeBuild,
 )
 
 it.effect('attempts a source rejection and operational failure, preferring exit two', () =>
@@ -268,7 +269,7 @@ it.effect(
 
       assert.strictEqual(status, 42)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  30_000,
+  Timeouts.nativeBuild,
 )
 
 it.effect(
@@ -288,7 +289,7 @@ it.effect(
       assert.strictEqual(yield* fileSystem.exists(`${root}/src/Main.silk`), true)
       assert.strictEqual(yield* fileSystem.exists(`${root}/silk.toml`), true)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  30_000,
+  Timeouts.nativeBuild,
 )
 
 it.effect('exits zero cleaning a project that was never built', () =>
@@ -327,7 +328,7 @@ it.live(
 
       assert.deepStrictEqual(passes.slice(0, 2), [0, 0])
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  30_000,
+  Timeouts.nativeBuild,
 )
 
 it.live(
@@ -358,7 +359,7 @@ it.live(
 
       assert.deepStrictEqual(passes.slice(0, 2), [0, 0])
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  30_000,
+  Timeouts.nativeBuild,
 )
 
 it.live(
@@ -383,5 +384,5 @@ it.live(
       assert.strictEqual(passes[1], 0)
       yield* Fiber.interrupt(watching)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  30_000,
+  Timeouts.nativeBuild,
 )

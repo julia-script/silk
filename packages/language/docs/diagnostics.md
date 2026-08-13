@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 98 |
+| `SEM` | Semantic | 100 |
 | `OWN` | Ownership | 12 |
 | `LAY` | Layout | 1 |
 
-There are 126 codes in total.
+There are 128 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -152,8 +152,10 @@ There are 126 codes in total.
 | `SEM0095` | Stable code for a float literal spelling no floating-point value can represent. | `Invalid float literal: <spelling>` |
 | `SEM0096` | Stable code for an effect site or a move inside the conditional right operand of `&&` or `\|\|`. | `The right operand of <operator> must be pure, found <detail>` |
 | `SEM0097` | Stable code for a bound operation call whose receiver names more than one bounded parameter. | `<spelling> is ambiguous across bounded type parameters <join>` |
-| `SEM0098` | Stable code for one named type parameter left undetermined by an explicit prefix and the arguments. | `Cannot infer type argument <parameter> of <target> from supplied values` |
-| `SEM0099` | Stable code for an explicit type argument contradicting the type its value arguments imply. | `Type argument <parameter> of <target> is <written>, but the supplied values imply <implied>` |
+| `SEM0098` | Stable code for a construct the front end analyzes fully but no engine can lower yet. | `<construct> is analysis-only: it type-checks, but no engine lowers it yet, so a program that uses it cannot be built` |
+| `SEM0099` | Stable code for one named type parameter left undetermined by an explicit prefix and the arguments. | `Cannot infer type argument <parameter> of <target> from supplied values` |
+| `SEM0100` | Stable code for an explicit type argument contradicting the type its value arguments imply. | `Type argument <parameter> of <target> is <written>, but the supplied values imply <implied>` |
+| `SEM0101` | Stable code for a bound operation whose selected witness has no lowering. | `<spelling> has no witness that can be lowered for <provider>` |
 
 ## Ownership (`OWN`)
 

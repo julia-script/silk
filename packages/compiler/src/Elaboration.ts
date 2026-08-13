@@ -757,6 +757,23 @@ export type ExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
   | {
+      /**
+       * Member-selective recovery. `protectedRow`, `selected`, `handlerRow`, and `residualRow`
+       * are the four rows `bootstrap-semantic-facts` requires this operation to record; the
+       * residual is carried explicitly because it has no source-level type to recover it from.
+       */
+      readonly _tag: 'EffectCatch'
+      readonly reference: IntrinsicReferenceFact
+      readonly protected: ExpressionFact
+      readonly handler: ExpressionFact
+      readonly selected?: Type.Nominal
+      readonly protectedRow: ReadonlyArray<Type.Nominal>
+      readonly handlerRow: ReadonlyArray<Type.Nominal>
+      readonly residualRow: ReadonlyArray<Type.Nominal>
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
       readonly _tag: 'Call'
       readonly reference: CallReferenceFact
       readonly path: ReferencePathFact
@@ -5433,6 +5450,226 @@ const analyzeEffectResult = (
   })
 }
 
+/**
+ * Recognizes the member-selective recovery seam.
+ *
+ * `Effect.catch` is the only operation at this seam that users spell directly rather than through
+ * an `Intrinsic.` wrapper, because its result row — the protected row minus the selected member —
+ * has no source-level spelling for a Silk wrapper signature to declare. The predicate therefore
+ * matches the qualified source spelling under the intrinsic `Effect` namespace instead of going
+ * through `intrinsicOperationTarget`, which only ever sees `Intrinsic.` call heads.
+ */
+const isEffectCatchTarget = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): boolean => {
+  const identifiers = callReferenceTokens(node)
+  const qualifier = identifiers.at(0)
+  const member = identifiers.at(1)
+  if (qualifier === undefined || member === undefined || identifiers.length !== 2) return false
+  if (spelling(source, qualifier) !== 'Effect' || spelling(source, member) !== 'catch') return false
+  // Only the selector form routes here. `Effect.catch(effect, handler)` without a type argument
+  // stays the whole-row recovery the stdlib declaration provides, so every existing call site
+  // keeps its meaning and its lowering.
+  if (SyntaxTree.directNode(node, 'CallTypeArgumentList') === undefined) return false
+  const qualified = NameResolution.lookup(resolution.scope, resolution.index, 'Effect')
+  return (
+    qualified._tag === 'Intrinsic' ||
+    (qualified._tag === 'Namespace' && qualified.module === 'silk/effects')
+  )
+}
+
+const analyzeEffectCatch = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+): ExpressionResult => {
+  const pipelined = node.kind === 'PipelineExpression'
+  const target = pipelined ? (pipelineCallable(node) ?? node) : node
+  const list = SyntaxTree.directNode(target, 'ArgumentList')
+  const argumentNodes =
+    list?.children.filter((element): element is SyntaxTree.Node =>
+      isRecursiveArgumentNode(element),
+    ) ?? []
+  const protectedNode = pipelined ? pipelineInput(node) : argumentNodes.at(0)
+  const handlerNode = argumentNodes.at(pipelined ? 0 : 1)
+  const protectedResult =
+    protectedNode === undefined
+      ? undefined
+      : analyzeExpression(source, protectedNode, declarations, declaration, scope, resolution)
+  const handlerResult =
+    handlerNode === undefined
+      ? undefined
+      : analyzeExpression(source, handlerNode, declarations, declaration, scope, resolution)
+  const selectorArguments = analyzeCallTypeArguments(source, target, declaration, resolution)
+  const diagnostics: Array<Diagnostic.Diagnostic> = [
+    ...(protectedResult?.diagnostics ?? []),
+    ...(handlerResult?.diagnostics ?? []),
+    ...selectorArguments.diagnostics,
+  ]
+  let valid = true
+  const reject = (detail: string, span: SourceSpan.SourceSpan = node.span): void => {
+    diagnostics.push(Diagnostic.invalidEffectHandler(detail, span))
+    valid = false
+  }
+  const protectedEffect =
+    protectedResult?.type !== undefined && Type.isEffect(protectedResult.type)
+      ? protectedResult.type
+      : undefined
+  if (argumentNodes.length !== (pipelined ? 1 : 2))
+    reject('catch requires one Effect and one recovery handler')
+  if (protectedEffect === undefined)
+    reject('the protected argument is not an Effect', protectedNode?.span)
+
+  // The selector is an ordinary nominal, exactly as `Effect.catch<NotFound>(handler)` spells it.
+  // It never becomes a declared row parameter, so it needs neither a failure-row argument form
+  // nor partial positional type arguments; this seam reads it before any generic instantiation.
+  const selectorTypes = selectorArguments.types ?? Object.freeze([])
+  const selectorNode = selectorArguments.facts.at(0)?.syntax
+  if (selectorArguments.facts.length !== 1)
+    reject(
+      `catch selects exactly one failure member, received ${selectorArguments.facts.length}`,
+      selectorNode?.span,
+    )
+  const selectorType = selectorTypes.at(0)
+  const selected =
+    selectorType !== undefined && Type.isNominal(selectorType) ? selectorType : undefined
+  if (selectorType !== undefined && selected === undefined)
+    reject(
+      `the selected failure ${Type.encode(selectorType)} must be one concrete nominal type`,
+      selectorNode?.span,
+    )
+
+  const protectedFailures = protectedEffect?.failures ?? Object.freeze([])
+  const covered =
+    selected === undefined
+      ? undefined
+      : protectedFailures.find((member) => Type.equals(member, selected))
+  if (selected !== undefined && protectedEffect !== undefined && covered === undefined)
+    reject(`the protected Effect does not fail with ${Type.encode(selected)}`, selectorNode?.span)
+  if (
+    selected !== undefined &&
+    protectedEffect !== undefined &&
+    protectedEffect.failureParameters.length > 0
+  )
+    reject('catch cannot select a member from an open failure row', selectorNode?.span)
+
+  const handlerType = handlerResult?.type
+  const handlerCallable =
+    handlerType !== undefined && Type.isCallable(handlerType) ? handlerType : undefined
+  if (handlerType !== undefined && handlerCallable === undefined)
+    reject('the recovery handler is not a callable', handlerNode?.span)
+  const handlerParameter = handlerCallable?.parameters.at(0)
+  if (
+    handlerCallable !== undefined &&
+    (handlerCallable.parameters.length !== 1 || handlerParameter === undefined)
+  )
+    reject('the recovery handler takes exactly the selected failure', handlerNode?.span)
+  if (
+    selected !== undefined &&
+    handlerParameter !== undefined &&
+    !Type.equals(handlerParameter, selected)
+  )
+    reject(
+      `the recovery handler must accept ${Type.encode(selected)} but accepts ${Type.encode(handlerParameter)}`,
+      handlerNode?.span,
+    )
+  const handlerEffect =
+    handlerCallable !== undefined && Type.isEffect(handlerCallable.result)
+      ? handlerCallable.result
+      : undefined
+  if (handlerCallable !== undefined && handlerEffect === undefined)
+    reject('the recovery handler must return an Effect', handlerNode?.span)
+  if (
+    handlerEffect !== undefined &&
+    protectedEffect !== undefined &&
+    !Type.equals(handlerEffect.success, protectedEffect.success)
+  )
+    reject(
+      `the recovery handler must produce ${Type.encode(protectedEffect.success)} but produces ${Type.encode(handlerEffect.success)}`,
+      handlerNode?.span,
+    )
+
+  // The residual is the protected row minus the selected member, unioned with the handler's own
+  // failures. Computing it here is the whole reason this operation is a compiler primitive: the
+  // residual has no source-level spelling a Silk signature could declare.
+  const residual = protectedFailures.filter((member) => !Type.equals(member, selected ?? 'never'))
+  const failures = Type.union([...residual, ...(handlerEffect?.failures ?? [])])
+  const resultFailures =
+    failures._tag === 'Normalized'
+      ? Type.isUnion(failures.type)
+        ? failures.type.members
+        : Type.isNominal(failures.type)
+          ? Object.freeze([failures.type])
+          : Object.freeze([])
+      : Object.freeze([])
+  const access =
+    protectedEffect?.access === 'Take' || handlerEffect?.access === 'Take'
+      ? ('Take' as const)
+      : protectedEffect?.access === 'Exclusive' || handlerEffect?.access === 'Exclusive'
+        ? ('Exclusive' as const)
+        : ('Shared' as const)
+  const requirements = [
+    ...(protectedEffect?.requirements ?? []),
+    ...(handlerEffect?.requirements ?? []),
+  ]
+  const resultType =
+    valid && protectedEffect !== undefined && selected !== undefined
+      ? availableExpressionType(
+          Type.effect(
+            protectedEffect.success,
+            resultFailures,
+            access,
+            requirements,
+            protectedEffect.failureParameters,
+            [
+              ...protectedEffect.requirementParameters,
+              ...(handlerEffect?.requirementParameters ?? []),
+            ],
+          ),
+        )
+      : unavailableExpressionType
+
+  // Analysis of this operation is complete, but no engine lowers the residual dispatch yet, so a
+  // program that contains it cannot be built. Reporting that here — after the seam has typed the
+  // expression, and without touching `valid` — keeps the whole analysis intact for tooling while
+  // still telling whoever wrote the line, at their own call site, that it will not execute. The
+  // alternative is what this operation did before: type cleanly, then die in the backend as an
+  // `InvalidEffectOperation` MIR violation inside a stdlib function, with no user span at all.
+  // The node span opens on the call's leading trivia, so the reported span starts at the `Effect`
+  // token instead: an editor underlines the operation, not the whitespace before it.
+  const head = callReferenceTokens(target).at(0)
+  const operationSpan =
+    head === undefined
+      ? target.span
+      : Option.getOrElse(
+          SourceSpan.make(source, head.span.start, target.span.end),
+          () => target.span,
+        )
+  diagnostics.push(Diagnostic.analysisOnlyConstruct('Member-selective Effect.catch', operationSpan))
+
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'EffectCatch',
+      reference: intrinsicReference(source, target),
+      protected: protectedResult?.fact ?? unavailableExpression(node),
+      handler: handlerResult?.fact ?? unavailableExpression(node),
+      ...(selected === undefined ? {} : { selected }),
+      protectedRow: protectedFailures,
+      handlerRow: handlerEffect?.failures ?? Object.freeze([]),
+      residualRow: Object.freeze(residual),
+      type: resultType,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+    type: resultType._tag === 'Available' ? resultType.type : undefined,
+  })
+}
+
 const isEffectBindRequirementTarget = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -5737,6 +5974,10 @@ const effectCaptureFacts = (
         return
       case 'EffectResult':
         expression(fact.protected)
+        return
+      case 'EffectCatch':
+        expression(fact.protected)
+        expression(fact.handler)
         return
       case 'EffectBindRequirement':
         expression(fact.protected)
@@ -6162,6 +6403,8 @@ function analyzeExpression(
     const operationTarget = node.kind === 'PipelineExpression' ? pipelineCallable(node) : node
     if (operationTarget !== undefined && isEffectResultTarget(source, operationTarget))
       return analyzeEffectResult(source, node, declarations, declaration, scope, resolution)
+    if (operationTarget !== undefined && isEffectCatchTarget(source, operationTarget, resolution))
+      return analyzeEffectCatch(source, node, declarations, declaration, scope, resolution)
     if (operationTarget !== undefined && isEffectBindRequirementTarget(source, operationTarget))
       return analyzeEffectBindRequirement(
         source,
@@ -7904,6 +8147,29 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       span: fact.syntax.span,
     })
   }
+  if (fact._tag === 'EffectCatch') {
+    const protected_ = hirExpression(fact.protected)
+    const handler = hirExpression(fact.handler)
+    if (
+      protected_._tag === 'Unavailable' ||
+      handler._tag === 'Unavailable' ||
+      fact.selected === undefined ||
+      fact.type._tag !== 'Available' ||
+      !Type.isEffect(fact.type.type)
+    )
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    return Object.freeze({
+      _tag: 'EffectCatch',
+      protected: protected_,
+      handler,
+      selected: fact.selected,
+      protectedRow: fact.protectedRow,
+      handlerRow: fact.handlerRow,
+      residualRow: fact.residualRow,
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
   if (fact._tag === 'EffectBindRequirement') {
     const protected_ = hirExpression(fact.protected)
     if (
@@ -8867,6 +9133,8 @@ const directExpressionChildren = (expression: ExpressionFact): ReadonlyArray<Exp
       return Object.freeze([expression.protected])
     case 'EffectBindRequirement':
       return Object.freeze([expression.protected])
+    case 'EffectCatch':
+      return Object.freeze([expression.protected, expression.handler])
     case 'CallableSection':
       return Object.freeze(expression.captures.map((capture) => capture.expression))
     case 'CallableApply':

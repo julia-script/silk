@@ -479,13 +479,13 @@ export const invalidGenericCorpus: ReadonlyArray<InvalidCorpusProgram> = [
     name: 'generic-uninferred-prefix-remainder',
     source:
       'fn phantom<A, B>(value: A) -> A { return move value }\npub fn main() -> i32 { return phantom<i32>(1) }',
-    codes: ['SEM0098'],
+    codes: ['SEM0099'],
   },
   {
     name: 'generic-contradicted-prefix',
     source:
       'fn pair<A, B>(left: A, right: B) -> A { return move left }\npub fn main() -> i32 { return pair<bool>(1, true) }',
-    codes: ['SEM0099'],
+    codes: ['SEM0100'],
   },
   {
     name: 'generic-conflicting-inference',

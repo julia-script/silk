@@ -412,7 +412,7 @@ pub fn main() -> i32 { return phantom<i32>(1) }`),
 
     assert.deepEqual(
       snapshot.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
-      [['SEM0098', 'Cannot infer type argument B of phantom from supplied values']],
+      [['SEM0099', 'Cannot infer type argument B of phantom from supplied values']],
     )
     assert.strictEqual(snapshot.mir._tag, 'Unavailable')
   }),
@@ -429,7 +429,7 @@ pub fn main() -> i32 { return pair<bool>(1, true) }`
 
     const diagnostic = snapshot.diagnostics.at(0)
     assert.strictEqual(snapshot.diagnostics.length, 1, JSON.stringify(snapshot.diagnostics))
-    assert.strictEqual(diagnostic?.code, 'SEM0099')
+    assert.strictEqual(diagnostic?.code, 'SEM0100')
     assert.strictEqual(
       diagnostic?.message,
       'Type argument A of pair is bool, but the supplied values imply i32',
