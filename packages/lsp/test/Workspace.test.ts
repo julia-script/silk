@@ -309,6 +309,6 @@ it.effect('navigates standard-library definitions to the analyzed toolchain sour
       (module) => (module === 'silk/vector' ? libraryUri : undefined),
     )
     assert.strictEqual(definition?.targetUri, libraryUri)
-    assert.deepEqual(definition?.targetSelectionRange.start, { line: 15, character: 11 })
+    assert.deepEqual(definition?.targetSelectionRange.start, { line: 17, character: 11 })
   }).pipe(Effect.provide(NodeServices.layer)),
 )

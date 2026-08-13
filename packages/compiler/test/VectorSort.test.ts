@@ -1,0 +1,302 @@
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
+import * as Driver from '../src/Driver.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
+
+const ascii = (value: string): Uint8Array =>
+  Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-vector-sort-'))
+afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
+
+const program = (body: string): string =>
+  `import silk.vector { Vector, make, append, sort, binarySearch, get, length }
+import silk.option { Option, Some, None }
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+${body}
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+
+/** Appends each value in source order through the effectful `append`. */
+const fill = (name: string, values: ReadonlyArray<number>): string =>
+  values
+    .map(
+      (value, ordinal) =>
+        `  let ${name}${ordinal} = run append<i32>(&mut ${name}, ${value}) |> Effect.provideMut(&mut allocator)`,
+    )
+    .join('\n')
+
+/**
+ * Folds the whole sequence into one integer, so a single returned value pins every element and its
+ * position rather than only the set of elements.
+ */
+const fingerprint = (name: string, radix: number, into: string): string =>
+  `  let mut ${into}Index = usize.ZERO
+  let mut ${into} = 0
+  while ${into}Index < length<i32>(&${name}) {
+    ${into} = ${into} * ${radix} + get<i32>(&${name}, ${into}Index)
+    ${into}Index = ${into}Index + usize.ONE
+  }`
+
+const evaluate = (name: string, source: string) =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(
+      outcome._tag,
+      'Completed',
+      JSON.stringify(outcome, (_, value) => (typeof value === 'bigint' ? value.toString() : value)),
+    )
+    return outcome
+  })
+
+const evaluatedValue = (name: string, source: string) =>
+  Effect.map(evaluate(name, source), (outcome) =>
+    outcome._tag === 'Completed' ? outcome.result.value : undefined,
+  )
+
+// [9, -3, 5, 1, 0, -8, 7, 2] sorts to [-8, -3, 0, 1, 2, 5, 7, 9], which folds to -19473 in radix 3.
+const unsorted = [9, -3, 5, 1, 0, -8, 7, 2]
+const sortEight = program(`  let mut values = make<i32>()
+${fill('values', unsorted)}
+  let sorted = run sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+${fingerprint('values', 3, 'folded')}
+  return folded`)
+
+it.effect('sorts an empty vector and a one-element vector', () =>
+  Effect.gen(function* () {
+    const value = yield* evaluatedValue(
+      'vector-sort/small',
+      program(`  let mut empty = make<i32>()
+  let emptied = run sort<i32>(&mut empty) |> Effect.provideMut(&mut allocator)
+  let mut single = make<i32>()
+${fill('single', [5])}
+  let singled = run sort<i32>(&mut single) |> Effect.provideMut(&mut allocator)
+  if length<i32>(&empty) == usize.ZERO {
+    if length<i32>(&single) == usize.ONE {
+      return get<i32>(&single, usize.ZERO) + 37
+    }
+  }
+  return 0`),
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('orders every element of an unsorted vector', () =>
+  Effect.gen(function* () {
+    assert.strictEqual(yield* evaluatedValue('vector-sort/eight', sortEight), -19473)
+  }),
+)
+
+it.effect('gives the same output for two runs over the same input', () =>
+  Effect.gen(function* () {
+    // Two independent vectors built from the same input, sorted separately in one program: the
+    // returned zero is the difference of their fingerprints, so any divergence is non-zero.
+    const value = yield* evaluatedValue(
+      'vector-sort/repeatable',
+      program(`  let mut first = make<i32>()
+${fill('first', unsorted)}
+  let sortedFirst = run sort<i32>(&mut first) |> Effect.provideMut(&mut allocator)
+${fingerprint('first', 3, 'firstFold')}
+  let mut second = make<i32>()
+${fill('second', unsorted)}
+  let sortedSecond = run sort<i32>(&mut second) |> Effect.provideMut(&mut allocator)
+${fingerprint('second', 3, 'secondFold')}
+  if firstFold == secondFold { return 42 }
+  return firstFold - secondFold`),
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('keeps equal elements in one defined relative position', () =>
+  Effect.gen(function* () {
+    // [4, 1, 4, 1, 3, 4, 1] sorts to [1, 1, 1, 3, 4, 4, 4]. The fingerprint pins the exact
+    // arrangement of the three equal 1s and the three equal 4s, not merely that the result is
+    // ordered, so a change in how equal elements are placed fails this test.
+    const value = yield* evaluatedValue(
+      'vector-sort/equal-elements',
+      program(`  let mut values = make<i32>()
+${fill('values', [4, 1, 4, 1, 3, 4, 1])}
+  let sorted = run sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+${fingerprint('values', 10, 'folded')}
+  return folded`),
+    )
+    assert.strictEqual(value, 1113444)
+  }),
+)
+
+it.effect('leaves an already-sorted vector with equal elements unchanged', () =>
+  Effect.gen(function* () {
+    // Sorting twice must reach the same arrangement: an unstable placement of the equal elements
+    // could reorder them on the second pass, which this comparison would catch.
+    const value = yield* evaluatedValue(
+      'vector-sort/idempotent',
+      program(`  let mut values = make<i32>()
+${fill('values', [4, 1, 4, 1, 3, 4, 1])}
+  let first = run sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+${fingerprint('values', 10, 'firstFold')}
+  let second = run sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+${fingerprint('values', 10, 'secondFold')}
+  if firstFold == secondFold { return 42 }
+  return 0`),
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('sorts every integer width the standard library witnesses', () =>
+  Effect.gen(function* () {
+    const value = yield* evaluatedValue(
+      'vector-sort/widths',
+      `import silk.vector { Vector, make, append, sort, get, length }
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut narrow = make<u8>()
+  let n0 = run append<u8>(&mut narrow, 9) |> Effect.provideMut(&mut allocator)
+  let n1 = run append<u8>(&mut narrow, 2) |> Effect.provideMut(&mut allocator)
+  let n2 = run append<u8>(&mut narrow, 5) |> Effect.provideMut(&mut allocator)
+  let narrowed = run sort<u8>(&mut narrow) |> Effect.provideMut(&mut allocator)
+  let mut wide = make<i64>()
+  let w0 = run append<i64>(&mut wide, 30) |> Effect.provideMut(&mut allocator)
+  let w1 = run append<i64>(&mut wide, 10) |> Effect.provideMut(&mut allocator)
+  let w2 = run append<i64>(&mut wide, 20) |> Effect.provideMut(&mut allocator)
+  let widened = run sort<i64>(&mut wide) |> Effect.provideMut(&mut allocator)
+  let mut counts = make<usize>()
+  let c0 = run append<usize>(&mut counts, 7) |> Effect.provideMut(&mut allocator)
+  let c1 = run append<usize>(&mut counts, 3) |> Effect.provideMut(&mut allocator)
+  let counted = run sort<usize>(&mut counts) |> Effect.provideMut(&mut allocator)
+  if get<u8>(&narrow, usize.ZERO) == 2 {
+    if get<i64>(&wide, usize.ZERO) == 10 {
+      if get<usize>(&counts, usize.ZERO) == 3 {
+        return 42
+      }
+    }
+  }
+  return 0
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('releases every allocation the sort acquires', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluate('vector-sort/allocations', sortEight)
+    if (outcome._tag !== 'Completed') return
+    // The scratch element buffer and the two index vectors are acquired and released alongside the
+    // vector's own growth, so no element and no allocation leaks out of the sort.
+    const acquires = outcome.trace.filter((event) => event._tag === 'AllocationAcquire')
+    const releases = outcome.trace.filter((event) => event._tag === 'AllocationRelease')
+    assert.strictEqual(acquires.length, releases.length)
+    assert.isAbove(acquires.length, 0)
+  }),
+)
+
+it.effect('finds a present element and reports an absent one', () =>
+  Effect.gen(function* () {
+    // [9, 2, 7, 2, 5] sorts to [2, 2, 5, 7, 9]: 7 sits at index 3, 4 is absent, and the lowest
+    // index of the duplicated 2 is 0.
+    const value = yield* evaluatedValue(
+      'vector-sort/search',
+      program(`  let mut values = make<i32>()
+${fill('values', [9, 2, 7, 2, 5])}
+  let sorted = run sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+  let hit = binarySearch<i32>(&values, 7)
+  let miss = binarySearch<i32>(&values, 4)
+  let duplicate = binarySearch<i32>(&values, 2)
+  let hitCode = match move hit { Some<usize> { value } => usize.toI32(value) None {} => 0 - 1 }
+  let missCode = match move miss { Some<usize> { value } => usize.toI32(value) None {} => 0 - 1 }
+  let duplicateCode = match move duplicate { Some<usize> { value } => usize.toI32(value) None {} => 0 - 1 }
+  return hitCode * 100 + (missCode + 1) * 10 + duplicateCode`),
+    )
+    assert.strictEqual(value, 300)
+  }),
+)
+
+it.effect('reports an absent value for every miss around and beyond the elements', () =>
+  Effect.gen(function* () {
+    const value = yield* evaluatedValue(
+      'vector-sort/search-misses',
+      program(`  let mut values = make<i32>()
+${fill('values', [5, 1, 9])}
+  let sorted = run sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+  let below = binarySearch<i32>(&values, 0)
+  let between = binarySearch<i32>(&values, 4)
+  let above = binarySearch<i32>(&values, 12)
+  let mut score = 0
+  let belowCode = match move below { Some<usize> { value } => 1 None {} => 0 }
+  let betweenCode = match move between { Some<usize> { value } => 1 None {} => 0 }
+  let aboveCode = match move above { Some<usize> { value } => 1 None {} => 0 }
+  if belowCode + betweenCode + aboveCode == 0 { return 42 }
+  return 0`),
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('searches an empty vector without matching', () =>
+  Effect.gen(function* () {
+    const value = yield* evaluatedValue(
+      'vector-sort/search-empty',
+      program(`  let mut values = make<i32>()
+  let missing = binarySearch<i32>(&values, 3)
+  return match move missing { Some<usize> { value } => 0 None {} => 42 }`),
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect(
+  'sorts to the same output on the evaluator, on Wasm, and on LLVM',
+  () =>
+    Effect.gen(function* () {
+      const wasmSnapshot = yield* Analysis.ofSourceRealized(
+        'vector-sort/parity',
+        ascii(sortEight),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(wasmSnapshot), [])
+
+      const evaluated = Analysis.evaluate(wasmSnapshot)
+      assert.strictEqual(evaluated._tag, 'Completed')
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, -19473)
+
+      const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      // Wasm returns i32 as an unsigned 32-bit pattern, so compare the same two's complement bits.
+      assert.strictEqual((instance.exports.silk_main as () => number)() | 0, -19473)
+
+      const compiled = yield* Driver.compile({
+        compilation: { root: SourceFile.make('vector-sort/parity', ascii(sortEight)) },
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        profile: 'release',
+        destination: join(destinationRoot, 'parity'),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(compiled._tag, 'Compiled')
+      if (compiled._tag !== 'Compiled') return
+      // A process exit status is one unsigned byte, so compare the fingerprint the same way.
+      const native = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      assert.strictEqual(native.status, -19473 & 0xff, native.stderr)
+    }),
+  60_000,
+)
