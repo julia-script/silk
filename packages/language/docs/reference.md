@@ -595,6 +595,11 @@ arm-local binding is released at its arm boundary. Every `return` is its own exi
 `drop value` consumes a value early. Dropping a borrowed owner is rejected. A `Drop` hook may
 declare neither a failure row nor a capability requirement.
 
+Cleanup descends through hooks by ordinary calls, so releasing a deeply nested owned value is a deep
+recursion and is bounded by the machine stack like any other. A type that can form an unbounded
+chain needs an explicit iterative teardown — see
+[Recursion and the machine stack](./recursion.md#6-cleanup-has-the-same-limit-and-fewer-ways-out).
+
 ### 4.4 Allocation
 
 There is no ambient heap. Allocation is a capability obtained through the `Allocator` service, and
@@ -834,6 +839,10 @@ pub fn main() -> i32 {
 }
 ```
 
+`while` is also the answer to depth. An ordinary recursive call costs a machine stack frame and Silk
+promises no bound on how many are available, so a traversal whose depth comes from input is written
+as a loop — see [Recursion and the machine stack](./recursion.md).
+
 ### 6.3 `match`
 
 `match` **is** an expression and is valid anywhere an expression is. Its access mode is part of the
@@ -917,5 +926,7 @@ Concurrency, networking, a package registry, broad FFI, and self-hosting are fut
 ## See also
 
 - [Tutorial](./tutorial.md) — from `silk init` to a running program.
+- [Recursion and the machine stack](./recursion.md) — the bound on ordinary recursion, and how it
+  fails on each engine.
 - [Standard library](./stdlib.md) — every module and public declaration.
 - [Diagnostic index](./diagnostics.md) — every error code, including those cited above.
