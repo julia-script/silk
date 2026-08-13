@@ -1,5 +1,17 @@
 import silk.option { Option }
 
+/// The largest isize. The checked arithmetic intrinsics reject every result above this bound. No
+/// literal spells it: isize is as wide as a pointer, so the bound is 2147483647 on a 32-bit target
+/// and 9223372036854775807 on a 64-bit one, and the compiler selects between them.
+pub const MAX: isize = Target.isizeMax
+
+/// The smallest isize. The checked arithmetic intrinsics reject every result below this bound. It
+/// is -2147483648 on a 32-bit target and -9223372036854775808 on a 64-bit one.
+pub const MIN: isize = Target.isizeMin
+
+/// The width of isize in bits, which is the selected target's pointer width.
+pub const BITS: u32 = Target.pointerBits
+
 /// Calls the concrete isize negate primitive.
 pub fn negate(value: isize) -> isize {
   return Intrinsic.isizeNegate(value)

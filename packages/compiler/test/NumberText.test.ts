@@ -221,9 +221,9 @@ const boundChecks: ReadonlyArray<Check> = fixedWidthIntegers.flatMap((scalar) =>
 })
 
 /**
- * `usize` and `isize` have no limit constants to name — they are target-dependent (#109) — so they
- * are held to the round trip at values every supported pointer width holds, which is what a
- * diagnostic actually renders.
+ * `usize` and `isize` carry a target-dependent bound, so no one expected text is correct for every
+ * engine this program runs on. They are held to the round trip at values every supported pointer
+ * width holds, which is what a diagnostic actually renders.
  */
 const pointerWidthChecks: ReadonlyArray<Check> = pointerWidthSpellings.flatMap((spelling) => {
   const signed = isSigned(spelling)

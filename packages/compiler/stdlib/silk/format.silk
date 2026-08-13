@@ -173,9 +173,10 @@ pub fn signedValue(text: string) -> Result<i64, ParseFailure> {
   return succeed<i64, ParseFailure>(SIGNED_ZERO - total)
 }
 
-// Narrowing is the checked conversion rather than a comparison against the target's MAX, so the two
-// pointer-width types read exactly like the eight fixed-width ones. `usize` and `isize` have no
-// limit constants to name (#109) and need none here.
+// Narrowing is the checked conversion rather than a comparison against the target's MAX, so every
+// type reads the same way. It is also the only form that works at every width: `usize.MAX` and
+// `isize.MAX` are target-dependent, so a comparison against them would be a different comparison
+// per target, while the checked conversion is one range test whatever the pointer width.
 
 fn narrowU8(value: u64) -> Result<u8, ParseFailure> {
   return match move u64.checkedToU8(value) {

@@ -210,10 +210,20 @@ export type Verdict =
 export interface FunctionOwnership {
   readonly _tag: 'FunctionOwnership'
   readonly declaration: DeclarationIndex.DeclarationFact
+  /**
+   * Bindings this function's own statements introduce: parameters, `let` statements, and match
+   * patterns the enclosing flow reaches. Deliberately excludes deferred effect bodies, so it is
+   * not the whole set of bindings the function owns — an `effect fn` is entirely a deferred
+   * body, and publishes little beyond its parameters here. Read {@link allBindings} instead
+   * whenever completeness matters; reach for this field only to ask the narrower question of
+   * what the enclosing flow itself introduced.
+   */
   readonly bindings: ReadonlyArray<BindingFact>
   /**
    * Bindings owned by deferred effect bodies: published separately because their releases lower
-   * through the body's compiled runner, not through the enclosing function's statements.
+   * through the body's compiled runner, not through the enclosing function's statements. An
+   * `effect fn`'s whole body is deferred, so its `let` and pattern bindings arrive here rather
+   * than in {@link FunctionOwnership.bindings}.
    */
   readonly deferredBindings: ReadonlyArray<BindingFact>
   readonly exits: ReadonlyArray<ExitPlan>
@@ -224,6 +234,20 @@ export interface FunctionOwnership {
   readonly borrowedReplacements: ReadonlyArray<BorrowedReplacementFact>
   readonly verdict: Verdict
 }
+
+/**
+ * Every binding one function owns, enclosing statements and deferred effect bodies alike. The
+ * two fact sets are published apart because their releases lower through different bodies, so a
+ * consumer asking "what does this function own?" — cleanup emission, drop lowering — must join
+ * them rather than read {@link FunctionOwnership.bindings} and silently miss an `effect fn`'s
+ * entire body.
+ */
+export const allBindings = (
+  ownership: FunctionOwnership | undefined,
+): ReadonlyArray<BindingFact> =>
+  ownership === undefined
+    ? Object.freeze([])
+    : Object.freeze([...ownership.bindings, ...ownership.deferredBindings])
 
 export interface MatchOwnership {
   readonly _tag: 'MatchOwnership'

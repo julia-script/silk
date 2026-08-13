@@ -20,3 +20,38 @@ pub fn none<T>() -> Option<T> {
 pub fn some<T>(value: T) -> Option<T> {
   return Some<T> { value: move value }
 }
+
+/// Applies a transform to a present value and keeps an absent value absent.
+pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> Option<U> {
+  return match move self {
+    Some<T> { value } => some<U>(transform(move value))
+    None {} => none<U>()
+  }
+}
+
+/// Continues a present value with a transform that itself answers with an Option, so the
+/// outcome stays one Option deep instead of nesting.
+pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> Option<U>) -> Option<U> {
+  return match move self {
+    Some<T> { value } => transform(move value)
+    None {} => none<U>()
+  }
+}
+
+/// Returns the present value, or the fallback value when the option is absent.
+///
+/// Only the absent arm consumes the fallback. The present arm releases it, so exactly one of the
+/// two owned values leaves this call and the other drops.
+pub fn unwrapOr<T>(self: Option<T>, fallback: T) -> T {
+  return match move self {
+    Some<T> { value } => keepPresent<T>(move value, move fallback)
+    None {} => move fallback
+  }
+}
+
+/// Releases the fallback that a present value never needed. A match arm is one expression, so the
+/// arm that must both drop and produce delegates to this helper.
+fn keepPresent<T>(present: T, unused: T) -> T {
+  drop unused
+  return move present
+}

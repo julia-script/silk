@@ -28,10 +28,11 @@ than restated.
   because the only `pub const` declarations in the whole standard library were `usize.ZERO` and
   `usize.ONE`. PR #106 (issue #38) shipped `MAX`, `MIN` and `BITS` across all eight fixed-width
   integer modules, so the accumulator can name the bound it must not cross.
-- **`usize` and `isize` are not blocked on #109.** They have no limit constants — those are
-  target-dependent — but reading them needs none: the digits accumulate in `u64`/`i64` and the
-  result narrows through the existing checked conversion, which is exactly a range test that names
-  no literal.
+- **`usize` and `isize` are not blocked on #109.** Reading them needs no bound of their own: the
+  digits accumulate in `u64`/`i64` and the result narrows through the existing checked conversion,
+  which is exactly a range test that names no literal. #109 has since landed their bounds, and the
+  checked conversion remains the right form — a comparison against a target-dependent `MAX` would be
+  a different comparison per target.
 
 ## What Changes
 
