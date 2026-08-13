@@ -194,6 +194,8 @@ export const invalidFloatLiteralCode = 'SEM0095' as const
 export const impureShortCircuitOperandCode = 'SEM0096' as const
 /** Stable code for a bound operation call whose receiver names more than one bounded parameter. */
 export const ambiguousBoundOperationCode = 'SEM0097' as const
+/** Stable code for a bound operation whose selected witness has no lowering. */
+export const unlowerableBoundWitnessCode = 'SEM0101' as const
 
 /** Stable code for a construct the front end analyzes fully but no engine can lower yet. */
 export const analysisOnlyConstructCode = 'SEM0098' as const
@@ -329,6 +331,7 @@ export type Code =
   | typeof impureShortCircuitOperandCode
   | typeof ambiguousBoundOperationCode
   | typeof analysisOnlyConstructCode
+  | typeof unlowerableBoundWitnessCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -411,6 +414,11 @@ export type Reason =
       readonly _tag: 'AmbiguousBoundOperation'
       readonly spelling: string
       readonly parameters: ReadonlyArray<string>
+    }
+  | {
+      readonly _tag: 'UnlowerableBoundWitness'
+      readonly spelling: string
+      readonly provider: string
     }
   | { readonly _tag: 'InvalidServiceDeclaration'; readonly detail: string }
   | { readonly _tag: 'InvalidReturnedBorrowSignature' }
@@ -2288,6 +2296,31 @@ export const ambiguousBoundOperation = (
       spelling,
       parameters: Object.freeze([...parameters]),
     }),
+    span,
+  })
+
+/**
+ * Creates the diagnostic for a bound operation whose specialization selects a witness that has no
+ * lowering.
+ *
+ * A witness answers with a sealed intrinsic or with a function of the provider's own actor, and a
+ * bound operation call reaches both. A conformance that names neither leaves the call with nothing
+ * to run: it would lower to nothing, and the specialized instance would fail MIR validation with no
+ * user-visible cause. A call that passes analysis and produces no code is a reported error, because
+ * the alternative is a silent miscompile.
+ */
+export const unlowerableBoundWitness = (
+  spelling: string,
+  provider: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unlowerableBoundWitnessCode,
+    severity: 'error',
+    message: `${spelling} has no witness that can be lowered for ${provider}`,
+    reason: Object.freeze({ _tag: 'UnlowerableBoundWitness', spelling, provider }),
     span,
   })
 
