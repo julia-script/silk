@@ -1,0 +1,86 @@
+// The hashing contract the hashed collections resolve against, and the seed every hash is computed
+// under. Ordinary Silk: no compiler phase computes a hash, recognizes this interface by spelling, or
+// treats a conformance to it as anything other than an ordinary conformance.
+//
+// The contract pairs an equivalence with a hash because a hashed collection needs both and needs
+// them to agree. The equivalence is named `equals` rather than `equivalent` for the same reason
+// `order.silk` declares `lessThan` rather than a three-way `compare`: an interface operation is
+// reachable from a generic body through the operator that spells it, and `==` spells `equals`. The
+// hash is reached by naming the bound, which is the one call shape no operator provides.
+
+/// The value every hash in one collection is computed under.
+///
+/// One seed fixes one iteration order. A collection consults nothing else — no allocation address,
+/// no clock, no ambient entropy — so two runs of one program over one seed observe one order, and
+/// they observe it identically on the evaluator, on the native backend, and on WebAssembly.
+pub struct HashSeed {
+  /// The seed value handed to every hash the collection computes.
+  pub value: u64
+}
+
+/// Constructs a seed from one value.
+pub fn seed(value: u64) -> HashSeed {
+  return HashSeed { value: value }
+}
+
+/// Static hashing contract for a key of a hashed collection.
+///
+/// A witness supplies two operations over one key type: the equivalence `==` spells, and a hash of
+/// one key under one seed. The seed is an operand of the hash rather than state a key carries,
+/// because one seed serves the whole collection.
+///
+/// A witness MUST compute equal hashes for two keys its own `equals` reports equivalent, under every
+/// seed. Nothing checks this — a witness that breaks it makes a present key unreachable, and a
+/// collection can neither detect the breakage nor recover from it.
+pub interface HashKey<T> {
+  fn equals(left: T, right: T) -> bool
+  fn hash(value: T, seed: HashSeed) -> u64
+}
+
+/// Mixes one value under one seed into a hash spread across the whole 64-bit range.
+///
+/// Every step is a wrapping multiply, a shift, or an exclusive or, so the result is exactly the same
+/// on every engine. A witness for a key built from integers can answer `hash` by folding its fields
+/// through this function rather than inventing a mixer.
+pub fn mix(seed: &HashSeed, value: u64) -> u64 {
+  let salted = u64.wrappingAdd(value, seed.value)
+  let stepped = u64.wrappingAdd(salted, 11400714819323198485)
+  let folded = u64.bitXor(stepped, u64.shiftRight(stepped, 30))
+  let spread = u64.wrappingMultiply(folded, 13787848793156543929)
+  let refolded = u64.bitXor(spread, u64.shiftRight(spread, 27))
+  let respread = u64.wrappingMultiply(refolded, 10723151780598845931)
+  return u64.bitXor(respread, u64.shiftRight(respread, 31))
+}
+
+/// Continues a hash with one further value, so a key of several fields folds into one hash.
+pub fn combine(hashed: u64, value: u64) -> u64 {
+  let mingled = u64.bitXor(hashed, u64.wrappingAdd(value, 11400714819323198485))
+  let spread = u64.wrappingMultiply(mingled, 13787848793156543929)
+  return u64.bitXor(spread, u64.shiftRight(spread, 27))
+}
+
+/// A key holding one unsigned integer.
+///
+/// The scalar types cannot carry a `HashKey` witness themselves: a conformance whose provider is a
+/// scalar admits a sealed compiler operation and nothing else, and no compiler operation computes a
+/// hash — nor may one be added. A key built from an integer is therefore a declared type, and this
+/// is the canonical one.
+pub struct Word {
+  /// The integer this key stands for.
+  pub value: u64
+}
+
+/// Constructs an integer key.
+pub fn word(value: u64) -> Word {
+  return Word { value: value }
+}
+
+fn wordEquals(left: &Word, right: &Word) -> bool {
+  return left.value == right.value
+}
+
+fn wordHash(value: &Word, seed: &HashSeed) -> u64 {
+  return mix(seed, value.value)
+}
+
+impl HashKey<Word> for Word { equals: Word.wordEquals hash: Word.wordHash }
