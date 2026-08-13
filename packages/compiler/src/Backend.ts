@@ -1346,6 +1346,41 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               }),
             )
           }
+
+          /**
+           * Re-reads every memory-backed root from its storage into the local value cache.
+           *
+           * The cache holds SSA values, and an SSA value is only readable in blocks the block
+           * defining it dominates. Running this on entry to a block whose predecessors diverge
+           * re-establishes that: nothing cached from one predecessor survives into the join, and
+           * what replaces it is a load placed in the join itself. Storage is authoritative
+           * because every write to one of these roots stores through it, so the reloaded value
+           * is also the current one — a cleanup arm that mutated the root is observed, not
+           * discarded.
+           */
+          const reloadMutableRoots = Effect.fnUntraced(function* (tag: string) {
+            for (const root of [...mutableRoots].sort((left, right) => left - right)) {
+              const storage = mutableStorage.get(root)
+              if (storage === undefined) continue
+              const loaded: Array<Value.Input> = []
+              const logicalType = entry.fn.localTypes.at(root)
+              if (logicalType === undefined) throw new RangeError('Mutable root lost its type')
+              for (const [lane, pointer] of storage.entries()) {
+                const callingLane = valueLanesFor(logicalType).at(lane)
+                if (callingLane === undefined) throw new RangeError('Mutable root lost a lane')
+                loaded.push(
+                  yield* FunctionBody.load(
+                    body,
+                    laneType(callingLane),
+                    pointer,
+                    `mut${root}_${lane}_load_${tag}`,
+                  ),
+                )
+              }
+              locals.set(root, Object.freeze(loaded))
+            }
+          })
+
           const storeAddressRootValues = Effect.fnUntraced(function* (
             root: number,
             values: ReadonlyArray<Value.Input>,
@@ -2363,6 +2398,12 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     )
                     yield* FunctionBody.branch(body, followingBlock)
                     yield* LlvmBlock.setInsertionPoint(body, followingBlock)
+                    // The arm just emitted is only one of this join's two predecessors, so
+                    // anything it left in the value cache is unreadable here — a Drop hook
+                    // reloads its receiver after calling out, and those loads live in the arm.
+                    // Reloading re-roots the cache in this block, which is both valid SSA and
+                    // the value the arm may have just mutated.
+                    yield* reloadMutableRoots(`${tag}_u${caseEntry.ordinal}_next`)
                     continue
                   }
                   for (const [pathOrdinal, path] of paths.entries()) {
@@ -2406,28 +2447,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             const blockHandle = blocks.get(block.id.ordinal)
             if (blockHandle === undefined) continue
             if (blockOrdinal > 0) yield* LlvmBlock.setInsertionPoint(body, blockHandle)
-            if (blockOrdinal > 0) {
-              for (const root of [...mutableRoots].sort((left, right) => left - right)) {
-                const storage = mutableStorage.get(root)
-                if (storage === undefined) continue
-                const loaded: Array<Value.Input> = []
-                const logicalType = entry.fn.localTypes.at(root)
-                if (logicalType === undefined) throw new RangeError('Mutable root lost its type')
-                for (const [lane, pointer] of storage.entries()) {
-                  const callingLane = valueLanesFor(logicalType).at(lane)
-                  if (callingLane === undefined) throw new RangeError('Mutable root lost a lane')
-                  loaded.push(
-                    yield* FunctionBody.load(
-                      body,
-                      laneType(callingLane),
-                      pointer,
-                      `mut${root}_${lane}_load_b${block.id.ordinal}`,
-                    ),
-                  )
-                }
-                locals.set(root, Object.freeze(loaded))
-              }
-            }
+            if (blockOrdinal > 0) yield* reloadMutableRoots(`b${block.id.ordinal}`)
             for (const operation of block.operations) {
               switch (operation._tag) {
                 case 'BindMatch': {
@@ -6152,6 +6172,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     )
                   }
                   yield* LlvmBlock.setInsertionPoint(body, followingBlock)
+                  // Both arms of this outcome dispatch reach here, so neither arm's cached
+                  // values are readable in the join. Reloading re-roots them at this block.
+                  yield* reloadMutableRoots(`effect_run${operation.destination.ordinal}_following`)
                   const storage = mutableStorage.get(operation.destination.ordinal)
                   if (storage === undefined)
                     throw new RangeError('Effect run destination is not materialized')
@@ -6318,6 +6341,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                         ),
                   )
                   yield* LlvmBlock.setInsertionPoint(body, followingBlock)
+                  // Both arms of this outcome dispatch reach here, so neither arm's cached
+                  // values are readable in the join. Reloading re-roots them at this block.
+                  yield* reloadMutableRoots(
+                    `effect_value${operation.destination.ordinal}_following`,
+                  )
                   const storage = mutableStorage.get(operation.destination.ordinal)
                   if (storage === undefined)
                     throw new RangeError('Effect value run destination is not materialized')
@@ -6443,6 +6471,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     yield* FunctionBody.branch(body, followingBlock)
                   }
                   yield* LlvmBlock.setInsertionPoint(body, followingBlock)
+                  // Both arms of this outcome dispatch reach here, so neither arm's cached
+                  // values are readable in the join. Reloading re-roots them at this block.
+                  yield* reloadMutableRoots(
+                    `effect_result${operation.destination.ordinal}_following`,
+                  )
                   const storage = mutableStorage.get(operation.destination.ordinal)
                   if (storage === undefined)
                     throw new RangeError('Effect result destination is not materialized')
@@ -6557,6 +6590,12 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     yield* FunctionBody.branch(body, trapBlock)
                   }
                   yield* LlvmBlock.setInsertionPoint(body, following)
+                  // The success arm and every failure-tag arm reach here, so no arm's cached
+                  // values are readable in the join — and the failure arms run cleanup, which
+                  // reloads. Reloading re-roots the cache at this block.
+                  yield* reloadMutableRoots(
+                    `effect_entry${operation.destination.ordinal}_following`,
+                  )
                   const storage = mutableStorage.get(operation.destination.ordinal)
                   const pointer = storage?.at(0)
                   if (pointer === undefined)
