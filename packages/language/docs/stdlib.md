@@ -24,7 +24,7 @@ The library has 38 modules.
 | [`silk/char`](#silk-char) | `char` | 6 |
 | [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
 | [`silk/core`](#silk-core) | `Allocator` | 17 |
-| [`silk/effects`](#silk-effects) | `Effect` | 25 |
+| [`silk/effects`](#silk-effects) | `Effect` | 26 |
 | [`silk/f32`](#silk-f32) | `f32` | 51 |
 | [`silk/f64`](#silk-f64) | `f64` | 51 |
 | [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 85 |
@@ -892,6 +892,32 @@ with the one being preserved. A caller with fallible cleanup recovers it into `!
 
 A trap is not an outcome. It bypasses the finalizer exactly as it bypasses `Effect.catch` and
 every Drop hook.
+
+### `ifThenElse`
+
+```silk
+pub effect fn ifThenElse<A, !E, !F, ?R, ?S>(condition: bool, onTrue: once fn() -> Effect<A ! E ? R>, onFalse: once fn() -> Effect<A ! F ? S>) -> A ! E | F ? R | S
+```
+
+Runs exactly one of two suspended branches, selected by a condition.
+
+The arms are suspended rather than pre-built: each is a `once fn()` that produces its branch's
+Effect, and only the selected arm is invoked. The branch not taken is therefore never
+constructed, which is a stronger guarantee than merely not being run — construction-time work
+inside an arm never happens, and an arm whose body is only well-defined under the condition is
+safe to write. Two pre-built `Effect` arguments would instead be evaluated at the call site,
+before either was chosen.
+
+The unselected arm is released here with an explicit `drop move`, so the affine obligation for
+the arm that is never invoked is discharged in this source rather than left to a generated
+release.
+
+The result's failure and requirement rows are the union of the two arms', so the caller
+discharges whatever either branch could need without knowing which one will be selected. Both
+arms must agree on the success type.
+
+The name is `ifThenElse` rather than `if` because `if` is a keyword and Silk has no
+raw-identifier form, so the declaration itself could not be spelled `if`.
 
 ### `retry`
 
