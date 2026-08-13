@@ -312,6 +312,30 @@ pub fn main() -> i32 {
 The `T: Integer` bound on `add` is what makes `left + right` legal inside its body: a generic body
 may use only the operations its bounds promise.
 
+An operation whose name an operator spells is reached through that operator. Every other operation
+is reached by qualifying through the bound's own name, `Bound.operation(args)`, the same shape a
+service operation takes:
+
+```silk
+pub interface Mixer<T> {
+  fn mix(left: T, right: T) -> T
+}
+
+impl Mixer<i32> for i32 { mix: Intrinsic.i32WrappingAdd }
+impl Mixer<u8> for u8 { mix: Intrinsic.u8SaturatingAdd }
+
+pub fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.mix(left, right) }
+```
+
+One body, two specializations, two instructions: `blend<i32>` wraps and `blend<u8>` saturates,
+because each reads the operation its own witness maps. The call is still specialization-time only —
+no dispatch, no provider slot, no row.
+
+Inside a body bounded by an interface, that name selects the bound's operation even when the
+interface's module also declares a public function of the same name; the module function stays
+reachable through its module everywhere else. A declaration that bounds two of its type parameters
+by one interface leaves the receiver naming neither, and the call is reported with `SEM0097`.
+
 ### 2.6 Services
 
 A `service` declares runtime capability contracts — operation signatures only, with no fields, no
@@ -607,10 +631,10 @@ as `Result<A, Row<!E>>` data, one that removes a single capability-role entry, a
 single failure-row member. The third is a deliberate, explained exception to the rule that handling
 is library code — see "Why `catch<E>` is not ordinary Silk" below.
 
-Everything else — `map`, `mapError`, `flatMap`, `tap`, `catchAll`, `retry`, `ensuring`,
-`provide`, `provideMut`, `provideWith`, and `catch` in its whole-row form — is ordinary Silk source
-in `effects.silk`. The compiler must not infer their meaning from a name or an origin, so a
-user-defined equivalent gets identical treatment with no registration.
+Everything else — `map`, `mapError`, `flatMap`, `flatten`, `tap`, `catchAll`, `retry`, `ensuring`,
+`zip`, `zip3`, `provide`, `provideMut`, `provideWith`, and `catch` in its whole-row form — is
+ordinary Silk source in `effects.silk`. The compiler must not infer their meaning from a name or an
+origin, so a user-defined equivalent gets identical treatment with no registration.
 
 Recovery is therefore just reify, `match`, and re-raise or return. Because a failure row reifies to
 `Row<!E>` — ordinary value data projected to a structural union — a handler can match on it like any
@@ -658,7 +682,7 @@ unioned with the handler's failures. The four rows are recorded as semantic fact
 selected, handler, residual.
 
 No execution surface lowers the residual dispatch yet, and writing the selector form says so.
-Semantic analysis reports [`SEM0097`](./diagnostics.md) — *`<construct>` is analysis-only: it
+Semantic analysis reports [`SEM0098`](./diagnostics.md) — *`<construct>` is analysis-only: it
 type-checks, but no engine lowers it yet, so a program that uses it cannot be built* — as an error
 spanning the `Effect.catch<E>(…)` call. The diagnostic is raised after the seam has typed the
 expression and does not suppress any of it: the result type, the residual row, and the four semantic
@@ -683,6 +707,22 @@ reconcile with the one being preserved, and the failure row of the wrapped Effec
 release that can fail is recovered into that contract first — `Effect.catch(release(), ignore)` —
 which leaves the decision about what a failed release means with the caller. A trap is not an
 outcome: it bypasses the finalizer exactly as it bypasses `catch` and every `Drop` hook.
+
+`Effect.zip` collects instead of transforming: it runs two Effects in order and returns a `Pair`
+holding both success values, with both failure rows and both requirement rows unioned. `Effect.zip3`
+does the same for three operands and returns a `Triple`. Sequencing is the body's own statement
+order — `let first = run self` then `let second = run other` — so a typed failure from the first
+operand propagates out before the second `run` is reached. The second Effect is never executed, and
+because it is an owned local of the frame the failure leaves, the propagation exit releases it like
+any other local. Neither combinator reifies, because neither has anything to do after a failure.
+
+Arity is fixed, and that is a property of the language rather than a simplification. A
+collection-taking `all` would need `Vector<Effect<...>>`, which cannot be lowered: Effect values are
+compiler-private with no target layout, and they survive being passed and returned only because
+hidden-identity specialization erases them at each statically known use. A `RawBuffer` element's
+identity is a runtime value, so there is nothing to erase — such a program passes semantic analysis
+today and then fails MIR verification with `MissingTypeLayout`. Distinct parameters keep every
+operand statically known. A caller combining more than three Effects nests: `zip(zip3(a, b, c), d)`.
 
 ### 5.5 Provision
 

@@ -34,12 +34,12 @@ effect fn recoverRow(problem: Row<!A | B>) -> i32 { return 99 }
 `
 
 /**
- * Every program below that writes the selector form also carries `SEM0097`, because the operation
+ * Every program below that writes the selector form also carries `SEM0098`, because the operation
  * is analysis-only: it types, but no engine lowers it. That code appearing beside a clean analysis
  * is the point — the two statements are independent, and each assertion here still pins exactly
  * what the analysis concluded.
  */
-const analysisOnly = 'SEM0097'
+const analysisOnly = 'SEM0098'
 const notExecutable =
   'Member-selective Effect.catch is analysis-only: it type-checks, but no engine lowers it yet, so a program that uses it cannot be built'
 

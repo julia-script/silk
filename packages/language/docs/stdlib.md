@@ -24,7 +24,7 @@ The library has 38 modules.
 | [`silk/char`](#silk-char) | `char` | 6 |
 | [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
 | [`silk/core`](#silk-core) | `Allocator` | 17 |
-| [`silk/effects`](#silk-effects) | `Effect` | 21 |
+| [`silk/effects`](#silk-effects) | `Effect` | 26 |
 | [`silk/f32`](#silk-f32) | `f32` | 51 |
 | [`silk/f64`](#silk-f64) | `f64` | 51 |
 | [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 85 |
@@ -786,6 +786,67 @@ pub effect fn flatten<A, !E, !F, ?R, ?S>(self: once Effect<Effect<A ! F ? S> ! E
 
 Removes one Effect layer from a nested Effect.
 
+### `Pair`
+
+```silk
+pub struct Pair<A, B>
+```
+
+Two success values collected in order by `Effect.zip`.
+
+| Field | Description |
+| --- | --- |
+| `pub first: A` | The first Effect's success value. |
+| `pub second: B` | The second Effect's success value. |
+
+### `Triple`
+
+```silk
+pub struct Triple<A, B, C>
+```
+
+Three success values collected in order by `Effect.zip3`.
+
+| Field | Description |
+| --- | --- |
+| `pub first: A` | The first Effect's success value. |
+| `pub second: B` | The second Effect's success value. |
+| `pub third: C` | The third Effect's success value. |
+
+### `zip`
+
+```silk
+pub effect fn zip<A, B, !E, !F, ?R, ?S>(self: once Effect<A ! E ? R>, other: once Effect<B ! F ? S>) -> silk/effects.Pair<A, B> ! E | F ? R | S
+```
+
+Runs two Effects in declaration order and collects both success values.
+
+The order is the body's own statement order rather than a scheduling promise: the second Effect
+is only constructed into a value here, and nothing runs it until the first `run` has produced a
+success. A typed failure from the first Effect therefore propagates out of this body before the
+second Effect is ever executed, and the unrun second Effect is released by the ordinary local
+cleanup of the frame the propagation leaves.
+
+Both failure rows and both requirement rows are unioned, so the result is `! E | F ? R | S`. The
+fields are `pub`, so a caller in another module can project `first` and `second` directly.
+
+This combinator is fixed-arity by construction. Each operand is a distinct parameter, so no
+Effect is ever stored in a collection — see the note on `zip3` for why that matters.
+
+### `zip3`
+
+```silk
+pub effect fn zip3<A, B, C, !E, !F, !G, ?R, ?S, ?T>(self: once Effect<A ! E ? R>, second: once Effect<B ! F ? S>, third: once Effect<C ! G ? T>) -> silk/effects.Triple<A, B, C> ! E | F | G ? R | S | T
+```
+
+Runs three Effects in declaration order and collects all three success values.
+
+Arity is extended by adding a parameter rather than by accepting a collection. An Effect value is
+compiler-private and has no target layout, so it cannot live in runtime-indexed storage such as a
+`Vector`; a collection-taking `all` would need a storable Effect representation, which is a
+compiler-core change rather than a library one. Distinct parameters keep every Effect in the
+hidden-identity specialization path, where it is erased before lowering.
+
 ### `tap`
 
 ```silk
@@ -826,7 +887,7 @@ Without a selector, `Effect.catch(protected, handler)` recovers the whole row an
 for `catchAll` that this declaration provides.
 
 The selector form is analyzed but not yet executable: no engine lowers the residual dispatch,
-so writing it reports `SEM0097` at the call and the program does not build. The whole-row form
+so writing it reports `SEM0098` at the call and the program does not build. The whole-row form
 is unaffected.
 
 ### `ensuring`
@@ -850,6 +911,32 @@ with the one being preserved. A caller with fallible cleanup recovers it into `!
 
 A trap is not an outcome. It bypasses the finalizer exactly as it bypasses `Effect.catch` and
 every Drop hook.
+
+### `ifThenElse`
+
+```silk
+pub effect fn ifThenElse<A, !E, !F, ?R, ?S>(condition: bool, onTrue: once fn() -> Effect<A ! E ? R>, onFalse: once fn() -> Effect<A ! F ? S>) -> A ! E | F ? R | S
+```
+
+Runs exactly one of two suspended branches, selected by a condition.
+
+The arms are suspended rather than pre-built: each is a `once fn()` that produces its branch's
+Effect, and only the selected arm is invoked. The branch not taken is therefore never
+constructed, which is a stronger guarantee than merely not being run — construction-time work
+inside an arm never happens, and an arm whose body is only well-defined under the condition is
+safe to write. Two pre-built `Effect` arguments would instead be evaluated at the call site,
+before either was chosen.
+
+The unselected arm is released here with an explicit `drop move`, so the affine obligation for
+the arm that is never invoked is discharged in this source rather than left to a generated
+release.
+
+The result's failure and requirement rows are the union of the two arms', so the caller
+discharges whatever either branch could need without knowing which one will be selected. Both
+arms must agree on the success type.
+
+The name is `ifThenElse` rather than `if` because `if` is a keyword and Silk has no
+raw-identifier form, so the declaration itself could not be spelled `if`.
 
 ### `retry`
 

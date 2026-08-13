@@ -3371,13 +3371,33 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 candidate.scrutinee.ordinal === operation.destination.ordinal &&
                 (candidate.access === 'Shared' || candidate.access === 'Exclusive'),
             )
+          // A read whose value is never accessed as an owner and is only borrowed shared observes
+          // the place without claiming it: it cannot be moved, dropped, or written through, so a
+          // non-Copy element reaches an interface witness without being duplicated in any sense a
+          // later release could notice. This is the same license the shared match projection has.
+          const sharedBorrowProjection =
+            operation._tag === 'ReadPlace' &&
+            operation.consume !== true &&
+            operations.every(
+              (candidate) =>
+                !accessedOwnerLocals(candidate).some(
+                  (local) => local.ordinal === operation.destination.ordinal,
+                ),
+            ) &&
+            operations.some(
+              (candidate) =>
+                candidate._tag === 'BeginLoan' &&
+                candidate.access === 'Shared' &&
+                candidate.root.ordinal === operation.destination.ordinal,
+            )
           if (
             selected === undefined ||
             !SilkType.equals(selected, semanticType(operation.type)) ||
             (operation._tag === 'ReadPlace' &&
               !isStructurallyCopy(self.layout, selected) &&
               operation.consume !== true &&
-              !sharedMatchProjection)
+              !sharedMatchProjection &&
+              !sharedBorrowProjection)
           ) {
             violations.push(
               Object.freeze({
