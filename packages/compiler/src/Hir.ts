@@ -553,6 +553,24 @@ export type Expression =
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
+  /**
+   * One call to an operation a type parameter's bound declares, spelled through the bound's own
+   * name. It records the question rather than an answer: which operation of which interface, over
+   * which bounded parameter. An operator carries its compiler-known operation from elaboration
+   * because the specialized operand type alone selects the instruction; an operation no operator
+   * spells has no such lowering, so the concrete instruction is the one the witness selected for
+   * the specialized type argument, and only lowering — where the substitution exists — knows it.
+   */
+  | {
+      readonly _tag: 'BoundOperationCall'
+      readonly capability: Type.Nominal
+      readonly provider: Type.Type
+      readonly operation: string
+      readonly arguments: ReadonlyArray<Expression>
+      readonly loanEnds: ReadonlyArray<BorrowId>
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
   | {
       readonly _tag: 'Unavailable'
       readonly span: SourceSpan.SourceSpan
@@ -729,6 +747,7 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
       case 'EffectConstruct':
       case 'ServiceEffectConstruct':
       case 'BuiltinCall':
+      case 'BoundOperationCall':
         return expression.arguments
       case 'CallableSection':
         return expression.captures.map((capture) => capture.value)
@@ -795,6 +814,7 @@ export const hasUnavailable = (self: HirFunction): boolean => {
       case 'EffectConstruct':
       case 'ServiceEffectConstruct':
       case 'BuiltinCall':
+      case 'BoundOperationCall':
         return expression.arguments.some(walk)
       case 'CallableSection':
         return expression.captures.some((capture) => walk(capture.value))
@@ -865,7 +885,8 @@ export const firstUnavailable = (
       case 'Call':
       case 'EffectConstruct':
       case 'ServiceEffectConstruct':
-      case 'BuiltinCall': {
+      case 'BuiltinCall':
+      case 'BoundOperationCall': {
         for (const argument of expression.arguments) {
           const found = walk(argument)
           if (found !== undefined) return found
@@ -1048,7 +1069,11 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
       }
     }
-    if (expression._tag === 'Call' || expression._tag === 'BuiltinCall') {
+    if (
+      expression._tag === 'Call' ||
+      expression._tag === 'BuiltinCall' ||
+      expression._tag === 'BoundOperationCall'
+    ) {
       const begins = expression.arguments
         .flatMap(expressionTree)
         .filter(
@@ -1056,12 +1081,15 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
             candidate,
           ): candidate is Extract<Expression, { readonly _tag: 'SliceBorrow' | 'ValueBorrow' }> =>
             (candidate._tag === 'SliceBorrow' || candidate._tag === 'ValueBorrow') &&
-            (expression._tag === 'BuiltinCall' ||
+            (expression._tag !== 'Call' ||
               (candidate.borrow.callSpan.start === expression.span.start &&
                 candidate.borrow.callSpan.end === expression.span.end)),
         )
         .map((candidate) => borrowText(candidate.borrow))
-      const ends = [...expression.loanEnds, ...expression.heldLoans].map(borrowText)
+      const ends = [
+        ...expression.loanEnds,
+        ...(expression._tag === 'BoundOperationCall' ? [] : expression.heldLoans),
+      ].map(borrowText)
       if (
         begins.length !== ends.length ||
         begins.some((begin, ordinal) => begin !== ends.at(ordinal)) ||
@@ -1420,6 +1448,11 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     }
+    case 'BoundOperationCall':
+      return [
+        `${indent}bound ${Type.encode(expression.capability)}.${expression.operation} over ${Type.encode(expression.provider)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
+      ].join('\n')
     case 'Unavailable':
       return `${indent}unavailable ${spanText(expression.span)}`
   }

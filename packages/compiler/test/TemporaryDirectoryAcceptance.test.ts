@@ -129,6 +129,52 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
 ${epilogue}`
 
 /**
+ * Several populated scopes, each released while the others are still owned. This is the shape that
+ * trapped at `-O0` while #130's crash was being narrowed: one owner's cleanup is a conditional arm,
+ * and the values the arm reloads are read again at the arm's join. Both a populated tree and a live
+ * neighbour are needed — two bare scopes released in sequence do not reach it.
+ */
+const nativeManySource = `${prelude}
+
+effect fn program() -> i32 ! FileError | OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
+  let parent = run pathMake("/many") |> Effect.provideMut(&mut allocator)
+  let prepared = run Intrinsic.bindRequirement(
+    Intrinsic.bindRequirement(createDirectoriesRecursively(&parent), &mut fs),
+    &mut allocator
+  )
+  let payload = [u8.toU8(1), u8.toU8(2), u8.toU8(3)]
+${[0, 1, 2]
+  .map(
+    (index) => `  let scope${index} = run Intrinsic.bindRequirement(
+    Intrinsic.bindRequirement(temporaryDirectory(&parent, "silk-many${index}-"), &mut fs),
+    &mut allocator
+  )
+  let nested${index} = run pathJoin(&scope${index}.path, "nested") |> Effect.provideMut(&mut allocator)
+  let madeNested${index} = run Intrinsic.bindRequirement(
+    Intrinsic.bindRequirement(createDirectoriesRecursively(&nested${index}), &mut fs),
+    &mut allocator
+  )
+  let file${index} = run pathJoin(&nested${index}, "payload.bin") |> Effect.provideMut(&mut allocator)
+  let wrote${index} = run Intrinsic.bindRequirement(FileSystem.writeFile(&file${index}, &payload), &mut fs)
+  if run Intrinsic.bindRequirement(exists(&scope${index}.path), &mut fs) {} else { return ${index + 1} }`,
+  )
+  .join('\n')}
+${[0, 1, 2]
+  .map(
+    (index) => `  let released${index} = run Intrinsic.bindRequirement(
+    Intrinsic.bindRequirement(release(move scope${index}), &mut fs),
+    &mut allocator
+  )`,
+  )
+  .join('\n')}
+  return 42
+}
+
+${epilogue}`
+
+/**
  * The provider protocol on the evaluator: the provider chooses the name, so the created name comes
  * back through the output buffer, and a buffer too small creates nothing and reports the capacity
  * it needs. The retry counter is what proves the second half.
@@ -176,14 +222,10 @@ it.effect(
           root: SourceFile.make('temporary-directory/native', ascii(nativeSource)),
         },
         toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        // Debug, not release. `removeDirectoryRecursively` is correct on both, but clang 18.1
-        // crashes in its own Register Coalescer pass while compiling that function's IR at -O2
-        // ("PLEASE submit a bug report to llvm/llvm-project"). The crash reproduces with the same
-        // function written in an ordinary user module, so it is a backend defect rather than
-        // anything this module can express differently — three separate formulations of the walk
-        // hit it. Native codegen and a real filesystem are still exercised here; only the
-        // optimizer level differs. Raise this to 'release' once the toolchain is fixed.
-        profile: 'debug',
+        // Release, so this also stands as the regression test for #130: the backend used to let
+        // a cleanup arm's reloaded lanes escape into the arm's join block, which is invalid SSA,
+        // and Clang crashed on it at -O2 instead of diagnosing it.
+        profile: 'release',
         destination: join(destinationRoot, 'native'),
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled', JSON.stringify(compiled).slice(0, 2500))
@@ -218,8 +260,8 @@ it.effect(
           root: SourceFile.make('temporary-directory/native-tree', ascii(nativeTreeSource)),
         },
         toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        // Debug for the same toolchain reason as above.
-        profile: 'debug',
+        // Release for the same reason as above — this is the walk #130 crashed on.
+        profile: 'release',
         destination: join(destinationRoot, 'native-tree'),
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled', JSON.stringify(compiled).slice(0, 2500))
@@ -230,6 +272,40 @@ it.effect(
       assert.isFalse(existsSync(join(nativeRoot, 'tree')))
     }),
   120_000,
+)
+
+it.effect(
+  'releases each of several populated scopes while the rest are still owned',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'temporary-directory/native-many',
+        ascii(nativeManySource),
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const compiled = yield* Driver.compile({
+        compilation: {
+          root: SourceFile.make('temporary-directory/native-many', ascii(nativeManySource)),
+        },
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        profile: 'release',
+        destination: join(destinationRoot, 'native-many'),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(compiled._tag, 'Compiled', JSON.stringify(compiled).slice(0, 2500))
+      if (compiled._tag !== 'Compiled') return
+      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      // Before #130 was fixed this trapped (SIGILL) even at -O0: a cleanup arm's reloaded lanes
+      // escaped into the arm's join block, so the join read an undefined union tag and fell
+      // through to the invalid-tag trap. The status, not just the absence of a crash, is what
+      // says the releases actually ran.
+      assert.strictEqual(
+        run.status,
+        42,
+        JSON.stringify({ signal: run.signal, stderr: run.stderr, stdout: run.stdout }),
+      )
+      assert.deepEqual(readdirSync(join(nativeRoot, 'many')), [])
+    }),
+  180_000,
 )
 
 it.effect(

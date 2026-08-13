@@ -192,6 +192,8 @@ export const invalidStringViewTypeCode = 'SEM0094' as const
 export const invalidFloatLiteralCode = 'SEM0095' as const
 /** Stable code for an effect site or a move inside the conditional right operand of `&&` or `||`. */
 export const impureShortCircuitOperandCode = 'SEM0096' as const
+/** Stable code for a bound operation call whose receiver names more than one bounded parameter. */
+export const ambiguousBoundOperationCode = 'SEM0097' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -322,6 +324,7 @@ export type Code =
   | typeof invalidStringViewTypeCode
   | typeof invalidFloatLiteralCode
   | typeof impureShortCircuitOperandCode
+  | typeof ambiguousBoundOperationCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -400,6 +403,11 @@ export type Reason =
   | { readonly _tag: 'UnknownOwnedCallableReturn' }
   | { readonly _tag: 'MissingUnsafeBoundary'; readonly operation: string }
   | { readonly _tag: 'InvalidConformance'; readonly detail: string }
+  | {
+      readonly _tag: 'AmbiguousBoundOperation'
+      readonly spelling: string
+      readonly parameters: ReadonlyArray<string>
+    }
   | { readonly _tag: 'InvalidServiceDeclaration'; readonly detail: string }
   | { readonly _tag: 'InvalidReturnedBorrowSignature' }
   | { readonly _tag: 'InvalidReturnedBorrowOrigin' }
@@ -2229,6 +2237,32 @@ export const invalidConformance = (detail: string, span: SourceSpan.SourceSpan):
     severity: 'error',
     message: `Invalid conformance: ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidConformance', detail }),
+    span,
+  })
+
+/**
+ * Creates the diagnostic for a bound operation reachable through more than one bounded parameter.
+ *
+ * The receiver of a bound operation call is the bound's own name, so one declaration bounding two
+ * of its parameters by the same interface leaves the call naming no single parameter. The operation
+ * is real and the bound is satisfied; what is missing is which parameter's witness answers it.
+ */
+export const ambiguousBoundOperation = (
+  spelling: string,
+  parameters: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: ambiguousBoundOperationCode,
+    severity: 'error',
+    message: `${spelling} is ambiguous across bounded type parameters ${parameters.join(', ')}`,
+    reason: Object.freeze({
+      _tag: 'AmbiguousBoundOperation',
+      spelling,
+      parameters: Object.freeze([...parameters]),
+    }),
     span,
   })
 
