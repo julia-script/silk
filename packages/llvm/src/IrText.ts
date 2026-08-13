@@ -456,6 +456,8 @@ const renderMetadataNode = (
         ['emissionKind', 'FullDebug'],
         ['enums', ref(node.enums)],
         ['globals', ref(node.globals)],
+        // Bitcode writes this operand as false, while the textual default is true.
+        ['splitDebugInlining', false],
       ])})`
     case 'Subprogram':
       return `!DISubprogram(${metadataFields([
