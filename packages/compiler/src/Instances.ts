@@ -582,6 +582,51 @@ const slotDropHookTargets = (
   return fn.statements.flatMap((statement) => Hir.statementExpressions(statement).flatMap(walk))
 }
 
+/**
+ * Collects the provider functions a specialized body's bound operators dispatch to.
+ *
+ * A source witness is reachable through the operator that spells its operation and through no
+ * ordinary call, so discovery has to read the conformance itself; a scalar argument maps the same
+ * operator to a sealed intrinsic and contributes no target.
+ */
+const interfaceWitnessTargets = (
+  fn: Hir.HirFunction,
+  index: DeclarationIndex.Index,
+  substitution: Type.Substitution,
+): ReadonlyArray<CallTarget> => {
+  const walk = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
+    const bound = expression._tag === 'BuiltinCall' ? expression.interfaceOperation : undefined
+    const capability =
+      bound === undefined ? undefined : Type.substitute(bound.capability, substitution)
+    const target =
+      bound === undefined || capability === undefined || !Type.isNominal(capability)
+        ? undefined
+        : DeclarationIndex.interfaceWitnessImplementation(
+            index,
+            Type.substitute(bound.provider, substitution),
+            capability,
+            bound.operation,
+          )
+    const own =
+      target === undefined
+        ? []
+        : [Object.freeze({ declaration: target, typeArguments: Object.freeze([]) })]
+    if (expression._tag === 'Match') {
+      return [
+        ...own,
+        ...walk(expression.scrutinee),
+        ...expression.arms.flatMap((arm) =>
+          arm.reachable
+            ? [...(arm.guard === undefined ? [] : walk(arm.guard)), ...walk(arm.result)]
+            : [],
+        ),
+      ]
+    }
+    return [...own, ...Hir.expressionChildren(expression).flatMap(walk)]
+  }
+  return fn.statements.flatMap((statement) => Hir.statementExpressions(statement).flatMap(walk))
+}
+
 const callableBindings = (fn: Hir.HirFunction): ReadonlyMap<number, Hir.Expression> => {
   const bindings = new Map<number, Hir.Expression>()
   const expression = (value: Hir.Expression): void => {
@@ -1355,6 +1400,7 @@ export const discover = (
     const cleanupIdentities = new Set(cleanupTargets.map(identityOfCall))
     for (const call of [
       ...bodyCallTargets(fn),
+      ...interfaceWitnessTargets(fn, index, substitution),
       ...requirementBindingCallTargets(fn, substitution, index),
       ...directCalls.map((call) => ({
         declaration: call.target.declaration,

@@ -300,3 +300,119 @@ it.effect(
     }),
   60_000,
 )
+
+/**
+ * Stability is only observable when two elements can compare equal yet stay distinguishable. Every
+ * conforming type used to be a scalar, whose equality is identity, so this program could not be
+ * written until a user type could witness `Order`. `Item` compares on `key` alone and carries a
+ * `tag` the comparison never reads, so the arrangement of the equal elements is visible in the
+ * result.
+ */
+const stableUserOrder = `import silk.order { Order }
+import silk.vector { Vector, make, append, asSlice, sort, length }
+
+struct Item {
+  key: i32
+  tag: i32
+}
+
+fn itemLess(left: &Item, right: &Item) -> bool {
+  return left.key < right.key
+}
+
+impl Order<Item> for Item { lessThan: Item.itemLess }
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut items = make<Item>()
+  let a = run append<Item>(&mut items, Item { key: 1, tag: 1 }) |> Effect.provideMut(&mut allocator)
+  let b = run append<Item>(&mut items, Item { key: 0, tag: 2 }) |> Effect.provideMut(&mut allocator)
+  let c = run append<Item>(&mut items, Item { key: 1, tag: 3 }) |> Effect.provideMut(&mut allocator)
+  let d = run append<Item>(&mut items, Item { key: 0, tag: 4 }) |> Effect.provideMut(&mut allocator)
+  let ordered = run sort<Item>(&mut items) |> Effect.provideMut(&mut allocator)
+  let view = asSlice<Item>(&items)
+  let mut folded = 0
+  let mut index = usize.ZERO
+  while index < length<Item>(&items) {
+    folded = folded * 10 + view[index].tag
+    index = index + usize.ONE
+  }
+  return folded
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+
+it.effect('keeps equal elements of a user type in their input order', () =>
+  Effect.gen(function* () {
+    // Tags 1..4 carry keys [1, 0, 1, 0]. A stable order yields keys [0, 0, 1, 1] with tags 2, 4,
+    // 1, 3 — the two equal-key pairs each in input order. Any unstable placement folds otherwise.
+    const value = yield* evaluatedValue('vector-sort/stable-user-order', stableUserOrder)
+    assert.strictEqual(value, 2413)
+  }),
+)
+
+/**
+ * A sort over an element type that owns an allocation and is therefore never `Copy`. Nothing in
+ * the comparison, the index permutation, or the final bulk move may duplicate or lose one, so the
+ * acquire and release counts have to agree exactly.
+ */
+const moveOnlyElements = `import silk.order { Order }
+import silk.vector { Vector, make, append, asSlice, sort, length }
+
+struct Tracked {
+  key: i32
+  payload: Vector<i32>
+}
+
+fn trackedLess(left: &Tracked, right: &Tracked) -> bool {
+  return left.key < right.key
+}
+
+impl Order<Tracked> for Tracked { lessThan: Tracked.trackedLess }
+
+effect fn hold(key: i32) -> Tracked ! OutOfMemory ? &mut Allocator {
+  let mut payload = make<i32>()
+  let filled = run append<i32>(&mut payload, key)
+  return Tracked { key: key, payload: move payload }
+}
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut items = make<Tracked>()
+  let first = run hold(3) |> Effect.provideMut(&mut allocator)
+  let a = run append<Tracked>(&mut items, move first) |> Effect.provideMut(&mut allocator)
+  let second = run hold(1) |> Effect.provideMut(&mut allocator)
+  let b = run append<Tracked>(&mut items, move second) |> Effect.provideMut(&mut allocator)
+  let third = run hold(2) |> Effect.provideMut(&mut allocator)
+  let c = run append<Tracked>(&mut items, move third) |> Effect.provideMut(&mut allocator)
+  let ordered = run sort<Tracked>(&mut items) |> Effect.provideMut(&mut allocator)
+  let view = asSlice<Tracked>(&items)
+  let mut folded = 0
+  let mut index = usize.ZERO
+  while index < length<Tracked>(&items) {
+    folded = folded * 10 + view[index].key
+    index = index + usize.ONE
+  }
+  return folded
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+
+it.effect('sorts a move-only element type and releases every allocation it acquires', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluate('vector-sort/move-only-elements', moveOnlyElements)
+    if (outcome._tag !== 'Completed') return
+    // Keys [3, 1, 2] order to [1, 2, 3]: each element travelled without being duplicated or lost.
+    assert.strictEqual(outcome.result.value, 123)
+    const acquires = outcome.trace.filter((event) => event._tag === 'AllocationAcquire')
+    const releases = outcome.trace.filter((event) => event._tag === 'AllocationRelease')
+    // Each element owns one allocation of its own, so a duplicated element would leak one and a
+    // lost element would release one twice. The counts agree only when neither happened.
+    assert.isAbove(acquires.length, 0)
+    assert.strictEqual(releases.length, acquires.length)
+  }),
+)

@@ -3457,11 +3457,88 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           continue
         }
         if (invalid) continue
+        const interfaceProviderModule = Type.isNominal(provider)
+          ? modules.find((candidate) => candidate.module === provider.module)
+          : undefined
         for (const contract of sourceInterface.operations) {
           if (contract.name._tag !== 'Present') continue
           const mapping = mapped.get(contract.name.spelling)
           if (mapping === undefined) continue
           const target = mapping.target
+          const contractName = contract.name.spelling
+          const contractShape =
+            contract.functionKind === 'Ordinary' &&
+            contract.failureRow.failures.length === 0 &&
+            contract.requirementRow.requirements.length === 0
+          const reject = (): void => {
+            diagnostics.push(
+              Diagnostic.invalidConformance(
+                `${target._tag === 'TypePath' ? target.spelling : '_'} is incompatible with ${capability.name}.${contractName}`,
+                mapping.syntax.span,
+              ),
+            )
+          }
+          // A witness names either one sealed intrinsic or one function of the provider's own
+          // actor. The two targets are checked against the same substituted contract; only the
+          // operand form differs, because a source witness observes each operand through a shared
+          // borrow while an intrinsic consumes the scalar the operand denotes.
+          if (
+            Type.isNominal(provider) &&
+            target._tag === 'TypePath' &&
+            target.segments.length === 2 &&
+            target.segments.at(0)?.spelling === provider.name &&
+            target.segments.at(0)?.spelling !== 'Intrinsic'
+          ) {
+            const targetName = target.segments.at(1)?.spelling
+            const implementation = interfaceProviderModule?.declarations.find(
+              (declaration) =>
+                targetName !== undefined &&
+                declaration.name._tag === 'Present' &&
+                declaration.name.spelling === targetName,
+            )
+            if (implementation === undefined) {
+              diagnostics.push(
+                Diagnostic.invalidConformance(
+                  `mapped operation ${provider.name}.${targetName ?? '_'} does not exist`,
+                  mapping.syntax.span,
+                ),
+              )
+              continue
+            }
+            const validParameters =
+              implementation.parameters.length === contract.parameters.length &&
+              contract.parameters.every((parameter, ordinal) => {
+                const actual = implementation.parameters.at(ordinal)?.declaredType
+                return (
+                  parameter.declaredType._tag === 'Resolved' &&
+                  actual?._tag === 'Resolved' &&
+                  Type.isReference(actual.type) &&
+                  actual.type.access === 'Shared' &&
+                  Type.equals(
+                    Type.substitute(parameter.declaredType.type, substitution),
+                    actual.type.target,
+                  )
+                )
+              })
+            const validResult =
+              implementation.returnType._tag === 'Resolved' &&
+              contract.returnType._tag === 'Resolved' &&
+              Type.equals(
+                Type.substitute(contract.returnType.type, substitution),
+                implementation.returnType.type,
+              )
+            if (
+              !contractShape ||
+              !validParameters ||
+              !validResult ||
+              implementation.functionKind !== 'Ordinary' ||
+              implementation.typeParameters.length > 0 ||
+              implementation.failureRow.failures.length > 0 ||
+              implementation.requirementRow.requirements.length > 0
+            )
+              reject()
+            continue
+          }
           const operation =
             target._tag === 'TypePath' &&
             target.segments.length === 2 &&
@@ -3489,18 +3566,11 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           if (
             operation === undefined ||
             operation.unsafe ||
-            contract.functionKind !== 'Ordinary' ||
+            !contractShape ||
             !validParameters ||
-            !validResult ||
-            contract.failureRow.failures.length > 0 ||
-            contract.requirementRow.requirements.length > 0
+            !validResult
           )
-            diagnostics.push(
-              Diagnostic.invalidConformance(
-                `${target._tag === 'TypePath' ? target.spelling : '_'} is incompatible with ${capability.name}.${contract.name.spelling}`,
-                mapping.syntax.span,
-              ),
-            )
+            reject()
         }
         continue
       }
@@ -4094,6 +4164,42 @@ export const unmappedInterfaceOperations = (
         : [],
     ),
   )
+}
+
+/**
+ * Selects the provider's own function that its interface conformance maps one operation to.
+ *
+ * Nothing is returned when the mapping names a sealed intrinsic instead, which is the whole answer
+ * for every scalar witness: specialization keeps lowering those operators to the compiler-known
+ * operation and only a source-declared target redirects the call to ordinary Silk.
+ */
+export const interfaceWitnessImplementation = (
+  self: Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+  operation: string,
+): CanonicalId | undefined => {
+  if (!Type.isNominal(provider)) return undefined
+  const mapping = interfaceConformance(self, provider, capability)?.operations.find(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === operation,
+  )
+  const target = mapping?.target
+  if (
+    target?._tag !== 'TypePath' ||
+    target.segments.length !== 2 ||
+    target.segments.at(0)?.spelling !== provider.name
+  )
+    return undefined
+  const targetName = target.segments.at(1)?.spelling
+  const declaration = self.modules
+    .find((module) => module.module === provider.module)
+    ?.declarations.find(
+      (candidate) =>
+        targetName !== undefined &&
+        candidate.name._tag === 'Present' &&
+        candidate.name.spelling === targetName,
+    )
+  return declaration?.canonical._tag === 'Canonical' ? declaration.canonical.id : undefined
 }
 
 /** Selects the unique compiler-shipped or source-declared witness for one provider. */

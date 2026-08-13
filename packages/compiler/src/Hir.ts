@@ -536,6 +536,16 @@ export type Expression =
       readonly _tag: 'BuiltinCall'
       readonly operation: BuiltinOperation
       readonly intrinsic: Intrinsic.OperationId
+      /**
+       * The bound interface operation an operator inside a generic body spells. Specialization
+       * redirects the call to the provider's own function when the conformance maps one, and
+       * otherwise keeps the compiler-known operation this node already names.
+       */
+      readonly interfaceOperation?: {
+        readonly capability: Type.Nominal
+        readonly provider: Type.Parameter
+        readonly operation: string
+      }
       readonly typeArguments: ReadonlyArray<Type.Type>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
