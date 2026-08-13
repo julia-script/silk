@@ -8,9 +8,22 @@ interface Structure {
   readonly calls: number
   readonly branches: number
   readonly allocations: number
+  readonly allocationSites: ReadonlyArray<string>
   readonly indirectCalls: number
   readonly suspensionTerms: number
   readonly effectTerms: number
+}
+
+interface EntryStructure extends Structure {
+  readonly abi?: {
+    readonly parameters: ReadonlyArray<string>
+    readonly results: ReadonlyArray<string>
+  }
+}
+
+interface TagCount {
+  readonly tag: string
+  readonly count: number
 }
 
 interface RunnerClassification {
@@ -53,19 +66,32 @@ interface CostCase {
   }
   readonly runners: ReadonlyArray<RunnerClassification>
   readonly pipeTokens: { readonly hir: number; readonly mir: number }
+  readonly mirOperationTags: ReadonlyArray<TagCount>
+  readonly suspensionOperationTags: ReadonlyArray<TagCount>
   readonly mir: Structure
   readonly optimizedLlvm: Structure
-  readonly optimizedLlvmEntry: Structure
+  readonly optimizedLlvmEntry: EntryStructure
   readonly assembly: Structure
   readonly assemblyEntry: Structure
   readonly wasm: Structure & { readonly binaryBytes: number }
-  readonly wasmEntry: Structure
+  readonly wasmEntry: EntryStructure
   readonly unnormalizedWasm: Structure & { readonly binaryBytes: number }
-  readonly unnormalizedWasmEntry: Structure
+  readonly unnormalizedWasmEntry: EntryStructure
+  readonly symbols: {
+    readonly native: ReadonlyArray<string>
+    readonly wasm: ReadonlyArray<string>
+  }
+  readonly linkage: {
+    readonly nativeRuntime: ReadonlyArray<string>
+    readonly nativeDeclarations: ReadonlyArray<string>
+    readonly wasmImports: ReadonlyArray<string>
+    readonly unnormalizedWasmImports: ReadonlyArray<string>
+  }
+  readonly suspensionLinkage: ReadonlyArray<string>
 }
 
 interface CostReport {
-  readonly schema: 1
+  readonly schema: 2
   readonly clang: string
   readonly node: string
   readonly cases: ReadonlyArray<CostCase>
@@ -83,7 +109,7 @@ it('captures synchronous Effect costs deterministically in fresh processes', () 
   assert.strictEqual(first.stdout, second.stdout)
 
   const report = JSON.parse(first.stdout) as CostReport
-  assert.strictEqual(report.schema, 1)
+  assert.strictEqual(report.schema, 2)
   assert.match(report.clang, /clang version/)
   assert.strictEqual(report.cases.length, 18)
   assert.deepEqual(
@@ -108,6 +134,13 @@ it('captures synchronous Effect costs deterministically in fresh processes', () 
     assert.strictEqual(sample.behavior.unnormalizedWasm, sample.expected, sample.id)
     assert.strictEqual(sample.pipeTokens.hir, 0, sample.id)
     assert.strictEqual(sample.pipeTokens.mir, 0, sample.id)
+    // This is derived from the MIR object graph, so a suspension operation cannot hide behind an
+    // encoder spelling change. The fixture's centralized reserved vocabulary classifies new tags.
+    assert.isAbove(sample.mirOperationTags.length, 0, sample.id)
+    assert.deepEqual(sample.suspensionOperationTags, [], sample.id)
+    // These values come from backend symbol tables, native-runtime requirements, LLVM
+    // declarations, and Wasm imports. An unreferenced but linked suspension component is covered.
+    assert.deepEqual(sample.suspensionLinkage, [], sample.id)
     assert.strictEqual(sample.mir.suspensionTerms, 0, sample.id)
     assert.strictEqual(sample.optimizedLlvm.suspensionTerms, 0, sample.id)
     assert.strictEqual(sample.optimizedLlvmEntry.suspensionTerms, 0, sample.id)
@@ -117,6 +150,14 @@ it('captures synchronous Effect costs deterministically in fresh processes', () 
     assert.strictEqual(sample.wasmEntry.suspensionTerms, 0, sample.id)
     assert.strictEqual(sample.unnormalizedWasm.suspensionTerms, 0, sample.id)
     assert.strictEqual(sample.unnormalizedWasmEntry.suspensionTerms, 0, sample.id)
+    // A synchronous entry has no indirect dispatcher. Direct calls remain valid for ordinary
+    // user code and Effect runners.
+    assert.strictEqual(sample.optimizedLlvmEntry.indirectCalls, 0, sample.id)
+    assert.strictEqual(sample.wasmEntry.indirectCalls, 0, sample.id)
+    assert.strictEqual(sample.unnormalizedWasmEntry.indirectCalls, 0, sample.id)
+    assert.isDefined(sample.optimizedLlvmEntry.abi, sample.id)
+    assert.isDefined(sample.wasmEntry.abi, sample.id)
+    assert.isDefined(sample.unnormalizedWasmEntry.abi, sample.id)
     assert.isAbove(sample.wasm.binaryBytes, 0, sample.id)
     assert.isAbove(sample.unnormalizedWasm.binaryBytes, 0, sample.id)
     if (sample.applicability === 'DirectStaticRun') {
@@ -173,7 +214,30 @@ it('captures synchronous Effect costs deterministically in fresh processes', () 
     assert.isDefined(baseline, pair)
     assert.isDefined(effect, pair)
     if (baseline === undefined || effect === undefined) continue
-    assert.isAtLeast(effect.optimizedLlvm.allocations, 0, pair)
-    assert.isAtLeast(effect.wasm.allocations, 0, pair)
+    // Compare semantic entry properties with an imperative program that performs the same work.
+    // This avoids platform-dependent instruction snapshots while proving that merely using a
+    // non-suspending Effect adds no allocation path or mandatory complete-vs-pending branch.
+    assert.isAtMost(
+      effect.optimizedLlvmEntry.allocations,
+      baseline.optimizedLlvmEntry.allocations,
+      pair,
+    )
+    assert.isAtMost(effect.wasmEntry.allocations, baseline.wasmEntry.allocations, pair)
+    assert.isAtMost(
+      effect.unnormalizedWasmEntry.allocations,
+      baseline.unnormalizedWasmEntry.allocations,
+      pair,
+    )
+    assert.isAtMost(effect.optimizedLlvmEntry.branches, baseline.optimizedLlvmEntry.branches, pair)
+    assert.isAtMost(effect.wasmEntry.branches, baseline.wasmEntry.branches, pair)
+    assert.isAtMost(
+      effect.unnormalizedWasmEntry.branches,
+      baseline.unnormalizedWasmEntry.branches,
+      pair,
+    )
+    // The exported entry keeps the same parameter/result ABI; no pending result is exposed.
+    assert.deepEqual(effect.optimizedLlvmEntry.abi, baseline.optimizedLlvmEntry.abi, pair)
+    assert.deepEqual(effect.wasmEntry.abi, baseline.wasmEntry.abi, pair)
+    assert.deepEqual(effect.unnormalizedWasmEntry.abi, baseline.unnormalizedWasmEntry.abi, pair)
   }
 }, 180_000)

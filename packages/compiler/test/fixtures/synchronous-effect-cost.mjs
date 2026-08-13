@@ -11,6 +11,21 @@ import * as Mir from '../../dist/Mir.js'
 const encoder = new TextEncoder()
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const occurrences = (text, pattern) => [...text.matchAll(pattern)].length
+const suspensionVocabulary = Object.freeze([
+  'suspend',
+  'suspended',
+  'continuation',
+  'scheduler',
+  'fiber',
+  'dispatch',
+  'resume',
+  'trampoline',
+  'pending',
+  'atomic',
+])
+const suspensionTerm = new RegExp(`(?:${suspensionVocabulary.join('|')})`, 'i')
+const containsSuspensionTerm = (value) =>
+  suspensionTerm.test(value.replaceAll(/\bsuspended=false\b/gi, ''))
 const normalize = (text) =>
   text
     .replaceAll(/cost\/[a-z0-9-]+\/(?:native|wasm)/g, 'cost/<case>/<target>')
@@ -253,19 +268,22 @@ const clangText = (bitcode, id, arguments_) => {
 }
 
 const summarize = (text, includeHash = true) => {
-  const suspensionMatches = [
+  const suspensionMatches = text
+    .split('\n')
+    .filter(containsSuspensionTerm)
+    .map((line) => line.trim())
+  const allocationSites = [
     ...text.matchAll(
-      /\bsuspended=true\b|\bsuspend(?:ed)?[_ .-]?(?:effect|operation|step)\b|\b(?:scheduler|fiber|effect[_ .-]?continuation|runtime[_ .-]?continuation)\b/gi,
+      /\b(?:call\s+[^\n@]*@((?:malloc|calloc|realloc|aligned_alloc))|memory\.grow)\b/gi,
     ),
-  ].map((match) =>
-    text.slice(Math.max(0, (match.index ?? 0) - 48), (match.index ?? 0) + match[0].length + 48),
-  )
+  ].map((match) => match[1]?.toLowerCase() ?? 'memory.grow')
   return Object.freeze({
     bytes: Buffer.byteLength(text),
     ...(includeHash ? { hash: hash(text) } : {}),
     calls: occurrences(text, /\bcall\b/g),
     branches: occurrences(text, /\b(?:br|if|switch)\b/g),
-    allocations: occurrences(text, /\b(?:malloc|calloc|realloc|free|memory\.grow)\b/gi),
+    allocations: allocationSites.length,
+    allocationSites: Object.freeze(allocationSites),
     indirectCalls: occurrences(text, /\bcall\b[^\n@]*%[A-Za-z0-9_.]+/g),
     suspensionTerms: suspensionMatches.length,
     suspensionMatches,
@@ -289,6 +307,20 @@ const llvmEntry = (text) => {
   if (start < 0 || body < 0) return ''
   const end = text.indexOf('\n}', body)
   return end < 0 ? '' : text.slice(start, end + 2)
+}
+
+const llvmEntryAbi = (text) => {
+  const signature = /^define\s+(.+?)\s+@silk_main\(([^)]*)\)/m.exec(text)
+  if (signature === null) return undefined
+  const result = /(?:^|\s)(void|i\d+|float|double|ptr|\{[^}]+\})$/.exec(signature[1])?.[1]
+  if (result === undefined) return undefined
+  const parameters = signature[2].trim()
+  return Object.freeze({
+    parameters: Object.freeze(
+      parameters === '' ? [] : parameters.split(',').map((value) => value.trim()),
+    ),
+    results: Object.freeze(result === 'void' ? [] : [result]),
+  })
 }
 
 const assemblyEntry = (text) => {
@@ -337,6 +369,28 @@ const wasmEntry = (text) => {
   const imported = forms.filter((form) => /^\(import\b/.test(form) && /\(func\b/.test(form)).length
   return forms.filter((form) => /^\(func\b/.test(form)).at(index - imported) ?? ''
 }
+
+const wasmEntryAbi = (text) => {
+  const forms = topLevelWasmForms(text)
+  const entry = wasmEntry(text)
+  const typeIndex = Number(/^\(func\s+\(type\s+(\d+)\)/.exec(entry)?.[1])
+  if (!Number.isInteger(typeIndex)) return undefined
+  const type = forms.filter((form) => /^\(type\b/.test(form)).at(typeIndex)
+  if (type === undefined) return undefined
+  const values = (kind) =>
+    Object.freeze(
+      [...type.matchAll(new RegExp(`\\(${kind}((?:\\s+[a-z][0-9]+)*)\\)`, 'g'))].flatMap((match) =>
+        match[1].trim().split(/\s+/).filter(Boolean),
+      ),
+    )
+  return Object.freeze({ parameters: values('param'), results: values('result') })
+}
+
+const llvmDeclarations = (text) =>
+  Object.freeze([...text.matchAll(/^declare\s+[^@\n]*@([^\s(]+)/gm)].map((match) => match[1]))
+
+const wasmImports = (text) =>
+  Object.freeze(topLevelWasmForms(text).filter((form) => /^\(import\b/.test(form)))
 
 const wasmBehavior = (artifact, id) => {
   const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
@@ -599,7 +653,9 @@ try {
         (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl#'),
       ).length
       const verdicts = Analysis.effectNormalizationOf(wasm)
-      const runners = runnerClassifications(Analysis.loweredMir(wasm))
+      const loweredWasm = Analysis.loweredMir(wasm)
+      const runners = runnerClassifications(loweredWasm)
+      const mirOperationTags = countTags(loweredWasm.functions.flatMap(Mir.operations))
       const applicability = directStaticCases.has(sample.id)
         ? 'DirectStaticRun'
         : constructorOnlyCases.has(sample.id)
@@ -641,25 +697,51 @@ try {
             hir: occurrences(hir, /\|>/g),
             mir: occurrences(mir, /\|>/g),
           }),
+          mirOperationTags,
+          suspensionOperationTags: Object.freeze(
+            mirOperationTags.filter(({ tag }) => containsSuspensionTerm(tag)),
+          ),
           hir: summarize(hir),
           mir: summarize(mir),
           debugLlvm: summarize(debugLlvm),
           releaseLlvm: summarize(releaseLlvm),
           optimizedLlvm: summarize(optimizedLlvm, false),
-          optimizedLlvmEntry: summarize(llvmEntry(optimizedLlvm), false),
+          optimizedLlvmEntry: Object.freeze({
+            ...summarize(llvmEntry(optimizedLlvm), false),
+            abi: llvmEntryAbi(optimizedLlvm),
+          }),
           assembly: summarizeAssembly(assembly),
           assemblyEntry: summarizeAssembly(assemblyEntry(assembly)),
           wasm: Object.freeze({ ...summarize(wat), binaryBytes: wasmArtifact.bytes.length }),
-          wasmEntry: summarize(wasmEntry(wat)),
+          wasmEntry: Object.freeze({ ...summarize(wasmEntry(wat)), abi: wasmEntryAbi(wat) }),
           unnormalizedWasm: Object.freeze({
             ...summarize(unnormalizedWat),
             binaryBytes: unnormalizedWasmArtifact.bytes.length,
           }),
-          unnormalizedWasmEntry: summarize(wasmEntry(unnormalizedWat)),
+          unnormalizedWasmEntry: Object.freeze({
+            ...summarize(wasmEntry(unnormalizedWat)),
+            abi: wasmEntryAbi(unnormalizedWat),
+          }),
           symbols: Object.freeze({
             native: release.symbols.map((entry) => entry.declaration.name),
             wasm: wasmArtifact.symbols.map((entry) => entry.declaration.name),
           }),
+          linkage: Object.freeze({
+            nativeRuntime: release.nativeRuntimeSymbols,
+            nativeDeclarations: llvmDeclarations(optimizedLlvm),
+            wasmImports: wasmImports(wat),
+            unnormalizedWasmImports: wasmImports(unnormalizedWat),
+          }),
+          suspensionLinkage: Object.freeze(
+            [
+              ...release.nativeRuntimeSymbols,
+              ...llvmDeclarations(optimizedLlvm),
+              ...wasmImports(wat),
+              ...wasmImports(unnormalizedWat),
+              ...release.symbols.map((entry) => entry.declaration.name),
+              ...wasmArtifact.symbols.map((entry) => entry.declaration.name),
+            ].filter(containsSuspensionTerm),
+          ),
         }),
       )
     } catch (cause) {
@@ -671,7 +753,7 @@ try {
   if (version.status !== 0) throw new Error(`${clang} --version failed: ${version.stderr}`)
   process.stdout.write(
     JSON.stringify({
-      schema: 1,
+      schema: 2,
       clang: version.stdout.split('\n').at(0),
       node: process.version,
       cases,
