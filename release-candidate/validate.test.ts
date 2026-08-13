@@ -131,6 +131,7 @@ test('the llvm release candidate is a self-contained ESM package', () => {
       './Type',
       './Value',
       './Variable',
+      './Verify',
     ])
     expect(manifest.exports).not.toHaveProperty('./SilkError')
 
@@ -1192,6 +1193,7 @@ test('the wasm release candidate is a self-contained ESM package', () => {
       './Tag',
       './Type',
       './ValType',
+      './Validate',
       './WasmError',
       './WatText',
     ])
