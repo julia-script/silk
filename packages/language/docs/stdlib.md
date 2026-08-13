@@ -12,47 +12,50 @@ each signature and description below is the `///` comment on the declaration in
 $ pnpm --filter @silk-effect/compiler documentation:generate
 ```
 
-The library has 35 modules.
+The library has 38 modules.
 
 ## Modules
 
 | Module | Import namespace | Declarations |
 | --- | --- | --- |
 | [`silk/bool`](#silk-bool) | `bool` | 3 |
+| [`silk/box`](#silk-box) | `Box` | 14 |
 | [`silk/bytes`](#silk-bytes) | `Bytes` | 8 |
 | [`silk/char`](#silk-char) | `char` | 6 |
 | [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
 | [`silk/core`](#silk-core) | `Allocator` | 17 |
 | [`silk/effects`](#silk-effects) | `Effect` | 21 |
-| [`silk/f32`](#silk-f32) | `f32` | 41 |
-| [`silk/f64`](#silk-f64) | `f64` | 41 |
-| [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 76 |
+| [`silk/f32`](#silk-f32) | `f32` | 51 |
+| [`silk/f64`](#silk-f64) | `f64` | 51 |
+| [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 85 |
+| [`silk/format`](#silk-format) | `Format` | 40 |
 | [`silk/host_input`](#silk-host-input) | `HostInput` | 12 |
-| [`silk/i16`](#silk-i16) | `i16` | 58 |
-| [`silk/i32`](#silk-i32) | `i32` | 58 |
-| [`silk/i64`](#silk-i64) | `i64` | 58 |
-| [`silk/i8`](#silk-i8) | `i8` | 58 |
-| [`silk/isize`](#silk-isize) | `isize` | 55 |
+| [`silk/i16`](#silk-i16) | `i16` | 60 |
+| [`silk/i32`](#silk-i32) | `i32` | 60 |
+| [`silk/i64`](#silk-i64) | `i64` | 60 |
+| [`silk/i8`](#silk-i8) | `i8` | 60 |
+| [`silk/isize`](#silk-isize) | `isize` | 60 |
 | [`silk/layout`](#silk-layout) | `Layout` | 6 |
 | [`silk/logging`](#silk-logging) | `Logger` | 30 |
 | [`silk/metrics`](#silk-metrics) | `AllocationMetrics` | 6 |
 | [`silk/numeric`](#silk-numeric) | `Integer` | 12 |
-| [`silk/option`](#silk-option) | `Option` | 5 |
+| [`silk/option`](#silk-option) | `Option` | 9 |
+| [`silk/order`](#silk-order) | `Order` | 21 |
 | [`silk/os_child_process`](#silk-os-child-process) | `OsChildProcess` | 9 |
-| [`silk/os_filesystem`](#silk-os-filesystem) | `OsFileSystem` | 35 |
+| [`silk/os_filesystem`](#silk-os-filesystem) | `OsFileSystem` | 37 |
 | [`silk/os_host_input`](#silk-os-host-input) | `OsHostInput` | 14 |
 | [`silk/os_standard_input`](#silk-os-standard-input) | `OsStandardInput` | 6 |
 | [`silk/raw-buffer`](#silk-raw-buffer) | `RawBuffer` | 8 |
-| [`silk/result`](#silk-result) | `Result` | 5 |
+| [`silk/result`](#silk-result) | `Result` | 13 |
 | [`silk/slot`](#silk-slot) | `Slot` | 4 |
 | [`silk/standard_input`](#silk-standard-input) | `StandardInput` | 12 |
-| [`silk/string`](#silk-string) | `String` | 23 |
-| [`silk/u16`](#silk-u16) | `u16` | 55 |
-| [`silk/u32`](#silk-u32) | `u32` | 55 |
-| [`silk/u64`](#silk-u64) | `u64` | 55 |
-| [`silk/u8`](#silk-u8) | `u8` | 55 |
-| [`silk/usize`](#silk-usize) | `usize` | 54 |
-| [`silk/vector`](#silk-vector) | `Vector` | 48 |
+| [`silk/string`](#silk-string) | `String` | 24 |
+| [`silk/u16`](#silk-u16) | `u16` | 57 |
+| [`silk/u32`](#silk-u32) | `u32` | 57 |
+| [`silk/u64`](#silk-u64) | `u64` | 57 |
+| [`silk/u8`](#silk-u8) | `u8` | 57 |
+| [`silk/usize`](#silk-usize) | `usize` | 59 |
+| [`silk/vector`](#silk-vector) | `Vector` | 55 |
 
 ## silk/bool
 
@@ -81,6 +84,61 @@ pub fn not(value: bool) -> bool
 ```
 
 Calls the concrete bool not primitive.
+
+
+## silk/box
+
+Import as `Box` with `import silk.box`.
+
+### `Vacant`
+
+```silk
+pub struct Vacant
+```
+
+### `Occupied`
+
+```silk
+pub struct Occupied
+```
+
+### `Box`
+
+```silk
+pub struct Box<T>
+```
+
+### `make`
+
+```silk
+pub effect fn make<T>(value: T) -> silk/box.Box<T> ! OutOfMemory ? &mut Allocator
+```
+
+Moves one value onto the heap, allocating storage for exactly one element.
+
+### `get`
+
+```silk
+pub fn get<T>(self: &silk/box.Box<T>) -> &[T]
+```
+
+Borrows the held value as one shared element view.
+
+### `getMut`
+
+```silk
+pub fn getMut<T>(self: &mut silk/box.Box<T>) -> &mut [T]
+```
+
+Borrows the held value as one exclusive element view.
+
+### `into`
+
+```silk
+pub fn into<T>(self: silk/box.Box<T>) -> T
+```
+
+Consumes the box and yields the value it held, releasing the storage.
 
 
 ## silk/bytes
@@ -1045,6 +1103,97 @@ pub fn fromBits(value: u32) -> f32
 
 Calls the concrete f32 fromBits primitive.
 
+### `sqrt`
+
+```silk
+pub fn sqrt(value: f32) -> f32
+```
+
+The square root of `value`, correctly rounded.
+
+IEEE-754 requires the square root be correctly rounded, so the hardware instruction is the
+exact result rather than an approximation of it. This is why `sqrt` may lower to `llvm.sqrt`
+on the native backend and `f32.sqrt` on Wasm while `pow` and `log`, whose results are
+implementation-defined, may not. The evaluator reproduces the same bits by rounding an exact
+integer root.
+
+That guarantee covers numeric results only. IEEE-754 leaves the *sign* of a NaN produced by an
+invalid operation unspecified, and the hosts disagree: an x86 square root of a negative operand
+yields `0xFFC00000` while AArch64's default NaN yields `0x7FC00000`. Both NaN-producing inputs
+are therefore screened here, before the primitive runs, so the primitive only ever sees the
+domain on which it is bit-exact.
+
+### `abs`
+
+```silk
+pub fn abs(value: f32) -> f32
+```
+
+The magnitude of `value`, which clears the sign bit. A NaN input gives the canonical NaN.
+
+### `copysign`
+
+```silk
+pub fn copysign(magnitude: f32, sign: f32) -> f32
+```
+
+The magnitude of `magnitude` carrying the sign bit of `sign`. Requirement 10 outranks sign
+transfer here, so a NaN `magnitude` gives the canonical NaN rather than a signed NaN.
+
+### `trunc`
+
+```silk
+pub fn trunc(value: f32) -> f32
+```
+
+`value` rounded toward zero, which discards the fraction bits the exponent does not reach.
+The sign survives, so a value in `(-1.0, -0.0]` gives negative zero. A NaN input gives the
+canonical NaN, and either infinity is already integral and returns unchanged.
+
+### `floor`
+
+```silk
+pub fn floor(value: f32) -> f32
+```
+
+The largest integral f32 no greater than `value`. A NaN input gives the canonical NaN.
+
+### `ceil`
+
+```silk
+pub fn ceil(value: f32) -> f32
+```
+
+The smallest integral f32 no less than `value`. A NaN input gives the canonical NaN.
+
+### `round`
+
+```silk
+pub fn round(value: f32) -> f32
+```
+
+`value` rounded to the nearest integral f32, with a half rounding away from zero. That is the
+reading `round` carries in C and Rust; the ties-to-even form is a separate operation this
+module does not yet offer. A NaN input gives the canonical NaN.
+
+### `min`
+
+```silk
+pub fn min(left: f32, right: f32) -> f32
+```
+
+The lesser of two values, ordering negative zero below positive zero. Either operand being NaN
+gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `minimum`.
+
+### `max`
+
+```silk
+pub fn max(left: f32, right: f32) -> f32
+```
+
+The greater of two values, ordering positive zero above negative zero. Either operand being NaN
+gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `maximum`.
+
 ### `sin`
 
 ```silk
@@ -1381,6 +1530,97 @@ pub fn fromBits(value: u64) -> f64
 
 Calls the concrete f64 fromBits primitive.
 
+### `sqrt`
+
+```silk
+pub fn sqrt(value: f64) -> f64
+```
+
+The square root of `value`, correctly rounded.
+
+IEEE-754 requires the square root be correctly rounded, so the hardware instruction is the
+exact result rather than an approximation of it. This is why `sqrt` may lower to `llvm.sqrt`
+on the native backend and `f64.sqrt` on Wasm while `pow` and `log`, whose results are
+implementation-defined, may not. The evaluator reproduces the same bits by rounding an exact
+integer root.
+
+That guarantee covers numeric results only. IEEE-754 leaves the *sign* of a NaN produced by an
+invalid operation unspecified, and the hosts disagree: an x86 square root of a negative operand
+yields `0xFFF8000000000000` while AArch64's default NaN yields `0x7FF8000000000000`. Both
+NaN-producing inputs are therefore screened here, before the primitive runs, so the primitive
+only ever sees the domain on which it is bit-exact.
+
+### `abs`
+
+```silk
+pub fn abs(value: f64) -> f64
+```
+
+The magnitude of `value`, which clears the sign bit. A NaN input gives the canonical NaN.
+
+### `copysign`
+
+```silk
+pub fn copysign(magnitude: f64, sign: f64) -> f64
+```
+
+The magnitude of `magnitude` carrying the sign bit of `sign`. Requirement 10 outranks sign
+transfer here, so a NaN `magnitude` gives the canonical NaN rather than a signed NaN.
+
+### `trunc`
+
+```silk
+pub fn trunc(value: f64) -> f64
+```
+
+`value` rounded toward zero, which discards the fraction bits the exponent does not reach.
+The sign survives, so a value in `(-1.0, -0.0]` gives negative zero. A NaN input gives the
+canonical NaN, and either infinity is already integral and returns unchanged.
+
+### `floor`
+
+```silk
+pub fn floor(value: f64) -> f64
+```
+
+The largest integral f64 no greater than `value`. A NaN input gives the canonical NaN.
+
+### `ceil`
+
+```silk
+pub fn ceil(value: f64) -> f64
+```
+
+The smallest integral f64 no less than `value`. A NaN input gives the canonical NaN.
+
+### `round`
+
+```silk
+pub fn round(value: f64) -> f64
+```
+
+`value` rounded to the nearest integral f64, with a half rounding away from zero. That is the
+reading `round` carries in C and Rust; the ties-to-even form is a separate operation this
+module does not yet offer. A NaN input gives the canonical NaN.
+
+### `min`
+
+```silk
+pub fn min(left: f64, right: f64) -> f64
+```
+
+The lesser of two values, ordering negative zero below positive zero. Either operand being NaN
+gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `minimum`.
+
+### `max`
+
+```silk
+pub fn max(left: f64, right: f64) -> f64
+```
+
+The greater of two values, ordering positive zero above negative zero. Either operand being NaN
+gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `maximum`.
+
 ### `sin`
 
 ```silk
@@ -1674,6 +1914,14 @@ pub fn pathOperation() -> FileOperation
 
 Selects path construction and resolution.
 
+### `createTemporaryDirectoryOperation`
+
+```silk
+pub fn createTemporaryDirectoryOperation() -> FileOperation
+```
+
+Selects the create-temporary-directory operation.
+
 ### `operationCode`
 
 ```silk
@@ -1899,6 +2147,90 @@ pub service FileSystem
 
 Portable mutable whole-file service. Providers own implementation and platform policy.
 
+### `TemporaryDirectory`
+
+```silk
+pub struct TemporaryDirectory
+```
+
+A directory a caller owns outright, together with everything written inside it.
+
+Ownership is affine: `TemporaryDirectory` holds an owned `Path`, so exactly one binding holds
+it and the compiler rejects a second use of a moved one. Ownership is not, however, a `Drop`
+hook. Removing a directory is a fallible operation that requires the `FileSystem` capability,
+and a `Drop` hook may carry neither a failure row nor a requirement row, so a hook here could
+only be written by inventing an infallible intrinsic over a fallible syscall. Release is
+therefore explicit and honest about both rows — see `release`.
+
+Scope ownership comes from composition rather than from a hook: `Effect.ensuring(release)`
+runs the release whatever the protected Effect's outcome. Because `ensuring` types its
+finalizer `! never`, that composition has to say what a failed removal means; `releaseIgnored`
+is the stdlib's answer and names the loss at the call site.
+
+### `temporaryDirectory`
+
+```silk
+pub effect fn temporaryDirectory(parent: &silk/filesystem.Path, prefix: string) -> TemporaryDirectory ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+```
+
+Creates one temporary directory under `parent` whose name begins with `prefix`.
+
+The result is owned. Nothing removes it until a caller runs `release` or `releaseIgnored`.
+
+### `release`
+
+```silk
+pub effect fn release(self: TemporaryDirectory) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+```
+
+Consumes one TemporaryDirectory and removes it together with everything inside it.
+
+Both rows are stated rather than hidden. Removal reaches the host, so it can fail; walking the
+tree to find what to remove allocates, so it can exhaust memory. A caller that must observe a
+failed cleanup uses this operation and handles the failure.
+
+### `releaseIgnored`
+
+```silk
+pub effect fn releaseIgnored(self: TemporaryDirectory) -> () ? &mut FileSystem | &mut Allocator
+```
+
+Consumes one TemporaryDirectory, removes it, and discards a failed removal.
+
+This exists because `Effect.ensuring` types its finalizer `! never`, so a fallible release has
+to be recovered before it can be a finalizer. The recovery is deliberate and it is named: a
+caller reading `releaseIgnored` at the call site can see that a failed removal is being
+dropped, which a hook doing the same thing invisibly could not show. What is lost is bounded —
+a directory the host will reap — and what is kept is the protected Effect's own outcome, which
+is the answer the program was computing.
+
+A caller who needs the failure uses `release` instead and does not compose it with `ensuring`.
+
+One shape note for that composition: the finalizer consumes the directory, so the protected
+Effect cannot still be borrowing it. Derive whatever paths the work needs from `path` first,
+then hand the owner to the finalizer:
+
+```silk
+let scope = run temporaryDirectory(&parent, "silk-build-")
+let artifact = run join(&scope.path, "output.bin")
+let value = run Effect.ensuring(build(&artifact), releaseIgnored(move scope))
+```
+
+### `removeDirectoryRecursively`
+
+```silk
+pub effect fn removeDirectoryRecursively(path: &silk/filesystem.Path) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+```
+
+Removes one directory and everything inside it.
+
+Two passes, because the portable primitive removes exactly one *empty* directory. The first
+pass walks the tree front to back, unlinking every file it meets and recording every directory
+it meets; the second removes the recorded directories back to front. That order is
+child-before-parent for free: a directory is always recorded before the children found inside
+it, so reversing the record reverses the containment. Neither pass recurses, so depth costs
+vector capacity rather than stack.
+
 ### `createDirectoriesRecursively`
 
 ```silk
@@ -1922,6 +2254,168 @@ pub effect fn exists(path: &silk/filesystem.Path) -> bool ! FileError ? &mut Fil
 ```
 
 Returns false only for NotFound and propagates every other provider failure.
+
+
+## silk/format
+
+Import as `Format` with `import silk.format`.
+
+### `NotANumber`
+
+```silk
+pub struct NotANumber
+```
+
+The byte offset of the first byte that is not part of a decimal number.
+
+| Field | Description |
+| --- | --- |
+| `pub offset: usize` | The offset at which reading stopped. Empty text reports offset zero. |
+
+### `OutOfRange`
+
+```silk
+pub struct OutOfRange
+```
+
+A well-formed decimal number whose value does not fit the requested type.
+
+### `ParseFailure`
+
+```silk
+pub struct ParseFailure
+```
+
+Why decimal text did not produce a value, narrowed with `match`.
+
+| Field | Description |
+| --- | --- |
+| `pub reason: silk/format.NotANumber \| silk/format.OutOfRange` | The reason the text was rejected. |
+
+### `unsignedText`
+
+```silk
+pub effect fn unsignedText(value: u64) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders an unsigned value as decimal text in freshly owned storage.
+
+Every unsigned integer module reaches this by widening, so the text of a `u8` and the text of the
+same number as a `u64` are the same bytes.
+
+### `signedText`
+
+```silk
+pub effect fn signedText(value: i64) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders a signed value as decimal text in freshly owned storage, with a leading `-` when negative.
+
+The digits are taken from the value's negative form, so `i64.MIN` needs no special case: negating
+it would overflow, while negating one digit of it never does.
+
+### `unsignedValue`
+
+```silk
+pub fn unsignedValue(text: string) -> silk/result.Result<u64, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an unsigned value.
+
+Empty text, a leading sign, and any byte outside `0`–`9` are `NotANumber` at the offset that
+stopped the read. A value above `u64.MAX` is `OutOfRange`, detected before the overflow rather
+than after it.
+
+### `signedValue`
+
+```silk
+pub fn signedValue(text: string) -> silk/result.Result<i64, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a signed value, accepting one leading `-`.
+
+Digits accumulate negatively, so text naming `i64.MIN` reads like any other value. A leading `+`
+is not accepted. A value outside `i64.MIN`–`i64.MAX` is `OutOfRange`.
+
+### `u8Value`
+
+```silk
+pub fn u8Value(text: string) -> silk/result.Result<u8, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u8`, rejecting a value above `u8.MAX`.
+
+### `u16Value`
+
+```silk
+pub fn u16Value(text: string) -> silk/result.Result<u16, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u16`, rejecting a value above `u16.MAX`.
+
+### `u32Value`
+
+```silk
+pub fn u32Value(text: string) -> silk/result.Result<u32, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u32`, rejecting a value above `u32.MAX`.
+
+### `u64Value`
+
+```silk
+pub fn u64Value(text: string) -> silk/result.Result<u64, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u64`, rejecting a value above `u64.MAX`.
+
+### `usizeValue`
+
+```silk
+pub fn usizeValue(text: string) -> silk/result.Result<usize, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `usize`, rejecting a value the target's pointer width cannot hold.
+
+### `i8Value`
+
+```silk
+pub fn i8Value(text: string) -> silk/result.Result<i8, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i8`, rejecting a value outside `i8.MIN`–`i8.MAX`.
+
+### `i16Value`
+
+```silk
+pub fn i16Value(text: string) -> silk/result.Result<i16, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i16`, rejecting a value outside `i16.MIN`–`i16.MAX`.
+
+### `i32Value`
+
+```silk
+pub fn i32Value(text: string) -> silk/result.Result<i32, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i32`, rejecting a value outside `i32.MIN`–`i32.MAX`.
+
+### `i64Value`
+
+```silk
+pub fn i64Value(text: string) -> silk/result.Result<i64, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i64`, rejecting a value outside `i64.MIN`–`i64.MAX`.
+
+### `isizeValue`
+
+```silk
+pub fn isizeValue(text: string) -> silk/result.Result<isize, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `isize`, rejecting a value the target's pointer width cannot hold.
 
 
 ## silk/host_input
@@ -2488,6 +2982,22 @@ pub fn greaterOrEqual(left: i16, right: i16) -> bool
 
 Calls the concrete i16 greaterOrEqual primitive.
 
+### `toText`
+
+```silk
+pub effect fn toText(value: i16) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<i16, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i16`, or reports why the text is not one.
+
 
 ## silk/i32
 
@@ -2956,6 +3466,22 @@ pub fn greaterOrEqual(left: i32, right: i32) -> bool
 ```
 
 Calls the concrete i32 greaterOrEqual primitive.
+
+### `toText`
+
+```silk
+pub effect fn toText(value: i32) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<i32, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i32`, or reports why the text is not one.
 
 
 ## silk/i64
@@ -3426,6 +3952,22 @@ pub fn greaterOrEqual(left: i64, right: i64) -> bool
 
 Calls the concrete i64 greaterOrEqual primitive.
 
+### `toText`
+
+```silk
+pub effect fn toText(value: i64) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<i64, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i64`, or reports why the text is not one.
+
 
 ## silk/i8
 
@@ -3895,10 +4437,53 @@ pub fn greaterOrEqual(left: i8, right: i8) -> bool
 
 Calls the concrete i8 greaterOrEqual primitive.
 
+### `toText`
+
+```silk
+pub effect fn toText(value: i8) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<i8, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i8`, or reports why the text is not one.
+
 
 ## silk/isize
 
 Import as `isize` with `import silk.isize`.
+
+### `MAX`
+
+```silk
+pub const MAX: isize
+```
+
+The largest isize. The checked arithmetic intrinsics reject every result above this bound. No
+literal spells it: isize is as wide as a pointer, so the bound is 2147483647 on a 32-bit target
+and 9223372036854775807 on a 64-bit one, and the compiler selects between them.
+
+### `MIN`
+
+```silk
+pub const MIN: isize
+```
+
+The smallest isize. The checked arithmetic intrinsics reject every result below this bound. It
+is -2147483648 on a 32-bit target and -9223372036854775808 on a 64-bit one.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of isize in bits, which is the selected target's pointer width.
 
 ### `negate`
 
@@ -4340,6 +4925,22 @@ pub fn greaterOrEqual(left: isize, right: isize) -> bool
 
 Calls the concrete isize greaterOrEqual primitive.
 
+### `toText`
+
+```silk
+pub effect fn toText(value: isize) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<isize, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `isize`, or reports why the text is not one.
+
 
 ## silk/layout
 
@@ -4671,6 +5272,137 @@ pub fn some<T>(value: T) -> Option<T>
 
 Constructs a present optional value.
 
+### `map`
+
+```silk
+pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> Option<U>
+```
+
+Applies a transform to a present value and keeps an absent value absent.
+
+### `flatMap`
+
+```silk
+pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> Option<U>) -> Option<U>
+```
+
+Continues a present value with a transform that itself answers with an Option, so the
+outcome stays one Option deep instead of nesting.
+
+### `unwrapOr`
+
+```silk
+pub fn unwrapOr<T>(self: Option<T>, fallback: T) -> T
+```
+
+Returns the present value, or the fallback value when the option is absent.
+
+Only the absent arm consumes the fallback. The present arm releases it, so exactly one of the
+two owned values leaves this call and the other drops.
+
+
+## silk/order
+
+Import as `Order` with `import silk.order`.
+
+### `Less`
+
+```silk
+pub struct Less
+```
+
+The left value orders before the right value.
+
+### `Equal`
+
+```silk
+pub struct Equal
+```
+
+Neither value orders before the other.
+
+### `Greater`
+
+```silk
+pub struct Greater
+```
+
+The left value orders after the right value.
+
+### `Ordering`
+
+```silk
+pub struct Ordering
+```
+
+The result of comparing two values in one order.
+
+| Field | Description |
+| --- | --- |
+| `pub value: silk/order.Equal \| silk/order.Greater \| silk/order.Less` | The comparison result, narrowed with `match`. |
+
+### `Order`
+
+```silk
+pub interface Order<T>
+```
+
+Static strict-ordering contract for primitive comparable values.
+
+A witness supplies the strict `lessThan` the operator `<` spells. Equality is derived from it
+rather than declared, so a witness can never disagree with itself about which values are equal.
+
+### `compare`
+
+```silk
+pub fn compare<T>(left: T, right: T) -> Ordering
+```
+
+Compares two values three ways using the concrete comparison selected during specialization.
+
+Reads both operands twice without moving either, so the result is the same whichever order a
+caller evaluates the operands in.
+
+### `less`
+
+```silk
+pub fn less<T>(left: T, right: T) -> bool
+```
+
+Reports whether one value orders strictly before another.
+
+### `equal`
+
+```silk
+pub fn equal<T>(left: T, right: T) -> bool
+```
+
+Reports whether neither value orders before the other.
+
+### `isLess`
+
+```silk
+pub fn isLess(ordering: &silk/order.Ordering) -> bool
+```
+
+Reports whether an ordering is `Less`.
+
+### `isEqual`
+
+```silk
+pub fn isEqual(ordering: &silk/order.Ordering) -> bool
+```
+
+Reports whether an ordering is `Equal`.
+
+### `isGreater`
+
+```silk
+pub fn isGreater(ordering: &silk/order.Ordering) -> bool
+```
+
+Reports whether an ordering is `Greater`.
+
 
 ## silk/os_child_process
 
@@ -4877,6 +5609,58 @@ pub fn failResult<A, F>(error: F) -> silk/result.Result<A, F>
 ```
 
 Constructs a completed failed outcome.
+
+### `map`
+
+```silk
+pub fn map<A, B, F>(self: silk/result.Result<A, F>, transform: once fn(A) -> B) -> silk/result.Result<B, F>
+```
+
+Applies a transform to a success value and carries a failure through unchanged.
+
+### `mapError`
+
+```silk
+pub fn mapError<A, F, G>(self: silk/result.Result<A, F>, transform: once fn(F) -> G) -> silk/result.Result<A, G>
+```
+
+Applies a transform to a failure value and carries a success through unchanged.
+
+### `flatMap`
+
+```silk
+pub fn flatMap<A, B, F>(self: silk/result.Result<A, F>, transform: once fn(A) -> silk/result.Result<B, F>) -> silk/result.Result<B, F>
+```
+
+Continues a success with a transform that answers with a Result of its own, so the outcome
+stays one Result deep instead of nesting.
+
+### `unwrapOr`
+
+```silk
+pub fn unwrapOr<A, F>(self: silk/result.Result<A, F>, fallback: A) -> A
+```
+
+Returns the success value, or the fallback value when the outcome is a failure.
+
+Only the failure arm consumes the fallback. The success arm releases it, and the failure arm
+releases the error, so exactly one owned value leaves this call and the other drops.
+
+### `isSuccess`
+
+```silk
+pub fn isSuccess<A, F>(self: &silk/result.Result<A, F>) -> bool
+```
+
+Answers whether the outcome succeeded, without consuming it.
+
+### `isFailure`
+
+```silk
+pub fn isFailure<A, F>(self: &silk/result.Result<A, F>) -> bool
+```
+
+Answers whether the outcome failed, without consuming it.
 
 
 ## silk/slot
@@ -5090,6 +5874,17 @@ pub effect fn append(self: &mut silk/string.String, value: string) -> () ! OutOf
 ```
 
 Appends complete valid text atomically with respect to allocation failure.
+
+### `appendOwned`
+
+```silk
+pub effect fn appendOwned(self: &mut silk/string.String, value: String) -> () ! OutOfMemory ? &mut Allocator
+```
+
+Appends another owned String atomically with respect to allocation failure.
+
+The companion to `append` for text a program computed rather than wrote. The appended String is
+consumed, so a rendered value composes into a message without the caller keeping it alive.
 
 ### `view`
 
@@ -5624,6 +6419,22 @@ pub fn greaterOrEqual(left: u16, right: u16) -> bool
 
 Calls the concrete u16 greaterOrEqual primitive.
 
+### `toText`
+
+```silk
+pub effect fn toText(value: u16) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<u16, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u16`, or reports why the text is not one.
+
 
 ## silk/u32
 
@@ -6068,6 +6879,22 @@ pub fn greaterOrEqual(left: u32, right: u32) -> bool
 ```
 
 Calls the concrete u32 greaterOrEqual primitive.
+
+### `toText`
+
+```silk
+pub effect fn toText(value: u32) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<u32, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u32`, or reports why the text is not one.
 
 
 ## silk/u64
@@ -6514,6 +7341,22 @@ pub fn greaterOrEqual(left: u64, right: u64) -> bool
 
 Calls the concrete u64 greaterOrEqual primitive.
 
+### `toText`
+
+```silk
+pub effect fn toText(value: u64) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<u64, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u64`, or reports why the text is not one.
+
 
 ## silk/u8
 
@@ -6959,10 +7802,52 @@ pub fn greaterOrEqual(left: u8, right: u8) -> bool
 
 Calls the concrete u8 greaterOrEqual primitive.
 
+### `toText`
+
+```silk
+pub effect fn toText(value: u8) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<u8, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u8`, or reports why the text is not one.
+
 
 ## silk/usize
 
 Import as `usize` with `import silk.usize`.
+
+### `MAX`
+
+```silk
+pub const MAX: usize
+```
+
+The largest usize. The checked arithmetic intrinsics reject every result above this bound. No
+literal spells it: usize is as wide as a pointer, so the bound is 4294967295 on a 32-bit target
+and 18446744073709551615 on a 64-bit one, and the compiler selects between them.
+
+### `MIN`
+
+```silk
+pub const MIN: usize
+```
+
+The smallest usize. An unsigned bound is zero at every pointer width, so this one is a literal.
+
+### `BITS`
+
+```silk
+pub const BITS: u32
+```
+
+The width of usize in bits, which is the selected target's pointer width.
 
 ### `ZERO`
 
@@ -7396,6 +8281,22 @@ pub fn greaterOrEqual(left: usize, right: usize) -> bool
 
 Calls the concrete usize greaterOrEqual primitive.
 
+### `toText`
+
+```silk
+pub effect fn toText(value: usize) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<usize, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `usize`, or reports why the text is not one.
+
 
 ## silk/vector
 
@@ -7528,6 +8429,25 @@ pub effect fn reserve<T>(self: &mut silk/vector.Vector<T>, additional: usize) ->
 ```
 
 Grows the capacity to hold at least one additional count of elements.
+
+### `sort`
+
+```silk
+pub effect fn sort<T>(self: &mut silk/vector.Vector<T>) -> () ! OutOfMemory ? &mut Allocator
+```
+
+Orders the elements in place. Equal elements keep their input order.
+
+### `binarySearch`
+
+```silk
+pub fn binarySearch<T>(self: &silk/vector.Vector<T>, target: T) -> Option<usize>
+```
+
+Returns the index of a matching element in a sorted vector, or an absent value when none matches.
+
+Returns the lowest matching index when a vector holds several equal elements, so a repeated
+search over one vector always answers with the same index.
 
 
 ## See also

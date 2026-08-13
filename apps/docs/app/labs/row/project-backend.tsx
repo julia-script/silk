@@ -1056,6 +1056,8 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
       ? `${value.value.toString()}usize`
       : value._tag === 'ScalarIntegerValue'
         ? `${value.value.toString()}${value.type}`
+        : value._tag === 'CharacterValue'
+          ? `U+${value.value.toString(16).toUpperCase().padStart(4, '0')}`
         : value._tag === 'FloatValue'
           ? `${value.type}(bits=0x${value.bits.toString(16)})`
     : value._tag === 'ArrayValue'

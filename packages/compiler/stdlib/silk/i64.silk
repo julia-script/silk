@@ -283,3 +283,13 @@ pub fn greaterThan(left: i64, right: i64) -> bool {
 pub fn greaterOrEqual(left: i64, right: i64) -> bool {
   return Intrinsic.i64GreaterOrEqual(left, right)
 }
+
+/// Renders the value as decimal text in freshly owned storage.
+pub effect fn toText(value: i64) -> String ! OutOfMemory ? &mut Allocator {
+  return run Format.signedText(toI64(value))
+}
+
+/// Reads complete decimal text as an `i64`, or reports why the text is not one.
+pub fn parse(text: string) -> Result<i64, ParseFailure> {
+  return Format.i64Value(text)
+}

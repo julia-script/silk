@@ -226,8 +226,10 @@ it.effect('types every reachable standard-library count as usize, never as the i
         ),
       ].sort()
 
-    // The shared constants carry the zero and one.
-    assert.deepEqual(counts('silk/usize'), ['0', '1'])
+    // The shared constants carry the zero and one, and `MAX` carries the largest usize of the
+    // target this snapshot selected — the 32-bit one, so the bound ranges at 4294967295 rather
+    // than at the wider value a 64-bit target would give it.
+    assert.deepEqual(counts('silk/usize'), ['0', '1', '4294967295'])
     // Every width the constants do not name is still a usize literal inside silk/string.
     assert.deepEqual(counts('silk/string'), ['2', '3', '4'])
 

@@ -60,6 +60,7 @@ const provider: OsFileSystemHost.Provider = Object.freeze({
   directoryNext: () => end,
   pathInspect: () => inspected,
   directoryCreate: () => completed,
+  directoryCreateUnique: () => unsupported,
   fileRemove: () => completed,
   directoryRemove: () => completed,
   handleClose: () => completed,
@@ -193,6 +194,7 @@ pub fn main() -> i32 {
           directoryNext: () => end,
           pathInspect: () => inspected,
           directoryCreate: () => completed,
+          directoryCreateUnique: () => unsupported,
           fileRemove: () => completed,
           directoryRemove: () => completed,
           handleClose: () => {

@@ -96,6 +96,7 @@ const tokenKinds = [
   'InterfaceKeyword',
   'AmpersandAmpersand',
   'PipePipe',
+  'CharLiteral',
 ] as const satisfies ReadonlyArray<Token.TokenKind>
 
 const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
@@ -174,6 +175,7 @@ const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
   Tilde: 72,
   AmpersandAmpersand: 73,
   PipePipe: 74,
+  CharLiteral: 75,
 })
 
 interface ExpectedToken {
@@ -189,6 +191,37 @@ interface ExpectedCase {
   readonly fingerprint: number
 }
 
+/** One-based line and column of a byte offset, counting line feeds exactly as the program does. */
+const positionOf = (
+  bytes: Uint8Array,
+  offset: number,
+): { readonly line: number; readonly column: number } => {
+  let line = 1
+  let column = 1
+  for (let index = 0; index < offset; index += 1) {
+    column += 1
+    if (bytes[index] === 10) {
+      line += 1
+      column = 1
+    }
+  }
+  return { line, column }
+}
+
+/** The text the pressure program renders, spelled the same way here so the two can disagree. */
+const diagnosticMessage = (
+  input: string,
+  diagnostics: ReadonlyArray<{ readonly start: number; readonly end: number }>,
+): string => {
+  const bytes = ascii(input)
+  return diagnostics
+    .map((diagnostic) => {
+      const { line, column } = positionOf(bytes, diagnostic.start)
+      return `LEX0001 at line ${line} column ${column}\n`
+    })
+    .join('')
+}
+
 const expectedCase = (input: string, id: string): ExpectedCase => {
   const lexical = Lexer.lex(SourceFile.make(id, ascii(input)))
   const tokens = lexical.tokens.map(({ kind, span }) =>
@@ -201,8 +234,11 @@ const expectedCase = (input: string, id: string): ExpectedCase => {
   for (const token of tokens) {
     fingerprint = (fingerprint * 17 + token.code + token.start * 3 + token.end * 5) % 197
   }
-  for (const diagnostic of diagnostics) {
-    fingerprint = (fingerprint * 19 + diagnostic.start * 7 + diagnostic.end * 11) % 197
+  // The program no longer folds diagnostic offsets: it renders a message carrying the line and
+  // column those offsets resolve to, and folds the message text. Mirroring the rendering here is
+  // what makes a wrong line number a failing test rather than a different number.
+  for (const byte of ascii(diagnosticMessage(input, diagnostics))) {
+    fingerprint = (fingerprint * 19 + byte * 7) % 197
   }
   return Object.freeze({
     tokens: Object.freeze(tokens),
@@ -284,6 +320,10 @@ const corpus = [
   Object.freeze({
     id: 'punctuation',
     input: '( ) { } [ ] : ; , = == => - + * / % ! != ? @ < <= > >= | |> || & && ^ ~ . .. ->',
+  }),
+  Object.freeze({
+    id: 'char-literals',
+    input: "'a' '\\n' '\\'' '\\u{2603}' '' 'ab' 'unterminated\nnext",
   }),
   Object.freeze({ id: 'invalid', input: '#~ pub \u0000? $x' }),
 ] as const

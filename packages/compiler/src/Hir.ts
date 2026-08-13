@@ -6,6 +6,7 @@ import type * as Operator from './Operator.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
+import type * as TargetConstant from './TargetConstant.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
@@ -117,6 +118,7 @@ export type BuiltinOperation =
   | 'OsDirectoryNext'
   | 'OsPathInspect'
   | 'OsDirectoryCreate'
+  | 'OsDirectoryCreateUnique'
   | 'OsFileRemove'
   | 'OsDirectoryRemove'
   | 'OsHandleClose'
@@ -195,6 +197,9 @@ export type Expression =
       readonly value: bigint
       readonly type: DeclarationIndex.SemanticType
       readonly constant?: DeclarationIndex.CanonicalId
+      // A pointer-width fact rather than a spelled number. `value` carries the widest selection so
+      // target-independent analysis has one; `Lower` replaces it with the selected target's value.
+      readonly targetConstant?: TargetConstant.Selector
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -224,6 +229,12 @@ export type Expression =
   | {
       readonly _tag: 'BooleanLiteral'
       readonly value: boolean
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'CharacterLiteral'
+      readonly value: number
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -1218,7 +1229,9 @@ const encodeExpression = (expression: Expression, depth: number): string => {
   const indent = '  '.repeat(depth)
   switch (expression._tag) {
     case 'IntegerLiteral':
-      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)}${expression.constant === undefined ? '' : ` constant=${expression.constant.module}::${expression.constant.name}`} ${spanText(expression.span)}`
+      // A pointer-width fact prints its selector rather than its unselected value, so the text
+      // never shows a number that the chosen target would contradict.
+      return `${indent}literal ${expression.targetConstant === undefined ? expression.value : `target=${expression.targetConstant}`} : ${Type.encode(expression.type)}${expression.constant === undefined ? '' : ` constant=${expression.constant.module}::${expression.constant.name}`} ${spanText(expression.span)}`
     case 'FloatingLiteral':
       return `${indent}literal ${expression.spelling} bits=0x${expression.bits.toString(16)} : ${expression.type} ${spanText(expression.span)}`
     case 'StaticStringLiteral':
@@ -1229,6 +1242,8 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       return `${indent}unit : () ${spanText(expression.span)}`
     case 'BooleanLiteral':
       return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+    case 'CharacterLiteral':
+      return `${indent}literal U+${expression.value.toString(16).toUpperCase().padStart(4, '0')} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'ParameterReference':
       return `${indent}param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'BindingReference':

@@ -36,6 +36,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   DecimalFloat: { name: 'number', tags: [tags.float] },
   TextLiteral: { name: 'string', tags: [tags.string] },
   ByteStringLiteral: { name: 'string', tags: [tags.string] },
+  CharLiteral: { name: 'character', tags: [tags.character] },
   InvalidStaticLiteral: { name: 'invalid', tags: [tags.invalid] },
   PubKeyword: keyword,
   StructKeyword: keyword,

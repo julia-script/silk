@@ -12,10 +12,6 @@ import * as TerminalSession from '../app/editor/TerminalSession'
 import * as VirtualFileSystem from '../../../packages/platform-webcontainer/test/support/VirtualFileSystem.js'
 import * as WebContainerService from '../../../packages/platform-webcontainer/test/support/WebContainerService.js'
 
-const nextTask = Effect.promise(
-  () => new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0)),
-)
-
 it.effect('feeds ordered input, streams output, validates resize, and releases the process', () =>
   Effect.gen(function* () {
     const virtual = VirtualFileSystem.make()
@@ -93,6 +89,10 @@ it.effect('shares one output consumer and follows default atom lifetime in a fre
     const virtual = VirtualFileSystem.make()
     const received: Array<string> = []
     const inputReceived = yield* Deferred.make<void>()
+    // The registry defers node removal to a scheduler task and then closes the session scope on a
+    // forked fiber, so the release lands an unpredictable number of ticks after the last
+    // unsubscribe. Await the release itself rather than a fixed number of ticks.
+    const processReleased = yield* Deferred.make<void>()
     let outputAcquisitions = 0
     let spawns = 0
     let releases = 0
@@ -122,8 +122,9 @@ it.effect('shares one output consumer and follows default atom lifetime in a fre
           Effect.succeed({
             process,
             running: Effect.succeed(true),
-            release: Effect.sync(() => {
+            release: Effect.gen(function* () {
               releases += 1
+              yield* Deferred.succeed(processReleased, undefined)
             }),
           }),
         )
@@ -149,8 +150,10 @@ it.effect('shares one output consumer and follows default atom lifetime in a fre
     assert.strictEqual(spawns, 1)
 
     releaseFirst()
+    assert.strictEqual(releases, 0, 'the shared shell outlives a single unsubscribe')
+
     releaseSecond()
-    yield* nextTask
+    yield* Deferred.await(processReleased)
     assert.strictEqual(releases, 1)
 
     registry.dispose()

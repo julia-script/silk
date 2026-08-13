@@ -62,6 +62,7 @@ it('generates one longest-first TextMate rule for every committed literal form',
       { name: 'string.quoted.double.byte.silk', begin: '(b)(")' },
       { name: 'string.quoted.double.raw.silk', begin: '(r)(")' },
       { name: 'string.quoted.double.silk', begin: '(")' },
+      { name: 'string.quoted.single.silk', begin: "(')" },
     ],
   )
 })
@@ -180,5 +181,9 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   // A raw body has no escapes, so a backslash is content rather than an escape scope.
   assert.notInclude(scopesAt('r"\\d+"', '\\d+'), 'constant.character.escape.silk')
   assert.include(scopesAt('r"""raw\n// body\n"""', '// body'), 'string.quoted.triple.raw.silk')
+  assert.include(scopesAt("const tab: char = '\\t'", "'"), 'string.quoted.single.silk')
+  assert.include(scopesAt("const tab: char = '\\t'", '\\t'), 'constant.character.escape.silk')
+  // The delimiter escape belongs to the character rule alone, so `'` cannot end the literal early.
+  assert.include(scopesAt("const quote: char = '\\''", "\\'"), 'constant.character.escape.silk')
   highlighter.dispose()
 })

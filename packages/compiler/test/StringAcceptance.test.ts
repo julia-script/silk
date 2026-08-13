@@ -148,7 +148,9 @@ effect fn ignore(error: OutOfMemory) -> () { return () }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
 effect fn build() -> i32 ! OutOfMemory {
-  let mut allocator = QuotaAllocator { remaining: 2 }
+  // One allocation, spent by the copy. Appending grows the copied storage in place rather than
+  // copying it into fresh storage first, so starving the append takes one fewer than it used to.
+  let mut allocator = QuotaAllocator { remaining: 1 }
   let copying = copy("ok") |> Effect.provideMut(&mut allocator)
   let mut value = run copying
   let recovered = run Effect.catch(

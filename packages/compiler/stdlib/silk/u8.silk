@@ -268,3 +268,13 @@ pub fn greaterThan(left: u8, right: u8) -> bool {
 pub fn greaterOrEqual(left: u8, right: u8) -> bool {
   return Intrinsic.u8GreaterOrEqual(left, right)
 }
+
+/// Renders the value as decimal text in freshly owned storage.
+pub effect fn toText(value: u8) -> String ! OutOfMemory ? &mut Allocator {
+  return run Format.unsignedText(toU64(value))
+}
+
+/// Reads complete decimal text as a `u8`, or reports why the text is not one.
+pub fn parse(text: string) -> Result<u8, ParseFailure> {
+  return Format.u8Value(text)
+}

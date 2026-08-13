@@ -351,6 +351,7 @@ export type Operation =
       readonly _tag: 'FloatUnary'
       readonly operation:
         | 'Negate'
+        | 'Sqrt'
         | 'IsNaN'
         | 'IsInfinite'
         | 'IsFinite'
@@ -2388,9 +2389,12 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 })()
               : scalar?.category === 'Boolean'
                 ? value === 0n || value === 1n
-                : scalar?.category === 'Floating'
-                  ? value >= 0n && value < 1n << BigInt(Scalar.bits(scalar, pointerBits))
-                  : false
+                : scalar?.category === 'Character'
+                  ? // A Unicode scalar value: inside the range and outside the surrogate hole.
+                    value >= 0n && value <= 0x10ffffn && !(value >= 0xd800n && value <= 0xdfffn)
+                  : scalar?.category === 'Floating'
+                    ? value >= 0n && value < 1n << BigInt(Scalar.bits(scalar, pointerBits))
+                    : false
           if (
             destination === undefined ||
             !SilkType.equals(semanticType(destination), semantic) ||
@@ -2431,7 +2435,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 operation.operator === 'Divide' ||
                 operation.operator === 'Remainder')) ||
             (scalar?.category === 'Boolean' &&
-              (operation.operator === 'Equals' || operation.operator === 'NotEquals'))
+              (operation.operator === 'Equals' || operation.operator === 'NotEquals')) ||
+            (scalar?.category === 'Character' && comparison && operation.operator !== 'TotalOrder')
           const expectedResult = comparison ? 'bool' : operand
           if (
             operand === undefined ||
@@ -2497,7 +2502,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const unary =
             operation._tag !== 'FloatUnary' ||
             (sourceScalar?.category === 'Floating' &&
-              (operation.operation === 'Negate'
+              (operation.operation === 'Negate' || operation.operation === 'Sqrt'
                 ? targetScalar?.spelling === sourceScalar.spelling
                 : targetScalar?.category === 'Boolean'))
           const transcendental =

@@ -10,6 +10,7 @@ import type * as SourceSpan from './SourceSpan.js'
 import * as StaticText from './StaticText.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
+import * as TargetConstant from './TargetConstant.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
@@ -322,6 +323,7 @@ export const returnedBorrow = (declaration: DeclarationFact): ReturnedBorrowFact
 /** The source-retained literal carried by one compile-time constant header. */
 export type ConstantLiteralFact =
   | { readonly _tag: 'BooleanLiteral'; readonly value: boolean; readonly token: Token.Token }
+  | { readonly _tag: 'CharacterLiteral'; readonly value: number; readonly token: Token.Token }
   | {
       readonly _tag: 'IntegerLiteral'
       readonly value: bigint
@@ -336,6 +338,14 @@ export type ConstantLiteralFact =
   | {
       readonly _tag: 'StringLiteral'
       readonly data: StaticText.Data
+      readonly token: Token.Token
+    }
+  // One pointer-width fact named below `Target`. It is not a literal the source spells; it selects
+  // between literals the compiler already holds, because no single number bounds a pointer-width
+  // integer on both a 32-bit and a 64-bit target.
+  | {
+      readonly _tag: 'TargetConstant'
+      readonly selector: TargetConstant.Selector
       readonly token: Token.Token
     }
   // A literal the lexer accepted but no value can be decoded from; it carries its own detail so
@@ -642,6 +652,18 @@ const constantLiteral = (
       ? Object.freeze({ _tag: 'Unavailable', syntax: initializer })
       : Object.freeze({ _tag: 'BooleanLiteral', value: token.kind === 'TrueKeyword', token })
   }
+  if (initializer.kind === 'CharacterLiteralExpression') {
+    const token = SyntaxTree.directToken(initializer, 'CharLiteral')
+    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const bytes = Option.getOrUndefined(SourceFile.slice(source, token.span))
+    const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
+    if (bytes === undefined || form === undefined)
+      return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const decoded = StaticText.decodeScalar(Array.from(bytes), form)
+    return decoded._tag === 'Scalar'
+      ? Object.freeze({ _tag: 'CharacterLiteral', value: decoded.value, token })
+      : Object.freeze({ _tag: 'Malformed', detail: decoded.detail, syntax: initializer })
+  }
   if (initializer.kind === 'IntegerLiteralExpression') {
     const token = SyntaxTree.directToken(initializer, 'DecimalInteger')
     if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
@@ -681,7 +703,36 @@ const constantLiteral = (
       ? Object.freeze({ _tag: 'StringLiteral', data: decoded.data, token })
       : Object.freeze({ _tag: 'Malformed', detail: decoded.detail, syntax: initializer })
   }
+  const target = targetConstant(source, initializer)
+  if (target !== undefined) return target
   return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+}
+
+/**
+ * Recognizes `Target.<fact>`, the one initializer form that is not a source literal. The projection
+ * is matched on syntax alone — `Target` names no declaration and resolves to nothing — so a form
+ * that is already rejected today is the only form whose meaning changes.
+ */
+const targetConstant = (
+  source: SourceFile.SourceFile,
+  initializer: SyntaxTree.Node,
+): ConstantLiteralFact | undefined => {
+  if (initializer.kind !== 'FieldProjectionExpression') return undefined
+  const base = SyntaxTree.directNode(initializer, 'IdentifierExpression')
+  const baseToken = base === undefined ? undefined : SyntaxTree.directToken(base, 'Identifier')
+  if (baseToken === undefined || spelling(source, baseToken) !== TargetConstant.root)
+    return undefined
+  const member = SyntaxTree.directToken(initializer, 'Identifier')
+  if (member === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+  const memberSpelling = spelling(source, member)
+  const selector = TargetConstant.find(memberSpelling)
+  return selector === undefined
+    ? Object.freeze({
+        _tag: 'Malformed',
+        detail: `${TargetConstant.root}.${memberSpelling} names no target fact; the target facts are ${TargetConstant.all.map((candidate) => `${TargetConstant.root}.${candidate}`).join(', ')}`,
+        syntax: initializer,
+      })
+    : Object.freeze({ _tag: 'TargetConstant', selector, token: member })
 }
 
 /** Retains and initially resolves one concrete type path against built-in types only. */
@@ -2835,8 +2886,129 @@ const attachExposure = (
   return Object.freeze({ ...fact, exposureCause: Diagnostic.identity(diagnostic) })
 }
 
+/**
+ * The type parameters each canonical struct reaches inline, keyed by canonical struct key. A
+ * parameter absent from a struct's set is one the struct only ever holds behind an indirection.
+ * A struct missing from the map is one this index cannot see, and its arguments are all treated
+ * as inline.
+ */
+type InlineParameters = ReadonlyMap<string, ReadonlySet<number>>
+
+/**
+ * Walks the nominals and parameters whose layout one type's layout actually requires.
+ *
+ * A struct embeds its fields, so a field reaches everything its type names outside an indirecting
+ * position. `RawBuffer<T>` and `Slot<T>` are the compiler-owned indirections: their
+ * representations are `{$allocation, count}` and `{$address}` whatever `T` is, so the walk names
+ * them and stops rather than descending into the element. Every other nominal is entered only
+ * through the arguments its own declaration reaches inline, which `inlineParameters` supplies.
+ * Arrays, slices, references, callables, effects, and unions descend exactly as `Type.nominals`
+ * does, so this graph is narrower than the reported dependency graph and never wider.
+ */
+const inlineReach = (
+  self: Type.Type,
+  inlineParameters: InlineParameters,
+  visit: (reached: Type.Nominal | Type.Parameter) => void,
+): void => {
+  const descend = (type: Type.Type): void => {
+    if (Type.isNominal(type)) {
+      visit(type)
+      if (Type.isRawBuffer(type) || Type.isSlot(type)) return
+      const inline = inlineParameters.get(`${type.module}.${type.name}`)
+      for (const [ordinal, argument] of type.arguments.entries())
+        if (inline === undefined || inline.has(ordinal)) descend(argument)
+      return
+    }
+    if (Type.isParameter(type)) {
+      visit(type)
+      return
+    }
+    if (Type.isFailureProjection(type)) {
+      visit(type.parameter)
+      return
+    }
+    if (Type.isFixedArray(type) || Type.isSlice(type)) {
+      descend(type.element)
+      return
+    }
+    if (Type.isReference(type)) {
+      descend(type.target)
+      return
+    }
+    if (Type.isCallable(type)) {
+      for (const parameter of type.parameters) descend(parameter)
+      descend(type.result)
+      return
+    }
+    if (Type.isEffect(type)) {
+      descend(type.success)
+      for (const failure of type.failures) descend(failure)
+      for (const requirement of type.requirements) descend(requirement.capability)
+      return
+    }
+    if (Type.isUnion(type)) for (const member of type.members) descend(member)
+  }
+  descend(self)
+}
+
+/**
+ * The monotone least fixed point of "struct `S` reaches its own parameter `i` inline".
+ *
+ * Every parameter starts indirected. A round marks a parameter inline as soon as one of the
+ * struct's own fields reaches it under `inlineReach`, and marking a parameter can only open more
+ * descents, so the sets only grow and the loop terminates. Because it is the least fixed point,
+ * the answer does not depend on the order structs or modules arrive in.
+ */
+const inlineParametersOf = (structs: ReadonlyArray<StructFact>): InlineParameters => {
+  const declarations = new Map<string, StructFact>()
+  for (const struct of structs)
+    if (struct.canonical._tag === 'Canonical')
+      declarations.set(canonicalKey(struct.canonical.id), struct)
+  const inline = new Map<string, Set<number>>()
+  for (const key of declarations.keys()) inline.set(key, new Set())
+  for (let growing = true; growing; ) {
+    growing = false
+    for (const [key, struct] of declarations) {
+      const reached = inline.get(key)
+      if (reached === undefined || struct.typeParameters.length === 0) continue
+      // Keyed by position, matching how `Type.substitution` binds arguments to parameters.
+      const own = new Map(
+        struct.typeParameters.map(
+          (parameter, position) => [Type.key(parameter.type), position] as const,
+        ),
+      )
+      for (const field of struct.fields) {
+        if (field.declaredType._tag !== 'Resolved') continue
+        inlineReach(field.declaredType.type, inline, (member) => {
+          if (!Type.isParameter(member)) return
+          const ordinal = own.get(Type.key(member))
+          if (ordinal === undefined || reached.has(ordinal)) return
+          reached.add(ordinal)
+          growing = true
+        })
+      }
+    }
+  }
+  return inline
+}
+
+/** Names every canonical struct one field reaches inline, for cycle detection only. */
+const inlineNeighbors = (
+  field: FieldFact,
+  inlineParameters: InlineParameters,
+): ReadonlyArray<string> => {
+  if (field.declaredType._tag !== 'Resolved') return Object.freeze([])
+  const reached: Array<string> = []
+  inlineReach(field.declaredType.type, inlineParameters, (member) => {
+    if (Type.isParameter(member)) return
+    reached.push(`${member.module}.${member.name}`)
+  })
+  return Object.freeze(reached)
+}
+
 const stronglyConnected = (
   structs: ReadonlyArray<StructFact>,
+  inlineParameters: InlineParameters,
 ): ReadonlyArray<ReadonlyArray<StructFact>> => {
   const canonical = structs
     .filter((struct) => struct.canonical._tag === 'Canonical')
@@ -2868,11 +3040,7 @@ const stronglyConnected = (
     stacked.add(key)
     const struct = byKey.get(key)
     const neighbors = (struct?.fields ?? [])
-      .flatMap((field) =>
-        field.declaredType._tag === 'Resolved'
-          ? Type.nominals(field.declaredType.type).map((type) => `${type.module}.${type.name}`)
-          : [],
-      )
+      .flatMap((field) => inlineNeighbors(field, inlineParameters))
       .filter((neighbor) => byKey.has(neighbor))
       .sort()
     for (const neighbor of neighbors) {
@@ -3771,8 +3939,12 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
   })
 
   const structs = modules.flatMap((module) => module.structs)
+  // One graph, two readers: the component walk and the self-edge test below must agree about what
+  // "inline" means, or a struct that reaches itself through an indirection is a component of one
+  // in the first and a cycle in the second.
+  const inlineParameters = inlineParametersOf(structs)
   const cycleCause = new Map<string, Diagnostic.Identity>()
-  for (const component of stronglyConnected(structs)) {
+  for (const component of stronglyConnected(structs, inlineParameters)) {
     const first = component.at(0)
     if (first === undefined) continue
     const keys = component.flatMap((struct) =>
@@ -3780,12 +3952,8 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
     )
     const selfEdge =
       keys.length === 1 &&
-      first.fields.some(
-        (field) =>
-          field.declaredType._tag === 'Resolved' &&
-          Type.nominals(field.declaredType.type).some(
-            (type) => `${type.module}.${type.name}` === keys[0],
-          ),
+      first.fields.some((field) =>
+        inlineNeighbors(field, inlineParameters).some((neighbor) => neighbor === keys[0]),
       )
     if (keys.length < 2 && !selfEdge) continue
     const diagnostic = Diagnostic.inlineRecursiveStruct(

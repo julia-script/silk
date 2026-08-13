@@ -1322,11 +1322,10 @@ export const discover = (
       ?.functions.find(
         (candidate) => candidate.declaration.id.ordinal === fn.declaration.id.ordinal,
       )
-    // Deferred effect-body bindings publish only through exit releases, so both fact sources
-    // feed hook reachability.
+    // Deferred effect-body bindings publish only through exit releases, so the joined binding
+    // facts and the exit releases both feed hook reachability.
     const cleanupHooks = [
-      ...(functionOwnership?.bindings.map((binding) => binding.cleanup) ?? []),
-      ...(functionOwnership?.deferredBindings.map((binding) => binding.cleanup) ?? []),
+      ...Ownership.allBindings(functionOwnership).map((binding) => binding.cleanup),
       ...(functionOwnership?.exits.flatMap((exit) =>
         exit.releases.map((release) => release.cleanup),
       ) ?? []),

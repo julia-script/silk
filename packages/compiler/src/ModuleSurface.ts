@@ -275,12 +275,18 @@ const constantLiteral = (value: DeclarationIndex.ConstantLiteralFact): string =>
   switch (value._tag) {
     case 'BooleanLiteral':
       return record('BooleanLiteral', [boolean(value.value)])
+    case 'CharacterLiteral':
+      return record('CharacterLiteral', [value.value.toString()])
     case 'IntegerLiteral':
       return record('IntegerLiteral', [value.value.toString()])
     case 'FloatingLiteral':
       return record('FloatingLiteral', [value.spelling])
     case 'StringLiteral':
       return record('StringLiteral', [value.data.id])
+    // The surface names the selected fact, not a number: the value belongs to a target, and the
+    // surface is the target-independent module boundary.
+    case 'TargetConstant':
+      return record('TargetConstant', [value.selector])
     case 'Malformed':
       return record('MalformedLiteral', [value.detail])
     case 'Unavailable':
