@@ -232,15 +232,15 @@ const acquire = 'AllocationAcquire'
 const release = 'AllocationRelease'
 
 it.effect(
-  'runs the true arm and performs none of the false arm’s effects',
-  // 1 from `bumpOnce`, and a counter of 1: the false arm’s ten service calls never happened.
+  "runs the true arm and performs none of the false arm's effects",
+  // 1 from `bumpOnce`, and a counter of 1: the false arm's ten service calls never happened.
   () => accept('selecting-true', selecting('true'), 101),
   180_000,
 )
 
 it.effect(
-  'runs the false arm and performs none of the true arm’s effects',
-  // 2 from `bumpTen`, and a counter of 10: the true arm’s single service call never happened.
+  "runs the false arm and performs none of the true arm's effects",
+  // 2 from `bumpTen`, and a counter of 10: the true arm's single service call never happened.
   () => accept('selecting-false', selecting('false'), 210),
   180_000,
 )
@@ -269,13 +269,13 @@ it.effect(
 )
 
 it.effect(
-  'discharges the unselected arm’s requirement even though it never runs',
+  "discharges the unselected arm's requirement even though it never runs",
   () => accept('requirements-false', requirements('false'), 200),
   180_000,
 )
 
 it.effect(
-  'propagates the selected arm’s failure through the unioned row',
+  "propagates the selected arm's failure through the unioned row",
   () => accept('failures-true', failures('true'), 6),
   180_000,
 )
