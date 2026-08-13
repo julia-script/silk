@@ -738,6 +738,7 @@ console.log(
       'SyntaxFile',
       'SyntaxTree',
       'Target',
+      'TargetConstant',
       'Token',
       'ToolchainPlan',
       'Transcendental',
