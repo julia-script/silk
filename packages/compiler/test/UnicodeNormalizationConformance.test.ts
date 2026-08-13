@@ -1,9 +1,14 @@
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { assert, it } from '@effect/vitest'
+import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Driver from '../src/Driver.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 
 /**
  * The pinned Unicode conformance data, run through the standard library's own normalizer.
@@ -21,13 +26,15 @@ import * as Analysis from '../src/Analysis.js'
  *
  * The corpus travels into the program as one packed byte string the Silk harness walks, rather than
  * as one call statement per case. That is a speed decision with a measured basis: as call
- * statements the corpus costs about 14 ms of analysis per case, which is over four minutes for the
- * whole file, while a packed corpus makes analysis a constant and hands the actual work to compiled
- * WebAssembly, where it is nearly free. The chunking exists because a program's static data has to
- * fit below the wasm heap table at 64 KiB, which the Unicode tables already occupy 19 KiB of.
+ * statements the corpus costs about 14 ms of analysis per case, four minutes for the file, while a
+ * packed corpus makes analysis a constant and hands the work to a compiled binary that finishes it
+ * in milliseconds.
  */
 
 const dataRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'unicode-data')
+
+const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-conformance-'))
+afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -41,8 +48,8 @@ interface Case {
 
 const parse = (): ReadonlyArray<Case> => {
   const text = readFileSync(join(dataRoot, 'NormalizationTest.txt'), 'utf8')
-  const points = (field: string) =>
-    field
+  const points = (field: string | undefined) =>
+    (field ?? '')
       .split(' ')
       .filter((value) => value !== '')
       .map((value) => Number.parseInt(value, 16))
@@ -195,47 +202,37 @@ effect fn recover(error: OutOfMemory) -> i32 { return -1 }
 
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
-/** Static data has to clear the wasm heap table at 64 KiB, and the Unicode tables take 19 KiB. */
-const chunkBudget = 32 * 1024
-
-const chunks = (cases: ReadonlyArray<Case>): ReadonlyArray<ReadonlyArray<Case>> => {
-  const grouped: Array<Array<Case>> = []
-  let current: Array<Case> = []
-  let size = 0
-  for (const entry of cases) {
-    const width = encode(entry).length
-    if (size + width > chunkBudget && current.length > 0) {
-      grouped.push(current)
-      current = []
-      size = 0
-    }
-    current.push(entry)
-    size += width
-  }
-  if (current.length > 0) grouped.push(current)
-  return grouped
-}
-
+/**
+ * Compiles the whole corpus into one native binary and returns its failure count.
+ *
+ * Native is the engine this runs on, and the choice is forced. The bootstrap evaluator is the
+ * reference implementation but blocks on its own step limit somewhere above fifty cases in a single
+ * program. WebAssembly miscounts here for a reason that is not the normalizer: a value built from
+ * heap-backed storage reads stale once another is built, which is #172, and the same normalizer
+ * passes the literal-driven parity suite on wasm. So the corpus runs natively in full, and a small
+ * slice of it runs on the evaluator below to show the reference engine agrees.
+ */
 const failuresIn = (name: string, cases: ReadonlyArray<Case>) =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      name,
-      ascii(program(cases)),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map(
-        (diagnostic) => `${diagnostic.code} ${diagnostic.message}`,
-      ),
-      [],
-    )
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    return (instance.exports.silk_main as () => number)()
+    const source = program(cases)
+    const compiled = yield* Driver.compile({
+      compilation: { root: SourceFile.make(name, ascii(source)) },
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      profile: 'release',
+      destination: join(destinationRoot, name.replaceAll('/', '-')),
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.strictEqual(compiled._tag, 'Compiled', `${name} did not compile`)
+    if (compiled._tag !== 'Compiled') return Number.NaN
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
+    assert.isNull(run.signal, `${name} died on ${run.signal}`)
+    return run.status ?? Number.NaN
   })
 
 const spell = (points: ReadonlyArray<number>) =>
   points.map((point) => point.toString(16).toUpperCase().padStart(4, '0')).join(' ')
+
+/** How many failing cases to name individually before the report stops paying for detail. */
+const narrowLimit = 15
 
 it.effect(
   'normalizes every case in the pinned Unicode conformance data',
@@ -244,31 +241,65 @@ it.effect(
       const cases = parse()
       assert.isAbove(cases.length, 19_000, 'the conformance corpus was read')
 
-      const failing: Array<string> = []
-      let checked = 0
-      let chunkIndex = 0
-      for (const chunk of chunks(cases)) {
-        const failures = yield* failuresIn(`unicode-conformance/chunk-${chunkIndex}`, chunk)
-        chunkIndex += 1
-        checked += chunk.length
-        if (failures === 0) continue
-        // A chunk only fails while something is wrong, so paying for a per-case re-run to name the
-        // offenders costs nothing on a healthy suite and is the whole value on a sick one.
-        for (const entry of chunk) {
-          const single = yield* failuresIn(`unicode-conformance/line-${entry.line}`, [entry])
-          if (single === 0) continue
-          failing.push(
-            `line ${entry.line}: ${spell(entry.source)} ; NFC ${spell(entry.nfc)} ; NFD ${spell(entry.nfd)} (${single}/6 assertions failed)`,
-          )
-        }
-      }
-
-      assert.strictEqual(checked, cases.length)
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'unicode-conformance/corpus',
+        ascii(program(cases)),
+      )
       assert.deepEqual(
-        failing,
+        Analysis.diagnostics(snapshot).map(
+          (diagnostic) => `${diagnostic.code} ${diagnostic.message}`,
+        ),
         [],
-        `${failing.length} of ${cases.length} conformance cases failed:\n${failing.slice(0, 40).join('\n')}`,
+      )
+
+      const failures = yield* failuresIn('unicode-conformance/corpus', cases)
+      if (failures === 0) return
+
+      // A run only fails while something is wrong, so paying for per-case re-runs to name the
+      // offenders costs nothing on a healthy suite and is the whole value on a sick one.
+      const failing: Array<string> = []
+      for (const entry of cases) {
+        if (failing.length >= narrowLimit) break
+        const single = yield* failuresIn(`unicode-conformance/line-${entry.line}`, [entry])
+        if (single === 0) continue
+        failing.push(
+          `line ${entry.line}: ${spell(entry.source)} ; NFC ${spell(entry.nfc)} ; NFD ${spell(entry.nfd)} (${single}/6 assertions failed)`,
+        )
+      }
+      assert.fail(
+        `${failures} failing assertions across ${cases.length} conformance cases` +
+          `${failures === 250 ? ' (count saturated)' : ''}; first ${failing.length}:\n${failing.join('\n')}`,
       )
     }),
   1_800_000,
+)
+
+/**
+ * The same corpus, on the reference engine, for as much of it as one program can hold.
+ *
+ * The bootstrap evaluator blocks on its step limit between twelve and twenty of these cases in one
+ * program, so this is a slice rather than the whole file. It exists to show the engine the language
+ * is defined by agrees with the binary the assertion above trusts.
+ */
+it.effect(
+  'agrees with the bootstrap evaluator on the leading conformance cases',
+  () =>
+    Effect.gen(function* () {
+      const cases = parse().slice(0, 12)
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'unicode-conformance/evaluated',
+        ascii(program(cases)),
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map(
+          (diagnostic) => `${diagnostic.code} ${diagnostic.message}`,
+        ),
+        [],
+      )
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed', 'the evaluator ran the slice')
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 0)
+    }),
+  600_000,
 )
