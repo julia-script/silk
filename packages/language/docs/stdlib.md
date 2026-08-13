@@ -12,7 +12,7 @@ each signature and description below is the `///` comment on the declaration in
 $ pnpm --filter @silk-effect/compiler documentation:generate
 ```
 
-The library has 36 modules.
+The library has 37 modules.
 
 ## Modules
 
@@ -39,6 +39,7 @@ The library has 36 modules.
 | [`silk/metrics`](#silk-metrics) | `AllocationMetrics` | 6 |
 | [`silk/numeric`](#silk-numeric) | `Integer` | 12 |
 | [`silk/option`](#silk-option) | `Option` | 9 |
+| [`silk/order`](#silk-order) | `Order` | 21 |
 | [`silk/os_child_process`](#silk-os-child-process) | `OsChildProcess` | 9 |
 | [`silk/os_filesystem`](#silk-os-filesystem) | `OsFileSystem` | 35 |
 | [`silk/os_host_input`](#silk-os-host-input) | `OsHostInput` | 14 |
@@ -53,7 +54,7 @@ The library has 36 modules.
 | [`silk/u64`](#silk-u64) | `u64` | 55 |
 | [`silk/u8`](#silk-u8) | `u8` | 55 |
 | [`silk/usize`](#silk-usize) | `usize` | 57 |
-| [`silk/vector`](#silk-vector) | `Vector` | 48 |
+| [`silk/vector`](#silk-vector) | `Vector` | 55 |
 
 ## silk/bool
 
@@ -4965,6 +4966,109 @@ Only the absent arm consumes the fallback. The present arm releases it, so exact
 two owned values leaves this call and the other drops.
 
 
+## silk/order
+
+Import as `Order` with `import silk.order`.
+
+### `Less`
+
+```silk
+pub struct Less
+```
+
+The left value orders before the right value.
+
+### `Equal`
+
+```silk
+pub struct Equal
+```
+
+Neither value orders before the other.
+
+### `Greater`
+
+```silk
+pub struct Greater
+```
+
+The left value orders after the right value.
+
+### `Ordering`
+
+```silk
+pub struct Ordering
+```
+
+The result of comparing two values in one order.
+
+| Field | Description |
+| --- | --- |
+| `pub value: silk/order.Equal \| silk/order.Greater \| silk/order.Less` | The comparison result, narrowed with `match`. |
+
+### `Order`
+
+```silk
+pub interface Order<T>
+```
+
+Static strict-ordering contract for primitive comparable values.
+
+A witness supplies the strict `lessThan` the operator `<` spells. Equality is derived from it
+rather than declared, so a witness can never disagree with itself about which values are equal.
+
+### `compare`
+
+```silk
+pub fn compare<T>(left: T, right: T) -> Ordering
+```
+
+Compares two values three ways using the concrete comparison selected during specialization.
+
+Reads both operands twice without moving either, so the result is the same whichever order a
+caller evaluates the operands in.
+
+### `less`
+
+```silk
+pub fn less<T>(left: T, right: T) -> bool
+```
+
+Reports whether one value orders strictly before another.
+
+### `equal`
+
+```silk
+pub fn equal<T>(left: T, right: T) -> bool
+```
+
+Reports whether neither value orders before the other.
+
+### `isLess`
+
+```silk
+pub fn isLess(ordering: &silk/order.Ordering) -> bool
+```
+
+Reports whether an ordering is `Less`.
+
+### `isEqual`
+
+```silk
+pub fn isEqual(ordering: &silk/order.Ordering) -> bool
+```
+
+Reports whether an ordering is `Equal`.
+
+### `isGreater`
+
+```silk
+pub fn isGreater(ordering: &silk/order.Ordering) -> bool
+```
+
+Reports whether an ordering is `Greater`.
+
+
 ## silk/os_child_process
 
 Import as `OsChildProcess` with `import silk.os_child_process`.
@@ -7899,6 +8003,25 @@ pub effect fn reserve<T>(self: &mut silk/vector.Vector<T>, additional: usize) ->
 ```
 
 Grows the capacity to hold at least one additional count of elements.
+
+### `sort`
+
+```silk
+pub effect fn sort<T>(self: &mut silk/vector.Vector<T>) -> () ! OutOfMemory ? &mut Allocator
+```
+
+Orders the elements in place. Equal elements keep their input order.
+
+### `binarySearch`
+
+```silk
+pub fn binarySearch<T>(self: &silk/vector.Vector<T>, target: T) -> Option<usize>
+```
+
+Returns the index of a matching element in a sorted vector, or an absent value when none matches.
+
+Returns the lowest matching index when a vector holds several equal elements, so a repeated
+search over one vector always answers with the same index.
 
 
 ## See also
