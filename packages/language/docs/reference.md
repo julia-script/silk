@@ -595,6 +595,11 @@ arm-local binding is released at its arm boundary. Every `return` is its own exi
 `drop value` consumes a value early. Dropping a borrowed owner is rejected. A `Drop` hook may
 declare neither a failure row nor a capability requirement.
 
+Cleanup descends through hooks by ordinary calls, so releasing a deeply nested owned value is a deep
+recursion and is bounded by the machine stack like any other. A type that can form an unbounded
+chain needs an explicit iterative teardown — see
+[Recursion and the machine stack](./recursion.md#6-cleanup-has-the-same-limit-and-fewer-ways-out).
+
 ### 4.4 Allocation
 
 There is no ambient heap. Allocation is a capability obtained through the `Allocator` service, and

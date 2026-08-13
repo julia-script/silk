@@ -244,6 +244,60 @@ A recursion that explicitly crosses a suspension boundary — where the continua
 than left on the stack — is the other shape that can be deep by construction. That boundary is being
 designed with the coroutine work and **is not available today**. Until it is, iterate.
 
+## 6. Cleanup has the same limit and fewer ways out
+
+Everything above is about recursion you wrote. Automatic cleanup is the same boundary reached from
+the other side, and it is the harder half.
+
+A `Box` releases the value it holds, so releasing the outermost link of a chain calls the hook of
+the link below it, which calls the hook below that. Destroying a chain of a million boxed nodes is a
+million-deep recursion **that nobody wrote and no call site can see**. It runs wherever the value
+happens to go out of scope, including on paths you did not think about.
+
+The escapes offered above do not carry over:
+
+- **It is not a traversal you control.** There is no call site to rewrite as a loop; the recursion
+  is the cleanup plan descending through hooks.
+- **It cannot cross a suspension boundary.** A `Drop` hook may declare neither a failure row nor a
+  capability requirement. Cleanup cannot allocate, cannot fail, and cannot suspend, so the "express
+  it as an Effect" answer is closed to it — and closed permanently, not just until the coroutine
+  work lands.
+
+### What to do
+
+**Give any type that can form a deep chain an explicit, consuming, iterative teardown, and call it
+before the value goes out of scope.** The `length` loop in §4 is exactly that shape: it consumes the
+chain one link per loop turn, so by the time automatic cleanup runs, the value it sees is one level
+deep. A teardown that returns nothing is the same loop without the counter.
+
+This works today. It is also, honestly, incomplete, and it is worth knowing where it stops:
+
+- **Nothing enforces it.** Forgetting to drain compiles, passes review, and works — until the chain
+  gets deep in production. There is no diagnostic for "this type recurses through cleanup".
+- **It cannot be written once.** Only the holder knows which field is the next link, so every
+  recursive type hand-rolls its own teardown. `silk.box` cannot provide a generic one.
+- **The failure path is not covered at all.** If construction runs out of allocations halfway down,
+  the half-built chain is released by the ordinary failure path, and there is no point in the source
+  at which a teardown could be called on it — the value never becomes yours. A program that drains
+  religiously still meets recursive cleanup on its `OutOfMemory` path, at whatever depth
+  construction had reached. That is a real gap, and today it has no answer beyond bounding the
+  depth you build.
+
+### Measured depths for cleanup
+
+Same machine and profile as §3, dropping a chain built iteratively:
+
+| Engine | Deepest chain released | Shallowest that failed |
+| --- | --- | --- |
+| Bootstrap evaluator | 300 | 340 (the 1,024-frame `CallDepth` budget) |
+| WebAssembly (Node/V8) | 5,000 | 6,000 |
+| Native (release) | 200,000 | 1,000,000 |
+
+Cleanup frames are narrower than the walk's, so the numbers are larger than §3's — and that is the
+trap. The two limits differ by roughly a factor of five, so neither calibrates the other: a chain
+comfortably droppable is not necessarily walkable, and a depth that survived a walk on one engine
+says nothing about a teardown on another. Both are the same rule — a call costs a frame.
+
 ## See also
 
 - [Language reference](./reference.md) — `while`, `match`, and the ownership rules the loops above

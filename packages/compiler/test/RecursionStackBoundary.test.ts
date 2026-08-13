@@ -174,6 +174,54 @@ const drain = (depth: number): string =>
     depth,
   )
 
+/**
+ * Iterative construction, then ordinary automatic cleanup. `Box.drop` drops the element it holds,
+ * so releasing the outermost link calls the hook of the one below it: the chain is destroyed by
+ * recursion nobody wrote, and there is no call site at which to write it differently.
+ */
+const dropped = (depth: number): string =>
+  program(
+    `effect fn measure(depth: i32) -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let built = run build(depth) |> Effect.provideMut(&mut allocator)
+  drop built
+  return 0
+}`,
+    depth,
+  )
+
+/**
+ * The case with no escape hatch at all: construction runs out of allocations partway, and the
+ * half-built chain is released by the failure path. `drain` cannot be called on it — the value is
+ * never named by user code, it exists only inside the cleanup the compiler runs on the way out.
+ *
+ * Recovering the `OutOfMemory` is the point: at a shallow depth this returns 1, having unwound
+ * cleanly. Deep, the unwinding is what dies.
+ */
+const failedBuild = (depth: number): string => `${prelude}
+struct QuotaAllocator { remaining: i32 }
+
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+  if self.remaining == 0 { fail OutOfMemory {} }
+  self.remaining = self.remaining - 1
+  let mut inner = SystemAllocator.make()
+  let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
+  return run pending
+}
+
+impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
+
+effect fn measure(depth: i32) -> i32 ! OutOfMemory {
+  let mut allocator = QuotaAllocator { remaining: ${Math.floor(depth / 2)} }
+  let built = run build(depth) |> Effect.provideMut(&mut allocator)
+  drop built
+  return 0
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+
+pub fn main() -> i32 { return run Effect.catch(measure(${depth}), recover) }`
+
 const realize = (id: string, source: string) =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(id, ascii(source), 'wasm32-unknown-unknown')
@@ -384,4 +432,143 @@ it.effect(
       )
     }),
   600_000,
+)
+
+/**
+ * Automatic cleanup is the same boundary reached from the other side, and it is the harder half.
+ *
+ * A traversal can be rewritten as a loop because the call site owns the shape of the traversal. A
+ * `Drop` chain cannot: the recursion is `Box`'s hook dropping the element that is itself a `Box`,
+ * and it runs wherever the value happens to go out of scope. A `Drop` hook may declare no failure
+ * row and no capability requirement, so the escape offered for a traversal — express it as an
+ * Effect that crosses a suspension boundary — is not open to it either. Cleanup cannot allocate,
+ * cannot fail, and cannot suspend.
+ *
+ * What is left is an explicit iterative teardown, called before the value goes out of scope, and
+ * the case below pins that it works. What it cannot cover is pinned after it.
+ */
+it.effect(
+  'releases a shallow chain through recursive cleanup on all three engines',
+  () =>
+    Effect.gen(function* () {
+      const depth = 64
+      const source = dropped(depth)
+      const snapshot = yield* realize('recursion-stack-boundary/drop-shallow', source)
+
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed')
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 0)
+
+      const events = Analysis.allocationTraceEventsOf(evaluated)
+      const acquires = events.filter((event) => event._tag === 'AllocationAcquire').length
+      const releases = events.filter((event) => event._tag === 'AllocationRelease').length
+      assert.strictEqual(acquires, depth)
+      assert.strictEqual(releases, acquires)
+
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      assert.deepEqual(runWasm(wasm.bytes), returned(0))
+
+      assert.deepEqual(
+        yield* runNative(
+          'recursion-stack-boundary/drop-shallow',
+          source,
+          join(destinationRoot, 'drop-shallow'),
+        ),
+        returned(0),
+      )
+    }),
+  180_000,
+)
+
+it.effect('blocks a deep recursive Drop on the evaluator call-depth limit', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realize('recursion-stack-boundary/drop-evaluator', dropped(4_000))
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Blocked')
+    if (evaluated._tag !== 'Blocked') return
+    assert.strictEqual(evaluated.reason._tag, 'EvaluationLimit')
+    if (evaluated.reason._tag !== 'EvaluationLimit') return
+    assert.strictEqual(evaluated.reason.kind, 'CallDepth')
+    // The frame that ran out belongs to the standard library, not to the program: the recursion
+    // here is `Box`'s hook descending into the box it holds, which no call site wrote.
+    assert.strictEqual(evaluated.reason.function.module, 'silk/box')
+    assert.strictEqual(evaluated.reason.function.name, 'dropElement')
+  }),
+)
+
+it.effect(
+  'exhausts the Wasm host stack when a deep chain is dropped',
+  () =>
+    Effect.gen(function* () {
+      const found = yield* escalate(8_000, 512_000, (depth) =>
+        Effect.gen(function* () {
+          const snapshot = yield* realize(
+            `recursion-stack-boundary/drop-wasm/${depth}`,
+            dropped(depth),
+          )
+          const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+          return runWasm(wasm.bytes)
+        }),
+      )
+      assert.strictEqual(found.outcome._tag, 'Failed')
+    }),
+  300_000,
+)
+
+/**
+ * Cleanup frames are narrower than the walk's, so this needs an order of magnitude more depth than
+ * the traversal did before the guard page arrives — which is precisely why it is worth pinning
+ * separately. "Deep enough to be safe for a walk" is not deep enough to be safe for a teardown.
+ */
+it.effect(
+  'exhausts the native machine stack when a deep chain is dropped',
+  () =>
+    Effect.gen(function* () {
+      const found = yield* escalate(1_000_000, 8_000_000, (depth) =>
+        runNative(
+          `recursion-stack-boundary/drop-native/${depth}`,
+          dropped(depth),
+          join(destinationRoot, `native-drop-${depth}`),
+        ),
+      )
+      assert.strictEqual(found.outcome._tag, 'Failed')
+    }),
+  900_000,
+)
+
+/**
+ * The gap the guidance cannot close, pinned so it is a known shape rather than a surprise.
+ *
+ * A value you hold can be drained before it goes out of scope. A value that never becomes yours
+ * cannot: when construction fails partway, the half-built chain is released by the failure path,
+ * and there is no point in the source at which an iterative teardown could be called on it. So a
+ * program that always drains explicitly still meets recursive `Drop` on its allocation-failure
+ * path, at whatever depth construction had reached.
+ *
+ * Shallow, this recovers the `OutOfMemory` and returns 1. Deep, the recovery never happens.
+ */
+it.effect(
+  'has no teardown to offer when construction fails partway down a deep chain',
+  () =>
+    Effect.gen(function* () {
+      const shallow = yield* realize('recursion-stack-boundary/failure-shallow', failedBuild(64))
+      const shallowWasm = yield* Analysis.codegenWasm(shallow, { mode: 'release' })
+      assert.deepEqual(runWasm(shallowWasm.bytes), returned(1))
+
+      const found = yield* escalate(8_000, 512_000, (depth) =>
+        Effect.gen(function* () {
+          const snapshot = yield* realize(
+            `recursion-stack-boundary/failure-wasm/${depth}`,
+            failedBuild(depth),
+          )
+          const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+          const outcome = runWasm(wasm.bytes)
+          // A recovered failure is a survived depth here, not a wrong answer.
+          return outcome._tag === 'Returned' && outcome.detail === '1' ? returned(0) : outcome
+        }),
+      )
+      assert.strictEqual(found.outcome._tag, 'Failed')
+    }),
+  300_000,
 )
