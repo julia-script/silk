@@ -360,6 +360,86 @@ it.effect('infers and explicitly selects finite concrete instances before MIR', 
   }),
 )
 
+it.effect('infers the parameters an explicit type-argument prefix leaves open', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'generics/PartialExplicit',
+      new TextEncoder().encode(`fn pair<A, B>(left: A, right: B) -> A { return move left }
+pub fn main() -> i32 { return pair<i32>(42, true) }`),
+    )
+
+    assert.deepEqual(snapshot.diagnostics, [])
+    assert.deepEqual(
+      snapshot.instances.instances.map((instance) => ({
+        name: instance.key.declaration.name,
+        arguments: instance.key.typeArguments.map(Type.encodeGenericArgument),
+      })),
+      [
+        { name: 'main', arguments: [] },
+        { name: 'pair', arguments: ['i32', 'bool'] },
+      ],
+    )
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
+it.effect('uses an explicit prefix as value-argument context for the arguments it binds', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'generics/PartialExplicitContext',
+      new TextEncoder().encode(`struct Left { value: i32 }
+struct Right { value: i32 }
+fn accept<T, U>(value: T, other: U) -> i32 { return 42 }
+pub fn main() -> i32 { return accept<Left | Right>(Left { value: 0 }, true) }`),
+    )
+
+    assert.deepEqual(snapshot.diagnostics, [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
+it.effect('names the parameter an explicit prefix leaves undetermined', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'generics/UninferredRemainder',
+      new TextEncoder().encode(`fn phantom<A, B>(value: A) -> A { return move value }
+pub fn main() -> i32 { return phantom<i32>(1) }`),
+    )
+
+    assert.deepEqual(
+      snapshot.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
+      [['SEM0098', 'Cannot infer type argument B of phantom from supplied values']],
+    )
+    assert.strictEqual(snapshot.mir._tag, 'Unavailable')
+  }),
+)
+
+it.effect('reports a contradicted explicit type argument at what the call wrote', () =>
+  Effect.gen(function* () {
+    const text = `fn pair<A, B>(left: A, right: B) -> A { return move left }
+pub fn main() -> i32 { return pair<bool>(1, true) }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'generics/ContradictedPrefix',
+      new TextEncoder().encode(text),
+    )
+
+    const diagnostic = snapshot.diagnostics.at(0)
+    assert.strictEqual(snapshot.diagnostics.length, 1, JSON.stringify(snapshot.diagnostics))
+    assert.strictEqual(diagnostic?.code, 'SEM0099')
+    assert.strictEqual(
+      diagnostic?.message,
+      'Type argument A of pair is bool, but the supplied values imply i32',
+    )
+    // The span covers the written type argument itself, not the call and not the argument that
+    // disagrees with it.
+    assert.strictEqual(text.slice(diagnostic?.span.start, diagnostic?.span.end), 'bool')
+  }),
+)
+
 it.effect('uses complete explicit arguments as value-argument context', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -617,6 +697,11 @@ const invalidCases: ReadonlyArray<readonly [string, string, string]> = [
   [
     'excess explicit arguments',
     'fn id<T>(value: T) -> T { return move value }\npub fn main() -> i32 { return id<i32, bool>(1) }',
+    'SEM0051',
+  ],
+  [
+    'excess explicit arguments past a complete prefix',
+    'fn pair<A, B>(left: A, right: B) -> A { return move left }\npub fn main() -> i32 { return pair<i32, bool, u8>(1, true) }',
     'SEM0051',
   ],
   [

@@ -65,6 +65,18 @@ pub fn main() -> i32 {
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'generic-partial-type-arguments',
+    source: `struct Box<T> { value: T }
+fn pick<A, B>(left: A, right: B) -> A { return move left }
+fn phantom<A, B>(value: A) -> A { return move value }
+pub fn main() -> i32 {
+  let picked = pick<i32>(40, true)
+  let boxed = pick<Box<i32>>(Box<i32> { value: 1 }, picked)
+  return picked + boxed.value + phantom<i32, bool>(1)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'same-specialization-recursion',
     source: `fn recurse<T>(value: T, remaining: i32) -> i32 {
   if remaining > 0 { return recurse<T>(move value, remaining - 1) }
@@ -456,6 +468,24 @@ export const invalidGenericCorpus: ReadonlyArray<InvalidCorpusProgram> = [
     source:
       'fn identity<T>(value: T) -> T { return move value }\npub fn main() -> i32 { return identity<i32, bool>(42) }',
     codes: ['SEM0051'],
+  },
+  {
+    name: 'generic-explicit-arity-past-prefix',
+    source:
+      'fn pair<A, B>(left: A, right: B) -> A { return move left }\npub fn main() -> i32 { return pair<i32, bool, u8>(1, true) }',
+    codes: ['SEM0051'],
+  },
+  {
+    name: 'generic-uninferred-prefix-remainder',
+    source:
+      'fn phantom<A, B>(value: A) -> A { return move value }\npub fn main() -> i32 { return phantom<i32>(1) }',
+    codes: ['SEM0098'],
+  },
+  {
+    name: 'generic-contradicted-prefix',
+    source:
+      'fn pair<A, B>(left: A, right: B) -> A { return move left }\npub fn main() -> i32 { return pair<bool>(1, true) }',
+    codes: ['SEM0099'],
   },
   {
     name: 'generic-conflicting-inference',
