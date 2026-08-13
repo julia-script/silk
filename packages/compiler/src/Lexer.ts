@@ -75,6 +75,8 @@ const compoundPunctuationKind = (
   if (first === 0x3c && second === 0x3d) return 'LessEqual'
   if (first === 0x3e && second === 0x3d) return 'GreaterEqual'
   if (first === 0x7c && second === 0x3e) return 'PipeGreater'
+  if (first === 0x7c && second === 0x7c) return 'PipePipe'
+  if (first === 0x26 && second === 0x26) return 'AmpersandAmpersand'
   if (first === 0x2e && second === 0x2e) return 'DotDot'
   return undefined
 }

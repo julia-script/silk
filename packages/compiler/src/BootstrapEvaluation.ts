@@ -1956,6 +1956,22 @@ function* executeFunction(
         }
         state.steps += 1
         switch (operation._tag) {
+          case 'ShortCircuit': {
+            const decided = readI32(operation.left).value !== 0
+            // `&&` decides on a false left operand, `||` on a true one. Only the undecided case
+            // executes the nested right-operand operations at all.
+            if (decided === (operation.operator === 'Or')) {
+              write(operation.destination, {
+                value: value(decided ? 1 : 0),
+                fromCall: false,
+              })
+              break
+            }
+            const rightStep = yield* executeOperations(operation.right.operations)
+            if (rightStep !== undefined) return rightStep
+            write(operation.destination, read(operation.right.result))
+            break
+          }
           case 'Match': {
             const scrutinee = read(operation.scrutinee).value
             const activeMember =

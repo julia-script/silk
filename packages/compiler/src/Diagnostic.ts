@@ -187,6 +187,8 @@ export const intrinsicTargetUnavailableCode = 'SEM0093' as const
 export const invalidStringViewTypeCode = 'SEM0094' as const
 /** Stable code for a float literal spelling no floating-point value can represent. */
 export const invalidFloatLiteralCode = 'SEM0095' as const
+/** Stable code for an effect site or a move inside the conditional right operand of `&&` or `||`. */
+export const impureShortCircuitOperandCode = 'SEM0096' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -315,6 +317,7 @@ export type Code =
   | typeof intrinsicTargetUnavailableCode
   | typeof invalidStringViewTypeCode
   | typeof invalidFloatLiteralCode
+  | typeof impureShortCircuitOperandCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -402,6 +405,11 @@ export type Reason =
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
   | { readonly _tag: 'InvalidFloatLiteral'; readonly spelling: string }
+  | {
+      readonly _tag: 'ImpureShortCircuitOperand'
+      readonly operator: string
+      readonly detail: string
+    }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
@@ -878,6 +886,26 @@ export const invalidFloatLiteral = (spelling: string, span: SourceSpan.SourceSpa
     severity: 'error',
     message: `Invalid float literal: ${spelling}`,
     reason: Object.freeze({ _tag: 'InvalidFloatLiteral', spelling }),
+    span,
+  })
+
+/**
+ * Creates the semantic diagnostic for an effect site or a move in the right operand of `&&` or
+ * `||`. That operand evaluates only when the left one does not already decide the result, so an
+ * effect performed or a value consumed there would depend on the left operand's value.
+ */
+export const impureShortCircuitOperand = (
+  operator: string,
+  detail: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: impureShortCircuitOperandCode,
+    severity: 'error',
+    message: `The right operand of ${operator} must be pure, found ${detail}`,
+    reason: Object.freeze({ _tag: 'ImpureShortCircuitOperand', operator, detail }),
     span,
   })
 

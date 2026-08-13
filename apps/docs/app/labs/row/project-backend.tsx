@@ -807,6 +807,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `drop ${localText(operation.local)}`
     case 'Match':
       return `${localText(operation.destination)} = match ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}`
+    case 'ShortCircuit':
+      return `${localText(operation.destination)} = ${operation.operator === 'And' ? '&&' : '||'} ${localText(operation.left)}`
     case 'ValidateLayout':
       return `${localText(operation.destination)} = validate layout ${localText(operation.bytes)} bytes, align ${localText(operation.alignment)}`
     case 'RepeatLayout':

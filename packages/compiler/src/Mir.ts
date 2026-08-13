@@ -805,6 +805,27 @@ export type Operation =
     }
   | DropOperation
   | MatchOperation
+  | ShortCircuitOperation
+
+/**
+ * One compiler-owned conditional evaluation: `&&` and `||`. `left` is already evaluated when the
+ * operation runs; `right` holds the operations that evaluate the right operand and the local
+ * carrying its value. `&&` evaluates `right` only when `left` is true and otherwise yields false;
+ * `||` evaluates `right` only when `left` is false and otherwise yields true. The right operand
+ * is pure by elaboration, so skipping it performs and releases nothing.
+ */
+export interface ShortCircuitOperation {
+  readonly _tag: 'ShortCircuit'
+  readonly operator: 'And' | 'Or'
+  readonly destination: LocalId
+  readonly left: LocalId
+  readonly right: {
+    readonly operations: ReadonlyArray<Operation>
+    readonly result: LocalId
+  }
+  readonly type: Extract<Type, { readonly _tag: 'bool' }>
+  readonly provenance: Provenance
+}
 
 /** Releases one owned local through its cleanup plan. */
 export interface DropOperation {
@@ -1101,16 +1122,18 @@ const operationsOf = (region: Region): ReadonlyArray<Operation> =>
       : []
 
 const operationChildren = (operation: Operation): ReadonlyArray<Operation> =>
-  operation._tag === 'Match'
-    ? operation.arms.flatMap((arm) => [
-        ...(arm.guard?.operations ?? []),
-        ...arm.selected.operations,
-      ])
-    : operation._tag === 'RunEffect' ||
-        operation._tag === 'RunEffectValue' ||
-        operation._tag === 'RunStaticEffect'
-      ? (operation.releases ?? [])
-      : []
+  operation._tag === 'ShortCircuit'
+    ? operation.right.operations
+    : operation._tag === 'Match'
+      ? operation.arms.flatMap((arm) => [
+          ...(arm.guard?.operations ?? []),
+          ...arm.selected.operations,
+        ])
+      : operation._tag === 'RunEffect' ||
+          operation._tag === 'RunEffectValue' ||
+          operation._tag === 'RunStaticEffect'
+        ? (operation.releases ?? [])
+        : []
 
 /** One operation and all structurally nested operations in deterministic source order. */
 export const operationTree = (operation: Operation): ReadonlyArray<Operation> => {
@@ -1272,6 +1295,8 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
           arm.selected.result,
         ]),
       ]
+    case 'ShortCircuit':
+      return [operation.destination, operation.left, operation.right.result]
   }
 }
 
@@ -1581,6 +1606,8 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
           ...arm.selected.cleanup.flatMap((entry) => cleanupTypes(entry.cleanup)),
         ]),
       ]
+    case 'ShortCircuit':
+      return [semanticType(operation.type), ...operation.right.operations.flatMap(operationTypes)]
     case 'Move':
       return []
     case 'Drop':
@@ -1683,6 +1710,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.local]
     case 'Match':
       return [operation.scrutinee]
+    case 'ShortCircuit':
+      return [operation.left]
     case 'Literal':
     case 'StaticView':
     case 'StaticString':
@@ -3888,6 +3917,8 @@ const operationText = (operation: Operation): string => {
       return `drop ${localText(operation.local)}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`} ${provenanceText(operation.provenance)}`
     case 'Match':
       return `${localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ShortCircuit':
+      return `${localText(operation.destination)} = short-circuit ${operation.operator === 'And' ? '&&' : '||'} ${localText(operation.left)} : bool ${provenanceText(operation.provenance)}`
   }
 }
 
@@ -3895,6 +3926,13 @@ const fieldPathText = (path: ReadonlyArray<DeclarationIndex.FieldId>): string =>
   path.length === 0 ? 'payload' : path.map((field) => `#${field.ordinal}`).join('.')
 
 const operationLines = (operation: Operation, indent: string): ReadonlyArray<string> => {
+  if (operation._tag === 'ShortCircuit') {
+    return [
+      `${indent}${operationText(operation)}`,
+      `${indent}  right -> ${localText(operation.right.result)}`,
+      ...operation.right.operations.flatMap((child) => operationLines(child, `${indent}    `)),
+    ]
+  }
   if (operation._tag !== 'Match') return [`${indent}${operationText(operation)}`]
   return [
     `${indent}${operationText(operation)}`,

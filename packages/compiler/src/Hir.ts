@@ -2,6 +2,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Match from './Match.js'
+import type * as Operator from './Operator.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
@@ -297,6 +298,20 @@ export type Expression =
         readonly reachable: boolean
         readonly span: SourceSpan.SourceSpan
       }>
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      /**
+       * `&&` and `||`. The left operand always evaluates; the right operand evaluates only when
+       * the left one does not already decide the result. The right operand is a pure expression
+       * — elaboration rejects an effect site or a move inside it — so skipping it releases
+       * nothing and performs nothing.
+       */
+      readonly _tag: 'ShortCircuit'
+      readonly operator: Operator.ShortCircuit
+      readonly left: Expression
+      readonly right: Expression
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -667,6 +682,7 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
       case 'RuntimeStringView':
         return [expression.source]
       case 'StringEquality':
+      case 'ShortCircuit':
         return [expression.left, expression.right]
       case 'Replace':
         return [expression.value]
@@ -730,6 +746,7 @@ export const hasUnavailable = (self: HirFunction): boolean => {
       case 'RuntimeStringView':
         return walk(expression.source)
       case 'StringEquality':
+      case 'ShortCircuit':
         return walk(expression.left) || walk(expression.right)
       case 'Replace':
         return walk(expression.value)
@@ -790,6 +807,7 @@ export const firstUnavailable = (
       case 'RuntimeStringView':
         return walk(expression.source)
       case 'StringEquality':
+      case 'ShortCircuit':
         return walk(expression.left) ?? walk(expression.right)
       case 'Replace':
         return walk(expression.value)
@@ -1200,6 +1218,12 @@ const encodeExpression = (expression: Expression, depth: number): string => {
     case 'StringEquality':
       return [
         `${indent}string-${expression.negated ? 'not-equals' : 'equals'} intrinsic=${Intrinsic.operationText(expression.intrinsic)} : bool ${spanText(expression.span)}`,
+        encodeExpression(expression.left, depth + 1),
+        encodeExpression(expression.right, depth + 1),
+      ].join('\n')
+    case 'ShortCircuit':
+      return [
+        `${indent}short-circuit ${expression.operator === 'And' ? '&&' : '||'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.left, depth + 1),
         encodeExpression(expression.right, depth + 1),
       ].join('\n')

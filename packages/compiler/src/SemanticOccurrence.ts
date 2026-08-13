@@ -652,6 +652,10 @@ const collectExpression = (
       for (const argument of expression.arguments)
         collectExpression(argument.expression, index, scope, pending)
       return
+    case 'ShortCircuit':
+      for (const argument of expression.arguments)
+        collectExpression(argument.expression, index, scope, pending)
+      return
     case 'FunctionItem':
       collectCallReference(expression.reference, expression.path, index, scope, pending)
       return

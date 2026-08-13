@@ -890,7 +890,9 @@ const lexicalTokenType = (kind: Token.TokenKind): string | undefined => {
     case 'GreaterEqual':
     case 'Pipe':
     case 'PipeGreater':
+    case 'PipePipe':
     case 'Ampersand':
+    case 'AmpersandAmpersand':
     case 'Caret':
     case 'Tilde':
     case 'Arrow':

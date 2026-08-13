@@ -50,6 +50,7 @@ const nestedExpressions = (
       case 'CallableApply':
         return [expression.callee, ...expression.arguments.map((argument) => argument.expression)]
       case 'Operator':
+      case 'ShortCircuit':
       case 'Call':
         return expression.arguments.map((argument) => argument.expression)
       case 'Match':
