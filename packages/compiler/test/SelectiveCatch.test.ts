@@ -33,6 +33,16 @@ effect fn recoverB(problem: B) -> i32 { return problem.code + 2 }
 effect fn recoverRow(problem: Row<!A | B>) -> i32 { return 99 }
 `
 
+/**
+ * Every program below that writes the selector form also carries `SEM0097`, because the operation
+ * is analysis-only: it types, but no engine lowers it. That code appearing beside a clean analysis
+ * is the point — the two statements are independent, and each assertion here still pins exactly
+ * what the analysis concluded.
+ */
+const analysisOnly = 'SEM0097'
+const notExecutable =
+  'Member-selective Effect.catch is analysis-only: it type-checks, but no engine lowers it yet, so a program that uses it cannot be built'
+
 it.effect('recovers one member and leaves the other in the result failure row', () =>
   Effect.gen(function* () {
     const self = yield* analyze(`${preamble}
@@ -40,8 +50,9 @@ effect fn selective(flag: bool) -> i32 ! B {
   return run Effect.catch<A>(risky(flag), recoverA)
 }
 pub fn main() -> i32 { return 0 }`)
-    // Declaring the residual as the result row is accepted: A is gone, B survives.
-    assert.deepEqual(codes(self), [])
+    // Declaring the residual as the result row is accepted: A is gone, B survives. Nothing about
+    // the recovery itself is rejected — the only code is the analysis-only notice.
+    assert.deepEqual(codes(self), [analysisOnly])
   }),
 )
 
@@ -52,8 +63,8 @@ pub fn main() -> i32 {
   return run Effect.catch<A>(risky(true), recoverA)
 }`)
     // The residual is not silently discarded; B reaches the caller and must be handled there.
-    assert.deepEqual(codes(self), ['SEM0066'])
-    assert.deepEqual(messages(self), ['Run leaves unhandled failures: root.B'])
+    assert.deepEqual(codes(self), ['SEM0066', analysisOnly])
+    assert.deepEqual(messages(self), ['Run leaves unhandled failures: root.B', notExecutable])
   }),
 )
 
@@ -68,8 +79,8 @@ pub fn main() -> i32 { return run Effect.catchAll(risky(true), recoverRow) }`)
     // The selective form keeps B, so the identical run site now has a failure left to handle.
     const selective = yield* analyze(`${preamble}
 pub fn main() -> i32 { return run Effect.catch<A>(risky(true), recoverA) }`)
-    assert.deepEqual(codes(selective), ['SEM0066'])
-    assert.deepEqual(messages(selective), ['Run leaves unhandled failures: root.B'])
+    assert.deepEqual(codes(selective), ['SEM0066', analysisOnly])
+    assert.deepEqual(messages(selective), ['Run leaves unhandled failures: root.B', notExecutable])
   }),
 )
 
@@ -146,6 +157,90 @@ pub fn main() -> i32 { return run handleA(risky(true)) }`)
     assert.deepEqual(messages(self), [
       'Expected once Effect<i32 ! root.A> but received Effect<i32 ! root.A | root.B>',
     ])
+  }),
+)
+
+/**
+ * The operation types but does not execute. These three tests pin the only thing standing between
+ * a user and a build that dies inside the backend with no source span: writing the selector form
+ * says so, at the call site, under a stable code.
+ */
+it.effect('reports the analysis-only diagnostic at the call that writes the selector form', () =>
+  Effect.gen(function* () {
+    const call = 'Effect.catch<A>(risky(flag), recoverA)'
+    const text = `${preamble}
+effect fn selective(flag: bool) -> i32 ! B {
+  return run ${call}
+}
+pub fn main() -> i32 { return 0 }`
+    const self = yield* analyze(text)
+    const reported = Analysis.diagnostics(self).filter(
+      (diagnostic) => diagnostic.code === analysisOnly,
+    )
+    assert.strictEqual(reported.length, 1)
+    const diagnostic = reported.at(0)
+    assert.strictEqual(diagnostic?.severity, 'error')
+    assert.strictEqual(diagnostic?.message, notExecutable)
+    // The span is the call itself: not the enclosing `run`, not the whole statement, and not a
+    // stdlib function the user never wrote.
+    const start = text.indexOf(call)
+    assert.deepEqual(
+      {
+        sourceId: diagnostic?.span.sourceId,
+        start: diagnostic?.span.start,
+        end: diagnostic?.span.end,
+      },
+      { sourceId: 'root', start, end: start + call.length },
+    )
+  }),
+)
+
+it.effect('reports it at the pipelined selector form too, spanning the operation', () =>
+  Effect.gen(function* () {
+    const call = 'Effect.catch<A>(recoverA)'
+    const text = `${preamble}
+effect fn selective(flag: bool) -> i32 ! B {
+  return run risky(flag) |> ${call}
+}
+pub fn main() -> i32 { return 0 }`
+    const self = yield* analyze(text)
+    const diagnostic = Analysis.diagnostics(self).find(
+      (candidate) => candidate.code === analysisOnly,
+    )
+    const start = text.indexOf(call)
+    assert.deepEqual(
+      { start: diagnostic?.span.start, end: diagnostic?.span.end },
+      { start, end: start + call.length },
+    )
+  }),
+)
+
+/**
+ * Before this diagnostic the same program reached the backend and was rejected as an
+ * `InvalidEffectOperation` MIR violation inside `silk/effects`, naming a generated stdlib function
+ * and no user span. Emission must now stop on the source diagnostic instead.
+ */
+it.effect('stops emission on the diagnostic rather than on a MIR violation', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`${preamble}
+effect fn selective(flag: bool) -> i32 ! B {
+  return run Effect.catch<A>(risky(flag), recoverA)
+}
+effect fn recoverRest(problem: B) -> i32 { return problem.code + 3 }
+pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverRest) }`)
+    const failure = yield* Effect.flip(Analysis.codegen(self, { mode: 'release' }))
+    assert.strictEqual(failure._tag, 'CodegenUnavailable')
+    if (failure._tag !== 'CodegenUnavailable') return
+    assert.include(
+      failure.diagnostics.map((diagnostic) => diagnostic.code),
+      analysisOnly,
+    )
+    assert.deepEqual(
+      failure.diagnostics
+        .filter((diagnostic) => diagnostic.code === analysisOnly)
+        .map((diagnostic) => diagnostic.message),
+      [notExecutable],
+    )
   }),
 )
 

@@ -657,11 +657,16 @@ handler against the selected member, computes the residual, and types the result
 unioned with the handler's failures. The four rows are recorded as semantic facts — protected,
 selected, handler, residual.
 
-No execution surface lowers the residual dispatch yet. Recognition, typing, and the fact surface are
-complete, so a program that only analyzes selective recovery typechecks and reports the residual
-correctly; a program that executes it does not build, because no engine emits a body for the
-operation. Whole-row `Effect.catch` — the form without a selector — and `Effect.catchAll` are
-untouched by this and execute exactly as before.
+No execution surface lowers the residual dispatch yet, and writing the selector form says so.
+Semantic analysis reports [`SEM0097`](./diagnostics.md) — *`<construct>` is analysis-only: it
+type-checks, but no engine lowers it yet, so a program that uses it cannot be built* — as an error
+spanning the `Effect.catch<E>(…)` call. The diagnostic is raised after the seam has typed the
+expression and does not suppress any of it: the result type, the residual row, and the four semantic
+facts are all still produced, so tooling reports selective recovery correctly while the build stops
+on a source diagnostic rather than on a MIR violation inside the standard library.
+
+Whole-row `Effect.catch` — the form without a selector — and `Effect.catchAll` are untouched by this
+and execute exactly as before.
 
 Until that lowering lands, executable selective recovery is done by hand: reify with `Effect.result`,
 `match` the row, and re-raise the members you do not handle.

@@ -5223,6 +5223,25 @@ const analyzeEffectCatch = (
           ),
         )
       : unavailableExpressionType
+
+  // Analysis of this operation is complete, but no engine lowers the residual dispatch yet, so a
+  // program that contains it cannot be built. Reporting that here — after the seam has typed the
+  // expression, and without touching `valid` — keeps the whole analysis intact for tooling while
+  // still telling whoever wrote the line, at their own call site, that it will not execute. The
+  // alternative is what this operation did before: type cleanly, then die in the backend as an
+  // `InvalidEffectOperation` MIR violation inside a stdlib function, with no user span at all.
+  // The node span opens on the call's leading trivia, so the reported span starts at the `Effect`
+  // token instead: an editor underlines the operation, not the whitespace before it.
+  const head = callReferenceTokens(target).at(0)
+  const operationSpan =
+    head === undefined
+      ? target.span
+      : Option.getOrElse(
+          SourceSpan.make(source, head.span.start, target.span.end),
+          () => target.span,
+        )
+  diagnostics.push(Diagnostic.analysisOnlyConstruct('Member-selective Effect.catch', operationSpan))
+
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'EffectCatch',

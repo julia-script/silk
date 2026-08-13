@@ -141,7 +141,8 @@ pub effect fn catchAll<A, !E, !F, ?R, ?S>(
 /// for `catchAll` that this declaration provides.
 ///
 /// The selector form is analyzed but not yet executable: no engine lowers the residual dispatch,
-/// so a program that runs it does not build. The whole-row form is unaffected.
+/// so writing it reports `SEM0097` at the call and the program does not build. The whole-row form
+/// is unaffected.
 pub effect fn catch<A, !E, !F, ?R, ?S>(
   self: once Effect<A ! E ? R>,
   onFailure: once fn(Row<!E>) -> Effect<A ! F ? S>
