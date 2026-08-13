@@ -5,6 +5,7 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Result from 'effect/Result'
 import { Command } from 'effect/unstable/cli'
 import * as Cli from '../src/Cli.js'
+import * as Timeouts from './timeouts.js'
 
 it('exposes the project-first command surface without a compile alias', () => {
   const names = Cli.command.subcommands.flatMap((group) =>
@@ -65,7 +66,7 @@ it.effect(
       const ran = yield* execute(['run', '--manifest-path', `${projectRoot}/silk.toml`])
       assert.strictEqual(Result.isSuccess(ran), true)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  30_000,
+  Timeouts.nativeBuild,
 )
 
 it.effect(
@@ -97,7 +98,7 @@ it.effect(
         if (executed.failure._tag === 'CommandExit') assert.strictEqual(executed.failure.status, 42)
       }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  30_000,
+  Timeouts.nativeBuild,
 )
 
 it('lists clean with its purpose in root help', () => {
