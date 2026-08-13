@@ -446,8 +446,14 @@ const verifyFunction = (
  * incoming edges, phis grouped at the top of their block, and in-range branch destinations.
  *
  * Verification reads the committed bodies, so it sees the same module `Bitcode.encode` writes.
- * An empty result means the module is well-formed by these invariants; it is not a claim that
- * LLVM's full verifier has nothing to say about types or attributes.
+ *
+ * **Gotchas**
+ *
+ * An empty result means the module is well-formed by those invariants, not that `opt` would have
+ * nothing to say. Deliberately outside this check: operand and result type agreement, call-site
+ * agreement with the callee's signature and calling convention, attribute and metadata
+ * well-formedness, and intrinsic signatures. Those are covered by the cross-check against
+ * `opt -passes=verify` over emitted modules, not here.
  *
  * **Example** (Failing a build on invalid IR)
  *

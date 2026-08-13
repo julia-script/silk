@@ -43,8 +43,15 @@ it.effect(
   () =>
     Effect.gen(function* () {
       if (opt === undefined) {
-        // The in-process verifier still ran on every module emitted by every other test; only
-        // the cross-check against the reference implementation needs the tool.
+        // A cross-check that turns itself off when its reference implementation is missing
+        // reports success in exactly the situation where it verified nothing — the failure mode
+        // this file exists to remove. A contributor without LLVM's tools still gets a useful
+        // suite; CI gets a red build, answered by installing LLVM rather than by a quieter test.
+        if (process.env.CI !== undefined) {
+          return assert.fail(
+            'opt was not found in CI, so the LLVM verifier cross-check cannot run. Install LLVM in the workflow, or point SILK_TEST_OPT at the binary.',
+          )
+        }
         console.log('opt was not found; skipping the LLVM verifier cross-check')
         return
       }
