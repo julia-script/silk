@@ -3550,41 +3550,37 @@ const interfaceConstraintDiagnostics = (
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   if (reference._tag !== 'Resolved' || contract.fact._tag !== 'Compatible') return Object.freeze([])
   const substitution = contract.fact.substitution
-  const module =
-    reference.declaration.canonical._tag === 'Canonical'
-      ? reference.declaration.canonical.id.module
-      : reference.declaration.id.sourceId
   return Object.freeze(
     reference.declaration.typeParameters.flatMap((parameter) => {
-      if (parameter.bound === undefined) return []
+      const bound = parameter.bound
+      if (bound === undefined) return []
       const provider = substitution.get(Type.key(parameter.type))
       if (provider === undefined || !Type.isTypeArgument(provider)) return []
-      const interface_ = index.modules
-        .find((candidate) => candidate.module === module)
-        ?.interfaces.find(
-          (candidate) =>
-            candidate.name._tag === 'Present' && candidate.name.spelling === parameter.bound,
-        )
-      if (interface_?.canonical._tag !== 'Canonical')
+      if (bound._tag !== 'ResolvedBound')
         return [
           Diagnostic.invalidConformance(
-            `unknown interface constraint ${parameter.bound}`,
+            `unknown interface constraint ${bound.spelling}`,
             parameter.syntax.span,
           ),
         ]
-      const capability = Type.nominal(
-        interface_.canonical.id.module,
-        interface_.canonical.id.name,
-        [provider],
+      const capability = Type.nominal(bound.capability.module, bound.capability.name, [provider])
+      if (!DeclarationIndex.conforms(index, provider, capability))
+        return [
+          Diagnostic.invalidConformance(
+            `${Type.encode(provider)} does not implement ${bound.spelling}`,
+            span,
+          ),
+        ]
+      // A witness that exists is not yet a witness that is complete: specialization admits the type
+      // argument only when the conformance maps every operation the bound declares, so a bound with
+      // more than one operation cannot be half-satisfied.
+      return DeclarationIndex.unmappedInterfaceOperations(index, provider, capability).map(
+        (operation) =>
+          Diagnostic.invalidConformance(
+            `${Type.encode(provider)} does not implement ${bound.spelling}.${operation}`,
+            span,
+          ),
       )
-      return DeclarationIndex.conforms(index, provider, capability)
-        ? []
-        : [
-            Diagnostic.invalidConformance(
-              `${Type.encode(provider)} does not implement ${parameter.bound}`,
-              span,
-            ),
-          ]
     }),
   )
 }
@@ -4708,25 +4704,16 @@ const analyzeOperatorExpression = (
   const genericInterface =
     selectedFirstType?._tag === 'Available' && Type.isParameter(selectedFirstType.type)
       ? declaration.typeParameters.some((parameter) => {
-          if (!Type.equals(parameter.type, selectedFirstType.type) || parameter.bound === undefined)
-            return false
-          const module =
-            declaration.canonical._tag === 'Canonical'
-              ? declaration.canonical.id.module
-              : declaration.id.sourceId
-          const interface_ = resolution.index.modules
-            .find((candidate) => candidate.module === module)
-            ?.interfaces.find(
-              (candidate) =>
-                candidate.name._tag === 'Present' && candidate.name.spelling === parameter.bound,
-            )
-          const operationName = `${operator.slice(0, 1).toLowerCase()}${operator.slice(1)}`
-          return (
-            interface_?.operations.some(
-              (candidate) =>
-                candidate.name._tag === 'Present' && candidate.name.spelling === operationName,
-            ) ?? false
+          // Every operation the bound declares is callable on a bound-typed operand, so an operator
+          // stays generic exactly when the bound's contract names the operation it spells.
+          const bound = parameter.bound
+          if (
+            !Type.equals(parameter.type, selectedFirstType.type) ||
+            bound?._tag !== 'ResolvedBound'
           )
+            return false
+          const operationName = `${operator.slice(0, 1).toLowerCase()}${operator.slice(1)}`
+          return bound.operations.includes(operationName)
         })
       : false
   const selectedActor: Operator.Actor =
@@ -4739,10 +4726,24 @@ const analyzeOperatorExpression = (
   const signature = builtinSignature(target.actor, target.operation)
   if (signature === undefined) throw new RangeError('Compiler operator table is inconsistent')
   const genericType = selectedFirstType?._tag === 'Available' ? selectedFirstType.type : undefined
+  // A bound operator's contract is the compiler-known operation with the stand-in actor replaced by
+  // the bound parameter. Only the positions that carry the actor's own type become generic, so a
+  // comparison the bound declares keeps its `bool` result instead of widening to the parameter.
+  const actorType: SemanticType | undefined = Scalar.isSpelling(target.actor)
+    ? target.actor
+    : undefined
+  const overActor = (type: SemanticType): SemanticType =>
+    genericType !== undefined && actorType !== undefined && Type.equals(type, actorType)
+      ? genericType
+      : type
   const operatorParameters = genericInterface
-    ? Object.freeze(operandNodes.map(() => genericType ?? signature.result))
+    ? Object.freeze(
+        signature.parameters.length === operandNodes.length
+          ? signature.parameters.map(overActor)
+          : operandNodes.map(() => genericType ?? signature.result),
+      )
     : signature.parameters
-  const operatorResult = genericInterface ? (genericType ?? signature.result) : signature.result
+  const operatorResult = genericInterface ? overActor(signature.result) : signature.result
   const reference: CallReferenceFact = Object.freeze({
     _tag: 'ResolvedBuiltin',
     spelling: `${target.actor}.${target.operation}`,
