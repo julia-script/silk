@@ -12,13 +12,14 @@ each signature and description below is the `///` comment on the declaration in
 $ pnpm --filter @silk-effect/compiler documentation:generate
 ```
 
-The library has 35 modules.
+The library has 36 modules.
 
 ## Modules
 
 | Module | Import namespace | Declarations |
 | --- | --- | --- |
 | [`silk/bool`](#silk-bool) | `bool` | 3 |
+| [`silk/box`](#silk-box) | `Box` | 14 |
 | [`silk/bytes`](#silk-bytes) | `Bytes` | 8 |
 | [`silk/char`](#silk-char) | `char` | 6 |
 | [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
@@ -81,6 +82,61 @@ pub fn not(value: bool) -> bool
 ```
 
 Calls the concrete bool not primitive.
+
+
+## silk/box
+
+Import as `Box` with `import silk.box`.
+
+### `Vacant`
+
+```silk
+pub struct Vacant
+```
+
+### `Occupied`
+
+```silk
+pub struct Occupied
+```
+
+### `Box`
+
+```silk
+pub struct Box<T>
+```
+
+### `make`
+
+```silk
+pub effect fn make<T>(value: T) -> silk/box.Box<T> ! OutOfMemory ? &mut Allocator
+```
+
+Moves one value onto the heap, allocating storage for exactly one element.
+
+### `get`
+
+```silk
+pub fn get<T>(self: &silk/box.Box<T>) -> &[T]
+```
+
+Borrows the held value as one shared element view.
+
+### `getMut`
+
+```silk
+pub fn getMut<T>(self: &mut silk/box.Box<T>) -> &mut [T]
+```
+
+Borrows the held value as one exclusive element view.
+
+### `into`
+
+```silk
+pub fn into<T>(self: silk/box.Box<T>) -> T
+```
+
+Consumes the box and yields the value it held, releasing the storage.
 
 
 ## silk/bytes
