@@ -49,12 +49,12 @@ The library has 40 modules.
 | [`silk/result`](#silk-result) | `Result` | 13 |
 | [`silk/slot`](#silk-slot) | `Slot` | 4 |
 | [`silk/standard_input`](#silk-standard-input) | `StandardInput` | 12 |
-| [`silk/string`](#silk-string) | `String` | 24 |
+| [`silk/string`](#silk-string) | `String` | 25 |
 | [`silk/u16`](#silk-u16) | `u16` | 57 |
 | [`silk/u32`](#silk-u32) | `u32` | 57 |
 | [`silk/u64`](#silk-u64) | `u64` | 57 |
 | [`silk/u8`](#silk-u8) | `u8` | 57 |
-| [`silk/unicode`](#silk-unicode) | `Unicode` | 24 |
+| [`silk/unicode`](#silk-unicode) | `Unicode` | 23 |
 | [`silk/unicode_tables`](#silk-unicode-tables) | `UnicodeTables` | 11 |
 | [`silk/usize`](#silk-usize) | `usize` | 59 |
 | [`silk/vector`](#silk-vector) | `Vector` | 55 |
@@ -5959,6 +5959,9 @@ pub fn fromUtf8(values: &[u8]) -> silk/result.Result<string, silk/string.Invalid
 
 Validates a complete byte view and borrows it as text without allocating.
 
+The offset is unpacked before the borrow rather than after it because an unchecked construction
+has to happen in the function that owns the borrowed parameter the view comes from.
+
 ### `make`
 
 ```silk
@@ -5974,6 +5977,19 @@ pub effect fn copy(value: string) -> String ! OutOfMemory ? &mut Allocator
 ```
 
 Copies valid text into independently owned storage.
+
+### `copyUtf8`
+
+```silk
+pub effect fn copyUtf8(values: &[u8]) -> silk/result.Result<silk/string.String, silk/string.InvalidUtf8> ! OutOfMemory ? &mut Allocator
+```
+
+Validates complete UTF-8 bytes and copies them into independently owned storage.
+
+The companion to `fromUtf8` for bytes a program built rather than borrowed. `fromUtf8` hands
+back a view that lives exactly as long as the buffer under it, which is the wrong shape for an
+encoder that wants to return its result and let its working buffer go; this validates the same
+way and owns the outcome.
 
 ### `append`
 

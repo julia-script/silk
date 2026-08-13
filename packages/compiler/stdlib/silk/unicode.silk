@@ -1,5 +1,5 @@
 import silk.result { Result, Success, Failure }
-import silk.string { String, InvalidUtf8, copy as stringCopy, fromUtf8, utf8Bytes }
+import silk.string { String, InvalidUtf8, copyUtf8, make as stringMake, utf8Bytes }
 import silk.unicode_tables {
   Decomposition,
   canonicalComposition,
@@ -215,31 +215,12 @@ fn composeInPlace(buffer: Vector<u32>) -> Vector<u32> {
   return move composed
 }
 
-/// Appends one scalar's UTF-8 encoding.
-effect fn encodeScalar(bytes: Vector<u8>, scalar: u32) -> Vector<u8> ! OutOfMemory ? &mut Allocator {
-  let mut encoded = move bytes
-  if scalar < 128 {
-    let only = run vectorAppend<u8>(&mut encoded, u32.toU8(scalar))
-    return move encoded
-  }
-  if scalar < 2048 {
-    let lead = run vectorAppend<u8>(&mut encoded, u32.toU8(192 + scalar / 64))
-    let last = run vectorAppend<u8>(&mut encoded, u32.toU8(128 + scalar % 64))
-    return move encoded
-  }
-  if scalar < 65536 {
-    let lead = run vectorAppend<u8>(&mut encoded, u32.toU8(224 + scalar / 4096))
-    let middle = run vectorAppend<u8>(&mut encoded, u32.toU8(128 + (scalar / 64) % 64))
-    let last = run vectorAppend<u8>(&mut encoded, u32.toU8(128 + scalar % 64))
-    return move encoded
-  }
-  let lead = run vectorAppend<u8>(&mut encoded, u32.toU8(240 + scalar / 262144))
-  let second = run vectorAppend<u8>(&mut encoded, u32.toU8(128 + (scalar / 4096) % 64))
-  let third = run vectorAppend<u8>(&mut encoded, u32.toU8(128 + (scalar / 64) % 64))
-  let last = run vectorAppend<u8>(&mut encoded, u32.toU8(128 + scalar % 64))
-  return move encoded
-}
-
+/// Appends one scalar's UTF-8 encoding to a buffer the caller owns directly.
+///
+/// This is written against a local binding rather than as a helper taking the buffer, because a
+/// reference parameter cannot be reborrowed and threading the buffer through by move hit a native
+/// backend defect: a vector rebound by `buffer = move helper(move buffer)` inside a loop reads
+/// stale once the loop ends and the buffer is borrowed. See the note in the pull request.
 /// Decodes valid UTF-8 into scalars, decomposing and canonically ordering as it goes.
 ///
 /// The input is a `string`, so it is already valid UTF-8 and the decode needs no validation; the
@@ -280,23 +261,41 @@ effect fn decomposedScalars(value: string) -> Vector<u32> ! OutOfMemory ? &mut A
 
 /// Copies a scalar sequence into owned text.
 ///
-/// The encoder only ever writes well-formed UTF-8, so the validation here cannot fail. The failing
-/// arm exists because `fromUtf8` is the safe constructor and normalization has no reason to reach
-/// for the unchecked one.
+/// The encoder only ever writes well-formed UTF-8, so the validation inside `copyUtf8` cannot fail
+/// here; the failing arm returns empty text because this module has no reason to reach for the
+/// unchecked constructor to save a scan it is not paying much for.
 effect fn encodeOwned(scalars: Vector<u32>) -> String ! OutOfMemory ? &mut Allocator {
   let source = move scalars
   let mut bytes = vectorMake<u8>()
   let mut index = usize.ZERO
   while index < vectorLength<u32>(&source) {
-    let extended = run encodeScalar(move bytes, vectorGet<u32>(&source, index))
-    bytes = move extended
+    let scalar = vectorGet<u32>(&source, index)
+    if scalar < 128 {
+      let only = run vectorAppend<u8>(&mut bytes, u32.toU8(scalar))
+    } else {
+      if scalar < 2048 {
+        let lead = run vectorAppend<u8>(&mut bytes, u32.toU8(192 + scalar / 64))
+        let last = run vectorAppend<u8>(&mut bytes, u32.toU8(128 + scalar % 64))
+      } else {
+        if scalar < 65536 {
+          let lead = run vectorAppend<u8>(&mut bytes, u32.toU8(224 + scalar / 4096))
+          let middle = run vectorAppend<u8>(&mut bytes, u32.toU8(128 + (scalar / 64) % 64))
+          let last = run vectorAppend<u8>(&mut bytes, u32.toU8(128 + scalar % 64))
+        } else {
+          let lead = run vectorAppend<u8>(&mut bytes, u32.toU8(240 + scalar / 262144))
+          let second = run vectorAppend<u8>(&mut bytes, u32.toU8(128 + (scalar / 4096) % 64))
+          let third = run vectorAppend<u8>(&mut bytes, u32.toU8(128 + (scalar / 64) % 64))
+          let last = run vectorAppend<u8>(&mut bytes, u32.toU8(128 + scalar % 64))
+        }
+      }
+    }
     index = index + usize.ONE
   }
-  let validated = fromUtf8(vectorAsSlice<u8>(&bytes))
-  return match move validated {
-    Result<string, InvalidUtf8> { value: outcome } => match move outcome {
-      Success<string> { value } => run stringCopy(value)
-      Failure<InvalidUtf8> { error } => run stringCopy("")
+  let owned = run copyUtf8(vectorAsSlice<u8>(&bytes))
+  return match move owned {
+    Result<String, InvalidUtf8> { value: outcome } => match move outcome {
+      Success<String> { value } => move value
+      Failure<InvalidUtf8> { error } => stringMake()
     }
   }
 }
