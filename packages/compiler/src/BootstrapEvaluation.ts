@@ -2947,6 +2947,50 @@ function* executeFunction(
                 }
                 break
               }
+              if (name === 'osDirectoryCreateUnique') {
+                const root = arguments_.at(0)
+                const parent = arguments_.at(1)
+                const prefix = arguments_.at(2)
+                const output = arguments_.at(3)
+                const required = arguments_.at(4)
+                if (
+                  root === undefined ||
+                  parent === undefined ||
+                  prefix === undefined ||
+                  output === undefined ||
+                  required === undefined
+                )
+                  throw new RangeError('OS unique directory create omitted arguments')
+                const result = host.directoryCreateUnique(
+                  byteView(root),
+                  byteView(parent),
+                  byteView(prefix),
+                  byteView(output).length,
+                )
+                if (result._tag === 'Failure' || result._tag === 'BufferTooSmall') {
+                  status(
+                    result._tag === 'Failure'
+                      ? result
+                      : { _tag: 'Failure', reason: 'BufferTooSmall' },
+                  )
+                  if (result._tag === 'BufferTooSmall')
+                    replaceReferenced(
+                      required,
+                      Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.requiredCapacity) }),
+                    )
+                  commit(optionValue('usize'))
+                } else {
+                  writeByteView(output, result.name)
+                  status()
+                  commit(
+                    optionValue(
+                      'usize',
+                      Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.name.length) }),
+                    ),
+                  )
+                }
+                break
+              }
               if (name === 'osPathInspect') {
                 const root = arguments_.at(0)
                 const path = arguments_.at(1)

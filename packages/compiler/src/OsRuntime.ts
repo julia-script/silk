@@ -10,6 +10,7 @@ export const symbols = Object.freeze([
   'silk_os_directory_next_v1',
   'silk_os_path_inspect_v1',
   'silk_os_directory_create_v1',
+  'silk_os_directory_create_unique_v1',
   'silk_os_file_remove_v1',
   'silk_os_directory_remove_v1',
   'silk_os_handle_close_v1',
@@ -62,6 +63,10 @@ enum {
   SILK_UNSUPPORTED = 9,
   SILK_OTHER = 10
 };
+
+/* Suffix width for provider-chosen unique directory names, and the retry ceiling for collisions. */
+#define SILK_UNIQUE_SUFFIX 8
+#define SILK_UNIQUE_ATTEMPTS 128
 
 typedef struct { size_t identity; int kind; int active; } silk_os_handle;
 typedef struct { int tag; size_t value; } silk_option_usize;
@@ -216,6 +221,50 @@ static int silk_parent(const unsigned char *root, size_t root_length,
   close(current);
   silk_protocol_failure(reason, native_code, SILK_INVALID_PATH);
   return 0;
+}
+
+/* Opens one normalized provider-absolute directory itself, rather than its parent. */
+static int silk_directory(const unsigned char *root, size_t root_length,
+                          const unsigned char *path, size_t path_length,
+                          int *reason, uint32_t *native_code) {
+  int parent; char *leaf;
+  if (!silk_parent(root, root_length, path, path_length, &parent, &leaf, reason, native_code)) {
+    return -1;
+  }
+  if (leaf == NULL) return parent;
+  int opened = openat(parent, leaf, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+  int selected = errno;
+  free(leaf);
+  close(parent);
+  if (opened < 0) { silk_failure(reason, native_code, selected); return -1; }
+  return opened;
+}
+
+/*
+ * Fills a unique-name suffix. The kernel decides uniqueness — mkdirat fails with EEXIST rather
+ * than adopting an existing directory — so this only has to make collisions rare enough that the
+ * retry loop terminates. The degraded path is therefore a correctness-preserving fallback, not a
+ * silent weakening of an exclusivity guarantee.
+ */
+static void silk_entropy(unsigned char *output, size_t length) {
+  static uint64_t counter = 0;
+  int source = open("/dev/urandom", O_RDONLY);
+  if (source >= 0) {
+    size_t filled = 0;
+    while (filled < length) {
+      ssize_t received = read(source, output + filled, length - filled);
+      if (received > 0) { filled += (size_t)received; continue; }
+      if (received < 0 && errno == EINTR) continue;
+      break;
+    }
+    close(source);
+    if (filled == length) return;
+  }
+  uint64_t mixed = (uint64_t)getpid() ^ (counter += 0x9e3779b97f4a7c15ull);
+  for (size_t index = 0; index < length; index += 1) {
+    mixed = mixed * 6364136223846793005ull + 1442695040888963407ull;
+    output[index] = (unsigned char)(mixed >> 33);
+  }
 }
 
 static silk_native_handle *silk_live(silk_os_handle *handle, int kind,
@@ -511,6 +560,64 @@ int silk_os_directory_create_v1(const unsigned char *root, size_t root_length,
   free(leaf); close(parent);
   if (status != 0) { silk_failure(reason, native_code, selected); return 0; }
   silk_success(reason, native_code); return 1;
+}
+`,
+  silk_os_directory_create_unique_v1: `
+silk_option_usize silk_os_directory_create_unique_v1(const unsigned char *root, size_t root_length,
+                                                     const unsigned char *parent,
+                                                     size_t parent_length,
+                                                     const unsigned char *prefix,
+                                                     size_t prefix_length, unsigned char *output,
+                                                     size_t capacity, size_t *required,
+                                                     int *reason, uint32_t *native_code) {
+  static const char alphabet[] = "abcdefghijklmnopqrstuvwxyz0123456789";
+  size_t length = prefix_length + SILK_UNIQUE_SUFFIX;
+  if (capacity < length) {
+    *required = length;
+    silk_protocol_failure(reason, native_code, SILK_BUFFER_TOO_SMALL);
+    return silk_transfer_failure();
+  }
+  if (!silk_utf8(prefix, prefix_length) || !silk_component_valid(prefix, prefix_length) ||
+      memchr(prefix, '/', prefix_length) != NULL) {
+    silk_protocol_failure(reason, native_code, SILK_INVALID_PATH);
+    return silk_transfer_failure();
+  }
+  int directory = silk_directory(root, root_length, parent, parent_length, reason, native_code);
+  if (directory < 0) return silk_transfer_failure();
+  char *name = (char *)malloc(length + 1);
+  if (name == NULL) {
+    close(directory);
+    silk_protocol_failure(reason, native_code, SILK_NO_SPACE);
+    return silk_transfer_failure();
+  }
+  memcpy(name, prefix, prefix_length);
+  name[length] = 0;
+  for (int attempt = 0; attempt < SILK_UNIQUE_ATTEMPTS; attempt += 1) {
+    unsigned char chosen[SILK_UNIQUE_SUFFIX];
+    silk_entropy(chosen, sizeof(chosen));
+    for (size_t index = 0; index < SILK_UNIQUE_SUFFIX; index += 1) {
+      name[prefix_length + index] = alphabet[chosen[index] % (sizeof(alphabet) - 1)];
+    }
+    /* mkdirat fails with EEXIST rather than adopting a directory, so success is exclusive. */
+    if (mkdirat(directory, name, 0700) == 0) {
+      memcpy(output, name, length);
+      free(name);
+      close(directory);
+      silk_success(reason, native_code);
+      return silk_transfer(length);
+    }
+    int selected = errno;
+    if (selected != EEXIST) {
+      free(name);
+      close(directory);
+      silk_failure(reason, native_code, selected);
+      return silk_transfer_failure();
+    }
+  }
+  free(name);
+  close(directory);
+  silk_protocol_failure(reason, native_code, SILK_ALREADY_EXISTS);
+  return silk_transfer_failure();
 }
 `,
   silk_os_file_remove_v1: `
