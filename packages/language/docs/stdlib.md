@@ -38,13 +38,13 @@ The library has 36 modules.
 | [`silk/logging`](#silk-logging) | `Logger` | 30 |
 | [`silk/metrics`](#silk-metrics) | `AllocationMetrics` | 6 |
 | [`silk/numeric`](#silk-numeric) | `Integer` | 12 |
-| [`silk/option`](#silk-option) | `Option` | 5 |
+| [`silk/option`](#silk-option) | `Option` | 9 |
 | [`silk/os_child_process`](#silk-os-child-process) | `OsChildProcess` | 9 |
 | [`silk/os_filesystem`](#silk-os-filesystem) | `OsFileSystem` | 35 |
 | [`silk/os_host_input`](#silk-os-host-input) | `OsHostInput` | 14 |
 | [`silk/os_standard_input`](#silk-os-standard-input) | `OsStandardInput` | 6 |
 | [`silk/raw-buffer`](#silk-raw-buffer) | `RawBuffer` | 8 |
-| [`silk/result`](#silk-result) | `Result` | 5 |
+| [`silk/result`](#silk-result) | `Result` | 13 |
 | [`silk/slot`](#silk-slot) | `Slot` | 4 |
 | [`silk/standard_input`](#silk-standard-input) | `StandardInput` | 12 |
 | [`silk/string`](#silk-string) | `String` | 23 |
@@ -4727,6 +4727,34 @@ pub fn some<T>(value: T) -> Option<T>
 
 Constructs a present optional value.
 
+### `map`
+
+```silk
+pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> Option<U>
+```
+
+Applies a transform to a present value and keeps an absent value absent.
+
+### `flatMap`
+
+```silk
+pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> Option<U>) -> Option<U>
+```
+
+Continues a present value with a transform that itself answers with an Option, so the
+outcome stays one Option deep instead of nesting.
+
+### `unwrapOr`
+
+```silk
+pub fn unwrapOr<T>(self: Option<T>, fallback: T) -> T
+```
+
+Returns the present value, or the fallback value when the option is absent.
+
+Only the absent arm consumes the fallback. The present arm releases it, so exactly one of the
+two owned values leaves this call and the other drops.
+
 
 ## silk/os_child_process
 
@@ -4933,6 +4961,58 @@ pub fn failResult<A, F>(error: F) -> silk/result.Result<A, F>
 ```
 
 Constructs a completed failed outcome.
+
+### `map`
+
+```silk
+pub fn map<A, B, F>(self: silk/result.Result<A, F>, transform: once fn(A) -> B) -> silk/result.Result<B, F>
+```
+
+Applies a transform to a success value and carries a failure through unchanged.
+
+### `mapError`
+
+```silk
+pub fn mapError<A, F, G>(self: silk/result.Result<A, F>, transform: once fn(F) -> G) -> silk/result.Result<A, G>
+```
+
+Applies a transform to a failure value and carries a success through unchanged.
+
+### `flatMap`
+
+```silk
+pub fn flatMap<A, B, F>(self: silk/result.Result<A, F>, transform: once fn(A) -> silk/result.Result<B, F>) -> silk/result.Result<B, F>
+```
+
+Continues a success with a transform that answers with a Result of its own, so the outcome
+stays one Result deep instead of nesting.
+
+### `unwrapOr`
+
+```silk
+pub fn unwrapOr<A, F>(self: silk/result.Result<A, F>, fallback: A) -> A
+```
+
+Returns the success value, or the fallback value when the outcome is a failure.
+
+Only the failure arm consumes the fallback. The success arm releases it, and the failure arm
+releases the error, so exactly one owned value leaves this call and the other drops.
+
+### `isSuccess`
+
+```silk
+pub fn isSuccess<A, F>(self: &silk/result.Result<A, F>) -> bool
+```
+
+Answers whether the outcome succeeded, without consuming it.
+
+### `isFailure`
+
+```silk
+pub fn isFailure<A, F>(self: &silk/result.Result<A, F>) -> bool
+```
+
+Answers whether the outcome failed, without consuming it.
 
 
 ## silk/slot
