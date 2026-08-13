@@ -59,15 +59,16 @@ interface Host {
 
 /**
  * The package builds against the ES library, which does not describe `WebAssembly`, and its
- * consumers build against libraries that describe it differently. Naming the one shape this actor
- * uses keeps both builds honest without a cast.
+ * consumers build against libraries that describe it differently. Declaring the one shape this
+ * actor uses keeps both builds honest without a cast, and `typeof` reaches for it without
+ * assuming a runtime that has it.
  *
  * @internal
  */
-declare const globalThis: { readonly WebAssembly?: Host }
+declare const WebAssembly: Host | undefined
 
 /** @internal */
-const host = (): Host | undefined => globalThis.WebAssembly
+const host = (): Host | undefined => (typeof WebAssembly === 'undefined' ? undefined : WebAssembly)
 
 /** @internal */
 const compile = (implementation: Host, bytes: Uint8Array): ReadonlyArray<Violation> => {
