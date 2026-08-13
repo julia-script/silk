@@ -606,11 +606,13 @@ const slotDropHookTargets = (
 }
 
 /**
- * Collects the provider functions a specialized body's bound operators dispatch to.
+ * Collects the provider functions a specialized body's bound operations dispatch to.
  *
- * A source witness is reachable through the operator that spells its operation and through no
- * ordinary call, so discovery has to read the conformance itself; a scalar argument maps the same
- * operator to a sealed intrinsic and contributes no target.
+ * A source witness is reachable through the operator that spells its operation, or through the
+ * bound's own name when no operator spells it, and through no ordinary call — so discovery has to
+ * read the conformance itself. Both spellings walk one conformance, because the witness a
+ * specialization selects does not depend on how the body names the operation; a scalar argument
+ * maps the same operation to a sealed intrinsic and contributes no target.
  */
 const interfaceWitnessTargets = (
   fn: Hir.HirFunction,
@@ -618,7 +620,12 @@ const interfaceWitnessTargets = (
   substitution: Type.Substitution,
 ): ReadonlyArray<CallTarget> => {
   const walk = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
-    const bound = expression._tag === 'BuiltinCall' ? expression.interfaceOperation : undefined
+    const bound =
+      expression._tag === 'BuiltinCall'
+        ? expression.interfaceOperation
+        : expression._tag === 'BoundOperationCall'
+          ? expression
+          : undefined
     const capability =
       bound === undefined ? undefined : Type.substitute(bound.capability, substitution)
     const target =
