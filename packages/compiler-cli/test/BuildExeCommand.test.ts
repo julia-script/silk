@@ -6,6 +6,7 @@ import { NodeServices } from '@effect/platform-node'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as BuildExeCommand from '../src/BuildExeCommand.js'
+import * as Timeouts from './timeouts.js'
 
 const clang = '/usr/bin/clang'
 const root = mkdtempSync(join(tmpdir(), 'silk-build-exe-test-'))
@@ -34,31 +35,37 @@ const run = (source: string, overrides: Partial<BuildExeCommand.Options> = {}) =
     ...overrides,
   }).pipe(Effect.provide(NodeServices.layer))
 
-it.effect('compiles a single file to a runnable executable and exits zero', () =>
-  Effect.gen(function* () {
-    const source = sourceFile('main.silk', 'pub fn main() -> i32 { return 42 }')
-    const output = join(root, 'answer')
+it.effect(
+  'compiles a single file to a runnable executable and exits zero',
+  () =>
+    Effect.gen(function* () {
+      const source = sourceFile('main.silk', 'pub fn main() -> i32 { return 42 }')
+      const output = join(root, 'answer')
 
-    const status = yield* run(source, { output })
+      const status = yield* run(source, { output })
 
-    assert.strictEqual(status, 0)
-    assert.strictEqual(spawnSync(output).status, 42)
-  }),
+      assert.strictEqual(status, 0)
+      assert.strictEqual(spawnSync(output).status, 42)
+    }),
+  Timeouts.nativeBuild,
 )
 
-it.effect('resolves nested imports from the source root rather than the importer directory', () =>
-  Effect.gen(function* () {
-    const source = sourceFile(
-      'src/app/Main.silk',
-      'import compiler.Syntax { answer }\npub fn main() -> i32 { return answer() }',
-    )
-    sourceFile('src/compiler/Syntax.silk', 'pub fn answer() -> i32 { return 42 }')
-    const output = join(root, 'nested-answer')
-    const status = yield* run(source, { sourceRoot: join(root, 'src'), output })
+it.effect(
+  'resolves nested imports from the source root rather than the importer directory',
+  () =>
+    Effect.gen(function* () {
+      const source = sourceFile(
+        'src/app/Main.silk',
+        'import compiler.Syntax { answer }\npub fn main() -> i32 { return answer() }',
+      )
+      sourceFile('src/compiler/Syntax.silk', 'pub fn answer() -> i32 { return 42 }')
+      const output = join(root, 'nested-answer')
+      const status = yield* run(source, { sourceRoot: join(root, 'src'), output })
 
-    assert.strictEqual(status, 0)
-    assert.strictEqual(spawnSync(output).status, 42)
-  }),
+      assert.strictEqual(status, 0)
+      assert.strictEqual(spawnSync(output).status, 42)
+    }),
+  Timeouts.nativeBuild,
 )
 
 it.effect('returns one for an absent import and leaves no artifact', () =>
