@@ -100,6 +100,8 @@ export type BuiltinOperation =
   | 'RawBufferRead'
   | 'RawBufferView'
   | 'RawBufferViewMut'
+  | 'RawBufferCopy'
+  | 'RawBufferFill'
   | 'SlotWrite'
   | 'SlotTake'
   | 'SlotCopy'

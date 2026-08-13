@@ -365,6 +365,8 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'RawBufferSlot':
     case 'RawBufferRead':
     case 'RawBufferView':
+    case 'RawBufferCopy':
+    case 'RawBufferFill':
     case 'SlotWrite':
     case 'SlotTake':
     case 'SlotCopy':
@@ -388,6 +390,8 @@ const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'RawBufferSlot' ||
   operation._tag === 'RawBufferRead' ||
   operation._tag === 'RawBufferView' ||
+  operation._tag === 'RawBufferCopy' ||
+  operation._tag === 'RawBufferFill' ||
   operation._tag === 'RunEffect' ||
   operation._tag === 'RunEffectValue' ||
   operation._tag === 'RunStaticEffect' ||
@@ -896,6 +900,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             operation._tag === 'RawBufferSlot' ||
             operation._tag === 'RawBufferRead' ||
             operation._tag === 'RawBufferView' ||
+            operation._tag === 'RawBufferCopy' ||
+            operation._tag === 'RawBufferFill' ||
             operation._tag === 'SlotWrite' ||
             operation._tag === 'SlotTake' ||
             operation._tag === 'SlotCopy' ||
@@ -991,6 +997,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           operation._tag === 'RawBufferSlot' ||
           operation._tag === 'RawBufferRead' ||
           operation._tag === 'RawBufferView' ||
+          operation._tag === 'RawBufferCopy' ||
+          operation._tag === 'RawBufferFill' ||
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
           operation._tag === 'SlotCopy' ||
@@ -3211,6 +3219,226 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     `raw_view${operation.destination.ordinal}_ptr`,
                   )
                   locals.set(operation.destination.ordinal, Object.freeze([base, length]))
+                  break
+                }
+                case 'RawBufferCopy': {
+                  const address = readLocal(operation.buffer).at(0)
+                  const offset = readLocal(operation.offset).at(0)
+                  const sourceLanes = readLocal(operation.source)
+                  const sourceAddress = sourceLanes.at(0)
+                  const sourceLength = sourceLanes.at(1)
+                  const length = readLocal(operation.length).at(0)
+                  const element = Layout.entry(program.layout, operation.element)
+                  if (
+                    address === undefined ||
+                    offset === undefined ||
+                    sourceAddress === undefined ||
+                    sourceLength === undefined ||
+                    length === undefined ||
+                    element === undefined ||
+                    usizeType === undefined
+                  ) {
+                    throw new RangeError('LLVM RawBuffer.copy lost its storage provenance')
+                  }
+                  const bufferType = SilkType.rawBuffer(operation.element)
+                  const count = yield* FunctionBody.load(
+                    body,
+                    usizeType,
+                    yield* constantBytePointer(
+                      address,
+                      aggregateFieldOffset(bufferType, 'count'),
+                      `raw_copy${operation.destination.ordinal}_count_ptr`,
+                    ),
+                    `raw_copy${operation.destination.ordinal}_count`,
+                  )
+                  const offsetOutOfBounds = yield* FunctionBody.integerCompare(
+                    body,
+                    'ugt',
+                    offset,
+                    count,
+                    `raw_copy${operation.destination.ordinal}_offset_bounds`,
+                  )
+                  const remaining = yield* FunctionBody.binary(
+                    body,
+                    'sub',
+                    count,
+                    offset,
+                    `raw_copy${operation.destination.ordinal}_remaining`,
+                  )
+                  const lengthOutOfBounds = yield* FunctionBody.integerCompare(
+                    body,
+                    'ugt',
+                    length,
+                    remaining,
+                    `raw_copy${operation.destination.ordinal}_length_bounds`,
+                  )
+                  const sourceOutOfBounds = yield* FunctionBody.integerCompare(
+                    body,
+                    'ugt',
+                    length,
+                    sourceLength,
+                    `raw_copy${operation.destination.ordinal}_source_bounds`,
+                  )
+                  const invalidRange = yield* FunctionBody.binary(
+                    body,
+                    'or',
+                    offsetOutOfBounds,
+                    lengthOutOfBounds,
+                    `raw_copy${operation.destination.ordinal}_range`,
+                  )
+                  const invalid = yield* FunctionBody.binary(
+                    body,
+                    'or',
+                    invalidRange,
+                    sourceOutOfBounds,
+                    `raw_copy${operation.destination.ordinal}_invalid`,
+                  )
+                  if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'raw_trap')
+                  const accepted = yield* LlvmBlock.make(
+                    body,
+                    `raw_copy${operation.destination.ordinal}_accepted`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
+                  yield* LlvmBlock.setInsertionPoint(body, accepted)
+                  const allocationOffset = aggregateFieldOffset(bufferType, '$allocation')
+                  const baseAddress = yield* FunctionBody.load(
+                    body,
+                    usizeType,
+                    yield* constantBytePointer(
+                      address,
+                      allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base'),
+                      `raw_copy${operation.destination.ordinal}_base_ptr`,
+                    ),
+                    `raw_copy${operation.destination.ordinal}_base`,
+                  )
+                  const stride = yield* Constant.integerUnsigned(
+                    builder,
+                    usizeType,
+                    BigInt(operation.stride),
+                  )
+                  const byteOffset = yield* FunctionBody.binary(
+                    body,
+                    'mul',
+                    offset,
+                    stride,
+                    `raw_copy${operation.destination.ordinal}_byte_offset`,
+                  )
+                  const selected = yield* FunctionBody.binary(
+                    body,
+                    'add',
+                    baseAddress,
+                    byteOffset,
+                    `raw_copy${operation.destination.ordinal}_address`,
+                  )
+                  const target = yield* FunctionBody.cast(
+                    body,
+                    'inttoptr',
+                    selected,
+                    pointer,
+                    `raw_copy${operation.destination.ordinal}_ptr`,
+                  )
+                  const byteLength = yield* FunctionBody.binary(
+                    body,
+                    'mul',
+                    length,
+                    stride,
+                    `raw_copy${operation.destination.ordinal}_bytes`,
+                  )
+                  // memmove, not memcpy: an overlapping source and destination is a defined move.
+                  yield* Intrinsic.memmove(body, target, sourceAddress, byteLength, {
+                    destinationAlignment: yield* Alignment.fromByteUnits(element.alignment),
+                    sourceAlignment: yield* Alignment.fromByteUnits(element.alignment),
+                  })
+                  locals.set(operation.destination.ordinal, Object.freeze([]))
+                  break
+                }
+                case 'RawBufferFill': {
+                  const address = readLocal(operation.buffer).at(0)
+                  const offset = readLocal(operation.offset).at(0)
+                  const length = readLocal(operation.length).at(0)
+                  const value = readLocal(operation.value).at(0)
+                  if (
+                    address === undefined ||
+                    offset === undefined ||
+                    length === undefined ||
+                    value === undefined ||
+                    usizeType === undefined
+                  ) {
+                    throw new RangeError('LLVM RawBuffer.fill lost its storage provenance')
+                  }
+                  const bufferType = SilkType.rawBuffer('u8')
+                  const count = yield* FunctionBody.load(
+                    body,
+                    usizeType,
+                    yield* constantBytePointer(
+                      address,
+                      aggregateFieldOffset(bufferType, 'count'),
+                      `raw_fill${operation.destination.ordinal}_count_ptr`,
+                    ),
+                    `raw_fill${operation.destination.ordinal}_count`,
+                  )
+                  const offsetOutOfBounds = yield* FunctionBody.integerCompare(
+                    body,
+                    'ugt',
+                    offset,
+                    count,
+                    `raw_fill${operation.destination.ordinal}_offset_bounds`,
+                  )
+                  const remaining = yield* FunctionBody.binary(
+                    body,
+                    'sub',
+                    count,
+                    offset,
+                    `raw_fill${operation.destination.ordinal}_remaining`,
+                  )
+                  const lengthOutOfBounds = yield* FunctionBody.integerCompare(
+                    body,
+                    'ugt',
+                    length,
+                    remaining,
+                    `raw_fill${operation.destination.ordinal}_length_bounds`,
+                  )
+                  const invalid = yield* FunctionBody.binary(
+                    body,
+                    'or',
+                    offsetOutOfBounds,
+                    lengthOutOfBounds,
+                    `raw_fill${operation.destination.ordinal}_invalid`,
+                  )
+                  if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'raw_trap')
+                  const accepted = yield* LlvmBlock.make(
+                    body,
+                    `raw_fill${operation.destination.ordinal}_accepted`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
+                  yield* LlvmBlock.setInsertionPoint(body, accepted)
+                  const allocationOffset = aggregateFieldOffset(bufferType, '$allocation')
+                  const baseAddress = yield* FunctionBody.load(
+                    body,
+                    usizeType,
+                    yield* constantBytePointer(
+                      address,
+                      allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base'),
+                      `raw_fill${operation.destination.ordinal}_base_ptr`,
+                    ),
+                    `raw_fill${operation.destination.ordinal}_base`,
+                  )
+                  const selected = yield* FunctionBody.binary(
+                    body,
+                    'add',
+                    baseAddress,
+                    offset,
+                    `raw_fill${operation.destination.ordinal}_address`,
+                  )
+                  const target = yield* FunctionBody.cast(
+                    body,
+                    'inttoptr',
+                    selected,
+                    pointer,
+                    `raw_fill${operation.destination.ordinal}_ptr`,
+                  )
+                  yield* Intrinsic.memset(body, target, value, length)
+                  locals.set(operation.destination.ordinal, Object.freeze([]))
                   break
                 }
                 case 'SlotWrite': {

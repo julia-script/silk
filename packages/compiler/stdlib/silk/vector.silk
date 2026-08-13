@@ -126,6 +126,68 @@ pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &m
   return ()
 }
 
+// Bulk byte append. Concrete to u8 rather than generic over T: the copy moves the source range,
+// and moving out of a borrowed slice is only a copy when the element type is Copy. Growth
+// repeats the shape `append` uses, so a failed allocation leaves the original vector untouched.
+/// Appends every byte of one borrowed sequence in source order with one bulk copy.
+pub effect fn appendBytes(
+  self: &mut Vector<u8>,
+  values: &[u8]
+) -> () ! OutOfMemory ? &mut Allocator {
+  let count = values.length
+  if count == usize.ZERO {
+    return ()
+  }
+  let needed = self.length + count
+  if self.capacity < needed {
+    let mut next = self.capacity + self.capacity
+    if self.capacity == usize.ZERO {
+      next = 4
+    }
+    while next < needed {
+      next = next + next
+    }
+    let element = Layout.of<u8>()
+    let plan = Layout.repeat(move element, next)
+    let layout = match move plan {
+      Layout ready => ready
+      LayoutOverflow overflow => run overflowed()
+    }
+    let recipe = Allocator.allocate(move layout)
+    let allocation = run recipe
+    let storage = Intrinsic.replace(self.storage, Empty<u8> { anchor: [] })
+    let moved = match move storage {
+      Empty<u8> nothing => Full<u8> { buffer: freshBuffer<u8>(move allocation, next) }
+      Full<u8> full => Full<u8> { buffer: migrate<u8>(move full, move allocation, self.length, next) }
+    }
+    self.storage = move moved
+    self.capacity = next
+  }
+  let storage = Intrinsic.replace(self.storage, Empty<u8> { anchor: [] })
+  let stored = match move storage {
+    Empty<u8> nothing => absurd<Full<u8>>()
+    Full<u8> full => copyInto(move full, self.length, values, count)
+  }
+  self.storage = move stored
+  self.length = needed
+  return ()
+}
+
+fn copyInto(full: Full<u8>, offset: usize, values: &[u8], count: usize) -> Full<u8> {
+  return match move full {
+    Full<u8> { buffer } => Full<u8> { buffer: copyBuffer(move buffer, offset, values, count) }
+  }
+}
+
+fn copyBuffer(buffer: RawBuffer<u8>, offset: usize, values: &[u8], count: usize) -> RawBuffer<u8> {
+  unsafe {
+    let mut owned = move buffer
+    let copied = RawBuffer.copy<u8>(&mut owned, offset, values, count)
+    return move owned
+  }
+  return absurd<RawBuffer<u8>>()
+}
+
 /// Inserts one owned value at an index, shifting later elements without requiring T to be Copy.
 pub effect fn insert<T>(
   self: &mut Vector<T>,
@@ -205,18 +267,14 @@ fn migrate<T>(full: Full<T>, allocation: Allocation, length: usize, count: usize
   }
 }
 
+// One bulk move replaces the element-by-element migration: the initialized prefix of the old
+// buffer travels to the fresh buffer in a single copy, and the emptied source releases as before.
 fn migrateBuffer<T>(old: RawBuffer<T>, allocation: Allocation, length: usize, count: usize) -> RawBuffer<T> {
   let mut target = freshBuffer<T>(move allocation, count)
   unsafe {
     let mut source = move old
-    let mut index = usize.ZERO
-    while index < length {
-      let sourceSlot = RawBuffer.slot(&mut source, index)
-      let element = Slot.take(move sourceSlot)
-      let targetSlot = RawBuffer.slot(&mut target, index)
-      let written = Slot.write(move targetSlot, move element)
-      index = index + usize.ONE
-    }
+    let initialized = RawBuffer.view<T>(&source, usize.ZERO, length)
+    let migrated = RawBuffer.copy<T>(&mut target, usize.ZERO, initialized, length)
     drop source
   }
   return move target

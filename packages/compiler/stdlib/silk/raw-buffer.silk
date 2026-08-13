@@ -18,6 +18,18 @@ pub fn read<T>(buffer: &RawBuffer<T>, index: usize) -> T {
   unsafe { return Intrinsic.rawBufferRead<T>(buffer, index) }
 }
 
+/// Moves a caller-proven initialized range into the selected storage in one bulk transfer. An
+/// overlapping source and destination is a correct move: the result is as if the elements
+/// travelled through an intermediate buffer.
+pub fn copy<T>(destination: &mut RawBuffer<T>, destinationOffset: usize, source: &[T], length: usize) -> () {
+  unsafe { return Intrinsic.rawBufferCopy<T>(destination, destinationOffset, source, length) }
+}
+
+/// Sets a caller-proven byte range of raw storage to one repeated byte value.
+pub fn fill(buffer: &mut RawBuffer<u8>, offset: usize, length: usize, value: u8) -> () {
+  unsafe { return Intrinsic.rawBufferFill(buffer, offset, length, value) }
+}
+
 /// Forms a shared view over caller-proven initialized elements in the selected range.
 pub fn view<T>(buffer: &RawBuffer<T>, offset: usize, length: usize) -> &[T] {
   unsafe { return Intrinsic.rawBufferView<T>(buffer, offset, length) }

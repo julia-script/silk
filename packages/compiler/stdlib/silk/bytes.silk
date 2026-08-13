@@ -2,6 +2,7 @@ import silk.vector {
   Vector,
   make as vectorMake,
   append as vectorAppend,
+  appendBytes as vectorAppendBytes,
   length as vectorLength,
   asSlice as vectorAsSlice,
   asMutSlice as vectorAsMutSlice
@@ -40,13 +41,9 @@ pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemory ? &mut Allocator {
   return move result
 }
 
-/// Appends one complete borrowed byte sequence in source order.
+/// Appends one complete borrowed byte sequence in source order with one bulk copy.
 pub effect fn append(self: &mut Bytes, values: &[u8]) -> () ! OutOfMemory ? &mut Allocator {
-  let mut index = usize.ZERO
-  while index < values.length {
-    let appended = run vectorAppend<u8>(&mut self.values, values[index])
-    index = index + usize.ONE
-  }
+  let appended = run vectorAppendBytes(&mut self.values, values)
   return ()
 }
 
