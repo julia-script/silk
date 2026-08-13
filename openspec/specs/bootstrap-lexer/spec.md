@@ -254,6 +254,40 @@ SHALL remain an ordinary identifier wherever it is not adjacent to a quote delim
 - **WHEN** source contains `future"value"` and `future"""value"""`
 - **THEN** each adjacent `future` spelling is retained with its literal as one invalid introduction and produces a stable lexical diagnostic naming the unknown modifier
 
+### Requirement: A character literal holds exactly one Unicode scalar
+
+The lexer SHALL recognize `'` as the delimiter of a character literal, which is a fourth literal
+introduction outside the closed quote-delimiter vocabulary and takes no modifier. The literal SHALL
+carry one distinct token kind. Its body SHALL admit the escape vocabulary of an escaped quote
+literal and SHALL additionally admit `\'` for its own delimiter; one escape SHALL keep one meaning
+in every literal form that admits it. The body SHALL denote exactly one Unicode scalar value, and
+that rule SHALL count scalars rather than bytes, so a multi-byte scalar is one character. A body
+denoting no scalar and a body denoting more than one SHALL each produce exactly one lexical
+diagnostic. An unterminated character literal SHALL stop immediately before a physical CR or LF and
+SHALL produce exactly one lexical diagnostic, exactly as a single-line quote literal does. An
+identifier-like spelling adjacent to `'` SHALL NOT be reserved as an unknown modifier, because the
+character form declares no modifier to misspell.
+
+#### Scenario: Recognize a character literal and its escapes
+
+- **WHEN** source contains `'a'`, `' '`, `'\t'`, `'\u{2603}'`, `'\''`, and `'é'`
+- **THEN** the lexer emits six character-literal tokens with exact source spans and produces no lexical diagnostic
+
+#### Scenario: Reject a body that is not one scalar
+
+- **WHEN** source contains `''` and `'ab'`
+- **THEN** each is retained as one invalid literal token over its exact span and produces exactly one lexical diagnostic naming the scalar count
+
+#### Scenario: Recover an unterminated character literal
+
+- **WHEN** an opening `'` is followed by content and a line ending without a closing `'`
+- **THEN** the token stops immediately before the line ending, one lexical diagnostic is produced, and the following line lexes normally
+
+#### Scenario: Keep the delimiter outside the modifier vocabulary
+
+- **WHEN** source contains `b'a'`
+- **THEN** `b` remains one ordinary identifier token, `'a'` is one character-literal token, and no unknown-modifier diagnostic is produced
+
 ### Requirement: String literal boundaries recover deterministically
 
 An escaped single-line literal SHALL close at the first unescaped quote and SHALL otherwise stop

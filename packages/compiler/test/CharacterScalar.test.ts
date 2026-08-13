@@ -176,25 +176,38 @@ it.effect('refuses to give an integer literal the char type', () =>
 )
 
 /**
- * No source can build a `char` value yet: there is no literal (#11) and no conversion from an
- * integer, which this issue defers. Every engine is reachability-driven, so a `char` operation
- * never reaches MIR or a backend, and the value variant, the MIR admission, and the per-engine
- * compare lane belong to the follow-up that makes `char` values constructible. This test pins
- * the property the rest of the surface depends on: `char` is analyzable but not yet inhabited.
+ * Lowering is reachability-driven, so a `char` operation reaches MIR only from a source that
+ * builds a `char` value. The character literal is now the one way to build one, and it is what
+ * makes the MIR admission, the evaluator value, and the per-engine compare lane testable at all;
+ * `CharacterLiteral.test.ts` covers them end to end. This test keeps the reachability property
+ * itself pinned: without a value, a `char` function is analyzed and never lowered.
  */
-it.effect('lowers no char operation, because no source can build a char value', () =>
+it.effect('lowers a char operation only from a source that builds a char value', () =>
   Effect.gen(function* () {
-    const snapshot = yield* analyze(
+    const unreachable = yield* analyze(
       'unreachable',
       'pub fn below(left: char, right: char) -> bool { return left < right }\n' +
         'pub fn main() -> i32 { return 0 }',
     )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(Analysis.diagnostics(unreachable), [])
     assert.deepEqual(
-      Analysis.loweredMir(snapshot).functions.map((fn) => fn.id.name),
+      Analysis.loweredMir(unreachable).functions.map((fn) => fn.id.name),
       ['main'],
     )
-    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const artifact = yield* Analysis.codegenWasm(unreachable, { mode: 'release' })
     assert.isTrue(WebAssembly.validate(artifact.bytes.slice()))
+
+    const reachable = yield* analyze(
+      'reachable',
+      'pub fn below(left: char, right: char) -> bool { return left < right }\n' +
+        "pub fn main() -> i32 { if below('a', 'b') { return 0 }\n  return 1 }",
+    )
+    assert.deepEqual(Analysis.diagnostics(reachable), [])
+    assert.deepEqual(
+      Analysis.loweredMir(reachable)
+        .functions.map((fn) => fn.id.name)
+        .sort(),
+      ['below', 'main'],
+    )
   }),
 )

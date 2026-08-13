@@ -13,14 +13,14 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 
 | Prefix | Phase | Codes |
 | --- | --- | --- |
-| `LEX` | Lexical | 6 |
+| `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 4 |
 | `SEM` | Semantic | 95 |
 | `OWN` | Ownership | 12 |
 | `LAY` | Layout | 1 |
 
-There are 122 codes in total.
+There are 123 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -28,10 +28,11 @@ There are 122 codes in total.
 | --- | --- | --- |
 | `LEX0001` | Stable diagnostic code for a maximal unsupported byte region. | `Unsupported byte sequence` |
 | `LEX0002` | Stable code for an identifier-like modifier outside the closed literal vocabulary. | `Unknown static-literal modifier: <modifier>` |
-| `LEX0003` | Stable code for a literal whose matching closing delimiter is absent. | `Unterminated <delimiterWidth3multiline>static literal` |
+| `LEX0003` | Stable code for a literal whose matching closing delimiter is absent. | `Unterminated <subject> literal` |
 | `LEX0004` | Stable code for an integer-literal base prefix that no digit follows. | `Base-<radix> integer literal without digits` |
 | `LEX0005` | Stable code for a number-literal digit separator outside a position between two digits. | `Digit separator must sit between two digits` |
 | `LEX0006` | Stable code for a float-literal exponent marker that no exponent digit follows. | `Float literal exponent must have at least one digit` |
+| `LEX0007` | Stable code for a character literal that denotes a number of scalars other than one. | `Character literal must hold exactly one Unicode scalar, but holds <scalars>` |
 
 ## Parser (`PAR`)
 

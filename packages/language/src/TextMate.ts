@@ -83,9 +83,11 @@ export interface Grammar {
 }
 
 const literalPatterns: ReadonlyArray<GrammarPattern> = LiteralForm.forms.map((form) => {
-  const delimiter = '"'.repeat(form.delimiterWidth)
+  const quote = String.fromCharCode(form.delimiter)
+  const delimiter = quote.repeat(form.delimiterWidth)
   const byte = form.category === 'Bytes'
-  const width = form.delimiterWidth === 3 ? 'triple' : 'double'
+  const character = form.category === 'Character'
+  const width = character ? 'single' : form.delimiterWidth === 3 ? 'triple' : 'double'
   const raw = form.escapePolicy === 'Raw'
   const begin = form.modifier.length === 0 ? `(${delimiter})` : `(${form.modifier})(${delimiter})`
   const delimiterCapture = form.modifier.length === 0 ? '1' : '2'
@@ -93,7 +95,7 @@ const literalPatterns: ReadonlyArray<GrammarPattern> = LiteralForm.forms.map((fo
   return {
     name: `string.quoted.${width}${byte ? '.byte' : raw ? '.raw' : ''}.silk`,
     begin,
-    end: form.delimiterWidth === 3 ? `${guard}(${delimiter})` : `${guard}(")|$`,
+    end: form.delimiterWidth === 3 ? `${guard}(${delimiter})` : `${guard}(${quote})|$`,
     beginCaptures: {
       ...(form.modifier.length === 0
         ? {}
@@ -108,7 +110,7 @@ const literalPatterns: ReadonlyArray<GrammarPattern> = LiteralForm.forms.map((fo
       : [
           {
             name: 'constant.character.escape.silk',
-            match: '\\\\(?:[nrt0"\\\\]|x[0-9A-Fa-f]{2}|u\\{[0-9A-Fa-f]{1,6}\\})',
+            match: `\\\\(?:[nrt0"${character ? "'" : ''}\\\\]|x[0-9A-Fa-f]{2}|u\\{[0-9A-Fa-f]{1,6}\\})`,
           },
         ],
   }

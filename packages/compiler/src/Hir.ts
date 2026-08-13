@@ -233,6 +233,12 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'CharacterLiteral'
+      readonly value: number
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'ParameterReference'
       readonly parameter: DeclarationIndex.ParameterId
       readonly type: DeclarationIndex.SemanticType
@@ -1214,6 +1220,8 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       return `${indent}unit : () ${spanText(expression.span)}`
     case 'BooleanLiteral':
       return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+    case 'CharacterLiteral':
+      return `${indent}literal U+${expression.value.toString(16).toUpperCase().padStart(4, '0')} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'ParameterReference':
       return `${indent}param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'BindingReference':
