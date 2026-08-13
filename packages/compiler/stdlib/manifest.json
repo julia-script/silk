@@ -10,6 +10,11 @@
     "namespace": "Bytes"
   },
   {
+    "module": "silk/char",
+    "path": "silk/char.silk",
+    "namespace": "char"
+  },
+  {
     "module": "silk/core",
     "path": "silk/core.silk",
     "namespace": "Allocator",

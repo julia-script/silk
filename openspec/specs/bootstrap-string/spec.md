@@ -31,6 +31,20 @@ view, Unicode-scalar traversal, and future grapheme traversal operations. `strin
 direct indexing or a generic `length` operation whose unit is unstated. Returning a UTF-8 byte view
 MUST NOT allocate, copy, or permit mutation through that view.
 
+The language SHALL provide lowercase `char` as the compiler-known scalar that names one Unicode
+scalar value: a value from `0` to `0x10ffff` that is not a surrogate in `0xd800` to `0xdfff`.
+`char` SHALL occupy exactly 32 bits with a 4-byte alignment, SHALL expose the equality and the
+ordering operations, and SHALL order by Unicode scalar value. `char` MUST NOT expose arithmetic,
+because every arithmetic operation can leave that range, and MUST NOT convert to or from any
+integer without an explicit source operation.
+
+Scalar traversal SHALL state the unit in its own type once `char` values can be built. The
+traversal surface still reports a scalar as `u32` today, so `ScalarStep.scalar` and
+`scalarValue` remain typed `u32` until a follow-up adds the checked `u32`-to-`char` conversion
+and the representation of the surrogate hole that the conversion has to test. That follow-up
+owns retyping them; until it lands, the compiler cannot state that a traversal result is a
+Unicode scalar value.
+
 #### Scenario: Reject ambiguous indexing
 
 - **WHEN** source applies the ordinary index operator to a `string`
@@ -40,6 +54,16 @@ MUST NOT allocate, copy, or permit mutation through that view.
 
 - **WHEN** source requests the byte length and UTF-8 bytes of a valid `string`
 - **THEN** it observes the exact encoded byte count and one immutable allocation-free view
+
+#### Scenario: Keep a scalar value distinct from a count
+
+- **WHEN** source supplies a `u32` where a `char` is expected, or a `char` where a `u32` is expected
+- **THEN** semantic analysis rejects the expression rather than converting between the two
+
+#### Scenario: Refuse arithmetic on a scalar value
+
+- **WHEN** source applies an arithmetic or bitwise operator to two `char` operands
+- **THEN** semantic analysis reports the operand-type diagnostic rather than selecting a `char` operation
 
 ### Requirement: String conversions are explicit
 
