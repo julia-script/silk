@@ -35,6 +35,7 @@ it('keeps the composed algorithm byte-identical across fresh processes', () => {
     'silk/i64',
     'silk/layout',
     'silk/option',
+    'silk/order',
     'silk/raw-buffer',
     'silk/result',
     'silk/slot',

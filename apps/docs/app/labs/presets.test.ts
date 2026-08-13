@@ -552,6 +552,7 @@ describe('preset catalog', () => {
       'silk/i64',
       'silk/layout',
       'silk/option',
+      'silk/order',
       'silk/raw-buffer',
       'silk/result',
       'silk/slot',
