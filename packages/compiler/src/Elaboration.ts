@@ -575,8 +575,23 @@ export interface OperatorExpressionFact {
   readonly arguments: ReadonlyArray<ArgumentFact>
   readonly mappings: ReadonlyArray<BuiltinArgumentMappingFact>
   readonly contract: CallContractFact
+  readonly interfaceOperation?: InterfaceOperationFact
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
+}
+
+/**
+ * The bound contract one operator resolves through inside a generic body.
+ *
+ * The operator still elaborates against the compiler-known operation of a stand-in actor, because
+ * the operand type is not known until specialization. This records which interface operation the
+ * operator spells so specialization can redirect the call to a source witness; a scalar argument
+ * keeps the compiler-known operation and never consults it.
+ */
+export interface InterfaceOperationFact {
+  readonly capability: Type.Nominal
+  readonly provider: Type.Parameter
+  readonly operation: string
 }
 
 /** One declaration or builtin named as a callable value without invocation. */
@@ -4884,21 +4899,33 @@ const analyzeOperatorExpression = (
     )
   }
   const selectedFirstType = argumentsResult.facts.at(0)?.type
-  const genericInterface =
+  const boundOperand =
     selectedFirstType?._tag === 'Available' && Type.isParameter(selectedFirstType.type)
-      ? declaration.typeParameters.some((parameter) => {
+      ? selectedFirstType.type
+      : undefined
+  const interfaceOperation =
+    boundOperand === undefined
+      ? undefined
+      : declaration.typeParameters.flatMap((parameter): ReadonlyArray<InterfaceOperationFact> => {
           // Every operation the bound declares is callable on a bound-typed operand, so an operator
           // stays generic exactly when the bound's contract names the operation it spells.
           const bound = parameter.bound
-          if (
-            !Type.equals(parameter.type, selectedFirstType.type) ||
-            bound?._tag !== 'ResolvedBound'
-          )
-            return false
+          if (!Type.equals(parameter.type, boundOperand) || bound?._tag !== 'ResolvedBound')
+            return []
           const operationName = `${operator.slice(0, 1).toLowerCase()}${operator.slice(1)}`
           return bound.operations.includes(operationName)
-        })
-      : false
+            ? [
+                Object.freeze({
+                  capability: Type.nominal(bound.capability.module, bound.capability.name, [
+                    boundOperand,
+                  ]),
+                  provider: boundOperand,
+                  operation: operationName,
+                }),
+              ]
+            : []
+        })[0]
+  const genericInterface = interfaceOperation !== undefined
   const selectedActor: Operator.Actor =
     selectedFirstType?._tag === 'Available' && Type.isString(selectedFirstType.type)
       ? 'string'
@@ -4955,6 +4982,7 @@ const analyzeOperatorExpression = (
       arguments: argumentsResult.facts,
       mappings: builtinArgumentMappings(reference, argumentsResult.facts),
       contract: contract.fact,
+      ...(interfaceOperation === undefined ? {} : { interfaceOperation }),
       type: expressionType,
       syntax: node,
     }),
@@ -8161,6 +8189,9 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       _tag: 'BuiltinCall',
       operation: fact.reference.operation,
       intrinsic: fact.reference.intrinsic,
+      ...(fact._tag === 'Operator' && fact.interfaceOperation !== undefined
+        ? { interfaceOperation: fact.interfaceOperation }
+        : {}),
       typeArguments: Object.freeze(
         fact._tag === 'Call'
           ? fact.typeArguments.flatMap((argument) =>
