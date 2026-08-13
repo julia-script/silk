@@ -383,10 +383,12 @@ export const watch = Effect.fn('Workflow.watch')(function* (
   const loaded = yield* Effect.result(loadProject(options))
   if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
   const sourceRoot = loaded.success.entry.sourceRoot
+  // Taken before the pass rather than after it: an edit that lands while the pass is running must
+  // look like a change the pass did not read, so it recompiles instead of being skipped.
+  const compiled = yield* Ref.make(yield* sourceFingerprint(sourceRoot))
   yield* run(options)
   // ponytail: directories are enumerated once; a directory created later needs a restart.
   const directories = yield* sourceDirectories(sourceRoot)
-  const compiled = yield* Ref.make(yield* sourceFingerprint(sourceRoot))
   yield* Console.log(`Watching ${sourceRoot} for changes.`)
   yield* Stream.mergeAll(
     directories.map((directory) => fileSystem.watch(directory)),
