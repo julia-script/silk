@@ -96,6 +96,35 @@ pub fn main() -> i32 { return combine(40, 44) }`)
   }),
 )
 
+it.effect('checks a bound against a type argument an explicit prefix wrote', () =>
+  Effect.gen(function* () {
+    // A substitution seeded from a written prefix is still a substitution: what it binds faces the
+    // same conformance check an inferred binding does.
+    const declarations = `pub interface Arith<T> {
+  fn add(left: T, right: T) -> T
+  fn subtract(left: T, right: T) -> T
+}
+impl Arith<i32> for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
+struct Plain { value: i32 }
+pub fn combine<T: Arith, U>(left: T, right: T, other: U) -> T { return (left + right) - left }
+`
+    const { self, outcome } = yield* evaluate(
+      `${declarations}pub fn main() -> i32 { return combine<i32>(40, 44, true) }`,
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 44)
+
+    const violated = yield* snapshot(
+      `${declarations}pub fn main() -> i32 { let held = combine<Plain>(Plain { value: 1 }, Plain { value: 2 }, true) return 0 }`,
+    )
+    assert.include(
+      messages(violated),
+      'Invalid conformance: interface-bounds/main.Plain does not implement Arith',
+    )
+  }),
+)
+
 it.effect('accepts an interface another module declares as a bound', () =>
   Effect.gen(function* () {
     const { self, outcome } = yield* evaluate(`import silk.numeric { Integer }

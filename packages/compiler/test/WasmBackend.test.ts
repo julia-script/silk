@@ -185,6 +185,17 @@ it.effect('keeps every valid match corpus case in three-engine agreement', () =>
   }),
 )
 
+it.effect('agrees with the interpreter on partially annotated generic calls', () =>
+  Effect.gen(function* () {
+    // A substitution seeded from an explicit prefix specializes the same way an inferred one
+    // does, so emission must not be able to tell how the call was written.
+    const program = corpus.find((candidate) => candidate.name === 'generic-partial-type-arguments')
+    assert.notStrictEqual(program, undefined)
+    if (program === undefined) return
+    assert.strictEqual(yield* run(program.source), yield* interpret(program.source), program.name)
+  }),
+)
+
 it.effect('rejects a structural MIR cycle before structured emission', () =>
   Effect.gen(function* () {
     const snapshot = yield* snapshotOf('pub fn main() -> i32 { return 42 }')

@@ -194,6 +194,11 @@ export const invalidFloatLiteralCode = 'SEM0095' as const
 export const impureShortCircuitOperandCode = 'SEM0096' as const
 /** Stable code for a bound operation call whose receiver names more than one bounded parameter. */
 export const ambiguousBoundOperationCode = 'SEM0097' as const
+/** Stable code for one named type parameter left undetermined by an explicit prefix and the arguments. */
+export const uninferredTypeParameterCode = 'SEM0099' as const
+/** Stable code for an explicit type argument contradicting the type its value arguments imply. */
+export const typeArgumentConflictCode = 'SEM0100' as const
+
 /** Stable code for a bound operation whose selected witness has no lowering. */
 export const unlowerableBoundWitnessCode = 'SEM0101' as const
 
@@ -331,6 +336,8 @@ export type Code =
   | typeof impureShortCircuitOperandCode
   | typeof ambiguousBoundOperationCode
   | typeof analysisOnlyConstructCode
+  | typeof uninferredTypeParameterCode
+  | typeof typeArgumentConflictCode
   | typeof unlowerableBoundWitnessCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
@@ -599,6 +606,18 @@ export type Reason =
     }
   | { readonly _tag: 'TypeArgumentInference'; readonly target: string }
   | {
+      readonly _tag: 'UninferredTypeParameter'
+      readonly target: string
+      readonly parameter: string
+    }
+  | {
+      readonly _tag: 'TypeArgumentConflict'
+      readonly target: string
+      readonly parameter: string
+      readonly written: string
+      readonly implied: string
+    }
+  | {
       readonly _tag: 'PolymorphicRecursion'
       readonly caller: string
       readonly target: string
@@ -745,6 +764,8 @@ export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagno
       diagnostic.code === duplicateTypeParameterCode ||
       diagnostic.code === typeArgumentArityCode ||
       diagnostic.code === typeArgumentInferenceCode ||
+      diagnostic.code === uninferredTypeParameterCode ||
+      diagnostic.code === typeArgumentConflictCode ||
       diagnostic.code === genericParameterKindMismatchCode ||
       diagnostic.code === contractRowInferenceCode ||
       diagnostic.code === invalidEffectProvisionCode ||
@@ -2129,6 +2150,38 @@ export const typeArgumentInference = (target: string, span: SourceSpan.SourceSpa
     severity: 'error',
     message: `Cannot infer all type arguments for ${target} from supplied values`,
     reason: Object.freeze({ _tag: 'TypeArgumentInference', target }),
+    span,
+  })
+
+export const uninferredTypeParameter = (
+  target: string,
+  parameter: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: uninferredTypeParameterCode,
+    severity: 'error',
+    message: `Cannot infer type argument ${parameter} of ${target} from supplied values`,
+    reason: Object.freeze({ _tag: 'UninferredTypeParameter', target, parameter }),
+    span,
+  })
+
+export const typeArgumentConflict = (
+  target: string,
+  parameter: string,
+  written: string,
+  implied: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: typeArgumentConflictCode,
+    severity: 'error',
+    message: `Type argument ${parameter} of ${target} is ${written}, but the supplied values imply ${implied}`,
+    reason: Object.freeze({ _tag: 'TypeArgumentConflict', target, parameter, written, implied }),
     span,
   })
 

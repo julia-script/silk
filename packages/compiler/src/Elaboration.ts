@@ -3110,11 +3110,12 @@ function analyzeArguments(
     explicitTypes.length === builtinTypeParameters.length
       ? Type.substitution(builtinTypeParameters, explicitTypes)
       : undefined
+  // An explicit prefix is context for the value arguments just as a complete list is: the
+  // parameters it binds become concrete expected types, and the ones it leaves open stay symbolic
+  // exactly as they are when nothing was written.
   const substitution =
-    callTypeArguments?.explicit === true &&
-    explicitTypes !== undefined &&
-    explicitTypes.length === declaredTypeParameters.length
-      ? Type.substitution(declaredTypeParameters, explicitTypes)
+    callTypeArguments?.explicit === true && explicitTypes !== undefined
+      ? Type.prefixSubstitution(declaredTypeParameters, explicitTypes)
       : undefined
   const expectedTypes = Object.freeze(
     builtinParameters.length > 0
@@ -3313,6 +3314,169 @@ const callArityDiagnostic = (
   )
 }
 
+/** One value argument paired with the parameter type it must determine. */
+interface SpecializationSite {
+  /** Position of the argument in the call, so a caller can keep one mistake to one report. */
+  readonly ordinal: number
+  readonly pattern: SemanticType
+  readonly actual: SemanticType
+  readonly expression: ExpressionFact
+}
+
+/** One written type argument the value arguments contradict, reported at what was written. */
+interface SpecializationConflict {
+  readonly diagnostic: Diagnostic.Diagnostic
+  /** The argument that implied the other type, absent when no value argument is involved. */
+  readonly ordinal?: number
+}
+
+interface SeededSpecialization {
+  readonly substitution: Type.Substitution
+  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  readonly conflicts: ReadonlyArray<SpecializationConflict>
+  /**
+   * A parameter no explicit argument wrote and no value argument determines. It waits for the
+   * ordinary argument checks, because an argument the call got wrong is the better first report.
+   */
+  readonly unresolved?: Diagnostic.Diagnostic
+}
+
+/**
+ * Specializes a call from an explicit prefix of its type arguments plus its value arguments. The
+ * prefix seeds the substitution and the parameters past it are inferred exactly as they are when
+ * nothing was written, so a call annotates only the parameters inference cannot reach.
+ *
+ * A prefix that names every parameter binds everything and leaves inference nothing to do, which
+ * is the same substitution a complete explicit list has always produced.
+ *
+ * `deferred` names the parameters allowed to stay open because something other than these
+ * arguments determines them, which is how a callable section keeps its captured parameter generic.
+ */
+const seededSpecialization = (
+  target: string,
+  declared: ReadonlyArray<Type.Parameter>,
+  explicit: ReadonlyArray<TypeArgumentFact>,
+  sites: ReadonlyArray<SpecializationSite>,
+  span: SourceSpan.SourceSpan,
+  deferred: ReadonlySet<string> = new Set(),
+): SeededSpecialization => {
+  const written = new Map<string, TypeArgumentFact>()
+  const seeded = new Map<string, Type.GenericArgument>()
+  const conflicts: Array<SpecializationConflict> = []
+  for (const fact of explicit) {
+    const parameter = declared.at(fact.ordinal)
+    const argument = fact.type
+    if (parameter === undefined || argument === undefined) continue
+    if (parameter.kind !== 'Value' || !Type.isTypeArgument(argument)) {
+      conflicts.push(
+        Object.freeze({
+          diagnostic: Diagnostic.genericParameterKindMismatch(
+            parameter.name,
+            parameter.kind,
+            'Value',
+            fact.syntax.span,
+          ),
+        }),
+      )
+      continue
+    }
+    seeded.set(Type.key(parameter), argument)
+    written.set(Type.key(parameter), fact)
+  }
+  const inferred = new Map(seeded)
+  let rowFailure: Type.RowInferenceFailure | undefined
+  for (const site of sites) {
+    const attempt = new Map(inferred)
+    if (Type.infer(site.pattern, site.actual, attempt)) {
+      commitSpecialization(inferred, attempt)
+      continue
+    }
+    // Inference under the prefix failed. When the argument still satisfies what the prefix says
+    // this parameter is, the written type simply wins — that is how a widened literal keeps
+    // working under `take<u8>(1)`.
+    const expected = Type.substitute(site.pattern, inferred)
+    if (
+      typesCompatible(site.actual, expected) ||
+      contextualIntegerCompatible(site.expression, expected)
+    )
+      continue
+    rowFailure ??= Type.rowInferenceFailure(site.pattern, site.actual)
+    const implied = new Map<string, Type.GenericArgument>()
+    // Only what this argument alone implies can contradict the prefix; an argument that does not
+    // unify at all is an ordinary argument mismatch and belongs to the argument pass.
+    if (!Type.infer(site.pattern, site.actual, implied)) continue
+    for (const [identity, fact] of written) {
+      const suppliedArgument = implied.get(identity)
+      const explicitArgument = seeded.get(identity)
+      if (suppliedArgument === undefined || explicitArgument === undefined) continue
+      if (Type.genericArgumentKey(suppliedArgument) === Type.genericArgumentKey(explicitArgument))
+        continue
+      conflicts.push(
+        Object.freeze({
+          ordinal: site.ordinal,
+          diagnostic: Diagnostic.typeArgumentConflict(
+            target,
+            declared.at(fact.ordinal)?.name ?? fact.ordinal.toString(),
+            Type.encodeGenericArgument(explicitArgument),
+            Type.encodeGenericArgument(suppliedArgument),
+            fact.syntax.span,
+          ),
+        }),
+      )
+    }
+  }
+  const open = declared.find(
+    (parameter) => !inferred.has(Type.key(parameter)) && !deferred.has(Type.key(parameter)),
+  )
+  const typeArguments = Object.freeze(
+    declared.flatMap((parameter) => {
+      const argument = inferred.get(Type.key(parameter))
+      return argument === undefined ? [] : [argument]
+    }),
+  )
+  return Object.freeze({
+    substitution: inferred,
+    typeArguments,
+    conflicts: Object.freeze(conflicts),
+    ...(open === undefined || conflicts.length > 0
+      ? {}
+      : {
+          unresolved:
+            rowFailure === undefined
+              ? Diagnostic.uninferredTypeParameter(target, open.name, span)
+              : Diagnostic.contractRowInference(rowFailure, span),
+        }),
+  })
+}
+
+const commitSpecialization = (
+  target: Map<string, Type.GenericArgument>,
+  source: ReadonlyMap<string, Type.GenericArgument>,
+): void => {
+  target.clear()
+  for (const [identity, argument] of source) target.set(identity, argument)
+}
+
+const specializationSites = (
+  mappings: ReadonlyArray<ArgumentMappingFact>,
+): ReadonlyArray<SpecializationSite> =>
+  Object.freeze(
+    mappings.flatMap(
+      (mapping, ordinal): ReadonlyArray<SpecializationSite> =>
+        mapping.argument.type._tag === 'Available' &&
+        mapping.parameter.declaredType._tag === 'Resolved'
+          ? [
+              Object.freeze({
+                ordinal,
+                pattern: mapping.parameter.declaredType.type,
+                actual: mapping.argument.type.type,
+                expression: mapping.argument.expression,
+              }),
+            ]
+          : [],
+    ),
+  )
+
 const analyzeCallContract = (
   call: SyntaxTree.Node,
   reference: CallReferenceFact,
@@ -3482,8 +3646,11 @@ const analyzeCallContract = (
   )
   let substitution: Type.Substitution
   let typeArguments: ReadonlyArray<Type.GenericArgument>
+  let unresolvedSpecialization: Diagnostic.Diagnostic | undefined
   if (callTypeArguments?.explicit === true) {
-    if (callTypeArguments.facts.length !== declaredTypeParameters.length) {
+    // More type arguments than the callable declares is the arity error that remains: fewer is a
+    // prefix, and the parameters it leaves open are inferred from the value arguments below.
+    if (callTypeArguments.facts.length > declaredTypeParameters.length) {
       const diagnostic = Diagnostic.typeArgumentArity(
         reference.spelling,
         declaredTypeParameters.length,
@@ -3517,12 +3684,28 @@ const analyzeCallContract = (
         type: undefined,
       })
     }
-    typeArguments = Object.freeze(Array.from(callTypeArguments.types))
-    const explicitSubstitution = Type.substitution(declaredTypeParameters, typeArguments)
-    if (explicitSubstitution === undefined) {
-      throw new RangeError('validated call type arguments lost their declaration arity')
+    const seeded = seededSpecialization(
+      reference.spelling,
+      declaredTypeParameters,
+      callTypeArguments.facts,
+      specializationSites(mappings),
+      call.span,
+    )
+    const conflict = seeded.conflicts.at(0)
+    if (conflict !== undefined) {
+      return Object.freeze({
+        mappings,
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          cause: Diagnostic.identity(conflict.diagnostic),
+        }),
+        diagnostics: Object.freeze([conflict.diagnostic]),
+      })
     }
-    substitution = explicitSubstitution
+    typeArguments = seeded.typeArguments
+    substitution = seeded.substitution
+    unresolvedSpecialization = seeded.unresolved
   } else if (declaredTypeParameters.length === 0) {
     typeArguments = Object.freeze([])
     substitution = new Map()
@@ -3626,6 +3809,19 @@ const analyzeCallContract = (
       diagnostics: Object.freeze([
         callArityDiagnostic(reference, expectedCount, actualCount, call.span),
       ]),
+    })
+  }
+  // Every argument the call did supply is sound, so what remains open is genuinely undetermined
+  // rather than a consequence of an argument the author already needs to fix.
+  if (unresolvedSpecialization !== undefined) {
+    return Object.freeze({
+      mappings,
+      fact: Object.freeze({
+        _tag: 'Unavailable',
+        reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+        cause: Diagnostic.identity(unresolvedSpecialization),
+      }),
+      diagnostics: Object.freeze([unresolvedSpecialization]),
     })
   }
 
@@ -4009,6 +4205,27 @@ interface SectionContractResult {
   readonly valid: boolean
 }
 
+/** A section applies its arguments from the second parameter on: the first one is what it holds. */
+const sectionSpecializationSites = (
+  declaration: DeclarationFact,
+  arguments_: ReadonlyArray<ArgumentFact>,
+): ReadonlyArray<SpecializationSite> =>
+  Object.freeze(
+    arguments_.flatMap((argument, ordinal): ReadonlyArray<SpecializationSite> => {
+      const parameter = declaration.parameters.at(ordinal + 1)
+      return argument.type._tag === 'Available' && parameter?.declaredType._tag === 'Resolved'
+        ? [
+            Object.freeze({
+              ordinal,
+              pattern: parameter.declaredType.type,
+              actual: argument.type.type,
+              expression: argument.expression,
+            }),
+          ]
+        : []
+    }),
+  )
+
 const analyzeSectionContract = (
   call: SyntaxTree.Node,
   reference: Extract<CallReferenceFact, { readonly _tag: 'Resolved' | 'ResolvedBuiltin' }>,
@@ -4049,11 +4266,12 @@ const analyzeSectionContract = (
 
   const declaredParameters = reference.declaration.typeParameters.map((parameter) => parameter.type)
   const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const contradicted = new Set<number>()
   let substitution = new Map<string, Type.GenericArgument>()
   if (callTypeArguments.explicit) {
     if (
       callTypeArguments.types === undefined ||
-      callTypeArguments.facts.length !== declaredParameters.length
+      callTypeArguments.facts.length > declaredParameters.length
     ) {
       diagnostics.push(
         Diagnostic.typeArgumentArity(
@@ -4064,9 +4282,24 @@ const analyzeSectionContract = (
         ),
       )
     } else {
-      substitution = new Map(
-        Type.substitution(declaredParameters, callTypeArguments.types) ?? new Map(),
+      // A section takes a prefix the same way an ordinary call does: what the list writes is
+      // bound, what the supplied arguments determine is inferred, and the parameter the section
+      // still holds open belongs to the captured leading parameter.
+      const leading = reference.declaration.parameters.at(0)?.declaredType
+      const seeded = seededSpecialization(
+        reference.spelling,
+        declaredParameters,
+        callTypeArguments.facts,
+        sectionSpecializationSites(reference.declaration, arguments_),
+        call.span,
+        new Set(leading?._tag === 'Resolved' ? Type.parameters(leading.type).map(Type.key) : []),
       )
+      substitution = new Map(seeded.substitution)
+      for (const conflict of seeded.conflicts) {
+        diagnostics.push(conflict.diagnostic)
+        if (conflict.ordinal !== undefined) contradicted.add(conflict.ordinal)
+      }
+      if (seeded.unresolved !== undefined) diagnostics.push(seeded.unresolved)
     }
   } else {
     for (const [ordinal, argument] of arguments_.entries()) {
@@ -4100,6 +4333,9 @@ const analyzeSectionContract = (
   for (const [ordinal, argument] of arguments_.entries()) {
     const parameter = reference.declaration.parameters.at(ordinal + 1)
     if (argument.type._tag !== 'Available' || parameter?.declaredType._tag !== 'Resolved') continue
+    // An argument already named as contradicting a written type argument is one mistake, and it
+    // was reported where the author wrote the type.
+    if (contradicted.has(ordinal)) continue
     const expected = Type.substitute(parameter.declaredType.type, substitution)
     if (!Type.isConcrete(expected) || typesCompatible(argument.type.type, expected)) continue
     diagnostics.push(

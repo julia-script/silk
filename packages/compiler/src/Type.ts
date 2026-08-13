@@ -1192,16 +1192,21 @@ export const infer = (
   return equals(pattern, actual)
 }
 
-/** Builds a substitution from ordered parameters and arguments when their arities match. */
-export const substitution = (
+/**
+ * Builds a substitution from a leading run of parameters, binding only the parameters an argument
+ * was supplied for. The parameters past the prefix stay open, so inference can determine them
+ * afterwards; the result is undefined when an argument's kind does not match its parameter, or
+ * when more arguments were supplied than the declaration has parameters.
+ */
+export const prefixSubstitution = (
   declared: ReadonlyArray<Parameter>,
   arguments_: ReadonlyArray<GenericArgument>,
 ): Substitution | undefined => {
-  if (declared.length !== arguments_.length) return undefined
+  if (arguments_.length > declared.length) return undefined
   const result = new Map<string, GenericArgument>()
-  for (const [index, parameter_] of declared.entries()) {
-    const argument = arguments_.at(index)
-    if (argument === undefined) return undefined
+  for (const [index, argument] of arguments_.entries()) {
+    const parameter_ = declared.at(index)
+    if (parameter_ === undefined) return undefined
     if (
       (parameter_.kind === 'Value' && !isTypeArgument(argument)) ||
       (parameter_.kind === 'FailureRow' && !isFailureRowArgument(argument)) ||
@@ -1212,3 +1217,10 @@ export const substitution = (
   }
   return result
 }
+
+/** Builds a substitution from ordered parameters and arguments when their arities match. */
+export const substitution = (
+  declared: ReadonlyArray<Parameter>,
+  arguments_: ReadonlyArray<GenericArgument>,
+): Substitution | undefined =>
+  declared.length !== arguments_.length ? undefined : prefixSubstitution(declared, arguments_)

@@ -1839,11 +1839,21 @@ fn main() -> i32 { let maker = make(true) return 0 }`,
   )
 })
 
-it('rejects partial explicit generic argument lists on callable sections', () => {
+it('accepts a partial explicit generic argument list on a callable section', () => {
   const result = analyzeText(
     'fixture://partial-explicit-section-generics.silk',
     `fn choose<T, U>(value: T, left: U, right: U) -> T { return value }
 fn main() -> i32 { let callback = choose<i32>(1, 2) return 0 }`,
+  )
+
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('rejects more explicit generic arguments than a callable section declares', () => {
+  const result = analyzeText(
+    'fixture://excess-explicit-section-generics.silk',
+    `fn choose<T, U>(value: T, left: U, right: U) -> T { return value }
+fn main() -> i32 { let callback = choose<i32, i32, bool>(1, 2) return 0 }`,
   )
 
   assert.deepEqual(

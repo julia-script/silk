@@ -441,6 +441,47 @@ pub fn main() -> i32 {
 
 Bounded generics take an interface bound, written `T: Bound`.
 
+#### Which type arguments may be omitted
+
+A call writes **all**, **some**, or **none** of a callable's type arguments. What it writes is a
+prefix matched to the declared parameters in order; every parameter past the prefix is inferred from
+the value arguments exactly as it is when nothing was written. A declaration with one parameter
+inference cannot reach therefore costs one annotation rather than a full list.
+
+```silk
+fn pick<A, B>(left: A, right: B) -> A {
+  return move left
+}
+
+fn phantom<A, B>(value: A) -> A {
+  return move value
+}
+
+pub fn main() -> i32 {
+  let inferred = pick(40, true)
+  let prefix = pick<i32>(1, true)
+  let complete = phantom<i32, bool>(1)
+  return inferred + prefix + complete
+}
+```
+
+Three rules bound a prefix:
+
+- Writing **more** type arguments than the callable declares is `SEM0051`. Writing fewer is a
+  prefix, not an arity error.
+- A parameter the prefix does not write and no value argument determines is `SEM0099`, which names
+  that parameter rather than the whole list.
+- A written type argument the value arguments contradict is `SEM0100`, reported at the type argument
+  that was written rather than at the call.
+
+The list is positional, so a parameter can be omitted only when every parameter after it is omitted
+too: `pick<i32>` writes `A`, and there is no way to write `B` alone. Declare the parameters
+inference cannot reach — a phantom parameter, one that appears only in the return type, or one that
+appears only in a failure or requirement row — ahead of the parameters the arguments determine.
+
+A callable section, which supplies every argument but the first, takes a prefix the same way. Its
+own leading parameter stays open there, because the section is still waiting for that argument.
+
 ## 4. Memory and ownership
 
 ### 4.1 Affine values, explicit moves
