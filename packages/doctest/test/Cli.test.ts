@@ -108,5 +108,5 @@ it.effect(
     Effect.gen(function* () {
       assert.strictEqual(yield* Cli.run({ stdlib: true }), 0)
     }).pipe(Effect.provide(NodeServices.layer)),
-  120_000,
+  240_000,
 )

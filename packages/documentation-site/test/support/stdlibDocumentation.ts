@@ -12,7 +12,7 @@ import * as Effect from 'effect/Effect'
  * that it declares no workspace dependency at all, and the way to keep its local view of the JSON
  * from drifting is to feed it what the emitter really writes rather than a fixture that ages.
  */
-export const encoded = Effect.fn('stdlibDocumentation.encoded')(function* (): Effect.fn.Return<
+const build = Effect.fn('stdlibDocumentation.build')(function* (): Effect.fn.Return<
   string,
   never,
   never
@@ -35,6 +35,19 @@ export const encoded = Effect.fn('stdlibDocumentation.encoded')(function* (): Ef
     }),
   )
 })
+
+/**
+ * The same text for every test in the file, built once.
+ *
+ * Building it analyzes every module of the shipped manifest and its import closure, which costs
+ * around a minute; three tests need the same bytes, and rebuilding per test spent that minute three
+ * times over — enough to blow a test timeout on a loaded runner while proving nothing new.
+ */
+let pending: Promise<string> | undefined
+
+export const encoded: Effect.Effect<string> = Effect.promise(
+  () => (pending ??= Effect.runPromise(build())),
+)
 
 /** The module identities the shipped manifest promises, in its own order. */
 export const manifestModules: ReadonlyArray<string> = CompilerStdlib.manifest.map(

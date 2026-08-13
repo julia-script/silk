@@ -5,6 +5,7 @@ import * as Effect from 'effect/Effect'
 import * as Doctest from '../src/Doctest.js'
 import * as Report from '../src/Report.js'
 import * as Stdlib from '../src/Stdlib.js'
+import { documentation as stdlibDocumentation } from './support/stdlibDocumentation.js'
 
 /**
  * Every example the standard library documents, opted out or not.
@@ -19,7 +20,7 @@ it.effect(
   'compiles every fenced Silk example in the standard library',
   () =>
     Effect.gen(function* () {
-      const documentation = yield* Stdlib.documentation()
+      const documentation = yield* stdlibDocumentation
       const report = yield* Doctest.run({ documentation, sources: Stdlib.sources })
 
       assert.isAbove(
@@ -43,7 +44,7 @@ it.effect(
         skipped,
       )
     }),
-  60_000,
+  180_000,
 )
 
 /**
@@ -55,13 +56,13 @@ it.effect(
   'documents every module of the shipped manifest',
   () =>
     Effect.gen(function* () {
-      const documentation = yield* Stdlib.documentation()
+      const documentation = yield* stdlibDocumentation
       assert.deepStrictEqual(
         documentation.modules.map((module) => module.name),
         CompilerStdlib.manifest.map((entry) => entry.module),
       )
     }),
-  60_000,
+  180_000,
 )
 
 /**
@@ -73,7 +74,7 @@ it.effect(
   'reads the same examples back out of encoded JSON',
   () =>
     Effect.gen(function* () {
-      const documentation = yield* Stdlib.documentation()
+      const documentation = yield* stdlibDocumentation
       const parsed: unknown = JSON.parse(Json.encode(documentation))
       const live = yield* Doctest.run({ documentation, sources: Stdlib.sources })
       const roundTripped = yield* Doctest.run({
@@ -95,5 +96,5 @@ it.effect(
         },
       )
     }),
-  120_000,
+  180_000,
 )

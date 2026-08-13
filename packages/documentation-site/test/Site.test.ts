@@ -54,7 +54,7 @@ it.effect(
     Effect.gen(function* () {
       // Parsed from text, so the renderer reads what `silk doc` writes rather than what the
       // emitter happens to hold in memory.
-      const parsed: unknown = JSON.parse(yield* encoded())
+      const parsed: unknown = JSON.parse(yield* encoded)
       const decoded = Model.decode(parsed)
       assert.strictEqual(decoded._tag, 'Decoded')
       if (decoded._tag !== 'Decoded') return
@@ -99,14 +99,14 @@ it.effect(
         'no documentation value may reach the page as an element',
       )
     }),
-  120_000,
+  240_000,
 )
 
 it.effect(
   'renders the same bytes twice',
   () =>
     Effect.gen(function* () {
-      const parsed: unknown = JSON.parse(yield* encoded())
+      const parsed: unknown = JSON.parse(yield* encoded)
       const decoded = Model.decode(parsed)
       if (decoded._tag !== 'Decoded') return assert.fail('expected documentation JSON')
       const first = Site.render(decoded.documentation)
@@ -116,7 +116,7 @@ it.effect(
         first.files.map((file) => [file.path, file.contents]),
       )
     }),
-  120_000,
+  240_000,
 )
 
 /**
@@ -127,7 +127,7 @@ it.effect(
   'finds a standard-library declaration by name through the emitted index',
   () =>
     Effect.gen(function* () {
-      const decoded = Model.decode(JSON.parse(yield* encoded()))
+      const decoded = Model.decode(JSON.parse(yield* encoded))
       if (decoded._tag !== 'Decoded') return assert.fail('expected documentation JSON')
       const site = Site.render(decoded.documentation)
       const indexFile = site.files.find((file) => file.path === 'search-index.js')
@@ -150,5 +150,5 @@ it.effect(
       assert.include(target.contents, `id="${String(anchor)}"`)
       assert.include(target.contents, '<script src="search-index.js"></script>')
     }),
-  120_000,
+  240_000,
 )
