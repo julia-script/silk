@@ -168,6 +168,23 @@ export type CallReferenceFact =
       readonly service: DeclarationIndex.ServiceFact
       readonly operation: DeclarationIndex.ServiceOperationFact
     }
+  /**
+   * One operation of a type parameter's bound, reached through the bound's own name. The contract
+   * is the interface's own declaration over the bounded parameter, checked once before any concrete
+   * argument exists; which implementation runs is the witness's answer at specialization, not one
+   * this reference records.
+   */
+  | {
+      readonly _tag: 'ResolvedBoundOperation'
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly capability: Type.Nominal
+      readonly provider: Type.Parameter
+      readonly operation: string
+      readonly declaration: DeclarationIndex.ServiceOperationFact
+      readonly parameters: ReadonlyArray<SemanticType>
+      readonly result: SemanticType
+    }
   | {
       readonly _tag: 'Missing'
       readonly spelling: string
@@ -558,8 +575,23 @@ export interface OperatorExpressionFact {
   readonly arguments: ReadonlyArray<ArgumentFact>
   readonly mappings: ReadonlyArray<BuiltinArgumentMappingFact>
   readonly contract: CallContractFact
+  readonly interfaceOperation?: InterfaceOperationFact
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
+}
+
+/**
+ * The bound contract one operator resolves through inside a generic body.
+ *
+ * The operator still elaborates against the compiler-known operation of a stand-in actor, because
+ * the operand type is not known until specialization. This records which interface operation the
+ * operator spells so specialization can redirect the call to a source witness; a scalar argument
+ * keeps the compiler-known operation and never consults it.
+ */
+export interface InterfaceOperationFact {
+  readonly capability: Type.Nominal
+  readonly provider: Type.Parameter
+  readonly operation: string
 }
 
 /** One declaration or builtin named as a callable value without invocation. */
@@ -3226,7 +3258,13 @@ const sourceCallableTypeParameters = (
 const callArityDiagnostic = (
   reference: Extract<
     CallReferenceFact,
-    { readonly _tag: 'Resolved' | 'ResolvedBuiltin' | 'ResolvedServiceOperation' }
+    {
+      readonly _tag:
+        | 'Resolved'
+        | 'ResolvedBuiltin'
+        | 'ResolvedServiceOperation'
+        | 'ResolvedBoundOperation'
+    }
   >,
   expectedCount: number,
   actualCount: number,
@@ -3243,9 +3281,15 @@ const callArityDiagnostic = (
           actor: reference.actor,
           operation: reference.operation,
         })
-      : reference._tag === 'Resolved'
-        ? reference.declaration.id
-        : reference.operation.id,
+      : reference._tag === 'ResolvedBoundOperation'
+        ? Object.freeze({
+            _tag: 'BuiltinTarget',
+            actor: reference.capability.name,
+            operation: reference.operation,
+          })
+        : reference._tag === 'Resolved'
+          ? reference.declaration.id
+          : reference.operation.id,
     expectedCount,
     actualCount,
     span,
@@ -3269,7 +3313,9 @@ const analyzeCallContract = (
       diagnostics: Object.freeze([]),
     })
   }
-  if (reference._tag === 'ResolvedBuiltin') {
+  // A bound operation's contract is a fixed parameter and result list over the bounded parameter,
+  // exactly like a compiler-known operation's, so both are checked the same way.
+  if (reference._tag === 'ResolvedBuiltin' || reference._tag === 'ResolvedBoundOperation') {
     const unavailableArgument = argumentsList.find((argument) => argument.type._tag !== 'Available')
     if (unavailableArgument !== undefined) {
       return Object.freeze({
@@ -3685,6 +3731,121 @@ const serviceOperation = (
       operation.name._tag === 'Present' &&
       operation.name.spelling === spelling_,
   )
+
+/**
+ * The contract one interface operation declares over a bounded parameter.
+ *
+ * The interface writes its contract over its own type parameter; a bound applies that interface to
+ * one parameter of the bounded declaration, so the operation's contract over that parameter is the
+ * declared one with the interface's parameter substituted. It is the same contract the conformance
+ * check already holds every witness to, which is what lets the body be checked once, over the
+ * canonical parameter, before any concrete argument exists.
+ */
+const interfaceOperationContract = (
+  interface_: DeclarationIndex.InterfaceFact,
+  member: string,
+  parameter: Type.Parameter,
+):
+  | {
+      readonly declaration: DeclarationIndex.ServiceOperationFact
+      readonly parameters: ReadonlyArray<SemanticType>
+      readonly result: SemanticType
+    }
+  | undefined => {
+  const operation = interface_.operations.find(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === member,
+  )
+  if (
+    operation === undefined ||
+    operation.functionKind !== 'Ordinary' ||
+    operation.typeParameters.length > 0 ||
+    operation.returnType._tag !== 'Resolved'
+  )
+    return undefined
+  const substitution = Type.substitution(
+    interface_.typeParameters.map((declared) => declared.type),
+    Object.freeze([parameter]),
+  )
+  if (substitution === undefined) return undefined
+  const parameters = operation.parameters.flatMap((declared) =>
+    declared.declaredType._tag === 'Resolved'
+      ? [Type.substitute(declared.declaredType.type, substitution)]
+      : [],
+  )
+  if (parameters.length !== operation.parameters.length) return undefined
+  return Object.freeze({
+    declaration: operation,
+    parameters: Object.freeze(parameters),
+    result: Type.substitute(operation.returnType.type, substitution),
+  })
+}
+
+/**
+ * Resolves one `Bound.operation(...)` receiver against the bounds of the declaration being
+ * elaborated.
+ *
+ * A bound's operation is spelled through the bound's own name, so inside a body bounded by an
+ * interface that name selects the bound's operation rather than a same-named public function of the
+ * module declaring the interface. The preference is deliberately narrow: only a name the bound's
+ * recorded contract actually declares is taken, so every other member of that module keeps
+ * resolving exactly where it resolved before, and a body with no such bound is untouched.
+ *
+ * One declaration may bound two of its parameters by one interface. The receiver then names no
+ * single parameter, and the call is reported rather than resolved to either.
+ */
+const boundOperationReference = (
+  declaration: DeclarationFact,
+  interface_: DeclarationIndex.InterfaceFact,
+  qualifier: string,
+  member: string,
+  memberToken: Token.Token,
+):
+  | {
+      readonly _tag: 'BoundOperation'
+      readonly reference: Extract<CallReferenceFact, { readonly _tag: 'ResolvedBoundOperation' }>
+    }
+  | { readonly _tag: 'AmbiguousBound'; readonly parameters: ReadonlyArray<string> }
+  | undefined => {
+  if (interface_.canonical._tag !== 'Canonical') return undefined
+  const capability = interface_.canonical.id
+  const bounded = declaration.typeParameters.filter((parameter) => {
+    const bound = parameter.bound
+    return (
+      bound?._tag === 'ResolvedBound' &&
+      bound.capability.module === capability.module &&
+      bound.capability.name === capability.name &&
+      bound.operations.includes(member)
+    )
+  })
+  if (bounded.length === 0) return undefined
+  if (bounded.length > 1)
+    return Object.freeze({
+      _tag: 'AmbiguousBound',
+      parameters: Object.freeze(
+        bounded.map((parameter) =>
+          parameter.name._tag === 'Present' ? parameter.name.spelling : Type.encode(parameter.type),
+        ),
+      ),
+    })
+  const parameter = bounded.at(0)
+  if (parameter === undefined) return undefined
+  const contract = interfaceOperationContract(interface_, member, parameter.type)
+  if (contract === undefined) return undefined
+  return Object.freeze({
+    _tag: 'BoundOperation',
+    reference: Object.freeze({
+      _tag: 'ResolvedBoundOperation' as const,
+      spelling: `${qualifier}.${member}`,
+      token: memberToken,
+      capability: Type.nominal(capability.module, capability.name, [parameter.type]),
+      provider: parameter.type,
+      operation: member,
+      declaration: contract.declaration,
+      parameters: contract.parameters,
+      result: contract.result,
+    }),
+  })
+}
 
 const resolvedFunctionReference = (
   source: SourceFile.SourceFile,
@@ -4738,21 +4899,33 @@ const analyzeOperatorExpression = (
     )
   }
   const selectedFirstType = argumentsResult.facts.at(0)?.type
-  const genericInterface =
+  const boundOperand =
     selectedFirstType?._tag === 'Available' && Type.isParameter(selectedFirstType.type)
-      ? declaration.typeParameters.some((parameter) => {
+      ? selectedFirstType.type
+      : undefined
+  const interfaceOperation =
+    boundOperand === undefined
+      ? undefined
+      : declaration.typeParameters.flatMap((parameter): ReadonlyArray<InterfaceOperationFact> => {
           // Every operation the bound declares is callable on a bound-typed operand, so an operator
           // stays generic exactly when the bound's contract names the operation it spells.
           const bound = parameter.bound
-          if (
-            !Type.equals(parameter.type, selectedFirstType.type) ||
-            bound?._tag !== 'ResolvedBound'
-          )
-            return false
+          if (!Type.equals(parameter.type, boundOperand) || bound?._tag !== 'ResolvedBound')
+            return []
           const operationName = `${operator.slice(0, 1).toLowerCase()}${operator.slice(1)}`
           return bound.operations.includes(operationName)
-        })
-      : false
+            ? [
+                Object.freeze({
+                  capability: Type.nominal(bound.capability.module, bound.capability.name, [
+                    boundOperand,
+                  ]),
+                  provider: boundOperand,
+                  operation: operationName,
+                }),
+              ]
+            : []
+        })[0]
+  const genericInterface = interfaceOperation !== undefined
   const selectedActor: Operator.Actor =
     selectedFirstType?._tag === 'Available' && Type.isString(selectedFirstType.type)
       ? 'string'
@@ -4809,6 +4982,7 @@ const analyzeOperatorExpression = (
       arguments: argumentsResult.facts,
       mappings: builtinArgumentMappings(reference, argumentsResult.facts),
       contract: contract.fact,
+      ...(interfaceOperation === undefined ? {} : { interfaceOperation }),
       type: expressionType,
       syntax: node,
     }),
@@ -5866,6 +6040,40 @@ function analyzeExpression(
     }
     if (
       qualifierLookup._tag === 'Resolved' &&
+      qualifierLookup.declaration._tag === 'InterfaceDeclaration'
+    ) {
+      const bound = boundOperationReference(
+        declaration,
+        qualifierLookup.declaration,
+        qualifier,
+        member,
+        memberToken,
+      )
+      if (bound?._tag === 'AmbiguousBound') {
+        const ambiguous = Diagnostic.ambiguousBoundOperation(
+          `${qualifier}.${member}`,
+          bound.parameters,
+          memberToken.span,
+        )
+        return finishDeclarationCall(
+          node,
+          Object.freeze({
+            _tag: 'Missing',
+            spelling: `${qualifier}.${member}`,
+            token: memberToken,
+            cause: Diagnostic.identity(ambiguous),
+          }),
+          argumentsResult,
+          callTypeArguments,
+          ambiguous,
+          resolution.index,
+        )
+      }
+      if (bound !== undefined)
+        return finishBoundOperationCall(node, bound.reference, argumentsResult, callTypeArguments)
+    }
+    if (
+      qualifierLookup._tag === 'Resolved' &&
       (qualifierLookup.declaration._tag === 'StructDeclaration' ||
         qualifierLookup.declaration._tag === 'InterfaceDeclaration') &&
       qualifierLookup.declaration.canonical._tag === 'Canonical'
@@ -6245,6 +6453,58 @@ const finishDeclarationCall = (
       ...callTypeArguments.diagnostics,
       ...callContract.diagnostics,
       ...constraintDiagnostics,
+    ]),
+    type: expressionType._tag === 'Available' ? expressionType.type : undefined,
+  })
+}
+
+/**
+ * Finishes one call to an operation the enclosing declaration's bound declares.
+ *
+ * The contract is the interface's own, over the bounded parameter, so the call checks exactly like
+ * a compiler-known operation's. It carries no type arguments of its own: the only type the call
+ * varies over is the bounded parameter, and that one is supplied by the specialization of the
+ * declaration this body belongs to.
+ */
+const finishBoundOperationCall = (
+  node: SyntaxTree.Node,
+  reference: Extract<CallReferenceFact, { readonly _tag: 'ResolvedBoundOperation' }>,
+  argumentsResult: ArgumentsResult,
+  callTypeArguments: CallTypeArgumentsResult,
+): ExpressionResult => {
+  const typeArgumentDiagnostic =
+    callTypeArguments.explicit && callTypeArguments.facts.length > 0
+      ? Diagnostic.typeArgumentArity(
+          reference.spelling,
+          0,
+          callTypeArguments.facts.length,
+          node.span,
+        )
+      : undefined
+  const callContract = analyzeCallContract(node, reference, argumentsResult.facts)
+  const expressionType =
+    hasAvailableCallSyntax(node) &&
+    typeArgumentDiagnostic === undefined &&
+    callContract.fact._tag === 'Compatible'
+      ? availableExpressionType(reference.result)
+      : unavailableExpressionType
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Call',
+      reference,
+      path: referencePath(node),
+      typeArguments: callTypeArguments.facts,
+      arguments: argumentsResult.facts,
+      mappings: callContract.mappings,
+      contract: callContract.fact,
+      type: expressionType,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze([
+      ...(typeArgumentDiagnostic === undefined ? [] : [typeArgumentDiagnostic]),
+      ...argumentsResult.diagnostics,
+      ...callTypeArguments.diagnostics,
+      ...callContract.diagnostics,
     ]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
   })
@@ -7765,6 +8025,53 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
     })
   }
   if (
+    fact.reference._tag === 'ResolvedBoundOperation' &&
+    fact.contract._tag === 'Compatible' &&
+    fact.type._tag === 'Available'
+  ) {
+    const borrowIds = Object.freeze(
+      fact.arguments.flatMap(
+        (argument, ordinal): ReadonlyArray<Hir.BorrowId> =>
+          argument.expression._tag === 'Borrow' &&
+          argument.expression.formation._tag !== 'Unavailable'
+            ? [
+                Object.freeze({
+                  _tag: 'BorrowId' as const,
+                  function: argument.id.function,
+                  callSpan: argument.id.callSpan,
+                  ordinal,
+                }),
+              ]
+            : [],
+      ),
+    )
+    return Object.freeze({
+      _tag: 'BoundOperationCall',
+      capability: fact.reference.capability,
+      provider: fact.reference.provider,
+      operation: fact.reference.operation,
+      arguments: Object.freeze(
+        fact.arguments.map((argument, ordinal) =>
+          hirExpression(
+            argument.expression,
+            argument.expression._tag === 'Borrow' &&
+              argument.expression.formation._tag !== 'Unavailable'
+              ? Object.freeze({
+                  _tag: 'BorrowId',
+                  function: argument.id.function,
+                  callSpan: argument.id.callSpan,
+                  ordinal,
+                })
+              : undefined,
+          ),
+        ),
+      ),
+      loanEnds: borrowIds,
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (
     fact.reference._tag === 'ResolvedBuiltin' &&
     fact.contract._tag === 'Compatible' &&
     fact.type._tag === 'Available'
@@ -7882,6 +8189,9 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       _tag: 'BuiltinCall',
       operation: fact.reference.operation,
       intrinsic: fact.reference.intrinsic,
+      ...(fact._tag === 'Operator' && fact.interfaceOperation !== undefined
+        ? { interfaceOperation: fact.interfaceOperation }
+        : {}),
       typeArguments: Object.freeze(
         fact._tag === 'Call'
           ? fact.typeArguments.flatMap((argument) =>

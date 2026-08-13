@@ -24,7 +24,7 @@ The library has 38 modules.
 | [`silk/char`](#silk-char) | `char` | 6 |
 | [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
 | [`silk/core`](#silk-core) | `Allocator` | 17 |
-| [`silk/effects`](#silk-effects) | `Effect` | 22 |
+| [`silk/effects`](#silk-effects) | `Effect` | 26 |
 | [`silk/f32`](#silk-f32) | `f32` | 51 |
 | [`silk/f64`](#silk-f64) | `f64` | 51 |
 | [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 85 |
@@ -785,6 +785,67 @@ pub effect fn flatten<A, !E, !F, ?R, ?S>(self: once Effect<Effect<A ! F ? S> ! E
 ```
 
 Removes one Effect layer from a nested Effect.
+
+### `Pair`
+
+```silk
+pub struct Pair<A, B>
+```
+
+Two success values collected in order by `Effect.zip`.
+
+| Field | Description |
+| --- | --- |
+| `pub first: A` | The first Effect's success value. |
+| `pub second: B` | The second Effect's success value. |
+
+### `Triple`
+
+```silk
+pub struct Triple<A, B, C>
+```
+
+Three success values collected in order by `Effect.zip3`.
+
+| Field | Description |
+| --- | --- |
+| `pub first: A` | The first Effect's success value. |
+| `pub second: B` | The second Effect's success value. |
+| `pub third: C` | The third Effect's success value. |
+
+### `zip`
+
+```silk
+pub effect fn zip<A, B, !E, !F, ?R, ?S>(self: once Effect<A ! E ? R>, other: once Effect<B ! F ? S>) -> silk/effects.Pair<A, B> ! E | F ? R | S
+```
+
+Runs two Effects in declaration order and collects both success values.
+
+The order is the body's own statement order rather than a scheduling promise: the second Effect
+is only constructed into a value here, and nothing runs it until the first `run` has produced a
+success. A typed failure from the first Effect therefore propagates out of this body before the
+second Effect is ever executed, and the unrun second Effect is released by the ordinary local
+cleanup of the frame the propagation leaves.
+
+Both failure rows and both requirement rows are unioned, so the result is `! E | F ? R | S`. The
+fields are `pub`, so a caller in another module can project `first` and `second` directly.
+
+This combinator is fixed-arity by construction. Each operand is a distinct parameter, so no
+Effect is ever stored in a collection — see the note on `zip3` for why that matters.
+
+### `zip3`
+
+```silk
+pub effect fn zip3<A, B, C, !E, !F, !G, ?R, ?S, ?T>(self: once Effect<A ! E ? R>, second: once Effect<B ! F ? S>, third: once Effect<C ! G ? T>) -> silk/effects.Triple<A, B, C> ! E | F | G ? R | S | T
+```
+
+Runs three Effects in declaration order and collects all three success values.
+
+Arity is extended by adding a parameter rather than by accepting a collection. An Effect value is
+compiler-private and has no target layout, so it cannot live in runtime-indexed storage such as a
+`Vector`; a collection-taking `all` would need a storable Effect representation, which is a
+compiler-core change rather than a library one. Distinct parameters keep every Effect in the
+hidden-identity specialization path, where it is erased before lowering.
 
 ### `tap`
 

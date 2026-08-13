@@ -262,20 +262,43 @@ const compareIntrinsicCalls = (left: IntrinsicCall, right: IntrinsicCall): numbe
   left.span.start - right.span.start ||
   left.span.end - right.span.end
 
-/** Collects the canonical intrinsic identities retained by reachable function instances. */
-const reachableIntrinsics = (instances: ReadonlyArray<Instance>): ReadonlyArray<IntrinsicCall> => {
+/**
+ * Collects the canonical intrinsic identities retained by reachable function instances.
+ *
+ * A bound operation names no intrinsic until its type argument is known, so its identity is read
+ * from the witness this instance's substitution selects. Two instances of one body therefore
+ * contribute two identities, which is exactly what target availability has to see.
+ */
+const reachableIntrinsics = (
+  instances: ReadonlyArray<Instance>,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<IntrinsicCall> => {
   const calls = new Map<string, IntrinsicCall>()
   for (const instance of instances) {
     for (const statement of instance.function.statements) {
       for (const root of Hir.statementExpressions(statement)) {
         for (const expression of Hir.expressionTree(root)) {
+          const selected =
+            expression._tag === 'BoundOperationCall'
+              ? (() => {
+                  const capability = Type.substitute(expression.capability, instance.substitution)
+                  return Type.isNominal(capability)
+                    ? DeclarationIndex.interfaceOperationIntrinsic(
+                        index,
+                        Type.substitute(expression.provider, instance.substitution),
+                        capability,
+                        expression.operation,
+                      )?.id
+                    : undefined
+                })()
+              : undefined
           const operation =
             expression._tag === 'BuiltinCall'
               ? expression.intrinsic
               : (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection') &&
                   expression.target._tag === 'BuiltinCallableTarget'
                 ? expression.target.intrinsic
-                : undefined
+                : selected
           if (operation === undefined) continue
           const span = expression.span
           const key = `${Intrinsic.operationText(operation)}\u0000${span.sourceId}\u0000${span.start}\u0000${span.end}`
@@ -480,7 +503,7 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
   if (expression._tag === 'ArrayConstruct') {
     return expression.elements.flatMap((element) => callTargets(element))
   }
-  if (expression._tag === 'BuiltinCall') {
+  if (expression._tag === 'BuiltinCall' || expression._tag === 'BoundOperationCall') {
     return expression.arguments.flatMap((argument) => callTargets(argument))
   }
   if (expression._tag === 'FunctionItem') return []
@@ -566,6 +589,51 @@ const slotDropHookTargets = (
             hookCalls(Ownership.cleanupPlan(index, Type.substitute(argument, substitution))),
           )
         : []
+    if (expression._tag === 'Match') {
+      return [
+        ...own,
+        ...walk(expression.scrutinee),
+        ...expression.arms.flatMap((arm) =>
+          arm.reachable
+            ? [...(arm.guard === undefined ? [] : walk(arm.guard)), ...walk(arm.result)]
+            : [],
+        ),
+      ]
+    }
+    return [...own, ...Hir.expressionChildren(expression).flatMap(walk)]
+  }
+  return fn.statements.flatMap((statement) => Hir.statementExpressions(statement).flatMap(walk))
+}
+
+/**
+ * Collects the provider functions a specialized body's bound operators dispatch to.
+ *
+ * A source witness is reachable through the operator that spells its operation and through no
+ * ordinary call, so discovery has to read the conformance itself; a scalar argument maps the same
+ * operator to a sealed intrinsic and contributes no target.
+ */
+const interfaceWitnessTargets = (
+  fn: Hir.HirFunction,
+  index: DeclarationIndex.Index,
+  substitution: Type.Substitution,
+): ReadonlyArray<CallTarget> => {
+  const walk = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
+    const bound = expression._tag === 'BuiltinCall' ? expression.interfaceOperation : undefined
+    const capability =
+      bound === undefined ? undefined : Type.substitute(bound.capability, substitution)
+    const target =
+      bound === undefined || capability === undefined || !Type.isNominal(capability)
+        ? undefined
+        : DeclarationIndex.interfaceWitnessImplementation(
+            index,
+            Type.substitute(bound.provider, substitution),
+            capability,
+            bound.operation,
+          )
+    const own =
+      target === undefined
+        ? []
+        : [Object.freeze({ declaration: target, typeArguments: Object.freeze([]) })]
     if (expression._tag === 'Match') {
       return [
         ...own,
@@ -1355,6 +1423,7 @@ export const discover = (
     const cleanupIdentities = new Set(cleanupTargets.map(identityOfCall))
     for (const call of [
       ...bodyCallTargets(fn),
+      ...interfaceWitnessTargets(fn, index, substitution),
       ...requirementBindingCallTargets(fn, substitution, index),
       ...directCalls.map((call) => ({
         declaration: call.target.declaration,
@@ -1419,7 +1488,7 @@ export const discover = (
     instances,
     callables: Object.freeze([...recordedCallables.values()]),
     calls: Object.freeze([...recordedCalls.values()]),
-    intrinsics: reachableIntrinsics(instances),
+    intrinsics: reachableIntrinsics(instances, index),
     violations: Object.freeze(violations),
   })
 }

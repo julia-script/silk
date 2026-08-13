@@ -145,6 +145,119 @@ pub fn main() -> i32 { return combine(40, 2) }`)
   }),
 )
 
+/**
+ * A bound operation no operator spells. `mix` is reachable only through the bound's own name, and
+ * the two witnesses answer it with two unrelated instructions — wrapping for `i32`, saturating for
+ * `u8` — so the call must read the witness the specialization selected rather than reuse an
+ * operator's width-neutral lowering.
+ */
+const nonOperatorOperation = `pub interface Mixer<T> {
+  fn mix(left: T, right: T) -> T
+}
+impl Mixer<i32> for i32 { mix: Intrinsic.i32WrappingAdd }
+impl Mixer<u8> for u8 { mix: Intrinsic.u8SaturatingAdd }
+pub fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.mix(left, right) }
+pub fn main() -> i32 { return blend(40, 2) }`
+
+it.effect('calls a bound operation no operator spells', () =>
+  Effect.gen(function* () {
+    const { self, outcome } = yield* evaluate(nonOperatorOperation)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
+it.effect('reaches a different witness for each specialized type argument', () =>
+  Effect.gen(function* () {
+    const { self, outcome } = yield* evaluate(`pub interface Mixer<T> {
+  fn mix(left: T, right: T) -> T
+}
+impl Mixer<i32> for i32 { mix: Intrinsic.i32WrappingAdd }
+impl Mixer<u8> for u8 { mix: Intrinsic.u8SaturatingAdd }
+pub fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.mix(left, right) }
+pub fn main() -> i32 {
+  // u8 saturates at 255; i32 wraps from its maximum to its minimum. One shared body, two
+  // instructions, and neither is the other's width-neutral form.
+  let saturated = blend<u8>(200, 100)
+  let wrapped = blend<i32>(2147483647, 1)
+  if saturated != 255 { return 1 }
+  if wrapped != -2147483648 { return 2 }
+  return 42
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
+it.effect('keeps a bound operation at the result its interface declares', () =>
+  Effect.gen(function* () {
+    const { self, outcome } = yield* evaluate(`pub interface Ranked<T> {
+  fn ranksBelow(left: T, right: T) -> bool
+}
+impl Ranked<i32> for i32 { ranksBelow: Intrinsic.i32LessThan }
+pub fn pick<T: Ranked>(left: T, right: T) -> T {
+  if Ranked.ranksBelow(left, right) { return move right }
+  return move left
+}
+pub fn main() -> i32 { return pick(2, 42) }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
+/**
+ * `Integer.add` names both the bound's operation and a public function of `silk/numeric`. Inside a
+ * body bounded by `Integer` the bound takes the spelling; the module function stays reachable
+ * everywhere else, including through its own module namespace.
+ */
+it.effect('prefers the bound operation over a same-named module function', () =>
+  Effect.gen(function* () {
+    const { self, outcome } = yield* evaluate(`import silk.numeric { Integer }
+pub fn twice<T: Integer>(value: T) -> T { return Integer.add(value, value) }
+pub fn main() -> i32 { return twice(21) }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
+it.effect('keeps the module function reachable where no bound claims the name', () =>
+  Effect.gen(function* () {
+    const { self, outcome } = yield* evaluate(`import silk.numeric { Integer }
+pub fn main() -> i32 { return Integer.add(40, 2) }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
+it.effect('reports a bound operation reachable through two bounded parameters', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`pub interface Mixer<T> {
+  fn mix(left: T, right: T) -> T
+}
+impl Mixer<i32> for i32 { mix: Intrinsic.i32WrappingAdd }
+pub fn blend<A: Mixer, B: Mixer>(left: A, right: B) -> A { return Mixer.mix(left, left) }
+pub fn main() -> i32 { return blend<i32, i32>(40, 2) }`)
+    assert.include(messages(self), 'Mixer.mix is ambiguous across bounded type parameters A, B')
+  }),
+)
+
+it.effect('reports a bound operation the interface never declares', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`pub interface Mixer<T> {
+  fn mix(left: T, right: T) -> T
+}
+impl Mixer<i32> for i32 { mix: Intrinsic.i32WrappingAdd }
+pub fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.stir(left, right) }
+pub fn main() -> i32 { return blend(40, 2) }`)
+    assert.include(messages(self), 'Mixer has no operation stir')
+  }),
+)
+
 it.effect('records the resolved bound contract on the declaration it belongs to', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(twoOperations)

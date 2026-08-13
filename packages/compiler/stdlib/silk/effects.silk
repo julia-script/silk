@@ -95,6 +95,68 @@ pub effect fn flatten<A, !E, !F, ?R, ?S>(
   return run inner
 }
 
+/// Two success values collected in order by `Effect.zip`.
+pub struct Pair<A, B> {
+  /// The first Effect's success value.
+  pub first: A
+  /// The second Effect's success value.
+  pub second: B
+}
+
+/// Three success values collected in order by `Effect.zip3`.
+pub struct Triple<A, B, C> {
+  /// The first Effect's success value.
+  pub first: A
+  /// The second Effect's success value.
+  pub second: B
+  /// The third Effect's success value.
+  pub third: C
+}
+
+/// Runs two Effects in declaration order and collects both success values.
+///
+/// The order is the body's own statement order rather than a scheduling promise: the second Effect
+/// is only constructed into a value here, and nothing runs it until the first `run` has produced a
+/// success. A typed failure from the first Effect therefore propagates out of this body before the
+/// second Effect is ever executed, and the unrun second Effect is released by the ordinary local
+/// cleanup of the frame the propagation leaves.
+///
+/// Both failure rows and both requirement rows are unioned, so the result is `! E | F ? R | S`. The
+/// fields are `pub`, so a caller in another module can project `first` and `second` directly.
+///
+/// This combinator is fixed-arity by construction. Each operand is a distinct parameter, so no
+/// Effect is ever stored in a collection — see the note on `zip3` for why that matters.
+pub effect fn zip<A, B, !E, !F, ?R, ?S>(
+  self: once Effect<A ! E ? R>,
+  other: once Effect<B ! F ? S>
+) -> Pair<A, B> ! E | F ? R | S {
+  let first = run self
+  let second = run other
+  return Pair<A, B> { first: move first, second: move second }
+}
+
+/// Runs three Effects in declaration order and collects all three success values.
+///
+/// Arity is extended by adding a parameter rather than by accepting a collection. An Effect value is
+/// compiler-private and has no target layout, so it cannot live in runtime-indexed storage such as a
+/// `Vector`; a collection-taking `all` would need a storable Effect representation, which is a
+/// compiler-core change rather than a library one. Distinct parameters keep every Effect in the
+/// hidden-identity specialization path, where it is erased before lowering.
+pub effect fn zip3<A, B, C, !E, !F, !G, ?R, ?S, ?T>(
+  self: once Effect<A ! E ? R>,
+  second: once Effect<B ! F ? S>,
+  third: once Effect<C ! G ? T>
+) -> Triple<A, B, C> ! E | F | G ? R | S | T {
+  let firstValue = run self
+  let secondValue = run second
+  let thirdValue = run third
+  return Triple<A, B, C> {
+    first: move firstValue,
+    second: move secondValue,
+    third: move thirdValue
+  }
+}
+
 /// Runs an effectful callback while preserving its returned success value.
 pub effect fn tap<A, !E, !F, ?R, ?S>(
   self: once Effect<A ! E ? R>,

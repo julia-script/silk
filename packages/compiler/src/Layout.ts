@@ -1079,7 +1079,8 @@ const addExpressionTypes = (
     expression._tag === 'Call' ||
     expression._tag === 'EffectConstruct' ||
     expression._tag === 'ServiceEffectConstruct' ||
-    expression._tag === 'BuiltinCall'
+    expression._tag === 'BuiltinCall' ||
+    expression._tag === 'BoundOperationCall'
   ) {
     for (const argument of expression.arguments) addExpressionTypes(types, argument, substitution)
   }
