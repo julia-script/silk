@@ -454,6 +454,8 @@ const carriesHiddenIdentity = (
 const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
   if (expression._tag === 'Run') return callTargets(expression.subject)
   if (expression._tag === 'EffectResult') return callTargets(expression.protected)
+  if (expression._tag === 'EffectCatch')
+    return [...callTargets(expression.protected), ...callTargets(expression.handler)]
   if (expression._tag === 'EffectBindRequirement') {
     // A source-declared witness makes provision dispatch to its qualified operation, so the
     // operation is reachable even though no ordinary call names it.

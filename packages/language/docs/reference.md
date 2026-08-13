@@ -547,28 +547,69 @@ propagation is a compile error rather than a runtime surprise.
 
 ### 5.4 Handling is library code
 
-The compiler owns exactly two primitives at this seam: one that runs a layer and reifies its outcome
-as `Result<A, Row<!E>>` data, and one that removes a single capability-role entry.
+The compiler owns three primitives at this seam: one that runs a layer and reifies its outcome
+as `Result<A, Row<!E>>` data, one that removes a single capability-role entry, and one that removes a
+single failure-row member. The third is a deliberate, explained exception to the rule that handling
+is library code — see "Why `catch<E>` is not ordinary Silk" below.
 
-Everything else — `map`, `mapError`, `flatMap`, `tap`, `catch`, `catchAll`, `retry`, `ensuring`,
-`provide`, `provideMut`, `provideWith` — is ordinary Silk source in `effects.silk`. The compiler must
-not infer their meaning from a name or an origin, so a user-defined equivalent gets identical
-treatment with no registration.
+Everything else — `map`, `mapError`, `flatMap`, `tap`, `catchAll`, `retry`, `ensuring`,
+`provide`, `provideMut`, `provideWith`, and `catch` in its whole-row form — is ordinary Silk source
+in `effects.silk`. The compiler must not infer their meaning from a name or an origin, so a
+user-defined equivalent gets identical treatment with no registration.
 
 Recovery is therefore just reify, `match`, and re-raise or return. Because a failure row reifies to
 `Row<!E>` — ordinary value data projected to a structural union — a handler can match on it like any
 other value.
 
-`Effect.catch` as it ships today is an unconditional alias for `Effect.catchAll`: its body is
-`return run catchAll(move self, move onFailure)`, and its doc comment is identical. Both take a
-handler over the whole reified row `Row<!E>`, discard the entire failure row `!E`, and replace it
-with the handler's own `!F`. There is no residual row and no member selector — the `E` in
-`catch<A, !E, !F, ?R, ?S>` is the protected row, not a chosen member, so a selective
-`Effect.catch<E>(handler)` cannot be written.
+`Effect.catch` has two forms, distinguished by whether a member is selected:
 
-Selective recovery is therefore done by hand: reify with `Effect.result`, `match` the row, and
-re-raise the members you do not handle. The specification does describe a member-selective `catch`;
-the standard library does not yet implement one.
+```
+Effect.catch(protected, handler)       // whole-row: the alias for Effect.catchAll
+Effect.catch<E>(protected, handler)    // member-selective: recovers E, propagates the rest
+```
+
+Without a selector it is ordinary Silk in `effects.silk`, taking a handler over the whole reified
+row `Row<!E>`, discarding the failure row `!E` and replacing it with the handler's own `!F`. With a
+selector it is the third compiler primitive: the handler takes the selected member alone, runs only
+for that member, contributes its own failures to the result row, and every nonmatching member
+propagates unchanged as the residual.
+
+#### Why `catch<E>` is not ordinary Silk
+
+The failure row cannot express what the requirement row already can. A requirement row admits a type
+parameter as a member — `Requirement.capability` is `Nominal | Parameter` — which is exactly how
+`provide<C>` removes one entry and keeps the rest open. A failure row does not: `Type.Effect.failures`
+is `ReadonlyArray<Nominal>`, so a member is always a concrete nominal and can never be a parameter a
+signature could solve for.
+
+That asymmetry has two consequences, and together they make a Silk `catch<E>` unwritable rather than
+merely awkward. There is no value type for a partially-open row, so the residual has no type a
+signature could declare or a binding could hold; and `match` has no residual binder, so a body that
+handled one member could not name the rest in order to re-raise them. The compiler computes the split
+and the residual instead, which is the same thing it already does for requirement rows.
+
+This is recorded as an exception, not a widening. The rule that the compiler must not infer meaning
+from a name or an origin is unchanged for every other operation at this seam. The path back to two
+primitives is row-polymorphic values — admitting a parameter as a failure-row member, solving member
+and residual together, and adding an open union value type with a residual binder — after which
+`catch<E>` becomes ordinary library code like everything around it.
+
+#### What ships today
+
+Analysis of `Effect.catch<E>` is complete: it validates the selector against the protected row,
+rejects a selector the protected Effect cannot fail with and an open protected row, checks the
+handler against the selected member, computes the residual, and types the result as the residual
+unioned with the handler's failures. The four rows are recorded as semantic facts — protected,
+selected, handler, residual.
+
+No execution surface lowers the residual dispatch yet. Recognition, typing, and the fact surface are
+complete, so a program that only analyzes selective recovery typechecks and reports the residual
+correctly; a program that executes it does not build, because no engine emits a body for the
+operation. Whole-row `Effect.catch` — the form without a selector — and `Effect.catchAll` are
+untouched by this and execute exactly as before.
+
+Until that lowering lands, executable selective recovery is done by hand: reify with `Effect.result`,
+`match` the row, and re-raise the members you do not handle.
 
 `Effect.ensuring` is the cleanup counterpart: it runs a finalizer after the protected Effect
 completes either way, then hands on the original success value or the original typed failure
