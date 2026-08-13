@@ -131,6 +131,35 @@ pub effect fn catch<A, !E, !F, ?R, ?S>(
   return run catchAll(move self, move onFailure)
 }
 
+/// Runs a finalizer after the Effect completes, whatever its outcome, and preserves that outcome.
+///
+/// The protected Effect is reified into Result data before the finalizer runs, which is what fixes
+/// the order: a typed failure reaches this body as data rather than as a propagation, so the
+/// protected Effect's own frame — and every local it cleans up — is already gone by the time the
+/// finalizer starts. The finalizer therefore exits last, in reverse acquisition order against the
+/// cleanup it wraps. The original success value or the original typed failure is only handed on
+/// afterwards, so a recovering caller never observes the outcome before the finalizer has run.
+///
+/// The finalizer is typed `! never`: it cannot fail, so there is no second outcome to reconcile
+/// with the one being preserved. A caller with fallible cleanup recovers it into `! never` first
+/// — for example with `Effect.catch` — and decides there what a failed release means.
+///
+/// A trap is not an outcome. It bypasses the finalizer exactly as it bypasses `Effect.catch` and
+/// every Drop hook.
+pub effect fn ensuring<A, !E, ?R, ?S>(
+  self: once Effect<A ! E ? R>,
+  finalizer: once Effect<() ! never ? S>
+) -> A ! E ? R | S {
+  let completed = run result(move self)
+  let finalized = run move finalizer
+  return match move completed {
+    Result<A, Row<!E>> { value: outcome } => match move outcome {
+      Success<A> { value: success } => move success
+      Failure<Row<!E>> { error } => run raise(move error)
+    }
+  }
+}
+
 effect fn retryFailure<A, !E, ?R>(
   self: mut Effect<A ! E ? R>,
   error: Row<!E>,

@@ -550,10 +550,10 @@ propagation is a compile error rather than a runtime surprise.
 The compiler owns exactly two primitives at this seam: one that runs a layer and reifies its outcome
 as `Result<A, Row<!E>>` data, and one that removes a single capability-role entry.
 
-Everything else — `map`, `mapError`, `flatMap`, `tap`, `catch`, `catchAll`, `retry`, `provide`,
-`provideMut`, `provideWith` — is ordinary Silk source in `effects.silk`. The compiler must not infer
-their meaning from a name or an origin, so a user-defined equivalent gets identical treatment with
-no registration.
+Everything else — `map`, `mapError`, `flatMap`, `tap`, `catch`, `catchAll`, `retry`, `ensuring`,
+`provide`, `provideMut`, `provideWith` — is ordinary Silk source in `effects.silk`. The compiler must
+not infer their meaning from a name or an origin, so a user-defined equivalent gets identical
+treatment with no registration.
 
 Recovery is therefore just reify, `match`, and re-raise or return. Because a failure row reifies to
 `Row<!E>` — ordinary value data projected to a structural union — a handler can match on it like any
@@ -569,6 +569,19 @@ with the handler's own `!F`. There is no residual row and no member selector —
 Selective recovery is therefore done by hand: reify with `Effect.result`, `match` the row, and
 re-raise the members you do not handle. The specification does describe a member-selective `catch`;
 the standard library does not yet implement one.
+
+`Effect.ensuring` is the cleanup counterpart: it runs a finalizer after the protected Effect
+completes either way, then hands on the original success value or the original typed failure
+unchanged. It is built the same way — reify, run the finalizer, then return or re-raise — and that
+shape is what fixes the order. The protected Effect's frame has already exited and its locals are
+already cleaned when the finalizer starts, so the finalizer exits last, in reverse acquisition order
+against the cleanup it wraps.
+
+The finalizer is typed `Effect<() ! never ? S>`. It cannot fail, so there is no second outcome to
+reconcile with the one being preserved, and the failure row of the wrapped Effect is untouched. A
+release that can fail is recovered into that contract first — `Effect.catch(release(), ignore)` —
+which leaves the decision about what a failed release means with the caller. A trap is not an
+outcome: it bypasses the finalizer exactly as it bypasses `catch` and every `Drop` hook.
 
 ### 5.5 Provision
 

@@ -23,7 +23,7 @@ The library has 35 modules.
 | [`silk/char`](#silk-char) | `char` | 6 |
 | [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
 | [`silk/core`](#silk-core) | `Allocator` | 17 |
-| [`silk/effects`](#silk-effects) | `Effect` | 20 |
+| [`silk/effects`](#silk-effects) | `Effect` | 21 |
 | [`silk/f32`](#silk-f32) | `f32` | 41 |
 | [`silk/f64`](#silk-f64) | `f64` | 41 |
 | [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 76 |
@@ -751,6 +751,28 @@ pub effect fn catch<A, !E, !F, ?R, ?S>(self: once Effect<A ! E ? R>, onFailure: 
 ```
 
 Recovers every typed failure with another Effect.
+
+### `ensuring`
+
+```silk
+pub effect fn ensuring<A, !E, ?R, ?S>(self: once Effect<A ! E ? R>, finalizer: once Effect<() ? S>) -> A ! E ? R | S
+```
+
+Runs a finalizer after the Effect completes, whatever its outcome, and preserves that outcome.
+
+The protected Effect is reified into Result data before the finalizer runs, which is what fixes
+the order: a typed failure reaches this body as data rather than as a propagation, so the
+protected Effect's own frame — and every local it cleans up — is already gone by the time the
+finalizer starts. The finalizer therefore exits last, in reverse acquisition order against the
+cleanup it wraps. The original success value or the original typed failure is only handed on
+afterwards, so a recovering caller never observes the outcome before the finalizer has run.
+
+The finalizer is typed `! never`: it cannot fail, so there is no second outcome to reconcile
+with the one being preserved. A caller with fallible cleanup recovers it into `! never` first
+— for example with `Effect.catch` — and decides there what a failed release means.
+
+A trap is not an outcome. It bypasses the finalizer exactly as it bypasses `Effect.catch` and
+every Drop hook.
 
 ### `retry`
 
