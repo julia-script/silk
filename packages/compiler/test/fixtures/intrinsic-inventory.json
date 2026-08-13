@@ -4474,6 +4474,14 @@
       "identity": "FromBits"
     },
     {
+      "operation": "Intrinsic.f32Sqrt",
+      "signature": "fn Intrinsic.f32Sqrt(value: f32) -> f32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f32.sqrt",
+      "identity": "Sqrt"
+    },
+    {
       "operation": "Intrinsic.f32Sin",
       "signature": "fn Intrinsic.f32Sin(value: f32) -> f32",
       "unsafe": false,
@@ -4752,6 +4760,14 @@
       "admission": "Scalar",
       "consumer": "silk/f64.fromBits",
       "identity": "FromBits"
+    },
+    {
+      "operation": "Intrinsic.f64Sqrt",
+      "signature": "fn Intrinsic.f64Sqrt(value: f64) -> f64",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/f64.sqrt",
+      "identity": "Sqrt"
     },
     {
       "operation": "Intrinsic.f64Sin",
