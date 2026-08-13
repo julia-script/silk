@@ -54,6 +54,12 @@
     ]
   },
   {
+    "module": "silk/host_input",
+    "path": "silk/host_input.silk",
+    "namespace": "HostInput",
+    "aliases": ["HostInputFailure"]
+  },
+  {
     "module": "silk/i16",
     "path": "silk/i16.silk",
     "namespace": "i16"
@@ -110,6 +116,11 @@
     "module": "silk/os_filesystem",
     "path": "silk/os_filesystem.silk",
     "namespace": "OsFileSystem"
+  },
+  {
+    "module": "silk/os_host_input",
+    "path": "silk/os_host_input.silk",
+    "namespace": "OsHostInput"
   },
   {
     "module": "silk/os_standard_input",

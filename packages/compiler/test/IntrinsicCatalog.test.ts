@@ -203,6 +203,22 @@ effect fn close(handle: OsHandle, reason: &mut i32, code: &mut u32) -> bool {
 effect fn standardInputRead(output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
   unsafe { return run Intrinsic.osStandardInputRead(move output, reason, code) }
   return none<usize>()
+}
+effect fn hostArgumentCount(count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osHostArgumentCount(count, reason, code) }
+  return false
+}
+effect fn hostArgument(index: usize, output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
+  unsafe { return run Intrinsic.osHostArgument(index, move output, reason, code) }
+  return none<usize>()
+}
+effect fn hostVariable(name: &[u8], output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
+  unsafe { return run Intrinsic.osHostVariable(name, move output, reason, code) }
+  return none<usize>()
+}
+effect fn hostWorkingDirectory(output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
+  unsafe { return run Intrinsic.osHostWorkingDirectory(move output, reason, code) }
+  return none<usize>()
 }`,
 ])
 

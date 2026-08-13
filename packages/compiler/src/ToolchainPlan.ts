@@ -130,12 +130,20 @@ export const wasmCommand = (
 
 /**
  * The minimal C runtime shim: a private, compiler-versioned scalar ABI reaching a closed native
- * entry. The shim's `main` returns `silk_main`'s `i32` result as the process exit status. Not
- * user-facing FFI; issue 07 owns the ABI's growth.
+ * entry. The shim's `main` receives the process command line, holds it for the host-input runtime,
+ * and returns `silk_main`'s `i32` result as the process exit status. Silk `main` itself keeps its
+ * zero-parameter shape: arguments reach a program through a service, never through the entry
+ * signature. Not user-facing FFI; issue 07 owns the ABI's growth.
  */
 const hostWriteShimSource = `#include <errno.h>
 #include <stddef.h>
 #include <unistd.h>
+
+/* The command line the process received. The entry point stores it before running the user entry,
+   which is what lets a host-input provider read arguments without an ambient global of its own. A
+   program that never reads them pays exactly these two stores. */
+int silk_host_argc_v1 = 0;
+char **silk_host_argv_v1 = 0;
 
 int silk_standard_stream_write_v1(int destination, const unsigned char *bytes, size_t length) {
   const int descriptor = destination == 0 ? 1 : 2;
@@ -165,7 +173,9 @@ ${hostWriteShimSource}
 ${osRuntime}
 extern int silk_main(void);
 
-int main(void) {
+int main(int argc, char **argv) {
+  silk_host_argc_v1 = argc;
+  silk_host_argv_v1 = argv;
   return silk_main();
 }
 `
@@ -194,7 +204,9 @@ static int silk_write_all(const unsigned char *bytes, size_t length) {
   return 1;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+  silk_host_argc_v1 = argc;
+  silk_host_argv_v1 = argv;
   const int tag = silk_main();
   if (tag == 0) return 0;
   switch (tag) {

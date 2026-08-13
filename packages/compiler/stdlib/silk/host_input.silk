@@ -1,0 +1,109 @@
+// The portable process-input boundary. A program receives its command line, its environment, and
+// its working directory here, explicitly, and never through an ambient global.
+//
+// Every value this service hands back is raw bytes, exactly as the process received them. A POSIX
+// argument or environment value is an arbitrary byte string, and a program must be able to read one
+// and pass it through unchanged, so the byte view is the primary one. `text` is the checked,
+// fallible view for the common case; it never replaces or discards the bytes.
+
+import silk.bytes { Bytes }
+import silk.option { None, Option, Some }
+import silk.result { Result }
+import silk.string { InvalidUtf8, fromUtf8 as stringFromUtf8, utf8Bytes as stringUtf8Bytes }
+import silk.vector { Vector, append as vectorAppend, make as vectorMake }
+
+/// Failure to complete one host-input lookup.
+pub struct HostInputFailure {}
+
+impl Report for HostInputFailure {}
+
+/// Constructs the typed failure of one host lookup that could not complete.
+pub fn inputFailure() -> HostInputFailure {
+  return HostInputFailure {}
+}
+
+/// Portable read-only process-input contract.
+///
+/// The service reads and never writes: it has no operation that sets an environment variable or
+/// changes the working directory. An absent argument index and an unset variable name are `None`
+/// rather than typed failures, because absence is an ordinary answer; only a host that cannot
+/// answer at all is `HostInputFailure`.
+pub service HostInput {
+  /// The number of command-line arguments the process received, including the program name at
+  /// index zero.
+  effect fn argumentCount() -> usize ! HostInputFailure ? &mut HostInput
+  /// The raw bytes of one argument, or `None` at or past the argument count.
+  effect fn argument(
+    index: usize
+  ) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+  /// The raw bytes of one environment variable's value, or `None` when the name is unset.
+  effect fn variable(
+    name: &[u8]
+  ) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+  /// The raw bytes of the process working directory.
+  effect fn workingDirectory() -> Bytes ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+}
+
+/// Builds the argument-count effect.
+pub effect fn argumentCount() -> usize ! HostInputFailure ? &mut HostInput {
+  return run HostInput.argumentCount()
+}
+
+/// Builds one argument lookup effect.
+pub effect fn argument(
+  index: usize
+) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator {
+  return run HostInput.argument(index)
+}
+
+/// Builds one environment lookup effect for a raw byte name.
+pub effect fn variable(
+  name: &[u8]
+) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator {
+  return run HostInput.variable(name)
+}
+
+/// Looks one environment variable up by its textual name.
+pub effect fn variableNamed(
+  name: string
+) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator {
+  return run HostInput.variable(stringUtf8Bytes(name))
+}
+
+/// Builds the working-directory effect.
+pub effect fn workingDirectory() -> Bytes ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator {
+  return run HostInput.workingDirectory()
+}
+
+effect fn missingArgument() -> Bytes ! HostInputFailure {
+  fail inputFailure()
+}
+
+/// Collects every command-line argument, in the order the process received them.
+///
+/// A host that reports a count it cannot then supply is a broken host, so a missing index below the
+/// count is `HostInputFailure` rather than a silently shorter sequence.
+pub effect fn arguments(
+) -> Vector<Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator {
+  let total = run HostInput.argumentCount()
+  let mut collected = vectorMake<Bytes>()
+  let mut index = usize.ZERO
+  while index < total {
+    let found = run HostInput.argument(index)
+    let owned = match move found {
+      Some<Bytes> { value: bytes } => move bytes
+      None {} => run missingArgument()
+    }
+    let appended = run vectorAppend<Bytes>(&mut collected, move owned)
+    index = index + usize.ONE
+  }
+  return move collected
+}
+
+/// The checked textual view of raw host bytes.
+///
+/// Host input is not required to be UTF-8, so the view is fallible. A failure leaves the bytes
+/// untouched and readable, which is how a program passes a value it cannot decode through unchanged.
+pub fn text(values: &[u8]) -> Result<string, InvalidUtf8> {
+  return stringFromUtf8(values)
+}

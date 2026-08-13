@@ -2,6 +2,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import type * as Hir from './Hir.js'
+import type * as HostInput from './HostInput.js'
 import type * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import type * as Match from './Match.js'
@@ -491,6 +492,7 @@ export type BlockedReason =
     }
   | { readonly _tag: 'MissingStandardStreams' }
   | { readonly _tag: 'MissingStandardInput' }
+  | { readonly _tag: 'MissingHostInput' }
   | { readonly _tag: 'MissingOsFileSystemHost' }
   | {
       readonly _tag: 'IntrinsicTargetUnavailable'
@@ -652,6 +654,7 @@ interface EvaluationState {
   readonly stringLoans: Set<string>
   readonly standardStreams?: StandardStreams.Provider
   readonly standardInput?: StandardInput.Provider
+  readonly hostInput?: HostInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
 }
 
@@ -2648,6 +2651,59 @@ function* executeFunction(
               )
               break
             }
+            if (name.startsWith('osHost')) {
+              const input = state.hostInput
+              if (input === undefined) return blockedStep({ _tag: 'MissingHostInput' })
+              if (name === 'osHostArgumentCount') {
+                const count = arguments_.at(0)
+                if (count === undefined) throw new RangeError('OS count omitted its output')
+                const result = input.argumentCount()
+                if (result._tag === 'LookupFailure') {
+                  status({ _tag: 'Failure', reason: 'Other' })
+                  commit(value(0))
+                  break
+                }
+                replaceReferenced(
+                  count,
+                  Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.count) }),
+                )
+                status()
+                commit(value(1))
+                break
+              }
+              const output = arguments_.at(name === 'osHostWorkingDirectory' ? 0 : 1)
+              if (output === undefined) throw new RangeError('OS lookup omitted its output buffer')
+              const selector = arguments_.at(0)
+              if (selector === undefined) throw new RangeError('OS lookup omitted its subject')
+              const result =
+                name === 'osHostArgument'
+                  ? input.argument(Number(readUsize(selector).value))
+                  : name === 'osHostVariable'
+                    ? input.variable(byteView(selector))
+                    : input.workingDirectory()
+              if (result._tag !== 'Present') {
+                // Absence is the not-found reason, which the provider reads as an ordinary answer;
+                // any other reason is a host that could not answer at all.
+                status({
+                  _tag: 'Failure',
+                  reason: result._tag === 'Absent' ? 'NotFound' : 'Other',
+                })
+                commit(optionValue('usize'))
+                break
+              }
+              // The complete byte length is the result even when only a prefix fit, so the caller
+              // can size an exact buffer and ask again.
+              const capacity = byteView(output).length
+              writeByteView(output, result.bytes.slice(0, capacity))
+              status()
+              commit(
+                optionValue(
+                  'usize',
+                  Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.bytes.length) }),
+                ),
+              )
+              break
+            }
             const host = state.osFileSystem
             if (host === undefined) return blockedStep({ _tag: 'MissingOsFileSystemHost' })
             try {
@@ -4615,6 +4671,7 @@ const evaluationLimitOption = (
 export interface Options {
   readonly standardStreams?: StandardStreams.Provider
   readonly standardInput?: StandardInput.Provider
+  readonly hostInput?: HostInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
   readonly maxSteps?: number
   readonly maxCallDepth?: number
@@ -4693,6 +4750,7 @@ export const evaluate = (
     stringLoans: new Set(),
     ...(options.standardStreams === undefined ? {} : { standardStreams: options.standardStreams }),
     ...(options.standardInput === undefined ? {} : { standardInput: options.standardInput }),
+    ...(options.hostInput === undefined ? {} : { hostInput: options.hostInput }),
     ...(options.osFileSystem === undefined ? {} : { osFileSystem: options.osFileSystem }),
   })
   if (result._tag === 'Blocked') {

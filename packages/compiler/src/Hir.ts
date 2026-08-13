@@ -119,6 +119,10 @@ export type BuiltinOperation =
   | 'OsDirectoryRemove'
   | 'OsHandleClose'
   | 'OsStandardInputRead'
+  | 'OsHostArgumentCount'
+  | 'OsHostArgument'
+  | 'OsHostVariable'
+  | 'OsHostWorkingDirectory'
 
 export type BoundsMode =
   | { readonly _tag: 'Proven'; readonly index: number; readonly length: number }

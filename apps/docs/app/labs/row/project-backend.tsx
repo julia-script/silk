@@ -1274,6 +1274,8 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return 'missing StandardStreams host provider'
     case 'MissingStandardInput':
       return 'missing StandardInput host provider'
+    case 'MissingHostInput':
+      return 'missing HostInput host provider'
     case 'MissingOsFileSystemHost':
       return 'missing OS filesystem host provider'
     case 'IntrinsicTargetUnavailable':
