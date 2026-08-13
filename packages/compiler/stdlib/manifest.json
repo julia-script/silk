@@ -95,6 +95,11 @@
     "namespace": "HashMap"
   },
   {
+    "module": "silk/hash_set",
+    "path": "silk/hash_set.silk",
+    "namespace": "HashSet"
+  },
+  {
     "module": "silk/host_input",
     "path": "silk/host_input.silk",
     "namespace": "HostInput",
