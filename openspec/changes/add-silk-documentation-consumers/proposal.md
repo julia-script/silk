@@ -39,7 +39,9 @@ to work has been designed wrong. Both consumers chartered here read the schema e
 - Charter a static search index built from declaration names and documentation text, shipped as one
   file the rendered site loads.
 - Mark the one standard-library example that is a composition fragment rather than a program with
-  the new opt-out marker, and regenerate the standard-library documentation page from it.
+  the new opt-out marker, and give one standard-library declaration a compilable example, so the
+  standard-library gate compiles something rather than skipping everything it is given. Regenerate
+  the compiler-shipped source table and the standard-library documentation page from both.
 
 ## Capabilities
 
@@ -56,9 +58,10 @@ The change adds two packages that read the documentation JSON and adds no compil
 does not change the `silk-documentation-json` schema, does not add HTML output to the compiler or to
 `silk doc`, and does not add a hosted site or a deployment pipeline.
 
-It touches canonical standard-library source in exactly one place: the fence marker on the
+It touches canonical standard-library source in two documentation comments: the fence marker on the
 `silk/filesystem` composition example, which the doctest workflow would otherwise report as a
-failure forever. The generated standard-library documentation page is regenerated from that edit
+failure forever, and an example on `silk/option.unwrapOr`, without which the gate would compile
+nothing at all. The generated source table and documentation page are regenerated from those edits
 rather than hand-corrected.
 
 The doctest workflow needs the compiler to compile an example, so it depends on the compiler. The
