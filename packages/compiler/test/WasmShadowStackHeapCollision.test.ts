@@ -1,9 +1,10 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import { statusAddress, statusStackOverflow } from '../src/WasmBackend.js'
 
 /**
- * Characterizes the premature Wasm `unreachable` of #134, and attributes it.
+ * Pins the shadow stack's bound against the heap — the fix for #134, and the mechanism it replaced.
  *
  * The Wasm backend keeps two bump regions in one linear memory, and they grow toward each other's
  * data rather than away from it:
@@ -13,38 +14,42 @@ import * as Analysis from '../src/Analysis.js'
  * - the heap starts at a **fixed** address — the free-list head table at `heapTableBase`, then
  *   blocks from `heapBase` — and grows up from there.
  *
- * `reserveFrame` guards the two ways a frame reservation can fail arithmetically: an `i32` wrap
- * (`frameEnd < frameBase`) and a refused `memory.grow`. It does not guard the reservation against
- * the heap, so a deep enough chain of frames walks straight over the allocator's table and then
- * over live blocks. Nothing traps at the moment of the overwrite — the corrupted value is read back
- * later, by whichever guard happens to see it first.
+ * `reserveFrame` used to guard only the two ways a reservation can fail arithmetically: an `i32`
+ * wrap (`frameEnd < frameBase`) and a refused `memory.grow`. Neither one looks at the heap, so a
+ * deep enough chain of frames walked straight over the allocator's table and then over live blocks.
+ * Nothing trapped at the moment of the overwrite — the corrupted value was read back later, by
+ * whichever guard happened to see it first, which for a borrowed `match` was the union-tag dispatch
+ * chain's impossible-state fallback. That guard was right; the memory beneath it was not. At other
+ * depths there was no trap at all and the walk simply returned a wrong answer.
  *
- * That is why the trap lands where it does: the union-tag dispatch chain a `match` on a borrowed
- * union lowers to (`WasmBackend.ts` `emitDecisions`) ends in `unreachable` for a tag that names no
- * member. It is an impossible-state guard doing exactly its job on a discriminant that was
- * overwritten by a shadow-stack frame. The guard is correct; the memory beneath it is not.
+ * `reserveFrame` now compares `frameEnd` against the heap's base before the stack pointer moves, so
+ * a reservation that would cross reports instead of writing. The report is deliberate: it names
+ * itself in the status word at `statusAddress` and rewinds the stack pointer, so the trap is one
+ * legible event rather than a module that answers every later call the same way.
  *
- * The three facts that make this a defect rather than ordinary stack exhaustion — each pinned below:
+ * The four facts that make this a bound rather than ordinary stack exhaustion — each pinned below:
  *
  * 1. **The budget is tiny and fixed.** The shadow stack has `heapTableBase - staticEnd` bytes,
- *    about 64 KiB, whatever the host offers. This fixture spends 68 bytes per level, so it dies
+ *    about 64 KiB, whatever the host offers. This fixture spends 68 bytes per level, so it stops
  *    just under a thousand levels deep.
- * 2. **The host is not involved.** A recursion that needs no shadow-stack frame carries ten times
+ * 2. **Crossing reports.** Past that depth the module traps at the reservation and names the reason,
+ *    and its frames never reach the heap page.
+ * 3. **The host is not involved.** A recursion that needs no shadow-stack frame carries ten times
  *    that depth on the same engine before V8 raises `RangeError`.
- * 3. **Only the walk pays.** Building and releasing the same chain iteratively reserves one frame,
+ * 4. **Only the walk pays.** Building and releasing the same chain iteratively reserves one frame,
  *    so it is unaffected at any depth.
  *
- * Because the collision depth is arithmetic over three module-determined constants — static end,
- * heap base, and frame bytes per level — it is the same on every host. The depths below are
- * *derived* from the emitted module rather than written down, so this test pins the mechanism and
- * not one machine's numbers.
+ * Because the bound is arithmetic over three module-determined constants — static end, heap base,
+ * and frame bytes per level — it is the same on every host. The depths below are *derived* from the
+ * emitted module rather than written down, so this test pins the mechanism and not one machine's
+ * numbers.
  *
- * This pins current, wrong behaviour on purpose: it is the tripwire #134 asked for. When the
- * backend gains a shadow-stack bound, the second case stops holding — a bounded stack should report
- * exhaustion, not corrupt the heap and trap somewhere downstream — and this test should be rewritten
- * to pin that instead. The #132/#133 characterization covers the ordinary, sanctioned boundary and
- * deliberately accepts either failure mode at these depths; this one is about the failure that
- * arrives *before* it.
+ * The last case is the one that matters most: hitting the bound must leave the allocator alone. It
+ * allocates, crosses, and then checks both that the heap's bytes are exactly what an uncrossed run
+ * leaves and that the allocator still answers correctly afterwards.
+ *
+ * The #132/#133 characterization covers the ordinary, sanctioned depth boundary; this one is about
+ * the budget that runs out before it.
  */
 
 const ascii = (value: string): Uint8Array =>
@@ -206,6 +211,8 @@ interface Run {
    * head table because the allocator writes that itself, and this must measure only the stack.
    */
   readonly stackReach: number | undefined
+  /** The status word a deliberate trap leaves behind, or `undefined` without a memory. */
+  readonly status: number | undefined
 }
 
 const globalInitializers = (wat: string): ReadonlyArray<number> =>
@@ -215,6 +222,22 @@ const globalInitializers = (wat: string): ReadonlyArray<number> =>
 
 /** The free-list head table opens the heap's page; blocks follow it in the same page. */
 const heapPageOf = (heapBase: number): number => heapBase - (heapBase % 65536)
+
+/**
+ * The shadow stack's high-water mark: the highest nonzero word between static data and the heap
+ * page, which is where its frames live and where they stay written after the run.
+ *
+ * The scan starts past the status word, which sits in the reserved hole at the bottom of memory and
+ * belongs to the trap report rather than to any frame.
+ */
+const reachOf = (memory: WebAssembly.Memory, heapBase: number): number => {
+  const words = new Int32Array(memory.buffer, 0, heapPageOf(heapBase) >> 2)
+  let stackReach = 0
+  for (let index = (statusAddress >> 2) + 1; index < words.length; index += 1) {
+    if (words[index] !== 0) stackReach = index * 4
+  }
+  return stackReach
+}
 
 const execute = (bytes: Uint8Array, heapBase: number): Run => {
   const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice()), {})
@@ -227,13 +250,14 @@ const execute = (bytes: Uint8Array, heapBase: number): Run => {
     failure = `${caught.constructor.name}: ${caught.message}`
   }
   const memory = instance.exports.__silk_memory_v1 as WebAssembly.Memory | undefined
-  if (memory === undefined) return Object.freeze({ value, failure, stackReach: undefined })
-  const words = new Int32Array(memory.buffer, 0, heapPageOf(heapBase) >> 2)
-  let stackReach = 0
-  for (let index = 0; index < words.length; index += 1) {
-    if (words[index] !== 0) stackReach = index * 4
-  }
-  return Object.freeze({ value, failure, stackReach })
+  if (memory === undefined)
+    return Object.freeze({ value, failure, stackReach: undefined, status: undefined })
+  return Object.freeze({
+    value,
+    failure,
+    stackReach: reachOf(memory, heapBase),
+    status: new Int32Array(memory.buffer, statusAddress, 1)[0],
+  })
 }
 
 /**
@@ -257,23 +281,49 @@ const measure = (id: string, source: string) =>
     return Object.freeze({ heapBase, ...execute(artifact.bytes, heapBase) })
   })
 
-/** Bytes of shadow stack this fixture spends per level, and where its frames start, measured. */
-const growth = Effect.gen(function* () {
-  const shallow = yield* measure('shadow-stack-collision/growth/400', walk(400))
-  const deeper = yield* measure('shadow-stack-collision/growth/800', walk(800))
-  assert.strictEqual(shallow.value, 0, 'the walk must still be correct at 400')
-  assert.strictEqual(deeper.value, 0, 'the walk must still be correct at 800')
-  const shallowReach = shallow.stackReach ?? 0
-  const deeperReach = deeper.stackReach ?? 0
-  const perLevel = (deeperReach - shallowReach) / 400
-  return Object.freeze({
-    heapBase: shallow.heapBase,
-    perLevel,
-    base: shallowReach - perLevel * 400,
-    shallowReach,
-    deeperReach,
+/**
+ * Bytes of shadow stack a fixture spends per level, where its frames start, and the two depths that
+ * straddle the bound — all measured off the emitted module rather than written down.
+ *
+ * `perLevel` and `base` describe the highest byte the frames actually *wrote*, which sits a little
+ * below the frame end the bound compares, and by a different amount per fixture. That difference is
+ * at most one frame, and a level reserves at least one frame, so two levels of margin always covers
+ * it: `bounded` is deep enough that its frame end is certainly past the limit, and `clear` shallow
+ * enough that it is certainly short of it.
+ */
+const growthOf = (
+  id: string,
+  source: (depth: number) => string,
+  shallowDepth: number,
+  deeperDepth: number,
+) =>
+  Effect.gen(function* () {
+    const shallow = yield* measure(`${id}/growth/${shallowDepth}`, source(shallowDepth))
+    const deeper = yield* measure(`${id}/growth/${deeperDepth}`, source(deeperDepth))
+    assert.strictEqual(shallow.value, 0, `${id} must still be correct at ${shallowDepth}`)
+    assert.strictEqual(deeper.value, 0, `${id} must still be correct at ${deeperDepth}`)
+    const shallowReach = shallow.stackReach ?? 0
+    const deeperReach = deeper.stackReach ?? 0
+    const perLevel = (deeperReach - shallowReach) / (deeperDepth - shallowDepth)
+    const base = shallowReach - perLevel * shallowDepth
+    // The heap's page is the first address the shadow stack may not reach: the free-list head table
+    // opens it. The module's own heap global names it, so a backend that moves the heap moves this.
+    const limit = heapPageOf(shallow.heapBase)
+    const span = (limit - base) / perLevel
+    return Object.freeze({
+      heapBase: shallow.heapBase,
+      limit,
+      perLevel,
+      base,
+      shallowReach,
+      deeperReach,
+      span,
+      bounded: Math.ceil(span),
+      clear: Math.floor(span) - 2,
+    })
   })
-})
+
+const growth = growthOf('shadow-stack-collision', walk, 400, 800)
 
 it.effect(
   'grows a shadow-stack frame per borrowed level, straight at the heap',
@@ -287,57 +337,68 @@ it.effect(
       assert.isBelow(measured.base, measured.perLevel)
 
       // Both depths are still short of the heap, which is why both are still correct.
-      assert.isBelow(measured.deeperReach, heapPageOf(measured.heapBase))
+      assert.isBelow(measured.deeperReach, measured.limit)
 
       // And the budget is the gap between static data and a heap base that never moves: a fixed
       // ~64 KiB, which is what makes this arrive so early. Nothing about it scales with the host.
-      assert.isBelow(measured.heapBase - measured.base, 1 << 17)
+      assert.isBelow(measured.limit - measured.base, 1 << 17)
     }),
   120_000,
 )
 
 it.effect(
-  'corrupts the chain and traps the level after its frames reach the heap',
+  'reports the bound rather than writing its frames over the heap',
   () =>
     Effect.gen(function* () {
       const measured = yield* growth
-      // The first depth whose frames are written at or above the allocator's bump base.
-      const crossing = Math.ceil((measured.heapBase - measured.base) / measured.perLevel)
 
       const before = yield* measure(
-        `shadow-stack-collision/crossing/${crossing - 1}`,
-        walk(crossing - 1),
+        `shadow-stack-collision/crossing/${measured.clear}`,
+        walk(measured.clear),
       )
       assert.strictEqual(
         before.value,
         0,
-        `depth ${crossing - 1} keeps its frames below the heap and stays correct`,
+        `depth ${measured.clear} keeps its frames below the heap and stays correct`,
       )
+      assert.strictEqual(before.status, 0, 'a run that stays inside its budget reports nothing')
 
-      const after = yield* measure(`shadow-stack-collision/crossing/${crossing}`, walk(crossing))
-      // #134 itself: one level further and the walk reads back a union tag that names no member,
-      // so the dispatch chain's impossible-state guard traps. The failure is a Wasm trap, not the
-      // host's `RangeError` — the engine still has stack to spare, as the next case shows.
-      assert.isDefined(after.failure, `depth ${crossing} must fail`)
+      // Past the budget the reservation itself refuses, before the stack pointer moves. What used
+      // to happen here — #134 — was that the frames kept climbing over the allocator, and the walk
+      // read back a union tag that named no member some levels later, or returned a wrong answer
+      // and raised nothing at all.
+      const after = yield* measure(
+        `shadow-stack-collision/crossing/${measured.bounded}`,
+        walk(measured.bounded),
+      )
+      assert.isDefined(after.failure, `depth ${measured.bounded} must report`)
+      // A deliberate Wasm trap, not the host's `RangeError`: the engine still has stack to spare,
+      // as the next case shows.
       assert.include(after.failure ?? '', 'RuntimeError', after.failure ?? '')
       assert.notInclude(after.failure ?? '', 'RangeError', after.failure ?? '')
+
+      // And it says which trap it was, which is what makes this diagnosable rather than one more
+      // indistinguishable `unreachable`.
+      assert.strictEqual(after.status, statusStackOverflow)
+
+      // The point of the bound: the frames stopped below the heap's page instead of writing into
+      // the allocator's table.
+      assert.isBelow(after.stackReach ?? Number.POSITIVE_INFINITY, measured.limit)
     }),
   120_000,
 )
 
 it.effect(
-  'has host stack to spare an order of magnitude past the depth that trapped',
+  'has host stack to spare an order of magnitude past the depth that reported',
   () =>
     Effect.gen(function* () {
       const measured = yield* growth
-      const crossing = Math.ceil((measured.heapBase - measured.base) / measured.perLevel)
 
-      // Same engine, same call depth times ten, no shadow-stack frame: it returns. So the trap
-      // above is not the machine stack running out, and the guard that fired was not reporting a
-      // limit the host had reached.
+      // Same engine, same call depth times ten, no shadow-stack frame: it returns. So the report
+      // above is not the machine stack running out, and the bound that fired was not the host's.
       const deep = yield* measure(
-        `shadow-stack-collision/host-control/${crossing * 10}`,
-        plainRecursion(crossing * 10),
+        `shadow-stack-collision/host-control/${measured.bounded * 10}`,
+        plainRecursion(measured.bounded * 10),
       )
       assert.strictEqual(deep.value, 0)
       assert.isUndefined(deep.stackReach, 'a frameless recursion needs no linear memory at all')
@@ -350,7 +411,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const measured = yield* growth
-      const crossing = Math.ceil((measured.heapBase - measured.base) / measured.perLevel)
+      const crossing = measured.bounded
 
       // The asymmetry that names the cause. Construction is a loop, so it reserves one frame no
       // matter how long the chain is; the allocations it makes are identical to the walking case's.
@@ -363,4 +424,159 @@ it.effect(
       }
     }),
   120_000,
+)
+
+/**
+ * The second fixture, for the question the first one cannot ask: what the heap looks like after the
+ * bound is hit.
+ *
+ * `probe` builds a short chain, walks it, and drains it. That leaves the allocator with exactly the
+ * bookkeeping the unbounded stack used to overwrite — a free-list head table with real addresses in
+ * it, and a bump pointer that has moved. It is exported on its own so a host can ask the allocator
+ * a question *after* the module has reported.
+ *
+ * `main` runs `probe` once and then recurses. The recursion carries a wide borrowed record so that
+ * a level costs enough shadow stack to reach the bound well short of the host's own limit, and it
+ * allocates nothing — so the heap's contents do not depend on the depth, and a run that crosses is
+ * directly comparable, byte for byte, against one that does not.
+ */
+const lanes = Object.freeze(Array.from({ length: 16 }, (_, index) => index))
+const allocatingCross = (depth: number): string => `${prelude}
+pub struct Wide {
+${lanes.map((lane) => `  lane${lane}: i32`).join('\n')}
+}
+
+fn spend(wide: &Wide, remaining: i32) -> i32 {
+  if remaining == 0 { return wide.lane0 }
+  let next = Wide {
+${lanes.map((lane) => `    lane${lane}: wide.lane${lane}`).join(',\n')}
+  }
+  return spend(&next, remaining - 1)
+}
+
+effect fn probing() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let built = run build(8) |> Effect.provideMut(&mut allocator)
+  let counted = stepDepth(&built.step)
+  let released = drain(move built)
+  if counted == released { return 0 }
+  return 2
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+
+pub fn probe() -> i32 { return run Effect.catch(probing(), recover) }
+
+pub fn main() -> i32 {
+  let seed = Wide { ${lanes.map((lane) => `lane${lane}: ${lane}`).join(', ')} }
+  return probe() + spend(&seed, ${depth})
+}`
+
+interface Crossing {
+  readonly failure: string | undefined
+  readonly value: number | undefined
+  readonly status: number
+  readonly stackReach: number
+  /** The allocator's free-list heads, read straight out of the table that opens the heap page. */
+  readonly heads: ReadonlyArray<number>
+  /** The heap page's bytes, as left by the run. */
+  readonly heap: string
+  /** What `probe` answered when it was called again after the run, and the heap it left behind. */
+  readonly after: number | string
+  readonly heapAfter: string
+}
+
+/**
+ * Runs the allocating fixture at one depth and reports the heap on both sides of a second `probe`.
+ *
+ * The two calls share one instance, so the second one sees whatever the first left in the
+ * allocator: this is the module answering a question after it has reported, not a fresh start.
+ */
+const cross = (id: string, depth: number) =>
+  Effect.gen(function* () {
+    const source = allocatingCross(depth)
+    const snapshot = yield* Analysis.ofSourceRealized(id, ascii(source), 'wasm32-unknown-unknown')
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+      id,
+    )
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const heapBase = globalInitializers(artifact.wat).at(1) ?? 0
+    const page = heapPageOf(heapBase)
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    const memory = instance.exports.__silk_memory_v1 as WebAssembly.Memory
+    // Non-entry functions carry a mangled symbol; the declaration's name survives inside it.
+    const probeExport = Object.keys(instance.exports).find((name) => name.includes('_probe__'))
+    assert.isDefined(probeExport, 'the fixture must export its probe')
+    const call = (name: string): number | string => {
+      try {
+        return (instance.exports[name] as () => number)()
+      } catch (error) {
+        const caught = error as Error
+        return `${caught.constructor.name}: ${caught.message}`
+      }
+    }
+    // A window wide enough for the free-list table and every block this fixture allocates.
+    const heapBytes = (): string =>
+      Array.from(new Uint8Array(memory.buffer, page, 2048), (byte) =>
+        byte.toString(16).padStart(2, '0'),
+      ).join('')
+    const outcome = call('silk_main')
+    const heap = heapBytes()
+    const status = new Int32Array(memory.buffer, statusAddress, 1)[0] ?? 0
+    const stackReach = reachOf(memory, heapBase)
+    const heads = Array.from(new Int32Array(memory.buffer, page, (heapBase - page) >> 2))
+    const after = call(probeExport ?? '')
+    return Object.freeze({
+      heapBase,
+      page,
+      failure: typeof outcome === 'string' ? outcome : undefined,
+      value: typeof outcome === 'number' ? outcome : undefined,
+      status,
+      stackReach,
+      heads,
+      heap,
+      after,
+      heapAfter: heapBytes(),
+    }) satisfies Crossing & { readonly heapBase: number; readonly page: number }
+  })
+
+it.effect(
+  'leaves the allocator intact and answering after the bound is hit',
+  () =>
+    Effect.gen(function* () {
+      const measured = yield* growthOf('shadow-stack-cross', allocatingCross, 200, 600)
+
+      // The control: the same allocations, a recursion that stays inside the budget.
+      const control = yield* cross(`shadow-stack-cross/clear/${measured.clear}`, measured.clear)
+      assert.strictEqual(control.value, 0, `depth ${measured.clear} stays inside the budget`)
+      assert.strictEqual(control.status, 0)
+      // The allocator really did leave bookkeeping behind for a crossing run to damage.
+      assert.isTrue(
+        control.heads.some((head) => head !== 0),
+        'the probe must leave blocks on a free list',
+      )
+
+      // The same allocations, then a recursion that crosses.
+      const crossed = yield* cross(
+        `shadow-stack-cross/bounded/${measured.bounded}`,
+        measured.bounded,
+      )
+      assert.isDefined(crossed.failure, `depth ${measured.bounded} must report`)
+      assert.strictEqual(crossed.status, statusStackOverflow)
+      assert.isBelow(crossed.stackReach, measured.limit)
+
+      // This is the criterion. Both runs allocated identically and only one of them crossed, so any
+      // difference in these bytes is a frame that reached the heap. Before the bound, the free-list
+      // heads at this depth read back as frame data rather than as block addresses.
+      assert.deepEqual(crossed.heads, control.heads, 'the free-list table must be untouched')
+      assert.strictEqual(crossed.heap, control.heap, 'the heap page must be untouched')
+
+      // And the allocator is not merely unwritten but still correct: asked again, on the same
+      // instance that just reported, it serves and reclaims the same chain and answers the same.
+      assert.strictEqual(crossed.after, 0, 'the allocator must still answer after the report')
+      assert.strictEqual(crossed.heapAfter, control.heapAfter)
+    }),
+  180_000,
 )
