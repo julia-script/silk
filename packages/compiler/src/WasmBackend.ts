@@ -755,6 +755,8 @@ interface Layout {
   /** Physical wasm locals realizing each logical MIR local's compiler-selected lanes. */
   readonly slots: ReadonlyArray<ReadonlyArray<number>>
   readonly lanes: ReadonlyArray<ReadonlyArray<LayoutPlan.CallingLane>>
+  /** The declared value type of every physical local, parameters first, indexed by local index. */
+  readonly physicalTypes: ReadonlyArray<ValType.ValType>
   /** Incoming address parameter for each capture represented internally by its loaded value lanes. */
   readonly borrowPointers: ReadonlyMap<number, number>
   readonly types: ReadonlyArray<Mir.Type>
@@ -1284,6 +1286,10 @@ const layoutOf = (
     .reduce((total, type) => total + signatureLaneCount(type), 0)
   const slots: Array<ReadonlyArray<number>> = []
   const borrowPointers = new Map<number, number>()
+  // The declared type of every physical local, in index order. Parameters are not part of
+  // `declared`, so they are recorded here as they are assigned and the declared locals append
+  // afterwards in the same order the definition emits them.
+  const parameterTypes: Array<ValType.ValType> = []
   let parameterPhysical = 0
   for (let ordinal = 0; ordinal < fn.parameterCount; ordinal += 1) {
     const type = fn.localTypes.at(ordinal)
@@ -1291,9 +1297,12 @@ const layoutOf = (
     if (type._tag === 'EffectBorrow') {
       borrowPointers.set(ordinal, parameterPhysical)
       parameterPhysical += 1
+      parameterTypes.push(i32)
       slots.push(Object.freeze([]))
     } else {
-      slots.push(Object.freeze(logicalLanes(type).map(() => parameterPhysical++)))
+      const logical = logicalLanes(type)
+      for (const logicalLane of logical) parameterTypes.push(laneValueType(plan, logicalLane))
+      slots.push(Object.freeze(logical.map(() => parameterPhysical++)))
     }
   }
   let physical = parameterLaneCount
@@ -1362,6 +1371,7 @@ const layoutOf = (
     declared: Object.freeze(declared),
     slots: Object.freeze(slots),
     lanes: Object.freeze(lanes),
+    physicalTypes: Object.freeze([...parameterTypes, ...declared.map((local) => local.type)]),
     borrowPointers,
     types: fn.localTypes,
     ...(frameBase === undefined ? {} : { frameBase }),
@@ -1390,13 +1400,60 @@ const emitOperation = (
     }
     return first
   }
+  // A union payload slot is as wide as its widest member, so a narrower member's lane and the slot
+  // holding it can be different wasm value types. The bits are the same bits either way — only the
+  // container differs — so a transfer between them normalizes to the integer of its own width,
+  // adjusts the width, and reinterprets into the target. Widening is unsigned so that narrowing
+  // back yields exactly the bits that went in, whatever the member's own signedness.
+  const laneBridge = (from: ValType.ValType, to: ValType.ValType): ReadonlyArray<Instr.Instr> => {
+    if (from === to) return []
+    const toInteger =
+      from === f32
+        ? [Instr.op('i32.reinterpret_f32')]
+        : from === f64
+          ? [Instr.op('i64.reinterpret_f64')]
+          : []
+    const sourceBits = from === i64 || from === f64 ? 64 : 32
+    const targetBits = to === i64 || to === f64 ? 64 : 32
+    const resize =
+      sourceBits === targetBits
+        ? []
+        : targetBits === 64
+          ? [Instr.op('i64.extend_i32_u')]
+          : [Instr.op('i32.wrap_i64')]
+    const fromInteger =
+      to === f32
+        ? [Instr.op('f32.reinterpret_i32')]
+        : to === f64
+          ? [Instr.op('f64.reinterpret_i64')]
+          : []
+    return [...toInteger, ...resize, ...fromInteger]
+  }
+  /** Moves one physical local into another, bridging the value types when they differ. */
+  const transfer = (source: number, target: number): ReadonlyArray<Instr.Instr> => {
+    const from = layout.physicalTypes.at(source)
+    const to = layout.physicalTypes.at(target)
+    return [
+      Instr.localGet(source),
+      ...(from === undefined || to === undefined ? [] : laneBridge(from, to)),
+      Instr.localSet(target),
+    ]
+  }
+  /** The zero one lane's own value type spells, for a union slot no member of this arm fills. */
+  const zeroFor = (target: number): Instr.Instr => {
+    const type = layout.physicalTypes.at(target)
+    if (type === i64) return Instr.i64Const(0n)
+    if (type === f32) return Instr.f32Const(0)
+    if (type === f64) return Instr.f64Const(0)
+    return Instr.i32Const(0)
+  }
   const copy = (source: ReadonlyArray<number>, destination: ReadonlyArray<number>) => {
     if (source.length !== destination.length) {
       throw new RangeError('Wasm backend cannot copy mismatched logical lane bundles')
     }
     return source.flatMap((value, index) => {
       const target = destination.at(index)
-      return target === undefined ? [] : [Instr.localGet(value), Instr.localSet(target)]
+      return target === undefined ? [] : [...transfer(value, target)]
     })
   }
   const frameAddress = (offset: number): ReadonlyArray<Instr.Instr> => {
@@ -1784,19 +1841,23 @@ const emitOperation = (
           const physical = LayoutPlan.memberFieldSlots(shape, caseEntry.member, [])
           const memberLanes = semanticLanesOf(caseEntry.member)
           if (physical === undefined || physical.length !== memberLanes.length) return []
-          // A member's lane can sit in a physically wider union slot. This backend reads slots
-          // directly rather than coercing them, so a widened lane is left to the owner that
-          // eventually destructures the union.
+          // A member's lane can sit in a physically wider union slot. Reclaim reads slots directly
+          // and has no local of the member's own type to bridge into, so a widened lane cannot be
+          // released here. Refusing to emit keeps that loud: releasing nothing would leak the
+          // member's blocks silently, and this is the only shape for which the release is missing.
           const selected = physical.flatMap((ordinal, index) => {
             const value = values.at(ordinal)
             const physicalLane = shape.lanes.at(ordinal)
             const memberLane = memberLanes.at(index)
-            return value === undefined ||
-              physicalLane === undefined ||
-              memberLane === undefined ||
-              laneValueType(plan, physicalLane) !== laneValueType(plan, memberLane)
-              ? []
-              : [value]
+            if (value === undefined || physicalLane === undefined || memberLane === undefined) {
+              return []
+            }
+            if (laneValueType(plan, physicalLane) !== laneValueType(plan, memberLane)) {
+              throw new RangeError(
+                'Wasm union cleanup cannot release a member whose lane is narrower than its union slot',
+              )
+            }
+            return [value]
           })
           if (selected.length !== memberLanes.length) return []
           const inner = reclaimReleaseInstructions(caseEntry.cleanup, selected)
@@ -2675,8 +2736,9 @@ const emitOperation = (
           const value = source.at(slot - 1)
           if (target === undefined) continue
           instructions.push(
-            ...(value === undefined ? [Instr.i32Const(0)] : [Instr.localGet(value)]),
-            Instr.localSet(target),
+            ...(value === undefined
+              ? [zeroFor(target), Instr.localSet(target)]
+              : transfer(value, target)),
           )
         }
         return instructions
@@ -2701,8 +2763,9 @@ const emitOperation = (
         const value = source.at(slot)
         if (target === undefined) continue
         instructions.push(
-          ...(value === undefined ? [Instr.i32Const(0)] : [Instr.localGet(value)]),
-          Instr.localSet(target),
+          ...(value === undefined
+            ? [zeroFor(target), Instr.localSet(target)]
+            : transfer(value, target)),
         )
       }
       return instructions
@@ -3155,10 +3218,9 @@ const emitOperation = (
         Instr.localSet(destinationTag),
         ...destination.slice(1).flatMap((target, index) => {
           const value = source.at(index + 1)
-          return [
-            ...(value === undefined ? [Instr.i32Const(0)] : [Instr.localGet(value)]),
-            Instr.localSet(target),
-          ]
+          return value === undefined
+            ? [zeroFor(target), Instr.localSet(target)]
+            : [...transfer(value, target)]
         }),
       ]
     }

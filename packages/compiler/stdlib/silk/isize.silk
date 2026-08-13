@@ -286,3 +286,13 @@ pub fn greaterThan(left: isize, right: isize) -> bool {
 pub fn greaterOrEqual(left: isize, right: isize) -> bool {
   return Intrinsic.isizeGreaterOrEqual(left, right)
 }
+
+/// Renders the value as decimal text in freshly owned storage.
+pub effect fn toText(value: isize) -> String ! OutOfMemory ? &mut Allocator {
+  return run Format.signedText(toI64(value))
+}
+
+/// Reads complete decimal text as an `isize`, or reports why the text is not one.
+pub fn parse(text: string) -> Result<isize, ParseFailure> {
+  return Format.isizeValue(text)
+}

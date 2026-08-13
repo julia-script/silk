@@ -467,7 +467,7 @@ fn observeTokenEnd(value: usize) -> usize { return value }
 fn observeDiagnosticStart(value: usize) -> usize { return value }
 fn observeDiagnosticEnd(value: usize) -> usize { return value }
 
-fn fingerprintVectors(tokens: &Vector<Token>, diagnostics: &Vector<LexicalDiagnostic>) -> i32 {
+fn fingerprintTokens(tokens: &Vector<Token>) -> i32 {
   let mut value = 0
   let mut index = usize.add(0, 0)
   while index < length<Token>(tokens) {
@@ -478,20 +478,73 @@ fn fingerprintVectors(tokens: &Vector<Token>, diagnostics: &Vector<LexicalDiagno
     value = (value * 17 + u8.toI32(kind) + usize.toI32(start) * 3 + usize.toI32(end) * 5) % 197
     index = index + 1
   }
-  index = usize.add(0, 0)
+  return value
+}
+
+fn lineOf(source: &[u8], offset: usize) -> usize {
+  let mut line = usize.add(0, 1)
+  let mut index = usize.add(0, 0)
+  while index < offset {
+    if source[index] == asciiLineFeed { line = line + 1 }
+    index = index + 1
+  }
+  return line
+}
+
+fn columnOf(source: &[u8], offset: usize) -> usize {
+  let mut column = usize.add(0, 1)
+  let mut index = usize.add(0, 0)
+  while index < offset {
+    column = column + 1
+    if source[index] == asciiLineFeed { column = usize.add(0, 1) }
+    index = index + 1
+  }
+  return column
+}
+
+// The message this example could not write before: every number in it is a runtime value, so no
+// amount of literal text reaches it. One line per diagnostic, in lexical order.
+effect fn renderDiagnostics(
+  source: &[u8],
+  diagnostics: &Vector<LexicalDiagnostic>
+) -> String ! OutOfMemory ? &mut Allocator {
+  let mut message = String.make()
+  let mut index = usize.add(0, 0)
   while index < length<LexicalDiagnostic>(diagnostics) {
     let diagnostic = get<LexicalDiagnostic>(diagnostics, index)
     let start = observeDiagnosticStart(diagnostic.start)
     let end = observeDiagnosticEnd(diagnostic.end)
-    value = (value * 19 + usize.toI32(start) * 7 + usize.toI32(end) * 11) % 197
+    let opened = run String.append(&mut message, "LEX0001 at line ")
+    let lined = run String.appendOwned(&mut message, run usize.toText(lineOf(source, start)))
+    let between = run String.append(&mut message, " column ")
+    let columned = run String.appendOwned(&mut message, run usize.toText(columnOf(source, start)))
+    let closed = run String.append(&mut message, "\n")
+    index = index + 1
+  }
+  return move message
+}
+
+// The rendered message is folded byte by byte, so the value the harness checks covers the message
+// text itself: a wrong line number is a wrong answer on every engine.
+effect fn digestVectors(
+  source: &[u8],
+  tokens: &Vector<Token>,
+  diagnostics: &Vector<LexicalDiagnostic>
+) -> i32 ! OutOfMemory ? &mut Allocator {
+  let mut value = fingerprintTokens(tokens)
+  let message = run renderDiagnostics(source, diagnostics)
+  let bytes = String.ownedUtf8Bytes(&message)
+  let mut index = usize.add(0, 0)
+  while index < bytes.length {
+    value = (value * 19 + u8.toI32(bytes[index]) * 7) % 197
     index = index + 1
   }
   return value
 }
 
-fn fingerprint(result: Lexed) -> i32 {
+effect fn digest(source: &[u8], result: Lexed) -> i32 ! OutOfMemory ? &mut Allocator {
   return match &result {
-    Lexed { tokens, diagnostics } => fingerprintVectors(&tokens, &diagnostics)
+    Lexed { tokens, diagnostics } => run digestVectors(source, &tokens, &diagnostics)
   }
 }
 
@@ -501,12 +554,15 @@ fn verify(value: i32) -> () {
   return ()
 }
 
+effect fn check(source: &[u8]) -> () ! OutOfMemory ? &mut Allocator {
+  let lexed = run lex(source)
+  let value = run digest(source, move lexed)
+  return verify(value)
+}
+
 pub effect fn main() -> () ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   // PRESSURE_INPUT: the harness replaces this literal only.
   let source = b"pub fn main() -> i32 { return 42 }\n"
-  return run lex(source)
-    |> Effect.map(fingerprint)
-    |> Effect.map(verify)
-    |> Effect.provideMut(&mut allocator)
+  return run check(source) |> Effect.provideMut(&mut allocator)
 }

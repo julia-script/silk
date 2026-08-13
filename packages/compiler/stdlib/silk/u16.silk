@@ -268,3 +268,13 @@ pub fn greaterThan(left: u16, right: u16) -> bool {
 pub fn greaterOrEqual(left: u16, right: u16) -> bool {
   return Intrinsic.u16GreaterOrEqual(left, right)
 }
+
+/// Renders the value as decimal text in freshly owned storage.
+pub effect fn toText(value: u16) -> String ! OutOfMemory ? &mut Allocator {
+  return run Format.unsignedText(toU64(value))
+}
+
+/// Reads complete decimal text as a `u16`, or reports why the text is not one.
+pub fn parse(text: string) -> Result<u16, ParseFailure> {
+  return Format.u16Value(text)
+}

@@ -12,7 +12,7 @@ each signature and description below is the `///` comment on the declaration in
 $ pnpm --filter @silk-effect/compiler documentation:generate
 ```
 
-The library has 37 modules.
+The library has 38 modules.
 
 ## Modules
 
@@ -28,12 +28,13 @@ The library has 37 modules.
 | [`silk/f32`](#silk-f32) | `f32` | 51 |
 | [`silk/f64`](#silk-f64) | `f64` | 51 |
 | [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 85 |
+| [`silk/format`](#silk-format) | `Format` | 40 |
 | [`silk/host_input`](#silk-host-input) | `HostInput` | 12 |
-| [`silk/i16`](#silk-i16) | `i16` | 58 |
-| [`silk/i32`](#silk-i32) | `i32` | 58 |
-| [`silk/i64`](#silk-i64) | `i64` | 58 |
-| [`silk/i8`](#silk-i8) | `i8` | 58 |
-| [`silk/isize`](#silk-isize) | `isize` | 58 |
+| [`silk/i16`](#silk-i16) | `i16` | 60 |
+| [`silk/i32`](#silk-i32) | `i32` | 60 |
+| [`silk/i64`](#silk-i64) | `i64` | 60 |
+| [`silk/i8`](#silk-i8) | `i8` | 60 |
+| [`silk/isize`](#silk-isize) | `isize` | 60 |
 | [`silk/layout`](#silk-layout) | `Layout` | 6 |
 | [`silk/logging`](#silk-logging) | `Logger` | 30 |
 | [`silk/metrics`](#silk-metrics) | `AllocationMetrics` | 6 |
@@ -48,12 +49,12 @@ The library has 37 modules.
 | [`silk/result`](#silk-result) | `Result` | 13 |
 | [`silk/slot`](#silk-slot) | `Slot` | 4 |
 | [`silk/standard_input`](#silk-standard-input) | `StandardInput` | 12 |
-| [`silk/string`](#silk-string) | `String` | 23 |
-| [`silk/u16`](#silk-u16) | `u16` | 55 |
-| [`silk/u32`](#silk-u32) | `u32` | 55 |
-| [`silk/u64`](#silk-u64) | `u64` | 55 |
-| [`silk/u8`](#silk-u8) | `u8` | 55 |
-| [`silk/usize`](#silk-usize) | `usize` | 57 |
+| [`silk/string`](#silk-string) | `String` | 24 |
+| [`silk/u16`](#silk-u16) | `u16` | 57 |
+| [`silk/u32`](#silk-u32) | `u32` | 57 |
+| [`silk/u64`](#silk-u64) | `u64` | 57 |
+| [`silk/u8`](#silk-u8) | `u8` | 57 |
+| [`silk/usize`](#silk-usize) | `usize` | 59 |
 | [`silk/vector`](#silk-vector) | `Vector` | 55 |
 
 ## silk/bool
@@ -2255,6 +2256,168 @@ pub effect fn exists(path: &silk/filesystem.Path) -> bool ! FileError ? &mut Fil
 Returns false only for NotFound and propagates every other provider failure.
 
 
+## silk/format
+
+Import as `Format` with `import silk.format`.
+
+### `NotANumber`
+
+```silk
+pub struct NotANumber
+```
+
+The byte offset of the first byte that is not part of a decimal number.
+
+| Field | Description |
+| --- | --- |
+| `pub offset: usize` | The offset at which reading stopped. Empty text reports offset zero. |
+
+### `OutOfRange`
+
+```silk
+pub struct OutOfRange
+```
+
+A well-formed decimal number whose value does not fit the requested type.
+
+### `ParseFailure`
+
+```silk
+pub struct ParseFailure
+```
+
+Why decimal text did not produce a value, narrowed with `match`.
+
+| Field | Description |
+| --- | --- |
+| `pub reason: silk/format.NotANumber \| silk/format.OutOfRange` | The reason the text was rejected. |
+
+### `unsignedText`
+
+```silk
+pub effect fn unsignedText(value: u64) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders an unsigned value as decimal text in freshly owned storage.
+
+Every unsigned integer module reaches this by widening, so the text of a `u8` and the text of the
+same number as a `u64` are the same bytes.
+
+### `signedText`
+
+```silk
+pub effect fn signedText(value: i64) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders a signed value as decimal text in freshly owned storage, with a leading `-` when negative.
+
+The digits are taken from the value's negative form, so `i64.MIN` needs no special case: negating
+it would overflow, while negating one digit of it never does.
+
+### `unsignedValue`
+
+```silk
+pub fn unsignedValue(text: string) -> silk/result.Result<u64, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an unsigned value.
+
+Empty text, a leading sign, and any byte outside `0`–`9` are `NotANumber` at the offset that
+stopped the read. A value above `u64.MAX` is `OutOfRange`, detected before the overflow rather
+than after it.
+
+### `signedValue`
+
+```silk
+pub fn signedValue(text: string) -> silk/result.Result<i64, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a signed value, accepting one leading `-`.
+
+Digits accumulate negatively, so text naming `i64.MIN` reads like any other value. A leading `+`
+is not accepted. A value outside `i64.MIN`–`i64.MAX` is `OutOfRange`.
+
+### `u8Value`
+
+```silk
+pub fn u8Value(text: string) -> silk/result.Result<u8, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u8`, rejecting a value above `u8.MAX`.
+
+### `u16Value`
+
+```silk
+pub fn u16Value(text: string) -> silk/result.Result<u16, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u16`, rejecting a value above `u16.MAX`.
+
+### `u32Value`
+
+```silk
+pub fn u32Value(text: string) -> silk/result.Result<u32, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u32`, rejecting a value above `u32.MAX`.
+
+### `u64Value`
+
+```silk
+pub fn u64Value(text: string) -> silk/result.Result<u64, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u64`, rejecting a value above `u64.MAX`.
+
+### `usizeValue`
+
+```silk
+pub fn usizeValue(text: string) -> silk/result.Result<usize, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `usize`, rejecting a value the target's pointer width cannot hold.
+
+### `i8Value`
+
+```silk
+pub fn i8Value(text: string) -> silk/result.Result<i8, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i8`, rejecting a value outside `i8.MIN`–`i8.MAX`.
+
+### `i16Value`
+
+```silk
+pub fn i16Value(text: string) -> silk/result.Result<i16, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i16`, rejecting a value outside `i16.MIN`–`i16.MAX`.
+
+### `i32Value`
+
+```silk
+pub fn i32Value(text: string) -> silk/result.Result<i32, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i32`, rejecting a value outside `i32.MIN`–`i32.MAX`.
+
+### `i64Value`
+
+```silk
+pub fn i64Value(text: string) -> silk/result.Result<i64, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i64`, rejecting a value outside `i64.MIN`–`i64.MAX`.
+
+### `isizeValue`
+
+```silk
+pub fn isizeValue(text: string) -> silk/result.Result<isize, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `isize`, rejecting a value the target's pointer width cannot hold.
+
+
 ## silk/host_input
 
 Import as `HostInput` with `import silk.host_input`.
@@ -2819,6 +2982,22 @@ pub fn greaterOrEqual(left: i16, right: i16) -> bool
 
 Calls the concrete i16 greaterOrEqual primitive.
 
+### `toText`
+
+```silk
+pub effect fn toText(value: i16) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<i16, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i16`, or reports why the text is not one.
+
 
 ## silk/i32
 
@@ -3287,6 +3466,22 @@ pub fn greaterOrEqual(left: i32, right: i32) -> bool
 ```
 
 Calls the concrete i32 greaterOrEqual primitive.
+
+### `toText`
+
+```silk
+pub effect fn toText(value: i32) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<i32, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i32`, or reports why the text is not one.
 
 
 ## silk/i64
@@ -3757,6 +3952,22 @@ pub fn greaterOrEqual(left: i64, right: i64) -> bool
 
 Calls the concrete i64 greaterOrEqual primitive.
 
+### `toText`
+
+```silk
+pub effect fn toText(value: i64) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<i64, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i64`, or reports why the text is not one.
+
 
 ## silk/i8
 
@@ -4225,6 +4436,22 @@ pub fn greaterOrEqual(left: i8, right: i8) -> bool
 ```
 
 Calls the concrete i8 greaterOrEqual primitive.
+
+### `toText`
+
+```silk
+pub effect fn toText(value: i8) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<i8, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `i8`, or reports why the text is not one.
 
 
 ## silk/isize
@@ -4697,6 +4924,22 @@ pub fn greaterOrEqual(left: isize, right: isize) -> bool
 ```
 
 Calls the concrete isize greaterOrEqual primitive.
+
+### `toText`
+
+```silk
+pub effect fn toText(value: isize) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<isize, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as an `isize`, or reports why the text is not one.
 
 
 ## silk/layout
@@ -5632,6 +5875,17 @@ pub effect fn append(self: &mut silk/string.String, value: string) -> () ! OutOf
 
 Appends complete valid text atomically with respect to allocation failure.
 
+### `appendOwned`
+
+```silk
+pub effect fn appendOwned(self: &mut silk/string.String, value: String) -> () ! OutOfMemory ? &mut Allocator
+```
+
+Appends another owned String atomically with respect to allocation failure.
+
+The companion to `append` for text a program computed rather than wrote. The appended String is
+consumed, so a rendered value composes into a message without the caller keeping it alive.
+
 ### `view`
 
 ```silk
@@ -6165,6 +6419,22 @@ pub fn greaterOrEqual(left: u16, right: u16) -> bool
 
 Calls the concrete u16 greaterOrEqual primitive.
 
+### `toText`
+
+```silk
+pub effect fn toText(value: u16) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<u16, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u16`, or reports why the text is not one.
+
 
 ## silk/u32
 
@@ -6609,6 +6879,22 @@ pub fn greaterOrEqual(left: u32, right: u32) -> bool
 ```
 
 Calls the concrete u32 greaterOrEqual primitive.
+
+### `toText`
+
+```silk
+pub effect fn toText(value: u32) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<u32, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u32`, or reports why the text is not one.
 
 
 ## silk/u64
@@ -7055,6 +7341,22 @@ pub fn greaterOrEqual(left: u64, right: u64) -> bool
 
 Calls the concrete u64 greaterOrEqual primitive.
 
+### `toText`
+
+```silk
+pub effect fn toText(value: u64) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<u64, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u64`, or reports why the text is not one.
+
 
 ## silk/u8
 
@@ -7499,6 +7801,22 @@ pub fn greaterOrEqual(left: u8, right: u8) -> bool
 ```
 
 Calls the concrete u8 greaterOrEqual primitive.
+
+### `toText`
+
+```silk
+pub effect fn toText(value: u8) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<u8, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `u8`, or reports why the text is not one.
 
 
 ## silk/usize
@@ -7962,6 +8280,22 @@ pub fn greaterOrEqual(left: usize, right: usize) -> bool
 ```
 
 Calls the concrete usize greaterOrEqual primitive.
+
+### `toText`
+
+```silk
+pub effect fn toText(value: usize) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Renders the value as decimal text in freshly owned storage.
+
+### `parse`
+
+```silk
+pub fn parse(text: string) -> silk/result.Result<usize, silk/format.ParseFailure>
+```
+
+Reads complete decimal text as a `usize`, or reports why the text is not one.
 
 
 ## silk/vector

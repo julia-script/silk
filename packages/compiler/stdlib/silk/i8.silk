@@ -283,3 +283,13 @@ pub fn greaterThan(left: i8, right: i8) -> bool {
 pub fn greaterOrEqual(left: i8, right: i8) -> bool {
   return Intrinsic.i8GreaterOrEqual(left, right)
 }
+
+/// Renders the value as decimal text in freshly owned storage.
+pub effect fn toText(value: i8) -> String ! OutOfMemory ? &mut Allocator {
+  return run Format.signedText(toI64(value))
+}
+
+/// Reads complete decimal text as an `i8`, or reports why the text is not one.
+pub fn parse(text: string) -> Result<i8, ParseFailure> {
+  return Format.i8Value(text)
+}

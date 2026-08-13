@@ -224,3 +224,51 @@ pub fn main() -> i32 { return accept(C {}) }`),
     )
   }),
 )
+
+/**
+ * A union's payload slot is as wide as its widest member, so a narrower member and the slot holding
+ * it are different wasm value types. The Wasm backend used to move one into the other unchanged,
+ * which is not a valid instruction sequence, so every such program failed to emit while the
+ * evaluator and the native backend ran it correctly — `Result<u64, E>` for any `E` narrower than
+ * `u64` is that shape on a 32-bit target. The bits are the same bits either way, so the transfer
+ * bridges the containers and every engine now agrees.
+ */
+const widened = `struct Wide { value: u64 }
+struct Narrow { code: u8 }
+struct Holder { value: Wide | Narrow }
+
+fn hold(selector: i32) -> Holder {
+  if selector == 0 { return Holder { value: Wide { value: u64.MAX } } }
+  return Holder { value: Narrow { code: i32.toU8(7) } }
+}
+
+fn read(selector: i32) -> i32 {
+  return match move hold(selector) {
+    Holder { value: outcome } => match move outcome {
+      Wide { value } => u64.toI32(u64.remainder(u64.shiftRight(value, i32.toU64(32)), i32.toU64(1000)))
+      Narrow { code } => u8.toI32(code)
+    }
+  }
+}
+
+pub fn main() -> i32 { return read(0) * 100 + read(1) }`
+
+it.effect('carries a member narrower than its union slot through the Wasm backend', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-widened/main',
+      ascii(widened),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 29507)
+
+    const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 29507)
+  }),
+)

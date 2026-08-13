@@ -539,12 +539,29 @@ describe('preset catalog', () => {
     const native = snapshotOf(acceptancePreset, 'aarch64-apple-darwin')
     const wasm = snapshotOf(acceptancePreset, 'wasm32-unknown-unknown')
     expect(Analysis.diagnostics(native)).toEqual([])
+    // `usize` renders and reads decimal text, so naming it reaches the formatting stack and the
+    // owned text it produces. The closure is an analysis fact, not an artifact cost.
     expect(Analysis.modules(native).map((module) => module.name)).toEqual([
       'app/Main',
       'compiler/Coverage',
       'compiler/Member',
+      'silk/bytes',
+      'silk/core',
+      'silk/format',
+      'silk/i32',
+      'silk/i64',
+      'silk/layout',
       'silk/option',
+      'silk/order',
+      'silk/raw-buffer',
+      'silk/result',
+      'silk/slot',
+      'silk/string',
+      'silk/u32',
+      'silk/u64',
+      'silk/u8',
       'silk/usize',
+      'silk/vector',
     ])
     for (const name of Object.keys(acceptancePreset.modules)) {
       expect(Analysis.hirOf(native, name), name).toBeDefined()

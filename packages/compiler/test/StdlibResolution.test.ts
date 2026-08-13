@@ -111,15 +111,28 @@ it.effect('resolves standard-library imports without vendoring source', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized('stdlib/importer', ascii(importing))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    // `usize` renders and reads decimal text, so naming it reaches the formatting stack and the
+    // owned text it produces. The closure is an analysis fact, not an artifact cost: this program's
+    // emitted module is byte-identical to the one it produced before those functions existed,
+    // because codegen emits only what `main` reaches.
     assert.deepEqual(
       Analysis.modules(snapshot).map((module) => module.name),
       [
+        'silk/bytes',
         'silk/core',
+        'silk/format',
+        'silk/i32',
+        'silk/i64',
         'silk/layout',
         'silk/option',
         'silk/order',
         'silk/raw-buffer',
+        'silk/result',
         'silk/slot',
+        'silk/string',
+        'silk/u32',
+        'silk/u64',
+        'silk/u8',
         'silk/usize',
         'silk/vector',
         'stdlib/importer',

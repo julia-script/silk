@@ -43,9 +43,33 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
     const self = yield* snapshot('aarch64-apple-darwin')
 
     assert.deepEqual(Analysis.diagnostics(self), [])
+    // `usize` renders and reads decimal text, so naming it reaches the formatting stack and the
+    // owned text it produces. The closure is an analysis fact: this program's emitted artifact is
+    // unchanged, because codegen emits only what the entry point reaches.
     assert.deepEqual(
       Analysis.modules(self).map((module) => module.name),
-      ['app/Main', 'compiler/Coverage', 'compiler/Member', 'silk/option', 'silk/usize'],
+      [
+        'app/Main',
+        'compiler/Coverage',
+        'compiler/Member',
+        'silk/bytes',
+        'silk/core',
+        'silk/format',
+        'silk/i32',
+        'silk/i64',
+        'silk/layout',
+        'silk/option',
+        'silk/order',
+        'silk/raw-buffer',
+        'silk/result',
+        'silk/slot',
+        'silk/string',
+        'silk/u32',
+        'silk/u64',
+        'silk/u8',
+        'silk/usize',
+        'silk/vector',
+      ],
     )
     for (const name of moduleNames) {
       assert.notStrictEqual(Analysis.syntaxOf(self, name), undefined)

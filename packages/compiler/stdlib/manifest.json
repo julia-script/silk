@@ -78,6 +78,12 @@
     ]
   },
   {
+    "module": "silk/format",
+    "path": "silk/format.silk",
+    "namespace": "Format",
+    "aliases": ["NotANumber", "OutOfRange", "ParseFailure"]
+  },
+  {
     "module": "silk/host_input",
     "path": "silk/host_input.silk",
     "namespace": "HostInput",
