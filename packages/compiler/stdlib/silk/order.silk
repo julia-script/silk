@@ -1,0 +1,97 @@
+// The comparison contract the ordered sequence operations resolve against. Ordinary Silk: the
+// interface selects a compiler-known comparison during specialization exactly as `Integer` does, and
+// creates no effect requirement, provider slot, or runtime dispatch.
+//
+// The contract is `lessThan` rather than a three-way `compare` because an interface operation is
+// reachable from a generic body only through the operator that spells it. `<` spells `lessThan`, so
+// a body bounded by `Order` can compare; no operator spells `compare`, so a `compare` operation
+// would be declared and mapped yet uncallable. The three-way result is derived here instead, from
+// the two strict comparisons, and is therefore ordinary Silk over the same one-operation bound.
+
+/// The left value orders before the right value.
+pub struct Less {}
+
+/// Neither value orders before the other.
+pub struct Equal {}
+
+/// The left value orders after the right value.
+pub struct Greater {}
+
+/// The result of comparing two values in one order.
+pub struct Ordering {
+  /// The comparison result, narrowed with `match`.
+  pub value: Less | Equal | Greater
+}
+
+/// Static strict-ordering contract for primitive comparable values.
+///
+/// A witness supplies the strict `lessThan` the operator `<` spells. Equality is derived from it
+/// rather than declared, so a witness can never disagree with itself about which values are equal.
+pub interface Order<T> {
+  fn lessThan(left: T, right: T) -> bool
+}
+
+impl Order<u8> for u8 { lessThan: Intrinsic.u8LessThan }
+impl Order<u16> for u16 { lessThan: Intrinsic.u16LessThan }
+impl Order<u32> for u32 { lessThan: Intrinsic.u32LessThan }
+impl Order<u64> for u64 { lessThan: Intrinsic.u64LessThan }
+impl Order<usize> for usize { lessThan: Intrinsic.usizeLessThan }
+impl Order<i8> for i8 { lessThan: Intrinsic.i8LessThan }
+impl Order<i16> for i16 { lessThan: Intrinsic.i16LessThan }
+impl Order<i32> for i32 { lessThan: Intrinsic.i32LessThan }
+impl Order<i64> for i64 { lessThan: Intrinsic.i64LessThan }
+impl Order<isize> for isize { lessThan: Intrinsic.isizeLessThan }
+
+/// Compares two values three ways using the concrete comparison selected during specialization.
+///
+/// Reads both operands twice without moving either, so the result is the same whichever order a
+/// caller evaluates the operands in.
+pub fn compare<T: Order>(left: T, right: T) -> Ordering {
+  if left < right {
+    return Ordering { value: Less {} }
+  }
+  if right < left {
+    return Ordering { value: Greater {} }
+  }
+  return Ordering { value: Equal {} }
+}
+
+/// Reports whether one value orders strictly before another.
+pub fn less<T: Order>(left: T, right: T) -> bool {
+  return left < right
+}
+
+/// Reports whether neither value orders before the other.
+pub fn equal<T: Order>(left: T, right: T) -> bool {
+  if left < right {
+    return false
+  }
+  return !(right < left)
+}
+
+/// Reports whether an ordering is `Less`.
+pub fn isLess(ordering: &Ordering) -> bool {
+  return match &ordering.value {
+    Less {} => true
+    Equal {} => false
+    Greater {} => false
+  }
+}
+
+/// Reports whether an ordering is `Equal`.
+pub fn isEqual(ordering: &Ordering) -> bool {
+  return match &ordering.value {
+    Less {} => false
+    Equal {} => true
+    Greater {} => false
+  }
+}
+
+/// Reports whether an ordering is `Greater`.
+pub fn isGreater(ordering: &Ordering) -> bool {
+  return match &ordering.value {
+    Less {} => false
+    Equal {} => false
+    Greater {} => true
+  }
+}

@@ -45,6 +45,15 @@ export type CommandResult = { readonly _tag: 'Completed' } | Failure
 export type InspectResult =
   | { readonly _tag: 'Inspected'; readonly kind: Handle['kind']; readonly byteLength: number }
   | Failure
+/**
+ * A unique-directory creation. The provider picks the suffix, so the created final component name
+ * comes back rather than going in, and a caller with too small a buffer learns the exact capacity
+ * it needs without anything having been created.
+ */
+export type DirectoryCreateUniqueResult =
+  | { readonly _tag: 'Created'; readonly name: ReadonlyArray<number> }
+  | { readonly _tag: 'BufferTooSmall'; readonly requiredCapacity: number }
+  | Failure
 export type DirectoryNextResult =
   | { readonly _tag: 'Entry'; readonly name: ReadonlyArray<number>; readonly kind: Handle['kind'] }
   | { readonly _tag: 'End' }
@@ -70,6 +79,12 @@ export interface Provider {
     root: ReadonlyArray<number>,
     path: ReadonlyArray<number>,
   ) => CommandResult
+  readonly directoryCreateUnique: (
+    root: ReadonlyArray<number>,
+    parent: ReadonlyArray<number>,
+    prefix: ReadonlyArray<number>,
+    capacity: number,
+  ) => DirectoryCreateUniqueResult
   readonly fileRemove: (root: ReadonlyArray<number>, path: ReadonlyArray<number>) => CommandResult
   readonly directoryRemove: (
     root: ReadonlyArray<number>,

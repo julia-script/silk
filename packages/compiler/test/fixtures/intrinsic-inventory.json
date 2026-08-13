@@ -5017,6 +5017,15 @@
       "invariant": "root and path satisfy confined traversal; kind and byteLength outputs are initialized"
     },
     {
+      "operation": "Intrinsic.osDirectoryCreateUnique",
+      "signature": "unsafe fn Intrinsic.osDirectoryCreateUnique(root: &[u8], parent: &[u8], prefix: &[u8], output: &mut [u8], requiredCapacity: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os-filesystem.directoryCreateUnique",
+      "identity": "OsDirectoryCreateUnique",
+      "invariant": "root and parent satisfy confined traversal; prefix is one valid final component fragment; the provider chooses the unique suffix, creates exactly one directory no other caller holds, and writes its complete final component name; buffer-too-small creates nothing and reports required capacity"
+    },
+    {
       "operation": "Intrinsic.osDirectoryCreate",
       "signature": "unsafe fn Intrinsic.osDirectoryCreate(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
       "unsafe": true,

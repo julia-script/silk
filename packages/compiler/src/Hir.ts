@@ -118,6 +118,7 @@ export type BuiltinOperation =
   | 'OsDirectoryNext'
   | 'OsPathInspect'
   | 'OsDirectoryCreate'
+  | 'OsDirectoryCreateUnique'
   | 'OsFileRemove'
   | 'OsDirectoryRemove'
   | 'OsHandleClose'

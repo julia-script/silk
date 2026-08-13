@@ -143,6 +143,12 @@
     "aliases": ["None", "Some"]
   },
   {
+    "module": "silk/order",
+    "path": "silk/order.silk",
+    "namespace": "Order",
+    "aliases": ["Ordering", "Less", "Equal", "Greater"]
+  },
+  {
     "module": "silk/os_child_process",
     "path": "silk/os_child_process.silk",
     "namespace": "OsChildProcess"

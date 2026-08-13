@@ -5,6 +5,8 @@
 // through &mut self without a partial move, and the Drop hook destroys exactly the
 // initialized elements before the backing buffer releases.
 
+import silk.order { Order }
+
 pub struct Empty<T> {
   anchor: [T; 0]
 }
@@ -524,4 +526,184 @@ pub effect fn reserve<T>(
   self.storage = move moved
   self.capacity = next
   return ()
+}
+
+// Ordering. A bottom-up merge sort over a permutation of the element indices, so it is stable, and
+// deterministic because every comparison and every exchange is decided by the run boundaries alone
+// and never by an address, a capacity, or an engine detail. The same input therefore produces the
+// same output on the evaluator, on LLVM, and on Wasm.
+//
+// Merging cannot happen in place, so the sort allocates and carries `! OutOfMemory ? &mut Allocator`.
+// An insertion sort would need no allocation and no requirement, but it costs O(n^2), and the two
+// signatures are not source-compatible, so the choice cannot be deferred to a later release.
+//
+// The sort orders indices first and moves elements only once, at the end: each element is taken from
+// its old slot into the scratch buffer exactly once and the whole prefix travels back in one bulk
+// move. An element is therefore never read out of a borrowed place, never duplicated, and never
+// dropped twice, and the movement itself never requires the element type to be Copy.
+//
+// `sort` is one single body rather than the helper chain the rest of this file uses because a bound
+// is not carried into a nested generic call: a `T: Order` body cannot pass its own `T` to another
+// `T: Order` function. Every helper `sort` calls is therefore unbounded, and every comparison is
+// written here.
+
+struct Applied<T> {
+  buffer: RawBuffer<T>
+  scratch: RawBuffer<T>
+}
+
+/// Orders the elements in place. Equal elements keep their input order.
+pub effect fn sort<T: Order>(self: &mut Vector<T>) -> () ! OutOfMemory ? &mut Allocator {
+  let count = self.length
+  if count <= usize.ONE {
+    return ()
+  }
+  let element = Layout.of<T>()
+  let plan = Layout.repeat(move element, count)
+  let layout = match move plan {
+    Layout ready => ready
+    LayoutOverflow overflow => run overflowed()
+  }
+  let recipe = Allocator.allocate(move layout)
+  let allocation = run recipe
+  let scratch = freshBuffer<T>(move allocation, count)
+  let mut order = make<usize>()
+  let mut spare = make<usize>()
+  let mut seed = usize.ZERO
+  while seed < count {
+    let placed = run append<usize>(&mut order, seed)
+    let staged = run append<usize>(&mut spare, seed)
+    seed = seed + usize.ONE
+  }
+  let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+  let mut owned = takeBuffer<T>(move storage)
+  let mut width = usize.ONE
+  while width < count {
+    let mut low = usize.ZERO
+    while low < count {
+      let mut middle = low + width
+      if count < middle {
+        middle = count
+      }
+      let mut high = middle + width
+      if count < high {
+        high = count
+      }
+      let mut left = low
+      let mut right = middle
+      let mut cursor = low
+      while cursor < high {
+        // The right run wins a position only when it compares strictly less, so equal elements
+        // leave the left run first and the sort is stable.
+        let mut takeRight = true
+        if left < middle {
+          takeRight = false
+          if right < high {
+            let indices = asSlice<usize>(&order)
+            let after = RawBuffer.view<T>(&owned, indices[right], usize.ONE)
+            let before = RawBuffer.view<T>(&owned, indices[left], usize.ONE)
+            takeRight = after[usize.ZERO] < before[usize.ZERO]
+          }
+        }
+        let mut picked = usize.ZERO
+        if takeRight {
+          let indices = asSlice<usize>(&order)
+          picked = indices[right]
+          right = right + usize.ONE
+        } else {
+          let indices = asSlice<usize>(&order)
+          picked = indices[left]
+          left = left + usize.ONE
+        }
+        let mut slots = asMutSlice<usize>(&mut spare)
+        slots[cursor] = picked
+        cursor = cursor + usize.ONE
+      }
+      low = high
+    }
+    let mut back = usize.ZERO
+    while back < count {
+      let staged = asSlice<usize>(&spare)
+      let value = staged[back]
+      let mut slots = asMutSlice<usize>(&mut order)
+      slots[back] = value
+      back = back + usize.ONE
+    }
+    width = width + width
+  }
+  let applied = applyOrder<T>(move owned, move scratch, asSlice<usize>(&order), count)
+  let sorted = match move applied {
+    Applied<T> { buffer, scratch: leftover } => releaseScratch<T>(move buffer, move leftover)
+  }
+  self.storage = Full<T> { buffer: move sorted }
+  return ()
+}
+
+fn takeBuffer<T>(storage: Empty<T> | Full<T>) -> RawBuffer<T> {
+  return match move storage {
+    Empty<T> nothing => absurd<RawBuffer<T>>()
+    Full<T> full => unwrapFull<T>(move full)
+  }
+}
+
+fn unwrapFull<T>(full: Full<T>) -> RawBuffer<T> {
+  return match move full {
+    Full<T> { buffer } => move buffer
+  }
+}
+
+// Moves every element into the scratch buffer in the order the permutation names, then returns the
+// whole prefix in one bulk move. Every source slot is taken exactly once because the permutation is
+// a bijection, so nothing leaks and nothing is dropped twice.
+fn applyOrder<T>(buffer: RawBuffer<T>, scratch: RawBuffer<T>, order: &[usize], count: usize) -> Applied<T> {
+  let mut owned = move buffer
+  let mut staging = move scratch
+  unsafe {
+    let mut index = usize.ZERO
+    while index < count {
+      let selected = RawBuffer.slot(&mut owned, order[index])
+      let value = Slot.take(move selected)
+      let destination = RawBuffer.slot(&mut staging, index)
+      let written = Slot.write(move destination, move value)
+      index = index + usize.ONE
+    }
+  }
+  let merged = RawBuffer.view<T>(&staging, usize.ZERO, count)
+  let moved = RawBuffer.copy<T>(&mut owned, usize.ZERO, merged, count)
+  return Applied<T> { buffer: move owned, scratch: move staging }
+}
+
+// The scratch buffer holds no initialized element once the bulk move returns, so releasing it
+// destroys nothing.
+fn releaseScratch<T>(buffer: RawBuffer<T>, leftover: RawBuffer<T>) -> RawBuffer<T> {
+  unsafe {
+    let spent = move leftover
+    drop spent
+  }
+  return move buffer
+}
+
+/// Returns the index of a matching element in a sorted vector, or an absent value when none matches.
+///
+/// Returns the lowest matching index when a vector holds several equal elements, so a repeated
+/// search over one vector always answers with the same index.
+pub fn binarySearch<T: Order>(self: &Vector<T>, target: T) -> Option<usize> {
+  let two = usize.ONE + usize.ONE
+  let values = asSlice<T>(self)
+  let mut low = usize.ZERO
+  let mut high = self.length
+  while low < high {
+    let middle = low + (high - low) / two
+    if values[middle] < target {
+      low = middle + usize.ONE
+    } else {
+      high = middle
+    }
+  }
+  if low < self.length {
+    if !(target < values[low]) {
+      return Option.some<usize>(low)
+    }
+  }
+  return Option.none<usize>()
 }

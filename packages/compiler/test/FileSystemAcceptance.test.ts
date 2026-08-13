@@ -28,6 +28,7 @@ const portableProvider = `import silk.filesystem {
   view as pathView,
   createDirectoriesRecursively,
   createDirectoryOperation,
+  createTemporaryDirectoryOperation,
   directory,
   directoryEntry,
   directoryInfo,
@@ -47,7 +48,8 @@ const portableProvider = `import silk.filesystem {
   wrongType,
   writeFileOperation,
   writeFileWithParents,
-  exists
+  exists,
+  unsupported
 }
 import silk.bytes { Bytes, asSlice as bytesSlice, copy as bytesCopy }
 import silk.result { Failure, Result, Success }
@@ -164,6 +166,15 @@ effect fn memoryRemoveDirectory(self: &mut MemoryFileSystem, path: &Path) -> () 
   return ()
 }
 
+/// The in-memory provider has no namespace to make a unique name in.
+effect fn memoryCreateTemporary(
+  self: &mut MemoryFileSystem,
+  within: &Path,
+  prefix: &[u8]
+) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+  fail fsError(createTemporaryDirectoryOperation(), unsupported())
+}
+
 impl FileSystem for MemoryFileSystem {
   readFile: MemoryFileSystem.memoryRead
   writeFile: MemoryFileSystem.memoryWrite
@@ -172,6 +183,7 @@ impl FileSystem for MemoryFileSystem {
   createDirectory: MemoryFileSystem.memoryCreate
   removeFile: MemoryFileSystem.memoryRemoveFile
   removeDirectory: MemoryFileSystem.memoryRemoveDirectory
+  createTemporaryDirectory: MemoryFileSystem.memoryCreateTemporary
 }
 
 fn checksum(values: &[u8]) -> i32 {
@@ -516,7 +528,7 @@ it.effect(
   () => {
     const source = `import silk.filesystem {
   DirectoryEntry, DirectoryInfo, FileError, FileInfo, FileSystem, Path,
-  directoryInfo, exists, root
+  createTemporaryDirectoryOperation, directoryInfo, error, exists, root, unsupported
 }
 import silk.bytes { Bytes, make as bytesMake }
 import silk.vector { Vector, make as vectorMake }
@@ -540,6 +552,13 @@ effect fn list(self: &mut NativeProvider, path: &Path) -> Vector<DirectoryEntry>
 effect fn create(self: &mut NativeProvider, path: &Path) -> () ! FileError { return () }
 effect fn removeFile(self: &mut NativeProvider, path: &Path) -> () ! FileError { return () }
 effect fn removeDirectory(self: &mut NativeProvider, path: &Path) -> () ! FileError { return () }
+effect fn createTemporary(
+  self: &mut NativeProvider,
+  within: &Path,
+  prefix: &[u8]
+) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+  fail error(createTemporaryDirectoryOperation(), unsupported())
+}
 
 impl FileSystem for NativeProvider {
   readFile: NativeProvider.read
@@ -549,6 +568,7 @@ impl FileSystem for NativeProvider {
   createDirectory: NativeProvider.create
   removeFile: NativeProvider.removeFile
   removeDirectory: NativeProvider.removeDirectory
+  createTemporaryDirectory: NativeProvider.createTemporary
 }
 
 effect fn program() -> i32 ! FileError | OutOfMemory {

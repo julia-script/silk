@@ -428,6 +428,32 @@ const legacyActors = Object.freeze([
         invariant:
           'root and path satisfy confined traversal; kind and byteLength outputs are initialized',
       }),
+      osBuiltin({
+        name: 'directoryCreateUnique',
+        operation: 'OsDirectoryCreateUnique',
+        parameters: Object.freeze([
+          valueParameter('root', '&[u8]'),
+          valueParameter('parent', '&[u8]'),
+          valueParameter('prefix', '&[u8]'),
+          valueParameter('output', '&mut [u8]'),
+          valueParameter('requiredCapacity', '&mut usize'),
+          valueParameter('reason', '&mut i32'),
+          valueParameter('nativeCode', '&mut u32'),
+        ]),
+        semanticParameters: Object.freeze([
+          byteSlice,
+          byteSlice,
+          byteSlice,
+          Type.slice('Exclusive', 'u8'),
+          mutableUsize,
+          mutableI32,
+          mutableU32,
+        ]),
+        result: 'Effect<Option<usize>>',
+        semanticResult: Type.option('usize'),
+        invariant:
+          'root and parent satisfy confined traversal; prefix is one valid final component fragment; the provider chooses the unique suffix, creates exactly one directory no other caller holds, and writes its complete final component name; buffer-too-small creates nothing and reports required capacity',
+      }),
       ...(
         [
           ['directoryCreate', 'OsDirectoryCreate'],

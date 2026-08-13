@@ -12,7 +12,7 @@ each signature and description below is the `///` comment on the declaration in
 $ pnpm --filter @silk-effect/compiler documentation:generate
 ```
 
-The library has 37 modules.
+The library has 38 modules.
 
 ## Modules
 
@@ -27,7 +27,7 @@ The library has 37 modules.
 | [`silk/effects`](#silk-effects) | `Effect` | 21 |
 | [`silk/f32`](#silk-f32) | `f32` | 51 |
 | [`silk/f64`](#silk-f64) | `f64` | 51 |
-| [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 76 |
+| [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 85 |
 | [`silk/format`](#silk-format) | `Format` | 40 |
 | [`silk/host_input`](#silk-host-input) | `HostInput` | 12 |
 | [`silk/i16`](#silk-i16) | `i16` | 60 |
@@ -40,8 +40,9 @@ The library has 37 modules.
 | [`silk/metrics`](#silk-metrics) | `AllocationMetrics` | 6 |
 | [`silk/numeric`](#silk-numeric) | `Integer` | 12 |
 | [`silk/option`](#silk-option) | `Option` | 9 |
+| [`silk/order`](#silk-order) | `Order` | 21 |
 | [`silk/os_child_process`](#silk-os-child-process) | `OsChildProcess` | 9 |
-| [`silk/os_filesystem`](#silk-os-filesystem) | `OsFileSystem` | 35 |
+| [`silk/os_filesystem`](#silk-os-filesystem) | `OsFileSystem` | 37 |
 | [`silk/os_host_input`](#silk-os-host-input) | `OsHostInput` | 14 |
 | [`silk/os_standard_input`](#silk-os-standard-input) | `OsStandardInput` | 6 |
 | [`silk/raw-buffer`](#silk-raw-buffer) | `RawBuffer` | 8 |
@@ -54,7 +55,7 @@ The library has 37 modules.
 | [`silk/u64`](#silk-u64) | `u64` | 57 |
 | [`silk/u8`](#silk-u8) | `u8` | 57 |
 | [`silk/usize`](#silk-usize) | `usize` | 59 |
-| [`silk/vector`](#silk-vector) | `Vector` | 48 |
+| [`silk/vector`](#silk-vector) | `Vector` | 55 |
 
 ## silk/bool
 
@@ -1913,6 +1914,14 @@ pub fn pathOperation() -> FileOperation
 
 Selects path construction and resolution.
 
+### `createTemporaryDirectoryOperation`
+
+```silk
+pub fn createTemporaryDirectoryOperation() -> FileOperation
+```
+
+Selects the create-temporary-directory operation.
+
 ### `operationCode`
 
 ```silk
@@ -2137,6 +2146,90 @@ pub service FileSystem
 ```
 
 Portable mutable whole-file service. Providers own implementation and platform policy.
+
+### `TemporaryDirectory`
+
+```silk
+pub struct TemporaryDirectory
+```
+
+A directory a caller owns outright, together with everything written inside it.
+
+Ownership is affine: `TemporaryDirectory` holds an owned `Path`, so exactly one binding holds
+it and the compiler rejects a second use of a moved one. Ownership is not, however, a `Drop`
+hook. Removing a directory is a fallible operation that requires the `FileSystem` capability,
+and a `Drop` hook may carry neither a failure row nor a requirement row, so a hook here could
+only be written by inventing an infallible intrinsic over a fallible syscall. Release is
+therefore explicit and honest about both rows — see `release`.
+
+Scope ownership comes from composition rather than from a hook: `Effect.ensuring(release)`
+runs the release whatever the protected Effect's outcome. Because `ensuring` types its
+finalizer `! never`, that composition has to say what a failed removal means; `releaseIgnored`
+is the stdlib's answer and names the loss at the call site.
+
+### `temporaryDirectory`
+
+```silk
+pub effect fn temporaryDirectory(parent: &silk/filesystem.Path, prefix: string) -> TemporaryDirectory ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+```
+
+Creates one temporary directory under `parent` whose name begins with `prefix`.
+
+The result is owned. Nothing removes it until a caller runs `release` or `releaseIgnored`.
+
+### `release`
+
+```silk
+pub effect fn release(self: TemporaryDirectory) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+```
+
+Consumes one TemporaryDirectory and removes it together with everything inside it.
+
+Both rows are stated rather than hidden. Removal reaches the host, so it can fail; walking the
+tree to find what to remove allocates, so it can exhaust memory. A caller that must observe a
+failed cleanup uses this operation and handles the failure.
+
+### `releaseIgnored`
+
+```silk
+pub effect fn releaseIgnored(self: TemporaryDirectory) -> () ? &mut FileSystem | &mut Allocator
+```
+
+Consumes one TemporaryDirectory, removes it, and discards a failed removal.
+
+This exists because `Effect.ensuring` types its finalizer `! never`, so a fallible release has
+to be recovered before it can be a finalizer. The recovery is deliberate and it is named: a
+caller reading `releaseIgnored` at the call site can see that a failed removal is being
+dropped, which a hook doing the same thing invisibly could not show. What is lost is bounded —
+a directory the host will reap — and what is kept is the protected Effect's own outcome, which
+is the answer the program was computing.
+
+A caller who needs the failure uses `release` instead and does not compose it with `ensuring`.
+
+One shape note for that composition: the finalizer consumes the directory, so the protected
+Effect cannot still be borrowing it. Derive whatever paths the work needs from `path` first,
+then hand the owner to the finalizer:
+
+```silk
+let scope = run temporaryDirectory(&parent, "silk-build-")
+let artifact = run join(&scope.path, "output.bin")
+let value = run Effect.ensuring(build(&artifact), releaseIgnored(move scope))
+```
+
+### `removeDirectoryRecursively`
+
+```silk
+pub effect fn removeDirectoryRecursively(path: &silk/filesystem.Path) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+```
+
+Removes one directory and everything inside it.
+
+Two passes, because the portable primitive removes exactly one *empty* directory. The first
+pass walks the tree front to back, unlinking every file it meets and recording every directory
+it meets; the second removes the recorded directories back to front. That order is
+child-before-parent for free: a directory is always recorded before the children found inside
+it, so reversing the record reverses the containment. Neither pass recurses, so depth costs
+vector capacity rather than stack.
 
 ### `createDirectoriesRecursively`
 
@@ -5208,6 +5301,109 @@ Only the absent arm consumes the fallback. The present arm releases it, so exact
 two owned values leaves this call and the other drops.
 
 
+## silk/order
+
+Import as `Order` with `import silk.order`.
+
+### `Less`
+
+```silk
+pub struct Less
+```
+
+The left value orders before the right value.
+
+### `Equal`
+
+```silk
+pub struct Equal
+```
+
+Neither value orders before the other.
+
+### `Greater`
+
+```silk
+pub struct Greater
+```
+
+The left value orders after the right value.
+
+### `Ordering`
+
+```silk
+pub struct Ordering
+```
+
+The result of comparing two values in one order.
+
+| Field | Description |
+| --- | --- |
+| `pub value: silk/order.Equal \| silk/order.Greater \| silk/order.Less` | The comparison result, narrowed with `match`. |
+
+### `Order`
+
+```silk
+pub interface Order<T>
+```
+
+Static strict-ordering contract for primitive comparable values.
+
+A witness supplies the strict `lessThan` the operator `<` spells. Equality is derived from it
+rather than declared, so a witness can never disagree with itself about which values are equal.
+
+### `compare`
+
+```silk
+pub fn compare<T>(left: T, right: T) -> Ordering
+```
+
+Compares two values three ways using the concrete comparison selected during specialization.
+
+Reads both operands twice without moving either, so the result is the same whichever order a
+caller evaluates the operands in.
+
+### `less`
+
+```silk
+pub fn less<T>(left: T, right: T) -> bool
+```
+
+Reports whether one value orders strictly before another.
+
+### `equal`
+
+```silk
+pub fn equal<T>(left: T, right: T) -> bool
+```
+
+Reports whether neither value orders before the other.
+
+### `isLess`
+
+```silk
+pub fn isLess(ordering: &silk/order.Ordering) -> bool
+```
+
+Reports whether an ordering is `Less`.
+
+### `isEqual`
+
+```silk
+pub fn isEqual(ordering: &silk/order.Ordering) -> bool
+```
+
+Reports whether an ordering is `Equal`.
+
+### `isGreater`
+
+```silk
+pub fn isGreater(ordering: &silk/order.Ordering) -> bool
+```
+
+Reports whether an ordering is `Greater`.
+
+
 ## silk/os_child_process
 
 Import as `OsChildProcess` with `import silk.os_child_process`.
@@ -8233,6 +8429,25 @@ pub effect fn reserve<T>(self: &mut silk/vector.Vector<T>, additional: usize) ->
 ```
 
 Grows the capacity to hold at least one additional count of elements.
+
+### `sort`
+
+```silk
+pub effect fn sort<T>(self: &mut silk/vector.Vector<T>) -> () ! OutOfMemory ? &mut Allocator
+```
+
+Orders the elements in place. Equal elements keep their input order.
+
+### `binarySearch`
+
+```silk
+pub fn binarySearch<T>(self: &silk/vector.Vector<T>, target: T) -> Option<usize>
+```
+
+Returns the index of a matching element in a sorted vector, or an absent value when none matches.
+
+Returns the lowest matching index when a vector holds several equal elements, so a repeated
+search over one vector always answers with the same index.
 
 
 ## See also

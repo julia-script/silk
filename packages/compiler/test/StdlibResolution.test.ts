@@ -125,6 +125,7 @@ it.effect('resolves standard-library imports without vendoring source', () =>
         'silk/i64',
         'silk/layout',
         'silk/option',
+        'silk/order',
         'silk/raw-buffer',
         'silk/result',
         'silk/slot',
