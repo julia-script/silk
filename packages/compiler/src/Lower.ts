@@ -3700,7 +3700,7 @@ const lowerSequence = (
       droppedExpression._tag === 'BindingReference' ? droppedExpression.binding.ordinal : undefined
     const bindingFact =
       droppedBinding !== undefined
-        ? [...(fn.ownership?.bindings ?? []), ...(fn.ownership?.deferredBindings ?? [])].find(
+        ? Ownership.allBindings(fn.ownership).find(
             (binding) =>
               binding.site._tag === 'Let' && binding.site.binding.ordinal === droppedBinding,
           )
