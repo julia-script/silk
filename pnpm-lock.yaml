@@ -236,6 +236,28 @@ importers:
         specifier: 'catalog:'
         version: 4.0.0-beta.102
 
+  packages/documentation-site:
+    dependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-beta.103
+        version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102
+    devDependencies:
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
+      '@silk-effect/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      '@silk-effect/documentation':
+        specifier: workspace:*
+        version: link:../documentation
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.13.3
+
   packages/language:
     dependencies:
       '@silk-effect/compiler':

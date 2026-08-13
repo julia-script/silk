@@ -88,7 +88,7 @@ const exampleOf = (
   return Object.freeze({
     owner: Object.freeze(owner),
     code: stringAt(block, 'value') ?? '',
-    source: rangeOf(block['source']) ?? Object.freeze({ sourceId: fallback, start: 0, end: 0 }),
+    source: rangeOf(block.source) ?? Object.freeze({ sourceId: fallback, start: 0, end: 0 }),
     language,
     attributes: Object.freeze(attributes),
     ignored: attributes.includes(ignoreAttribute),
@@ -105,22 +105,22 @@ const fromBlock = (value: unknown, owner: Owner, fallback: string): ReadonlyArra
   if (!isRecord(value)) return []
   const direct = exampleOf(value, owner, fallback)
   const nested = [
-    ...fromBlock(value['children'], owner, fallback),
-    ...fromBlock(value['items'], owner, fallback),
+    ...fromBlock(value.children, owner, fallback),
+    ...fromBlock(value.items, owner, fallback),
   ]
   return direct === undefined ? nested : [direct, ...nested]
 }
 
 const fromDocument = (value: unknown, owner: Owner, fallback: string): ReadonlyArray<Example> =>
-  isRecord(value) ? fromBlock(value['blocks'], owner, fallback) : []
+  isRecord(value) ? fromBlock(value.blocks, owner, fallback) : []
 
 const fromItem = (value: unknown, module: string, fallback: string): ReadonlyArray<Example> => {
   if (!isRecord(value)) return []
   const name = stringAt(value, 'name')
   const owner: Owner = name === undefined ? { module } : { module, declaration: name }
-  const children = Array.isArray(value['children']) ? value['children'] : []
+  const children = Array.isArray(value.children) ? value.children : []
   return [
-    ...fromDocument(value['documentation'], owner, fallback),
+    ...fromDocument(value.documentation, owner, fallback),
     ...children.flatMap((child) => fromItem(child, module, fallback)),
   ]
 }
@@ -135,16 +135,16 @@ const fromItem = (value: unknown, module: string, fallback: string): ReadonlyArr
  */
 export const collect = (documentation: unknown): ReadonlyArray<Example> => {
   if (!isRecord(documentation)) return []
-  const modules = documentation['modules']
+  const modules = documentation.modules
   if (!Array.isArray(modules)) return []
   return Object.freeze(
     modules.flatMap((module): ReadonlyArray<Example> => {
       if (!isRecord(module)) return []
       const name = stringAt(module, 'name') ?? ''
       const sourceId = stringAt(module, 'sourceId') ?? name
-      const items = Array.isArray(module['items']) ? module['items'] : []
+      const items = Array.isArray(module.items) ? module.items : []
       return [
-        ...fromDocument(module['documentation'], { module: name }, sourceId),
+        ...fromDocument(module.documentation, { module: name }, sourceId),
         ...items.flatMap((item) => fromItem(item, name, sourceId)),
       ]
     }),
