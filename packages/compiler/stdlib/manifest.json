@@ -84,6 +84,17 @@
     "aliases": ["NotANumber", "OutOfRange", "ParseFailure"]
   },
   {
+    "module": "silk/hash",
+    "path": "silk/hash.silk",
+    "namespace": "HashKey",
+    "aliases": ["HashSeed", "Word"]
+  },
+  {
+    "module": "silk/hash_map",
+    "path": "silk/hash_map.silk",
+    "namespace": "HashMap"
+  },
+  {
     "module": "silk/host_input",
     "path": "silk/host_input.silk",
     "namespace": "HostInput",
