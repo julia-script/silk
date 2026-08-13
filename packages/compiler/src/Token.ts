@@ -11,6 +11,7 @@ export type TokenKind =
   | 'DecimalFloat'
   | 'TextLiteral'
   | 'ByteStringLiteral'
+  | 'CharLiteral'
   | 'InvalidStaticLiteral'
   | 'PubKeyword'
   | 'StructKeyword'
@@ -88,6 +89,7 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   DecimalFloat: 'decimal floating-point literal',
   TextLiteral: 'text literal',
   ByteStringLiteral: 'byte-string literal',
+  CharLiteral: 'character literal',
   InvalidStaticLiteral: 'invalid static literal',
   PubKeyword: '`pub`',
   StructKeyword: '`struct`',

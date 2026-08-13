@@ -28,8 +28,8 @@ const decoded = (kind: Data['kind'], bytes: ReadonlyArray<number>, utf8: boolean
     }),
   })
 
-const invalid = (detail: string, offset: number): DecodeResult =>
-  Object.freeze({ _tag: 'Invalid', detail, offset })
+const invalid = (detail: string, offset: number) =>
+  Object.freeze({ _tag: 'Invalid' as const, detail, offset })
 
 const hexDigit = (byte: number | undefined): number | undefined => {
   if (byte !== undefined && byte >= 0x30 && byte <= 0x39) return byte - 0x30
@@ -50,11 +50,11 @@ export const decode = (
   const end = token.length - form.delimiterWidth
   const openingIsValid = Array.from(
     { length: form.delimiterWidth },
-    (_, index) => token[form.modifier.length + index] === 0x22,
+    (_, index) => token[form.modifier.length + index] === form.delimiter,
   ).every(Boolean)
   const closingIsValid = Array.from(
     { length: form.delimiterWidth },
-    (_, index) => token[end + index] === 0x22,
+    (_, index) => token[end + index] === form.delimiter,
   ).every(Boolean)
   if (!openingIsValid || !closingIsValid || end < contentStart)
     return invalid('unterminated literal', Math.max(0, token.length - 1))
@@ -85,7 +85,10 @@ export const decode = (
     else if (escaped === 0x72) output.push(0x0d)
     else if (escaped === 0x74) output.push(0x09)
     else if (escaped === 0x30) output.push(0)
+    // `\'` escapes the character form's own delimiter. The quote escape stays valid everywhere,
+    // so one escape keeps one meaning in every literal that admits it.
     else if (escaped === 0x22 || escaped === 0x5c) output.push(escaped)
+    else if (escaped === 0x27 && form.delimiter === 0x27) output.push(escaped)
     else if (escaped === 0x78) {
       const high = hexDigit(token[index])
       const low = hexDigit(token[index + 1])
@@ -125,7 +128,35 @@ export const decode = (
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(output))
   } catch {
-    return invalid('text literal is not valid UTF-8', contentStart)
+    return invalid(
+      `${form.category === 'Character' ? 'character' : 'text'} literal is not valid UTF-8`,
+      contentStart,
+    )
   }
   return decoded('Text', output, true)
+}
+
+/** One Unicode scalar value decoded from one complete character-literal token. */
+export type ScalarResult =
+  | { readonly _tag: 'Scalar'; readonly value: number }
+  | { readonly _tag: 'Invalid'; readonly detail: string; readonly offset: number }
+
+/**
+ * Decodes one character literal to the single Unicode scalar value it denotes.
+ *
+ * The escape vocabulary is the shared decoder's, so `\n`, `\u{2603}`, and the rest keep exactly
+ * one meaning across every literal form. Only the one-scalar rule is decided here, and it is a
+ * scalar rule rather than a byte rule: `'é'` decodes to two bytes and one scalar.
+ */
+export const decodeScalar = (
+  token: ReadonlyArray<number>,
+  form: LiteralForm.LiteralForm,
+): ScalarResult => {
+  const result = decode(token, form)
+  if (result._tag === 'Invalid') return result
+  const text = new TextDecoder('utf-8').decode(Uint8Array.from(result.data.bytes))
+  const value = text.codePointAt(0)
+  if (value === undefined || String.fromCodePoint(value).length !== text.length)
+    return invalid('character literal must hold exactly one Unicode scalar', form.delimiterWidth)
+  return Object.freeze({ _tag: 'Scalar', value })
 }

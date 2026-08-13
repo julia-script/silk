@@ -949,6 +949,7 @@ const printNode = (
     case 'IntegerLiteralExpression':
     case 'FloatingLiteralExpression':
     case 'StaticTextLiteralExpression':
+    case 'CharacterLiteralExpression':
     case 'BooleanLiteralExpression':
     case 'IdentifierExpression':
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)

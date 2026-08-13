@@ -195,6 +195,7 @@ const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'DecimalFloat',
   'TextLiteral',
   'ByteStringLiteral',
+  'CharLiteral',
   'InvalidStaticLiteral',
   'Identifier',
   'LeftBrace',
@@ -383,6 +384,14 @@ const parseStaticTextLiteralExpression = (initial: State): NodeResult => {
   })
 }
 
+const parseCharacterLiteralExpression = (initial: State): NodeResult => {
+  const literal = expect(initial, 'CharLiteral', expressionFollowing)
+  return Object.freeze({
+    state: literal.state,
+    node: syntaxNode(literal.state, 'CharacterLiteralExpression', literal.elements),
+  })
+}
+
 const primaryKind = (
   state: State,
   recoveryKind: 'Integer' | 'Identifier',
@@ -391,6 +400,7 @@ const primaryKind = (
   | 'Integer'
   | 'Floating'
   | 'StaticText'
+  | 'Character'
   | 'Boolean'
   | 'Identifier'
   | 'Move'
@@ -417,6 +427,7 @@ const primaryKind = (
       token.kind === 'InvalidStaticLiteral'
     )
       return 'StaticText'
+    if (token.kind === 'CharLiteral') return 'Character'
     if (token.kind === 'Minus')
       return significantKindAfter(state, 1) === 'DecimalInteger'
         ? 'Integer'
@@ -1091,6 +1102,7 @@ function parsePrimaryExpression(
   }
   if (kind === 'Boolean') return parseBooleanLiteralExpression(initial)
   if (kind === 'StaticText') return parseStaticTextLiteralExpression(initial)
+  if (kind === 'Character') return parseCharacterLiteralExpression(initial)
   if (kind === 'Floating') return parseFloatingLiteralExpression(initial)
   if (kind === 'Identifier') return parseIdentifierExpression(initial)
   if (kind === 'Grouped') return parseGroupedExpression(initial, reservedForEnclosingCalls)

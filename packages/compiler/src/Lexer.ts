@@ -342,10 +342,17 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
         start + modifierWidth + delimiterWidth,
         delimiterWidth,
         form?.escapePolicy ?? 'Escaped',
+        form?.delimiter ?? 0x22,
       )
       index = boundary.end
+      // A character literal holds exactly one Unicode scalar, which only the lexer can judge
+      // while it still owns the token's extent. Every other form accepts any body length.
+      const scalars =
+        form?.category === 'Character' && boundary.terminated
+          ? LiteralForm.scalarCount(bytes, start + delimiterWidth, index - delimiterWidth)
+          : 1
       const span = pushToken(
-        form !== undefined && boundary.terminated
+        form !== undefined && boundary.terminated && scalars === 1
           ? LiteralForm.tokenKind(form)
           : 'InvalidStaticLiteral',
         start,
@@ -355,8 +362,15 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
         diagnostics.push(Diagnostic.unknownLiteralModifier(unknown.modifier, span))
       } else if (!boundary.terminated && form !== undefined) {
         diagnostics.push(
-          Diagnostic.unterminatedStaticLiteral(form.modifier, form.delimiterWidth, span),
+          Diagnostic.unterminatedStaticLiteral(
+            form.modifier,
+            form.delimiterWidth,
+            span,
+            form.delimiter === 0x27 ? "'" : '"',
+          ),
         )
+      } else if (scalars !== 1) {
+        diagnostics.push(Diagnostic.characterLiteralScalarCount(scalars, span))
       }
       continue
     }

@@ -31,6 +31,9 @@ export const invalidDigitSeparatorCode = 'LEX0005' as const
 /** Stable code for a float-literal exponent marker that no exponent digit follows. */
 export const missingExponentDigitsCode = 'LEX0006' as const
 
+/** Stable code for a character literal that denotes a number of scalars other than one. */
+export const characterLiteralScalarCountCode = 'LEX0007' as const
+
 /** Stable code for one required token that is absent at its insertion position. */
 export const missingTokenCode = 'PAR0001' as const
 
@@ -215,6 +218,7 @@ export type Code =
   | typeof missingBaseDigitsCode
   | typeof invalidDigitSeparatorCode
   | typeof missingExponentDigitsCode
+  | typeof characterLiteralScalarCountCode
   | typeof missingTokenCode
   | typeof unexpectedTokensCode
   | typeof reservedTemplateSyntaxCode
@@ -355,11 +359,13 @@ export type Reason =
   | {
       readonly _tag: 'UnterminatedStaticLiteral'
       readonly modifier: string
+      readonly delimiter: '"' | "'"
       readonly delimiterWidth: 1 | 3
     }
   | { readonly _tag: 'MissingBaseDigits'; readonly radix: 2 | 8 | 16 }
   | { readonly _tag: 'InvalidDigitSeparator' }
   | { readonly _tag: 'MissingExponentDigits' }
+  | { readonly _tag: 'CharacterLiteralScalarCount'; readonly scalars: number }
   | { readonly _tag: 'MissingToken'; readonly expected: Token.TokenKind }
   | {
       readonly _tag: 'UnexpectedTokens'
@@ -818,14 +824,43 @@ export const unterminatedStaticLiteral = (
   modifier: string,
   delimiterWidth: 1 | 3,
   span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
+  delimiter: '"' | "'" = '"',
+): Diagnostic => {
+  const subject =
+    delimiter === "'" ? 'character' : `${delimiterWidth === 3 ? 'multiline ' : ''}static`
+  return Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
     code: unterminatedStaticLiteralCode,
     severity: 'error',
-    message: `Unterminated ${delimiterWidth === 3 ? 'multiline ' : ''}static literal`,
-    reason: Object.freeze({ _tag: 'UnterminatedStaticLiteral', modifier, delimiterWidth }),
+    message: `Unterminated ${subject} literal`,
+    reason: Object.freeze({
+      _tag: 'UnterminatedStaticLiteral',
+      modifier,
+      delimiter,
+      delimiterWidth,
+    }),
+    span,
+  })
+}
+
+/**
+ * Creates the lexical diagnostic for one character literal that does not denote one scalar.
+ *
+ * The rule counts Unicode scalars rather than bytes, so a multi-byte scalar such as `'é'` is one
+ * character and never a length error.
+ */
+export const characterLiteralScalarCount = (
+  scalars: number,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'lexical',
+    code: characterLiteralScalarCountCode,
+    severity: 'error',
+    message: `Character literal must hold exactly one Unicode scalar, but holds ${scalars}`,
+    reason: Object.freeze({ _tag: 'CharacterLiteralScalarCount', scalars }),
     span,
   })
 

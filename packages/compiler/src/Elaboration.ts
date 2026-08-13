@@ -134,6 +134,14 @@ export interface StaticTextExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** One character literal carrying the single Unicode scalar value its body denotes. */
+export interface CharacterExpressionFact {
+  readonly _tag: 'Character'
+  readonly value?: number
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
 /** A call callee resolved against top-level declarations or unavailable after syntax recovery. */
 export type CallReferenceFact =
   | {
@@ -507,6 +515,7 @@ export interface ConstantExpressionFact {
         readonly type: 'f32' | 'f64'
       }
     | { readonly _tag: 'String'; readonly data: StaticText.Data }
+    | { readonly _tag: 'Character'; readonly value: number }
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
 }
@@ -659,6 +668,7 @@ export type ExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
   | StaticTextExpressionFact
+  | CharacterExpressionFact
   | {
       readonly _tag: 'Unit'
       readonly type: ExpressionTypeFact
@@ -1014,6 +1024,7 @@ const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'IntegerLiteralExpression',
   'FloatingLiteralExpression',
   'StaticTextLiteralExpression',
+  'CharacterLiteralExpression',
   'UnitExpression',
   'BooleanLiteralExpression',
   'IdentifierExpression',
@@ -1300,6 +1311,9 @@ const analyzeConstant = (
   } else if (declared.type === 'bool' && literal._tag === 'BooleanLiteral') {
     type = 'bool'
     value = Object.freeze({ _tag: 'Boolean', value: literal.value })
+  } else if (declared.type === 'char' && literal._tag === 'CharacterLiteral') {
+    type = 'char'
+    value = Object.freeze({ _tag: 'Character', value: literal.value })
   } else if (Scalar.isIntegerSpelling(declared.type) && literal._tag === 'IntegerLiteral') {
     const scalar = Scalar.find(declared.type)
     if (scalar === undefined || scalar.category !== 'Integer') {
@@ -5327,6 +5341,7 @@ const effectCaptureFacts = (
         return
       case 'Integer':
       case 'Boolean':
+      case 'Character':
       case 'Constant':
         return
     }
@@ -5538,6 +5553,33 @@ function analyzeExpression(
       fact: Object.freeze({
         _tag: 'StaticText',
         ...(data === undefined ? {} : { data }),
+        type,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze(diagnostic === undefined ? [] : [diagnostic]),
+      type: type._tag === 'Available' ? type.type : undefined,
+    })
+  }
+
+  if (node.kind === 'CharacterLiteralExpression') {
+    const token = directToken(node, 'CharLiteral')
+    const bytes =
+      token === undefined ? undefined : Option.getOrUndefined(SourceFile.slice(source, token.span))
+    const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
+    const result =
+      bytes === undefined || form === undefined
+        ? undefined
+        : StaticText.decodeScalar(Array.from(bytes), form)
+    const diagnostic =
+      result?._tag === 'Invalid'
+        ? Diagnostic.invalidStaticLiteral(result.detail, node.span)
+        : undefined
+    const scalar = result?._tag === 'Scalar' ? result.value : undefined
+    const type = scalar === undefined ? unavailableExpressionType : availableExpressionType('char')
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Character',
+        ...(scalar === undefined ? {} : { value: scalar }),
         type,
         syntax: node,
       }),
@@ -7222,7 +7264,24 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
         })
       : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   }
+  if (fact._tag === 'Character') {
+    return fact.type._tag === 'Available' && fact.value !== undefined
+      ? Object.freeze({
+          _tag: 'CharacterLiteral',
+          value: fact.value,
+          type: fact.type.type,
+          span: fact.syntax.span,
+        })
+      : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+  }
   if (fact._tag === 'Constant') {
+    if (fact.value?._tag === 'Character')
+      return Object.freeze({
+        _tag: 'CharacterLiteral',
+        value: fact.value.value,
+        type: 'char',
+        span: fact.syntax.span,
+      })
     if (fact.value?._tag === 'Boolean')
       return Object.freeze({
         _tag: 'BooleanLiteral',
@@ -8278,6 +8337,7 @@ const directExpressionChildren = (expression: ExpressionFact): ReadonlyArray<Exp
     case 'Integer':
     case 'Floating':
     case 'StaticText':
+    case 'Character':
     case 'Unit':
     case 'Boolean':
     case 'Constant':

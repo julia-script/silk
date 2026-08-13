@@ -43,6 +43,18 @@ export interface ScalarIntegerValue {
   readonly value: bigint
 }
 
+/**
+ * One Unicode scalar value.
+ *
+ * `char` is its own scalar category rather than an integer, so it is its own value rather than an
+ * integer view: nothing that reads an integer accepts it, and the only operations that read it are
+ * the equality and ordering lanes the catalog declares.
+ */
+export interface CharacterValue {
+  readonly _tag: 'CharacterValue'
+  readonly value: number
+}
+
 export interface FloatValue {
   readonly _tag: 'FloatValue'
   readonly type: Scalar.FloatSpelling
@@ -197,6 +209,7 @@ export type Value =
   | I32Value
   | UsizeValue
   | ScalarIntegerValue
+  | CharacterValue
   | FloatValue
   | AggregateValue
   | ArrayValue
@@ -548,6 +561,9 @@ const scalarIntegerValue = (
       ? usizeValue(input)
       : Object.freeze({ _tag: 'ScalarIntegerValue', type, value: input })
 
+const characterValue = (input: number): CharacterValue =>
+  Object.freeze({ _tag: 'CharacterValue', value: input })
+
 const floatValue = (type: Scalar.FloatSpelling, bits: bigint): FloatValue =>
   Object.freeze({ _tag: 'FloatValue', type, bits: BigInt.asUintN(type === 'f32' ? 32 : 64, bits) })
 
@@ -816,6 +832,13 @@ function* executeFunction(
     ) {
       throw new RangeError(`MIR verifier allowed aggregate local %${local.ordinal} as an integer`)
     }
+    return found
+  }
+
+  const readCharacter = (local: Mir.LocalId): CharacterValue => {
+    const found = read(local).value
+    if (found._tag !== 'CharacterValue')
+      throw new RangeError(`MIR verifier allowed non-char local %${local.ordinal} as a char`)
     return found
   }
 
@@ -2121,12 +2144,15 @@ function* executeFunction(
               const semantic = Mir.semanticType(operation.type)
               const integer = typeof semantic === 'string' && Scalar.isIntegerSpelling(semantic)
               const floating = typeof semantic === 'string' && Scalar.isFloatSpelling(semantic)
+              const character = typeof semantic === 'string' && Scalar.isCharacterSpelling(semantic)
               write(operation.destination, {
                 value: floating
                   ? floatValue(semantic, BigInt(operation.value))
                   : integer
                     ? scalarIntegerValue(semantic, BigInt(operation.value))
-                    : value(Number(operation.value)),
+                    : character
+                      ? characterValue(Number(operation.value))
+                      : value(Number(operation.value)),
                 fromCall: false,
               })
             }
@@ -3550,6 +3576,28 @@ function* executeFunction(
                 ),
                 fromCall: false,
               })
+              break
+            }
+            if (Scalar.isCharacterSpelling(semantic)) {
+              const left = readCharacter(operation.left).value
+              const right = readCharacter(operation.right).value
+              const holds =
+                operation.operator === 'Equals'
+                  ? left === right
+                  : operation.operator === 'NotEquals'
+                    ? left !== right
+                    : operation.operator === 'LessThan'
+                      ? left < right
+                      : operation.operator === 'LessOrEqual'
+                        ? left <= right
+                        : operation.operator === 'GreaterThan'
+                          ? left > right
+                          : operation.operator === 'GreaterOrEqual'
+                            ? left >= right
+                            : undefined
+              if (holds === undefined)
+                throw new RangeError('MIR verifier allowed a non-comparison char operation')
+              write(operation.destination, { value: value(holds ? 1 : 0), fromCall: false })
               break
             }
             const leftValue = readInteger(operation.left)

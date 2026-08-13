@@ -19,6 +19,7 @@ import * as TypeCompatibility from './TypeCompatibility.js'
 const i32: Extract<Mir.Type, { readonly _tag: 'i32' }> = Object.freeze({ _tag: 'i32' })
 const usize: Extract<Mir.Type, { readonly _tag: 'usize' }> = Object.freeze({ _tag: 'usize' })
 const bool: Extract<Mir.Type, { readonly _tag: 'bool' }> = Object.freeze({ _tag: 'bool' })
+const character: Extract<Mir.Type, { readonly _tag: 'char' }> = Object.freeze({ _tag: 'char' })
 
 const isOsOperation = (
   operation: Hir.BuiltinOperation,
@@ -1201,6 +1202,19 @@ function lowerExpressionInner(
           destination,
           type: bool,
           value: expression.value ? 1 : 0,
+          provenance: Object.freeze({ span: expression.span, generated: false }),
+        }),
+      )
+      return { result: destination }
+    }
+    case 'CharacterLiteral': {
+      const destination = fn.alloc(character)
+      fn.emit(
+        Object.freeze({
+          _tag: 'Literal',
+          destination,
+          type: character,
+          value: expression.value,
           provenance: Object.freeze({ span: expression.span, generated: false }),
         }),
       )

@@ -999,3 +999,112 @@ it('lexes conditional keywords as complete identifiers only', () => {
     ['Identifier', 'Identifier', 'Identifier', 'Identifier', 'EndOfFile'],
   )
 })
+
+const utf8 = (value: string): Uint8Array => new TextEncoder().encode(value)
+
+it('lexes a character literal and every accepted escape as one CharLiteral token', () => {
+  for (const spelling of [
+    "'a'",
+    "' '",
+    "'\\n'",
+    "'\\r'",
+    "'\\t'",
+    "'\\0'",
+    "'\\\\'",
+    "'\\''",
+    "'\\\"'",
+    "'\"'",
+    "'\\x41'",
+    "'\\u{2603}'",
+    "'é'",
+    "'😀'",
+  ]) {
+    const bytes = utf8(spelling)
+    const source = SourceFile.make('memory://char.silk', bytes)
+    const result = Lexer.lex(source)
+    assert.deepEqual(
+      result.tokens.filter((token) => token.kind !== 'EndOfFile').map((token) => token.kind),
+      ['CharLiteral'],
+      spelling,
+    )
+    assert.strictEqual(result.tokens.at(0)?.span.end, bytes.length, spelling)
+    assert.deepEqual(result.diagnostics, [], spelling)
+  }
+})
+
+it('diagnoses a character literal that does not hold exactly one scalar', () => {
+  for (const [spelling, scalars] of [
+    ["''", 0],
+    ["'ab'", 2],
+    ["'éé'", 2],
+    ["'\\n\\t'", 2],
+    ["'a\\u{2603}'", 2],
+  ] as const) {
+    const bytes = utf8(spelling)
+    const source = SourceFile.make('memory://char-count.silk', bytes)
+    const result = Lexer.lex(source)
+    assert.deepEqual(
+      result.tokens.filter((token) => token.kind !== 'EndOfFile').map((token) => token.kind),
+      ['InvalidStaticLiteral'],
+      spelling,
+    )
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => diagnostic.code),
+      ['LEX0007'],
+      spelling,
+    )
+    assert.deepEqual(result.diagnostics.at(0)?.reason, {
+      _tag: 'CharacterLiteralScalarCount',
+      scalars,
+    })
+  }
+})
+
+it('stops an unterminated character literal before the line ending with one diagnostic', () => {
+  const source = SourceFile.make('memory://char-open.silk', ascii("'a\nnext"))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'EndOfFile')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'InvalidStaticLiteral', start: 0, end: 2, slice: "'a" },
+      { kind: 'Whitespace', start: 2, end: 3, slice: '\n' },
+      { kind: 'Identifier', start: 3, end: 7, slice: 'next' },
+    ],
+  )
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['LEX0003'],
+  )
+  assert.strictEqual(result.diagnostics.at(0)?.message, 'Unterminated character literal')
+})
+
+it('keeps a character literal one token beside its neighbours and covers every byte', () => {
+  const bytes = utf8("const space: char = ' '\nlet tab = '\\t' // 'not a literal'\n")
+  const source = SourceFile.make('memory://char-neighbours.silk', bytes)
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind === 'CharLiteral').map((token) => token.span.start),
+    [20, 34],
+  )
+  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(
+    Uint8Array.from(
+      result.tokens
+        .filter((token) => token.kind !== 'EndOfFile')
+        .flatMap((token) => Array.from(Option.getOrThrow(SourceFile.slice(source, token.span)))),
+    ),
+    bytes,
+  )
+})
+
+it('leaves an unknown modifier vocabulary to the quote delimiter alone', () => {
+  const source = SourceFile.make('memory://char-modifier.silk', ascii("b'a'"))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'EndOfFile').map((token) => token.kind),
+    ['Identifier', 'CharLiteral'],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
