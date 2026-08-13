@@ -605,8 +605,9 @@ propagation is a compile error rather than a runtime surprise.
 The compiler owns exactly two primitives at this seam: one that runs a layer and reifies its outcome
 as `Result<A, Row<!E>>` data, and one that removes a single capability-role entry.
 
-Everything else — `map`, `mapError`, `flatMap`, `tap`, `catch`, `catchAll`, `retry`, `ensuring`,
-`provide`, `provideMut`, `provideWith` — is ordinary Silk source in `effects.silk`. The compiler must
+Everything else — `map`, `mapError`, `flatMap`, `flatten`, `tap`, `catch`, `catchAll`, `retry`,
+`ensuring`, `zip`, `zip3`, `provide`, `provideMut`, `provideWith` — is ordinary Silk source in
+`effects.silk`. The compiler must
 not infer their meaning from a name or an origin, so a user-defined equivalent gets identical
 treatment with no registration.
 
@@ -637,6 +638,22 @@ reconcile with the one being preserved, and the failure row of the wrapped Effec
 release that can fail is recovered into that contract first — `Effect.catch(release(), ignore)` —
 which leaves the decision about what a failed release means with the caller. A trap is not an
 outcome: it bypasses the finalizer exactly as it bypasses `catch` and every `Drop` hook.
+
+`Effect.zip` collects instead of transforming: it runs two Effects in order and returns a `Pair`
+holding both success values, with both failure rows and both requirement rows unioned. `Effect.zip3`
+does the same for three operands and returns a `Triple`. Sequencing is the body's own statement
+order — `let first = run self` then `let second = run other` — so a typed failure from the first
+operand propagates out before the second `run` is reached. The second Effect is never executed, and
+because it is an owned local of the frame the failure leaves, the propagation exit releases it like
+any other local. Neither combinator reifies, because neither has anything to do after a failure.
+
+Arity is fixed, and that is a property of the language rather than a simplification. A
+collection-taking `all` would need `Vector<Effect<...>>`, which cannot be lowered: Effect values are
+compiler-private with no target layout, and they survive being passed and returned only because
+hidden-identity specialization erases them at each statically known use. A `RawBuffer` element's
+identity is a runtime value, so there is nothing to erase — such a program passes semantic analysis
+today and then fails MIR verification with `MissingTypeLayout`. Distinct parameters keep every
+operand statically known. A caller combining more than three Effects nests: `zip(zip3(a, b, c), d)`.
 
 ### 5.5 Provision
 
