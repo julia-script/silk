@@ -198,6 +198,10 @@ effect fn create(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> 
   unsafe { return run Intrinsic.osDirectoryCreate(root, path, reason, code) }
   return false
 }
+effect fn createUnique(root: &[u8], parent: &[u8], prefix: &[u8], output: &mut [u8], required: &mut usize, reason: &mut i32, code: &mut u32) -> Option<usize> {
+  unsafe { return run Intrinsic.osDirectoryCreateUnique(root, parent, prefix, move output, required, reason, code) }
+  return none<usize>()
+}
 effect fn removeFile(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> bool {
   unsafe { return run Intrinsic.osFileRemove(root, path, reason, code) }
   return false
