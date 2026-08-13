@@ -80,7 +80,9 @@ it.effect('lowers a HashMap program to a MIR that names no hash operation', () =
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? value.toString() : value)),
+      JSON.stringify(evaluated, (_, value) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      ),
     )
     assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
 
