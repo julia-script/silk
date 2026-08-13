@@ -18,6 +18,7 @@ import silk.filesystem {
   Path,
   alreadyExists,
   createDirectoryOperation,
+  createTemporaryDirectoryOperation,
   directory,
   directoryEntry,
   directoryInfo,
@@ -42,7 +43,7 @@ import silk.filesystem {
   joinUtf8 as pathJoinUtf8,
   view as pathView
 }
-import silk.option { None, Option, Some, none }
+import silk.option { None, Option, Some, none, some }
 import silk.result { Failure, Result, Success }
 import silk.string { utf8Bytes as stringUtf8Bytes }
 import silk.vector {
@@ -424,6 +425,80 @@ effect fn command(
   return ()
 }
 
+effect fn rawCreateUnique(
+  root: &[u8],
+  parent: &[u8],
+  prefix: &[u8],
+  output: &mut [u8],
+  required: &mut usize,
+  lowReason: &mut i32,
+  nativeCode: &mut u32
+) -> Option<usize> {
+  unsafe {
+    return run Intrinsic.osDirectoryCreateUnique(root, parent, prefix, output, required, lowReason, nativeCode)
+  }
+  let impossible = 1 / 0
+  return none<usize>()
+}
+
+/// Creates one uniquely named directory under `parent` and returns its complete Path.
+///
+/// The provider chooses the name's unique part, so the created name comes back rather than going
+/// in. A buffer too small for that name creates nothing and reports the capacity it needs, which
+/// is why the retry below is safe to take.
+effect fn createTemporaryDirectory(
+  self: &mut OsFileSystem,
+  parent: &Path,
+  prefix: &[u8]
+) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+  let mut buffer = run bytesZeroed(64)
+  let mut created = none<Path>()
+  let mut complete = false
+  while complete == false {
+    let mut required = usize.ZERO
+    let mut lowReason = 0
+    let mut nativeCode = u32.toU32(0)
+    let mut output = bytesMutSlice(&mut buffer)
+    let chosen = run rawCreateUnique(
+      bytesSlice(&self.root),
+      pathBytes(parent),
+      prefix,
+      move output,
+      &mut required,
+      &mut lowReason,
+      &mut nativeCode
+    )
+    let length = match move chosen {
+      Some<usize> { value: selected } => selected
+      None {} => usize.ZERO
+    }
+    if length == usize.ZERO {
+      if lowReason == 8 {
+        let resized = bytesZeroed(required)
+        buffer = run resized
+      } else {
+        return run raise(createTemporaryDirectoryOperation(), lowReason, nativeCode)
+      }
+    } else {
+      let view = bytesSlice(&buffer)
+      let mut name = bytesMake()
+      let mut index = usize.ZERO
+      while index < length {
+        let one = [view[index]]
+        let appended = run bytesAppend(&mut name, &one)
+        index = index + usize.ONE
+      }
+      let child = run pathJoinUtf8(parent, bytesSlice(&name))
+      created = some<Path>(move child)
+      complete = true
+    }
+  }
+  return match move created {
+    Some<Path> { value: path } => move path
+    None {} => run raise(createTemporaryDirectoryOperation(), 10, u32.toU32(0))
+  }
+}
+
 effect fn createDirectory(self: &mut OsFileSystem, path: &Path) -> () ! FileError {
   return run command(move self, path, createDirectoryOperation(), 0)
 }
@@ -442,4 +517,5 @@ impl FileSystem for OsFileSystem {
   createDirectory: OsFileSystem.createDirectory
   removeFile: OsFileSystem.removeFile
   removeDirectory: OsFileSystem.removeDirectory
+  createTemporaryDirectory: OsFileSystem.createTemporaryDirectory
 }
