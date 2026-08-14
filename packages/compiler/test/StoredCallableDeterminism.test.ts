@@ -2,8 +2,7 @@ import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Path from 'effect/Path'
-import * as Stream from 'effect/Stream'
-import { ChildProcess } from 'effect/unstable/process'
+import * as Process from './support/Process.js'
 
 /**
  * SEM0103 is part of the frontend's stable contract, so its reports must be byte-identical across
@@ -28,35 +27,17 @@ interface Report {
   readonly mir: string
 }
 
-const collectText = Stream.runFold(
-  () => '',
-  (text: string, chunk: string) => text + chunk,
-)
-
-const runFixture = Effect.fnUntraced(function* (fixture: string) {
-  const handle = yield* ChildProcess.make(process.execPath, [fixture], { stdin: 'ignore' })
-  const [code, stdout, stderr] = yield* Effect.all(
-    [
-      handle.exitCode,
-      handle.stdout.pipe(Stream.decodeText(), collectText),
-      handle.stderr.pipe(Stream.decodeText(), collectText),
-    ],
-    { concurrency: 'unbounded' },
-  )
-  return { code, stdout, stderr }
-})
-
 it.effect('keeps SEM0103 reports byte-identical across fresh processes', () =>
   Effect.gen(function* () {
     const path = yield* Path.Path
     const fixture = yield* path.fromFileUrl(
       new URL('./fixtures/stored-callable-determinism.mjs', import.meta.url),
     )
-    const first = yield* runFixture(fixture)
-    const second = yield* runFixture(fixture)
+    const first = yield* Process.run(process.execPath, [fixture])
+    const second = yield* Process.run(process.execPath, [fixture])
 
-    assert.strictEqual(first.code, 0, first.stderr)
-    assert.strictEqual(second.code, 0, second.stderr)
+    assert.strictEqual(first.exitCode, 0, first.stderr)
+    assert.strictEqual(second.exitCode, 0, second.stderr)
     assert.strictEqual(first.stdout, second.stdout)
 
     const report = JSON.parse(first.stdout) as Report

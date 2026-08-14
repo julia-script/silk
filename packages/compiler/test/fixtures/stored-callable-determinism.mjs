@@ -1,3 +1,4 @@
+import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../../dist/Analysis.js'
 
@@ -31,32 +32,33 @@ pub fn main() -> i32 {
   return 42
 }`
 
-const snapshot = await Effect.runPromise(
-  Analysis.ofSourceRealized(
-    'fixture/StoredCallable',
-    new TextEncoder().encode(source),
-    'wasm32-unknown-unknown',
-  ),
-)
-
-process.stdout.write(
-  JSON.stringify({
-    diagnostics: Analysis.diagnostics(snapshot).map((diagnostic) => ({
-      code: diagnostic.code,
-      message: diagnostic.message,
-      span: {
-        sourceId: diagnostic.span.sourceId,
-        start: diagnostic.span.start,
-        end: diagnostic.span.end,
-      },
-      related: (diagnostic.relatedSpans ?? []).map((related) => ({
-        label: related.label,
-        sourceId: related.span.sourceId,
-        start: related.span.start,
-        end: related.span.end,
-      })),
-    })),
-    layout: snapshot.layout._tag,
-    mir: snapshot.mir._tag,
+await Effect.runPromise(
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'fixture/StoredCallable',
+      new TextEncoder().encode(source),
+      'wasm32-unknown-unknown',
+    )
+    yield* Console.log(
+      JSON.stringify({
+        diagnostics: Analysis.diagnostics(snapshot).map((diagnostic) => ({
+          code: diagnostic.code,
+          message: diagnostic.message,
+          span: {
+            sourceId: diagnostic.span.sourceId,
+            start: diagnostic.span.start,
+            end: diagnostic.span.end,
+          },
+          related: (diagnostic.relatedSpans ?? []).map((related) => ({
+            label: related.label,
+            sourceId: related.span.sourceId,
+            start: related.span.start,
+            end: related.span.end,
+          })),
+        })),
+        layout: snapshot.layout._tag,
+        mir: snapshot.mir._tag,
+      }),
+    )
   }),
 )

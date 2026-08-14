@@ -3,12 +3,11 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
-import * as Stream from 'effect/Stream'
-import { ChildProcess } from 'effect/unstable/process'
 import * as Analysis from '../src/Analysis.js'
 import * as Driver from '../src/Driver.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Process from './support/Process.js'
 
 /**
  * The frontend/MIR contract at a stored callable (#184).
@@ -40,24 +39,6 @@ const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
 /** Evaluated scalars can be BigInt, which plain JSON serialization refuses. */
 const describe = (outcome: unknown): string =>
   JSON.stringify(outcome, (_, value) => (typeof value === 'bigint' ? value.toString() : value))
-
-const collectText = Stream.runFold(
-  () => '',
-  (text: string, chunk: string) => text + chunk,
-)
-
-const runExecutable = Effect.fnUntraced(function* (path: string) {
-  const process = yield* ChildProcess.make(path, [], { stdin: 'ignore' })
-  const [code, , stderr] = yield* Effect.all(
-    [
-      process.exitCode,
-      process.stdout.pipe(Stream.decodeText(), collectText),
-      process.stderr.pipe(Stream.decodeText(), collectText),
-    ],
-    { concurrency: 'unbounded' },
-  )
-  return { code, stderr }
-})
 
 /** The minimal reproducer from #184, repaired so declaration and semantic analysis accept it. */
 const reproducer = `struct Parser<A> {
@@ -274,8 +255,8 @@ it.effect(
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled')
       if (compiled._tag !== 'Compiled') return
-      const run = yield* runExecutable(compiled.path)
-      assert.strictEqual(run.code, 42, `native: ${run.stderr}`)
+      const run = yield* Process.run(compiled.path, [])
+      assert.strictEqual(run.exitCode, 42, `native: ${run.stderr}`)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   180_000,
 )
