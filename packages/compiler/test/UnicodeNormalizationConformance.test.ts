@@ -84,6 +84,14 @@ const literal = (bytes: ReadonlyArray<number>): string =>
   `b"${bytes.map((byte) => `\\x${byte.toString(16).padStart(2, '0')}`).join('')}"`
 
 /**
+ * The largest failure count a program reports, chosen to stay clear of the exit-status wrap.
+ *
+ * A process exit status is a byte, so an unsaturated count of exactly 256 would be indistinguishable
+ * from a clean run. Reporting at most this many keeps a nonzero number of failures nonzero.
+ */
+const saturation = 250
+
+/**
  * A program returning the number of failing assertions across its chunk.
  *
  * The harness is ordinary Silk calling the same public API a user program would, comparing with
@@ -195,6 +203,11 @@ effect fn build() -> i32 ! OutOfMemory {
     failures = failures + fromSource + fromNfc + fromNfd
     remaining = remaining - usize.ONE
   }
+  // The count leaves this program as a process exit status, which is a byte, so exactly 256 failing
+  // assertions would arrive as a 0 and read as a pass. Saturating below the wrap keeps every value
+  // the test can observe honest: an exact count under ${saturation}, or ${saturation} meaning at
+  // least that many.
+  if failures > ${saturation} { return ${saturation} }
   return failures
 }
 
@@ -268,7 +281,7 @@ it.effect(
       }
       assert.fail(
         `${failures} failing assertions across ${cases.length} conformance cases` +
-          `${failures === 250 ? ' (count saturated)' : ''}; first ${failing.length}:\n${failing.join('\n')}`,
+          `${failures === saturation ? ' (count saturated)' : ''}; first ${failing.length}:\n${failing.join('\n')}`,
       )
     }),
   1_800_000,
