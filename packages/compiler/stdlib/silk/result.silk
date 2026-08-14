@@ -1,3 +1,14 @@
+//! Completed success-or-failure values that can be inspected and transformed as ordinary data.
+//!
+//! # When to use
+//! Use [`Result`] after an effectful computation has been reified, or whenever both outcome arms
+//! belong in a value. Use [`map`] for success, [`mapError`] for failure, and [`flatMap`] for a
+//! success continuation that already returns a result.
+//!
+//! # Details
+//! `Result<A, F>` owns either [`Success`] or [`Failure`]. Its combinators move the selected payload
+//! forward and preserve the other arm without inventing a runtime failure-row descriptor.
+
 // Canonical completed typed outcome data. Failure rows project to ordinary value sums through
 // Row<! E>; Result itself remains ordinary source-defined data with no runtime row descriptor.
 
@@ -14,6 +25,8 @@ pub struct Failure<F> {
 }
 
 /// One completed outcome: either a success carrying `A` or a failure carrying `F`.
+///
+/// # Details
 ///
 /// `Result` is the reified form of an Effect that has already run. Reifying an Effect turns its
 /// failure row into ordinary value data, which is what lets the failure combinators in
@@ -66,9 +79,15 @@ pub fn flatMap<A, B, F>(self: Result<A, F>, transform: once fn(A) -> Result<B, F
 
 /// Returns the success value, or the fallback value when the outcome is a failure.
 ///
+/// # Details
+///
 /// Only the failure arm consumes the fallback. The success arm releases it, and the failure arm
 /// releases the error, so exactly one owned value leaves this call and the other drops.
-pub fn unwrapOr<A, F>(self: Result<A, F>, fallback: A) -> A {
+pub fn unwrapOr<A, F>(
+  self: Result<A, F>,
+  /// The owned alternative consumed only when `self` is a failure.
+  fallback: A,
+) -> A {
   return match move self {
     Result<A, F> { value: outcome } => match move outcome {
       Success<A> { value } => keepSuccess<A>(move value, move fallback)

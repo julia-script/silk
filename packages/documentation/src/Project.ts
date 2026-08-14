@@ -202,15 +202,22 @@ const serviceOperationItem = (
     module,
     parsedDocumentation(snapshot, module, source, operation.syntax),
   )
+  const id = `${ownerId}::operation:${nameOf(operation.name, '_')}`
+  const typeParameters = operation.typeParameters.map((parameter, ordinal) =>
+    typeParameterItem(snapshot, module, source, id, parameter, ordinal),
+  )
+  const parameters = operation.parameters.map((parameter) =>
+    parameterItem(snapshot, module, source, id, parameter),
+  )
   return Object.freeze({
-    id: `${ownerId}::operation:${nameOf(operation.name, '_')}`,
+    id,
     kind: 'Operation',
     name: nameOf(operation.name, '_'),
     visibility: 'Inherited',
     signature: Object.freeze({ text: presentation.text }),
     source: rangeOf(operation.syntax),
     ...(documentation === undefined ? {} : { documentation }),
-    children: Object.freeze([]),
+    children: Object.freeze([...typeParameters, ...parameters]),
   })
 }
 

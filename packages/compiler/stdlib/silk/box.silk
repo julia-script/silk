@@ -1,3 +1,19 @@
+//! One owned heap indirection for recursive data and values whose storage must have a stable size.
+//!
+//! # When to use
+//! Use [`Box`] to break an inline layout cycle, such as a tree node that owns more tree nodes. Use
+//! [`make`] to allocate, [`get`] or [`getMut`] to borrow the element, and [`into`] to recover it.
+//!
+//! # Details
+//! A box owns exactly one allocation and one value. Borrowing exposes a one-element slice because
+//! Silk can return a slice tied to a parameter but cannot return a bare borrowed value. Dropping
+//! the box recursively drops its element; consuming it with [`into`] transfers the element and
+//! still releases the allocation exactly once.
+//!
+//! # Gotchas
+//! Ordinary recursive destruction uses the call stack. For a very deep chain, consume links with
+//! [`into`] in an iterative loop when stack depth matters.
+
 // One owned heap indirection holding exactly one value. Ordinary Silk: no compiler phase knows
 // this type, and every capability it uses is available to user code.
 //
@@ -12,10 +28,13 @@
 // over T: a `[T; 0]` anchor of the kind Vector uses would be an inline reach into T and would make
 // a struct holding `Box` of itself recursive again.
 
+/// Internal occupancy state exposed by the current representation; it is not a construction API.
 pub struct Vacant {}
 
+/// Internal occupancy state exposed by the current representation; it is not a construction API.
 pub struct Occupied {}
 
+/// Owns one heap-allocated `T` and releases both the value and its allocation on drop.
 pub struct Box<T> {
   buffer: RawBuffer<T>
   state: Vacant | Occupied

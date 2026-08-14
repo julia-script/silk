@@ -1,3 +1,17 @@
+//! Thirty-two-bit unsigned integers for fixed-width counts, masks, and binary fields.
+//!
+//! # When to use
+//! Use `u32` when an unsigned 32-bit representation is part of the contract, including masks and
+//! encoded fields. Use `usize` for collection positions and allocation sizes tied to the target.
+//!
+//! # Details
+//! Ordinary arithmetic, narrowing conversions, division by zero, and invalid shift counts trap.
+//! `checked*` returns [`Option`], `wrapping*` computes modulo 2^32, and `saturating*` clamps at
+//! [`MIN`] or [`MAX`]. Right shift is logical and inserts zero bits.
+//!
+//! Decimal [`parse`] requires a complete unsigned representation and reports malformed input
+//! separately from overflow. [`toText`] allocates owned text.
+
 import silk.option { Option }
 
 /// The largest u32. The checked arithmetic intrinsics reject every result above this bound.

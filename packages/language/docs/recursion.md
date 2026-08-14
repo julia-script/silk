@@ -302,4 +302,4 @@ says nothing about a teardown on another. Both are the same rule — a call cost
 
 - [Language reference](./reference.md) — `while`, `match`, and the ownership rules the loops above
   are working within.
-- [Standard library](./stdlib.md) — `silk.box` and the rest of the modules.
+- [Standard library](./stdlib/) — `silk.box` and the rest of the modules.

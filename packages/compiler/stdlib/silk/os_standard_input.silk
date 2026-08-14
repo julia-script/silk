@@ -1,3 +1,18 @@
+//! Native [`StandardInput`] provider backed by the process standard-input descriptor.
+//!
+//! # When to use
+//! Construct [`OsStandardInput`] at a native application edge and provide it to portable byte-input
+//! code. Use a scripted provider in tests to control partial reads, end-of-input, and failures.
+//!
+//! # Details
+//! The provider owns no persistent state and commits each host read directly into the caller's
+//! buffer. A zero-length host transfer becomes the outcome selected by [`endOfInput`]; only a host
+//! read error becomes [`StreamReadFailure`]. Partial transfer counts are preserved exactly.
+//!
+//! # Gotchas
+//! Reachable OS standard-input operations are native-only. Direct WebAssembly compilation rejects
+//! them rather than inventing a descriptor import; evaluator execution requires an injected adapter.
+
 import silk.option { None, Option, Some, none }
 import silk.standard_input {
   ReadOutcome,

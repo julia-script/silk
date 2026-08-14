@@ -309,7 +309,14 @@ it.effect('navigates standard-library definitions to the analyzed toolchain sour
       (module) => (module === 'silk/vector' ? libraryUri : undefined),
     )
     assert.strictEqual(definition?.targetUri, libraryUri)
-    assert.deepEqual(definition?.targetSelectionRange.start, { line: 17, character: 11 })
+    const libraryLines = decoder.decode(SourceFile.toUint8Array(librarySource)).split('\n')
+    const declarationLine = libraryLines.findIndex((line) => line.includes('pub struct Vector<T>'))
+    assert.isAtLeast(declarationLine, 0)
+    const declaration = libraryLines[declarationLine] ?? ''
+    assert.deepEqual(definition?.targetSelectionRange.start, {
+      line: declarationLine,
+      character: declaration.indexOf('Vector'),
+    })
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 

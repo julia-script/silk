@@ -928,5 +928,5 @@ Concurrency, networking, a package registry, broad FFI, and self-hosting are fut
 - [Tutorial](./tutorial.md) — from `silk init` to a running program.
 - [Recursion and the machine stack](./recursion.md) — the bound on ordinary recursion, and how it
   fails on each engine.
-- [Standard library](./stdlib.md) — every module and public declaration.
+- [Standard library](./stdlib/) — every module and public declaration.
 - [Diagnostic index](./diagnostics.md) — every error code, including those cited above.

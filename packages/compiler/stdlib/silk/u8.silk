@@ -1,3 +1,37 @@
+//! Eight-bit unsigned integers for bytes, compact counters, and exact binary representations.
+//!
+//! # When to use
+//! Use `u8` for an individual byte or a field specified as eight unsigned bits. Prefer a wider
+//! integer for general counting unless the 0 through 255 range is intentional.
+//!
+//! # Details
+//! Ordinary arithmetic, narrowing conversions, division by zero, and invalid shift counts trap.
+//! `checked*` returns [`Option`] for invalid arithmetic, `wrapping*` computes modulo 2^8, and
+//! `saturating*` clamps at [`MIN`] or [`MAX`]. Right shift inserts zero bits.
+//!
+//! Decimal [`parse`] accepts only a complete unsigned representation; a leading minus sign is
+//! malformed rather than an out-of-range unsigned value. [`toText`] allocates owned text.
+//!
+//! # Examples
+//! ## Choose an overflow policy instead of relying on a trap
+//! ```silk
+//! import silk.option { None, Some }
+//!
+//! pub fn main() -> i32 {
+//!   let overflowed = match move u8.checkedAdd(255, 1) {
+//!     None {} => true
+//!     Some<u8> { value } => false
+//!   }
+//!   if !overflowed { return 1 }
+//!   if u8.wrappingAdd(255, 1) != 0 { return 2 }
+//!   if u8.saturatingAdd(255, 1) != 255 { return 3 }
+//!   return 42
+//! }
+//! ```
+//!
+//! # See also
+//! Use the `silk.char` module when a value is a Unicode scalar rather than an arbitrary byte.
+
 import silk.option { Option }
 
 /// The largest u8. The checked arithmetic intrinsics reject every result above this bound.

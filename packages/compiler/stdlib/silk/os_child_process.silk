@@ -1,3 +1,20 @@
+//! Native [`ChildProcess`] provider that executes directly through the platform process boundary.
+//!
+//! # When to use
+//! Construct [`OsChildProcess`] at a native application edge, then provide it to portable code that
+//! requires [`ChildProcess`]. Tests can supply an in-memory provider without importing this module.
+//!
+//! # Details
+//! The provider owns no persistent state. It translates low-level spawn and capture reasons into
+//! portable [`ProcessFailure`] data, preserves a native numeric code, and copies the complete stdout
+//! and stderr captures into independently owned [`Bytes`] values. Exit status and signal
+//! termination remain ordinary [`ProcessOutcome`] data.
+//!
+//! # Gotchas
+//! Reachable OS process operations are native-only. Direct WebAssembly compilation rejects them
+//! instead of inventing a process host import; evaluator execution requires an injected host
+//! adapter.
+
 import silk.bytes {
   Bytes,
   append as bytesAppend,

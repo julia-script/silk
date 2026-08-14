@@ -1,4 +1,6 @@
 import { assert, it } from '@effect/vitest'
+import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as DocumentationProject from '@silk-effect/documentation/Project'
 import * as Effect from 'effect/Effect'
 import * as Doctest from '../src/Doctest.js'
 import * as Report from '../src/Report.js'
@@ -64,6 +66,36 @@ const sources: Sources.Lookup = (sourceId) =>
 
 /** The byte offset of the fence in `module`, which is the offset the emitter would record. */
 const fenceOffset = encoder.encode(module.slice(0, module.indexOf('/// ```'))).length
+
+const titled = `//! Demonstrates one maintained example.
+
+/// Answers with one.
+///
+/// # Examples
+/// ## Return one from a complete module
+/// \`\`\`silk
+/// pub fn main() -> i32 { return 1 }
+/// \`\`\`
+pub fn one() -> i32 { return 1 }
+`
+
+it.effect('compiles a titled example collected from authored documentation', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource('doctest/titled', encoder.encode(titled))
+    const documentation = DocumentationProject.make(snapshot)
+    const report = yield* Doctest.run({ documentation })
+    assert.deepStrictEqual(
+      {
+        collected: report.collected,
+        passed: report.passed,
+        skipped: report.skipped,
+        failed: report.failed,
+      },
+      { collected: 1, passed: 1, skipped: 0, failed: 0 },
+    )
+    assert.strictEqual(report.results.at(0)?.example.owner.declaration, 'one')
+  }),
+)
 
 it.effect('passes an example that compiles as a complete module', () =>
   Effect.gen(function* () {

@@ -1,19 +1,36 @@
+//! Foundational allocation and standard-output services used by higher standard-library actors.
+//!
+//! # When to use
+//! Provide [`Allocator`] to operations that may create owned storage, normally with
+//! [`SystemAllocator`]. Use [`StandardStreams`] for complete byte messages to stdout or stderr;
+//! structured logging belongs in `silk.logging`.
+//!
+//! # Details
+//! Both capabilities are ordinary source-declared services. Their requirements remain in an
+//! Effect until a caller supplies a provider, so tests and applications can replace process-backed
+//! implementations lexically. Allocation failure is typed as [`OutOfMemory`], and stream failure as
+//! [`StreamWriteFailure`].
+
 import silk.layout { Layout as LayoutValue }
 
-/// Allocates owned storage through an explicitly provided implementation.
+/// Reports that an allocator could not satisfy a storage request.
 pub struct OutOfMemory {}
 
+/// Fails immediately with [`OutOfMemory`], for translating checked sizing failures.
 pub effect fn outOfMemory() -> never ! OutOfMemory {
   fail OutOfMemory {}
 }
 
+/// Mutable service for acquiring owned storage described by a layout.
 pub service Allocator {
+  /// Acquires one allocation or fails without returning partial storage.
   effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemory ? &mut Allocator
 }
 
 /// Constructs the process-backed allocation provider.
 pub struct SystemAllocator {}
 
+/// Constructs a process-backed allocator provider with no allocation of its own.
 pub fn make() -> SystemAllocator {
   return SystemAllocator {}
 }
@@ -33,6 +50,7 @@ impl Report for StreamWriteFailure {}
 
 /// Portable complete-message output contract.
 pub service StandardStreams {
+  /// Commits one complete immutable byte sequence to the selected destination.
   effect fn writeAll(
     destination: bool,
     bytes: &[u8]
@@ -42,14 +60,17 @@ pub service StandardStreams {
 /// Process-backed standard-stream provider.
 pub struct NativeStandardStreams {}
 
+/// Selects the process standard-output destination.
 pub fn stdout() -> bool {
   return false
 }
 
+/// Selects the process standard-error destination.
 pub fn stderr() -> bool {
   return true
 }
 
+/// Constructs the process-backed standard-stream provider.
 pub fn native() -> NativeStandardStreams {
   return NativeStandardStreams {}
 }

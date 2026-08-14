@@ -1,3 +1,19 @@
+//! Provider-owned allocation counters that can be published as ordinary copyable data.
+//!
+//! # When to use
+//! Embed [`AllocationMetrics`] in a custom [`Allocator`] provider when tests or diagnostics need
+//! acquisition, release, current-live, or peak-live counts. Code that never imports this module
+//! pays no instrumentation cost.
+//!
+//! # Details
+//! The compiler does not collect these metrics. A provider calls [`recordAcquire`] and
+//! [`recordRelease`] at its own allocation boundary, then exposes an independent snapshot with
+//! [`copy`]. Counts belong to that provider instance rather than to the process globally.
+//!
+//! # Gotchas
+//! Recording is intentionally minimal and assumes every release corresponds to an earlier acquire.
+//! The module does not identify allocations or repair an unbalanced provider.
+
 // Allocation counts an allocator provider can publish as an ordinary Silk value. No compiler
 // phase knows this module: every count is a plain `usize`, so `AllocationMetrics` is a Copy
 // struct that implements no Drop hook and carries no cleanup obligation, and a provider folds
@@ -8,8 +24,11 @@
 
 /// The acquire, release, and peak-live counts one allocation provider has observed.
 pub struct AllocationMetrics {
+  /// Total successful acquisitions observed by the provider.
   pub acquired: usize
+  /// Total releases observed by the provider.
   pub released: usize
+  /// Greatest number of simultaneously live allocations observed so far.
   pub peakLive: usize
 }
 

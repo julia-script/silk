@@ -48,9 +48,9 @@ const blocksOf = (file: string): ReadonlyArray<Block> => {
   return blocks
 }
 
-// The prose documents carry complete programs. stdlib.md and diagnostics.md are generated, and
-// their Silk blocks are bare declaration signatures rather than compilable modules.
-const generated = new Set(['stdlib.md', 'diagnostics.md'])
+// The prose documents carry complete programs. diagnostics.md and the stdlib/ tree are generated;
+// generated signature fences are not standalone modules and stdlib examples have their own gate.
+const generated = new Set(['diagnostics.md'])
 
 const documents = readdirSync(documentationRoot)
   .filter((entry) => entry.endsWith('.md'))
@@ -88,9 +88,13 @@ it('finds Silk examples in the tutorial and the reference', () => {
 })
 
 it('documents every standard library module and every diagnostic code', () => {
-  const stdlib = readFileSync(join(documentationRoot, 'stdlib.md'), 'utf8')
+  const stdlib = readFileSync(join(documentationRoot, 'stdlib', 'README.md'), 'utf8')
   for (const module of Stdlib.manifest)
-    assert.include(stdlib, `## ${module.module}`, `${module.module} is missing from stdlib.md`)
+    assert.include(
+      stdlib,
+      `\`${module.module}\``,
+      `${module.module} is missing from stdlib/README.md`,
+    )
 
   const diagnostics = readFileSync(join(documentationRoot, 'diagnostics.md'), 'utf8')
   const declared = new Set(codeLiterals)

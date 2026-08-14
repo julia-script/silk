@@ -1,3 +1,20 @@
+//! Deterministic seeded hashing contracts for hash maps, hash sets, and user-defined key types.
+//!
+//! # When to use
+//! Implement [`HashKey`] when a type will be stored as a hashed key. Use [`mix`] for the first
+//! integer field and [`combine`] for further fields, feeding every field that participates in
+//! equality. [`Word`] is the ready-made key for one `u64`.
+//!
+//! # Details
+//! A [`HashSeed`] belongs to a collection, not to each key. The same seed, keys, and operations
+//! produce the same bucket presentation order on every engine, independent of addresses or ambient
+//! state. Interface witnesses are selected during specialization and add no runtime dispatch.
+//!
+//! # Gotchas
+//! Whenever `HashKey.equals` reports two values equal, `HashKey.hash` must return the same value
+//! for both under every seed. The collection cannot detect a witness that violates this rule; such
+//! a key may become unreachable.
+
 // The hashing contract the hashed collections resolve against, and the seed every hash is computed
 // under. Ordinary Silk: no compiler phase computes a hash, recognizes this interface by spelling, or
 // treats a conformance to it as anything other than an ordinary conformance.
@@ -9,6 +26,8 @@
 // hash is reached by naming the bound, which is the one call shape no operator provides.
 
 /// The value every hash in one collection is computed under.
+///
+/// # Details
 ///
 /// One seed fixes one iteration order. A collection consults nothing else — no allocation address,
 /// no clock, no ambient entropy — so two runs of one program over one seed observe one order, and
@@ -25,19 +44,27 @@ pub fn seed(value: u64) -> HashSeed {
 
 /// Static hashing contract for a key of a hashed collection.
 ///
+/// # Details
+///
 /// A witness supplies two operations over one key type: the equivalence `==` spells, and a hash of
 /// one key under one seed. The seed is an operand of the hash rather than state a key carries,
 /// because one seed serves the whole collection.
 ///
-/// A witness MUST compute equal hashes for two keys its own `equals` reports equivalent, under every
+/// # Gotchas
+///
+/// A witness must compute equal hashes for two keys its own `equals` reports equivalent, under every
 /// seed. Nothing checks this — a witness that breaks it makes a present key unreachable, and a
 /// collection can neither detect the breakage nor recover from it.
 pub interface HashKey<T> {
+  /// Reports whether two keys name the same collection entry.
   fn equals(left: T, right: T) -> bool
+  /// Computes the key's deterministic 64-bit hash under the collection seed.
   fn hash(value: T, seed: HashSeed) -> u64
 }
 
 /// Mixes one value under one seed into a hash spread across the whole 64-bit range.
+///
+/// # Details
 ///
 /// Every step is a wrapping multiply, a shift, or an exclusive or, so the result is exactly the same
 /// on every engine. A witness for a key built from integers can answer `hash` by folding its fields
@@ -60,6 +87,8 @@ pub fn combine(hashed: u64, value: u64) -> u64 {
 }
 
 /// A key holding one unsigned integer.
+///
+/// # Details
 ///
 /// The scalar types cannot carry a `HashKey` witness themselves: a conformance whose provider is a
 /// scalar admits a sealed compiler operation and nothing else, and no compiler operation computes a

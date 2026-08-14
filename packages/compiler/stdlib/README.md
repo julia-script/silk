@@ -4,6 +4,10 @@ The files under `silk/` are the canonical compiler-shipped Silk modules. The gen
 manifest is only a build artifact; editors and language-server definition results point back to
 these source files.
 
+Use [the standard-library documentation guide](./DOCUMENTATION.md) when authoring or reviewing
+`//!` and `///` blocks. Source comments are the canonical API documentation; generated reference
+pages and doctests consume them directly.
+
 ## `string` and `String`
 
 Lowercase `string` is the built-in immutable view of a complete, valid UTF-8 byte sequence. Text

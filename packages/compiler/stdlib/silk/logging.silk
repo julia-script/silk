@@ -1,3 +1,20 @@
+//! Typed semantic logging with replaceable stdout and bounded in-memory providers.
+//!
+//! # When to use
+//! Require [`Logger`] when code emits whole semantic messages but should not choose their storage or
+//! destination. Provide [`StdoutLogger`] at a process edge, or [`InMemoryLogger`] for deterministic
+//! observation and failure testing.
+//!
+//! # Details
+//! Each invocation carries one [`LogLevel`] and one valid UTF-8 message. The service does not add
+//! formatting, newlines, timestamps, or allocation requirements. The stdout provider forwards only
+//! the message bytes; the in-memory provider retains at most eight committed events and 64 message
+//! bytes, and exposes attempted calls separately from successful commits.
+//!
+//! # Gotchas
+//! Logger failures are typed [`LogError`] values and do not imply that a message committed. Bounded
+//! accessors require a committed event and valid byte index; invalid indices trap.
+
 import silk.core {
   NativeStandardStreams,
   StreamWriteFailure,
@@ -45,6 +62,7 @@ effect fn reject(code: i32) -> never ! LogError {
 
 /// Receives one complete semantic message per invocation.
 pub service Logger {
+  /// Submits one complete message at one severity to the active provider.
   effect fn log(
     level: LogLevel,
     message: string

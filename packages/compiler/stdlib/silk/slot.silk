@@ -1,3 +1,20 @@
+//! Explicit initialization-state transitions for one slot selected from raw storage.
+//!
+//! # When to use
+//! Use these operations with `silk.raw-buffer` while implementing a container. Application code
+//! should prefer an initialized collection, which maintains the slot state on the caller's behalf.
+//!
+//! # Details
+//! [`write`] changes an uninitialized slot to initialized. [`take`] and [`dropValue`] change it
+//! back to uninitialized, while [`copy`] leaves an initialized `Copy` value in place. Consuming a
+//! `Slot<T>` prevents reusing the same selection accidentally, but the container must still keep
+//! its own initialization map.
+//!
+//! # Gotchas
+//! Selecting an out-of-bounds slot, writing twice, or reading an uninitialized slot violates the
+//! raw-storage contract. Debug execution may diagnose these mistakes; portable code must not rely
+//! on a runtime check.
+
 /// Initializes one selected raw slot exactly once.
 pub fn write<T>(slot: Slot<T>, value: T) -> () {
   unsafe { return Intrinsic.slotWrite<T>(move slot, move value) }

@@ -1,13 +1,29 @@
+//! Checked size-and-alignment descriptions used to request storage from an allocator.
+//!
+//! # When to use
+//! Prefer [`of`] when storage will hold a known Silk type. Use [`make`] only at an untyped boundary
+//! that already knows a byte size and alignment, and [`repeat`] when sizing contiguous elements.
+//!
+//! # Details
+//! Alignments are non-zero powers of two. [`repeat`] preserves the element alignment and reports
+//! [`LayoutOverflow`] instead of wrapping the aggregate byte size. A [`Layout`] describes storage;
+//! it does not allocate or initialize it.
+
 /// A byte size paired with a non-zero power-of-two alignment.
 pub struct Layout {
+  /// The number of addressable bytes required by the described storage.
   pub bytes: usize
+  /// The required non-zero power-of-two byte alignment.
   pub alignment: usize
 }
 
+/// Reports the rejected alignment supplied to [`make`].
 pub struct InvalidAlignment {
+  /// The zero or non-power-of-two alignment that was rejected.
   pub alignment: usize
 }
 
+/// Reports that [`repeat`] could not represent the aggregate byte size as `usize`.
 pub struct LayoutOverflow {}
 
 /// Returns the compiler-selected layout of T.

@@ -1,3 +1,20 @@
+//! Portable blocking child execution from structured byte arguments to fully captured output.
+//!
+//! # When to use
+//! Build a [`ProcessRequest`] when one executable should run directly. This API is not a shell:
+//! spaces, quotes, and metacharacters in an argument remain data and are never parsed as command
+//! syntax.
+//!
+//! # Details
+//! Requests preserve argument and environment-entry order as exact platform bytes. The environment
+//! begins empty, the working directory is inherited unless [`requestWithin`] selects one, and child
+//! standard input is closed. `ChildProcess.execute` blocks until termination and owns complete
+//! stdout and stderr captures in [`ProcessOutcome`]. A nonzero exit is ordinary outcome data.
+//!
+//! [`ProcessFailure`] is reserved for failing to spawn, wait, or capture; it carries a stable
+//! portable reason and may retain a provider code. Execution also reports [`OutOfMemory`] when
+//! captured output cannot be owned.
+
 // The portable child-process boundary: one blocking execution from structured input to structured
 // output. It is not a shell. The request carries an executable path and ordered argument bytes, and
 // no part of it is ever parsed as a command line, so a space, a quote, or a metacharacter inside an
@@ -16,19 +33,25 @@ import silk.option { None, Option, Some, none, some }
 
 /// The stage of one execution that failed.
 pub struct ProcessOperation {
+  /// Stable code identifying the failed execution stage.
   pub code: i32
 }
 
 /// A closed portable child-process recovery reason.
 pub struct ProcessReason {
+  /// Stable code identifying the portable recovery reason.
   pub code: i32
 }
 
 /// An allocation-free typed failure to start, to wait for, or to capture one child.
 ///
+/// # Details
+///
 /// A child that ran and exited nonzero is not a failure: that is `ProcessOutcome` data.
 pub struct ProcessFailure {
+  /// The execution stage that failed.
   pub operation: ProcessOperation
+  /// The portable reason callers can recover by.
   pub reason: ProcessReason
   providerCodeValue: i32
   hasProviderCode: bool
@@ -100,6 +123,8 @@ pub fn providerCode(error: &ProcessFailure) -> Option<i32> {
 }
 
 /// One complete execution request.
+///
+/// # Details
 ///
 /// Arguments and environment entries are exact platform bytes rather than checked text, so a value
 /// received from the platform can be handed to a child unchanged. Entries are retained in the order
@@ -229,6 +254,8 @@ pub struct Signaled {
 
 /// One completed execution outcome, narrowed with `match`.
 ///
+/// # Details
+///
 /// An exit code and a terminating signal are distinct members rather than one integer, so a caller
 /// can never read a signal number as though it were an exit code.
 pub struct ProcessOutcome {
@@ -238,10 +265,13 @@ pub struct ProcessOutcome {
 
 /// Portable blocking child-process contract.
 ///
+/// # Details
+///
 /// One `execute` runs the request to completion with the child's standard input closed, and owns
 /// the complete captured output and errors when it returns. A nonzero exit code is outcome data; a
 /// failure to start, to wait, or to capture is `ProcessFailure`.
 pub service ChildProcess {
+  /// Runs one structured request to completion and captures both output streams.
   effect fn execute(
     request: &ProcessRequest
   ) -> ProcessOutcome ! ProcessFailure | OutOfMemory ? &mut ChildProcess | &mut Allocator

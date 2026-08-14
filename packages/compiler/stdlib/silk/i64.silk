@@ -1,3 +1,20 @@
+//! Sixty-four-bit signed integers for large fixed-width values and exact integer protocols.
+//!
+//! # When to use
+//! Use `i64` when a stable signed 64-bit range is part of storage, interchange, or arithmetic.
+//! Prefer `isize` only for target-sized offsets; its width changes with the compilation target.
+//!
+//! # Details
+//! Ordinary arithmetic, narrowing conversions, division by zero, and invalid shift counts trap.
+//! `checked*` returns [`Option`] instead, `wrapping*` uses arithmetic modulo 2^64, and `saturating*`
+//! clamps at [`MIN`] or [`MAX`]. Signed right shifts preserve the sign bit.
+//!
+//! Decimal [`parse`] consumes the whole input and reports syntax separately from range overflow.
+//! [`toText`] allocates owned text. Conversion to `f32` or `f64` can round large exact integers.
+//!
+//! # Gotchas
+//! [`MIN`] has no positive i64 counterpart. Its ordinary negation and division by `-1` trap.
+
 import silk.option { Option }
 
 /// The largest i64. The checked arithmetic intrinsics reject every result above this bound.

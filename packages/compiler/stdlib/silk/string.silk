@@ -1,3 +1,18 @@
+//! Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal.
+//!
+//! # When to use
+//! Use the built-in `string` type for borrowed text and [`String`] when text must own its storage.
+//! Use [`Bytes`] when arbitrary octets must survive without UTF-8 validation.
+//!
+//! # Details
+//! [`fromUtf8`] validates and borrows existing bytes without allocating; [`copyUtf8`] validates and
+//! owns a copy. [`append`] and [`appendOwned`] leave the original value unchanged if growth cannot
+//! allocate. Scalar cursors expose Unicode scalar values and byte offsets, not grapheme clusters.
+//!
+//! # Gotchas
+//! A [`ScalarCursor`] is meaningful only for the same unchanged string from which its traversal
+//! began. Start with [`scalarCursor`] and advance only with [`nextCursor`].
+
 import silk.bytes {
   Bytes,
   make as bytesMake,
@@ -16,6 +31,7 @@ pub struct String {
 
 /// The first byte offset at which UTF-8 validation failed.
 pub struct InvalidUtf8 {
+  /// The zero-based offset of the first byte that cannot continue a valid UTF-8 sequence.
   pub offset: usize
 }
 
@@ -94,6 +110,8 @@ fn firstInvalidUtf8(values: &[u8]) -> Option<usize> {
 
 /// Validates a complete byte view and borrows it as text without allocating.
 ///
+/// # Details
+///
 /// The offset is unpacked before the borrow rather than after it because an unchecked construction
 /// has to happen in the function that owns the borrowed parameter the view comes from.
 pub fn fromUtf8(values: &[u8]) -> Result<string, InvalidUtf8> {
@@ -125,6 +143,8 @@ pub effect fn copy(value: string) -> String ! OutOfMemory ? &mut Allocator {
 
 /// Validates complete UTF-8 bytes and copies them into independently owned storage.
 ///
+/// # Details
+///
 /// The companion to `fromUtf8` for bytes a program built rather than borrowed. `fromUtf8` hands
 /// back a view that lives exactly as long as the buffer under it, which is the wrong shape for an
 /// encoder that wants to return its result and let its working buffer go; this validates the same
@@ -153,6 +173,8 @@ pub effect fn append(self: &mut String, value: string) -> () ! OutOfMemory ? &mu
 }
 
 /// Appends another owned String atomically with respect to allocation failure.
+///
+/// # Details
 ///
 /// The companion to `append` for text a program computed rather than wrote. The appended String is
 /// consumed, so a rendered value composes into a message without the caller keeping it alive.

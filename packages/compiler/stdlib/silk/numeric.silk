@@ -1,8 +1,23 @@
+//! Shared compile-time addition witness for generic algorithms over primitive integers.
+//!
+//! # When to use
+//! Add an [`Integer`] bound when a generic function needs the `+` operator. Use the concrete integer
+//! modules directly when an algorithm also needs width-specific conversion, overflow, bitwise, or
+//! formatting operations.
+//!
+//! # Details
+//! Witnesses are selected during specialization and create no Effect requirement, provider slot, or
+//! runtime dispatch. The interface intentionally exposes only the operation spelled by `+`; it does
+//! not attempt to erase the distinct ranges and conversion rules of each integer type.
+
 /// Static addition contract for primitive integer values.
+///
+/// # Details
 ///
 /// Interfaces select compiler-known operations during specialization. They do not create
 /// effect requirements, provider slots, or runtime dispatch.
 pub interface Integer<T> {
+  /// Adds two values using the concrete primitive integer operation.
   fn add(left: T, right: T) -> T
 }
 

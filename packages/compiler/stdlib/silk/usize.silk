@@ -1,8 +1,29 @@
+//! Pointer-width unsigned integers for lengths, indices, capacities, and allocation sizes.
+//!
+//! # When to use
+//! Use `usize` for values that index target memory or describe its layout. Use a fixed-width
+//! integer for serialized data, protocols, and persistent identifiers whose range must not change
+//! between 32-bit and 64-bit targets.
+//!
+//! # Details
+//! [`BITS`] and [`MAX`] follow the selected target. Ordinary arithmetic, narrowing conversions,
+//! division by zero, and invalid shift counts trap. `checked*` returns [`Option`], `wrapping*`
+//! computes modulo the target width, and `saturating*` clamps at [`MIN`] or [`MAX`].
+//!
+//! [`ZERO`] and [`ONE`] provide typed values where an uncontextualized literal would be `i32`.
+//! Decimal [`parse`] uses the target's range, while [`toText`] allocates owned text.
+//!
+//! # Gotchas
+//! A value valid as usize on a 64-bit target can be out of range on a 32-bit target.
+
 import silk.option { Option }
 
-/// The largest usize. The checked arithmetic intrinsics reject every result above this bound. No
-/// literal spells it: usize is as wide as a pointer, so the bound is 4294967295 on a 32-bit target
-/// and 18446744073709551615 on a 64-bit one, and the compiler selects between them.
+/// The largest usize selected for the compilation target.
+///
+/// # Details
+///
+/// This is 4294967295 on a 32-bit target and 18446744073709551615 on a 64-bit target. Checked
+/// arithmetic rejects results above it.
 pub const MAX: usize = Target.usizeMax
 
 /// The smallest usize. An unsigned bound is zero at every pointer width, so this one is a literal.

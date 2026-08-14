@@ -285,7 +285,7 @@ logger: a caller supplies them with `provide`, and the row shrinks as they are s
 
 - The [language reference](./reference.md) states the rules in full: lexical form, types, memory
   and ownership, and the effect system.
-- The [standard library reference](./stdlib.md) lists every module and public declaration.
+- The [standard library reference](./stdlib/) lists every module and public declaration.
 - The [diagnostic index](./diagnostics.md) explains every error code, including the `OWN0001` and
   `PAR0004` mentioned above.
 - `examples/algorithms/` in the repository holds larger programs — quicksort, FFT, CRC-32,
