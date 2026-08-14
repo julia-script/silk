@@ -64,22 +64,30 @@ test('every package that runs vitest extends the workspace test defaults', () =>
   )
 })
 
-test('the workspace defaults are the only place the shared numbers are written down', () => {
-  const shared = readFileSync(join(workspaceRoot, 'vitest.shared.ts'), 'utf8')
-  assert.match(shared, /maxWorkers/, 'vitest.shared.ts should decide the per-suite worker count')
+/**
+ * `packages/compiler` is the critical path of `pnpm check` and states its reason in its own config.
+ * Every other package leaves the worker count to vitest, whose default is already host-derived and
+ * leaves a spare core — #177 is what happens when that core is taken away.
+ */
+const mayChooseItsOwnWorkerCount = new Set(['packages/compiler'])
 
-  // A package may raise a timeout above the shared floor with a measurement that justifies it, but
-  // a second `maxWorkers` is how the per-package caps this replaced came back: a local cap looks
-  // like the bound, so the next person adds one instead of touching the workspace-level run.
-  const capped = packagesWithTests().filter((directory) => {
-    const config = join(directory, 'vitest.config.ts')
-    return existsSync(config) && readFileSync(config, 'utf8').includes('maxWorkers')
-  })
+test('only the critical-path package chooses its own worker count', () => {
+  // Three packages carried a local `maxWorkers` before #173, each added after that package had
+  // turned someone else's pull request red. A local cap looks like the bound, so the next person
+  // adds a fourth instead of touching the workspace-level run. Whoever adds one now has to come
+  // through here and write down why.
+  const chosen = packagesWithTests()
+    .filter((directory) => {
+      const config = join(directory, 'vitest.config.ts')
+      return existsSync(config) && readFileSync(config, 'utf8').includes('maxWorkers')
+    })
+    .map((directory) => relative(workspaceRoot, directory))
 
   assert.deepEqual(
-    capped.map((directory) => relative(workspaceRoot, directory)),
+    chosen.filter((name) => !mayChooseItsOwnWorkerCount.has(name)),
     [],
-    'Worker counts are bounded for the whole run by scripts/concurrency.mjs and vitest.shared.ts. ' +
-      'A per-package maxWorkers bounds one package while the run stays oversubscribed.',
+    'How many suites overlap is bounded for the whole run by scripts/concurrency.mjs; how many ' +
+      'workers one suite uses is vitest\'s host-derived default. A package that needs to depart ' +
+      'from that states why, and is listed here.',
   )
 })

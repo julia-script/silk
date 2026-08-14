@@ -32,14 +32,14 @@ export const deriveConcurrency = (cpus = hostParallelism(), workersPerTask = cpu
 /**
  * How much of the machine one task of this run takes.
  *
- * A `test` task starts a Vitest process that spreads over every core, which `vitest.shared.ts`
- * grants deliberately — keep the two in step, since lowering the per-suite worker count would let
- * proportionally more suites overlap rather than fewer. Everything else in this workspace is a
- * single `tsc` or `next build` process, so bounding those to the same count would cost wall-clock
- * and prevent nothing.
+ * A `test` task starts a Vitest process that spreads over vitest's own host-derived default, one
+ * worker short of the core count — keep this in step with `vitest.shared.ts`, since a smaller
+ * per-suite worker count would let proportionally more suites overlap rather than fewer.
+ * Everything else in this workspace is a single `tsc` or `next build` process, so bounding those
+ * to the same count would cost wall-clock and prevent nothing.
  */
 export const workersPerTask = (tasks, cpus = hostParallelism()) =>
-  tasks.includes('test') ? cpus : 1
+  tasks.includes('test') ? Math.max(1, cpus - 1) : 1
 
 /** The tasks of a `turbo run <task...> [flags]` invocation. */
 export const tasksOf = (argv) => {

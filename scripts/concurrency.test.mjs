@@ -4,21 +4,20 @@ import { deriveConcurrency, hostParallelism, tasksOf, workersPerTask } from './c
 
 const cpuCounts = [1, 2, 4, 8, 16, 64]
 
-test('a run containing tests overlaps a fixed number of suites at any machine size', () => {
-  // A suite may use every core, so the number of suites allowed to overlap is the oversubscription
-  // factor itself and holds at any host size — what scales with the host is the worker budget
-  // underneath it.
+test('a run containing tests keeps the peak within the worker budget', () => {
   for (const cpus of cpuCounts) {
-    const concurrency = deriveConcurrency(cpus, workersPerTask(['typecheck', 'test'], cpus))
-    assert.equal(concurrency, 2, `unexpected concurrency for ${cpus} cores`)
+    const workers = workersPerTask(['typecheck', 'test'], cpus)
+    const peak = deriveConcurrency(cpus, workers) * workers
+    assert.ok(peak <= cpus * 2, `peak ${peak} workers exceeds the budget for ${cpus} cores`)
   }
 })
 
-test('the total worker bound tracks the host rather than a hardcoded runner', () => {
-  for (const cpus of cpuCounts) {
-    const concurrency = deriveConcurrency(cpus, workersPerTask(['test'], cpus))
-    assert.equal(concurrency * cpus, cpus * 2, `unexpected worker budget for ${cpus} cores`)
-  }
+test('the per-suite worker count is vitest\'s host-derived default', () => {
+  // Kept in step with vitest.shared.ts, which deliberately does not override it: the spare core
+  // is what a syscall-heavy test needs to stay schedulable (#177).
+  assert.equal(workersPerTask(['test'], 4), 3)
+  assert.equal(workersPerTask(['test'], 2), 1)
+  assert.equal(workersPerTask(['test'], 1), 1)
 })
 
 test('a run of single-process tasks is not held to the test bound', () => {

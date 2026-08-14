@@ -11,16 +11,6 @@ import { defineConfig, mergeConfig, type ViteUserConfig } from 'vitest/config'
  */
 
 /**
- * A test suite that is running on its own may use the whole machine — one worker per core is not
- * oversubscription, it is the machine being used. What has to be bounded is how many suites run
- * at once, and that is `scripts/concurrency.mjs`, not this file.
- *
- * This is deliberately not a cap. The compiler suite is ~80% of the workspace's test CPU and sits
- * on the critical path of `pnpm check`; taking a worker away from it lengthens the whole gate.
- */
-export const testWorkers = Math.max(1, availableParallelism())
-
-/**
  * Vitest's default is 5 s, which is a budget for a test that does arithmetic, not for one that
  * drives a compiler. Two of the flaky-CI issues on this repo (#147, #173) were a test whose real
  * cost was well inside 5 s locally and outside it on a loaded shared runner: `packages/compiler-cli`
@@ -45,10 +35,28 @@ export const testWorkers = Math.max(1, availableParallelism())
  */
 export const testTimeout = 60_000
 
+/**
+ * Every core, for the one package that has a reason to ask for them. Not a default — see below.
+ */
+export const wholeMachineWorkers = Math.max(1, availableParallelism())
+
+/**
+ * Deliberately absent from the defaults below: a per-suite worker count.
+ *
+ * Vitest's own default is already derived from the host — `availableParallelism() - 1` — and the
+ * subtracted core is not an accident. It leaves something for the OS, the Turbo and pnpm
+ * supervisors, and the I/O a test does outside its worker. An earlier revision of this file set
+ * every package to the full core count and CI got worse, not better: `packages/compiler-cli` had
+ * been running on vitest's default, the override took its spare core away, and its watcher test —
+ * which asserts that a 200-file non-atomic write burst is never read mid-truncate, and so depends
+ * on its own writer being schedulable — started failing (#177).
+ *
+ * What has to be bounded is how many suites run at once, and that is `scripts/concurrency.mjs`.
+ * How many workers one suite uses is vitest's business, and vitest already scales it with the host.
+ */
 export const silkTestDefaults = {
   testTimeout,
   hookTimeout: testTimeout,
-  maxWorkers: testWorkers,
 } as const
 
 /** Extend the workspace defaults with whatever a package genuinely needs on top of them. */
