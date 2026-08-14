@@ -1,0 +1,70 @@
+{
+  "name": "@silk-effect/documentation-site",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Renders a static HTML documentation site and a static search index from Silk Effect documentation JSON.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/julia-script/silk-effect.git",
+    "directory": "packages/documentation-site"
+  },
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
+  "keywords": [
+    "silk",
+    "documentation",
+    "html",
+    "search"
+  ],
+  "type": "module",
+  "bin": {
+    "silk-docs-site": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./bin": "./dist/bin.js",
+    "./Html": {
+      "types": "./dist/Html.d.ts",
+      "import": "./dist/Html.js"
+    },
+    "./Model": {
+      "types": "./dist/Model.d.ts",
+      "import": "./dist/Model.js"
+    },
+    "./Prose": {
+      "types": "./dist/Prose.d.ts",
+      "import": "./dist/Prose.js"
+    },
+    "./Search": {
+      "types": "./dist/Search.d.ts",
+      "import": "./dist/Search.js"
+    },
+    "./Site": {
+      "types": "./dist/Site.d.ts",
+      "import": "./dist/Site.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm clean && tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.0-beta.103",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@silk-effect/compiler": "workspace:*",
+    "@silk-effect/documentation": "workspace:*",
+    "@types/node": "^24.10.1"
+  }
+}

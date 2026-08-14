@@ -9,7 +9,9 @@ import type * as ToolchainPlan from '@silk-effect/compiler/ToolchainPlan'
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
+import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
+import * as Ref from 'effect/Ref'
 import * as Result from 'effect/Result'
 import * as Stream from 'effect/Stream'
 import type { ChildProcessSpawner } from 'effect/unstable/process'
@@ -286,9 +288,90 @@ const sourceDirectories = Effect.fnUntraced(function* (
 })
 
 /**
+ * How long the event stream must fall quiet before a burst counts as one finished edit.
+ *
+ * A save is not one event. `writeFile` is `open(O_TRUNC)`, `write`, `close`, and the watch fires
+ * on the truncate, so recompiling per raw event reads a file that is still being written — issue
+ * #158 measured 71% of watch-woken reads observing zero bytes. Coalescing sub-millisecond bursts
+ * needs only a few milliseconds; 50 ms also absorbs an editor that writes a backup or a swap file
+ * beside the source, while staying far enough below the ~100 ms threshold where a feedback loop
+ * starts to feel delayed. Two edits further apart than this window remain two compilations.
+ */
+const quietWindow = '50 millis'
+
+/**
+ * Gap between the two source-tree samples that decide whether a writer is still mid-flight.
+ *
+ * Quiet is not the same as finished: one large `write` is a single event that arrives when the
+ * write completes, so a slow writer can leave the stream silent while the file on disk is
+ * truncated. Comparing the tree against itself across this gap catches that case, and costs one
+ * extra sample of the source tree per compilation.
+ */
+const settleInterval = '25 millis'
+
+/** Caps the settle wait at one second so a continuously rewritten tree still compiles. */
+const settleSamples = 40
+
+/**
+ * Fingerprints every file under the source root by path, size, and modification time.
+ *
+ * Two equal fingerprints taken `settleInterval` apart mean no writer is mid-flight; a fingerprint
+ * equal to the one already compiled means the burst left the tree byte-identical to what the last
+ * pass read. Deliberately not a content hash: rewriting a file with its previous contents is a
+ * real edit that must recompile, and a fingerprint records that the file was written at all.
+ */
+const sourceFingerprint = Effect.fnUntraced(function* (
+  root: string,
+): Effect.fn.Return<string, never, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const entries: Array<string> = []
+  const pending: Array<string> = [root]
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    if (directory === undefined) continue
+    const names = yield* Effect.result(fileSystem.readDirectory(directory))
+    if (Result.isFailure(names)) continue
+    for (const name of names.success) {
+      const candidate = path.resolve(directory, name)
+      const info = yield* Effect.result(fileSystem.stat(candidate))
+      if (Result.isFailure(info)) continue
+      if (info.success.type === 'Directory') {
+        pending.push(candidate)
+        continue
+      }
+      const modified = Option.match(info.success.mtime, {
+        onNone: () => 'unknown',
+        onSome: (at) => `${at.getTime()}`,
+      })
+      entries.push(`${candidate} ${info.success.size} ${modified}`)
+    }
+  }
+  return entries.sort().join('\n')
+})
+
+/** Samples the source tree until two consecutive samples agree, or the settle budget runs out. */
+const settledFingerprint = Effect.fnUntraced(function* (
+  root: string,
+): Effect.fn.Return<string, never, FileSystem.FileSystem | Path.Path> {
+  let previous = yield* sourceFingerprint(root)
+  for (let sample = 0; sample < settleSamples; sample += 1) {
+    yield* Effect.sleep(settleInterval)
+    const current = yield* sourceFingerprint(root)
+    if (current === previous) return current
+    previous = current
+  }
+  return previous
+})
+
+/**
  * Runs one compilation, then repeats it after every change under the project source root. The
  * status of each pass is reported but never returned: only stopping the watch ends the command,
  * so a pass that reports diagnostics leaves the watch running.
+ *
+ * A pass reads the source tree only once the tree has settled, so an ordinary non-atomic save is
+ * compiled whole rather than at the zero length the truncate left behind, and one edit produces
+ * one pass rather than one per raw event.
  */
 export const watch = Effect.fn('Workflow.watch')(function* (
   run: (
@@ -300,6 +383,9 @@ export const watch = Effect.fn('Workflow.watch')(function* (
   const loaded = yield* Effect.result(loadProject(options))
   if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
   const sourceRoot = loaded.success.entry.sourceRoot
+  // Taken before the pass rather than after it: an edit that lands while the pass is running must
+  // look like a change the pass did not read, so it recompiles instead of being skipped.
+  const compiled = yield* Ref.make(yield* sourceFingerprint(sourceRoot))
   yield* run(options)
   // ponytail: directories are enumerated once; a directory created later needs a restart.
   const directories = yield* sourceDirectories(sourceRoot)
@@ -308,9 +394,15 @@ export const watch = Effect.fn('Workflow.watch')(function* (
     directories.map((directory) => fileSystem.watch(directory)),
     { concurrency: 'unbounded' },
   ).pipe(
-    // ponytail: every event recompiles the whole graph; debounce if editors emit noisy bursts.
+    Stream.debounce(quietWindow),
     Stream.runForEach(
       Effect.fnUntraced(function* () {
+        const fingerprint = yield* settledFingerprint(sourceRoot)
+        // The burst carried no edit the last pass did not already read: the events were the
+        // truncate and the write of one save, or a file was rewritten with the same bytes at the
+        // same time. Recompiling would only repeat the result already on screen.
+        if (fingerprint === (yield* Ref.get(compiled))) return
+        yield* Ref.set(compiled, fingerprint)
         yield* run(options)
         yield* Console.log(`Watching ${sourceRoot} for changes.`)
       }),

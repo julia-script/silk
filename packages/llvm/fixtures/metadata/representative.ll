@@ -39,7 +39,7 @@ no:
 !19 = !{null, !1, !2, !3, !4, !8, !10, !13, !16, !17, !18}
 !20 = !DISubroutineType(types: !19, flags: DIFlagPrototyped)
 !21 = !{}
-!22 = distinct !DICompileUnit(language: DW_LANG_C99, file: !0, producer: "silk-effect", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug, globals: !21)
+!22 = distinct !DICompileUnit(language: DW_LANG_C99, file: !0, producer: "silk-effect", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug, globals: !21, splitDebugInlining: false)
 !23 = !{i32 2, !"Dwarf Version", i32 5}
 !24 = !{i32 2, !"Debug Info Version", i32 3}
 !25 = distinct !DISubprogram(scope: !0, name: "debugged", file: !0, line: 10, type: !20, scopeLine: 10, flags: DIFlagPrototyped | DIFlagAllCallsDescribed, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !22)

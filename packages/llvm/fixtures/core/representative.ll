@@ -52,7 +52,7 @@ entry:
   %and = and i32 %ashr, %v1
   %or = or i32 %and, %v1
   %xor = xor i32 %or, %v1
-  %negated = sub i32 zeroinitializer, %xor
+  %negated = sub i32 0, %xor
   %inverted = xor i32 %negated, -1
   %eq = icmp eq i32 %v0, %v1
   %ne = icmp ne i32 %v0, %v1

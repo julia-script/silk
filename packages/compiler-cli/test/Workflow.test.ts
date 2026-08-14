@@ -6,6 +6,7 @@ import * as Target from '@silk-effect/compiler/Target'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
+import * as Result from 'effect/Result'
 import * as Project from '../src/Project.js'
 import * as Workflow from '../src/Workflow.js'
 import * as Timeouts from './timeouts.js'
@@ -66,6 +67,62 @@ const editUntilRecompiled = Effect.fnUntraced(function* (
     }
   }
   throw new Error('Timed out waiting for the watch mode to compile again')
+})
+
+/**
+ * Waits until the watch mode stops producing passes and returns the count it stopped at, so a
+ * test can count the passes one edit produced rather than only the first of them.
+ */
+const passesSettled = Effect.fnUntraced(function* (passes: ReadonlyArray<unknown>) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const before = passes.length
+    yield* Effect.sleep('400 millis')
+    if (passes.length === before) return before
+  }
+  throw new Error('The watch mode never stopped compiling')
+})
+
+/**
+ * One watch-mode compilation: its reported status, and the entry source the pass read. The status
+ * alone cannot see a torn read — `check` of an empty entry finds no declaration to reject and
+ * reports success — so a test that asks whether a pass compiled a finished file has to look at
+ * the bytes the pass loaded.
+ */
+interface Pass {
+  readonly status: Workflow.ExitStatus
+  readonly source: string
+}
+
+const unreadable = '<unreadable>'
+
+/**
+ * Starts a watch whose passes are recorded, and returns once the watcher is demonstrably
+ * subscribed: the first compilation has run, an edit has been seen, and the passes it caused have
+ * finished. A test that counts passes needs that, because `Workflow.watch` registers the watcher
+ * only after its first compilation, so an early edit can land before anything is listening.
+ */
+const watchRecording = Effect.fnUntraced(function* (root: string) {
+  const passes: Array<Pass> = []
+  const record = (selection: Workflow.ProjectSelection) =>
+    Effect.gen(function* () {
+      // The same read `check` is about to perform, taken at the moment the pass begins.
+      const loaded = yield* Effect.result(Project.load({ workingDirectory: root }))
+      const status = yield* Workflow.check(selection)
+      const source = Result.isSuccess(loaded)
+        ? new TextDecoder().decode(loaded.success.entry.bytes)
+        : unreadable
+      passes.push({ status, source })
+      return status
+    })
+  const watching = yield* Effect.forkChild(Workflow.watch(record, options(root)))
+  yield* waitUntil(() => passes.length >= 1)
+  yield* editUntilRecompiled(
+    `${root}/src/Main.silk`,
+    'pub fn main() -> i32 { return 11 }',
+    () => passes.length >= 2,
+  )
+  yield* passesSettled(passes)
+  return { passes, watching } as const
 })
 
 it.effect('checks a whole project without creating build artifacts', () =>
@@ -358,6 +415,135 @@ it.live(
       yield* Fiber.interrupt(watching)
 
       assert.deepStrictEqual(passes.slice(0, 2), [0, 0])
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  Timeouts.nativeBuild,
+)
+
+/**
+ * `fileSystem.writeFileString` is `open(O_TRUNC)`, `write`, `close`, exactly what shell
+ * redirection, `sed -i`, and an editor without atomic save do. The watch fires on the truncate, so
+ * a watcher that reads on the raw event reads the file at zero length: issue #158 measured 71% of
+ * watch-woken reads observing no bytes at all. Every pass here must have read one of the whole
+ * programs this test wrote, never a truncated or half-written prefix of one.
+ */
+it.live(
+  'compiles the finished file when a burst of saves writes non-atomically',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
+      const { passes, watching } = yield* watchRecording(root)
+      const before = passes.length
+      const written = new Set(['pub fn main() -> i32 { return 11 }'])
+
+      for (let write = 0; write < 200; write += 1) {
+        const program = `pub fn main() -> i32 { return ${'4'.repeat((write % 8) + 1)} }`
+        written.add(program)
+        yield* fileSystem.writeFileString(`${root}/src/Main.silk`, program)
+      }
+      yield* waitUntil(() => passes.length > before)
+      yield* passesSettled(passes)
+      yield* Fiber.interrupt(watching)
+
+      const observed = passes.slice(before)
+      const torn = observed.filter((pass) => !written.has(pass.source))
+      assert.deepStrictEqual(
+        torn.map((pass) => pass.source.length),
+        [],
+        `${torn.length} of ${observed.length} passes read a file that was still being written`,
+      )
+      assert.deepStrictEqual(
+        observed.filter((pass) => pass.status !== 0),
+        [],
+      )
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  Timeouts.nativeBuild,
+)
+
+it.live(
+  'compiles once for one logical edit',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
+      const { passes, watching } = yield* watchRecording(root)
+      const before = passes.length
+
+      yield* fileSystem.writeFileString(
+        `${root}/src/Main.silk`,
+        'pub fn main() -> i32 { return 7 }',
+      )
+      yield* waitUntil(() => passes.length > before)
+      const settled = yield* passesSettled(passes)
+      yield* Fiber.interrupt(watching)
+
+      assert.strictEqual(settled - before, 1)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  Timeouts.nativeBuild,
+)
+
+/**
+ * The settle must coalesce one edit's events without swallowing a second edit: distinct saves are
+ * distinct work no matter how quickly they follow one another.
+ */
+it.live(
+  'compiles once per edit for a rapid sequence of distinct edits',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
+      const { passes, watching } = yield* watchRecording(root)
+      const before = passes.length
+      const edits = [
+        'pub fn main() -> i32 { return 1 }',
+        'pub fn main() -> i32 { return 22 }',
+        'pub fn main() -> i32 { return 333 }',
+        'pub fn main() -> i32 { return 4444 }',
+      ]
+
+      for (const [index, edit] of edits.entries()) {
+        yield* fileSystem.writeFileString(`${root}/src/Main.silk`, edit)
+        yield* waitUntil(() => passes.length >= before + index + 1)
+      }
+      const settled = yield* passesSettled(passes)
+      yield* Fiber.interrupt(watching)
+
+      assert.strictEqual(settled - before, edits.length)
+      assert.deepStrictEqual(
+        passes.slice(before).map((pass) => pass.source),
+        edits,
+      )
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  Timeouts.nativeBuild,
+)
+
+/**
+ * The settle decides that a file stopped changing, never that its contents are plausible. A user
+ * who empties a source file has made an edit like any other: it recompiles, and whatever the
+ * emptied graph deserves is what gets reported.
+ */
+it.live(
+  'compiles a source file the user emptied on purpose',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
+      const { passes, watching } = yield* watchRecording(root)
+      const before = passes.length
+
+      yield* fileSystem.writeFileString(`${root}/src/Main.silk`, '')
+      yield* waitUntil(() => passes.length > before)
+      yield* passesSettled(passes)
+      yield* Fiber.interrupt(watching)
+
+      assert.deepStrictEqual(
+        passes.slice(before).map((pass) => pass.source),
+        [''],
+      )
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   Timeouts.nativeBuild,
 )

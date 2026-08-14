@@ -12,7 +12,7 @@ each signature and description below is the `///` comment on the declaration in
 $ pnpm --filter @silk-effect/compiler documentation:generate
 ```
 
-The library has 40 modules.
+The library has 41 modules.
 
 ## Modules
 
@@ -29,6 +29,9 @@ The library has 40 modules.
 | [`silk/f64`](#silk-f64) | `f64` | 51 |
 | [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 85 |
 | [`silk/format`](#silk-format) | `Format` | 40 |
+| [`silk/hash`](#silk-hash) | `HashKey` | 10 |
+| [`silk/hash_map`](#silk-hash-map) | `HashMap` | 55 |
+| [`silk/hash_set`](#silk-hash-set) | `HashSet` | 48 |
 | [`silk/host_input`](#silk-host-input) | `HostInput` | 12 |
 | [`silk/i16`](#silk-i16) | `i16` | 60 |
 | [`silk/i32`](#silk-i32) | `i32` | 60 |
@@ -49,13 +52,11 @@ The library has 40 modules.
 | [`silk/result`](#silk-result) | `Result` | 13 |
 | [`silk/slot`](#silk-slot) | `Slot` | 4 |
 | [`silk/standard_input`](#silk-standard-input) | `StandardInput` | 12 |
-| [`silk/string`](#silk-string) | `String` | 25 |
+| [`silk/string`](#silk-string) | `String` | 24 |
 | [`silk/u16`](#silk-u16) | `u16` | 57 |
 | [`silk/u32`](#silk-u32) | `u32` | 57 |
 | [`silk/u64`](#silk-u64) | `u64` | 57 |
 | [`silk/u8`](#silk-u8) | `u8` | 57 |
-| [`silk/unicode`](#silk-unicode) | `Unicode` | 23 |
-| [`silk/unicode_tables`](#silk-unicode-tables) | `UnicodeTables` | 11 |
 | [`silk/usize`](#silk-usize) | `usize` | 59 |
 | [`silk/vector`](#silk-vector) | `Vector` | 55 |
 
@@ -2318,7 +2319,7 @@ One shape note for that composition: the finalizer consumes the directory, so th
 Effect cannot still be borrowing it. Derive whatever paths the work needs from `path` first,
 then hand the owner to the finalizer:
 
-```silk
+```silk,ignore
 let scope = run temporaryDirectory(&parent, "silk-build-")
 let artifact = run join(&scope.path, "output.bin")
 let value = run Effect.ensuring(build(&artifact), releaseIgnored(move scope))
@@ -2524,6 +2525,349 @@ pub fn isizeValue(text: string) -> silk/result.Result<isize, silk/format.ParseFa
 ```
 
 Reads complete decimal text as an `isize`, rejecting a value the target's pointer width cannot hold.
+
+
+## silk/hash
+
+Import as `HashKey` with `import silk.hash`.
+
+### `HashSeed`
+
+```silk
+pub struct HashSeed
+```
+
+The value every hash in one collection is computed under.
+
+One seed fixes one iteration order. A collection consults nothing else — no allocation address,
+no clock, no ambient entropy — so two runs of one program over one seed observe one order, and
+they observe it identically on the evaluator, on the native backend, and on WebAssembly.
+
+| Field | Description |
+| --- | --- |
+| `pub value: u64` | The seed value handed to every hash the collection computes. |
+
+### `seed`
+
+```silk
+pub fn seed(value: u64) -> HashSeed
+```
+
+Constructs a seed from one value.
+
+### `HashKey`
+
+```silk
+pub interface HashKey<T>
+```
+
+Static hashing contract for a key of a hashed collection.
+
+A witness supplies two operations over one key type: the equivalence `==` spells, and a hash of
+one key under one seed. The seed is an operand of the hash rather than state a key carries,
+because one seed serves the whole collection.
+
+A witness MUST compute equal hashes for two keys its own `equals` reports equivalent, under every
+seed. Nothing checks this — a witness that breaks it makes a present key unreachable, and a
+collection can neither detect the breakage nor recover from it.
+
+### `mix`
+
+```silk
+pub fn mix(seed: &silk/hash.HashSeed, value: u64) -> u64
+```
+
+Mixes one value under one seed into a hash spread across the whole 64-bit range.
+
+Every step is a wrapping multiply, a shift, or an exclusive or, so the result is exactly the same
+on every engine. A witness for a key built from integers can answer `hash` by folding its fields
+through this function rather than inventing a mixer.
+
+### `combine`
+
+```silk
+pub fn combine(hashed: u64, value: u64) -> u64
+```
+
+Continues a hash with one further value, so a key of several fields folds into one hash.
+
+### `Word`
+
+```silk
+pub struct Word
+```
+
+A key holding one unsigned integer.
+
+The scalar types cannot carry a `HashKey` witness themselves: a conformance whose provider is a
+scalar admits a sealed compiler operation and nothing else, and no compiler operation computes a
+hash — nor may one be added. A key built from an integer is therefore a declared type, and this
+is the canonical one.
+
+| Field | Description |
+| --- | --- |
+| `pub value: u64` | The integer this key stands for. |
+
+### `word`
+
+```silk
+pub fn word(value: u64) -> Word
+```
+
+Constructs an integer key.
+
+
+## silk/hash_map
+
+Import as `HashMap` with `import silk.hash_map`.
+
+### `Entry`
+
+```silk
+pub struct Entry<K, V>
+```
+
+### `Unallocated`
+
+```silk
+pub struct Unallocated<K, V>
+```
+
+### `Table`
+
+```silk
+pub struct Table<K, V>
+```
+
+### `HashMap`
+
+```silk
+pub struct HashMap<K, V>
+```
+
+### `make`
+
+```silk
+pub fn make<K, V>(seed: HashSeed) -> silk/hash_map.HashMap<K, V>
+```
+
+Constructs an empty map whose every hash is computed under one seed.
+
+An empty map allocates nothing. The seed fixes the order the map will present its entries in,
+and is the only thing besides the sequence of operations that decides it.
+
+### `length`
+
+```silk
+pub fn length<K, V>(self: &silk/hash_map.HashMap<K, V>) -> usize
+```
+
+Returns the number of entries the map holds.
+
+### `bucketCount`
+
+```silk
+pub fn bucketCount<K, V>(self: &silk/hash_map.HashMap<K, V>) -> usize
+```
+
+Returns the number of buckets the map presents, which is the range `occupiedAt` accepts.
+
+### `occupiedAt`
+
+```silk
+pub fn occupiedAt<K, V>(self: &silk/hash_map.HashMap<K, V>, index: usize) -> bool
+```
+
+Reports whether one bucket holds an entry. Out-of-range buckets hold nothing.
+
+### `insert`
+
+```silk
+pub effect fn insert<K, V>(self: &mut silk/hash_map.HashMap<K, V>, key: K, value: V) -> Option<V> ! OutOfMemory ? &mut Allocator
+```
+
+Inserts one owned key and value, answering with the value an equivalent key already held.
+
+The map takes ownership of both. When an equivalent key is already present the map's length does
+not change, the replaced value travels to the caller, and the key the map held is released.
+
+Fails only with `OutOfMemory`, and only from the growth this insert needed. A failed insert
+leaves every prior entry at its own key, and leaves the length and the bucket count unchanged.
+
+### `contains`
+
+```silk
+pub fn contains<K, V>(self: &silk/hash_map.HashMap<K, V>, key: K) -> bool
+```
+
+Reports whether the map holds an entry under a key equivalent to one probe key.
+
+### `indexOf`
+
+```silk
+pub fn indexOf<K, V>(self: &silk/hash_map.HashMap<K, V>, key: K) -> Option<usize>
+```
+
+Returns the bucket holding an entry under a key equivalent to one probe key, or an absent value.
+
+This is the lookup a map with move-only values answers: the bucket names the entry without
+moving anything out of the map.
+
+### `get`
+
+```silk
+pub fn get<K, V>(self: &silk/hash_map.HashMap<K, V>, key: K) -> Option<V>
+```
+
+Returns the value held under a key equivalent to one probe key, or an absent value.
+
+Reads a copy out of the map, so it answers for a map whose key and value types are `Copy`. A map
+holding move-only values is looked up with `indexOf` and read with `valueAt`, or emptied with
+`remove`.
+
+### `remove`
+
+```silk
+pub fn remove<K, V>(self: &mut silk/hash_map.HashMap<K, V>, key: K) -> Option<V>
+```
+
+Removes the entry under a key equivalent to one probe key and answers with its value.
+
+Ownership of the value passes to the caller; the map does not also release it. The key the map
+held is released, and the probe key is released as well.
+
+### `keyAt`
+
+```silk
+pub fn keyAt<K, V>(self: &silk/hash_map.HashMap<K, V>, index: usize) -> K
+```
+
+Returns the key held in one bucket. Traps on a bucket that holds no entry.
+
+Reads a copy out of the map, so it answers for a map whose key type is `Copy`.
+
+### `valueAt`
+
+```silk
+pub fn valueAt<K, V>(self: &silk/hash_map.HashMap<K, V>, index: usize) -> V
+```
+
+Returns the value held in one bucket. Traps on a bucket that holds no entry.
+
+Reads a copy out of the map, so it answers for a map whose value type is `Copy`.
+
+
+## silk/hash_set
+
+Import as `HashSet` with `import silk.hash_set`.
+
+### `Member`
+
+```silk
+pub struct Member<T>
+```
+
+### `Unseeded`
+
+```silk
+pub struct Unseeded<T>
+```
+
+### `Slots`
+
+```silk
+pub struct Slots<T>
+```
+
+### `HashSet`
+
+```silk
+pub struct HashSet<T>
+```
+
+### `make`
+
+```silk
+pub fn make<T>(seed: HashSeed) -> silk/hash_set.HashSet<T>
+```
+
+Constructs an empty set whose every hash is computed under one seed.
+
+### `length`
+
+```silk
+pub fn length<T>(self: &silk/hash_set.HashSet<T>) -> usize
+```
+
+Returns the number of elements the set holds.
+
+### `bucketCount`
+
+```silk
+pub fn bucketCount<T>(self: &silk/hash_set.HashSet<T>) -> usize
+```
+
+Returns the number of buckets the set presents, which is the range `occupiedAt` accepts.
+
+### `occupiedAt`
+
+```silk
+pub fn occupiedAt<T>(self: &silk/hash_set.HashSet<T>, index: usize) -> bool
+```
+
+Reports whether one bucket holds an element. Out-of-range buckets hold nothing.
+
+### `insert`
+
+```silk
+pub effect fn insert<T>(self: &mut silk/hash_set.HashSet<T>, value: T) -> bool ! OutOfMemory ? &mut Allocator
+```
+
+Inserts one owned element, reporting whether an equivalent element was already held.
+
+A set never holds two equivalent elements. When one is already held the set is unchanged and the
+arriving element is released, so the element that survives is the one the set already had.
+
+Fails only with `OutOfMemory`, and only from the growth this insert needed. A failed insert
+leaves every prior element present, and leaves the length and the bucket count unchanged.
+
+### `contains`
+
+```silk
+pub fn contains<T>(self: &silk/hash_set.HashSet<T>, value: T) -> bool
+```
+
+Reports whether the set holds an element equivalent to one probe element.
+
+### `indexOf`
+
+```silk
+pub fn indexOf<T>(self: &silk/hash_set.HashSet<T>, value: T) -> Option<usize>
+```
+
+Returns the bucket holding an element equivalent to one probe element, or an absent value.
+
+This is the membership question a set of move-only elements answers without moving anything.
+
+### `remove`
+
+```silk
+pub fn remove<T>(self: &mut silk/hash_set.HashSet<T>, value: T) -> Option<T>
+```
+
+Removes the element equivalent to one probe element and answers with it.
+
+Ownership passes to the caller; the set does not also release it. The probe element is released.
+
+### `elementAt`
+
+```silk
+pub fn elementAt<T>(self: &silk/hash_set.HashSet<T>, index: usize) -> T
+```
+
+Returns the element held in one bucket. Traps on a bucket that holds no element.
+
+Reads a copy out of the set, so it answers for a set whose element type is `Copy`.
 
 
 ## silk/host_input
@@ -5408,6 +5752,18 @@ Returns the present value, or the fallback value when the option is absent.
 Only the absent arm consumes the fallback. The present arm releases it, so exactly one of the
 two owned values leaves this call and the other drops.
 
+# Examples
+
+```silk
+import silk.option { none, some, unwrapOr }
+
+pub fn main() -> i32 {
+  let present = some<i32>(7)
+  let absent = none<i32>()
+  return unwrapOr<i32>(move present, 0) + unwrapOr<i32>(move absent, 5)
+}
+```
+
 
 ## silk/order
 
@@ -5959,9 +6315,6 @@ pub fn fromUtf8(values: &[u8]) -> silk/result.Result<string, silk/string.Invalid
 
 Validates a complete byte view and borrows it as text without allocating.
 
-The offset is unpacked before the borrow rather than after it because an unchecked construction
-has to happen in the function that owns the borrowed parameter the view comes from.
-
 ### `make`
 
 ```silk
@@ -5977,19 +6330,6 @@ pub effect fn copy(value: string) -> String ! OutOfMemory ? &mut Allocator
 ```
 
 Copies valid text into independently owned storage.
-
-### `copyUtf8`
-
-```silk
-pub effect fn copyUtf8(values: &[u8]) -> silk/result.Result<silk/string.String, silk/string.InvalidUtf8> ! OutOfMemory ? &mut Allocator
-```
-
-Validates complete UTF-8 bytes and copies them into independently owned storage.
-
-The companion to `fromUtf8` for bytes a program built rather than borrowed. `fromUtf8` hands
-back a view that lives exactly as long as the buffer under it, which is the wrong shape for an
-encoder that wants to return its result and let its working buffer go; this validates the same
-way and owns the outcome.
 
 ### `append`
 
@@ -7941,122 +8281,6 @@ pub fn parse(text: string) -> silk/result.Result<u8, silk/format.ParseFailure>
 ```
 
 Reads complete decimal text as a `u8`, or reports why the text is not one.
-
-
-## silk/unicode
-
-Import as `Unicode` with `import silk.unicode`.
-
-### `dataVersion`
-
-```silk
-pub fn dataVersion() -> string
-```
-
-Returns the Unicode version the tables were generated from.
-
-The version is data, not identity: a later database changes what this returns and what the
-tables contain, and changes neither a compiler type nor a target ABI.
-
-### `longestDecomposition`
-
-```silk
-pub fn longestDecomposition() -> usize
-```
-
-Returns the longest full canonical decomposition of a single scalar in the generated tables.
-
-### `canonicalCombiningClass`
-
-```silk
-pub fn canonicalCombiningClass(scalar: u32) -> u32
-```
-
-Returns a scalar's canonical combining class, zero for a starter.
-
-### `normalizeNfd`
-
-```silk
-pub effect fn normalizeNfd(value: string) -> String ! OutOfMemory ? &mut Allocator
-```
-
-Returns the Normalization Form D of text: fully decomposed, in canonical order.
-
-### `normalizeNfc`
-
-```silk
-pub effect fn normalizeNfc(value: string) -> String ! OutOfMemory ? &mut Allocator
-```
-
-Returns the Normalization Form C of text: decomposed, canonically ordered, then recomposed.
-
-This is the operation that lets a precomposed `é` and a decomposed `é` compare equal, and it
-only does so where source asks for it.
-
-
-## silk/unicode_tables
-
-Import as `UnicodeTables` with `import silk.unicode_tables`.
-
-### `Decomposition`
-
-```silk
-pub struct Decomposition
-```
-
-One canonical decomposition. A singleton leaves `second` at zero, which is not a decomposable
-scalar, so zero is an unambiguous absence.
-
-### `PairRecord`
-
-```silk
-pub struct PairRecord
-```
-
-One canonical decomposition together with the scalar it decomposes, for searching either way.
-
-### `dataVersion`
-
-```silk
-pub fn dataVersion() -> string
-```
-
-The Unicode version every table in this module was generated from.
-
-### `maximumDecompositionLength`
-
-```silk
-pub fn maximumDecompositionLength() -> usize
-```
-
-The longest full canonical decomposition of any single scalar, which bounds the decomposer's
-pending buffer.
-
-### `combiningClass`
-
-```silk
-pub fn combiningClass(scalar: u32) -> u32
-```
-
-Returns a scalar's canonical combining class, or zero for a starter.
-
-### `canonicalDecomposition`
-
-```silk
-pub fn canonicalDecomposition(scalar: u32) -> Decomposition
-```
-
-Returns the canonical decomposition of a scalar, or both components zero when it has none.
-Hangul syllables decompose algorithmically and are absent from this table by design.
-
-### `canonicalComposition`
-
-```silk
-pub fn canonicalComposition(first: u32, second: u32) -> u32
-```
-
-Composes a starter and a following scalar, or returns zero when the pair does not compose.
-Excluded pairs are absent from the index, so a hit is always a primary composite.
 
 
 ## silk/usize

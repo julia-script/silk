@@ -627,7 +627,7 @@ effect fn discardReleaseFailure(error: FileError | OutOfMemory) -> () { return (
 /// Effect cannot still be borrowing it. Derive whatever paths the work needs from `path` first,
 /// then hand the owner to the finalizer:
 ///
-/// ```silk
+/// ```silk,ignore
 /// let scope = run temporaryDirectory(&parent, "silk-build-")
 /// let artifact = run join(&scope.path, "output.bin")
 /// let value = run Effect.ensuring(build(&artifact), releaseIgnored(move scope))

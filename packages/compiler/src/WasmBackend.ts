@@ -94,6 +94,30 @@ const heapBase =
   heapTableBase + Math.ceil(((heapIrregularClass + 1) * 4) / heapHeaderBytes) * heapHeaderBytes
 
 /**
+ * The shadow stack may not reach the allocator's region.
+ *
+ * The two bump regions share one linear memory and point at each other: the shadow stack starts at
+ * the end of static data and grows up, while the heap starts at the fixed `heapTableBase` and grows
+ * up from there. Without a bound between them a deep enough chain of frames walks over the
+ * allocator's free-list table and then over live blocks, and nothing traps at the overwrite — the
+ * corrupted bytes are read back later, by whichever guard happens to see them first (#134).
+ *
+ * `memory.grow` cannot stand in for this bound. Growth appends pages above everything, so the stack
+ * reaches the heap long before a reservation runs past the memory that is mapped.
+ */
+const stackLimit = heapTableBase
+
+/**
+ * Linear memory opens with a 16-byte hole so that address 0 is never a live object. The backend
+ * spends its first word on a status word: a deliberate trap writes the reason there before
+ * `unreachable`, so a host that catches the trap can name what happened instead of inferring it
+ * from a byte offset. Memory is exported already, and it survives the trap.
+ */
+export const statusAddress = 0
+/** A frame reservation would have crossed out of the shadow stack's region. */
+export const statusStackOverflow = 1
+
+/**
  * A second `Backend` implementation emitting WebAssembly through the Silk wasm builder, for the
  * same MIR subset the bootstrap LLVM backend covers: logical scalar/aggregate locals, trapping
  * arithmetic, direct calls, checked replacement, and canonical structured control regions.
@@ -997,6 +1021,13 @@ const emitIntegerConversionValue = (
 interface MemoryContext {
   readonly memory: Memory.Memory
   readonly stackPointer: Global.Global
+  /** Where the shadow stack starts, so a report can rewind the pointer to it. */
+  readonly stackBase: number
+  /**
+   * The first address the shadow stack may not reach, or `undefined` when this module has no heap
+   * for it to run into and only the wrap and `memory.grow` guards apply.
+   */
+  readonly stackLimit: number | undefined
   readonly heapPointer: Global.Global
   readonly frame: FramePlan
   readonly plan: LayoutPlan.Plan
@@ -4457,6 +4488,35 @@ const emitBody = (
     if (memory.frame.size === 0) {
       return [Instr.globalGet(memory.stackPointer), Instr.localSet(layout.frameBase)]
     }
+    /**
+     * Report a deliberate trap rather than just taking one: name the reason in the status word, and
+     * rewind the stack pointer to the base so the trap is a single legible event instead of a
+     * module that answers every later call with the same trap. Whatever the abandoned frames owned
+     * is leaked — no cleanup ran — but the allocator's own structures are untouched, so a host that
+     * catches this can still read the heap back and get true answers out of it.
+     */
+    const report = (reason: number): ReadonlyArray<Instr.Instr> => [
+      Instr.i32Const(statusAddress),
+      Instr.i32Const(reason),
+      Instr.memoryAccess('i32.store', memory.memory),
+      Instr.i32Const(memory.stackBase),
+      Instr.globalSet(memory.stackPointer),
+      Instr.op('unreachable'),
+    ]
+    /**
+     * One comparison against an address known at emission, on the path that already computed
+     * `frameEnd`. A reservation that would cross into the heap reports here, before the stack
+     * pointer moves, instead of being noticed downstream as corrupted memory.
+     */
+    const boundCheck =
+      memory.stackLimit === undefined
+        ? []
+        : [
+            Instr.localGet(layout.frameEnd),
+            Instr.i32Const(memory.stackLimit),
+            Instr.op('i32.gt_u'),
+            Instr.ifElse(Instr.emptyBlockType, report(statusStackOverflow), []),
+          ]
     return [
       Instr.globalGet(memory.stackPointer),
       Instr.localSet(layout.frameBase),
@@ -4467,6 +4527,7 @@ const emitBody = (
       Instr.localGet(layout.frameBase),
       Instr.op('i32.lt_u'),
       Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+      ...boundCheck,
       Instr.localGet(layout.frameEnd),
       Instr.i32Const(1),
       Instr.op('i32.sub'),
@@ -4853,6 +4914,9 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           : Object.freeze({
               memory: privateMemory,
               stackPointer,
+              stackBase: staticEnd,
+              // Only a module with a heap has something above the shadow stack to run into.
+              stackLimit: needsHeap ? stackLimit : undefined,
               heapPointer,
               frame,
               plan: program.layout,

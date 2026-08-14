@@ -42,6 +42,18 @@ pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> Option<U>) -> Opt
 ///
 /// Only the absent arm consumes the fallback. The present arm releases it, so exactly one of the
 /// two owned values leaves this call and the other drops.
+///
+/// # Examples
+///
+/// ```silk
+/// import silk.option { none, some, unwrapOr }
+///
+/// pub fn main() -> i32 {
+///   let present = some<i32>(7)
+///   let absent = none<i32>()
+///   return unwrapOr<i32>(move present, 0) + unwrapOr<i32>(move absent, 5)
+/// }
+/// ```
 pub fn unwrapOr<T>(self: Option<T>, fallback: T) -> T {
   return match move self {
     Some<T> { value } => keepPresent<T>(move value, move fallback)
