@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as Scalar from '../src/Scalar.js'
+import * as Type from '../src/Type.js'
 
 const encoder = new TextEncoder()
 
@@ -160,6 +161,15 @@ pub effect fn main() -> i32 {
     }
   }
 }`,
+  `import silk.core { Allocator, OutOfMemory }
+struct SuspendProblem {}
+struct SuspendClock {}
+effect fn suspendDirect(
+  deferred: once Effect<i32 ! SuspendProblem ? &SuspendClock>
+) -> i32 ! SuspendProblem | OutOfMemory ? &SuspendClock | &mut Allocator {
+  return run Intrinsic.suspendEffect(move deferred)
+}
+pub fn main() -> i32 { return 42 }`,
   `pub effect fn main() -> () ! StreamWriteFailure {
   let mut native = NativeStandardStreams.native()
   let stdout = StandardStream.stdout()
@@ -282,6 +292,33 @@ it.effect('keeps every intrinsic identifiable and presentable in rejected calls'
   }),
 )
 
+it.effect('infers the suspension intrinsic exact widened Effect rows', () =>
+  Effect.gen(function* () {
+    const module = 'intrinsic/suspend-rows'
+    const source = `import silk.core { Allocator, OutOfMemory }
+struct Problem {}
+struct Clock {}
+fn suspend(
+  deferred: once Effect<i32 ! Problem ? &Clock>
+) -> once Effect<i32 ! Problem | OutOfMemory ? &Clock | &mut Allocator> {
+  return Intrinsic.suspendEffect(move deferred)
+}
+pub fn main() -> i32 { return 42 }`
+    const snapshot = yield* Analysis.ofSourceRealized(module, encoder.encode(source))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const suspended = Analysis.expressionsOf(snapshot, module).find(
+      (expression) =>
+        expression._tag === 'Call' &&
+        expression.reference._tag === 'ResolvedBuiltin' &&
+        expression.reference.operation === 'EffectSuspend',
+    )
+    assert.strictEqual(
+      suspended?.type._tag === 'Available' ? Type.encode(suspended.type.type) : undefined,
+      `once Effect<i32 ! ${module}.Problem | silk/core.OutOfMemory ? &${module}.Clock | &mut silk/core.Allocator>`,
+    )
+  }),
+)
+
 it('keeps catalog ordering stable across fresh reads', () => {
   const first = Intrinsic.all().map((actor) => ({
     actor: actor.spelling,
@@ -315,6 +352,23 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
   )
   assert.isTrue(entries.every((entry) => entry.consumer.length > 0))
   assert.isTrue(entries.filter((entry) => entry.unsafe).every((entry) => 'invariant' in entry))
+  assert.deepEqual(
+    Intrinsic.inventory()
+      .filter((entry) => entry.operation.toLowerCase().includes('suspend'))
+      .map((entry) => ({
+        operation: entry.operation,
+        signature: entry.signature,
+        targets: entry.targets,
+      })),
+    [
+      {
+        operation: 'Intrinsic.suspendEffect',
+        signature:
+          'fn Intrinsic.suspendEffect<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
+        targets: ['Evaluator', 'LLVM', 'Wasm'],
+      },
+    ],
+  )
 })
 
 it.effect(

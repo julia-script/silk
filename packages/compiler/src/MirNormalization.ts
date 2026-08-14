@@ -1,13 +1,10 @@
 import * as Mir from './Mir.js'
+import * as ProvisionalMir from './ProvisionalMir.js'
 
 /**
  * Shared, backend-neutral normalization of representation-only Effect construction and dispatch.
  * The deliberately small first slice never clones control flow or transfers affine ownership.
  */
-
-export interface Options {
-  readonly suspension?: 'Synchronous' | 'Unknown'
-}
 
 interface ConstructorShape {
   readonly fn: Mir.MirFunction
@@ -179,32 +176,30 @@ const rejection = (
     provenance: construction.provenance,
   })
 
-/** Normalizes one target-aware MIR module. Repeating the pass is an identity operation. */
-export const normalize = (program: Mir.Module, options: Options = {}): Mir.Module => {
+const suspensionReason = (
+  classification: ProvisionalMir.Classification,
+): Extract<Mir.NormalizationRejection, 'SuspendableRunner' | 'SuspensionUnknown'> | undefined =>
+  classification === 'Suspendable'
+    ? 'SuspendableRunner'
+    : classification === 'Unknown'
+      ? 'SuspensionUnknown'
+      : undefined
+
+const operationClassification = (
+  provisional: ProvisionalMir.Module,
+  fn: Mir.MirFunction,
+  operation: Extract<
+    Mir.Operation,
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'CloseEffectEntry' }
+  >,
+): ProvisionalMir.Classification =>
+  operation._tag === 'CloseEffectEntry'
+    ? ProvisionalMir.classificationOfRunner(provisional, operation.runner, operation.typeArguments)
+    : ProvisionalMir.classificationOfRun(provisional, fn.instance, operation.provenance.span)
+
+/** Normalizes one target-aware MIR module from exact provisional runner facts. */
+export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Module): Mir.Module => {
   if (program.normalization !== undefined) return program
-  if (options.suspension === 'Unknown') {
-    const verdicts = program.functions.flatMap((fn) =>
-      fn.regions.flatMap((region) =>
-        region._tag === 'OperationRegion'
-          ? region.operations.flatMap((operation) =>
-              operation._tag === 'RunEffectValue'
-                ? [
-                    Object.freeze({
-                      _tag: 'Rejected' as const,
-                      reason: 'SuspensionUnknown' as const,
-                      function: fn.id,
-                      region: region.id,
-                      local: operation.effect,
-                      provenance: operation.provenance,
-                    }),
-                  ]
-                : [],
-            )
-          : [],
-      ),
-    )
-    return Object.freeze({ ...program, normalization: Object.freeze(verdicts) })
-  }
   const verdicts: Array<Mir.NormalizationVerdict> = []
   let changed = false
   const functions = program.functions.map((fn) => {
@@ -212,7 +207,18 @@ export const normalize = (program: Mir.Module, options: Options = {}): Mir.Modul
     const foldedRegions = fn.regions.map((region) => {
       if (region._tag !== 'OperationRegion') return region
       const operations = region.operations.map((operation) => {
-        const folded = foldConstructor(program, operation)
+        const target =
+          operation._tag === 'Call' || operation._tag === 'ApplyCallable'
+            ? directTarget(program, operation)
+            : undefined
+        const targetSuspension =
+          target === undefined
+            ? undefined
+            : suspensionReason(
+                ProvisionalMir.classificationOfExecution(provisional, target.fn.instance),
+              )
+        const folded =
+          targetSuspension === undefined ? foldConstructor(program, operation) : undefined
         if (folded === undefined) {
           if (
             (operation._tag === 'Call' || operation._tag === 'ApplyCallable') &&
@@ -221,9 +227,9 @@ export const normalize = (program: Mir.Module, options: Options = {}): Mir.Modul
             verdicts.push(
               Object.freeze({
                 _tag: 'Rejected',
-                reason: hasConcreteTarget(program, operation)
-                  ? 'ComplexConstructor'
-                  : 'DynamicTarget',
+                reason:
+                  targetSuspension ??
+                  (hasConcreteTarget(program, operation) ? 'ComplexConstructor' : 'DynamicTarget'),
                 function: fn.id,
                 region: region.id,
                 local: operation.destination,
@@ -261,6 +267,29 @@ export const normalize = (program: Mir.Module, options: Options = {}): Mir.Modul
     const folded = functionChanged
       ? Object.freeze({ ...fn, regions: Object.freeze(foldedRegions) })
       : fn
+    for (const region of folded.regions) {
+      if (region._tag !== 'OperationRegion') continue
+      for (const operation of region.operations) {
+        if (
+          operation._tag !== 'RunEffect' &&
+          operation._tag !== 'ReifyEffect' &&
+          operation._tag !== 'CloseEffectEntry'
+        )
+          continue
+        const reason = suspensionReason(operationClassification(provisional, folded, operation))
+        if (reason === undefined) continue
+        verdicts.push(
+          Object.freeze({
+            _tag: 'Rejected',
+            reason,
+            function: folded.id,
+            region: region.id,
+            local: operation.destination,
+            provenance: operation.provenance,
+          }),
+        )
+      }
+    }
     let directChanged = false
     const directRegions = folded.regions.map((region) => {
       if (region._tag !== 'OperationRegion') return region
@@ -271,26 +300,29 @@ export const normalize = (program: Mir.Module, options: Options = {}): Mir.Modul
         const uses = usesOf(folded, construction)
         const use = uses.at(0)
         const run = use?.operation
+        const runSuspension =
+          run?._tag === 'RunEffectValue'
+            ? suspensionReason(operationClassification(provisional, folded, run))
+            : undefined
         const reason: Mir.NormalizationRejection | undefined =
-          options.suspension === 'Unknown'
-            ? 'SuspensionUnknown'
-            : uses.length === 0
-              ? 'EffectEscapes'
-              : uses.length > 1
-                ? 'EffectReused'
-                : use === undefined || !sameRegion(use.region.id, region.id)
-                  ? 'CrossRegionUse'
-                  : run?._tag !== 'RunEffectValue' ||
-                      run.effect.ordinal !== construction.destination.ordinal
-                    ? 'EffectEscapes'
-                    : construction.captures.some(
-                          (capture, ordinal) =>
-                            (capture.access !== 'Copy' && capture.access !== 'Shared') ||
-                            construction.type.environment.fields.at(ordinal)?.representation ===
-                              'Borrow',
-                        )
-                      ? 'AffineCapture'
-                      : undefined
+          runSuspension ??
+          (uses.length === 0
+            ? 'EffectEscapes'
+            : uses.length > 1
+              ? 'EffectReused'
+              : use === undefined || !sameRegion(use.region.id, region.id)
+                ? 'CrossRegionUse'
+                : run?._tag !== 'RunEffectValue' ||
+                    run.effect.ordinal !== construction.destination.ordinal
+                  ? 'EffectEscapes'
+                  : construction.captures.some(
+                        (capture, ordinal) =>
+                          (capture.access !== 'Copy' && capture.access !== 'Shared') ||
+                          construction.type.environment.fields.at(ordinal)?.representation ===
+                            'Borrow',
+                      )
+                    ? 'AffineCapture'
+                    : undefined)
         if (reason !== undefined) {
           verdicts.push(rejection(folded, region.id, construction, reason))
           continue

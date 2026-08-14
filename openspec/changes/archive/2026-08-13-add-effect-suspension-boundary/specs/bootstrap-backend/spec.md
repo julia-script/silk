@@ -6,6 +6,10 @@ Native LLVM and direct WebAssembly SHALL realize target-neutral suspension as pr
 execution boundaries whose machine-stack usage is bounded by a constant independent of the number
 of active suspended logical invocations. A suspended child SHALL complete or suspend through the
 private runner, then resume its parent with the exact typed outcome and live continuation state.
+An explicit suspension origin SHALL return transfer to the private boundary; an ordinary
+suspendable runner SHALL be able to complete synchronously or relay transfer. Relaying callers
+SHALL prepare their unpublished continuation state without recursively starting the deferred child,
+and the driver SHALL begin that child only after the complete continuation chain is published.
 Neither backend MAY depend on LLVM `musttail`, WebAssembly tail-call instructions, host exception
 unwinding, a JavaScript promise, or recursive host calls to provide this guarantee.
 
@@ -41,4 +45,3 @@ synchronous entry and Effect-call artifact shape SHALL remain unchanged.
 
 - **WHEN** the same closed synchronous Effect program is compiled to direct WebAssembly
 - **THEN** structural and linkage inspection finds no suspension table, driver, continuation allocation path, or pending branch
-

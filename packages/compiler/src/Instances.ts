@@ -109,6 +109,10 @@ export interface Discovery {
   readonly callables: ReadonlyArray<CallableInstance>
   readonly calls: ReadonlyArray<CallInstance>
   readonly intrinsics: ReadonlyArray<IntrinsicCall>
+  /** Exact concrete function executions that can suspend, excluding lazy result runners. */
+  readonly suspendableExecutions: ReadonlyArray<InstanceKey>
+  readonly suspendable: ReadonlyArray<InstanceKey>
+  readonly suspendableEffects: ReadonlyArray<string>
   readonly violations: ReadonlyArray<PolymorphicRecursion>
 }
 
@@ -253,6 +257,9 @@ export const invalid = (rootModule: string): Discovery =>
     callables: Object.freeze([]),
     calls: Object.freeze([]),
     intrinsics: Object.freeze([]),
+    suspendableExecutions: Object.freeze([]),
+    suspendable: Object.freeze([]),
+    suspendableEffects: Object.freeze([]),
     violations: Object.freeze([]),
   })
 
@@ -325,7 +332,7 @@ const keyOf = (
 export const keyText = (key: InstanceKey): string =>
   `${key.declaration.module}\u0000${key.declaration.name}\u0000${key.typeArguments
     .map(Type.genericArgumentKey)
-    .join('\u0000')}`
+    .join('\u0000')}\u0002${key.contractRow.join('\u0000')}`
 
 export const effectIdentity = (owner: InstanceKey, site: Hir.EffectSiteId): string =>
   `${keyText(owner)}\u0004${site.function.sourceId}:${site.function.ordinal}:${site.span.start}:${site.span.end}`
@@ -821,6 +828,7 @@ interface EffectOriginContext {
   readonly owner: InstanceKey
   readonly substitution: Type.Substitution
   readonly results: ReadonlyMap<string, Elaboration.Result>
+  readonly index: DeclarationIndex.Index
   readonly resolving: ReadonlySet<string>
 }
 
@@ -874,6 +882,7 @@ const resultEffectIdentity = (
   fn: Hir.HirFunction,
   owner: InstanceKey,
   results: ReadonlyMap<string, Elaboration.Result>,
+  index: DeclarationIndex.Index,
   resolving: ReadonlySet<string> = new Set(),
 ): string | undefined => {
   const substitution = instanceSubstitution(fn, owner)
@@ -891,6 +900,7 @@ const resultEffectIdentity = (
     owner,
     substitution,
     results,
+    index,
     resolving: new Set(resolving).add(identity),
   })
 }
@@ -916,19 +926,61 @@ const effectOriginOf = (
     })
     return identities.length !== 0 && new Set(identities).size === 1 ? identities.at(0) : undefined
   }
+  if (expression._tag === 'ServiceEffectConstruct') {
+    const service = Type.substitute(expression.service, context.substitution)
+    const selected = requirementBindings(context.fn).find((binding) => {
+      const capability = Type.substitute(binding.provider.capability, context.substitution)
+      return (
+        Type.isNominal(capability) &&
+        Type.equals(capability, service) &&
+        binding.provider.role === expression.role &&
+        (expression.access === 'Shared' || binding.provider.access === 'Exclusive')
+      )
+    })
+    const witness =
+      selected === undefined
+        ? undefined
+        : requirementBindingWitness(selected, context.substitution, context.index)
+    const operation =
+      witness?._tag === 'SourceConformanceWitness'
+        ? DeclarationIndex.witnessOperation(witness, expression.operation)
+        : undefined
+    const target = operation === undefined ? undefined : targetFunction(context.results, operation)
+    const typeArguments = expression.typeArguments.map((argument) =>
+      Type.substituteGenericArgument(argument, context.substitution),
+    )
+    const targetKey =
+      operation === undefined || target === undefined
+        ? undefined
+        : keyOf(
+            operation,
+            target.contract,
+            target.declaration.typeParameters.map((parameter) => parameter.type),
+            typeArguments,
+          )
+    return targetKey === undefined || target === undefined
+      ? undefined
+      : resultEffectIdentity(target, targetKey, context.results, context.index, context.resolving)
+  }
   if (expression._tag === 'CallableApply') {
     const targetKey = targetKeyOfCallableApply(expression, context)
     if (targetKey === undefined) return undefined
     const target = targetFunction(context.results, targetKey.declaration)
     if (target === undefined) return undefined
-    return resultEffectIdentity(target, targetKey, context.results, context.resolving)
+    return resultEffectIdentity(
+      target,
+      targetKey,
+      context.results,
+      context.index,
+      context.resolving,
+    )
   }
   if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return undefined
   const targetKey = targetKeyOfCall(expression, context)
   const target =
     targetKey === undefined ? undefined : targetFunction(context.results, expression.target)
   if (targetKey === undefined || target === undefined) return undefined
-  return resultEffectIdentity(target, targetKey, context.results, context.resolving)
+  return resultEffectIdentity(target, targetKey, context.results, context.index, context.resolving)
 }
 
 const effectSuccesses = (
@@ -936,12 +988,14 @@ const effectSuccesses = (
   owner: InstanceKey,
   substitution: Type.Substitution,
   results: ReadonlyMap<string, Elaboration.Result>,
+  index: DeclarationIndex.Index,
 ): NonNullable<Instance['effectSuccesses']> => {
   const context: EffectOriginContext = {
     fn,
     owner,
     substitution,
     results,
+    index,
     resolving: new Set(),
   }
   return Object.freeze(
@@ -965,12 +1019,14 @@ const directCallInstances = (
   owner: InstanceKey,
   substitution: Type.Substitution,
   results: ReadonlyMap<string, Elaboration.Result>,
+  index: DeclarationIndex.Index,
 ): ReadonlyArray<CallInstance> => {
   const context: EffectOriginContext = {
     fn,
     owner,
     substitution,
     results,
+    index,
     resolving: new Set(),
   }
   return fn.statements
@@ -982,7 +1038,7 @@ const directCallInstances = (
         if (target === undefined) return []
         const targetFn = targetFunction(results, target.declaration)
         if (targetFn === undefined) return []
-        const resultEffect = resultEffectIdentity(targetFn, target, results)
+        const resultEffect = resultEffectIdentity(targetFn, target, results, index)
         return [
           Object.freeze({
             _tag: 'CallInstance',
@@ -1001,7 +1057,7 @@ const directCallInstances = (
       const target = targetKeyOfCall(expression, context)
       const targetFn = target === undefined ? undefined : targetFunction(results, expression.target)
       if (target === undefined || targetFn === undefined) return []
-      const resultEffect = resultEffectIdentity(targetFn, target, results)
+      const resultEffect = resultEffectIdentity(targetFn, target, results, index)
       return [
         Object.freeze({
           _tag: 'CallInstance',
@@ -1220,6 +1276,304 @@ const functionByKey = (
         fn.declaration.canonical.id.name === key.declaration.name,
     )
 
+const compareInstanceKeys = (left: InstanceKey, right: InstanceKey): number => {
+  const leftText = keyText(left)
+  const rightText = keyText(right)
+  return leftText < rightText ? -1 : leftText > rightText ? 1 : 0
+}
+
+const instanceNode = (key: InstanceKey): string => `instance\u0000${keyText(key)}`
+const effectNode = (identity: string): string => `effect\u0000${identity}`
+
+interface SuspensionGraph {
+  readonly roots: ReadonlySet<string>
+  readonly dependencies: ReadonlyMap<string, ReadonlySet<string>>
+  readonly effectIdentities: ReadonlySet<string>
+}
+
+const suspensionGraph = (
+  instances: ReadonlyArray<Instance>,
+  results: ReadonlyMap<string, Elaboration.Result>,
+  index: DeclarationIndex.Index,
+): SuspensionGraph => {
+  const roots = new Set<string>()
+  const dependencies = new Map<string, Set<string>>()
+  const effectIdentities = new Set<string>()
+  const addDependency = (owner: string, target: string): void => {
+    const targets = dependencies.get(owner) ?? new Set<string>()
+    targets.add(target)
+    dependencies.set(owner, targets)
+  }
+
+  for (const instance of instances) {
+    const context: EffectOriginContext = {
+      fn: instance.function,
+      owner: instance.key,
+      substitution: instance.substitution,
+      results,
+      index,
+      resolving: new Set(),
+    }
+    const bindings = callableBindings(instance.function)
+
+    const effectOrigins = (expression: Hir.Expression): ReadonlyArray<string> => {
+      if (expression._tag === 'EffectBindRequirement') return effectOrigins(expression.protected)
+      if (expression._tag === 'BindingReference') {
+        const initializer = bindings.get(expression.binding.ordinal)
+        return initializer === undefined ? [] : effectOrigins(initializer)
+      }
+      if (expression._tag === 'Move') return effectOrigins(expression.subject)
+      if (expression._tag === 'UnionConvert') return effectOrigins(expression.source)
+      if (expression._tag === 'Match') {
+        return Object.freeze([
+          ...new Set(
+            expression.arms.flatMap((arm) => (arm.reachable ? effectOrigins(arm.result) : [])),
+          ),
+        ])
+      }
+      const identity = effectOriginOf(expression, context)
+      return identity === undefined ? [] : Object.freeze([identity])
+    }
+
+    const executionTargets = (expression: Hir.Expression): ReadonlyArray<string> => {
+      if (expression._tag === 'EffectBindRequirement') return executionTargets(expression.protected)
+      if (expression._tag === 'EffectResult') return executionTargets(expression.protected)
+      if (expression._tag === 'BindingReference') {
+        const initializer = bindings.get(expression.binding.ordinal)
+        return initializer === undefined ? [] : executionTargets(initializer)
+      }
+      if (expression._tag === 'Move') return executionTargets(expression.subject)
+      if (expression._tag === 'UnionConvert') return executionTargets(expression.source)
+      if (expression._tag === 'Match') {
+        return Object.freeze([
+          ...new Set(
+            expression.arms.flatMap((arm) => (arm.reachable ? executionTargets(arm.result) : [])),
+          ),
+        ])
+      }
+      if (expression._tag === 'EffectConstruct') {
+        const target = targetKeyOfCall(expression, context)
+        const targetFn =
+          target === undefined ? undefined : targetFunction(results, target.declaration)
+        const identity =
+          target === undefined || targetFn === undefined
+            ? undefined
+            : resultEffectIdentity(targetFn, target, results, index)
+        return identity !== undefined
+          ? Object.freeze([effectNode(identity)])
+          : target === undefined
+            ? []
+            : Object.freeze([instanceNode(target)])
+      }
+      if (expression._tag === 'ServiceEffectConstruct') {
+        const service = Type.substitute(expression.service, instance.substitution)
+        const selected = requirementBindings(instance.function).find((binding) => {
+          const capability = Type.substitute(binding.provider.capability, instance.substitution)
+          return (
+            Type.isNominal(capability) &&
+            Type.equals(capability, service) &&
+            binding.provider.role === expression.role &&
+            (expression.access === 'Shared' || binding.provider.access === 'Exclusive')
+          )
+        })
+        const witness =
+          selected === undefined
+            ? undefined
+            : requirementBindingWitness(selected, instance.substitution, index)
+        const operation =
+          witness?._tag !== 'SourceConformanceWitness'
+            ? undefined
+            : DeclarationIndex.witnessOperation(witness, expression.operation)
+        const target = operation === undefined ? undefined : targetFunction(results, operation)
+        const typeArguments = expression.typeArguments.map((argument) =>
+          Type.substituteGenericArgument(argument, instance.substitution),
+        )
+        const targetKey =
+          operation === undefined || target === undefined
+            ? undefined
+            : keyOf(
+                operation,
+                target.contract,
+                target.declaration.typeParameters.map((parameter) => parameter.type),
+                typeArguments,
+              )
+        const identity =
+          targetKey === undefined || target === undefined
+            ? undefined
+            : resultEffectIdentity(target, targetKey, results, index)
+        return identity !== undefined
+          ? Object.freeze([effectNode(identity)])
+          : targetKey === undefined
+            ? []
+            : Object.freeze([instanceNode(targetKey)])
+      }
+      return Object.freeze(effectOrigins(expression).map(effectNode))
+    }
+
+    const isSuspensionSubject = (expression: Hir.Expression): boolean => {
+      if (expression._tag === 'BuiltinCall') return expression.operation === 'EffectSuspend'
+      if (expression._tag === 'BindingReference') {
+        const initializer = bindings.get(expression.binding.ordinal)
+        return initializer !== undefined && isSuspensionSubject(initializer)
+      }
+      if (expression._tag === 'Move') return isSuspensionSubject(expression.subject)
+      if (expression._tag === 'UnionConvert') return isSuspensionSubject(expression.source)
+      if (expression._tag === 'EffectBindRequirement')
+        return isSuspensionSubject(expression.protected)
+      return false
+    }
+
+    const scanExpression = (expression: Hir.Expression, execution: string): void => {
+      if (expression._tag === 'EffectBlock') {
+        const identity = effectIdentity(instance.key, expression.site)
+        effectIdentities.add(identity)
+        scanStatements(expression.statements, effectNode(identity))
+        return
+      }
+      if (expression._tag === 'Call') {
+        const target = targetKeyOfCall(expression, context)
+        if (target !== undefined) addDependency(execution, instanceNode(target))
+      } else if (expression._tag === 'EffectConstruct') {
+        const target = targetKeyOfCall(expression, context)
+        if (target !== undefined) addDependency(execution, instanceNode(target))
+      } else if (expression._tag === 'ServiceEffectConstruct') {
+        for (const target of executionTargets(expression)) addDependency(execution, target)
+      } else if (expression._tag === 'CallableApply') {
+        const target = targetKeyOfCallableApply(expression, context)
+        if (target !== undefined) addDependency(execution, instanceNode(target))
+      } else if (expression._tag === 'Run') {
+        if (isSuspensionSubject(expression.subject)) {
+          roots.add(execution)
+        } else {
+          for (const target of executionTargets(expression.subject))
+            addDependency(execution, target)
+        }
+      }
+      for (const child of Hir.expressionChildren(expression)) scanExpression(child, execution)
+    }
+    const scanStatements = (statements: ReadonlyArray<Hir.Statement>, execution: string): void => {
+      for (const statement of statements) {
+        for (const expression of Hir.statementExpressions(statement))
+          scanExpression(expression, execution)
+      }
+    }
+    scanStatements(instance.function.statements, instanceNode(instance.key))
+  }
+
+  return Object.freeze({ roots, dependencies, effectIdentities })
+}
+
+const suspendableNodes = (graph: SuspensionGraph): ReadonlySet<string> => {
+  const suspendable = new Set(graph.roots)
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const [owner, targets] of graph.dependencies) {
+      if (suspendable.has(owner) || ![...targets].some((target) => suspendable.has(target)))
+        continue
+      suspendable.add(owner)
+      changed = true
+    }
+  }
+  return suspendable
+}
+
+/** Reports whether one exact concrete instance can reach the suspension intrinsic. */
+export const isSuspendable = (self: Discovery, key: InstanceKey): boolean =>
+  self.suspendable.some((candidate) => keyText(candidate) === keyText(key))
+
+/** Reports whether executing one exact concrete function can suspend, excluding its lazy result. */
+export const isExecutionSuspendable = (self: Discovery, key: InstanceKey): boolean =>
+  self.suspendableExecutions.some((candidate) => keyText(candidate) === keyText(key))
+
+/** Reports whether one exact hidden Effect runner can reach the suspension intrinsic. */
+export const isEffectSuspendable = (self: Discovery, identity: string): boolean =>
+  self.suspendableEffects.includes(identity)
+
+const sameInstanceKey = (left: InstanceKey, right: InstanceKey): boolean =>
+  keyText(left) === keyText(right)
+
+const sameDeclaration = (
+  left: DeclarationIndex.CanonicalId,
+  right: DeclarationIndex.CanonicalId,
+): boolean => left.module === right.module && left.name === right.name
+
+/**
+ * Rejects a concrete allocator selected for a suspendable Effect when its allocation operation can
+ * itself suspend. Such a provider would need continuation storage in order to allocate that same
+ * continuation storage, so the execution boundary could never bootstrap.
+ */
+export const continuationAllocatorViolations = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+  results: ReadonlyMap<string, Elaboration.Result>,
+): ReadonlyArray<Diagnostic.Diagnostic> => {
+  const diagnostics = new Map<string, Diagnostic.Diagnostic>()
+  for (const instance of self.instances) {
+    const context: EffectOriginContext = {
+      fn: instance.function,
+      owner: instance.key,
+      substitution: instance.substitution,
+      results,
+      index,
+      resolving: new Set(),
+    }
+    for (const binding of requirementBindings(instance.function)) {
+      const capability = Type.substitute(binding.provider.capability, instance.substitution)
+      const provider = Type.substitute(binding.provider.providerType, instance.substitution)
+      if (
+        !Type.isNominal(capability) ||
+        !Type.equals(capability, Type.allocator) ||
+        !Type.isNominal(provider)
+      )
+        continue
+      const protectedIdentity = effectOriginOf(binding.protected, context)
+      if (protectedIdentity === undefined || !isEffectSuspendable(self, protectedIdentity)) continue
+      const witness = requirementBindingWitness(binding, instance.substitution, index)
+      if (witness?._tag !== 'SourceConformanceWitness') continue
+      const implementation = DeclarationIndex.witnessOperation(witness, 'allocate')
+      if (implementation === undefined) continue
+      const implementationInstances = self.instances.filter((candidate) =>
+        sameDeclaration(candidate.key.declaration, implementation),
+      )
+      const implementationSuspends = implementationInstances.some(
+        (candidate) =>
+          isSuspendable(self, candidate.key) ||
+          (candidate.resultEffect !== undefined &&
+            isEffectSuspendable(self, candidate.resultEffect)),
+      )
+      if (!implementationSuspends) continue
+
+      const provisionSpans = self.calls
+        .filter((call) => sameInstanceKey(call.target, instance.key))
+        .map((call) => call.span)
+      const spans = provisionSpans.length === 0 ? [binding.provider.span] : provisionSpans
+      const providerText = Type.encode(provider)
+      const implementationText = `${implementation.module}.${implementation.name}`
+      for (const span of spans) {
+        const key = `${span.sourceId}\u0000${span.start}\u0000${span.end}`
+        if (diagnostics.has(key)) continue
+        diagnostics.set(
+          key,
+          Diagnostic.suspendingContinuationAllocator(providerText, implementationText, span),
+        )
+      }
+    }
+  }
+  return Object.freeze(
+    [...diagnostics.values()].sort(
+      (left, right) =>
+        (left.span.sourceId < right.span.sourceId
+          ? -1
+          : left.span.sourceId > right.span.sourceId
+            ? 1
+            : 0) ||
+        left.span.start - right.span.start ||
+        left.span.end - right.span.end,
+    ),
+  )
+}
+
 /**
  * Discovers the reachable instances from the root module's entry. The worklist records an
  * instance before following its calls, so directly and mutually recursive programs terminate.
@@ -1244,6 +1598,9 @@ export const discover = (
       callables: Object.freeze([]),
       calls: Object.freeze([]),
       intrinsics: Object.freeze([]),
+      suspendableExecutions: Object.freeze([]),
+      suspendable: Object.freeze([]),
+      suspendableEffects: Object.freeze([]),
       violations: Object.freeze([]),
     })
   }
@@ -1299,7 +1656,7 @@ export const discover = (
     )
     if (substitution === undefined) continue
     if (!recorded.has(keyText(key))) {
-      const resultEffect = resultEffectIdentity(fn, key, results)
+      const resultEffect = resultEffectIdentity(fn, key, results, index)
       recorded.set(
         keyText(key),
         Object.freeze({
@@ -1307,7 +1664,7 @@ export const discover = (
           key,
           function: fn,
           substitution,
-          effectSuccesses: effectSuccesses(fn, key, substitution, results),
+          effectSuccesses: effectSuccesses(fn, key, substitution, results, index),
           ...(resultEffect === undefined ? {} : { resultEffect }),
         }),
       )
@@ -1335,7 +1692,7 @@ export const discover = (
       )
       .flatMap(hookCalls)
     const calls = new Map<string, CallTarget>()
-    const directCalls = directCallInstances(fn, key, substitution, results)
+    const directCalls = directCallInstances(fn, key, substitution, results, index)
     const callableTargets = callableCallTargets(fn, results)
     for (const call of directCalls) {
       recordedCalls.set(
@@ -1412,6 +1769,8 @@ export const discover = (
   }
 
   const instances = Object.freeze([...recorded.values()])
+  const graph = suspensionGraph(instances, results, index)
+  const suspendable = suspendableNodes(graph)
   return Object.freeze({
     _tag: 'InstanceDiscovery',
     rootModule,
@@ -1420,6 +1779,29 @@ export const discover = (
     callables: Object.freeze([...recordedCallables.values()]),
     calls: Object.freeze([...recordedCalls.values()]),
     intrinsics: reachableIntrinsics(instances),
+    suspendableExecutions: Object.freeze(
+      instances
+        .filter((instance) => suspendable.has(instanceNode(instance.key)))
+        .map((instance) => instance.key)
+        .sort(compareInstanceKeys),
+    ),
+    suspendable: Object.freeze(
+      instances
+        .flatMap((instance) => {
+          const runnerSuspendable =
+            instance.resultEffect !== undefined &&
+            suspendable.has(effectNode(instance.resultEffect))
+          return suspendable.has(instanceNode(instance.key)) || runnerSuspendable
+            ? [instance.key]
+            : []
+        })
+        .sort(compareInstanceKeys),
+    ),
+    suspendableEffects: Object.freeze(
+      [...graph.effectIdentities]
+        .filter((identity) => suspendable.has(effectNode(identity)))
+        .sort(),
+    ),
     violations: Object.freeze(violations),
   })
 }

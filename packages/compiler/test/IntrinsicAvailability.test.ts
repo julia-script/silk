@@ -3,6 +3,8 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 
 const encoder = new TextEncoder()
 const source = `fn nativeWrapper() -> i32 { return Intrinsic.i32Add(20, 22) }
@@ -55,6 +57,42 @@ pub fn main() -> i32 { return i32Add(20, 22) }`)
         (call) => Intrinsic.operationText(call.operation) === 'Intrinsic.i32Add',
       ),
     )
+  }),
+)
+
+it.effect('does not grant suspension privilege to a user-defined Effect.suspend', () =>
+  Effect.gen(function* () {
+    const root = `import user_effect as Effect
+pub fn main() -> i32 {
+  return run Effect.suspend(effect { return 42 })
+}`
+    const userEffect = `pub effect fn suspend(deferred: once Effect<i32>) -> i32 {
+  return run deferred
+}`
+    const self = yield* Analysis.makeRealized({
+      root: SourceFile.make('availability/user-main', encoder.encode(root)),
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(new Map([['user_effect', encoder.encode(userEffect)] as const])),
+      ),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.isTrue(
+      self.instances.calls.some(
+        (call) =>
+          call.target.declaration.module === 'user_effect' &&
+          call.target.declaration.name === 'suspend',
+      ),
+    )
+    assert.isFalse(
+      self.instances.intrinsics.some(
+        (call) => Intrinsic.operationText(call.operation) === 'Intrinsic.suspendEffect',
+      ),
+    )
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
   }),
 )
 

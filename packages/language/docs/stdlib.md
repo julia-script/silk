@@ -24,7 +24,7 @@ The library has 38 modules.
 | [`silk/char`](#silk-char) | `char` | 6 |
 | [`silk/child_process`](#silk-child-process) | `ChildProcess` | 43 |
 | [`silk/core`](#silk-core) | `Allocator` | 17 |
-| [`silk/effects`](#silk-effects) | `Effect` | 21 |
+| [`silk/effects`](#silk-effects) | `Effect` | 22 |
 | [`silk/f32`](#silk-f32) | `f32` | 51 |
 | [`silk/f64`](#silk-f64) | `f64` | 51 |
 | [`silk/filesystem`](#silk-filesystem) | `FileSystem` | 85 |
@@ -878,6 +878,14 @@ returns, which is why the provided Effect is reified into Result data before it 
 typed failure then reaches this body as data rather than as a propagation that would leave
 the frame — and the acquired provider — behind. The failure is re-raised only after the
 provider is gone, so a recovering caller never observes it.
+
+### `suspend`
+
+```silk
+pub effect fn suspend<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> A ! OutOfMemory | E ? &mut Allocator | R
+```
+
+Defers one Effect through the compiler-owned stack-safe execution boundary.
 
 
 ## silk/f32

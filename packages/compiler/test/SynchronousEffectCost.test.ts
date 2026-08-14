@@ -65,6 +65,12 @@ interface CostCase {
     readonly directStaticRuns: number
   }
   readonly runners: ReadonlyArray<RunnerClassification>
+  readonly suspendability: {
+    readonly instances: ReadonlyArray<string>
+    readonly executions: ReadonlyArray<string>
+    readonly effects: ReadonlyArray<string>
+  }
+  readonly continuationDescriptors: number
   readonly pipeTokens: { readonly hir: number; readonly mir: number }
   readonly mirOperationTags: ReadonlyArray<TagCount>
   readonly suspensionOperationTags: ReadonlyArray<TagCount>
@@ -91,7 +97,7 @@ interface CostCase {
 }
 
 interface CostReport {
-  readonly schema: 2
+  readonly schema: 3
   readonly clang: string
   readonly node: string
   readonly cases: ReadonlyArray<CostCase>
@@ -109,7 +115,7 @@ it('captures synchronous Effect costs deterministically in fresh processes', () 
   assert.strictEqual(first.stdout, second.stdout)
 
   const report = JSON.parse(first.stdout) as CostReport
-  assert.strictEqual(report.schema, 2)
+  assert.strictEqual(report.schema, 3)
   assert.match(report.clang, /clang version/)
   assert.strictEqual(report.cases.length, 18)
   assert.deepEqual(
@@ -138,6 +144,10 @@ it('captures synchronous Effect costs deterministically in fresh processes', () 
     // encoder spelling change. The fixture's centralized reserved vocabulary classifies new tags.
     assert.isAbove(sample.mirOperationTags.length, 0, sample.id)
     assert.deepEqual(sample.suspensionOperationTags, [], sample.id)
+    assert.deepEqual(sample.suspendability.instances, [], sample.id)
+    assert.deepEqual(sample.suspendability.executions, [], sample.id)
+    assert.deepEqual(sample.suspendability.effects, [], sample.id)
+    assert.strictEqual(sample.continuationDescriptors, 0, sample.id)
     // These values come from backend symbol tables, native-runtime requirements, LLVM
     // declarations, and Wasm imports. An unreferenced but linked suspension component is covered.
     assert.deepEqual(sample.suspensionLinkage, [], sample.id)

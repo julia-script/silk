@@ -656,6 +656,13 @@ try {
       const loweredWasm = Analysis.loweredMir(wasm)
       const runners = runnerClassifications(loweredWasm)
       const mirOperationTags = countTags(loweredWasm.functions.flatMap(Mir.operations))
+      const continuationDescriptors = loweredWasm.functions.flatMap((fn) =>
+        (fn.suspension?.regions ?? []).flatMap((region) =>
+          region._tag === 'RunSuspendableEffectRegion' && region.relay.continuation !== undefined
+            ? [region.relay.continuation]
+            : [],
+        ),
+      ).length
       const applicability = directStaticCases.has(sample.id)
         ? 'DirectStaticRun'
         : constructorOnlyCases.has(sample.id)
@@ -693,6 +700,12 @@ try {
             ).length,
           }),
           runners,
+          suspendability: Object.freeze({
+            instances: Analysis.suspendableInstancesOf(wasm).map(identity),
+            executions: Analysis.suspendableExecutionsOf(wasm).map(identity),
+            effects: Analysis.suspendableEffectsOf(wasm),
+          }),
+          continuationDescriptors,
           pipeTokens: Object.freeze({
             hir: occurrences(hir, /\|>/g),
             mir: occurrences(mir, /\|>/g),
@@ -753,7 +766,7 @@ try {
   if (version.status !== 0) throw new Error(`${clang} --version failed: ${version.stderr}`)
   process.stdout.write(
     JSON.stringify({
-      schema: 2,
+      schema: 3,
       clang: version.stdout.split('\n').at(0),
       node: process.version,
       cases,

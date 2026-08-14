@@ -157,6 +157,10 @@ export type Instruction =
       readonly noUnsignedWrap: boolean
     })
   | (ResultInstruction & {
+      readonly _tag: 'Freeze'
+      readonly operand: Operand
+    })
+  | (ResultInstruction & {
       readonly _tag: 'ExtractValue'
       readonly aggregate: Operand
       readonly indices: ReadonlyArray<number>

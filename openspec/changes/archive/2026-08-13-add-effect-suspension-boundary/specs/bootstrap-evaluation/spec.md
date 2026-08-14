@@ -5,14 +5,15 @@
 Evaluation SHALL execute explicit suspension by retaining the parent logical activation in its heap
 activation machine, evaluating the deferred child, and resuming the parent with the child's exact
 typed outcome. It SHALL model continuation allocation, initialization, ownership transfer, and
-release through the selected allocator with the same deterministic allocation ordinals and events
-as the native and Wasm engines. Evaluation MUST NOT recurse on the JavaScript stack or expose a
-pending value as a source result.
+release through the selected allocator with the same logical boundary identities, request order,
+success or failure ordinals, ownership transfers, and release count as the native and Wasm engines.
+Each engine MAY use a different validated physical frame size, alignment, and private header.
+Evaluation MUST NOT recurse on the JavaScript stack or expose a pending value as a source result.
 
 #### Scenario: Complete deep suspension under raised limits
 
 - **WHEN** a terminating suspended Effect recursion is evaluated with step and call-depth limits above its logical work
-- **THEN** evaluation completes with the same result, allocation events, and cleanup trace as native and Wasm without depending on the JavaScript call stack
+- **THEN** evaluation completes with the same result, logical allocation order and outcomes, ownership and release counts, and cleanup trace as native and Wasm without requiring identical physical frame bytes or depending on the JavaScript call stack
 
 #### Scenario: Sweep continuation allocation failure
 
@@ -51,4 +52,3 @@ wall-clock time.
 
 - **WHEN** an equivalent program is evaluated repeatedly under equal limits
 - **THEN** its blocked reason, active frames, source provenance, and trace are identical
-

@@ -192,6 +192,8 @@ export const invalidStringViewTypeCode = 'SEM0094' as const
 export const invalidFloatLiteralCode = 'SEM0095' as const
 /** Stable code for an effect site or a move inside the conditional right operand of `&&` or `||`. */
 export const impureShortCircuitOperandCode = 'SEM0096' as const
+/** Stable code for selecting a suspending provider to allocate continuation storage. */
+export const suspendingContinuationAllocatorCode = 'SEM0097' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -322,6 +324,7 @@ export type Code =
   | typeof invalidStringViewTypeCode
   | typeof invalidFloatLiteralCode
   | typeof impureShortCircuitOperandCode
+  | typeof suspendingContinuationAllocatorCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -415,6 +418,11 @@ export type Reason =
       readonly _tag: 'ImpureShortCircuitOperand'
       readonly operator: string
       readonly detail: string
+    }
+  | {
+      readonly _tag: 'SuspendingContinuationAllocator'
+      readonly provider: string
+      readonly implementation: string
     }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
@@ -727,6 +735,7 @@ export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagno
       diagnostic.code === genericParameterKindMismatchCode ||
       diagnostic.code === contractRowInferenceCode ||
       diagnostic.code === invalidEffectProvisionCode ||
+      diagnostic.code === suspendingContinuationAllocatorCode ||
       diagnostic.code === polymorphicRecursionCode,
   )
 
@@ -1578,6 +1587,26 @@ export const invalidEffectProvision = (detail: string, span: SourceSpan.SourceSp
     severity: 'error',
     message: `Invalid Effect provider: ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidEffectProvision', detail }),
+    span,
+  })
+
+/** Rejects an allocator whose selected allocation implementation can itself suspend. */
+export const suspendingContinuationAllocator = (
+  provider: string,
+  implementation: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: suspendingContinuationAllocatorCode,
+    severity: 'error',
+    message: `Allocator ${provider} cannot provide continuation storage because ${implementation} can suspend`,
+    reason: Object.freeze({
+      _tag: 'SuspendingContinuationAllocator',
+      provider,
+      implementation,
+    }),
     span,
   })
 

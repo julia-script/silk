@@ -974,6 +974,44 @@ export const extractValue = Effect.fn('FunctionBody.extractValue')(function* (
 })
 
 /**
+ * Replaces an undefined or poison operand with an arbitrary stable value of the same type.
+ *
+ * This is useful at observation boundaries that must safely materialize every lane of a value
+ * whose inactive representation lanes are intentionally unspecified.
+ *
+ * @category instructions
+ * @since 0.0.0
+ */
+export const freeze = Effect.fn('FunctionBody.freeze')(function* (
+  self: FunctionBody,
+  operand: Value.Input,
+  name?: ByteString.ByteString | Uint8Array | string,
+): Effect.fn.Return<Value.Value, LlvmError> {
+  return yield* FunctionBodyState.mutateModule(self, 'FunctionBody.freeze', (draft, module) =>
+    Result.gen(function* () {
+      const resolved = yield* FunctionBodyState.resolveOperand(
+        draft,
+        module,
+        operand,
+        'FunctionBody.freeze',
+      )
+      return (yield* FunctionBodyState.appendResult(
+        draft,
+        resolved.type,
+        name,
+        (result, finalName) =>
+          Object.freeze({
+            _tag: 'Freeze',
+            operand: resolved.operand,
+            result,
+            name: finalName,
+          }),
+      )).value
+    }),
+  )
+})
+
+/**
  * Inserts a same-typed value along a validated aggregate path.
  *
  * @category instructions

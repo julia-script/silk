@@ -2,6 +2,7 @@ import * as Effect from 'effect/Effect'
 import { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as Backend from './Backend.js'
 import * as BackendRegistry from './BackendRegistry.js'
+import * as ContinuationLayout from './ContinuationLayout.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -17,8 +18,11 @@ import * as ModuleSurface from './ModuleSurface.js'
 import * as NameResolution from './NameResolution.js'
 import * as Ownership from './Ownership.js'
 import * as PhaseReport from './PhaseReport.js'
+import * as ProvisionalMir from './ProvisionalMir.js'
 import * as SemanticInvalidation from './SemanticInvalidation.js'
 import type * as SourceResolver from './SourceResolver.js'
+import * as SuspensionMir from './SuspensionMir.js'
+import * as SuspensionOwnership from './SuspensionOwnership.js'
 import * as Target from './Target.js'
 
 /** Optional environment-specific observations attached to compiler phase reports. */
@@ -28,8 +32,31 @@ export interface Options {
   readonly normalizeMir?: boolean
 }
 
-const normalizeMir = (program: Mir.Module, options: Options): Mir.Module =>
-  options.normalizeMir === false ? program : MirNormalization.normalize(program)
+const normalizeMir = (
+  program: Mir.Module,
+  provisional: ProvisionalMir.Module,
+  options: Options,
+): Mir.Module =>
+  options.normalizeMir === false ? program : MirNormalization.normalize(program, provisional)
+
+const finalizeMir = (
+  program: Mir.Module,
+  provisional: ProvisionalMir.Module,
+  index: DeclarationIndex.Index,
+  options: Options,
+): Mir.Module => {
+  const normalized = normalizeMir(program, provisional, options)
+  return options.normalizeMir === false
+    ? normalized
+    : ContinuationLayout.apply(
+        SuspensionMir.finalize(
+          normalized,
+          provisional,
+          SuspensionOwnership.plan(normalized, provisional, index),
+          index,
+        ),
+      )
+}
 
 /** An available target-owned artifact or the reason realization could not construct it. */
 export type Targeted<A> =
@@ -482,6 +509,7 @@ export const realize = (
     Instances.violationDiagnostics(instances),
     Instances.copyDropViolations(instances, self.index),
     Instances.requirementBindingViolations(instances, self.index),
+    Instances.continuationAllocatorViolations(instances, self.index, self.results),
   )
   const specializationError =
     specializationInvalid || Diagnostic.hasGenericSpecializationErrors(baseDiagnostics)
@@ -539,8 +567,10 @@ export const realize = (
         'mir-lowering',
         instances.instances.length,
         () =>
-          normalizeMir(
+          finalizeMir(
             Lower.lowerProgram(instances, self.ownership, availableLayout, self.index),
+            ProvisionalMir.build(instances, availableLayout, self.index),
+            self.index,
             options,
           ),
         (value) => value.functions.length,
@@ -588,6 +618,7 @@ export const prepare = (
     Instances.violationDiagnostics(discovery),
     Instances.copyDropViolations(discovery, self.index),
     Instances.requirementBindingViolations(discovery, self.index),
+    Instances.continuationAllocatorViolations(discovery, self.index, self.results),
   )
   if (Diagnostic.hasErrors(diagnostics))
     return Object.freeze({
@@ -671,8 +702,10 @@ export const prepare = (
     'mir-lowering',
     discovery.instances.length,
     () =>
-      normalizeMir(
+      finalizeMir(
         Lower.lowerProgram(discovery, self.ownership, targetAndLayout.layout, self.index),
+        ProvisionalMir.build(discovery, targetAndLayout.layout, self.index),
+        self.index,
         options,
       ),
     (value) => value.functions.length,

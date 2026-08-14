@@ -31,6 +31,7 @@ export const code = Object.freeze({
   storeAtomic: 45,
   compareExchange: 46,
   unary: 56,
+  freeze: 58,
 })
 
 export const binaryOpcode = Object.freeze({
