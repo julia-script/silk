@@ -1,6 +1,7 @@
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../../dist/Analysis.js'
 import * as Hir from '../../dist/Hir.js'
+import * as Instances from '../../dist/Instances.js'
 import * as RepresentationField from '../../dist/RepresentationField.js'
 import * as Type from '../../dist/Type.js'
 
@@ -51,6 +52,39 @@ pub fn main() -> i32 {
   let completed = run deferred.operation
   return decoded + completed
 }`
+const identitySource = `struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
+struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
+pub fn main() -> i32 {
+  let mappers = Mappers { first: i32.add(1), second: i32.add(1) }
+  let deferred = Deferred { first: effect { return 1 }, second: effect { return 1 } }
+  return 0
+}`
+const shiftedIdentitySource = `// Moving source trivia must not rename executable sites.
+
+struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
+struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
+pub fn main() -> i32 {
+  // Same-shaped sites remain distinct while retaining their structural ordinals.
+  let mappers = Mappers { first: i32.add(1), second: i32.add(1) }
+  let deferred = Deferred { first: effect { return 1 }, second: effect { return 1 } }
+  return 0
+}`
+const runtimeIdentitySource = `pub fn main() -> i32 {
+  let plusOne = i32.add(1)
+  let answer = plusOne(41)
+  let pending = effect { return answer }
+  return run pending
+}`
+const shiftedRuntimeIdentitySource = `// Source offsets are diagnostic provenance, not symbols.
+
+pub fn main() -> i32 {
+  // The callable and effect keep the same preorder sites.
+  let plusOne = i32.add(1)
+  let answer = plusOne(41)
+
+  let pending = effect { return answer }
+  return run pending
+}`
 const encoder = new TextEncoder()
 const validModule = 'fixture/representation-determinism'
 const conflictModule = 'fixture/representation-determinism-conflict'
@@ -62,6 +96,27 @@ const conflict = await Effect.runPromise(
 )
 const fences = await Effect.runPromise(
   Analysis.ofSourceRealized('fixture/representation-fences', encoder.encode(fenceSource)),
+)
+const identityModule = 'fixture/representation-identity-stability'
+const identity = await Effect.runPromise(
+  Analysis.ofSource(identityModule, encoder.encode(identitySource)),
+)
+const shiftedIdentity = await Effect.runPromise(
+  Analysis.ofSource(identityModule, encoder.encode(shiftedIdentitySource)),
+)
+const runtimeIdentity = await Effect.runPromise(
+  Analysis.ofSourceRealized(
+    'fixture/representation-runtime-identity',
+    encoder.encode(runtimeIdentitySource),
+    'wasm32-unknown-unknown',
+  ),
+)
+const shiftedRuntimeIdentity = await Effect.runPromise(
+  Analysis.ofSourceRealized(
+    'fixture/representation-runtime-identity',
+    encoder.encode(shiftedRuntimeIdentitySource),
+    'wasm32-unknown-unknown',
+  ),
 )
 const result = Analysis.rootAnalysis(valid)
 const main = result.functions.at(2)
@@ -124,6 +179,50 @@ const encodeField = (resolution) => ({
       }),
 })
 
+const identityFacts = (snapshot) => {
+  const main = Analysis.rootAnalysis(snapshot).functions.find(
+    (fact) => fact.declaration.name._tag === 'Present' && fact.declaration.name.spelling === 'main',
+  )
+  const instances = (main?.statements ?? []).flatMap((statement) =>
+    statement._tag === 'BindStatement' &&
+    statement.binding.inferredType._tag === 'Available' &&
+    Type.isNominal(statement.binding.inferredType.type)
+      ? [statement.binding.inferredType.type]
+      : [],
+  )
+  return instances.flatMap((instance) => {
+    const resolutions = RepresentationField.resolveFields(snapshot.index, [instance])
+    return RepresentationField.plansOf(snapshot.index, instance).map((plan) => {
+      const resolution = RepresentationField.lookup(resolutions, instance, plan.id)
+      return {
+        nominal: Type.key(instance),
+        field: RepresentationField.key(instance, plan.id),
+        argument:
+          resolution?._tag === 'ResolvedRepresentationField'
+            ? Type.genericArgumentKey(resolution.argument)
+            : '',
+      }
+    })
+  })
+}
+
+const runtimeIdentityFacts = (snapshot) => {
+  const discovery = Analysis.instancesOf(snapshot)
+  const layout = Analysis.layoutOf(snapshot)
+  return {
+    callables: discovery.callables.map(Instances.callableIdentity),
+    effects:
+      layout._tag === 'Available'
+        ? layout.value.effectEnvironments.map((environment) =>
+            Instances.effectIdentity(environment.instance, environment.site),
+          )
+        : [],
+    runners: Analysis.loweredMir(snapshot)
+      .functions.map((fn) => fn.id.name)
+      .filter((name) => name.includes('$effect$')),
+  }
+}
+
 process.stdout.write(
   JSON.stringify({
     semantic:
@@ -144,6 +243,14 @@ process.stdout.write(
       })),
       resolved: resolvedFields.resolutions.map(encodeField),
       unavailable: unavailableFields.resolutions.map(encodeField),
+    },
+    identityStability: {
+      baseline: identityFacts(identity),
+      shifted: identityFacts(shiftedIdentity),
+    },
+    runtimeIdentityStability: {
+      baseline: runtimeIdentityFacts(runtimeIdentity),
+      shifted: runtimeIdentityFacts(shiftedRuntimeIdentity),
     },
     diagnostics: Analysis.diagnostics(conflict).map((diagnostic) => ({
       code: diagnostic.code,

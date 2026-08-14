@@ -9,7 +9,7 @@
  * returning nothing, which is what keeps a broken pipeline readable.
  */
 
-import { Mir, Type } from '@silk-effect/compiler'
+import { Mir } from '@silk-effect/compiler'
 import type {
   BootstrapEvaluation,
   Backend,
@@ -21,6 +21,7 @@ import type {
   NameResolution,
   Ownership,
 } from '@silk-effect/compiler'
+import * as Type from '@silk-effect/compiler/Type'
 import type { RowModel, Span } from './row'
 
 const typeText = (type: Type.Type): string =>

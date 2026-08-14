@@ -96,9 +96,10 @@ pub fn main() -> i32 {
       : [],
   )
 
-  assert.strictEqual(identities.length, 2)
-  assert.match(identities.at(0) ?? '', /^representation-inference\/sites:\d+:/)
-  assert.match(identities.at(1) ?? '', /^effect:representation-inference\/sites:\d+:/)
+  assert.deepEqual(identities, [
+    'callable:callable\u0000declaration:representation-inference/sites:main\u0000site:0',
+    'effect:effect\u0000declaration:representation-inference/sites:main\u0000site:1',
+  ])
   assert.deepEqual(result.diagnostics, [])
 })
 

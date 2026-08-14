@@ -56,19 +56,46 @@ export interface BorrowId {
 const borrowText = (borrow: BorrowId): string =>
   `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
 
-/** Hidden nominal identity for one source `effect {}` construction site. */
-export interface EffectSiteId {
-  readonly _tag: 'EffectSiteId'
+interface ExecutableSiteId {
   readonly function: DeclarationIndex.DeclarationId
+  readonly owner?: DeclarationIndex.CanonicalId
+  readonly ordinal: number
   readonly span: SourceSpan.SourceSpan
 }
 
-/** Hidden nominal identity for one automatic callable-section construction site. */
-export interface CallableSiteId {
-  readonly _tag: 'CallableSiteId'
-  readonly function: DeclarationIndex.DeclarationId
-  readonly span: SourceSpan.SourceSpan
+/** Hidden nominal identity for one source `effect {}` construction site. */
+export interface EffectSiteId extends ExecutableSiteId {
+  readonly _tag: 'EffectSiteId'
 }
+
+/** Hidden nominal identity for one automatic callable-section construction site. */
+export interface CallableSiteId extends ExecutableSiteId {
+  readonly _tag: 'CallableSiteId'
+}
+
+/** Returns the path- and span-independent structural identity of one executable site. */
+export const executableSiteKey = (self: EffectSiteId | CallableSiteId): string =>
+  `${self._tag === 'EffectSiteId' ? 'effect' : 'callable'}\u0000${
+    self.owner === undefined
+      ? `recovered:${self.function.ordinal}`
+      : `declaration:${self.owner.module}:${self.owner.name}`
+  }\u0000site:${self.ordinal}`
+
+/** Tests structural executable-site identity without consulting diagnostic provenance. */
+export const sameExecutableSite = (
+  left: EffectSiteId | CallableSiteId,
+  right: EffectSiteId | CallableSiteId,
+): boolean => executableSiteKey(left) === executableSiteKey(right)
+
+/** Orders executable sites by their stable structural identities. */
+export const compareExecutableSites = (
+  left: EffectSiteId | CallableSiteId,
+  right: EffectSiteId | CallableSiteId,
+): number => executableSiteKey(left).localeCompare(executableSiteKey(right))
+
+/** Presents one structural executable-site identity without embedding control delimiters. */
+export const executableSiteLabel = (self: EffectSiteId | CallableSiteId): string =>
+  executableSiteKey(self).replaceAll('\u0000', ':')
 
 export type CallableTarget =
   | {
@@ -1339,7 +1366,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'EffectBlock':
       return [
-        `${indent}effect-block site=fn${expression.site.function.ordinal}@${expression.site.span.start} access=${expression.type.access.toLowerCase()} captures=${expression.captures.map((capture) => `${capture.binding === undefined ? `p${capture.parameter?.ordinal ?? '?'}` : `b${capture.binding.ordinal}`}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}effect-block site=${executableSiteLabel(expression.site)} access=${expression.type.access.toLowerCase()} captures=${expression.captures.map((capture) => `${capture.binding === undefined ? `p${capture.parameter?.ordinal ?? '?'}` : `b${capture.binding.ordinal}`}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         ...expression.statements.map((statement) => encodeStatement(statement, depth + 1)),
       ].join('\n')
     case 'UnionConvert':
@@ -1422,7 +1449,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       } : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'CallableSection':
       return [
-        `${indent}callable-section site=fn${expression.site.function.ordinal}@${expression.site.span.start} mode=${expression.mode.toLowerCase()} omitted=p0 target=${
+        `${indent}callable-section site=${executableSiteLabel(expression.site)} mode=${expression.mode.toLowerCase()} omitted=p0 target=${
           expression.target._tag === 'DeclarationCallableTarget'
             ? `${expression.target.declaration.module}.${expression.target.declaration.name}`
             : `${expression.target.actor}.${expression.target.operation}`

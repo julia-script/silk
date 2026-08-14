@@ -152,7 +152,7 @@ const runnerId = (
   Object.freeze({
     _tag: 'CanonicalDeclarationId',
     module: owner.declaration.module,
-    name: `${owner.declaration.name}$effect$${site.function.ordinal}$${site.span.start}`,
+    name: `${owner.declaration.name}$effect$${site.ordinal}`,
   })
 
 const executionIdentity = (key: ExecutionKey): string => key.identity
@@ -166,7 +166,7 @@ const executionInstance = (key: ExecutionKey): Instances.InstanceKey =>
         typeArguments: key.owner.typeArguments,
         contractRow: Object.freeze([
           ...key.owner.contractRow,
-          `effect-site:${key.site.function.sourceId}:${key.site.function.ordinal}:${key.site.span.start}`,
+          `effect-site:${Hir.executableSiteKey(key.site)}`,
         ]),
       })
 
@@ -438,10 +438,7 @@ const runnerOf = (expression: Hir.Expression, context: BuildContext): Runner => 
       .find(
         (candidate) =>
           candidate._tag === 'EffectBlock' &&
-          candidate.site.function.sourceId === environment.site.function.sourceId &&
-          candidate.site.function.ordinal === environment.site.function.ordinal &&
-          candidate.site.span.start === environment.site.span.start &&
-          candidate.site.span.end === environment.site.span.end,
+          Hir.sameExecutableSite(candidate.site, environment.site),
       )
     if (block?._tag !== 'EffectBlock') return 'Unknown'
     for (const service of block.statements

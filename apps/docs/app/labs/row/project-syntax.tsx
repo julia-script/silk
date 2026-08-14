@@ -8,8 +8,9 @@
  * has to say. It also makes each phase testable without rendering anything.
  */
 
-import { Diagnostic, SyntaxTree, Type } from '@silk-effect/compiler'
+import { Diagnostic, SyntaxTree } from '@silk-effect/compiler'
 import type { Elaboration, Hir, SyntaxFile } from '@silk-effect/compiler'
+import * as Type from '@silk-effect/compiler/Type'
 import type { FlowModel } from './flow-model'
 import type { RowModel, RowTone, Span } from './row'
 

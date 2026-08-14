@@ -1993,7 +1993,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   ? Object.freeze({
                       _tag: 'CanonicalDeclarationId' as const,
                       module: effectType.environment.instance.declaration.module,
-                      name: `${effectType.environment.instance.declaration.name}$effect$${effectType.site.function.ordinal}$${effectType.site.span.start}`,
+                      name: `${effectType.environment.instance.declaration.name}$effect$${effectType.site.ordinal}`,
                     })
                   : undefined
               const allocatorRunner =

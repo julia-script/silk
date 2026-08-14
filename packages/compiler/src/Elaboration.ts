@@ -615,11 +615,7 @@ export interface CallableCaptureFact {
 /** One hidden concrete section construction awaiting parameter zero. */
 export interface CallableSectionExpressionFact {
   readonly _tag: 'CallableSection'
-  readonly site: {
-    readonly _tag: 'CallableSiteId'
-    readonly function: DeclarationId
-    readonly span: SourceSpan.SourceSpan
-  }
+  readonly site: Hir.CallableSiteId
   readonly reference: CallReferenceFact
   readonly path: ReferencePathFact
   readonly omittedParameter: 0
@@ -2609,18 +2605,14 @@ const analyzeMatch = (
   )
   const effectSites = arms.flatMap((arm) =>
     arm.reachable && arm.result._tag === 'EffectBlock'
-      ? [
-          `${arm.result.site.function.sourceId}:${arm.result.site.function.ordinal}:${arm.result.site.span.start}`,
-        ]
+      ? [Hir.executableSiteKey(arm.result.site)]
       : [],
   )
   const erasesEffectIdentity = new Set(effectSites).size > 1
   if (erasesEffectIdentity) diagnostics.push(Diagnostic.effectIdentityErasure(node.span))
   const callableSites = arms.flatMap((arm) =>
     arm.reachable && arm.result._tag === 'CallableSection'
-      ? [
-          `${arm.result.site.function.sourceId}:${arm.result.site.function.ordinal}:${arm.result.site.span.start}`,
-        ]
+      ? [Hir.executableSiteKey(arm.result.site)]
       : [],
   )
   const erasesCallableIdentity = new Set(callableSites).size > 1
@@ -2720,7 +2712,7 @@ const representationOfExpression = (
     const contract = expression.type.type
     if (!Type.isCallable(contract)) return undefined
     const site = expression.site
-    const environment = `${site.function.sourceId}:${site.function.ordinal}:${site.span.start}:${site.span.end}\u0001${expression.typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
+    const environment = `callable:${Hir.executableSiteKey(site)}`
     return exactCallableRepresentation(
       expression.reference,
       contract,
@@ -2733,9 +2725,7 @@ const representationOfExpression = (
     if (!Type.isEffect(contract)) return undefined
     const site = expression.site
     return Type.exactRepresentationArgument(
-      Type.effectIdentityArgument(
-        `effect:${site.function.sourceId}:${site.function.ordinal}:${site.span.start}:${site.span.end}`,
-      ),
+      Type.effectIdentityArgument(`effect:${Hir.executableSiteKey(site)}`),
       contract,
     )
   }
@@ -4911,11 +4901,50 @@ const sectionCallableType = (
     : undefined
 }
 
+function executableSite(
+  tag: 'CallableSiteId',
+  resolution: ResolutionContext,
+  node: SyntaxTree.Node,
+): Hir.CallableSiteId
+function executableSite(
+  tag: 'EffectSiteId',
+  resolution: ResolutionContext,
+  node: SyntaxTree.Node,
+): Hir.EffectSiteId
+function executableSite(
+  tag: 'CallableSiteId' | 'EffectSiteId',
+  resolution: ResolutionContext,
+  node: SyntaxTree.Node,
+): Hir.CallableSiteId | Hir.EffectSiteId {
+  const ordinal = resolution.executableSites?.get(node) ?? 0
+  return Object.freeze({
+    _tag: tag,
+    function:
+      resolution.executableFunction ??
+      Object.freeze({ _tag: 'DeclarationId', sourceId: node.span.sourceId, ordinal: 0 }),
+    ...(resolution.executableOwner === undefined ? {} : { owner: resolution.executableOwner }),
+    ordinal,
+    span: node.span,
+  })
+}
+
+const executableSites = (root: SyntaxTree.Node): ReadonlyMap<SyntaxTree.Node, number> => {
+  const sites = new Map<SyntaxTree.Node, number>()
+  const visit = (node: SyntaxTree.Node): void => {
+    if (node.kind === 'CallExpression' || node.kind === 'EffectExpression')
+      sites.set(node, sites.size)
+    for (const child of node.children) if (SyntaxTree.isNode(child)) visit(child)
+  }
+  visit(root)
+  return sites
+}
+
 const finishCallableSection = (
   node: SyntaxTree.Node,
   reference: Extract<CallReferenceFact, { readonly _tag: 'Resolved' | 'ResolvedBuiltin' }>,
   argumentsResult: ArgumentsResult,
   callTypeArguments: CallTypeArgumentsResult,
+  resolution: ResolutionContext,
 ): ExpressionResult => {
   const contract = analyzeSectionContract(node, reference, argumentsResult.facts, callTypeArguments)
   const captures = Object.freeze(
@@ -4935,17 +4964,10 @@ const finishCallableSection = (
     contract.valid && callable !== undefined
       ? availableExpressionType(callable)
       : unavailableExpressionType
-  const owner = argumentsResult.facts.at(0)?.id.function
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'CallableSection',
-      site: Object.freeze({
-        _tag: 'CallableSiteId',
-        function:
-          owner ??
-          Object.freeze({ _tag: 'DeclarationId', sourceId: node.span.sourceId, ordinal: 0 }),
-        span: node.span,
-      }),
+      site: executableSite('CallableSiteId', resolution, node),
       reference,
       path: referencePath(node),
       omittedParameter: 0,
@@ -5391,7 +5413,7 @@ function analyzeBuiltinCall(
     reference.parameters.length >= 2 &&
     argumentsResult.facts.length === reference.parameters.length - 1
   ) {
-    return finishCallableSection(call, reference, argumentsResult, typeArguments)
+    return finishCallableSection(call, reference, argumentsResult, typeArguments, resolution)
   }
   const callContract = analyzeCallContract(call, reference, argumentsResult.facts)
   const expressionType =
@@ -6576,11 +6598,7 @@ function analyzeExpression(
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'EffectBlock',
-          site: Object.freeze({
-            _tag: 'EffectSiteId',
-            function: declaration.id,
-            span: node.span,
-          }),
+          site: executableSite('EffectSiteId', resolution, node),
           statements: Object.freeze([]),
           captures: Object.freeze([]),
           bindings: Object.freeze([]),
@@ -6638,11 +6656,7 @@ function analyzeExpression(
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'EffectBlock',
-        site: Object.freeze({
-          _tag: 'EffectSiteId',
-          function: declaration.id,
-          span: node.span,
-        }),
+        site: executableSite('EffectSiteId', resolution, node),
         statements,
         captures,
         bindings: Object.freeze(nested.bindings),
@@ -7004,7 +7018,7 @@ function analyzeExpression(
           argumentsResult,
           callTypeArguments,
           undefined,
-          resolution.index,
+          resolution,
         )
       return analyzeBuiltinCall(source, node, argumentsResult, callTypeArguments, resolution)
     }
@@ -7038,7 +7052,7 @@ function analyzeExpression(
         argumentsResult,
         callTypeArguments,
         diagnostic,
-        resolution.index,
+        resolution,
       )
     }
     if (
@@ -7069,7 +7083,7 @@ function analyzeExpression(
           argumentsResult,
           callTypeArguments,
           ambiguous,
-          resolution.index,
+          resolution,
         )
       }
       if (bound !== undefined)
@@ -7110,7 +7124,7 @@ function analyzeExpression(
         argumentsResult,
         callTypeArguments,
         diagnostic,
-        resolution.index,
+        resolution,
       )
     }
     if (qualifierLookup._tag === 'Namespace') {
@@ -7146,7 +7160,7 @@ function analyzeExpression(
         argumentsResult,
         callTypeArguments,
         diagnostic,
-        resolution.index,
+        resolution,
       )
     }
     const diagnostic =
@@ -7175,7 +7189,7 @@ function analyzeExpression(
       argumentsResult,
       callTypeArguments,
       diagnostic,
-      resolution.index,
+      resolution,
     )
   }
 
@@ -7274,7 +7288,7 @@ function analyzeExpression(
     reference.declaration.parameters.length >= 2 &&
     argumentsResult.facts.length === reference.declaration.parameters.length - 1
   ) {
-    return finishCallableSection(node, reference, argumentsResult, callTypeArguments)
+    return finishCallableSection(node, reference, argumentsResult, callTypeArguments, resolution)
   }
   const callContract = analyzeCallContract(
     node,
@@ -7364,14 +7378,20 @@ const finishDeclarationCall = (
   argumentsResult: ArgumentsResult,
   callTypeArguments: CallTypeArgumentsResult,
   diagnostic: Diagnostic.Diagnostic | undefined,
-  index: DeclarationIndex.Index,
+  resolution: ResolutionContext,
 ): ExpressionResult => {
   if (
     reference._tag === 'Resolved' &&
     reference.declaration.parameters.length >= 2 &&
     argumentsResult.facts.length === reference.declaration.parameters.length - 1
   ) {
-    const section = finishCallableSection(node, reference, argumentsResult, callTypeArguments)
+    const section = finishCallableSection(
+      node,
+      reference,
+      argumentsResult,
+      callTypeArguments,
+      resolution,
+    )
     return diagnostic === undefined
       ? section
       : Object.freeze({
@@ -7389,7 +7409,7 @@ const finishDeclarationCall = (
   const constraintDiagnostics = interfaceConstraintDiagnostics(
     reference,
     callContract,
-    index,
+    resolution.index,
     node.span,
   )
   const callable = sourceCallable(reference)
@@ -7580,6 +7600,9 @@ interface ResolutionContext {
   readonly index: DeclarationIndex.Index
   readonly unsafeSpans?: ReadonlyArray<SourceSpan.SourceSpan>
   readonly nextBindingOrdinal?: { value: number }
+  readonly executableFunction?: DeclarationId
+  readonly executableOwner?: DeclarationIndex.CanonicalId
+  readonly executableSites?: ReadonlyMap<SyntaxTree.Node, number>
 }
 
 const analyzeStatements = (
@@ -8101,6 +8124,11 @@ const analyzeFunctionBody = (
     ...resolution,
     unsafeSpans: Object.freeze(unsafeSpans),
     nextBindingOrdinal,
+    executableFunction: declaration.id,
+    ...(declaration.canonical._tag === 'Canonical'
+      ? { executableOwner: declaration.canonical.id }
+      : {}),
+    executableSites: executableSites(declaration.syntax),
   })
   const context: BodyContext = {
     source,
@@ -10069,6 +10097,10 @@ export const elaborateModule = (input: Input): Result => {
                 site: Object.freeze({
                   _tag: 'EffectSiteId',
                   function: fact.declaration.id,
+                  ...(fact.declaration.canonical._tag === 'Canonical'
+                    ? { owner: fact.declaration.canonical.id }
+                    : {}),
+                  ordinal: -1,
                   span: siteSpan,
                 }),
                 statements: hirStatements(fact.statements, fact.declaration.returnType.type),

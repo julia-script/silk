@@ -495,7 +495,10 @@ it('retains effect blocks as lazy statement regions with canonical captures', ()
     binding.initializer.captures.map((capture) => [capture.binding?.ordinal, capture.access]),
     [[0, 'Exclusive']],
   )
-  assert.include(Hir.encode(result.hir), 'effect-block site=fn0@')
+  assert.include(
+    Hir.encode(result.hir),
+    'effect-block site=effect:declaration:hir://effect-block.silk:main:site:',
+  )
   assert.include(Hir.encode(result.hir), 'access=exclusive')
 })
 

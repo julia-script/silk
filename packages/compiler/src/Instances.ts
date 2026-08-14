@@ -299,19 +299,31 @@ export const unlowerableWitnessViolations = (
  * construction is retained as related provenance. That keeps a stdlib-internal construction such
  * as `Option.some(i32.add(1))` pointing at the user's call rather than into `silk/option`.
  */
-interface StoredRepresentation {
+export interface StoredRepresentation {
   readonly path: ReadonlyArray<string>
   readonly contract: Type.RepresentationBound
   readonly open: boolean
 }
 
 /** Finds represented storage exclusively through the specialization field-resolution seam. */
-const storedRepresentation = (
+export const storedRepresentation = (
   index: DeclarationIndex.Index,
   type: Type.Type,
   kind: 'Callable' | 'Effect',
   seen: ReadonlySet<string> = new Set(),
 ): StoredRepresentation | undefined => {
+  if (Type.isRepresented(type)) {
+    if (
+      (kind === 'Callable' && !Type.isCallable(type.contract)) ||
+      (kind === 'Effect' && !Type.isEffect(type.contract))
+    )
+      return undefined
+    return Object.freeze({
+      path: Object.freeze([]),
+      contract: type.contract,
+      open: Type.isRepresentationParameterArgument(type.representation.argument),
+    })
+  }
   if (Type.isFixedArray(type) || Type.isSlice(type))
     return storedRepresentation(index, type.element, kind, seen)
   if (Type.isUnion(type)) {
@@ -375,84 +387,6 @@ const storedRepresentation = (
   return undefined
 }
 
-/**
- * Rejects reachable constructions that would store a bare or represented callable value inside an
- * aggregate.
- */
-export const storedCallableViolations = (
-  self: Discovery,
-  index: DeclarationIndex.Index,
-): ReadonlyArray<Diagnostic.Diagnostic> => {
-  const specializingCalls = new Map<string, CallInstance>()
-  for (const call of self.calls) {
-    const target = keyText(call.target)
-    const current = specializingCalls.get(target)
-    if (current === undefined || compareCallSites(call, current) < 0)
-      specializingCalls.set(target, call)
-  }
-  const reported: Array<StoredCallableViolationKey> = []
-  return Object.freeze(
-    self.instances.flatMap((instance) =>
-      instance.function.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
-        .flatMap((expression) => {
-          if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') return []
-          const aggregate = Type.substitute(expression.type, instance.substitution)
-          const bare = DeclarationIndex.storedCallable(index, aggregate)
-          const represented = storedRepresentation(index, aggregate, 'Callable')
-          const found =
-            bare === undefined
-              ? represented === undefined || !Type.isCallable(represented.contract)
-                ? undefined
-                : Object.freeze({
-                    path: represented.path,
-                    callable: represented.contract,
-                    represented: true,
-                    open: represented.open,
-                  })
-              : Object.freeze({
-                  path: bare.path,
-                  callable: bare.callable,
-                  represented: false,
-                  open: false,
-                })
-          if (found === undefined) return []
-          const declaredBare = DeclarationIndex.storedCallable(index, expression.type)
-          const declaredRepresented = storedRepresentation(index, expression.type, 'Callable')
-          const specializing =
-            declaredBare === undefined &&
-            (declaredRepresented === undefined || declaredRepresented.open)
-              ? specializingCalls.get(keyText(instance.key))
-              : undefined
-          const span = specializing?.span ?? expression.span
-          const constructionSpan = expression.span
-          const key: StoredCallableViolationKey = {
-            aggregate,
-            path: found.path,
-            callable: found.callable,
-            represented: found.represented,
-            span,
-            constructionSpan,
-          }
-          if (reported.some((candidate) => sameStoredCallableViolationKey(candidate, key)))
-            return []
-          reported.push(key)
-          return [
-            Diagnostic.storedCallableConstruction(
-              Type.encode(aggregate),
-              found.path.length === 0 ? undefined : found.path.join('.'),
-              Type.encode(found.callable),
-              span,
-              specializing === undefined ? undefined : expression.span,
-              found.represented,
-            ),
-          ]
-        }),
-    ),
-  )
-}
-
 /** Orders call sites by source ID, then position, for a deterministic primary origin. */
 const compareCallSites = (left: CallInstance, right: CallInstance): number =>
   left.span.sourceId === right.span.sourceId
@@ -461,32 +395,64 @@ const compareCallSites = (left: CallInstance, right: CallInstance): number =>
       ? -1
       : 1
 
-/** Stable semantic identity of one stored-callable violation before presentation encoding. */
-interface StoredCallableViolationKey {
+interface StoredExecutable {
+  readonly path: ReadonlyArray<string>
+  readonly contract: Type.RepresentationBound
+  readonly represented: boolean
+  readonly open: boolean
+}
+
+const storedExecutable = (
+  index: DeclarationIndex.Index,
+  type: Type.Type,
+  kind: 'Callable' | 'Effect',
+): StoredExecutable | undefined => {
+  if (kind === 'Callable') {
+    const bare = DeclarationIndex.storedCallable(index, type)
+    if (bare !== undefined)
+      return Object.freeze({
+        path: bare.path,
+        contract: bare.callable,
+        represented: false,
+        open: false,
+      })
+  }
+  const represented = storedRepresentation(index, type, kind)
+  return represented === undefined
+    ? undefined
+    : Object.freeze({
+        ...represented,
+        represented: true,
+      })
+}
+
+/** Stable semantic identity of one executable-storage violation before presentation encoding. */
+interface StoredExecutableViolationKey {
   readonly aggregate: Type.Type
   readonly path: ReadonlyArray<string>
-  readonly callable: Type.Callable
+  readonly contract: Type.RepresentationBound
   readonly represented: boolean
   readonly span: SourceSpan.SourceSpan
   readonly constructionSpan: SourceSpan.SourceSpan
 }
 
-const sameStoredCallableViolationKey = (
-  left: StoredCallableViolationKey,
-  right: StoredCallableViolationKey,
+const sameStoredExecutableViolationKey = (
+  left: StoredExecutableViolationKey,
+  right: StoredExecutableViolationKey,
 ): boolean =>
   Type.equals(left.aggregate, right.aggregate) &&
   left.path.length === right.path.length &&
   left.path.every((part, index) => part === right.path[index]) &&
-  Type.equals(left.callable, right.callable) &&
+  Type.equals(left.contract, right.contract) &&
   left.represented === right.represented &&
   SourceSpan.equals(left.span, right.span) &&
   SourceSpan.equals(left.constructionSpan, right.constructionSpan)
 
-/** Rejects reachable nominal constructions that store represented Effect values. */
-export const storedEffectViolations = (
+/** Collects every reachable aggregate construction that retains executable storage. */
+const storedExecutableViolations = (
   self: Discovery,
   index: DeclarationIndex.Index,
+  kind: 'Callable' | 'Effect',
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   const specializingCalls = new Map<string, CallInstance>()
   for (const call of self.calls) {
@@ -495,7 +461,7 @@ export const storedEffectViolations = (
     if (current === undefined || compareCallSites(call, current) < 0)
       specializingCalls.set(target, call)
   }
-  const reported: Array<StoredEffectViolationKey> = []
+  const reported: Array<StoredExecutableViolationKey> = []
   return Object.freeze(
     self.instances.flatMap((instance) =>
       instance.function.statements
@@ -504,57 +470,66 @@ export const storedEffectViolations = (
         .flatMap((expression) => {
           if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') return []
           const aggregate = Type.substitute(expression.type, instance.substitution)
-          const found = storedRepresentation(index, aggregate, 'Effect')
-          if (found === undefined || !Type.isEffect(found.contract)) return []
-          const declared = storedRepresentation(index, expression.type, 'Effect')
+          const found = storedExecutable(index, aggregate, kind)
+          if (found === undefined) return []
+          const declared = storedExecutable(index, expression.type, kind)
           const specializing =
             declared === undefined || declared.open
               ? specializingCalls.get(keyText(instance.key))
               : undefined
           const span = specializing?.span ?? expression.span
           const constructionSpan = expression.span
-          const key: StoredEffectViolationKey = {
+          const key: StoredExecutableViolationKey = {
             aggregate,
             path: found.path,
-            effect: found.contract,
+            contract: found.contract,
+            represented: found.represented,
             span,
             constructionSpan,
           }
-          if (reported.some((candidate) => sameStoredEffectViolationKey(candidate, key))) return []
+          if (reported.some((candidate) => sameStoredExecutableViolationKey(candidate, key)))
+            return []
           reported.push(key)
-          return [
-            Diagnostic.storedRepresentedEffectConstruction(
-              Type.encode(aggregate),
-              found.path.length === 0 ? undefined : found.path.join('.'),
-              Type.encode(found.contract),
-              span,
-              specializing === undefined ? undefined : expression.span,
-            ),
-          ]
+          const path = found.path.length === 0 ? undefined : found.path.join('.')
+          const related = specializing === undefined ? undefined : expression.span
+          if (kind === 'Callable' && Type.isCallable(found.contract))
+            return [
+              Diagnostic.storedCallableConstruction(
+                Type.encode(aggregate),
+                path,
+                Type.encode(found.contract),
+                span,
+                related,
+                found.represented,
+              ),
+            ]
+          if (kind === 'Effect' && Type.isEffect(found.contract))
+            return [
+              Diagnostic.storedRepresentedEffectConstruction(
+                Type.encode(aggregate),
+                path,
+                Type.encode(found.contract),
+                span,
+                related,
+              ),
+            ]
+          return []
         }),
     ),
   )
 }
 
-/** Stable semantic identity of one represented-Effect storage violation. */
-interface StoredEffectViolationKey {
-  readonly aggregate: Type.Type
-  readonly path: ReadonlyArray<string>
-  readonly effect: Type.Effect
-  readonly span: SourceSpan.SourceSpan
-  readonly constructionSpan: SourceSpan.SourceSpan
-}
+/** Rejects reachable constructions that retain bare or represented callable values. */
+export const storedCallableViolations = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<Diagnostic.Diagnostic> => storedExecutableViolations(self, index, 'Callable')
 
-const sameStoredEffectViolationKey = (
-  left: StoredEffectViolationKey,
-  right: StoredEffectViolationKey,
-): boolean =>
-  Type.equals(left.aggregate, right.aggregate) &&
-  left.path.length === right.path.length &&
-  left.path.every((part, index) => part === right.path[index]) &&
-  Type.equals(left.effect, right.effect) &&
-  SourceSpan.equals(left.span, right.span) &&
-  SourceSpan.equals(left.constructionSpan, right.constructionSpan)
+/** Rejects reachable constructions that retain represented Effect values. */
+export const storedEffectViolations = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<Diagnostic.Diagnostic> => storedExecutableViolations(self, index, 'Effect')
 
 /** Produces semantic diagnostics for every finite-discovery violation. */
 export const violationDiagnostics = (self: Discovery): ReadonlyArray<Diagnostic.Diagnostic> =>
@@ -691,7 +666,7 @@ export const keyText = (key: InstanceKey): string =>
     .join('\u0000')}\u0002${key.contractRow.join('\u0000')}`
 
 export const effectIdentity = (owner: InstanceKey, site: Hir.EffectSiteId): string =>
-  `${keyText(owner)}\u0004${site.function.sourceId}:${site.function.ordinal}:${site.span.start}:${site.span.end}`
+  `${keyText(owner)}\u0004${Hir.executableSiteKey(site)}`
 
 const resolveEntry = (root: Elaboration.Result, index: DeclarationIndex.Index): Entry => {
   const lookup = Elaboration.declarationByName(root, 'main')
@@ -1116,7 +1091,7 @@ const callableOriginOf = (
     const typeArguments = expression.typeArguments.map((argument) =>
       Type.substituteGenericArgument(argument, context.substitution),
     )
-    const identity = `${keyText(context.owner)}\u0001${expression.site.function.sourceId}:${expression.site.function.ordinal}:${expression.site.span.start}:${expression.site.span.end}\u0001${typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
+    const identity = `${keyText(context.owner)}\u0001${Hir.executableSiteKey(expression.site)}\u0001${typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
     return Type.callableIdentityArgument(
       identity,
       callableTargetIdentity(expression.target),
@@ -1588,7 +1563,7 @@ const forwardedRequirementTargets = (
   })
 
 export const callableIdentity = (self: CallableInstance): string =>
-  `${keyText(self.owner)}\u0001${self.site.function.sourceId}:${self.site.function.ordinal}:${self.site.span.start}:${self.site.span.end}\u0001${self.typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
+  `${keyText(self.owner)}\u0001${Hir.executableSiteKey(self.site)}\u0001${self.typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
 
 const concreteCallables = (
   fn: Hir.HirFunction,
@@ -1604,7 +1579,7 @@ const concreteCallables = (
   const seen = new Set<string>()
   const instances: Array<CallableInstance> = []
   for (const section of sections) {
-    const site = `${section.site.function.sourceId}:${section.site.function.ordinal}:${section.site.span.start}:${section.site.span.end}`
+    const site = Hir.executableSiteKey(section.site)
     if (seen.has(site)) continue
     seen.add(site)
     const applications = expressions.flatMap((expression) =>

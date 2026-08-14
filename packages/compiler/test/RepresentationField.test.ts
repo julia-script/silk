@@ -5,6 +5,7 @@ import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as RepresentationField from '../src/RepresentationField.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as SourceOrigin from '../src/SourceOrigin.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
 
@@ -17,6 +18,11 @@ const declarations = (id: string, source: string) =>
     ),
     (closure) => NameResolution.analyze(closure).index,
   )
+
+const analyzeAt = (id: string, source: string, path: string) =>
+  Analysis.make({
+    root: SourceFile.make(id, encoder.encode(source), SourceOrigin.projectFile(path)),
+  }).pipe(Effect.provide(SourceResolver.empty))
 
 const exactCallable = (module: string, name = 'decode') =>
   Type.exactRepresentationArgument(
@@ -281,5 +287,84 @@ pub fn main() -> i32 {
     assert.strictEqual(shared.admissibility._tag, 'Admitted')
     assert.strictEqual(once.admissibility._tag, 'Admitted')
     assert.notDeepEqual(shared.requiredBound, once.requiredBound)
+  }),
+)
+
+it.effect('keeps executable identities stable across edit shifts and source-path relocation', () =>
+  Effect.gen(function* () {
+    const module = 'representation-field/executable-sites'
+    const source = `struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
+struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
+pub fn main() -> i32 {
+  let mappers = Mappers { first: i32.add(1), second: i32.add(1) }
+  let deferred = Deferred { first: effect { return 1 }, second: effect { return 1 } }
+  return 0
+}`
+    const shifted = `// Leading comments and whitespace move every diagnostic span.
+
+struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
+struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
+pub fn main() -> i32 {
+  // The executable sites retain their structural ordinals.
+  let mappers = Mappers { first: i32.add(1), second: i32.add(1) }
+  let deferred = Deferred { first: effect { return 1 }, second: effect { return 1 } }
+  return 0
+}`
+    const first = yield* analyzeAt(module, source, '/workspace/first/Main.silk')
+    const moved = yield* analyzeAt(module, shifted, '/relocated/project/Main.silk')
+    const representedInstances = (snapshot: Analysis.SingleRootFrontendSnapshot) => {
+      const main = Analysis.rootAnalysis(snapshot).functions.find(
+        (fact) =>
+          fact.declaration.name._tag === 'Present' && fact.declaration.name.spelling === 'main',
+      )
+      return (main?.statements ?? []).flatMap((statement) =>
+        statement._tag === 'BindStatement' &&
+        statement.binding.inferredType._tag === 'Available' &&
+        Type.isNominal(statement.binding.inferredType.type)
+          ? [statement.binding.inferredType.type]
+          : [],
+      )
+    }
+    const facts = (snapshot: Analysis.SingleRootFrontendSnapshot) =>
+      representedInstances(snapshot).flatMap((instance) => {
+        const resolutions = RepresentationField.resolveFields(snapshot.index, [instance])
+        return RepresentationField.plansOf(snapshot.index, instance).map((plan) => {
+          const resolution = RepresentationField.lookup(resolutions, instance, plan.id)
+          return {
+            nominal: Type.key(instance),
+            field: RepresentationField.key(instance, plan.id),
+            argument:
+              resolution?._tag === 'ResolvedRepresentationField'
+                ? Type.genericArgumentKey(resolution.argument)
+                : undefined,
+          }
+        })
+      })
+
+    assert.deepEqual(facts(first), facts(moved))
+    assert.strictEqual(facts(first).length, 4)
+    assert.strictEqual(new Set(facts(first).map((fact) => fact.argument)).size, 4)
+    assert.deepEqual(
+      Analysis.sources(first).get(module)?.origin,
+      SourceOrigin.projectFile('/workspace/first/Main.silk'),
+    )
+    assert.deepEqual(
+      Analysis.sources(moved).get(module)?.origin,
+      SourceOrigin.projectFile('/relocated/project/Main.silk'),
+    )
+    const firstRealized = Analysis.realize(first, 'wasm32-unknown-unknown')
+    const movedRealized = Analysis.realize(moved, 'wasm32-unknown-unknown')
+    assert.deepEqual(
+      Analysis.diagnostics(firstRealized).map((diagnostic) => diagnostic.code),
+      ['SEM0103', 'SEM0107'],
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(movedRealized).map((diagnostic) => diagnostic.code),
+      ['SEM0103', 'SEM0107'],
+    )
+    assert.notDeepEqual(
+      Analysis.diagnostics(firstRealized).map((diagnostic) => diagnostic.span),
+      Analysis.diagnostics(movedRealized).map((diagnostic) => diagnostic.span),
+    )
   }),
 )

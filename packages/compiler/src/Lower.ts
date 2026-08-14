@@ -356,7 +356,7 @@ const runnerId = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): typeof 
   Object.freeze({
     _tag: 'CanonicalDeclarationId',
     module: owner.declaration.module,
-    name: `${owner.declaration.name}$effect$${site.function.ordinal}$${site.span.start}`,
+    name: `${owner.declaration.name}$effect$${site.ordinal}`,
   })
 
 const effectEntryAdapterId = (module: string): DeclarationIndex.CanonicalId =>
@@ -367,7 +367,7 @@ const effectEntryAdapterId = (module: string): DeclarationIndex.CanonicalId =>
   })
 
 const baseRunnerKey = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): string =>
-  `${instanceText(owner.declaration, owner.typeArguments)}\u0000${site.function.sourceId}\u0000${site.function.ordinal}\u0000${site.span.start}`
+  `${instanceText(owner.declaration, owner.typeArguments)}\u0000${Hir.executableSiteKey(site)}`
 
 const witnessKey = (witness: DeclarationIndex.ConformanceWitness): string =>
   witness._tag === 'SourceConformanceWitness'
@@ -400,9 +400,7 @@ const effectValueType = (
       candidate._tag === 'EffectEnvironment' &&
       instanceText(candidate.instance.declaration, candidate.instance.typeArguments) ===
         instanceText(instance.declaration, instance.typeArguments) &&
-      candidate.site.function.sourceId === block.site.function.sourceId &&
-      candidate.site.function.ordinal === block.site.function.ordinal &&
-      candidate.site.span.start === block.site.span.start,
+      Hir.sameExecutableSite(candidate.site, block.site),
   )
   if (environment?._tag !== 'EffectEnvironment') return undefined
   return Object.freeze({
@@ -545,10 +543,7 @@ const runtimeRequirementArguments = (
   )
 
 const sameSite = (left: Hir.CallableSiteId, right: Hir.CallableSiteId): boolean =>
-  left.function.sourceId === right.function.sourceId &&
-  left.function.ordinal === right.function.ordinal &&
-  left.span.start === right.span.start &&
-  left.span.end === right.span.end
+  Hir.sameExecutableSite(left, right)
 
 const callableValueType = (
   fn: FunctionLowering,
@@ -4624,7 +4619,7 @@ const lowerEffectRunner = (
     typeArguments: owner.key.typeArguments,
     contractRow: Object.freeze([
       ...owner.key.contractRow,
-      `effect-site:${block.site.function.sourceId}:${block.site.function.ordinal}:${block.site.span.start}`,
+      `effect-site:${Hir.executableSiteKey(block.site)}`,
     ]),
   })
   const captureParameterTypes = type.environment.fields.flatMap((field) => {
