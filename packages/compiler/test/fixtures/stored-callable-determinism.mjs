@@ -1,3 +1,4 @@
+import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../../dist/Analysis.js'
@@ -32,7 +33,7 @@ pub fn main() -> i32 {
   return 42
 }`
 
-await Effect.runPromise(
+NodeRuntime.runMain(
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'fixture/StoredCallable',
