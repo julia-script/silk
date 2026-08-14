@@ -2,8 +2,9 @@
 
 ## Purpose
 
-Define type-only generic declarations and calls whose reachable concrete uses are checked once,
-specialized finitely, and erased into deterministic monomorphic runtime instances.
+Define kinded generic declarations and applications across value, row, and executable-
+representation parameters whose reachable concrete uses are checked once, specialized finitely,
+and erased into deterministic monomorphic runtime instances.
 
 ## Requirements
 
