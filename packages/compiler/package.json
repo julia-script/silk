@@ -38,6 +38,10 @@
       "types": "./dist/Analysis.d.ts",
       "import": "./dist/Analysis.js"
     },
+    "./AutoImport": {
+      "types": "./dist/AutoImport.d.ts",
+      "import": "./dist/AutoImport.js"
+    },
     "./Backend": {
       "types": "./dist/Backend.d.ts",
       "import": "./dist/Backend.js"
@@ -69,6 +73,10 @@
     "./SourceFile": {
       "types": "./dist/SourceFile.d.ts",
       "import": "./dist/SourceFile.js"
+    },
+    "./SourceAction": {
+      "types": "./dist/SourceAction.d.ts",
+      "import": "./dist/SourceAction.js"
     },
     "./SourceOrigin": {
       "types": "./dist/SourceOrigin.d.ts",
@@ -134,6 +142,10 @@
       "types": "./dist/IntrinsicAvailability.d.ts",
       "import": "./dist/IntrinsicAvailability.js"
     },
+    "./ImportPlan": {
+      "types": "./dist/ImportPlan.d.ts",
+      "import": "./dist/ImportPlan.js"
+    },
     "./OsFileSystemHost": {
       "types": "./dist/OsFileSystemHost.d.ts",
       "import": "./dist/OsFileSystemHost.js"
@@ -161,6 +173,10 @@
     "./ModuleClosure": {
       "types": "./dist/ModuleClosure.d.ts",
       "import": "./dist/ModuleClosure.js"
+    },
+    "./ModuleSummary": {
+      "types": "./dist/ModuleSummary.d.ts",
+      "import": "./dist/ModuleSummary.js"
     },
     "./ModuleSurface": {
       "types": "./dist/ModuleSurface.d.ts",
@@ -265,6 +281,10 @@
     "./WasmBackend": {
       "types": "./dist/WasmBackend.d.ts",
       "import": "./dist/WasmBackend.js"
+    },
+    "./WorkspaceInventory": {
+      "types": "./dist/WorkspaceInventory.d.ts",
+      "import": "./dist/WorkspaceInventory.js"
     }
   },
   "scripts": {

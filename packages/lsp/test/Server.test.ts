@@ -139,6 +139,7 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     assert.strictEqual(initialized.capabilities.documentFormattingProvider, true)
     assert.deepEqual(initialized.capabilities.codeActionProvider, {
       codeActionKinds: ['quickfix'],
+      resolveProvider: true,
     })
     assert.deepEqual(initialized.capabilities.signatureHelpProvider, {
       triggerCharacters: ['(', ','],
@@ -772,6 +773,159 @@ it('offers a diagnostic edit as a quick fix over real stdio', { timeout: 30_000 
         newText: '',
       },
     ])
+  } finally {
+    await client.close()
+  }
+})
+
+it('discovers, resolves, and rejects stale auto-import actions over real stdio', {
+  timeout: 30_000,
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'silk-lsp-auto-import-'))
+  const sourceRoot = join(root, 'src')
+  mkdirSync(sourceRoot)
+  writeFileSync(
+    join(root, 'silk.toml'),
+    '[package]\nname = "imports"\nversion = "0.1.0"\nroot = "src/Main.silk"\n',
+  )
+  writeFileSync(join(sourceRoot, 'Alpha.silk'), 'pub fn calculate() -> i32 { return 1 }')
+  writeFileSync(join(sourceRoot, 'Beta.silk'), 'pub fn calculate() -> i32 { return 2 }')
+  const mainText = 'pub fn main() -> i32 { return calculate() }'
+  const mainUri = pathToFileURL(join(sourceRoot, 'Main.silk')).href
+  writeFileSync(join(sourceRoot, 'Main.silk'), mainText)
+  const client = connect()
+  try {
+    client.send({
+      id: 1,
+      method: 'initialize',
+      params: { processId: null, rootUri: pathToFileURL(root).href, capabilities: {} },
+    })
+    await client.waitFor((message) => response(message, 1))
+    client.send({ method: 'initialized', params: {} })
+    didOpen(client, mainUri, mainText)
+    await client.waitFor((message) => publishedDiagnostics(message, mainUri))
+
+    client.send({
+      id: 2,
+      method: 'textDocument/codeAction',
+      params: {
+        textDocument: { uri: mainUri },
+        range: {
+          start: { line: 0, character: mainText.indexOf('calculate') },
+          end: { line: 0, character: mainText.indexOf('calculate') + 'calculate'.length },
+        },
+        context: { diagnostics: [] },
+      },
+    })
+    const actions = (await client.waitFor((message) => response(message, 2))) as Array<{
+      title: string
+      data: unknown
+      edit?: { changes: Record<string, Array<{ newText: string }>> }
+      disabled?: { reason: string }
+    }>
+    assert.deepEqual(
+      actions.map((action) => action.title),
+      ['Import calculate from Alpha', 'Import calculate from Beta'],
+    )
+    assert.deepEqual(
+      actions[0]?.edit?.changes[mainUri]?.map((edit) => edit.newText),
+      ['import Alpha { calculate }\n'],
+    )
+    const selected = actions[0]
+    assert.isDefined(selected)
+    if (selected === undefined) return
+
+    client.send({ id: 3, method: 'codeAction/resolve', params: selected })
+    const resolved = (await client.waitFor((message) => response(message, 3))) as {
+      edit: { changes: Record<string, Array<{ newText: string }>> }
+    }
+    assert.deepEqual(
+      resolved.edit.changes[mainUri]?.map((edit) => edit.newText),
+      ['import Alpha { calculate }\n'],
+    )
+
+    client.send({
+      method: 'textDocument/didChange',
+      params: {
+        textDocument: { uri: mainUri, version: 2 },
+        contentChanges: [{ text: `// revised\n${mainText}` }],
+      },
+    })
+    await client.waitFor((message) => {
+      const report = publishedDiagnosticReport(message, mainUri)
+      return report?.version === 2 ? report : undefined
+    })
+    client.send({ id: 4, method: 'codeAction/resolve', params: selected })
+    const stale = (await client.waitFor((message) => response(message, 4))) as {
+      disabled: { reason: string }
+      edit?: unknown
+    }
+    assert.include(stale.disabled.reason, 'revision')
+    assert.isUndefined(stale.edit)
+  } finally {
+    await client.close()
+  }
+})
+
+it('resolves a standard-library auto-import using Silk source-path spelling', {
+  timeout: 30_000,
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'silk-lsp-stdlib-auto-import-'))
+  const sourceRoot = join(root, 'src')
+  mkdirSync(sourceRoot)
+  writeFileSync(
+    join(root, 'silk.toml'),
+    '[package]\nname = "imports"\nversion = "0.1.0"\nroot = "src/main.silk"\n',
+  )
+  const mainText = 'pub fn main() -> () {\n  Vector\n  return ()\n}\n'
+  const mainUri = pathToFileURL(join(sourceRoot, 'main.silk')).href
+  writeFileSync(join(sourceRoot, 'main.silk'), mainText)
+  const client = connect()
+  try {
+    client.send({
+      id: 1,
+      method: 'initialize',
+      params: { processId: null, rootUri: pathToFileURL(root).href, capabilities: {} },
+    })
+    await client.waitFor((message) => response(message, 1))
+    client.send({ method: 'initialized', params: {} })
+    didOpen(client, mainUri, mainText)
+    await client.waitFor((message) => publishedDiagnostics(message, mainUri))
+
+    client.send({
+      id: 2,
+      method: 'textDocument/codeAction',
+      params: {
+        textDocument: { uri: mainUri },
+        range: { start: { line: 1, character: 2 }, end: { line: 1, character: 8 } },
+        context: { diagnostics: [] },
+      },
+    })
+    const actions = (await client.waitFor((message) => response(message, 2))) as Array<{
+      title: string
+      data: unknown
+      edit?: { changes: Record<string, Array<{ newText: string }>> }
+    }>
+    assert.deepEqual(
+      actions.map((action) => action.title),
+      ['Import Vector from silk/vector'],
+    )
+    assert.deepEqual(
+      actions[0]?.edit?.changes[mainUri]?.map((edit) => edit.newText),
+      ['import silk.vector { Vector }\n'],
+    )
+    const selected = actions[0]
+    assert.isDefined(selected)
+    if (selected === undefined) return
+
+    client.send({ id: 3, method: 'codeAction/resolve', params: selected })
+    const resolved = (await client.waitFor((message) => response(message, 3))) as {
+      edit: { changes: Record<string, Array<{ newText: string }>> }
+    }
+    assert.deepEqual(
+      resolved.edit.changes[mainUri]?.map((edit) => edit.newText),
+      ['import silk.vector { Vector }\n'],
+    )
   } finally {
     await client.close()
   }

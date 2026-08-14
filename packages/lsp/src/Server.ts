@@ -66,7 +66,10 @@ export const start = (): void => {
         inlayHintProvider: true,
         documentSymbolProvider: true,
         documentFormattingProvider: true,
-        codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix] },
+        codeActionProvider: {
+          codeActionKinds: [CodeActionKind.QuickFix],
+          resolveProvider: true,
+        },
         semanticTokensProvider: { legend: Document.semanticTokensLegend, full: true },
         foldingRangeProvider: true,
         callHierarchyProvider: true,
@@ -293,8 +296,30 @@ export const start = (): void => {
         session.value.snapshot,
         parameters.range,
         (module) => session.value.moduleUris.get(module),
+        session.value.inventory,
       ),
     ]
+  })
+
+  connection.onCodeActionResolve(async (action) => {
+    const data = Document.parseAutoImportData(action.data)
+    if (data === undefined)
+      return Document.disableCodeAction(action, 'The source action descriptor is invalid')
+    await Promise.all([...documentUpdates])
+    const workspace = projectByUri.get(data.uri)
+    const project = workspace === undefined ? undefined : projects.get(workspace)
+    if (project === undefined)
+      return Document.disableCodeAction(action, 'The source revision is no longer available')
+    const session = await run(project.acquire(data.uri, data.version))
+    if (Option.isNone(session))
+      return Document.disableCodeAction(action, 'The source revision is no longer available')
+    return Document.resolveCodeAction(
+      session.value.document,
+      session.value.snapshot,
+      session.value.inventory,
+      action,
+      (module) => session.value.moduleUris.get(module),
+    )
   })
 
   connection.languages.semanticTokens.on(async (parameters) => {
@@ -372,6 +397,11 @@ export const start = (): void => {
           const isManifest = path.basename(changedPath.value) === 'silk.toml'
           if (isManifest) {
             const directory = path.dirname(changedPath.value)
+            for (const project of projects.values()) {
+              const relative = path.relative(directory, project.sourceRoot)
+              if (relative === '..' || relative.startsWith(`..${path.sep}`)) continue
+              yield* project.invalidate({ rediscover: true })
+            }
             for (const text of documents.all()) {
               const documentPath = yield* Effect.try({
                 try: () => new URL(text.uri),
@@ -391,7 +421,7 @@ export const start = (): void => {
           for (const project of projects.values()) {
             const relative = path.relative(project.sourceRoot, changedPath.value)
             if (relative === '..' || relative.startsWith(`..${path.sep}`)) continue
-            yield* project.invalidate()
+            yield* project.invalidate({ dirtyPaths: [changedPath.value] })
           }
         }
       }),

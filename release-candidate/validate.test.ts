@@ -268,6 +268,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
       './Analysis',
+      './AutoImport',
       './Backend',
       './BackendRegistry',
       './BootstrapEvaluation',
@@ -283,6 +284,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Formatter',
       './Hir',
       './HostInput',
+      './ImportPlan',
       './Instances',
       './Intrinsic',
       './IntrinsicAvailability',
@@ -293,6 +295,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Mir',
       './ModuleClosure',
       './ModuleSemantics',
+      './ModuleSummary',
       './ModuleSurface',
       './ModuleTooling',
       './NameResolution',
@@ -307,6 +310,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Scalar',
       './SemanticInvalidation',
       './SemanticOccurrence',
+      './SourceAction',
       './SourceFile',
       './SourceOrigin',
       './SourceResolver',
@@ -325,6 +329,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './TypeCompatibility',
       './TypeHint',
       './WasmBackend',
+      './WorkspaceInventory',
     ])
     expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
@@ -690,6 +695,7 @@ console.log(
     const api = JSON.parse(inspected)
     expect(api.root).toEqual([
       'Analysis',
+      'AutoImport',
       'Backend',
       'BackendRegistry',
       'BootstrapEvaluation',
@@ -704,6 +710,7 @@ console.log(
       'Formatter',
       'Hir',
       'HostInput',
+      'ImportPlan',
       'Instances',
       'Intrinsic',
       'IntrinsicAvailability',
@@ -716,6 +723,7 @@ console.log(
       'MirNormalization',
       'ModuleClosure',
       'ModuleSemantics',
+      'ModuleSummary',
       'ModuleSurface',
       'ModuleTooling',
       'NameResolution',
@@ -729,6 +737,7 @@ console.log(
       'Scalar',
       'SemanticInvalidation',
       'SemanticOccurrence',
+      'SourceAction',
       'SourceFile',
       'SourceOrigin',
       'SourceResolver',
@@ -748,6 +757,7 @@ console.log(
       'TypeCompatibility',
       'TypeHint',
       'WasmBackend',
+      'WorkspaceInventory',
     ])
     for (const [path, exports] of Object.entries(api.deep) as ReadonlyArray<
       readonly [string, ReadonlyArray<string>]

@@ -9,6 +9,7 @@ import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceOrigin from '@silk-effect/compiler/SourceOrigin'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
 import * as Stdlib from '@silk-effect/compiler/Stdlib'
+import * as WorkspaceInventory from '@silk-effect/compiler/WorkspaceInventory'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Document from '../src/Document.js'
@@ -278,6 +279,36 @@ it.effect('shares one project frontend across overlapping open roots', () =>
     assert.notStrictEqual(currentSyntax.get('Main'), previousSyntax.get('Main'))
     assert.strictEqual(currentSyntax.get('Util'), previousSyntax.get('Util'))
     assert.strictEqual(currentSyntax.get('Shared'), previousSyntax.get('Shared'))
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('indexes closed source-root modules without widening semantic project roots', () =>
+  Effect.gen(function* () {
+    const root = project()
+    writeFileSync(
+      join(root, 'src', 'Candidate.silk'),
+      'pub fn closedCandidate() -> i32 { return 7 }',
+    )
+    const document = yield* Workspace.open({
+      uri: pathToFileURL(join(root, 'src', 'Main.silk')).href,
+      version: 1,
+      bytes: encoder.encode('pub fn main() -> i32 { return 42 }'),
+    })
+    const sessions = yield* Workspace.analyzeProject([document])
+    const session = sessions.get(document.uri)
+    assert.isDefined(session)
+    if (session === undefined) return
+
+    assert.deepEqual(
+      Analysis.modules(session.snapshot).map((module) => module.name),
+      ['Main'],
+    )
+    assert.deepEqual(
+      WorkspaceInventory.candidates(session.inventory, 'closedCandidate').map(
+        (candidate) => candidate.module,
+      ),
+      ['Candidate'],
+    )
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 

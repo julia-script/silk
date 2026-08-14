@@ -1,14 +1,17 @@
 import * as Analysis from '@silk-effect/compiler/Analysis'
+import type * as AutoImport from '@silk-effect/compiler/AutoImport'
 import type * as DeclarationIndex from '@silk-effect/compiler/DeclarationIndex'
 import * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import * as FormattedDocument from '@silk-effect/compiler/FormattedDocument'
 import * as Formatter from '@silk-effect/compiler/Formatter'
 import * as Presentation from '@silk-effect/compiler/Presentation'
 import * as SemanticOccurrence from '@silk-effect/compiler/SemanticOccurrence'
+import * as SourceAction from '@silk-effect/compiler/SourceAction'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceSpan from '@silk-effect/compiler/SourceSpan'
 import * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
 import type * as Token from '@silk-effect/compiler/Token'
+import type * as WorkspaceInventory from '@silk-effect/compiler/WorkspaceInventory'
 import * as Documentation from '@silk-effect/documentation/Document'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
@@ -164,6 +167,89 @@ const overlaps = (left: Range, right: Range): boolean =>
     (right.end.line === left.start.line && right.end.character < left.start.character)
   )
 
+/** Serializable data carried by a revalidatable auto-import action. */
+export interface AutoImportData {
+  readonly _tag: 'SilkAutoImport'
+  readonly uri: string
+  readonly version: number
+  readonly module: string
+  readonly target: { readonly start: number; readonly end: number }
+  readonly candidate: AutoImport.CandidateKey
+}
+
+const autoImportData = (
+  self: Document,
+  target: SourceSpan.SourceSpan,
+  candidate: AutoImport.CandidateKey,
+): AutoImportData =>
+  Object.freeze({
+    _tag: 'SilkAutoImport',
+    uri: self.uri,
+    version: self.version,
+    module: self.module,
+    target: Object.freeze({ start: target.start, end: target.end }),
+    candidate,
+  })
+
+const record = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null
+
+/** Validates untrusted protocol data before it is used for exact-version reacquisition. */
+export const parseAutoImportData = (value: unknown): AutoImportData | undefined => {
+  if (!record(value) || value._tag !== 'SilkAutoImport') return undefined
+  const target = value.target
+  const candidate = value.candidate
+  if (
+    typeof value.uri !== 'string' ||
+    typeof value.version !== 'number' ||
+    typeof value.module !== 'string' ||
+    !record(target) ||
+    typeof target.start !== 'number' ||
+    typeof target.end !== 'number' ||
+    !record(candidate) ||
+    candidate._tag !== 'AutoImportCandidateKey' ||
+    typeof candidate.module !== 'string' ||
+    typeof candidate.spelling !== 'string' ||
+    typeof candidate.ordinal !== 'number' ||
+    !['Function', 'Constant', 'Struct', 'Service', 'Interface'].includes(
+      typeof candidate.declarationKind === 'string' ? candidate.declarationKind : '',
+    )
+  )
+    return undefined
+  return value as unknown as AutoImportData
+}
+
+const workspaceEdit = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  plan: SourceAction.ChangePlan,
+  uriOf: (module: string) => string | undefined,
+): WorkspaceEdit | undefined => {
+  const indexOf = lineIndexes(self, snapshot)
+  const changes: Record<string, Array<TextEdit>> = {}
+  for (const [module, edits] of plan.changes) {
+    const uri = module === self.module ? self.uri : uriOf(module)
+    const index = indexOf(module)
+    if (uri === undefined || index === undefined) return undefined
+    changes[uri] = edits.map((edit) => ({
+      range: LineIndex.rangeOf(index, edit.span),
+      newText: edit.replacement,
+    }))
+  }
+  return { changes }
+}
+
+const diagnosticPlan = (
+  source: SourceFile.SourceFile,
+  edits: ReadonlyArray<Diagnostic.Edit>,
+): SourceAction.ChangePlan | undefined =>
+  Option.getOrUndefined(
+    SourceAction.changePlan({
+      preconditions: [SourceAction.precondition(source)],
+      changes: [[source.id, edits.map((edit) => SourceAction.edit(edit.span, edit.replacement))]],
+    }),
+  )
+
 /**
  * Offers each machine-applicable edit of the diagnostics touching one range as a quick fix.
  *
@@ -177,26 +263,85 @@ export const codeActions = (
   snapshot: Analysis.FrontendSnapshot,
   range: Range,
   uriOf: (module: string) => string | undefined,
+  inventory?: WorkspaceInventory.WorkspaceInventory,
 ): ReadonlyArray<CodeAction> => {
   // `diagnostics` maps the same `owned` list one-to-one, so the two stay index-aligned.
   const published = diagnostics(self, snapshot, uriOf)
+  const sourceFile = Analysis.sources(snapshot).get(self.module)
   return owned(self, snapshot).flatMap((diagnostic, order) => {
     const title = correctionTitles[diagnostic.code]
     const source = published[order]
-    if (title === undefined || source === undefined || !overlaps(source.range, range)) return []
-    return (diagnostic.edits ?? []).map((edit) => ({
-      title,
-      kind: CodeActionKind.QuickFix,
-      diagnostics: [source],
-      edit: {
-        changes: {
-          [self.uri]: [
-            { range: LineIndex.rangeOf(self.index, edit.span), newText: edit.replacement },
-          ],
-        },
-      },
-    }))
+    if (source === undefined || !overlaps(source.range, range)) return []
+    const replacements =
+      title === undefined || sourceFile === undefined
+        ? []
+        : [diagnosticPlan(sourceFile, diagnostic.edits ?? [])].flatMap(
+            (plan): ReadonlyArray<CodeAction> => {
+              if (plan === undefined) return []
+              const edit = workspaceEdit(self, snapshot, plan, uriOf)
+              return edit === undefined
+                ? []
+                : [{ title, kind: CodeActionKind.QuickFix, diagnostics: [source], edit }]
+            },
+          )
+    if (inventory === undefined) return replacements
+    const imports = Analysis.autoImportsAt(snapshot, inventory, self.module, diagnostic.span.start)
+    return [
+      ...replacements,
+      ...imports.flatMap((action): ReadonlyArray<CodeAction> => {
+        const plan = Option.getOrUndefined(
+          Analysis.resolveAutoImport(
+            snapshot,
+            inventory,
+            self.module,
+            action.descriptor.target.start,
+            action.candidate,
+          ),
+        )
+        if (plan === undefined) return []
+        const edit = workspaceEdit(self, snapshot, plan, uriOf)
+        return edit === undefined
+          ? []
+          : [
+              {
+                title: action.descriptor.title,
+                kind: CodeActionKind.QuickFix,
+                diagnostics: [source],
+                data: autoImportData(self, action.descriptor.target, action.candidate),
+                edit,
+              },
+            ]
+      }),
+    ]
   })
+}
+
+export const disableCodeAction = (action: CodeAction, reason: string): CodeAction => {
+  const { edit: discarded, ...withoutEdit } = action
+  void discarded
+  return { ...withoutEdit, disabled: { reason } }
+}
+
+/** Revalidates a descriptor into one revision-checked protocol workspace edit. */
+export const resolveCodeAction = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  inventory: WorkspaceInventory.WorkspaceInventory,
+  action: CodeAction,
+  uriOf: (module: string) => string | undefined,
+): CodeAction => {
+  const data = parseAutoImportData(action.data)
+  if (data === undefined || data.uri !== self.uri || data.version !== self.version)
+    return disableCodeAction(action, 'The source revision for this action is no longer available')
+  const plan = Option.getOrUndefined(
+    Analysis.resolveAutoImport(snapshot, inventory, data.module, data.target.start, data.candidate),
+  )
+  if (plan === undefined)
+    return disableCodeAction(action, 'This import is no longer applicable in the accepted revision')
+  const edit = workspaceEdit(self, snapshot, plan, uriOf)
+  return edit === undefined
+    ? disableCodeAction(action, 'The import target could not be mapped to a workspace document')
+    : { ...action, edit }
 }
 
 /** Returns the source-like semantic presentation under one position. */

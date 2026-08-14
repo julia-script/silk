@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect'
 export { AnalysisUnavailable } from './AnalysisUnavailable.js'
 
 import type { AnalysisUnavailable } from './AnalysisUnavailable.js'
+import * as AutoImport from './AutoImport.js'
 import * as Backend from './Backend.js'
 import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as Completion from './Completion.js'
@@ -41,6 +42,7 @@ import type * as Token from './Token.js'
 import * as Type from './Type.js'
 import * as TypeHint from './TypeHint.js'
 import * as WasmBackend from './WasmBackend.js'
+import type * as WorkspaceInventory from './WorkspaceInventory.js'
 
 /**
  * The supported analysis facade. Tooling consumes compiler phases exclusively through this
@@ -246,6 +248,24 @@ export const syntaxOf = (
   self: FrontendSnapshot,
   module: string,
 ): SyntaxFile.SyntaxFile | undefined => self.results.get(module)?.syntax
+
+/** Discovers compiler-owned auto-import actions for one unresolved source occurrence. */
+export const autoImportsAt = (
+  self: FrontendSnapshot,
+  inventory: WorkspaceInventory.WorkspaceInventory,
+  module: string,
+  byteOffset: number,
+): ReadonlyArray<AutoImport.Action> =>
+  AutoImport.discover({ snapshot: self, inventory, module, byteOffset })
+
+/** Revalidates and resolves one auto-import candidate against this exact snapshot. */
+export const resolveAutoImport = (
+  self: FrontendSnapshot,
+  inventory: WorkspaceInventory.WorkspaceInventory,
+  module: string,
+  byteOffset: number,
+  candidate: AutoImport.CandidateKey,
+) => AutoImport.resolve({ snapshot: self, inventory, module, byteOffset, candidate })
 
 /** Returns one module's raw leading `//!` documentation without interpreting Markdown. */
 export const moduleDocumentation = (

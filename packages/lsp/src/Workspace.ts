@@ -13,6 +13,7 @@ import * as Path from 'effect/Path'
 import * as Result from 'effect/Result'
 import * as Document from './Document.js'
 import type * as ProjectSession from './ProjectSession.js'
+import * as WorkspaceCatalog from './WorkspaceCatalog.js'
 
 export interface Identity {
   readonly workspace: string
@@ -145,6 +146,10 @@ export const analyze = Effect.fn('Workspace.analyze')(function* (
 export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
   documents: ReadonlyArray<Document.Document>,
   previous: ReadonlyMap<string, ProjectSession.AnalyzedDocument> = new Map(),
+  invalidation: ProjectSession.AcceptedInvalidation = Object.freeze({
+    dirtyPaths: Object.freeze([]),
+    rediscover: false,
+  }),
 ): Effect.fn.Return<
   ReadonlyMap<string, ProjectSession.AnalyzedDocument>,
   never,
@@ -163,6 +168,16 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
     SourceFile.make(document.module, document.bytes, SourceOrigin.memory(document.uri)),
   )
   const previousProject = previous.values().next().value?.project
+  const previousInventory = previous.values().next().value?.inventory
+  const inventory = yield* WorkspaceCatalog.refresh({
+    sourceRoot: first.sourceRoot,
+    documents,
+    ...(previousInventory === undefined ? {} : { previous: previousInventory }),
+    invalidation: {
+      dirtyPaths: invalidation.dirtyPaths,
+      rediscover: invalidation.rediscover,
+    },
+  })
   const project = yield* (
     previousProject === undefined
       ? ProjectAnalysis.make(roots)
@@ -180,7 +195,12 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
       const snapshot = ProjectAnalysis.view(project, document.module)
       return snapshot === undefined
         ? []
-        : [[document.uri, Object.freeze({ document, project, snapshot, moduleUris })] as const]
+        : [
+            [
+              document.uri,
+              Object.freeze({ document, project, snapshot, moduleUris, inventory }),
+            ] as const,
+          ]
     }),
   )
 })

@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
+import * as WorkspaceInventory from '@silk-effect/compiler/WorkspaceInventory'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
@@ -34,11 +35,15 @@ const analyzed = Effect.fnUntraced(function* (
       : ProjectAnalysis.revise(previousProject, roots)
   ).pipe(Effect.provide(SourceResolver.empty))
   const moduleUris = new Map(documents.map((self) => [self.module, self.uri]))
+  const inventory = WorkspaceInventory.make()
   const entries: Array<readonly [string, ProjectSession.AnalyzedDocument]> = []
   for (const self of documents) {
     const snapshot = ProjectAnalysis.view(project, self.module)
     if (snapshot !== undefined)
-      entries.push([self.uri, Object.freeze({ document: self, project, snapshot, moduleUris })])
+      entries.push([
+        self.uri,
+        Object.freeze({ document: self, project, snapshot, moduleUris, inventory }),
+      ])
   }
   return new Map(entries)
 })
@@ -260,5 +265,55 @@ it.effect('allows independent projects to analyze concurrently', () =>
     yield* Fiber.join(leftFiber)
     yield* Fiber.join(rightFiber)
     assert.strictEqual(maximumActive, 2)
+  }),
+)
+
+it.effect('coalesces structured dirty paths and rediscovery with document priority', () =>
+  Effect.gen(function* () {
+    const accepted: Array<ProjectSession.AcceptedInvalidation> = []
+    const project = ProjectSession.make({
+      workspace: 'project:/workspace/silk.toml',
+      sourceRoot: '/workspace',
+      debounce: 10,
+      analyze: Effect.fnUntraced(function* (documents, previous, invalidation) {
+        accepted.push(invalidation)
+        return yield* analyzed(documents, previous)
+      }),
+      publish: Effect.fnUntraced(function* () {
+        yield* Effect.succeed(undefined)
+      }),
+    })
+    const opened = yield* Effect.forkChild(
+      project.open(document('file:///workspace/Main.silk', 1)),
+      { startImmediately: true },
+    )
+    yield* TestClock.adjust(10)
+    yield* Fiber.join(opened)
+    accepted.length = 0
+
+    const first = yield* Effect.forkChild(
+      project.invalidate({ dirtyPaths: ['/workspace/B.silk'] }),
+      { startImmediately: true },
+    )
+    const second = yield* Effect.forkChild(
+      project.invalidate({
+        priorityUri: 'file:///workspace/Main.silk',
+        dirtyPaths: ['/workspace/A.silk'],
+        rediscover: true,
+      }),
+      { startImmediately: true },
+    )
+    yield* Effect.yieldNow
+    yield* TestClock.adjust(10)
+    yield* Fiber.join(first)
+    yield* Fiber.join(second)
+
+    assert.deepEqual(accepted, [
+      {
+        priorityUri: 'file:///workspace/Main.silk',
+        dirtyPaths: ['/workspace/A.silk', '/workspace/B.silk'],
+        rediscover: true,
+      },
+    ])
   }),
 )

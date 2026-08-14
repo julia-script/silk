@@ -195,21 +195,24 @@ Full-document formatting was rejected because `Formatter.format` correctly refus
 and would rewrite unrelated source. Raw string search was rejected because it cannot distinguish
 comments/literals from import syntax or preserve recovered trees safely.
 
-### 7. Resolve auto-import actions against their originating revision
+### 7. Deliver eager edits and resolve auto-import actions against their originating revision
 
 The server will advertise code-action resolve support. Initial auto-import responses contain a
 descriptor in `CodeAction.data` with document URI/version, target span, selected module, spelling,
-and candidate kind; they do not retain server-side action objects. Resolution reacquires the exact
-document version from `ProjectSession`, repeats applicability for the selected key, and then asks
-`ImportPlan` for the edit.
+and candidate kind; they do not retain server-side action objects. They also contain the eagerly
+constructed edit. Cursor's keyboard-invoked action widget can display a resolvable action without
+ever issuing `codeAction/resolve` when the user accepts it, which otherwise leaves a visible but
+inert auto-import. Clients that resolve the action still reacquire the exact document version from
+`ProjectSession`, repeat applicability for the selected key, and ask `ImportPlan` for a fresh edit.
 
 If that document version is no longer current, resolution returns a disabled/no-edit action rather
 than applying old byte offsets. Existing small diagnostic replacements may remain eager, but they
 are adapted through the same protocol conversion helpers.
 
-Eager construction of every candidate edit was considered. Deferring it avoids repeated syntax
-planning for ambiguous names and establishes the revision-checked path needed by later, more
-expensive source actions.
+Deferring every candidate edit was considered and remains attractive for later, more expensive
+source actions. Auto-import planning is intentionally small and request-local, so eager construction
+is the compatibility boundary for this action family; the descriptor/resolve path remains available
+for revision revalidation without making successful application depend on client resolve behavior.
 
 ### 8. Preserve extension seams without precomputing future features
 

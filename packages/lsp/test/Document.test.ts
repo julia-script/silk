@@ -1,10 +1,14 @@
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as Lexer from '@silk-effect/compiler/Lexer'
+import * as ModuleSummary from '@silk-effect/compiler/ModuleSummary'
+import * as Parser from '@silk-effect/compiler/Parser'
 import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceOrigin from '@silk-effect/compiler/SourceOrigin'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
 import * as Stdlib from '@silk-effect/compiler/Stdlib'
+import * as WorkspaceInventory from '@silk-effect/compiler/WorkspaceInventory'
 import * as TextMate from '@silk-effect/language/TextMate'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -1127,6 +1131,125 @@ it.effect('offers no code action for a diagnostic that carries no edit', () =>
       [],
     )
   }),
+)
+
+const inventoryOf = (
+  modules: ReadonlyArray<ProjectModule>,
+): WorkspaceInventory.WorkspaceInventory =>
+  WorkspaceInventory.make({
+    project: modules.map(({ module, text }) => {
+      const source = SourceFile.make(module, encoder.encode(text))
+      return [module, ModuleSummary.make(Parser.parse(Lexer.lex(source)))] as const
+    }),
+  })
+
+it.effect('discovers ambiguous auto-import descriptors and resolves the selected new import', () =>
+  Effect.gen(function* () {
+    const source = 'pub fn main() -> i32 { return calculate() }'
+    const modules = [
+      { module: 'main', text: source },
+      { module: 'alpha', text: 'pub fn calculate() -> i32 { return 1 }' },
+      { module: 'beta', text: 'pub fn calculate() -> i32 { return 2 }' },
+      { module: 'private', text: 'fn calculate() -> i32 { return 3 }' },
+    ]
+    const { document, snapshot } = yield* open(source)
+    const inventory = inventoryOf(modules)
+    const actions = Document.codeActions(
+      document,
+      snapshot,
+      wholeDocument(source),
+      uriOfModule,
+      inventory,
+    )
+
+    assert.deepEqual(
+      actions.map((action) => action.title),
+      ['Import calculate from alpha', 'Import calculate from beta'],
+    )
+    assert.deepEqual(actions[0]?.edit?.changes?.[document.uri], [
+      {
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+        newText: 'import alpha { calculate }\n',
+      },
+    ])
+    const selected = actions[0]
+    assert.isDefined(selected)
+    if (selected === undefined) return
+    const resolved = Document.resolveCodeAction(
+      document,
+      snapshot,
+      inventory,
+      selected,
+      uriOfModule,
+    )
+    assert.deepEqual(resolved.edit?.changes?.[document.uri], [
+      {
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+        newText: 'import alpha { calculate }\n',
+      },
+    ])
+
+    const stale = Document.make({ ...document, version: 2 })
+    assert.include(
+      Document.resolveCodeAction(stale, snapshot, inventory, selected, uriOfModule).disabled
+        ?.reason ?? '',
+      'revision',
+    )
+  }),
+)
+
+it.effect(
+  'extends an existing import with UTF-16 ranges and filters actions outside the request',
+  () =>
+    Effect.gen(function* () {
+      const library = `pub fn existing() -> i32 { return 1 }
+pub fn calculate() -> i32 { return 2 }`
+      const source = `// π🙂
+import library { existing }
+pub fn main() -> i32 { return calculate() }`
+      const modules = [
+        { module: 'library', text: library },
+        { module: 'main', text: source },
+      ]
+      const { document, snapshot } = yield* openProject(modules, 'main')
+      const inventory = inventoryOf(modules)
+      assert.deepEqual(
+        Document.codeActions(
+          document,
+          snapshot,
+          { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } },
+          uriOfModule,
+          inventory,
+        ),
+        [],
+      )
+      const actions = Document.codeActions(
+        document,
+        snapshot,
+        wholeDocument(source),
+        uriOfModule,
+        inventory,
+      )
+      const action = actions.find((candidate) => candidate.title.includes('calculate'))
+      assert.isDefined(action)
+      if (action === undefined) return
+      const resolved = Document.resolveCodeAction(
+        document,
+        snapshot,
+        inventory,
+        action,
+        uriOfModule,
+      )
+      assert.deepEqual(resolved.edit?.changes?.[document.uri], [
+        {
+          range: {
+            start: { line: 1, character: 'import library { existing'.length },
+            end: { line: 1, character: 'import library { existing'.length },
+          },
+          newText: ', calculate',
+        },
+      ])
+    }),
 )
 
 const twoAliases = `import geometry as geometry

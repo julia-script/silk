@@ -1,4 +1,5 @@
 import type * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
+import type * as WorkspaceInventory from '@silk-effect/compiler/WorkspaceInventory'
 import * as Deferred from 'effect/Deferred'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
@@ -11,6 +12,20 @@ export interface AnalyzedDocument {
   readonly project: ProjectAnalysis.ProjectAnalysis
   readonly snapshot: ProjectAnalysis.View
   readonly moduleUris: ReadonlyMap<string, string>
+  readonly inventory: WorkspaceInventory.WorkspaceInventory
+}
+
+/** Document priority and filesystem hints coalesced into one project revision. */
+export interface Invalidation {
+  readonly priorityUri?: string
+  readonly dirtyPaths?: ReadonlyArray<string>
+  readonly rediscover?: boolean
+}
+
+export interface AcceptedInvalidation {
+  readonly priorityUri?: string
+  readonly dirtyPaths: ReadonlyArray<string>
+  readonly rediscover: boolean
 }
 
 export interface Options<R> {
@@ -20,6 +35,7 @@ export interface Options<R> {
   readonly analyze: (
     documents: ReadonlyArray<Document.Document>,
     previous: ReadonlyMap<string, AnalyzedDocument>,
+    invalidation: AcceptedInvalidation,
   ) => Effect.Effect<ReadonlyMap<string, AnalyzedDocument>, never, R>
   readonly publish: (session: AnalyzedDocument) => Effect.Effect<void, never, R>
 }
@@ -32,7 +48,7 @@ interface Waiter {
 
 interface Pending {
   readonly revision: number
-  readonly priority?: string
+  readonly invalidation: AcceptedInvalidation
   readonly documents: ReadonlyArray<Document.Document>
 }
 
@@ -44,7 +60,7 @@ export interface ProjectSession<R> {
   readonly documents: () => ReadonlyArray<Document.Document>
   readonly open: (document: Document.Document) => Effect.Effect<void, never, R>
   readonly close: (uri: string) => Effect.Effect<void, never, R>
-  readonly invalidate: (priority?: string) => Effect.Effect<void, never, R>
+  readonly invalidate: (invalidation?: Invalidation) => Effect.Effect<void, never, R>
   readonly acquire: (uri: string, version: number) => Effect.Effect<Option.Option<AnalyzedDocument>>
   readonly shutdown: () => Effect.Effect<void>
 }
@@ -62,10 +78,30 @@ export const make = <R>(options: Options<R>): ProjectSession<R> => {
   let idle: Deferred.Deferred<void> | undefined
   const debounce = options.debounce ?? Duration.millis(25)
 
-  const freezePending = (priority?: string): Pending =>
+  const emptyInvalidation = (): AcceptedInvalidation =>
+    Object.freeze({ dirtyPaths: Object.freeze([]), rediscover: false })
+  let accumulated = emptyInvalidation()
+
+  const mergeInvalidation = (
+    left: AcceptedInvalidation,
+    right: Invalidation,
+  ): AcceptedInvalidation =>
+    Object.freeze({
+      ...(right.priorityUri === undefined
+        ? left.priorityUri === undefined
+          ? {}
+          : { priorityUri: left.priorityUri }
+        : { priorityUri: right.priorityUri }),
+      dirtyPaths: Object.freeze(
+        [...new Set([...left.dirtyPaths, ...(right.dirtyPaths ?? [])])].sort(),
+      ),
+      rediscover: left.rediscover || right.rediscover === true,
+    })
+
+  const freezePending = (): Pending =>
     Object.freeze({
       revision,
-      ...(priority === undefined ? {} : { priority }),
+      invalidation: accumulated,
       documents: Object.freeze([...synchronized.values()]),
     })
 
@@ -85,19 +121,20 @@ export const make = <R>(options: Options<R>): ProjectSession<R> => {
 
   const analyzePending = Effect.fnUntraced(function* (work: Pending) {
     const ordered =
-      work.priority === undefined
+      work.invalidation.priorityUri === undefined
         ? work.documents
         : Object.freeze([
-            ...work.documents.filter((document) => document.uri === work.priority),
-            ...work.documents.filter((document) => document.uri !== work.priority),
+            ...work.documents.filter((document) => document.uri === work.invalidation.priorityUri),
+            ...work.documents.filter((document) => document.uri !== work.invalidation.priorityUri),
           ])
     const analyzed =
       ordered.length === 0
         ? new Map<string, AnalyzedDocument>()
-        : yield* options.analyze(ordered, new Map(committed))
+        : yield* options.analyze(ordered, new Map(committed), work.invalidation)
     if (closed || work.revision !== revision) return
     committed = new Map(analyzed)
     committedRevision = work.revision
+    accumulated = emptyInvalidation()
     for (const session of committed.values()) yield* options.publish(session)
     yield* completeWaiters((waiter) => {
       const document = synchronized.get(waiter.uri)
@@ -122,10 +159,11 @@ export const make = <R>(options: Options<R>): ProjectSession<R> => {
     if (completedIdle !== undefined) yield* Deferred.succeed(completedIdle, undefined)
   })
 
-  const schedule = Effect.fnUntraced(function* (priority?: string) {
+  const schedule = Effect.fnUntraced(function* (invalidation: Invalidation = {}) {
     if (closed) return
     revision += 1
-    pending = freezePending(priority)
+    accumulated = mergeInvalidation(accumulated, invalidation)
+    pending = freezePending()
     if (active) return
     active = true
     yield* worker()
@@ -141,18 +179,20 @@ export const make = <R>(options: Options<R>): ProjectSession<R> => {
           : undefined,
       )
     }
-    yield* schedule(document.uri)
+    yield* schedule({ priorityUri: document.uri })
   })
 
   const close = Effect.fn('ProjectSession.close')(function* (uri: string) {
     if (!synchronized.delete(uri)) return
     committed.delete(uri)
     yield* completeWaiters((waiter) => (waiter.uri === uri ? Option.none() : undefined))
-    yield* schedule()
+    yield* schedule({ rediscover: true })
   })
 
-  const invalidate = Effect.fn('ProjectSession.invalidate')(function* (priority?: string) {
-    yield* schedule(priority)
+  const invalidate = Effect.fn('ProjectSession.invalidate')(function* (
+    invalidation: Invalidation = {},
+  ) {
+    yield* schedule(invalidation)
   })
 
   const acquire = Effect.fn('ProjectSession.acquire')(function* (uri: string, version: number) {
