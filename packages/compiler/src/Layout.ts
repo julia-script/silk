@@ -904,6 +904,14 @@ export const catalog = (
       completed.set(key, result)
       return result
     }
+    if (Type.isRepresented(type)) {
+      const result = unavailable(type, Object.freeze(Type.nominals(type)), {
+        _tag: 'InvalidDeclaration',
+        detail: 'represented executable values remain unavailable to layout',
+      })
+      completed.set(key, result)
+      return result
+    }
     if (Type.isFailureProjection(type)) {
       const result = unavailable(type, Object.freeze([]), {
         _tag: 'InvalidDeclaration',
@@ -1757,6 +1765,11 @@ const shapeNode = (
   if (Type.isCallable(type)) {
     throw new RangeError(
       `callable ${Type.encode(type)} needs a hidden concrete identity before calling-shape planning`,
+    )
+  }
+  if (Type.isRepresented(type)) {
+    throw new RangeError(
+      `represented executable ${Type.encode(type)} is unavailable to calling-shape planning`,
     )
   }
   const candidate = entries.get(Type.key(type))

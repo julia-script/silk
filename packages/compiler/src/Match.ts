@@ -108,6 +108,12 @@ export const join = (inputs: ReadonlyArray<Type.Type>): Join => {
   if (contributing.every((type) => Type.equals(type, first))) {
     return Object.freeze({ _tag: 'Joined', type: first })
   }
+  for (const [leftOrdinal, left] of contributing.entries()) {
+    for (const right of contributing.slice(leftOrdinal + 1)) {
+      if (Type.firstRepresentationDivergence(left, right) !== undefined)
+        return Object.freeze({ _tag: 'Incompatible', types: Object.freeze([...contributing]) })
+    }
+  }
   const normalized = Type.union(contributing)
   return normalized._tag === 'Normalized'
     ? Object.freeze({ _tag: 'Joined', type: normalized.type })

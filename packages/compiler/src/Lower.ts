@@ -2823,7 +2823,9 @@ function lowerExpressionInner(
       if (expression.operation === 'RawBufferFrom') {
         const [allocation, count] = argumentLocals
         const type = fn.type(expression.type)
-        const raw = Type.isRawBuffer(expression.type) ? expression.type.arguments.at(0) : undefined
+        const raw = Type.isRawBuffer(expression.type)
+          ? Type.typeArgumentAt(expression.type, 0)
+          : undefined
         const element = raw === undefined ? undefined : fn.semantic(raw)
         const elementLayout = element === undefined ? undefined : Layout.entry(fn.layout, element)
         if (
@@ -2923,7 +2925,9 @@ function lowerExpressionInner(
       if (expression.operation === 'RawBufferSlot') {
         const [buffer, index] = argumentLocals
         const type = fn.type(expression.type)
-        const element = Type.isSlot(expression.type) ? expression.type.arguments.at(0) : undefined
+        const element = Type.isSlot(expression.type)
+          ? Type.typeArgumentAt(expression.type, 0)
+          : undefined
         if (
           buffer === undefined ||
           index === undefined ||
@@ -3019,7 +3023,9 @@ function lowerExpressionInner(
         const slotArgument = expression.arguments.at(0)
         const slotType = slotArgument?._tag === 'Unavailable' ? undefined : slotArgument?.type
         const slotElement =
-          slotType !== undefined && Type.isSlot(slotType) ? slotType.arguments.at(0) : undefined
+          slotType !== undefined && Type.isSlot(slotType)
+            ? Type.typeArgumentAt(slotType, 0)
+            : undefined
         const type = fn.type(expression.type)
         if (
           slot === undefined ||
@@ -3082,7 +3088,9 @@ function lowerExpressionInner(
         const slotArgument = expression.arguments.at(0)
         const slotType = slotArgument?._tag === 'Unavailable' ? undefined : slotArgument?.type
         const element =
-          slotType !== undefined && Type.isSlot(slotType) ? slotType.arguments.at(0) : undefined
+          slotType !== undefined && Type.isSlot(slotType)
+            ? Type.typeArgumentAt(slotType, 0)
+            : undefined
         const type = fn.type(expression.type)
         if (
           slot === undefined ||

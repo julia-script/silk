@@ -223,7 +223,7 @@ export const type = (
           })())
     return self.arguments.length === 0
       ? base
-      : `${base}<${self.arguments.map((argument) => type(argument, module, scope)).join(', ')}>`
+      : `${base}<${self.arguments.map((argument) => genericArgument(argument, module, scope)).join(', ')}>`
   }
   if (Type.isParameter(self)) return self.name
   if (Type.isFailureProjection(self)) return `Row<! ${self.parameter.name}>`
@@ -253,6 +253,7 @@ export const type = (
       requirementMembers.length === 0 ? '' : ` ? ${requirementMembers.join(' | ')}`
     return `Effect<${type(self.success, module, scope)}${failures}${requirements}>`
   }
+  if (Type.isRepresented(self)) return type(self.contract, module, scope)
   return self.members.map((member) => type(member, module, scope)).join(' | ')
 }
 
@@ -262,20 +263,26 @@ export const genericArgument = (
   module: string,
   scope?: NameResolution.ModuleScope,
 ): string =>
-  Type.isEffectIdentityArgument(self)
-    ? `effect@${self.identity}`
-    : Type.isCallableIdentityArgument(self)
-      ? `callable@${self.identity}`
-      : Type.isFailureRowArgument(self)
-        ? `! ${self.failures.map((failure) => type(failure, module, scope)).join(' | ') || 'never'}`
-        : Type.isRequirementRowArgument(self)
-          ? `? ${self.requirements
-              .map(
-                (requirement) =>
-                  `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
-              )
-              .join(' | ')}`
-          : type(self, module, scope)
+  Type.isUnavailableGenericArgument(self)
+    ? Type.encodeGenericArgument(self)
+    : Type.isRepresentationParameterArgument(self)
+      ? self.parameter.name
+      : Type.isExactRepresentationArgument(self)
+        ? Type.encodeGenericArgument(self)
+        : Type.isEffectIdentityArgument(self)
+          ? `effect@${self.identity}`
+          : Type.isCallableIdentityArgument(self)
+            ? `callable@${self.identity}`
+            : Type.isFailureRowArgument(self)
+              ? `! ${self.failures.map((failure) => type(failure, module, scope)).join(' | ') || 'never'}`
+              : Type.isRequirementRowArgument(self)
+                ? `? ${self.requirements
+                    .map(
+                      (requirement) =>
+                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+                    )
+                    .join(' | ')}`
+                : type(self, module, scope)
 
 export const binding = (
   self: Elaboration.BindingDeclarationFact,

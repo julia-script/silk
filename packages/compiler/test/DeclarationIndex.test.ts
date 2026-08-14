@@ -974,7 +974,9 @@ pub fn main() -> i32 { return 0 }`,
     assert.strictEqual(conformance?.provider._tag, 'Resolved')
     if (conformance?.provider._tag === 'Resolved' && Type.isNominal(conformance.provider.type)) {
       const argument = conformance.provider.type.arguments.at(0)
-      assert.isTrue(argument !== undefined && Type.isParameter(argument))
+      assert.isTrue(
+        argument !== undefined && Type.isTypeArgument(argument) && Type.isParameter(argument),
+      )
     }
   }),
 )

@@ -1693,6 +1693,7 @@ export const cleanupPlan = (
     })
   }
   if (Type.isCallable(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isRepresented(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   const key = Type.key(type)
   if (seen.has(key)) return Object.freeze({ _tag: 'NoCleanup', type })
   const declaration = DeclarationIndex.byCanonical(index, {

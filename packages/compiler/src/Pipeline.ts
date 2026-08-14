@@ -496,6 +496,7 @@ const instanceViolationDiagnostics = (
     Instances.requirementBindingViolations(discovery, self.index),
     Instances.unlowerableWitnessViolations(discovery, self.index),
     Instances.storedCallableViolations(discovery, self.index),
+    Instances.storedEffectViolations(discovery, self.index),
     Instances.continuationAllocatorViolations(discovery, self.index, self.results),
   )
 
@@ -532,14 +533,14 @@ export const realize = (
           message: 'Target-dependent phases are unavailable for invalid source specialization',
         })
       : undefined
-  // A stored-callable construction (SEM0103) names a program the layout planner cannot serve, so
-  // realization stops at the source diagnostic instead of producing an InvalidMir echo of it.
+  // Storage fences (SEM0103/SEM0107) name programs the layout planner cannot serve, so realization
+  // stops at the source diagnostic instead of producing an InvalidMir echo of it.
   const instanceFenceError =
     specializationError === undefined && Diagnostic.hasInstanceFenceErrors(baseDiagnostics)
       ? new AnalysisUnavailable({
           operation: 'Analysis.realize',
           message:
-            'Target-dependent phases are unavailable while a reachable construction stores a bare callable',
+            'Target-dependent phases are unavailable while a reachable construction stores an unsupported executable representation',
         })
       : undefined
   const realizationError = specializationError ?? instanceFenceError

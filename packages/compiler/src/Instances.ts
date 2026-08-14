@@ -4,6 +4,7 @@ import * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Ownership from './Ownership.js'
+import * as RepresentationField from './RepresentationField.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
@@ -298,6 +299,86 @@ export const unlowerableWitnessViolations = (
  * construction is retained as related provenance. That keeps a stdlib-internal construction such
  * as `Option.some(i32.add(1))` pointing at the user's call rather than into `silk/option`.
  */
+interface StoredRepresentation {
+  readonly path: ReadonlyArray<string>
+  readonly contract: Type.RepresentationBound
+  readonly open: boolean
+}
+
+/** Finds represented storage exclusively through the specialization field-resolution seam. */
+const storedRepresentation = (
+  index: DeclarationIndex.Index,
+  type: Type.Type,
+  kind: 'Callable' | 'Effect',
+  seen: ReadonlySet<string> = new Set(),
+): StoredRepresentation | undefined => {
+  if (Type.isFixedArray(type) || Type.isSlice(type))
+    return storedRepresentation(index, type.element, kind, seen)
+  if (Type.isUnion(type)) {
+    for (const member of type.members) {
+      const found = storedRepresentation(index, member, kind, seen)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return undefined
+  const typeKey = Type.key(type)
+  if (seen.has(typeKey)) return undefined
+  const declaration = DeclarationIndex.byCanonical(index, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (declaration?._tag !== 'StructDeclaration') return undefined
+  const substitution =
+    Type.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      type.arguments,
+    ) ?? new Map()
+  const fieldIndex = RepresentationField.resolveFields(index, [type])
+  const plans = RepresentationField.plansOf(index, type)
+  const next = new Set(seen).add(typeKey)
+  for (const [ordinal, field] of declaration.fields.entries()) {
+    if (field.declaredType._tag !== 'Resolved' || field.name._tag !== 'Present') continue
+    const plan = plans.find((candidate) => candidate.id.ordinal === ordinal)
+    if (plan !== undefined) {
+      const resolution = RepresentationField.lookup(fieldIndex, type, plan.id)
+      if (resolution !== undefined) {
+        const contract =
+          resolution._tag === 'ResolvedRepresentationField'
+            ? resolution.argument.contract
+            : resolution.reason.requiredBound
+        if (
+          (kind === 'Callable' && Type.isCallable(contract)) ||
+          (kind === 'Effect' && Type.isEffect(contract))
+        )
+          return Object.freeze({
+            path: Object.freeze([field.name.spelling]),
+            contract,
+            open: resolution._tag === 'UnavailableRepresentationField',
+          })
+      }
+    }
+    const nested = storedRepresentation(
+      index,
+      Type.substitute(field.declaredType.type, substitution),
+      kind,
+      next,
+    )
+    if (nested !== undefined)
+      return Object.freeze({
+        path: Object.freeze([field.name.spelling, ...nested.path]),
+        contract: nested.contract,
+        open: nested.open,
+      })
+  }
+  return undefined
+}
+
+/**
+ * Rejects reachable constructions that would store a bare or represented callable value inside an
+ * aggregate.
+ */
 export const storedCallableViolations = (
   self: Discovery,
   index: DeclarationIndex.Index,
@@ -318,17 +399,39 @@ export const storedCallableViolations = (
         .flatMap((expression) => {
           if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') return []
           const aggregate = Type.substitute(expression.type, instance.substitution)
-          const found = DeclarationIndex.storedCallable(index, aggregate)
+          const bare = DeclarationIndex.storedCallable(index, aggregate)
+          const represented = storedRepresentation(index, aggregate, 'Callable')
+          const found =
+            bare === undefined
+              ? represented === undefined || !Type.isCallable(represented.contract)
+                ? undefined
+                : Object.freeze({
+                    path: represented.path,
+                    callable: represented.contract,
+                    represented: true,
+                    open: represented.open,
+                  })
+              : Object.freeze({
+                  path: bare.path,
+                  callable: bare.callable,
+                  represented: false,
+                  open: false,
+                })
           if (found === undefined) return []
-          const declared = DeclarationIndex.storedCallable(index, expression.type)
+          const declaredBare = DeclarationIndex.storedCallable(index, expression.type)
+          const declaredRepresented = storedRepresentation(index, expression.type, 'Callable')
           const specializing =
-            declared === undefined ? specializingCalls.get(keyText(instance.key)) : undefined
+            declaredBare === undefined &&
+            (declaredRepresented === undefined || declaredRepresented.open)
+              ? specializingCalls.get(keyText(instance.key))
+              : undefined
           const span = specializing?.span ?? expression.span
           const constructionSpan = expression.span
           const key: StoredCallableViolationKey = {
             aggregate,
             path: found.path,
             callable: found.callable,
+            represented: found.represented,
             span,
             constructionSpan,
           }
@@ -342,6 +445,7 @@ export const storedCallableViolations = (
               Type.encode(found.callable),
               span,
               specializing === undefined ? undefined : expression.span,
+              found.represented,
             ),
           ]
         }),
@@ -362,6 +466,7 @@ interface StoredCallableViolationKey {
   readonly aggregate: Type.Type
   readonly path: ReadonlyArray<string>
   readonly callable: Type.Callable
+  readonly represented: boolean
   readonly span: SourceSpan.SourceSpan
   readonly constructionSpan: SourceSpan.SourceSpan
 }
@@ -374,6 +479,80 @@ const sameStoredCallableViolationKey = (
   left.path.length === right.path.length &&
   left.path.every((part, index) => part === right.path[index]) &&
   Type.equals(left.callable, right.callable) &&
+  left.represented === right.represented &&
+  SourceSpan.equals(left.span, right.span) &&
+  SourceSpan.equals(left.constructionSpan, right.constructionSpan)
+
+/** Rejects reachable nominal constructions that store represented Effect values. */
+export const storedEffectViolations = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<Diagnostic.Diagnostic> => {
+  const specializingCalls = new Map<string, CallInstance>()
+  for (const call of self.calls) {
+    const target = keyText(call.target)
+    const current = specializingCalls.get(target)
+    if (current === undefined || compareCallSites(call, current) < 0)
+      specializingCalls.set(target, call)
+  }
+  const reported: Array<StoredEffectViolationKey> = []
+  return Object.freeze(
+    self.instances.flatMap((instance) =>
+      instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .flatMap((expression) => {
+          if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') return []
+          const aggregate = Type.substitute(expression.type, instance.substitution)
+          const found = storedRepresentation(index, aggregate, 'Effect')
+          if (found === undefined || !Type.isEffect(found.contract)) return []
+          const declared = storedRepresentation(index, expression.type, 'Effect')
+          const specializing =
+            declared === undefined || declared.open
+              ? specializingCalls.get(keyText(instance.key))
+              : undefined
+          const span = specializing?.span ?? expression.span
+          const constructionSpan = expression.span
+          const key: StoredEffectViolationKey = {
+            aggregate,
+            path: found.path,
+            effect: found.contract,
+            span,
+            constructionSpan,
+          }
+          if (reported.some((candidate) => sameStoredEffectViolationKey(candidate, key))) return []
+          reported.push(key)
+          return [
+            Diagnostic.storedRepresentedEffectConstruction(
+              Type.encode(aggregate),
+              found.path.length === 0 ? undefined : found.path.join('.'),
+              Type.encode(found.contract),
+              span,
+              specializing === undefined ? undefined : expression.span,
+            ),
+          ]
+        }),
+    ),
+  )
+}
+
+/** Stable semantic identity of one represented-Effect storage violation. */
+interface StoredEffectViolationKey {
+  readonly aggregate: Type.Type
+  readonly path: ReadonlyArray<string>
+  readonly effect: Type.Effect
+  readonly span: SourceSpan.SourceSpan
+  readonly constructionSpan: SourceSpan.SourceSpan
+}
+
+const sameStoredEffectViolationKey = (
+  left: StoredEffectViolationKey,
+  right: StoredEffectViolationKey,
+): boolean =>
+  Type.equals(left.aggregate, right.aggregate) &&
+  left.path.length === right.path.length &&
+  left.path.every((part, index) => part === right.path[index]) &&
+  Type.equals(left.effect, right.effect) &&
   SourceSpan.equals(left.span, right.span) &&
   SourceSpan.equals(left.constructionSpan, right.constructionSpan)
 
