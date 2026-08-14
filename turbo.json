@@ -1,7 +1,6 @@
 {
   "$schema": "https://turborepo.com/schema.json",
   "globalPassThroughEnv": ["NPM_REGISTRY", "PUBLISHED_PACKAGES"],
-  "concurrency": "15",
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -29,12 +28,14 @@
     },
     "test": {
       "dependsOn": ["build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest.shared.ts"],
       "outputs": []
     },
     "@silk-effect/compiler#test": {
       "dependsOn": ["build", "@silk-effect/documentation#build"],
       "inputs": [
         "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/vitest.shared.ts",
         "$TURBO_ROOT$/packages/language/docs/diagnostics.md",
         "$TURBO_ROOT$/packages/language/docs/stdlib.md"
       ],
