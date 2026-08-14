@@ -482,6 +482,23 @@ export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
   })
 })
 
+/**
+ * Every diagnostic family judged against reachable concrete instances, collected once so that
+ * `realize` and `prepare` cannot drift apart on which checks a specialized program must pass.
+ */
+const instanceViolationDiagnostics = (
+  self: Frontend,
+  discovery: Instances.Discovery,
+): ReadonlyArray<Diagnostic.Diagnostic> =>
+  Diagnostic.merge(
+    Instances.violationDiagnostics(discovery),
+    Instances.copyDropViolations(discovery, self.index),
+    Instances.requirementBindingViolations(discovery, self.index),
+    Instances.unlowerableWitnessViolations(discovery, self.index),
+    Instances.storedCallableViolations(discovery, self.index),
+    Instances.continuationAllocatorViolations(discovery, self.index, self.results),
+  )
+
 /** Derives immutable target/runtime facts from one completed frontend. */
 export const realize = (
   self: Frontend,
@@ -506,11 +523,7 @@ export const realize = (
   )
   const baseDiagnostics = Diagnostic.merge(
     self.diagnostics,
-    Instances.violationDiagnostics(instances),
-    Instances.copyDropViolations(instances, self.index),
-    Instances.requirementBindingViolations(instances, self.index),
-    Instances.unlowerableWitnessViolations(instances, self.index),
-    Instances.continuationAllocatorViolations(instances, self.index, self.results),
+    instanceViolationDiagnostics(self, instances),
   )
   const specializationError =
     specializationInvalid || Diagnostic.hasGenericSpecializationErrors(baseDiagnostics)
@@ -519,6 +532,17 @@ export const realize = (
           message: 'Target-dependent phases are unavailable for invalid source specialization',
         })
       : undefined
+  // A stored-callable construction (SEM0103) names a program the layout planner cannot serve, so
+  // realization stops at the source diagnostic instead of producing an InvalidMir echo of it.
+  const instanceFenceError =
+    specializationError === undefined && Diagnostic.hasInstanceFenceErrors(baseDiagnostics)
+      ? new AnalysisUnavailable({
+          operation: 'Analysis.realize',
+          message:
+            'Target-dependent phases are unavailable while a reachable construction stores a bare callable',
+        })
+      : undefined
+  const realizationError = specializationError ?? instanceFenceError
   const targetLayout = measured(
     report,
     'target-layout',
@@ -526,8 +550,8 @@ export const realize = (
     () => {
       const target = Target.select(targetId)
       const layoutCatalog: Targeted<Layout.Catalog> =
-        specializationError !== undefined
-          ? Object.freeze({ _tag: 'Unavailable', error: specializationError })
+        realizationError !== undefined
+          ? Object.freeze({ _tag: 'Unavailable', error: realizationError })
           : target._tag === 'Resolved'
             ? Object.freeze({
                 _tag: 'Available',
@@ -616,11 +640,7 @@ export const prepare = (
   )
   const diagnostics = Diagnostic.merge(
     self.diagnostics,
-    Instances.violationDiagnostics(discovery),
-    Instances.copyDropViolations(discovery, self.index),
-    Instances.requirementBindingViolations(discovery, self.index),
-    Instances.unlowerableWitnessViolations(discovery, self.index),
-    Instances.continuationAllocatorViolations(discovery, self.index, self.results),
+    instanceViolationDiagnostics(self, discovery),
   )
   if (Diagnostic.hasErrors(diagnostics))
     return Object.freeze({

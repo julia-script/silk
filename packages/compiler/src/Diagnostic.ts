@@ -206,6 +206,8 @@ export const unlowerableBoundWitnessCode = 'SEM0101' as const
 export const analysisOnlyConstructCode = 'SEM0098' as const
 /** Stable code for selecting a suspending provider to allocate continuation storage. */
 export const suspendingContinuationAllocatorCode = 'SEM0102' as const
+/** Stable code for constructing an aggregate that stores a bare callable value. */
+export const storedCallableConstructionCode = 'SEM0103' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -342,6 +344,7 @@ export type Code =
   | typeof typeArgumentConflictCode
   | typeof unlowerableBoundWitnessCode
   | typeof suspendingContinuationAllocatorCode
+  | typeof storedCallableConstructionCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -451,6 +454,12 @@ export type Reason =
       readonly _tag: 'SuspendingContinuationAllocator'
       readonly provider: string
       readonly implementation: string
+    }
+  | {
+      readonly _tag: 'StoredCallableConstruction'
+      readonly aggregate: string
+      readonly field?: string
+      readonly callable: string
     }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
@@ -780,6 +789,17 @@ export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagno
       diagnostic.code === suspendingContinuationAllocatorCode ||
       diagnostic.code === polymorphicRecursionCode,
   )
+
+/**
+ * Tests whether a reachable-instance fence diagnostic denies target realization.
+ *
+ * A stored-callable construction (#184) is exactly a program the layout planner cannot serve: the
+ * violating aggregates would receive unavailable layout entries and MIR validation would fail with
+ * `MissingTypeLayout`/`InvalidAggregateOperation`. Realization stops here so the source diagnostic
+ * is the only reported failure, instead of being followed by an `InvalidMir` echo of itself.
+ */
+export const hasInstanceFenceErrors = (diagnostics: ReadonlyArray<Diagnostic>): boolean =>
+  diagnostics.some((diagnostic) => diagnostic.code === storedCallableConstructionCode)
 
 /** Derives the identity of one diagnostic given its ordinal among equals. */
 export const identity = (self: Diagnostic, ordinal = 0): Identity =>
@@ -1651,6 +1671,51 @@ export const suspendingContinuationAllocator = (
     }),
     span,
   })
+
+/**
+ * Rejects a reachable construction that would store a bare callable value inside an aggregate.
+ *
+ * A direct callable value works because the compiler still holds its hidden concrete identity; an
+ * aggregate type such as `Parser` carries only the declared signature, so layout planning cannot
+ * size the callable's environment (#184). Until nominal values can carry that identity — or stored
+ * callables get a uniform runtime representation — the construction is reported here, at the source
+ * site, instead of surfacing later as an `InvalidMir` failure with no user-facing diagnostic.
+ *
+ * When the aggregate stores a callable only because a generic specialization chose one — the
+ * declared field type is a bare type parameter — the primary span is the specializing call site,
+ * because that is where the concrete callable argument was written, and the generic body's
+ * construction is retained as `constructedAt` related provenance.
+ */
+export const storedCallableConstruction = (
+  aggregate: string,
+  field: string | undefined,
+  callable: string,
+  span: SourceSpan.SourceSpan,
+  constructedAt?: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const site = field === undefined ? 'its element' : `field ${field}`
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: storedCallableConstructionCode,
+    severity: 'error',
+    message: `Cannot construct ${aggregate}: ${site} would store the callable ${callable}, whose environment layout depends on a hidden concrete identity that ${aggregate} does not carry`,
+    reason: Object.freeze({
+      _tag: 'StoredCallableConstruction',
+      aggregate,
+      ...(field === undefined ? {} : { field }),
+      callable,
+    }),
+    span,
+    ...(constructedAt === undefined
+      ? {}
+      : {
+          relatedSpans: Object.freeze([
+            Object.freeze({ label: 'constructed here', span: constructedAt }),
+          ]),
+        }),
+  })
+}
 
 export const invalidEffectHandler = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({

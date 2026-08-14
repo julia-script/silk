@@ -4,6 +4,7 @@ import * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Ownership from './Ownership.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 /**
@@ -275,6 +276,106 @@ export const unlowerableWitnessViolations = (
         }),
     ),
   )
+
+/**
+ * Rejects reachable constructions that would store a bare callable value inside an aggregate.
+ *
+ * A direct callable value keeps its hidden concrete identity beside its structural type, so
+ * higher-order calls monomorphize; a `Construct` or `ArrayConstruct` result carries only the
+ * declared type, and nominal layout planning then meets a bare `fn(...) -> ...` field it refuses
+ * to size (#184). Lowering has no diagnostic channel and the program would otherwise pass a clean
+ * frontend and die in MIR validation, so the check runs here, where each instance's substitution
+ * is concrete and diagnostics are already reported.
+ *
+ * Scoped to reachable instances on purpose: a callable-bearing struct that is only declared, or
+ * only constructed in unreachable code, compiles and runs today and stays accepted.
+ *
+ * Provenance follows where the callable was written. A construction whose declared type already
+ * stores a callable — `Parser<A> { decode: fn(i32) -> A }` — names the fault itself, so its own
+ * span is primary. One that stores a callable only after substitution — `Holder<T> { value: T }`
+ * specialized at a callable — was decided at the call that chose the type arguments, so the
+ * earliest specializing call site (by source ID, then position) is primary and the generic body's
+ * construction is retained as related provenance. That keeps a stdlib-internal construction such
+ * as `Option.some(i32.add(1))` pointing at the user's call rather than into `silk/option`.
+ */
+export const storedCallableViolations = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<Diagnostic.Diagnostic> => {
+  const specializingCalls = new Map<string, CallInstance>()
+  for (const call of self.calls) {
+    const target = keyText(call.target)
+    const current = specializingCalls.get(target)
+    if (current === undefined || compareCallSites(call, current) < 0)
+      specializingCalls.set(target, call)
+  }
+  const reported: Array<StoredCallableViolationKey> = []
+  return Object.freeze(
+    self.instances.flatMap((instance) =>
+      instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .flatMap((expression) => {
+          if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') return []
+          const aggregate = Type.substitute(expression.type, instance.substitution)
+          const found = DeclarationIndex.storedCallable(index, aggregate)
+          if (found === undefined) return []
+          const declared = DeclarationIndex.storedCallable(index, expression.type)
+          const specializing =
+            declared === undefined ? specializingCalls.get(keyText(instance.key)) : undefined
+          const span = specializing?.span ?? expression.span
+          const constructionSpan = expression.span
+          const key: StoredCallableViolationKey = {
+            aggregate,
+            path: found.path,
+            callable: found.callable,
+            span,
+            constructionSpan,
+          }
+          if (reported.some((candidate) => sameStoredCallableViolationKey(candidate, key)))
+            return []
+          reported.push(key)
+          return [
+            Diagnostic.storedCallableConstruction(
+              Type.encode(aggregate),
+              found.path.length === 0 ? undefined : found.path.join('.'),
+              Type.encode(found.callable),
+              span,
+              specializing === undefined ? undefined : expression.span,
+            ),
+          ]
+        }),
+    ),
+  )
+}
+
+/** Orders call sites by source ID, then position, for a deterministic primary origin. */
+const compareCallSites = (left: CallInstance, right: CallInstance): number =>
+  left.span.sourceId === right.span.sourceId
+    ? left.span.start - right.span.start || left.span.end - right.span.end
+    : left.span.sourceId < right.span.sourceId
+      ? -1
+      : 1
+
+/** Stable semantic identity of one stored-callable violation before presentation encoding. */
+interface StoredCallableViolationKey {
+  readonly aggregate: Type.Type
+  readonly path: ReadonlyArray<string>
+  readonly callable: Type.Callable
+  readonly span: SourceSpan.SourceSpan
+  readonly constructionSpan: SourceSpan.SourceSpan
+}
+
+const sameStoredCallableViolationKey = (
+  left: StoredCallableViolationKey,
+  right: StoredCallableViolationKey,
+): boolean =>
+  Type.equals(left.aggregate, right.aggregate) &&
+  left.path.length === right.path.length &&
+  left.path.every((part, index) => part === right.path[index]) &&
+  Type.equals(left.callable, right.callable) &&
+  SourceSpan.equals(left.span, right.span) &&
+  SourceSpan.equals(left.constructionSpan, right.constructionSpan)
 
 /** Produces semantic diagnostics for every finite-discovery violation. */
 export const violationDiagnostics = (self: Discovery): ReadonlyArray<Diagnostic.Diagnostic> =>

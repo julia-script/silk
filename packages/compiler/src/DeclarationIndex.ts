@@ -4520,3 +4520,62 @@ export const containsLexicalBorrow = (
       containsLexicalBorrow(self, Type.substitute(field.declaredType.type, substitution), next),
   )
 }
+
+/** One stored bare-callable occurrence that denies an aggregate type a target layout. */
+export interface StoredCallable {
+  /** Field names from the aggregate down to the callable-typed position; empty for elements. */
+  readonly path: ReadonlyArray<string>
+  readonly callable: Type.Callable
+}
+
+/**
+ * Finds the first stored position at which a concrete type keeps a bare callable value.
+ *
+ * The walk mirrors what nominal layout planning can actually see: struct fields after
+ * substitution, fixed-array and slice elements, and union members. It deliberately does not
+ * descend through references (their layout is an address regardless of the target), intrinsic
+ * nominals (their layouts never depend on their type arguments), or Effect types (their hidden
+ * environments plan callables from concrete identities). A position this finds is exactly one
+ * `Layout.layoutType` would refuse with `callable environment layout is planned from its hidden
+ * concrete identity`, so a construction of the enclosing aggregate cannot receive a layout.
+ */
+export const storedCallable = (
+  self: Index,
+  type: Type.Type,
+  seen: ReadonlySet<string> = new Set(),
+): StoredCallable | undefined => {
+  if (Type.isCallable(type)) return Object.freeze({ path: Object.freeze([]), callable: type })
+  if (Type.isFixedArray(type) || Type.isSlice(type)) return storedCallable(self, type.element, seen)
+  if (Type.isUnion(type)) {
+    for (const member of type.members) {
+      const found = storedCallable(self, member, seen)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return undefined
+  const key = Type.key(type)
+  if (seen.has(key)) return undefined
+  const declaration = byCanonical(self, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (declaration?._tag !== 'StructDeclaration') return undefined
+  const substitution =
+    Type.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      type.arguments,
+    ) ?? new Map()
+  const next = new Set(seen).add(key)
+  for (const field of declaration.fields) {
+    if (field.declaredType._tag !== 'Resolved' || field.name._tag !== 'Present') continue
+    const found = storedCallable(self, Type.substitute(field.declaredType.type, substitution), next)
+    if (found !== undefined)
+      return Object.freeze({
+        path: Object.freeze([field.name.spelling, ...found.path]),
+        callable: found.callable,
+      })
+  }
+  return undefined
+}
