@@ -8,20 +8,20 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "build": "turbo run build",
+    "build": "node scripts/turbo.mjs run build",
     "changeset": "changeset",
-    "check": "biome check . && turbo run build && turbo run typecheck test && pnpm test:scripts",
+    "check": "biome check . && node scripts/turbo.mjs run build && node scripts/turbo.mjs run typecheck test && pnpm test:scripts",
     "check:write": "biome check --write .",
-    "dev": "turbo run dev",
+    "dev": "node scripts/turbo.mjs run dev --concurrency=15",
     "format": "biome format --write .",
     "prototype:bootstrap-syntax": "node .scratch/bootstrap-language/prototype-syntax/tui.mjs",
     "release:candidate": "pnpm build && vitest run release-candidate/validate.test.ts --exclude '.claude/**'",
     "release:publish": "changeset publish",
     "release:publish:ci": "node .github/scripts/publish-with-oidc-guard.mjs",
     "release:version": "changeset version",
-    "test": "turbo run test",
-    "test:scripts": "node --test \".github/scripts/*.test.mjs\"",
-    "typecheck": "turbo run typecheck"
+    "test": "node scripts/turbo.mjs run test",
+    "test:scripts": "node --test \".github/scripts/*.test.mjs\" \"scripts/*.test.mjs\"",
+    "typecheck": "node scripts/turbo.mjs run typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4",

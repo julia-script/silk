@@ -1,12 +1,10 @@
-import { defineConfig } from 'vitest/config'
+import { defineSilkConfig } from '../../vitest.shared.js'
 import * as Timeouts from './test/timeouts.js'
 
-export default defineConfig({
+export default defineSilkConfig({
   test: {
-    // Tests in this package shell out to Clang to compile and link real executables, which costs
-    // far more than Vitest's 5 s default on a loaded shared runner. Raising the package default
-    // keeps a newly added build test from silently inheriting a budget below the cost of the
-    // operation it exercises, which is how #147 reached `main`.
+    // Above the workspace floor, and measured rather than felt: tests in this package shell out to
+    // Clang to compile and link real executables. See the derivation in ./test/timeouts.ts.
     testTimeout: Timeouts.nativeBuild,
     hookTimeout: Timeouts.nativeBuild,
   },
