@@ -34,6 +34,11 @@ const exactCallable = (module: string, name = 'decode') =>
     Type.callable(['i32'], 'i32'),
   )
 
+const exactEffect = (identity: string) => {
+  const contract = Type.effect('i32', [])
+  return Type.exactRepresentationArgument(Type.effectIdentityArgument(identity), contract)
+}
+
 it.effect('keeps field and specialization keys stable across rename and span movement', () =>
   Effect.gen(function* () {
     const module = 'representation-field/stable'
@@ -135,6 +140,89 @@ struct Outer<F: fn(i32) -> i32> { first: Inner<F> second: Inner<F> }`,
         ? undefined
         : RepresentationField.lookup(resolutions, inner, innerPlan.id)?._tag,
       'ResolvedRepresentationField',
+    )
+  }),
+)
+
+it.effect('resolves every represented use forwarded through one nested physical field', () =>
+  Effect.gen(function* () {
+    const module = 'representation-field/nested-multiple'
+    const index = yield* declarations(
+      module,
+      `struct Inner<F: fn(i32) -> i32, G: Effect<i32>> { callable: F deferred: G }
+struct Outer<F: fn(i32) -> i32, G: Effect<i32>> { inner: Inner<F, G> }`,
+    )
+    const callable = exactCallable(module, 'decode')
+    const effect = exactEffect(`${module}.effect`)
+    const instance = Type.nominal(module, 'Outer', [callable, effect])
+    const plans = RepresentationField.plansOf(index, instance)
+    const resolutions = RepresentationField.resolveFields(index, [instance])
+
+    assert.deepEqual(
+      plans.map((plan) => ({
+        field: plan.id.ordinal,
+        use: plan.id.useOrdinal,
+        bound: plan.requiredBound._tag,
+      })),
+      [
+        { field: 0, use: 0, bound: 'CallableType' },
+        { field: 0, use: 1, bound: 'EffectType' },
+      ],
+    )
+    assert.strictEqual(new Set(plans.map((plan) => RepresentationField.idKey(plan.id))).size, 2)
+    assert.deepEqual(
+      plans.map((plan) => RepresentationField.lookup(resolutions, instance, plan.id)?._tag),
+      ['ResolvedRepresentationField', 'ResolvedRepresentationField'],
+    )
+
+    const open = Type.nominal(
+      module,
+      'Outer',
+      plans.map((plan) => Type.representationParameterArgument(plan.parameter)),
+    )
+    const unavailable = RepresentationField.resolveFields(index, [open])
+    assert.deepEqual(
+      plans.map((plan) => {
+        const resolution = RepresentationField.lookup(unavailable, open, plan.id)
+        return resolution?._tag === 'UnavailableRepresentationField'
+          ? resolution.reason._tag
+          : resolution?._tag
+      }),
+      ['OpenRepresentationArgument', 'OpenRepresentationArgument'],
+    )
+  }),
+)
+
+it.effect('assigns deterministic use ordinals to every represented union member', () =>
+  Effect.gen(function* () {
+    const module = 'representation-field/union-multiple'
+    const index = yield* declarations(
+      module,
+      `struct Left<F: fn(i32) -> i32> { operation: F }
+struct Right<G: fn(i32) -> i32> { operation: G }
+struct Choice<F: fn(i32) -> i32, G: fn(i32) -> i32> { operation: Left<F> | Right<G> }`,
+    )
+    const first = exactCallable(module, 'first')
+    const second = exactCallable(module, 'second')
+    const instance = Type.nominal(module, 'Choice', [first, second])
+    const plans = RepresentationField.plansOf(index, instance)
+    const resolutions = RepresentationField.resolveFields(index, [instance])
+
+    assert.deepEqual(
+      plans.map((plan) => [plan.id.ordinal, plan.id.useOrdinal]),
+      [
+        [0, 0],
+        [0, 1],
+      ],
+    )
+    assert.deepEqual(
+      plans.map((plan) => {
+        const resolution = RepresentationField.lookup(resolutions, instance, plan.id)
+        return resolution?._tag === 'ResolvedRepresentationField'
+          ? Type.genericArgumentKey(resolution.argument)
+          : resolution?._tag
+      }),
+      [Type.genericArgumentKey(first), Type.genericArgumentKey(second)],
     )
   }),
 )

@@ -145,16 +145,6 @@ export interface Module {
   readonly executions: ReadonlyArray<Execution>
 }
 
-const runnerId = (
-  owner: Instances.InstanceKey,
-  site: Hir.EffectSiteId,
-): DeclarationIndex.CanonicalId =>
-  Object.freeze({
-    _tag: 'CanonicalDeclarationId',
-    module: owner.declaration.module,
-    name: `${owner.declaration.name}$effect$${site.ordinal}`,
-  })
-
 const executionIdentity = (key: ExecutionKey): string => key.identity
 
 const executionInstance = (key: ExecutionKey): Instances.InstanceKey =>
@@ -406,7 +396,7 @@ const runnerOf = (expression: Hir.Expression, context: BuildContext): Runner => 
     owner: environment.instance,
     site: environment.site,
     identity,
-    runner: runnerId(environment.instance, environment.site),
+    runner: Hir.effectRunnerId(environment.instance.declaration, environment.site),
   })
   const providedIdentity =
     providers.length === 0
@@ -731,7 +721,7 @@ export const build = (
         owner: instance.key,
         site: expression.site,
         identity,
-        runner: runnerId(instance.key, expression.site),
+        runner: Hir.effectRunnerId(instance.key.declaration, expression.site),
       })
       const runnerClassification = classificationOfEffect(discovery, identity)
       const runnerContext: BuildContext = {

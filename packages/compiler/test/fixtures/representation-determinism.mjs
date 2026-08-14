@@ -9,6 +9,13 @@ const validSource = `struct Parser<A, F: fn(A) -> A> { parse: F }
 struct Wrapper<A, F: fn(A) -> A> { first: Parser<A, F> second: Parser<A, F> }
 struct Deferred<F: Effect<i32>> { operation: F }
 struct EffectWrapper<F: Effect<i32>> { first: Deferred<F> second: Deferred<F> }
+struct CallableLeaf<F: fn(i32) -> i32> { operation: F }
+struct EffectLeaf<G: Effect<i32>> { operation: G }
+struct MultipleInner<F: fn(i32) -> i32, G: Effect<i32>> { callable: F deferred: G }
+struct MultipleOuter<F: fn(i32) -> i32, G: Effect<i32>> { inner: MultipleInner<F, G> }
+struct MultipleUnion<F: fn(i32) -> i32, G: Effect<i32>> {
+  value: CallableLeaf<F> | EffectLeaf<G>
+}
 fn decode(value: i32) -> i32 { return value }
 fn consume<A, F: fn(A) -> A>(parser: Parser<A, F>) -> i32 { return 0 }
 pub fn main() -> i32 {
@@ -139,24 +146,41 @@ const effectWrapperInstance =
   deferredInstance === undefined
     ? undefined
     : Type.nominal(validModule, 'EffectWrapper', deferredInstance.arguments)
+const callableArgument = parserInstance?.arguments.find(Type.isExactRepresentationArgument)
+const effectArgument = deferredInstance?.arguments.find(Type.isExactRepresentationArgument)
+const multipleOuterInstance =
+  callableArgument === undefined || effectArgument === undefined
+    ? undefined
+    : Type.nominal(validModule, 'MultipleOuter', [callableArgument, effectArgument])
+const multipleUnionInstance =
+  callableArgument === undefined || effectArgument === undefined
+    ? undefined
+    : Type.nominal(validModule, 'MultipleUnion', [callableArgument, effectArgument])
 const fieldInstances = [
   parserInstance,
   wrapperInstance,
   deferredInstance,
   effectWrapperInstance,
+  multipleOuterInstance,
+  multipleUnionInstance,
 ].filter((type) => type !== undefined)
 const fieldPlans = fieldInstances.flatMap((instance) =>
   RepresentationField.plansOf(valid.index, instance),
 )
 const resolvedFields = RepresentationField.resolveFields(valid.index, fieldInstances)
 const openInstances = fieldInstances.flatMap((instance) => {
-  const plan = RepresentationField.plansOf(valid.index, instance).at(0)
-  if (plan === undefined) return []
-  const arguments_ = instance.arguments.map((argument) =>
-    Type.isExactRepresentationArgument(argument)
-      ? Type.representationParameterArgument(plan.parameter)
-      : argument,
-  )
+  const plans = RepresentationField.plansOf(valid.index, instance)
+  const parameters = []
+  for (const plan of plans) {
+    if (!parameters.some((parameter) => Type.key(parameter) === Type.key(plan.parameter)))
+      parameters.push(plan.parameter)
+  }
+  let representationOrdinal = 0
+  const arguments_ = instance.arguments.map((argument) => {
+    if (!Type.isExactRepresentationArgument(argument)) return argument
+    const parameter = parameters.at(representationOrdinal++)
+    return parameter === undefined ? argument : Type.representationParameterArgument(parameter)
+  })
   return [Type.nominal(instance.module, instance.name, arguments_)]
 })
 const unavailableFields = RepresentationField.resolveFields(valid.index, openInstances)

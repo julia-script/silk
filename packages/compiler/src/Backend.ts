@@ -19,6 +19,7 @@ import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
+import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
@@ -1990,11 +1991,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               const effectType = allocatorConstructor?.fn.result
               const runnerDeclaration =
                 effectType?._tag === 'EffectValue'
-                  ? Object.freeze({
-                      _tag: 'CanonicalDeclarationId' as const,
-                      module: effectType.environment.instance.declaration.module,
-                      name: `${effectType.environment.instance.declaration.name}$effect$${effectType.site.ordinal}`,
-                    })
+                  ? Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site)
                   : undefined
               const allocatorRunner =
                 runnerDeclaration === undefined || effectType?._tag !== 'EffectValue'

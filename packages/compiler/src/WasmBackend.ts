@@ -16,6 +16,7 @@ import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as FloatingPoint from './FloatingPoint.js'
+import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as LayoutPlan from './Layout.js'
 import type * as Match from './Match.js'
@@ -4924,11 +4925,7 @@ const emitBody = (
             const effectType = allocatorConstructor?.result
             const runnerDeclaration =
               effectType?._tag === 'EffectValue'
-                ? Object.freeze({
-                    _tag: 'CanonicalDeclarationId' as const,
-                    module: effectType.environment.instance.declaration.module,
-                    name: `${effectType.environment.instance.declaration.name}$effect$${effectType.site.ordinal}`,
-                  })
+                ? Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site)
                 : undefined
             const allocatorRunner =
               runnerDeclaration === undefined || effectType?._tag !== 'EffectValue'

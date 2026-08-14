@@ -2,11 +2,12 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
-/** Stable identity of one directly represented nominal field. */
+/** Stable identity of one represented use rooted in a nominal field. */
 export interface Id {
   readonly _tag: 'RepresentedFieldId'
   readonly nominal: DeclarationIndex.CanonicalId
   readonly ordinal: number
+  readonly useOrdinal: number
 }
 
 /** Declaration-owned symbolic representation requirement for one field. */
@@ -70,13 +71,22 @@ export interface Index {
   readonly resolutions: ReadonlyArray<Resolution>
 }
 
-/** Constructs a stable field identity without using field spelling or source position. */
-export const makeId = (nominal: DeclarationIndex.CanonicalId, ordinal: number): Id =>
-  Object.freeze({ _tag: 'RepresentedFieldId', nominal: Object.freeze({ ...nominal }), ordinal })
+/** Constructs a stable represented-use identity without using field spelling or source position. */
+export const makeId = (
+  nominal: DeclarationIndex.CanonicalId,
+  ordinal: number,
+  useOrdinal: number,
+): Id =>
+  Object.freeze({
+    _tag: 'RepresentedFieldId',
+    nominal: Object.freeze({ ...nominal }),
+    ordinal,
+    useOrdinal,
+  })
 
 /** Canonical identity key; source provenance is intentionally absent. */
 export const idKey = (self: Id): string =>
-  `${self.nominal.module}.${self.nominal.name}:field:${self.ordinal}`
+  `${self.nominal.module}.${self.nominal.name}:field:${self.ordinal}:representation:${self.useOrdinal}`
 
 /** Complete specialization key for one represented field. */
 export const key = (instance: Type.Nominal, id: Id): string => `${Type.key(instance)}:${idKey(id)}`
@@ -115,25 +125,21 @@ const plansOfInternal = (
     )
   if (declaration === undefined) return Object.freeze([])
   const next = new Set(seen).add(canonicalKey)
-  const symbolicUse = (type: Type.Type): SymbolicUse | undefined => {
+  const symbolicUses = (type: Type.Type): ReadonlyArray<SymbolicUse> => {
     if (Type.isRepresented(type)) {
       const argument = type.representation.argument
       return Type.isRepresentationParameterArgument(argument)
-        ? Object.freeze({
-            parameter: argument.parameter,
-            requiredBound: type.representation.requiredBound,
-          })
-        : undefined
+        ? Object.freeze([
+            Object.freeze({
+              parameter: argument.parameter,
+              requiredBound: type.representation.requiredBound,
+            }),
+          ])
+        : Object.freeze([])
     }
-    if (Type.isFixedArray(type) || Type.isSlice(type)) return symbolicUse(type.element)
-    if (Type.isUnion(type)) {
-      for (const member of type.members) {
-        const use = symbolicUse(member)
-        if (use !== undefined) return use
-      }
-      return undefined
-    }
-    if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return undefined
+    if (Type.isFixedArray(type) || Type.isSlice(type)) return symbolicUses(type.element)
+    if (Type.isUnion(type)) return Object.freeze(type.members.flatMap(symbolicUses))
+    if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return Object.freeze([])
     const nested = declarations.modules
       .flatMap((module) => module.structs)
       .find(
@@ -142,37 +148,35 @@ const plansOfInternal = (
           candidate.canonical.id.module === type.module &&
           candidate.canonical.id.name === type.name,
       )
-    if (nested === undefined) return undefined
+    if (nested === undefined) return Object.freeze([])
     const substitution = Type.substitution(
       nested.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     )
-    if (substitution === undefined) return undefined
-    for (const plan of plansOfInternal(declarations, type, next)) {
-      const argument = substitution.get(Type.key(plan.parameter))
-      const bound = Type.substitute(plan.requiredBound, substitution)
-      if (
-        argument !== undefined &&
-        Type.isRepresentationParameterArgument(argument) &&
-        (Type.isCallable(bound) || Type.isEffect(bound))
-      )
-        return Object.freeze({ parameter: argument.parameter, requiredBound: bound })
-    }
-    return undefined
+    if (substitution === undefined) return Object.freeze([])
+    return Object.freeze(
+      plansOfInternal(declarations, type, next).flatMap((plan): ReadonlyArray<SymbolicUse> => {
+        const argument = substitution.get(Type.key(plan.parameter))
+        const bound = Type.substitute(plan.requiredBound, substitution)
+        return argument !== undefined &&
+          Type.isRepresentationParameterArgument(argument) &&
+          (Type.isCallable(bound) || Type.isEffect(bound))
+          ? [Object.freeze({ parameter: argument.parameter, requiredBound: bound })]
+          : []
+      }),
+    )
   }
   return Object.freeze(
     declaration.fields.flatMap((field, ordinal): ReadonlyArray<Plan> => {
       if (field.declaredType._tag !== 'Resolved') return []
-      const use = symbolicUse(field.declaredType.type)
-      if (use === undefined) return []
-      return [
+      return symbolicUses(field.declaredType.type).map((use, useOrdinal) =>
         Object.freeze({
           _tag: 'RepresentationFieldPlan' as const,
-          id: makeId(canonical, ordinal),
+          id: makeId(canonical, ordinal, useOrdinal),
           parameter: use.parameter,
           requiredBound: use.requiredBound,
         }),
-      ]
+      )
     }),
   )
 }

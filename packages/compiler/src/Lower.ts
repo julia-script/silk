@@ -352,13 +352,6 @@ const instanceText = (
 ): string =>
   `${declaration.module}\u0000${declaration.name}\u0000${typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
 
-const runnerId = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): typeof owner.declaration =>
-  Object.freeze({
-    _tag: 'CanonicalDeclarationId',
-    module: owner.declaration.module,
-    name: `${owner.declaration.name}$effect$${site.ordinal}`,
-  })
-
 const effectEntryAdapterId = (module: string): DeclarationIndex.CanonicalId =>
   Object.freeze({
     _tag: 'CanonicalDeclarationId',
@@ -659,7 +652,9 @@ const lowerRunEffectValue = (
       destination,
       outcome,
       effect,
-      runner: providedRunner ?? runnerId(effectType.environment.instance, effectType.site),
+      runner:
+        providedRunner ??
+        Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site),
       runnerTypeArguments: effectType.environment.instance.typeArguments,
       arguments: runtimeRequirementArguments(provided),
       outcomeType,
@@ -1709,7 +1704,7 @@ function lowerExpressionInner(
         captures.push(Object.freeze({ source, access }))
       }
       const destination = fn.alloc(type)
-      const runner = runnerId(fn.owner.key, expression.site)
+      const runner = Hir.effectRunnerId(fn.owner.key.declaration, expression.site)
       fn.emit(
         Object.freeze({
           _tag: 'MakeEffect',
@@ -1762,7 +1757,7 @@ function lowerExpressionInner(
         if (provided === undefined) return undefined
         const runner =
           provided.length === 0
-            ? runnerId(protectedType.environment.instance, protectedType.site)
+            ? Hir.effectRunnerId(protectedType.environment.instance.declaration, protectedType.site)
             : ensureProvidedRunner(fn, protectedType, provided)
         if (runner === undefined) return undefined
         const arguments_ = runtimeRequirementArguments(provided)
@@ -1924,7 +1919,10 @@ function lowerExpressionInner(
             effect: loweredSubject.result,
             runner:
               providedRunner ??
-              runnerId(effectValueType.environment.instance, effectValueType.site),
+              Hir.effectRunnerId(
+                effectValueType.environment.instance.declaration,
+                effectValueType.site,
+              ),
             runnerTypeArguments: effectValueType.environment.instance.typeArguments,
             arguments: runtimeRequirementArguments(provided),
             outcomeType,
@@ -4749,7 +4747,7 @@ export const lowerProgram = (
       effectResults.set(instanceText(instance.key.declaration, instance.key.typeArguments), type)
       generatedRunners.push(
         Object.freeze({
-          id: runnerId(instance.key, block.site),
+          id: Hir.effectRunnerId(instance.key.declaration, block.site),
           owner: instance,
           block,
           type,

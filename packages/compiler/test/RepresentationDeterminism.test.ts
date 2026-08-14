@@ -102,9 +102,21 @@ it.effect('keeps representation facts byte-identical across fresh processes', ()
     )
     assert.strictEqual(encoded.fences.layout, 'Unavailable')
     assert.strictEqual(encoded.fences.mir, 'Unavailable')
-    assert.strictEqual(encoded.representationFields.plans.length, 6)
-    assert.strictEqual(encoded.representationFields.resolved.length, 6)
-    assert.strictEqual(encoded.representationFields.unavailable.length, 6)
+    assert.strictEqual(encoded.representationFields.plans.length, 10)
+    assert.strictEqual(encoded.representationFields.resolved.length, 10)
+    assert.strictEqual(encoded.representationFields.unavailable.length, 10)
+    assert.strictEqual(
+      encoded.representationFields.plans.filter((plan) =>
+        plan.field.includes('MultipleOuter:field:0:'),
+      ).length,
+      2,
+    )
+    assert.strictEqual(
+      encoded.representationFields.plans.filter((plan) =>
+        plan.field.includes('MultipleUnion:field:0:'),
+      ).length,
+      2,
+    )
     assert.strictEqual(
       encoded.representationFields.resolved.every(
         (field) =>

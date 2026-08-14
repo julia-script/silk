@@ -352,8 +352,8 @@ export const storedRepresentation = (
   const next = new Set(seen).add(typeKey)
   for (const [ordinal, field] of declaration.fields.entries()) {
     if (field.declaredType._tag !== 'Resolved' || field.name._tag !== 'Present') continue
-    const plan = plans.find((candidate) => candidate.id.ordinal === ordinal)
-    if (plan !== undefined) {
+    const fieldPlans = plans.filter((candidate) => candidate.id.ordinal === ordinal)
+    for (const plan of fieldPlans) {
       const resolution = RepresentationField.lookup(fieldIndex, type, plan.id)
       if (resolution !== undefined) {
         const contract =

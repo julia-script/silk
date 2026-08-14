@@ -97,6 +97,17 @@ export const compareExecutableSites = (
 export const executableSiteLabel = (self: EffectSiteId | CallableSiteId): string =>
   executableSiteKey(self).replaceAll('\u0000', ':')
 
+/** Derives the canonical hidden runner declaration owned by one effect construction site. */
+export const effectRunnerId = (
+  owner: DeclarationIndex.CanonicalId,
+  site: EffectSiteId,
+): DeclarationIndex.CanonicalId =>
+  Object.freeze({
+    _tag: 'CanonicalDeclarationId',
+    module: owner.module,
+    name: `${owner.name}$effect$${site.ordinal}`,
+  })
+
 export type CallableTarget =
   | {
       readonly _tag: 'DeclarationCallableTarget'
