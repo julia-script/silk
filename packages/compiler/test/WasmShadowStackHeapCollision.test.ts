@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import { wasmMemoryExport } from '../src/StandardStreams.js'
 import { statusAddress, statusStackOverflow } from '../src/WasmBackend.js'
 
 /**
@@ -203,7 +204,8 @@ interface Run {
   readonly failure: string | undefined
   /**
    * Highest address below the allocator's own region that the module ever wrote, or `undefined`
-   * without a memory.
+   * without a memory — which only the frameless control is allowed to be. Everywhere else
+   * `measuredReach` turns that `undefined` into a named failure.
    *
    * Between the end of static data and the heap page there is nothing but the shadow stack, so for
    * this fixture — whose static data is a handful of bytes — this is the high-water mark of
@@ -249,7 +251,9 @@ const execute = (bytes: Uint8Array, heapBase: number): Run => {
     const caught = error as Error
     failure = `${caught.constructor.name}: ${caught.message}`
   }
-  const memory = instance.exports.__silk_memory_v1 as WebAssembly.Memory | undefined
+  // The backend's own constant, not a copy of it: every reading this test takes comes through this
+  // export, so a rename must move the test with it rather than leave it reading `undefined`.
+  const memory = instance.exports[wasmMemoryExport] as WebAssembly.Memory | undefined
   if (memory === undefined)
     return Object.freeze({ value, failure, stackReach: undefined, status: undefined })
   return Object.freeze({
@@ -258,6 +262,22 @@ const execute = (bytes: Uint8Array, heapBase: number): Run => {
     stackReach: reachOf(memory, heapBase),
     status: new Int32Array(memory.buffer, statusAddress, 1)[0],
   })
+}
+
+/**
+ * The stack reading a fixture that spends shadow stack must have.
+ *
+ * `execute` reports `undefined` when the module exposes no memory, which is a real answer for the
+ * frameless control and for nothing else here. Folding it into a zero instead would let a bound
+ * this test cannot see read as a bound that held: a reach of zero is below every limit, and a
+ * per-level growth of zero derives a depth that straddles nothing. So it fails, and names the
+ * export it wanted, rather than measuring an absence.
+ */
+const measuredReach = (run: Run, id: string): number => {
+  const { stackReach } = run
+  if (stackReach === undefined)
+    throw new Error(`${id} exposed no ${wasmMemoryExport}: its shadow stack cannot be measured`)
+  return stackReach
 }
 
 /**
@@ -302,8 +322,8 @@ const growthOf = (
     const deeper = yield* measure(`${id}/growth/${deeperDepth}`, source(deeperDepth))
     assert.strictEqual(shallow.value, 0, `${id} must still be correct at ${shallowDepth}`)
     assert.strictEqual(deeper.value, 0, `${id} must still be correct at ${deeperDepth}`)
-    const shallowReach = shallow.stackReach ?? 0
-    const deeperReach = deeper.stackReach ?? 0
+    const shallowReach = measuredReach(shallow, `${id}/growth/${shallowDepth}`)
+    const deeperReach = measuredReach(deeper, `${id}/growth/${deeperDepth}`)
     const perLevel = (deeperReach - shallowReach) / (deeperDepth - shallowDepth)
     const base = shallowReach - perLevel * shallowDepth
     // The heap's page is the first address the shadow stack may not reach: the free-list head table
@@ -361,6 +381,13 @@ it.effect(
         0,
         `depth ${measured.clear} keeps its frames below the heap and stays correct`,
       )
+      // The status word is read through the module's memory export, so name a missing channel as
+      // itself. Without this, losing the export reads as `undefined` here — a bound that reported
+      // nothing looks exactly like a bound this test can no longer see.
+      assert.isDefined(
+        before.status,
+        `depth ${measured.clear} must expose ${wasmMemoryExport} to report through`,
+      )
       assert.strictEqual(before.status, 0, 'a run that stays inside its budget reports nothing')
 
       // Past the budget the reservation itself refuses, before the stack pointer moves. What used
@@ -417,10 +444,12 @@ it.effect(
       // matter how long the chain is; the allocations it makes are identical to the walking case's.
       // Allocating the chain is fine at any depth. Walking it is what spends the shadow stack.
       for (const depth of [crossing, crossing * 10]) {
-        const outcome = yield* measure(`shadow-stack-collision/unwalked/${depth}`, unwalked(depth))
+        const id = `shadow-stack-collision/unwalked/${depth}`
+        const outcome = yield* measure(id, unwalked(depth))
         assert.strictEqual(outcome.value, 0, `building ${depth} links without walking them`)
-        // One frame's worth, at any length: the loop reserves once and reuses it.
-        assert.isBelow(outcome.stackReach ?? 0, 1024)
+        // One frame's worth, at any length: the loop reserves once and reuses it. Measured, not
+        // defaulted — a module with no memory to read would otherwise clear this bar with a zero.
+        assert.isBelow(measuredReach(outcome, id), 1024)
       }
     }),
   120_000,
@@ -505,7 +534,11 @@ const cross = (id: string, depth: number) =>
     const heapBase = globalInitializers(artifact.wat).at(1) ?? 0
     const page = heapPageOf(heapBase)
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
-    const memory = instance.exports.__silk_memory_v1 as WebAssembly.Memory
+    const memory = instance.exports[wasmMemoryExport] as WebAssembly.Memory | undefined
+    // Every byte this case compares is read through that export, so its absence is a lost
+    // observation and not a heap that happens to match.
+    if (memory === undefined)
+      throw new Error(`${id} exposed no ${wasmMemoryExport}: its heap cannot be read back`)
     // Non-entry functions carry a mangled symbol; the declaration's name survives inside it.
     const probeExport = Object.keys(instance.exports).find((name) => name.includes('_probe__'))
     assert.isDefined(probeExport, 'the fixture must export its probe')
