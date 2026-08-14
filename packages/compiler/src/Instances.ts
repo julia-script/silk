@@ -276,6 +276,49 @@ export const unlowerableWitnessViolations = (
     ),
   )
 
+/**
+ * Rejects reachable constructions that would store a bare callable value inside an aggregate.
+ *
+ * A direct callable value keeps its hidden concrete identity beside its structural type, so
+ * higher-order calls monomorphize; a `Construct` or `ArrayConstruct` result carries only the
+ * declared type, and nominal layout planning then meets a bare `fn(...) -> ...` field it refuses
+ * to size (#184). Lowering has no diagnostic channel and the program would otherwise pass a clean
+ * frontend and die in MIR validation, so the check runs here, where each instance's substitution
+ * is concrete and diagnostics are already reported.
+ *
+ * Scoped to reachable instances on purpose: a callable-bearing struct that is only declared, or
+ * only constructed in unreachable code, compiles and runs today and stays accepted.
+ */
+export const storedCallableViolations = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<Diagnostic.Diagnostic> => {
+  const reported = new Set<string>()
+  return Object.freeze(
+    self.instances.flatMap((instance) =>
+      instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .flatMap((expression) => {
+          if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') return []
+          const aggregate = Type.substitute(expression.type, instance.substitution)
+          const found = DeclarationIndex.storedCallable(index, aggregate)
+          if (found === undefined) return []
+          const diagnostic = Diagnostic.storedCallableConstruction(
+            Type.encode(aggregate),
+            found.path.length === 0 ? undefined : found.path.join('.'),
+            Type.encode(found.callable),
+            expression.span,
+          )
+          const key = `${expression.span.sourceId}:${expression.span.start}:${expression.span.end} ${diagnostic.message}`
+          if (reported.has(key)) return []
+          reported.add(key)
+          return [diagnostic]
+        }),
+    ),
+  )
+}
+
 /** Produces semantic diagnostics for every finite-discovery violation. */
 export const violationDiagnostics = (self: Discovery): ReadonlyArray<Diagnostic.Diagnostic> =>
   Object.freeze(

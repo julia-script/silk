@@ -510,6 +510,7 @@ export const realize = (
     Instances.copyDropViolations(instances, self.index),
     Instances.requirementBindingViolations(instances, self.index),
     Instances.unlowerableWitnessViolations(instances, self.index),
+    Instances.storedCallableViolations(instances, self.index),
     Instances.continuationAllocatorViolations(instances, self.index, self.results),
   )
   const specializationError =
@@ -620,6 +621,7 @@ export const prepare = (
     Instances.copyDropViolations(discovery, self.index),
     Instances.requirementBindingViolations(discovery, self.index),
     Instances.unlowerableWitnessViolations(discovery, self.index),
+    Instances.storedCallableViolations(discovery, self.index),
     Instances.continuationAllocatorViolations(discovery, self.index, self.results),
   )
   if (Diagnostic.hasErrors(diagnostics))
