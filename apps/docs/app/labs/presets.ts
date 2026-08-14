@@ -299,6 +299,106 @@ pub fn main() -> i32 {
   ),
   one(
     'effects',
+    'ok · Suspended state resumes',
+    `effect fn delayed() -> i32
+! OutOfMemory
+? &mut Allocator {
+  let left = 40
+  return left + run Effect.suspend(
+    effect {
+      return 2
+    },
+  )
+}
+
+effect fn recover(error: OutOfMemory) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  let pending = delayed()
+    |> Effect.provideMut(&mut allocator)
+    |> Effect.catch(recover)
+  return run pending
+}
+`,
+  ),
+  one(
+    'effects',
+    'ok · Suspended map and flatMap',
+    `fn increment(value: i32) -> i32 {
+  return value + 1
+}
+
+effect fn select(value: i32) -> i32
+! OutOfMemory
+? &mut Allocator {
+  return run Effect.suspend(
+    effect {
+      return value + 1
+    },
+  )
+}
+
+effect fn composed() -> i32
+! OutOfMemory
+? &mut Allocator {
+  let first = Effect.suspend(
+    effect {
+      return 40
+    },
+  )
+    |> Effect.map(increment)
+  return run (move first
+    |> Effect.flatMap(select))
+}
+
+effect fn recover(error: OutOfMemory) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  let pending = composed()
+    |> Effect.provideMut(&mut allocator)
+    |> Effect.catch(recover)
+  return run pending
+}
+`,
+  ),
+  one(
+    'effects',
+    'ok · Stack-safe suspended recursion',
+    `effect fn count(value: i32) -> i32
+! OutOfMemory
+? &mut Allocator {
+  if value == 0 {
+    return 0
+  }
+  let next = run Effect.suspend(
+    effect {
+      return value - 1
+    },
+  )
+  return 1 + run count(next)
+}
+
+effect fn recover(error: OutOfMemory) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  let pending = count(42)
+    |> Effect.provideMut(&mut allocator)
+    |> Effect.catch(recover)
+  return run pending
+}
+`,
+  ),
+  one(
+    'effects',
     'ok · Portable Logger provider',
     `import silk.logging {length, messageByteAt}
 

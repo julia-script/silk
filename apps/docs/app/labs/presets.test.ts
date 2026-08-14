@@ -37,6 +37,14 @@ const retryEffectPreset = presets.find(
 const providerEffectPreset = presets.find(
   (preset) => preset.label === 'ok · Existing provider capture',
 )
+const suspendedEffectLabels = [
+  'ok · Suspended state resumes',
+  'ok · Suspended map and flatMap',
+  'ok · Stack-safe suspended recursion',
+] as const
+const suspendedEffectPresets = suspendedEffectLabels.map((label) =>
+  presets.find((preset) => preset.label === label),
+)
 const loggingPreset = presets.find(
   (preset) => preset.label === 'ok · Portable Logger provider',
 )
@@ -308,6 +316,36 @@ describe('preset catalog', () => {
     }
     for (const id of ['hir', 'ownership', 'layout', 'mir', 'evaluation', 'backend']) {
       expect(viewById(id)?.id, id).toBe(id)
+    }
+  })
+
+  it('exposes suspension, continuation state, composition, and recursion in Labs', () => {
+    for (const [index, preset] of suspendedEffectPresets.entries()) {
+      expect(preset, suspendedEffectLabels[index]).toBeDefined()
+      if (preset === undefined) continue
+
+      const native = snapshotOf(preset, 'aarch64-apple-darwin')
+      const wasm = snapshotOf(preset, 'wasm32-unknown-unknown')
+      expect(Analysis.diagnostics(native), preset.label).toEqual([])
+      expect(Analysis.mirOf(native)._tag, preset.label).toBe('Available')
+      expect(Analysis.mirOf(wasm)._tag, preset.label).toBe('Available')
+
+      const evaluation = Analysis.evaluate(native)
+      expect(evaluation._tag, preset.label).toBe('Completed')
+      if (evaluation._tag !== 'Completed') continue
+      expect(evaluation.result.value, preset.label).toBe(42)
+      expect(
+        evaluation.trace.some((event) => event._tag === 'SuspensionOrigin'),
+        preset.label,
+      ).toBe(true)
+      const requests = evaluation.trace.filter(
+        (event) => event._tag === 'ContinuationRequest',
+      ).length
+      const releases = evaluation.trace.filter(
+        (event) => event._tag === 'ContinuationRelease',
+      ).length
+      expect(requests, preset.label).toBeGreaterThan(0)
+      expect(releases, preset.label).toBe(requests)
     }
   })
 
