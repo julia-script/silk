@@ -232,6 +232,17 @@
     "namespace": "u8"
   },
   {
+    "module": "silk/unicode",
+    "path": "silk/unicode.silk",
+    "namespace": "Unicode"
+  },
+  {
+    "module": "silk/unicode_tables",
+    "path": "silk/unicode_tables.silk",
+    "namespace": "UnicodeTables",
+    "aliases": ["Decomposition", "PairRecord"]
+  },
+  {
     "module": "silk/usize",
     "path": "silk/usize.silk",
     "namespace": "usize"

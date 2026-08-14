@@ -35,69 +35,80 @@ fn byte(value: u8) -> u8 {
   return value
 }
 
-fn invalid(offset: usize) -> Result<string, InvalidUtf8> {
-  return failResult<string, InvalidUtf8>(InvalidUtf8 { offset: offset })
-}
-
 fn continuation(value: u8) -> bool {
   if value < byte(128) { return false }
   return value <= byte(191)
 }
 
-/// Validates a complete byte view and borrows it as text without allocating.
-pub fn fromUtf8(values: &[u8]) -> Result<string, InvalidUtf8> {
+/// Returns the first byte offset at which UTF-8 validation fails, or None for complete valid text.
+fn firstInvalidUtf8(values: &[u8]) -> Option<usize> {
   let mut index = usize.ZERO
   while index < values.length {
     let first = values[index]
     if first < byte(128) {
       index = index + usize.ONE
     } else {
-      if first < byte(194) { return invalid(index) }
+      if first < byte(194) { return some<usize>(index) }
       if first <= byte(223) {
-        if values.length <= index + usize.ONE { return invalid(index) }
+        if values.length <= index + usize.ONE { return some<usize>(index) }
         if continuation(values[index + usize.ONE]) == false {
-          return invalid(index + usize.ONE)
+          return some<usize>(index + usize.ONE)
         }
         index = index + 2
       } else {
         if first <= byte(239) {
-          if values.length <= index + 2 { return invalid(index) }
+          if values.length <= index + 2 { return some<usize>(index) }
           let second = values[index + usize.ONE]
           let third = values[index + 2]
-          if continuation(second) == false { return invalid(index + usize.ONE) }
-          if continuation(third) == false { return invalid(index + 2) }
+          if continuation(second) == false { return some<usize>(index + usize.ONE) }
+          if continuation(third) == false { return some<usize>(index + 2) }
           if first == byte(224) {
-            if second < byte(160) { return invalid(index + usize.ONE) }
+            if second < byte(160) { return some<usize>(index + usize.ONE) }
           }
           if first == byte(237) {
-            if byte(159) < second { return invalid(index + usize.ONE) }
+            if byte(159) < second { return some<usize>(index + usize.ONE) }
           }
           index = index + 3
         } else {
-          if byte(244) < first { return invalid(index) }
-          if values.length <= index + 3 { return invalid(index) }
+          if byte(244) < first { return some<usize>(index) }
+          if values.length <= index + 3 { return some<usize>(index) }
           let second = values[index + usize.ONE]
           let third = values[index + 2]
           let fourth = values[index + 3]
-          if continuation(second) == false { return invalid(index + usize.ONE) }
-          if continuation(third) == false { return invalid(index + 2) }
-          if continuation(fourth) == false { return invalid(index + 3) }
+          if continuation(second) == false { return some<usize>(index + usize.ONE) }
+          if continuation(third) == false { return some<usize>(index + 2) }
+          if continuation(fourth) == false { return some<usize>(index + 3) }
           if first == byte(240) {
-            if second < byte(144) { return invalid(index + usize.ONE) }
+            if second < byte(144) { return some<usize>(index + usize.ONE) }
           }
           if first == byte(244) {
-            if byte(143) < second { return invalid(index + usize.ONE) }
+            if byte(143) < second { return some<usize>(index + usize.ONE) }
           }
           index = index + 4
         }
       }
     }
   }
+  return none<usize>()
+}
+
+/// Validates a complete byte view and borrows it as text without allocating.
+///
+/// The offset is unpacked before the borrow rather than after it because an unchecked construction
+/// has to happen in the function that owns the borrowed parameter the view comes from.
+pub fn fromUtf8(values: &[u8]) -> Result<string, InvalidUtf8> {
+  let failure = match move firstInvalidUtf8(values) {
+    Some<usize> { value } => move value
+    None {} => values.length + usize.ONE
+  }
+  if failure <= values.length {
+    return failResult<string, InvalidUtf8>(InvalidUtf8 { offset: failure })
+  }
   unsafe {
     let text = Intrinsic.stringFromUtf8Unchecked(values)
     return succeed<string, InvalidUtf8>(text)
   }
-  return invalid(usize.ZERO)
+  return failResult<string, InvalidUtf8>(InvalidUtf8 { offset: usize.ZERO })
 }
 
 /// Constructs an empty owned String without allocating.
@@ -110,6 +121,24 @@ pub effect fn copy(value: string) -> String ! OutOfMemory ? &mut Allocator {
   let source = Intrinsic.stringUtf8Bytes(value)
   let bytes = run bytesCopy(source)
   return String { bytes: move bytes }
+}
+
+/// Validates complete UTF-8 bytes and copies them into independently owned storage.
+///
+/// The companion to `fromUtf8` for bytes a program built rather than borrowed. `fromUtf8` hands
+/// back a view that lives exactly as long as the buffer under it, which is the wrong shape for an
+/// encoder that wants to return its result and let its working buffer go; this validates the same
+/// way and owns the outcome.
+pub effect fn copyUtf8(values: &[u8]) -> Result<String, InvalidUtf8> ! OutOfMemory ? &mut Allocator {
+  let failure = match move firstInvalidUtf8(values) {
+    Some<usize> { value } => move value
+    None {} => values.length + usize.ONE
+  }
+  if failure <= values.length {
+    return failResult<String, InvalidUtf8>(InvalidUtf8 { offset: failure })
+  }
+  let bytes = run bytesCopy(values)
+  return succeed<String, InvalidUtf8>(String { bytes: move bytes })
 }
 
 // Appending grows the existing storage rather than copying the whole string into fresh storage

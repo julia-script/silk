@@ -12,7 +12,7 @@ each signature and description below is the `///` comment on the declaration in
 $ pnpm --filter @silk-effect/compiler documentation:generate
 ```
 
-The library has 41 modules.
+The library has 43 modules.
 
 ## Modules
 
@@ -52,11 +52,13 @@ The library has 41 modules.
 | [`silk/result`](#silk-result) | `Result` | 13 |
 | [`silk/slot`](#silk-slot) | `Slot` | 4 |
 | [`silk/standard_input`](#silk-standard-input) | `StandardInput` | 12 |
-| [`silk/string`](#silk-string) | `String` | 24 |
+| [`silk/string`](#silk-string) | `String` | 25 |
 | [`silk/u16`](#silk-u16) | `u16` | 57 |
 | [`silk/u32`](#silk-u32) | `u32` | 57 |
 | [`silk/u64`](#silk-u64) | `u64` | 57 |
 | [`silk/u8`](#silk-u8) | `u8` | 57 |
+| [`silk/unicode`](#silk-unicode) | `Unicode` | 23 |
+| [`silk/unicode_tables`](#silk-unicode-tables) | `UnicodeTables` | 11 |
 | [`silk/usize`](#silk-usize) | `usize` | 59 |
 | [`silk/vector`](#silk-vector) | `Vector` | 55 |
 
@@ -6323,6 +6325,9 @@ pub fn fromUtf8(values: &[u8]) -> silk/result.Result<string, silk/string.Invalid
 
 Validates a complete byte view and borrows it as text without allocating.
 
+The offset is unpacked before the borrow rather than after it because an unchecked construction
+has to happen in the function that owns the borrowed parameter the view comes from.
+
 ### `make`
 
 ```silk
@@ -6338,6 +6343,19 @@ pub effect fn copy(value: string) -> String ! OutOfMemory ? &mut Allocator
 ```
 
 Copies valid text into independently owned storage.
+
+### `copyUtf8`
+
+```silk
+pub effect fn copyUtf8(values: &[u8]) -> silk/result.Result<silk/string.String, silk/string.InvalidUtf8> ! OutOfMemory ? &mut Allocator
+```
+
+Validates complete UTF-8 bytes and copies them into independently owned storage.
+
+The companion to `fromUtf8` for bytes a program built rather than borrowed. `fromUtf8` hands
+back a view that lives exactly as long as the buffer under it, which is the wrong shape for an
+encoder that wants to return its result and let its working buffer go; this validates the same
+way and owns the outcome.
 
 ### `append`
 
@@ -8289,6 +8307,122 @@ pub fn parse(text: string) -> silk/result.Result<u8, silk/format.ParseFailure>
 ```
 
 Reads complete decimal text as a `u8`, or reports why the text is not one.
+
+
+## silk/unicode
+
+Import as `Unicode` with `import silk.unicode`.
+
+### `dataVersion`
+
+```silk
+pub fn dataVersion() -> string
+```
+
+Returns the Unicode version the tables were generated from.
+
+The version is data, not identity: a later database changes what this returns and what the
+tables contain, and changes neither a compiler type nor a target ABI.
+
+### `longestDecomposition`
+
+```silk
+pub fn longestDecomposition() -> usize
+```
+
+Returns the longest full canonical decomposition of a single scalar in the generated tables.
+
+### `canonicalCombiningClass`
+
+```silk
+pub fn canonicalCombiningClass(scalar: u32) -> u32
+```
+
+Returns a scalar's canonical combining class, zero for a starter.
+
+### `normalizeNfd`
+
+```silk
+pub effect fn normalizeNfd(value: string) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Returns the Normalization Form D of text: fully decomposed, in canonical order.
+
+### `normalizeNfc`
+
+```silk
+pub effect fn normalizeNfc(value: string) -> String ! OutOfMemory ? &mut Allocator
+```
+
+Returns the Normalization Form C of text: decomposed, canonically ordered, then recomposed.
+
+This is the operation that lets a precomposed `é` and a decomposed `é` compare equal, and it
+only does so where source asks for it.
+
+
+## silk/unicode_tables
+
+Import as `UnicodeTables` with `import silk.unicode_tables`.
+
+### `Decomposition`
+
+```silk
+pub struct Decomposition
+```
+
+One canonical decomposition. A singleton leaves `second` at zero, which is not a decomposable
+scalar, so zero is an unambiguous absence.
+
+### `PairRecord`
+
+```silk
+pub struct PairRecord
+```
+
+One canonical decomposition together with the scalar it decomposes, for searching either way.
+
+### `dataVersion`
+
+```silk
+pub fn dataVersion() -> string
+```
+
+The Unicode version every table in this module was generated from.
+
+### `maximumDecompositionLength`
+
+```silk
+pub fn maximumDecompositionLength() -> usize
+```
+
+The longest full canonical decomposition of any single scalar, which bounds the decomposer's
+pending buffer.
+
+### `combiningClass`
+
+```silk
+pub fn combiningClass(scalar: u32) -> u32
+```
+
+Returns a scalar's canonical combining class, or zero for a starter.
+
+### `canonicalDecomposition`
+
+```silk
+pub fn canonicalDecomposition(scalar: u32) -> Decomposition
+```
+
+Returns the canonical decomposition of a scalar, or both components zero when it has none.
+Hangul syllables decompose algorithmically and are absent from this table by design.
+
+### `canonicalComposition`
+
+```silk
+pub fn canonicalComposition(first: u32, second: u32) -> u32
+```
+
+Composes a starter and a following scalar, or returns zero when the pair does not compose.
+Excluded pairs are absent from the index, so a hit is always a primary composite.
 
 
 ## silk/usize
