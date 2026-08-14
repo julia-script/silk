@@ -1,0 +1,31 @@
+## 1. Contract Facts
+
+- [ ] 1.1 Confirm conditional generic conformances are complete and representation parameters are available for witness binders.
+- [ ] 1.2 Extend interface declarations, applications, and mapped operations with literal operand shapes, flow kind, success, failure rows, requirement rows, and access.
+- [ ] 1.3 Add syntax, kind, provider-equality, damaged, and visibility fixtures for complete contracts.
+
+## 2. Literal Ownership and Subsumption
+
+- [ ] 2.1 Replace general value-to-shared-borrow witness adaptation with literal source operand matching.
+- [ ] 2.2 Implement receiver/parameter access compatibility and deterministic stronger-demand diagnostics.
+- [ ] 2.3 Implement failure-row, requirement-row, and access subsumption while preserving exact generic caller contracts.
+- [ ] 2.4 Add pure/smaller witness positives and stronger-row/access negatives.
+
+## 3. Generic Witness Targets
+
+- [ ] 3.1 Infer mapped target type, row, and representation binders from substituted conformance and operation contracts.
+- [ ] 3.2 Preserve inferred target arguments in HIR witness questions and concrete instance keys.
+- [ ] 3.3 Add two-specialization acceptance plus unresolved and conflicting binder diagnostics.
+- [ ] 3.4 Lower every admitted witness to one static target with no runtime dictionary or service slot.
+
+## 4. Interface Migration
+
+- [ ] 4.1 Rewrite ordinary `Order` and `HashKey` interface operands and witnesses with explicit intended borrows.
+- [ ] 4.2 Confine any transitional operand adapter to sealed intrinsic witness lowering.
+- [ ] 4.3 Update standard-library, operator, collection, and compiler acceptance fixtures for the breaking ownership convention.
+
+## 5. Verification
+
+- [ ] 5.1 Run `pnpm typecheck` and `pnpm exec biome check .`.
+- [ ] 5.2 Run `pnpm test`, `pnpm check`, and `pnpm release:candidate`; report exact failures.
+- [ ] 5.3 Inspect specialized HIR/MIR to confirm caller rows stay exact while dead witness machinery may optimize away.
