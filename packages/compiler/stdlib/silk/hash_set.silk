@@ -1,3 +1,25 @@
+//! Owned unique elements with deterministic seeded hashing and open-addressed membership lookup.
+//!
+//! # When to use
+//! Use [`HashSet`] when equivalence and fast membership are central and an element has a [`HashKey`]
+//! witness. Use `silk.vector.Vector` when order or duplicate values are part of the data.
+//!
+//! # Details
+//! The set starts allocation-free, first allocates eight buckets, and grows before used buckets
+//! exceed three quarters of the table. Linear probing crosses removal markers; growth doubles the
+//! table, moves every live element, and discards those markers. Allocation completes before commit,
+//! so failed growth leaves prior membership, length, and bucket count unchanged.
+//!
+//! One [`HashSeed`] plus the same operation sequence fixes bucket presentation order on every
+//! engine. Iterate deterministically by scanning `0..bucketCount`, testing [`occupiedAt`], and then
+//! calling [`elementAt`]. This is bucket order, not insertion order.
+//!
+//! # Gotchas
+//! Probes are consumed. Inserting an equivalent element keeps the element already stored and drops
+//! the arrival; [`remove`] instead transfers the stored element to the caller. [`elementAt`] copies
+//! and therefore requires a `Copy` element; [`contains`] and [`indexOf`] can inspect membership for
+//! move-only elements without taking them out.
+
 // A hashed set over the allocation substrate, on the same table `hash_map.silk` describes: open
 // addressing with linear probing over an element buffer and a state buffer of one width, each
 // element carrying the hash it was placed under, and every bucket index reduced in u64 arithmetic
@@ -22,20 +44,24 @@ const REMOVED: u8 = 2
 /// The width a set takes when it first allocates.
 const INITIAL_WIDTH: usize = 8
 
+/// Internal hashed element record exposed by the current table representation.
 pub struct Member<T> {
   hash: u64
   value: T
 }
 
+/// Allocation-free storage state used before the set creates its first table.
 pub struct Unseeded<T> {
   anchor: [Member<T>; 0]
 }
 
+/// Allocated element and occupancy buffers used by [`HashSet`].
 pub struct Slots<T> {
   members: RawBuffer<Member<T>>
   states: RawBuffer<u8>
 }
 
+/// Owns one representative of each equivalence class under one hash witness and seed.
 pub struct HashSet<T> {
   storage: Unseeded<T> | Slots<T>
   seed: HashSeed
@@ -315,6 +341,8 @@ fn keep<T>(member: Member<T>) -> T {
 
 /// Inserts one owned element, reporting whether an equivalent element was already held.
 ///
+/// # Details
+///
 /// A set never holds two equivalent elements. When one is already held the set is unchanged and the
 /// arriving element is released, so the element that survives is the one the set already had.
 ///
@@ -416,6 +444,8 @@ pub fn contains<T: HashKey>(self: &HashSet<T>, value: T) -> bool {
 
 /// Returns the bucket holding an element equivalent to one probe element, or an absent value.
 ///
+/// # Details
+///
 /// This is the membership question a set of move-only elements answers without moving anything.
 pub fn indexOf<T: HashKey>(self: &HashSet<T>, value: T) -> Option<usize> {
   if self.capacity == usize.ZERO {
@@ -444,6 +474,8 @@ pub fn indexOf<T: HashKey>(self: &HashSet<T>, value: T) -> Option<usize> {
 }
 
 /// Removes the element equivalent to one probe element and answers with it.
+///
+/// # Details
 ///
 /// Ownership passes to the caller; the set does not also release it. The probe element is released.
 pub fn remove<T: HashKey>(self: &mut HashSet<T>, value: T) -> Option<T> {
@@ -495,6 +527,8 @@ fn evict<T>(owned: &mut Slots<T>, index: usize) -> T {
 }
 
 /// Returns the element held in one bucket. Traps on a bucket that holds no element.
+///
+/// # Details
 ///
 /// Reads a copy out of the set, so it answers for a set whose element type is `Copy`.
 pub fn elementAt<T>(self: &HashSet<T>, index: usize) -> T {

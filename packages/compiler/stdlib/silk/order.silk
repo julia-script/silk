@@ -1,3 +1,15 @@
+//! Compile-time ordering witnesses and a three-way result derived from strict comparison.
+//!
+//! # When to use
+//! Add an [`Order`] bound when a generic algorithm needs `<`, as sorting and binary search do. Use
+//! [`compare`] when all three outcomes matter, or [`less`] and [`equal`] for predicates.
+//!
+//! # Details
+//! An interface witness is selected during specialization; it creates no service requirement or
+//! runtime dispatch. [`Equal`] means neither operand orders before the other, so equality cannot
+//! disagree with the witness's own strict ordering. Witness implementations must provide a
+//! consistent strict order for algorithms to behave predictably.
+
 // The comparison contract the ordered sequence operations resolve against. Ordinary Silk: the
 // interface selects a compiler-known comparison during specialization exactly as `Integer` does, and
 // creates no effect requirement, provider slot, or runtime dispatch.
@@ -25,9 +37,12 @@ pub struct Ordering {
 
 /// Static strict-ordering contract for primitive comparable values.
 ///
+/// # Details
+///
 /// A witness supplies the strict `lessThan` the operator `<` spells. Equality is derived from it
 /// rather than declared, so a witness can never disagree with itself about which values are equal.
 pub interface Order<T> {
+  /// Reports whether `left` orders strictly before `right`.
   fn lessThan(left: T, right: T) -> bool
 }
 
@@ -43,6 +58,8 @@ impl Order<i64> for i64 { lessThan: Intrinsic.i64LessThan }
 impl Order<isize> for isize { lessThan: Intrinsic.isizeLessThan }
 
 /// Compares two values three ways using the concrete comparison selected during specialization.
+///
+/// # Details
 ///
 /// Reads both operands twice without moving either, so the result is the same whichever order a
 /// caller evaluates the operands in.

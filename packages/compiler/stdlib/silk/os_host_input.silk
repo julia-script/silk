@@ -1,3 +1,20 @@
+//! Native [`HostInput`] provider for the process command line, environment, and working directory.
+//!
+//! # When to use
+//! Construct [`OsHostInput`] at a native application edge and provide it to portable code requiring
+//! [`HostInput`]. Tests can replace it with a deterministic provider and keep process state out of
+//! the program under test.
+//!
+//! # Details
+//! The provider owns no persistent state. Each successful lookup copies the host value into
+//! independent [`Bytes`], beginning with a bounded buffer and retrying once at the exact size the
+//! boundary reports. An absent argument or variable remains [`None`]; an unavailable working
+//! directory and contradictory host lengths become [`HostInputFailure`].
+//!
+//! # Gotchas
+//! Reachable OS host-input operations are native-only. Direct WebAssembly compilation rejects them
+//! instead of inventing process-global imports; evaluator execution requires an injected adapter.
+
 import silk.bytes {
   Bytes,
   append as bytesAppend,

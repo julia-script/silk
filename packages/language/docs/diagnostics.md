@@ -185,4 +185,4 @@ There are 129 codes in total.
 
 - [Tutorial](./tutorial.md)
 - [Language reference](./reference.md)
-- [Standard library](./stdlib.md)
+- [Standard library](./stdlib/)

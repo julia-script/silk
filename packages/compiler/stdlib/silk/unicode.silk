@@ -1,3 +1,20 @@
+//! Explicit Unicode canonical normalization backed by the pinned Unicode 17.0.0 data set.
+//!
+//! # When to use
+//! Normalize text at a boundary where canonically equivalent spellings must compare alike. Use
+//! [`normalizeNfc`] for ordinary storage and comparison, or [`normalizeNfd`] when a decomposed,
+//! canonically ordered sequence is the desired representation.
+//!
+//! # Details
+//! Normalization is opt-in: `string` equality continues to compare exact UTF-8 bytes. Both forms
+//! allocate a fresh owned [`String`], handle Hangul composition algorithmically, and use the same
+//! generated tables on every target. [`dataVersion`] reports which Unicode database defines those
+//! results.
+//!
+//! # Gotchas
+//! This module implements canonical NFC and NFD, not compatibility normalization (NFKC or NFKD),
+//! locale-sensitive comparison, grapheme segmentation, or case folding.
+
 import silk.result { Result, Success, Failure }
 import silk.string { String, InvalidUtf8, copyUtf8, make as stringMake, utf8Bytes }
 import silk.unicode_tables {
@@ -54,7 +71,9 @@ const NO_COMBINING_CLASS: u32 = 256
 /// loudly rather than silently overrunning.
 const PENDING_CAPACITY: usize = 4
 
-/// Returns the Unicode version the tables were generated from.
+/// Returns the Unicode version that defines this module's normalization results.
+///
+/// # Details
 ///
 /// The version is data, not identity: a later database changes what this returns and what the
 /// tables contain, and changes neither a compiler type nor a target ABI.
@@ -67,8 +86,11 @@ pub fn longestDecomposition() -> usize {
   return maximumDecompositionLength()
 }
 
-/// Returns a scalar's canonical combining class, zero for a starter.
-pub fn canonicalCombiningClass(scalar: u32) -> u32 {
+/// Returns a Unicode scalar's canonical combining class, or zero for a starter or table miss.
+pub fn canonicalCombiningClass(
+  /// Unicode scalar value represented as its unsigned code point.
+  scalar: u32,
+) -> u32 {
   return combiningClass(scalar)
 }
 
@@ -307,6 +329,8 @@ pub effect fn normalizeNfd(value: string) -> String ! OutOfMemory ? &mut Allocat
 }
 
 /// Returns the Normalization Form C of text: decomposed, canonically ordered, then recomposed.
+///
+/// # Details
 ///
 /// This is the operation that lets a precomposed `é` and a decomposed `é` compare equal, and it
 /// only does so where source asks for it.

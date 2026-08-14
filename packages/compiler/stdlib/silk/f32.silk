@@ -1,3 +1,24 @@
+//! IEEE binary32 values with deterministic representation, classification, and math operations.
+//!
+//! # When to use
+//! Use `f32` when binary32 storage, interchange, or bandwidth is part of the contract. Use `f64`
+//! for general floating-point work and unconstrained literals; it preserves substantially more
+//! precision and is Silk's default floating type.
+//!
+//! # Details
+//! Basic arithmetic rounds to nearest with ties to even and never enables implicit fast-math
+//! assumptions. Division by zero and overflow produce IEEE infinities or NaNs rather than integer-
+//! style traps. Ordinary ordered comparisons return false for NaN and treat both zeros as equal;
+//! [`totalOrder`] distinguishes every encoding when deterministic ordering is required.
+//!
+//! [`toBits`] and [`fromBits`] expose the exact binary32 representation, including signed zero and
+//! NaN payloads. The source-defined rounding, extrema, sign, and square-root helpers canonicalize
+//! NaN results so evaluator, native, and WebAssembly execution agree on their bits.
+//!
+//! # Gotchas
+//! Converting to an integer discards the fractional part and traps for NaN, infinity, or a value
+//! outside the destination range. Converting a large integer to f32 can round it.
+
 /// The largest finite f32.
 pub const MAX: f32 = 3.4028235e38
 
@@ -7,10 +28,12 @@ pub const MIN: f32 = -3.4028235e38
 /// The distance from 1.0 to the next larger f32.
 pub const EPSILON: f32 = 1.1920929e-7
 
-/// Positive infinity. A constant initializer must be one literal, and no literal spells infinity
-/// directly, so this spelling overflows f32 on purpose: the decimal conversion rounds an
-/// overflowing magnitude to the infinity bit pattern. The value therefore depends on that rounding
-/// behavior, and a test pins the exact bits 0x7F800000 so a change to it cannot pass silently.
+/// Positive infinity with the binary32 bit pattern `0x7F800000`.
+///
+/// # Details
+///
+/// No source literal spells infinity directly. This initializer deliberately exceeds [`MAX`], and
+/// decimal-to-binary32 rounding produces the infinity encoding.
 pub const INFINITY: f32 = 1e999
 
 /// The ratio of a circle's circumference to its diameter, rounded to the nearest f32.
@@ -109,17 +132,22 @@ pub fn isSignNegative(value: f32) -> bool {
   return Intrinsic.f32IsSignNegative(value)
 }
 
-/// Calls the concrete f32 totalOrder primitive.
+/// Reports whether `left` precedes or equals `right` in the IEEE total order.
+///
+/// # Details
+///
+/// Unlike ordinary comparison, this order distinguishes negative and positive zero and provides a
+/// deterministic position for NaN encodings.
 pub fn totalOrder(left: f32, right: f32) -> bool {
   return Intrinsic.f32TotalOrder(left, right)
 }
 
-/// Calls the concrete f32 toBits primitive.
+/// Reinterprets a value as its exact 32-bit IEEE representation.
 pub fn toBits(value: f32) -> u32 {
   return Intrinsic.f32ToBits(value)
 }
 
-/// Calls the concrete f32 fromBits primitive.
+/// Reinterprets an arbitrary 32-bit pattern as an f32 without numeric conversion.
 pub fn fromBits(value: u32) -> f32 {
   return Intrinsic.f32FromBits(value)
 }
@@ -130,19 +158,17 @@ fn canonicalNaN() -> f32 {
   return fromBits(2143289344)
 }
 
-/// The square root of `value`, correctly rounded.
+/// Computes the correctly rounded square root and preserves either signed zero.
 ///
-/// IEEE-754 requires the square root be correctly rounded, so the hardware instruction is the
-/// exact result rather than an approximation of it. This is why `sqrt` may lower to `llvm.sqrt`
-/// on the native backend and `f32.sqrt` on Wasm while `pow` and `log`, whose results are
-/// implementation-defined, may not. The evaluator reproduces the same bits by rounding an exact
-/// integer root.
+/// # Details
 ///
-/// That guarantee covers numeric results only. IEEE-754 leaves the *sign* of a NaN produced by an
-/// invalid operation unspecified, and the hosts disagree: an x86 square root of a negative operand
-/// yields `0xFFC00000` while AArch64's default NaN yields `0x7FC00000`. Both NaN-producing inputs
-/// are therefore screened here, before the primitive runs, so the primitive only ever sees the
-/// domain on which it is bit-exact.
+/// IEEE requires square root to be correctly rounded, so its native and WebAssembly instructions
+/// have one admissible numeric result and the evaluator reproduces the same bits.
+///
+/// # Gotchas
+///
+/// NaN and negative nonzero inputs return the canonical quiet NaN. Negative zero is not treated as
+/// negative and returns unchanged.
 pub fn sqrt(value: f32) -> f32 {
   if Intrinsic.f32IsNaN(value) { return canonicalNaN() }
   // Negative zero compares equal to zero and so passes through to the primitive, which returns it
@@ -166,9 +192,12 @@ pub fn copysign(magnitude: f32, sign: f32) -> f32 {
   return fromBits(u32.bitOr(carried, transferred))
 }
 
-/// `value` rounded toward zero, which discards the fraction bits the exponent does not reach.
-/// The sign survives, so a value in `(-1.0, -0.0]` gives negative zero. A NaN input gives the
-/// canonical NaN, and either infinity is already integral and returns unchanged.
+/// Rounds toward zero while preserving the sign of a zero result.
+///
+/// # Details
+///
+/// A value in `(-1.0, -0.0]` becomes negative zero. A NaN becomes the canonical quiet NaN, while
+/// either infinity is already integral and returns unchanged.
 pub fn trunc(value: f32) -> f32 {
   if Intrinsic.f32IsNaN(value) { return canonicalNaN() }
   let bits = toBits(value)
@@ -200,9 +229,12 @@ pub fn ceil(value: f32) -> f32 {
   return truncated
 }
 
-/// `value` rounded to the nearest integral f32, with a half rounding away from zero. That is the
-/// reading `round` carries in C and Rust; the ties-to-even form is a separate operation this
-/// module does not yet offer. A NaN input gives the canonical NaN.
+/// Rounds to the nearest integral f32, with a half rounded away from zero.
+///
+/// # Details
+///
+/// This differs from the ties-to-even policy used by basic arithmetic. A zero result keeps its
+/// input sign, and a NaN becomes the canonical quiet NaN.
 pub fn round(value: f32) -> f32 {
   if Intrinsic.f32IsNaN(value) { return canonicalNaN() }
   let truncated = trunc(value)
@@ -236,22 +268,30 @@ pub fn max(left: f32, right: f32) -> f32 {
   return left
 }
 
-/// Calls the concrete f32 sin primitive.
+/// Approximates sine within four units in the last place using deterministic result bits.
+///
+/// # Details
+///
+/// NaN and either infinity return the canonical quiet NaN. Either signed zero returns unchanged.
 pub fn sin(value: f32) -> f32 {
   return Intrinsic.f32Sin(value)
 }
 
-/// Calls the concrete f32 cos primitive.
+/// Approximates cosine within four units in the last place using deterministic result bits.
+///
+/// # Details
+///
+/// NaN and either infinity return the canonical quiet NaN. Either signed zero returns positive one.
 pub fn cos(value: f32) -> f32 {
   return Intrinsic.f32Cos(value)
 }
 
-/// Calls the concrete f32 toF32 primitive.
+/// Returns the same binary32 value unchanged.
 pub fn toF32(value: f32) -> f32 {
   return Intrinsic.f32ToF32(value)
 }
 
-/// Calls the concrete f32 toF64 primitive.
+/// Widens binary32 to the exactly equivalent f64 value.
 pub fn toF64(value: f32) -> f64 {
   return Intrinsic.f32ToF64(value)
 }

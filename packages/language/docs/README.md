@@ -8,7 +8,7 @@
 - **[Recursion and the machine stack](./recursion.md)** — what ordinary recursion does and does not
   guarantee, how running out of stack looks on each engine, and the iterative pattern to use
   instead.
-- **[Standard library](./stdlib.md)** — every module and public declaration, generated from the
+- **[Standard library](./stdlib/)** — every module and public declaration, generated from the
   source doc comments.
 - **[Diagnostic index](./diagnostics.md)** — every compiler error code and what it means.
 

@@ -1,3 +1,19 @@
+//! Explicit access to process arguments, environment values, and the working directory as bytes.
+//!
+//! # When to use
+//! Require [`HostInput`] when code needs launch-time process data but should remain replaceable in
+//! tests. Use [`text`] only when the caller wants a checked UTF-8 view; keep the original bytes for
+//! lossless pass-through.
+//!
+//! # Details
+//! Arguments include the program name at index zero and retain host order. A missing argument index
+//! or unset variable is [`None`], while [`HostInputFailure`] means the provider could not answer.
+//! Returned [`Bytes`] values are independently owned, so lookup operations also carry explicit
+//! [`OutOfMemory`] and [`Allocator`] channels.
+//!
+//! The service is read-only and never mutates environment variables or the process working
+//! directory. No ambient global is consulted after a provider is supplied.
+
 // The portable process-input boundary. A program receives its command line, its environment, and
 // its working directory here, explicitly, and never through an ambient global.
 //
@@ -23,6 +39,8 @@ pub fn inputFailure() -> HostInputFailure {
 }
 
 /// Portable read-only process-input contract.
+///
+/// # Details
 ///
 /// The service reads and never writes: it has no operation that sets an environment variable or
 /// changes the working directory. An absent argument index and an unset variable name are `None`
@@ -81,6 +99,8 @@ effect fn missingArgument() -> Bytes ! HostInputFailure {
 
 /// Collects every command-line argument, in the order the process received them.
 ///
+/// # Details
+///
 /// A host that reports a count it cannot then supply is a broken host, so a missing index below the
 /// count is `HostInputFailure` rather than a silently shorter sequence.
 pub effect fn arguments(
@@ -101,6 +121,8 @@ pub effect fn arguments(
 }
 
 /// The checked textual view of raw host bytes.
+///
+/// # Details
 ///
 /// Host input is not required to be UTF-8, so the view is fallible. A failure leaves the bytes
 /// untouched and readable, which is how a program passes a value it cannot decode through unchanged.

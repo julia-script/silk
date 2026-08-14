@@ -1,12 +1,26 @@
+//! Optional owned values that distinguish presence from absence without a failure channel.
+//!
+//! # When to use
+//! Use [`Option`] when absence is an expected answer and needs no error payload. Use [`map`] for a
+//! pure transform, [`flatMap`] when the transform may also return absence, and [`unwrapOr`] only
+//! when the caller is ready to consume the option.
+//!
+//! # Details
+//! `Option<T>` is the structural union of [`Some`] and [`None`]. Its combinators preserve affine
+//! ownership: a present value moves forward, while an unused fallback or abandoned branch drops.
+
 // Canonical recoverable outcome members. The compiler's Option<T> is represented transparently by the
 // structural union Some<T> | None; the named declaration is its source-navigation anchor.
 
+/// The present member of [`Option`], carrying one owned value.
 pub struct Some<T> {
   value: T
 }
 
+/// The absent member of [`Option`].
 pub struct None {}
 
+/// An owned value that is either [`Some`] or [`None`].
 pub struct Option<T> {
   value: Some<T> | None
 }
@@ -40,10 +54,14 @@ pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> Option<U>) -> Opt
 
 /// Returns the present value, or the fallback value when the option is absent.
 ///
+/// # Details
+///
 /// Only the absent arm consumes the fallback. The present arm releases it, so exactly one of the
 /// two owned values leaves this call and the other drops.
 ///
 /// # Examples
+///
+/// ## Choose between a present value and a fallback
 ///
 /// ```silk
 /// import silk.option { none, some, unwrapOr }
@@ -54,7 +72,11 @@ pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> Option<U>) -> Opt
 ///   return unwrapOr<i32>(move present, 0) + unwrapOr<i32>(move absent, 5)
 /// }
 /// ```
-pub fn unwrapOr<T>(self: Option<T>, fallback: T) -> T {
+pub fn unwrapOr<T>(
+  self: Option<T>,
+  /// The owned alternative consumed only when `self` is absent.
+  fallback: T,
+) -> T {
   return match move self {
     Some<T> { value } => keepPresent<T>(move value, move fallback)
     None {} => move fallback

@@ -26,18 +26,22 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
+    "@silk-effect/compiler#typecheck": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
     "test": {
       "dependsOn": ["build"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest.shared.ts"],
       "outputs": []
     },
     "@silk-effect/compiler#test": {
-      "dependsOn": ["build", "@silk-effect/documentation#build"],
+      "dependsOn": ["build", "@silk-effect/documentation#build", "@silk-effect/doctest#build"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/vitest.shared.ts",
         "$TURBO_ROOT$/packages/language/docs/diagnostics.md",
-        "$TURBO_ROOT$/packages/language/docs/stdlib.md"
+        "$TURBO_ROOT$/packages/language/docs/stdlib/**"
       ],
       "outputs": []
     }

@@ -1,3 +1,24 @@
+//! Native [`FileSystem`] provider confined beneath one explicitly owned platform root.
+//!
+//! # When to use
+//! Construct [`OsFileSystem`] at a native application edge and provide it to portable filesystem
+//! code. Supply an ordinary in-memory [`FileSystem`] in tests or on targets without native OS access.
+//!
+//! # Details
+//! Portable `/` denotes the provider root rather than the host filesystem root. The native boundary
+//! rejects malformed paths, root escape, and symlink traversal outside that confinement. Whole-file
+//! reads and writes own or commit complete contents, directory listings retry oversized entries and
+//! sort complete child paths deterministically, and low-level failures become portable [`FileError`]
+//! values with retained native codes.
+//!
+//! [`make`] copies its root. The root must be an absolute, non-empty, NUL-free native path; violating
+//! that constructor precondition traps. Open handles are closed on success and failure, while an
+//! operation's original typed failure remains the reported outcome if closing also fails.
+//!
+//! # Gotchas
+//! Reachable OS filesystem operations are native-only. Direct WebAssembly compilation rejects them
+//! rather than inventing filesystem imports; evaluator execution requires an injected adapter.
+
 import silk.bytes {
   Bytes,
   append as bytesAppend,

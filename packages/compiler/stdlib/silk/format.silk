@@ -1,3 +1,16 @@
+//! Decimal rendering and complete-text parsing shared by every integer module.
+//!
+//! # When to use
+//! Prefer an integer module's `toText` and `parse` operations when the width is already known. Use
+//! [`unsignedText`], [`signedText`], [`unsignedValue`], or [`signedValue`] when intentionally
+//! working through the widest integer representation.
+//!
+//! # Details
+//! Rendering uses radix 10 and allocates an owned [`String`]. Parsing is allocation-free and reads
+//! the entire input: whitespace, a leading `+`, or trailing characters produce [`NotANumber`],
+//! while syntactically valid values outside the destination range produce [`OutOfRange`]. Signed
+//! parsing accepts `-0`; unsigned parsing rejects any sign.
+
 // Decimal text for integer values, in both directions, at radix 10 only.
 //
 // The whole engine is written twice — once over `u64` and once over `i64` — and every fixed-width
@@ -84,6 +97,8 @@ fn digitValue(value: u8) -> i32 {
 
 /// Renders an unsigned value as decimal text in freshly owned storage.
 ///
+/// # Details
+///
 /// Every unsigned integer module reaches this by widening, so the text of a `u8` and the text of the
 /// same number as a `u64` are the same bytes.
 pub effect fn unsignedText(value: u64) -> String ! OutOfMemory ? &mut Allocator {
@@ -99,6 +114,8 @@ pub effect fn unsignedText(value: u64) -> String ! OutOfMemory ? &mut Allocator 
 }
 
 /// Renders a signed value as decimal text in freshly owned storage, with a leading `-` when negative.
+///
+/// # Details
 ///
 /// The digits are taken from the value's negative form, so `i64.MIN` needs no special case: negating
 /// it would overflow, while negating one digit of it never does.
@@ -120,6 +137,8 @@ pub effect fn signedText(value: i64) -> String ! OutOfMemory ? &mut Allocator {
 }
 
 /// Reads complete decimal text as an unsigned value.
+///
+/// # Details
 ///
 /// Empty text, a leading sign, and any byte outside `0`–`9` are `NotANumber` at the offset that
 /// stopped the read. A value above `u64.MAX` is `OutOfRange`, detected before the overflow rather
@@ -143,6 +162,8 @@ pub fn unsignedValue(text: string) -> Result<u64, ParseFailure> {
 }
 
 /// Reads complete decimal text as a signed value, accepting one leading `-`.
+///
+/// # Details
 ///
 /// Digits accumulate negatively, so text naming `i64.MIN` reads like any other value. A leading `+`
 /// is not accepted. A value outside `i64.MIN`–`i64.MAX` is `OutOfRange`.

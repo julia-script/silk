@@ -298,12 +298,15 @@
     "unicode:generate": "node scripts/generate-unicode-tables.mjs",
     "unicode:vendor": "node scripts/vendor-unicode-data.mjs",
     "unicode:vendor:check": "node scripts/vendor-unicode-data.mjs --check",
-    "test": "pnpm unicode:check && pnpm stdlib:check && pnpm documentation:check && pnpm test:parallel && pnpm test:native-acceptance",
+    "test": "pnpm unicode:check && pnpm stdlib:check && pnpm documentation:policy && pnpm documentation:check && pnpm documentation:examples && pnpm test:parallel && pnpm test:native-acceptance",
     "test:native-acceptance": "vitest run test/DriverNativeAcceptance.test.ts --passWithNoTests --maxWorkers=1",
     "test:parallel": "vitest run --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts",
     "typecheck": "pnpm unicode:check && pnpm stdlib:check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "documentation:generate": "node scripts/generate-documentation.mjs",
-    "documentation:check": "node scripts/generate-documentation.mjs --check"
+    "documentation:check": "node scripts/generate-documentation.mjs --check",
+    "documentation:examples": "pnpm --filter @silk-effect/doctest stdlib:check",
+    "documentation:inventory": "node scripts/inventory-stdlib-documentation.mjs",
+    "documentation:policy": "node scripts/check-stdlib-documentation.mjs"
   },
   "dependencies": {
     "@silk-effect/llvm": "workspace:*",

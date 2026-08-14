@@ -1,3 +1,20 @@
+//! Sixteen-bit signed integers with explicit overflow, conversion, and text policies.
+//!
+//! # When to use
+//! Use `i16` for data whose public representation is exactly sixteen signed bits, such as a binary
+//! field or compact sample. Use `i32` or `i64` when the range is not itself part of the contract.
+//!
+//! # Details
+//! Ordinary arithmetic, narrowing conversions, division by zero, and invalid shift counts trap.
+//! Choose `checked*` to receive [`Option`] on invalid arithmetic, `wrapping*` for arithmetic modulo
+//! 2^16, or `saturating*` to clamp at [`MIN`] and [`MAX`]. Signed right shifts preserve the sign bit.
+//!
+//! Decimal [`parse`] requires a complete, in-range representation; [`toText`] returns newly
+//! allocated owned text.
+//!
+//! # Gotchas
+//! [`MIN`] cannot be represented as a positive i16, so ordinary [`negate`] traps for that value.
+
 import silk.option { Option }
 
 /// The largest i16. The checked arithmetic intrinsics reject every result above this bound.

@@ -1,3 +1,14 @@
+//! Owned arbitrary bytes for file contents, process output, and other encoding-neutral data.
+//!
+//! # When to use
+//! Use [`Bytes`] when every octet must round-trip unchanged. Use `silk.string.String` instead when
+//! the value is known to be valid UTF-8 and callers need text operations.
+//!
+//! # Details
+//! [`make`] creates an empty value without allocating, while [`zeroed`], [`copy`], and [`append`]
+//! may require an [`Allocator`]. Shared and exclusive views borrow only the initialized prefix;
+//! later appends can reallocate, so do not retain a view across a mutation.
+
 import silk.vector {
   Vector,
   make as vectorMake,

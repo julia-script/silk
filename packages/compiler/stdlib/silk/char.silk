@@ -1,3 +1,14 @@
+//! Named equality and scalar-order comparisons for Unicode scalar `char` values.
+//!
+//! # When to use
+//! Prefer comparison operators in direct expressions. Import these functions when comparison must
+//! be passed by name or when the Unicode scalar ordering should be explicit at a call site.
+//!
+//! # Details
+//! Ordering compares scalar values, not locale collation, normalization, grapheme clusters, or UTF-8
+//! byte sequences. These allocation-free functions call the same primitives as the corresponding
+//! operators and introduce no Effect channels.
+
 /// Calls the concrete char equals primitive.
 pub fn equals(left: char, right: char) -> bool {
   return Intrinsic.charEquals(left, right)

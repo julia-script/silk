@@ -1,3 +1,25 @@
+//! Portable normalized paths, whole-file operations, directory traversal, and explicit temp scopes.
+//!
+//! # When to use
+//! Build provider-absolute [`Path`] values with [`make`] or [`fromBytes`], then run operations
+//! through a supplied [`FileSystem`]. Use [`rawBytes`] for platform values that must round-trip even
+//! when they are not UTF-8, and [`resolve`] for lexical relative-path resolution.
+//!
+//! # Details
+//! Paths are absolute and normalized: they reject NUL, empty components, trailing separators, and
+//! embedded `.` or `..`. Resolution handles relative dot components but rejects escape above root.
+//! Directory listings return independently owned child paths in deterministic path-byte order.
+//! Portable [`FileError`] data names both the operation and a closed recovery reason, with an
+//! optional provider code for diagnostics.
+//!
+//! Temporary directories have an explicit lifecycle because removal can fail and needs services.
+//! Use [`release`] when cleanup failure matters, or [`releaseIgnored`] as an infallible finalizer
+//! only after deliberately accepting that loss.
+//!
+//! # Gotchas
+//! A path created from arbitrary bytes may not have a valid text view. Keep using [`rawBytes`] unless
+//! the bytes were validated as UTF-8; [`view`] and [`name`] rely on that caller knowledge.
+
 import silk.bytes {
   Bytes,
   make as bytesMake,
@@ -28,6 +50,7 @@ pub struct Path {
 
 /// Metadata for one portable regular file.
 pub struct FileInfo {
+  /// Complete file length in bytes.
   pub byteLength: usize
 }
 
@@ -36,28 +59,35 @@ pub struct DirectoryInfo {}
 
 /// The portable kind of one directory entry.
 pub struct DirectoryEntryKind {
+  /// Stable portable kind code selected by [`file`] or [`directory`].
   pub code: i32
 }
 
 /// One immediate directory child with an independently owned complete Path.
 pub struct DirectoryEntry {
+  /// Independently owned complete path to the child.
   pub path: Path
+  /// Portable kind reported for the child.
   pub kind: DirectoryEntryKind
 }
 
 /// The operation that produced one FileError.
 pub struct FileOperation {
+  /// Stable code identifying the attempted portable operation.
   pub code: i32
 }
 
 /// A closed portable filesystem recovery reason.
 pub struct FileReason {
+  /// Stable code identifying the portable recovery reason.
   pub code: i32
 }
 
 /// An allocation-free portable filesystem failure.
 pub struct FileError {
+  /// The operation that failed.
   pub operation: FileOperation
+  /// The portable reason callers can recover by.
   pub reason: FileReason
   providerCodeValue: i32
   hasProviderCode: bool
@@ -309,6 +339,8 @@ pub effect fn make(value: string) -> Path ! FileError | OutOfMemory ? &mut Alloc
 
 /// Constructs an owned normalized provider-absolute Path from exact platform bytes.
 ///
+/// # Details
+///
 /// Platform paths are byte sequences, and a caller that received one from the platform — a
 /// directory entry, an argument, an environment value — must be able to hand it back unchanged.
 /// The same normalization applies as for textual construction: the value is absolute, rejects NUL,
@@ -331,13 +363,15 @@ fn pathBytes(self: &Path) -> &[u8] { return bytesAsSlice(&self.bytes) }
 
 /// Borrows the complete normalized path as exact platform bytes.
 ///
+/// # Details
+///
 /// This is the lossless view. It round-trips a Path built from platform bytes even when those
 /// bytes are not well-formed text, which the `string` view cannot promise.
 pub fn rawBytes(self: &Path) -> &[u8] {
   return pathBytes(self)
 }
 
-/// Borrows the complete normalized path as semantic text.
+/// Borrows the complete normalized path as text when its bytes are known to be valid UTF-8.
 pub fn view(self: &Path) -> string {
   unsafe { return Intrinsic.stringFromUtf8Unchecked(pathBytes(self)) }
   return ""
@@ -346,7 +380,7 @@ pub fn view(self: &Path) -> string {
 /// Reports whether this Path denotes the selected provider's root.
 pub fn isRoot(self: &Path) -> bool { return bytesAsSlice(&self.bytes).length == usize.ONE }
 
-/// Borrows the final component as semantic text. Root returns empty text; use isRoot to distinguish absence.
+/// Borrows the final component as text when its bytes are valid UTF-8; root returns empty text.
 pub fn name(self: &Path) -> string {
   unsafe { return Intrinsic.stringFromUtf8Unchecked(bytesAsSlice(&self.nameBytes)) }
   return ""
@@ -559,6 +593,8 @@ pub service FileSystem {
   effect fn removeDirectory(path: &Path) -> () ! FileError ? &mut FileSystem
   /// Creates one directory under an existing parent under a name no other caller holds.
   ///
+  /// # Details
+  ///
   /// The provider chooses the name's unique part and returns the complete Path, because only the
   /// provider can create and claim a name in one step. A caller that supplied the name would have
   /// to check-then-create, and the gap between those two is exactly the race this avoids.
@@ -569,6 +605,8 @@ pub service FileSystem {
 }
 
 /// A directory a caller owns outright, together with everything written inside it.
+///
+/// # Details
 ///
 /// Ownership is affine: `TemporaryDirectory` holds an owned `Path`, so exactly one binding holds
 /// it and the compiler rejects a second use of a moved one. Ownership is not, however, a `Drop`
@@ -582,10 +620,13 @@ pub service FileSystem {
 /// finalizer `! never`, that composition has to say what a failed removal means; `releaseIgnored`
 /// is the stdlib's answer and names the loss at the call site.
 pub struct TemporaryDirectory {
+  /// The complete owned path callers use while the scope remains live.
   pub path: Path
 }
 
 /// Creates one temporary directory under `parent` whose name begins with `prefix`.
+///
+/// # Details
 ///
 /// The result is owned. Nothing removes it until a caller runs `release` or `releaseIgnored`.
 pub effect fn temporaryDirectory(
@@ -597,6 +638,8 @@ pub effect fn temporaryDirectory(
 }
 
 /// Consumes one TemporaryDirectory and removes it together with everything inside it.
+///
+/// # Details
 ///
 /// Both rows are stated rather than hidden. Removal reaches the host, so it can fail; walking the
 /// tree to find what to remove allocates, so it can exhaust memory. A caller that must observe a
@@ -614,6 +657,8 @@ effect fn discardReleaseFailure(error: FileError | OutOfMemory) -> () { return (
 
 /// Consumes one TemporaryDirectory, removes it, and discards a failed removal.
 ///
+/// # Details
+///
 /// This exists because `Effect.ensuring` types its finalizer `! never`, so a fallible release has
 /// to be recovered before it can be a finalizer. The recovery is deliberate and it is named: a
 /// caller reading `releaseIgnored` at the call site can see that a failed removal is being
@@ -626,6 +671,10 @@ effect fn discardReleaseFailure(error: FileError | OutOfMemory) -> () { return (
 /// One shape note for that composition: the finalizer consumes the directory, so the protected
 /// Effect cannot still be borrowing it. Derive whatever paths the work needs from `path` first,
 /// then hand the owner to the finalizer:
+///
+/// # Examples
+///
+/// ## Protect work with best-effort temporary-directory cleanup
 ///
 /// ```silk,ignore
 /// let scope = run temporaryDirectory(&parent, "silk-build-")
@@ -652,6 +701,8 @@ effect fn recordedCopy(
 }
 
 /// Removes one directory and everything inside it.
+///
+/// # Details
 ///
 /// Two passes, because the portable primitive removes exactly one *empty* directory. The first
 /// pass walks the tree front to back, unlinking every file it meets and recording every directory

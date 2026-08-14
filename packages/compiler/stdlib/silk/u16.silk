@@ -1,3 +1,17 @@
+//! Sixteen-bit unsigned integers with explicit arithmetic and conversion failure policies.
+//!
+//! # When to use
+//! Use `u16` when a file format, protocol, or compact data structure specifies exactly sixteen
+//! unsigned bits. Use `usize` for in-memory lengths and indices that follow the target.
+//!
+//! # Details
+//! Ordinary arithmetic, narrowing conversions, division by zero, and invalid shift counts trap.
+//! `checked*` reports invalid arithmetic with [`Option`], `wrapping*` computes modulo 2^16, and
+//! `saturating*` clamps at [`MIN`] or [`MAX`]. Right shift inserts zero bits.
+//!
+//! Decimal [`parse`] consumes the entire input and distinguishes malformed text from range
+//! overflow. [`toText`] allocates a new owned string.
+
 import silk.option { Option }
 
 /// The largest u16. The checked arithmetic intrinsics reject every result above this bound.

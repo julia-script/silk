@@ -1,3 +1,26 @@
+//! Owned key-value storage with deterministic seeded hashing and open-addressed lookup.
+//!
+//! # When to use
+//! Use [`HashMap`] for key-based lookup when a key has a [`HashKey`] witness. Use `silk.vector.Vector`
+//! when presentation order should follow insertion, or when indexing rather than equivalence is the
+//! primary operation.
+//!
+//! # Details
+//! The map starts allocation-free, first allocates eight buckets, and grows before used buckets
+//! exceed three quarters of the table. Linear probing crosses removal markers; growth doubles the
+//! table, moves every live entry, and discards those markers. Allocation completes before the map
+//! commits, so failed growth leaves existing entries, length, and bucket count unchanged.
+//!
+//! One [`HashSeed`] plus the same operation sequence fixes bucket presentation order across the
+//! evaluator, native code, and WebAssembly. Iterate deterministically by scanning
+//! `0..bucketCount`, testing [`occupiedAt`], then reading [`keyAt`] and [`valueAt`]. This is bucket
+//! order, not insertion order.
+//!
+//! # Gotchas
+//! Lookup and removal consume the probe key. [`get`], [`keyAt`], and [`valueAt`] copy a complete
+//! stored entry and therefore require both stored key and value to be `Copy`; use [`remove`] to
+//! transfer a move-only value out. Equivalent keys must also obey the [`HashKey`] hash contract.
+
 // A hashed map over the allocation substrate. Ordinary Silk: no compiler phase knows this type, no
 // engine contains a hash operation, and every hash a program computes is a call to a function some
 // `HashKey` witness declared in Silk.
@@ -33,21 +56,25 @@ const REMOVED: u8 = 2
 /// The width a map takes when it first allocates.
 const INITIAL_WIDTH: usize = 8
 
+/// Internal key-value record exposed by the current table representation.
 pub struct Entry<K, V> {
   hash: u64
   key: K
   value: V
 }
 
+/// Allocation-free storage state used before the map creates its first table.
 pub struct Unallocated<K, V> {
   anchor: [Entry<K, V>; 0]
 }
 
+/// Allocated entry and occupancy buffers used by [`HashMap`].
 pub struct Table<K, V> {
   entries: RawBuffer<Entry<K, V>>
   states: RawBuffer<u8>
 }
 
+/// Owns unique keys and their values under one equivalence, hash witness, and seed.
 pub struct HashMap<K, V> {
   storage: Unallocated<K, V> | Table<K, V>
   seed: HashSeed
@@ -63,6 +90,8 @@ fn absurd<T>() -> T {
 }
 
 /// Constructs an empty map whose every hash is computed under one seed.
+///
+/// # Details
 ///
 /// An empty map allocates nothing. The seed fixes the order the map will present its entries in,
 /// and is the only thing besides the sequence of operations that decides it.
@@ -353,6 +382,8 @@ fn markRemoved<K, V>(owned: &mut Table<K, V>, index: usize) -> () {
 
 /// Inserts one owned key and value, answering with the value an equivalent key already held.
 ///
+/// # Details
+///
 /// The map takes ownership of both. When an equivalent key is already present the map's length does
 /// not change, the replaced value travels to the caller, and the key the map held is released.
 ///
@@ -464,8 +495,10 @@ pub fn contains<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> bool {
 
 /// Returns the bucket holding an entry under a key equivalent to one probe key, or an absent value.
 ///
+/// # Details
+///
 /// This is the lookup a map with move-only values answers: the bucket names the entry without
-/// moving anything out of the map.
+/// moving anything out of the map. A move-only value can then be transferred with [`remove`].
 pub fn indexOf<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> Option<usize> {
   if self.capacity == usize.ZERO {
     return Option.none<usize>()
@@ -494,9 +527,10 @@ pub fn indexOf<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> Option<usize> {
 
 /// Returns the value held under a key equivalent to one probe key, or an absent value.
 ///
-/// Reads a copy out of the map, so it answers for a map whose key and value types are `Copy`. A map
-/// holding move-only values is looked up with `indexOf` and read with `valueAt`, or emptied with
-/// `remove`.
+/// # Details
+///
+/// Reads a complete entry copy, so it answers only when both stored key and value types are `Copy`.
+/// Use [`indexOf`] for a non-moving presence check and [`remove`] to transfer a move-only value.
 pub fn get<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> Option<V> {
   if self.capacity == usize.ZERO {
     return Option.none<V>()
@@ -524,6 +558,8 @@ pub fn get<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> Option<V> {
 }
 
 /// Removes the entry under a key equivalent to one probe key and answers with its value.
+///
+/// # Details
 ///
 /// Ownership of the value passes to the caller; the map does not also release it. The key the map
 /// held is released, and the probe key is released as well.
@@ -568,7 +604,9 @@ pub fn remove<K: HashKey, V>(self: &mut HashMap<K, V>, key: K) -> Option<V> {
 
 /// Returns the key held in one bucket. Traps on a bucket that holds no entry.
 ///
-/// Reads a copy out of the map, so it answers for a map whose key type is `Copy`.
+/// # Details
+///
+/// Reads a complete entry copy, so both stored key and value types must be `Copy`.
 pub fn keyAt<K, V>(self: &HashMap<K, V>, index: usize) -> K {
   if !occupiedAt<K, V>(self, index) {
     let boom = 1 / 0
@@ -578,7 +616,9 @@ pub fn keyAt<K, V>(self: &HashMap<K, V>, index: usize) -> K {
 
 /// Returns the value held in one bucket. Traps on a bucket that holds no entry.
 ///
-/// Reads a copy out of the map, so it answers for a map whose value type is `Copy`.
+/// # Details
+///
+/// Reads a complete entry copy, so both stored key and value types must be `Copy`.
 pub fn valueAt<K, V>(self: &HashMap<K, V>, index: usize) -> V {
   if !occupiedAt<K, V>(self, index) {
     let boom = 1 / 0

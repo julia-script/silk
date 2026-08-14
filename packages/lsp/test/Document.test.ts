@@ -171,7 +171,10 @@ pub fn main() -> i32 {
       JSON.stringify(Analysis.diagnostics(snapshot)),
     )
     assert.strictEqual(hoverText('Core'), '```silk\nimport silk/core as Core\n```')
-    assert.strictEqual(hoverText('make'), '```silk\npub fn make() -> SystemAllocator\n```')
+    assert.strictEqual(
+      hoverText('make'),
+      '```silk\npub fn make() -> SystemAllocator\n```\n\nConstructs a process-backed allocator provider with no allocation of its own.',
+    )
   }),
 )
 
