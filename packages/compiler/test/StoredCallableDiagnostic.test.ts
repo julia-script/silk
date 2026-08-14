@@ -2,7 +2,8 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
+import type * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Driver from '../src/Driver.js'
@@ -39,6 +40,21 @@ const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
 /** Evaluated scalars can be BigInt, which plain JSON serialization refuses. */
 const describe = (outcome: unknown): string =>
   JSON.stringify(outcome, (_, value) => (typeof value === 'bigint' ? value.toString() : value))
+
+/** A scoped temporary directory: acquisition and cleanup stay inside the test's Effect. */
+const withTemporaryDirectory = <A, E, R>(
+  use: (directory: string) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | Cause.UnknownError, R> =>
+  Effect.acquireUseRelease(
+    Effect.try(() => mkdtempSync(join(tmpdir(), 'silk-stored-callable-'))),
+    use,
+    (directory) =>
+      Effect.try(() => rmSync(directory, { recursive: true, force: true })).pipe(Effect.ignore),
+  )
+
+/** One synchronous child execution behind an Effect boundary. */
+const runExecutable = (path: string) =>
+  Effect.try(() => spawnSync(path, [], { encoding: 'utf8' as const }))
 
 /** The minimal reproducer from #184, repaired so declaration and semantic analysis accept it. */
 const reproducer = `struct Parser<A> {
@@ -84,6 +100,19 @@ it.effect('rejects the #184 reproducer at both construction sites', () =>
   }),
 )
 
+it.effect('fences realization: SEM0103 leaves layout and MIR unavailable, not InvalidMir', () =>
+  Effect.gen(function* () {
+    // The diagnostic is only a real fence if nothing downstream of it is built: a snapshot that
+    // still carried a layout and MIR would reproduce the InvalidMir failure the diagnostic exists
+    // to replace.
+    const snapshot = yield* analyzed('stored-callable/fence', reproducer)
+    assert.include(codes(snapshot), 'SEM0103')
+    assert.strictEqual(snapshot.layoutCatalog._tag, 'Unavailable')
+    assert.strictEqual(snapshot.layout._tag, 'Unavailable')
+    assert.strictEqual(snapshot.mir._tag, 'Unavailable')
+  }),
+)
+
 it.effect('rejects a monomorphic construction that stores a partial application', () =>
   Effect.gen(function* () {
     const source = `struct Parser { decode: fn(i32) -> i32 }
@@ -96,10 +125,11 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('rejects a generic wrapper whose inferred argument is a callable', () =>
+it.effect('points a generic wrapper violation at the specializing call site', () =>
   Effect.gen(function* () {
-    // The declared field type is `T`; only instance substitution makes it a callable, so the
-    // check has to run against specialized instances rather than declared field types.
+    // The declared field type is `T`; only instance substitution makes it a callable. The concrete
+    // callable was written at the call, so that is the primary origin, and the generic body's
+    // construction is retained as related provenance.
     const source = `struct Holder<T> { value: T }
 fn wrap<T>(value: T) -> Holder<T> { return Holder<T> { value: move value } }
 pub fn main() -> i32 {
@@ -108,6 +138,21 @@ pub fn main() -> i32 {
 }`
     const snapshot = yield* analyzed('stored-callable/generic-inferred', source)
     assert.deepEqual(codes(snapshot), ['SEM0103'], messages(snapshot).join('\n'))
+    const diagnostic = Analysis.diagnostics(snapshot).at(0)
+    assert.strictEqual(diagnostic?.span.sourceId, 'stored-callable/generic-inferred')
+    assert.strictEqual(
+      diagnostic === undefined
+        ? undefined
+        : source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      'wrap(i32.add(1))',
+    )
+    assert.deepEqual(
+      diagnostic?.relatedSpans?.map((related) => [
+        related.label,
+        source.slice(related.span.start, related.span.end).trim(),
+      ]),
+      [['constructed here', 'Holder<T> { value: move value }']],
+    )
   }),
 )
 
@@ -160,11 +205,12 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('rejects a stdlib construction reached only through inference', () =>
+it.effect('points a stdlib construction reached through inference at the user call', () =>
   Effect.gen(function* () {
-    // `Option.some(i32.add(1))` specializes `Some<T>` with a callable argument; the construction
-    // that cannot receive a layout is the one inside silk/option, so that is where the span
-    // points. Imperfect provenance, but a named source diagnostic rather than `InvalidMir`.
+    // `Option.some(i32.add(1))` specializes `Some<T>` with a callable argument. The construction
+    // that cannot receive a layout lives inside silk/option, but the callable was written at the
+    // user's call, so the primary span is the user source and the stdlib construction is related
+    // provenance.
     const source = `pub fn main() -> i32 {
   let optional = Option.some(i32.add(1))
   return 42
@@ -172,12 +218,13 @@ it.effect('rejects a stdlib construction reached only through inference', () =>
     const snapshot = yield* analyzed('stored-callable/stdlib-inference', source)
     assert.deepEqual(codes(snapshot), ['SEM0103'], messages(snapshot).join('\n'))
     const diagnostic = Analysis.diagnostics(snapshot).at(0)
-    assert.strictEqual(diagnostic?.span.sourceId, 'silk/option')
+    assert.strictEqual(diagnostic?.span.sourceId, 'stored-callable/stdlib-inference')
+    assert.deepEqual(
+      diagnostic?.relatedSpans?.map((related) => [related.label, related.span.sourceId]),
+      [['constructed here', 'silk/option']],
+    )
   }),
 )
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-stored-callable-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /**
  * Callable-bearing declarations that never reach a live construction keep compiling, and the
@@ -211,18 +258,22 @@ it.effect(
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42, 'wasm')
 
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make('stored-callable/accepted', ascii(accepted)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'accepted'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, `native: ${run.stderr}`)
+      yield* withTemporaryDirectory((directory) =>
+        Effect.gen(function* () {
+          const compiled = yield* Driver.compile({
+            compilation: {
+              root: SourceFile.make('stored-callable/accepted', ascii(accepted)),
+            },
+            toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+            profile: 'release',
+            destination: join(directory, 'accepted'),
+          }).pipe(Effect.provide(SourceResolver.empty))
+          assert.strictEqual(compiled._tag, 'Compiled')
+          if (compiled._tag !== 'Compiled') return
+          const run = yield* runExecutable(compiled.path)
+          assert.strictEqual(run.status, 42, `native: ${run.stderr}`)
+        }),
+      )
     }),
   180_000,
 )

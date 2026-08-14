@@ -790,6 +790,17 @@ export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagno
       diagnostic.code === polymorphicRecursionCode,
   )
 
+/**
+ * Tests whether a reachable-instance fence diagnostic denies target realization.
+ *
+ * A stored-callable construction (#184) is exactly a program the layout planner cannot serve: the
+ * violating aggregates would receive unavailable layout entries and MIR validation would fail with
+ * `MissingTypeLayout`/`InvalidAggregateOperation`. Realization stops here so the source diagnostic
+ * is the only reported failure, instead of being followed by an `InvalidMir` echo of itself.
+ */
+export const hasInstanceFenceErrors = (diagnostics: ReadonlyArray<Diagnostic>): boolean =>
+  diagnostics.some((diagnostic) => diagnostic.code === storedCallableConstructionCode)
+
 /** Derives the identity of one diagnostic given its ordinal among equals. */
 export const identity = (self: Diagnostic, ordinal = 0): Identity =>
   Object.freeze({
@@ -1669,12 +1680,18 @@ export const suspendingContinuationAllocator = (
  * size the callable's environment (#184). Until nominal values can carry that identity — or stored
  * callables get a uniform runtime representation — the construction is reported here, at the source
  * site, instead of surfacing later as an `InvalidMir` failure with no user-facing diagnostic.
+ *
+ * When the aggregate stores a callable only because a generic specialization chose one — the
+ * declared field type is a bare type parameter — the primary span is the specializing call site,
+ * because that is where the concrete callable argument was written, and the generic body's
+ * construction is retained as `constructedAt` related provenance.
  */
 export const storedCallableConstruction = (
   aggregate: string,
   field: string | undefined,
   callable: string,
   span: SourceSpan.SourceSpan,
+  constructedAt?: SourceSpan.SourceSpan,
 ): Diagnostic => {
   const site = field === undefined ? 'its element' : `field ${field}`
   return Object.freeze({
@@ -1690,6 +1707,13 @@ export const storedCallableConstruction = (
       callable,
     }),
     span,
+    ...(constructedAt === undefined
+      ? {}
+      : {
+          relatedSpans: Object.freeze([
+            Object.freeze({ label: 'constructed here', span: constructedAt }),
+          ]),
+        }),
   })
 }
 
