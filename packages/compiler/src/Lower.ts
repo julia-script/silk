@@ -177,13 +177,24 @@ class FunctionLowering {
   }
 
   call(span: SourceSpan.SourceSpan): Instances.CallInstance | undefined {
-    return this.calls.find(
+    const exact = this.calls.find(
       (call) =>
         Instances.keyText(call.owner) === Instances.keyText(this.owner.key) &&
         call.span.sourceId === span.sourceId &&
         call.span.start === span.start &&
         call.span.end === span.end,
     )
+    if (exact !== undefined || this.providedRequirements.length === 0) return exact
+    // A provided generated runner reuses the base Effect body's HIR and call sites but has a
+    // private synthesized InstanceKey that discovery never owns. Resolve its calls through the
+    // source owner whose body is being specialized; provider dispatch is represented separately.
+    const sameSite = this.calls.filter(
+      (call) =>
+        call.span.sourceId === span.sourceId &&
+        call.span.start === span.start &&
+        call.span.end === span.end,
+    )
+    return sameSite.length === 1 ? sameSite.at(0) : undefined
   }
 }
 
@@ -1937,6 +1948,12 @@ function lowerExpressionInner(
       }
       if (recipe?._tag === 'EffectBindRequirement' && recipe.protected._tag !== 'BuiltinCall')
         return lowerEffectExecution(fn, recipe, expression.type, expression.span)
+      if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'EffectSuspend') {
+        const deferred = recipe.arguments.at(0)
+        return deferred === undefined
+          ? undefined
+          : lowerEffectExecution(fn, deferred, expression.type, expression.span)
+      }
       if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'StorageAcquire') {
         const [layoutExpression] = recipe.arguments
         if (layoutExpression === undefined || fn.effectOutcome === undefined) return undefined
@@ -2797,7 +2814,11 @@ function lowerExpressionInner(
         )
         return finishBuiltin(destination)
       }
-      if (expression.operation === 'StorageAcquire' || expression.operation === 'HostWrite')
+      if (
+        expression.operation === 'EffectSuspend' ||
+        expression.operation === 'StorageAcquire' ||
+        expression.operation === 'HostWrite'
+      )
         return undefined
       if (expression.operation === 'RawBufferFrom') {
         const [allocation, count] = argumentLocals
@@ -4669,8 +4690,9 @@ const lowerEffectRunner = (
     provenance: generated(block.span),
   })
   const entry = lowerSequence(lowering, block.statements, indexExits(plan), undefined, terminal)
-  if (entry === undefined || lowering.regions.some((region) => region === undefined))
+  if (entry === undefined || lowering.regions.some((region) => region === undefined)) {
     return undefined
+  }
   const result: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
     _tag: 'EffectOutcome',
     type: type.type,

@@ -171,6 +171,15 @@ const actor = (
 
 const rawElement = Type.parameter({ module: 'silk/core', name: '$RawStorage' }, 0, 'T')
 const rawTypeParameters = Object.freeze([rawElement])
+const suspensionOwner = Object.freeze({ module: 'silk/core', name: '$EffectSuspend' })
+const suspensionSuccess = Type.parameter(suspensionOwner, 0, 'A')
+const suspensionFailure = Type.parameter(suspensionOwner, 1, 'E', 'FailureRow')
+const suspensionRequirement = Type.parameter(suspensionOwner, 2, 'R', 'RequirementRow')
+const suspensionTypeParameters = Object.freeze([
+  suspensionSuccess,
+  suspensionFailure,
+  suspensionRequirement,
+])
 const nativeTargets = Object.freeze<ReadonlyArray<ExecutionTarget>>(['Evaluator', 'LLVM'])
 const byteSlice = Type.slice('Shared', 'u8')
 const mutableI32 = Type.reference('Exclusive', 'i32')
@@ -901,6 +910,39 @@ const legacyActors = Object.freeze([
     'Effect',
     'Namespace',
     Object.freeze([
+      builtin({
+        actor: 'Effect',
+        name: 'suspendEffect',
+        operation: 'EffectSuspend',
+        typeParameters: Object.freeze(['A', '!E', '?R']),
+        semanticTypeParameters: suspensionTypeParameters,
+        parameters: Object.freeze([valueParameter('deferred', 'once Effect<A ! E ? R>')]),
+        semanticParameters: Object.freeze([
+          Type.effect(
+            suspensionSuccess,
+            Object.freeze([]),
+            'Take',
+            Object.freeze([]),
+            Object.freeze([suspensionFailure]),
+            Object.freeze([suspensionRequirement]),
+          ),
+        ]),
+        result: 'Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
+        semanticResult: Type.effect(
+          suspensionSuccess,
+          Object.freeze([Type.outOfMemory]),
+          'Take',
+          Object.freeze([
+            Object.freeze({
+              capability: Type.allocator,
+              role: 'DefaultRole',
+              access: 'Exclusive',
+            }),
+          ]),
+          Object.freeze([suspensionFailure]),
+          Object.freeze([suspensionRequirement]),
+        ),
+      }),
       effect({
         name: 'result',
         operation: 'Result',
@@ -947,6 +989,7 @@ const upperInitial = (value: string): string =>
 
 const flatSpelling = (actor_: string, operation: string): string => {
   if (Scalar.isSpelling(actor_)) return `${actor_}${upperInitial(operation)}`
+  if (actor_ === 'Effect' && operation === 'suspendEffect') return 'suspendEffect'
   if (actor_ === 'Effect' && operation === 'bindRequirement') return 'bindRequirement'
   if (actor_ === 'Place' && operation === 'replace') return 'replace'
   if (actor_ === 'Storage' && operation === 'acquire') return 'systemAllocationAcquire'

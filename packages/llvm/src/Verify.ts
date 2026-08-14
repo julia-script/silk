@@ -120,6 +120,8 @@ const operandsOf = (
       return [instruction.condition, instruction.onTrue, instruction.onFalse]
     case 'Cast':
       return [instruction.operand]
+    case 'Freeze':
+      return [instruction.operand]
     case 'ExtractValue':
       return [instruction.aggregate]
     case 'InsertValue':

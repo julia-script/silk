@@ -93,6 +93,7 @@ export interface LoopId {
 export type BuiltinOperation =
   | Scalar.OperationCode
   | 'LayoutOf'
+  | 'EffectSuspend'
   | 'StorageAcquire'
   | 'HostWrite'
   | 'RawBufferFrom'

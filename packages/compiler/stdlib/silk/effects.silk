@@ -360,3 +360,10 @@ pub effect fn provideWith<A, C, !E, !F, ?R, ?S>(
     }
   }
 }
+
+/// Defers one Effect through the compiler-owned stack-safe execution boundary.
+pub effect fn suspend<A, !E, ?R>(
+  deferred: once Effect<A ! E ? R>
+) -> A ! E | OutOfMemory ? R | &mut Allocator {
+  return run Intrinsic.suspendEffect(move deferred)
+}

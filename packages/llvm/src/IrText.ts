@@ -866,6 +866,8 @@ const renderInstruction = (
   switch (instruction._tag) {
     case 'Unary':
       return `${result}${instruction.kind} ${fastMathFlags(instruction.fastMath)}${renderTypedOperand(state, body, instruction.operand)}`
+    case 'Freeze':
+      return `${result}freeze ${renderTypedOperand(state, body, instruction.operand)}`
     case 'Binary': {
       const flags = instruction.kind.startsWith('f')
         ? fastMathFlags(instruction.fastMath)

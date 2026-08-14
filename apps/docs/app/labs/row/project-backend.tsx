@@ -1190,6 +1190,28 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `drop slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'AllocationRelease':
       return `release allocation #${event.ticket}`
+    case 'SuspensionOrigin':
+      return `originate suspension ${event.point.ordinal}`
+    case 'ContinuationRequest':
+      return `request continuation ${event.ordinal ?? '?'} · ${event.bytes ?? '?'} bytes · align ${event.alignment ?? '?'}`
+    case 'ContinuationReject':
+      return `reject continuation ${event.ordinal ?? '?'}`
+    case 'ContinuationAcquire':
+      return `acquire continuation #${event.ticket ?? '?'} · ordinal ${event.ordinal ?? '?'}`
+    case 'ContinuationLoanEnd':
+      return `end continuation allocator loan · ordinal ${event.ordinal ?? '?'}`
+    case 'ContinuationInitialize':
+      return `initialize continuation #${event.ticket ?? '?'} · ordinal ${event.ordinal ?? '?'}`
+    case 'ContinuationPublish':
+      return `publish continuation #${event.ticket ?? '?'} · ordinal ${event.ordinal ?? '?'}`
+    case 'ContinuationResume':
+      return `resume continuation #${event.ticket ?? '?'} · ${event.outcome?.toLowerCase() ?? '?'}`
+    case 'ContinuationRelease':
+      return `release continuation #${event.ticket ?? '?'}`
+    case 'SuspensionChildStart':
+      return `start suspended child · point ${event.point.ordinal}`
+    case 'SuspensionChildComplete':
+      return `complete suspended child · ${event.outcome?.toLowerCase() ?? '?'}`
     case 'HostWrite':
       return `${event.destination.toLowerCase()} write ${event.bytes.length} bytes · ${event.outcome.toLowerCase()}`
     case 'StringStatic':
@@ -1255,6 +1277,17 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'RawBufferFill':
     case 'SlotDrop':
     case 'AllocationRelease':
+    case 'SuspensionOrigin':
+    case 'ContinuationRequest':
+    case 'ContinuationReject':
+    case 'ContinuationAcquire':
+    case 'ContinuationLoanEnd':
+    case 'ContinuationInitialize':
+    case 'ContinuationPublish':
+    case 'ContinuationResume':
+    case 'ContinuationRelease':
+    case 'SuspensionChildStart':
+    case 'SuspensionChildComplete':
     case 'HostWrite':
     case 'StringStatic':
     case 'StringRuntime':

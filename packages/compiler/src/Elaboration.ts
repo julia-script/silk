@@ -4795,7 +4795,7 @@ function analyzeBuiltinCall(
           call.span,
         )
       : undefined
-  const substitution = new Map<string, SemanticType>()
+  const substitution = new Map<string, Type.GenericArgument>()
   if (
     typeArguments.explicit &&
     typeArguments.types !== undefined &&
@@ -5989,6 +5989,11 @@ const effectCaptureFacts = (
         )
         return
       case 'EffectBlock':
+        // Constructing a nested deferred Effect still reads the environment needed to create
+        // that Effect value. Bubble those dependencies into the enclosing Effect runner so a
+        // parameter used only by the nested body remains available when the child is formed.
+        for (const capture of fact.captures)
+          recordReference(capture.reference, capture.access, capture.span, false)
         return
       case 'Integer':
       case 'Boolean':
@@ -6074,8 +6079,7 @@ function analyzeExpression(
         diagnostics: Object.freeze([]),
         type: undefined,
       })
-    const firstLocalBinding =
-      Math.max(-1, ...scope.bindings.map((binding) => binding.id.ordinal)) + 1
+    const firstLocalBinding = resolution.nextBindingOrdinal?.value ?? 0
     const nested: BodyContext = {
       source,
       declaration,
@@ -6085,7 +6089,7 @@ function analyzeExpression(
       regions: [],
       loops: [],
       resolution,
-      bindingBase: firstLocalBinding,
+      nextBindingOrdinal: resolution.nextBindingOrdinal ?? { value: 0 },
       regionBase: 1_000_000 + node.span.start * 100,
       effectBlock: true,
     }
@@ -7046,7 +7050,7 @@ interface BodyContext {
   readonly regions: Array<Hir.RegionId>
   readonly loops: Array<Hir.LoopId>
   readonly resolution: ResolutionContext
-  readonly bindingBase?: number
+  readonly nextBindingOrdinal: { value: number }
   readonly regionBase?: number
   readonly effectBlock?: true
 }
@@ -7055,6 +7059,7 @@ interface ResolutionContext {
   readonly scope: NameResolution.ModuleScope
   readonly index: DeclarationIndex.Index
   readonly unsafeSpans?: ReadonlyArray<SourceSpan.SourceSpan>
+  readonly nextBindingOrdinal?: { value: number }
 }
 
 const analyzeStatements = (
@@ -7151,6 +7156,8 @@ const analyzeStatements = (
 
     if (element.kind === 'BindingStatement') {
       const region = nextRegion()
+      const bindingOrdinal = context.nextBindingOrdinal.value
+      context.nextBindingOrdinal.value += 1
       const initializerNode = statementExpressionNode(element)
       const initializer = analyzeExpression(
         context.source,
@@ -7178,7 +7185,7 @@ const analyzeStatements = (
         id: Object.freeze({
           _tag: 'HirBinding',
           function: context.declaration.id,
-          ordinal: (context.bindingBase ?? 0) + context.bindings.length,
+          ordinal: bindingOrdinal,
         }),
         name,
         mutability:
@@ -7552,9 +7559,11 @@ const analyzeFunctionBody = (
     for (const child of node.children) if (SyntaxTree.isNode(child)) collectUnsafeSpans(child)
   }
   collectUnsafeSpans(declaration.syntax)
+  const nextBindingOrdinal = { value: 0 }
   const bodyResolution: ResolutionContext = Object.freeze({
     ...resolution,
     unsafeSpans: Object.freeze(unsafeSpans),
+    nextBindingOrdinal,
   })
   const context: BodyContext = {
     source,
@@ -7565,6 +7574,7 @@ const analyzeFunctionBody = (
     regions: [],
     loops: [],
     resolution: bodyResolution,
+    nextBindingOrdinal,
   }
   declaration.failureRow.failures.forEach((failure, ordinal) => {
     if (!DeclarationIndex.containsLexicalBorrow(bodyResolution.index, failure)) return

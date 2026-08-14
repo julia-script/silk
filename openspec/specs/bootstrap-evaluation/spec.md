@@ -129,15 +129,23 @@ the correct frame even when several active frames share one canonical function i
 ### Requirement: Evaluation limits are deterministic blocked data
 
 Evaluation SHALL accept positive maximum-step and maximum-call-depth limits with stable defaults.
-Each executed MIR operation consumes one step and each active invocation consumes one depth unit.
+Each executed MIR operation consumes one step and each active source-logical invocation consumes one
+depth unit, including an invocation retained as a suspended heap continuation. Compiler-generated
+driver, resume, and storage helpers MUST NOT consume additional source-logical depth units.
 Exhaustion SHALL produce an `EvaluationLimit` blocked outcome naming `Steps` or `CallDepth`, the
 configured limit, the active function, the source span that attempted further work, and the complete
-active call identities. Evaluation MUST NOT depend on JavaScript stack overflow or wall-clock time.
+active source-logical call identities. Evaluation MUST NOT depend on JavaScript stack overflow or
+wall-clock time.
 
 #### Scenario: Bound direct non-termination
 
 - **WHEN** a function recursively calls itself without reaching a base case
 - **THEN** evaluation blocks at the configured call-depth limit with a deterministic active call path
+
+#### Scenario: Bound suspended logical recursion
+
+- **WHEN** an Effect crosses suspension boundaries until another source-logical invocation would exceed `maxCallDepth`
+- **THEN** evaluation blocks with `CallDepth` at that exact boundary and reports every retained suspended invocation in the active call path
 
 #### Scenario: Bound an infinite loop
 
@@ -703,3 +711,23 @@ browser-capable compiler cores, and MUST NOT commit more bytes than the caller's
 
 - **WHEN** evaluation reaches a host-input lookup and no provider was injected
 - **THEN** it reports a blocked outcome naming the missing host rather than inventing an empty command line
+
+### Requirement: Evaluation executes suspension through logical activations
+
+Evaluation SHALL execute explicit suspension by retaining the parent logical activation in its heap
+activation machine, evaluating the deferred child, and resuming the parent with the child's exact
+typed outcome. It SHALL model continuation allocation, initialization, ownership transfer, and
+release through the selected allocator with the same logical boundary identities, request order,
+success or failure ordinals, ownership transfers, and release count as the native and Wasm engines.
+Each engine MAY use a different validated physical frame size, alignment, and private header.
+Evaluation MUST NOT recurse on the JavaScript stack or expose a pending value as a source result.
+
+#### Scenario: Complete deep suspension under raised limits
+
+- **WHEN** a terminating suspended Effect recursion is evaluated with step and call-depth limits above its logical work
+- **THEN** evaluation completes with the same result, logical allocation order and outcomes, ownership and release counts, and cleanup trace as native and Wasm without requiring identical physical frame bytes or depending on the JavaScript call stack
+
+#### Scenario: Sweep continuation allocation failure
+
+- **WHEN** deterministic allocation failure rejects each continuation allocation ordinal in turn
+- **THEN** evaluation returns `OutOfMemory` at that boundary, creates no owner for the rejected request, and cleans every previously created logical continuation exactly once

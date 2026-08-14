@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Mir from '../src/Mir.js'
 import * as MirNormalization from '../src/MirNormalization.js'
+import * as ProvisionalMir from '../src/ProvisionalMir.js'
 
 const encoder = new TextEncoder()
 const source = `import silk.result { Result, Success, Failure }
@@ -30,6 +31,15 @@ const snapshot = (normalizeMir: boolean) =>
 const mainOperations = (program: Mir.Module): ReadonlyArray<Mir.Operation> => {
   const main = program.functions.find((fn) => fn.id.name === 'main')
   return main === undefined ? Object.freeze([]) : Mir.operations(main)
+}
+
+const allOperations = (program: Mir.Module): ReadonlyArray<Mir.Operation> =>
+  program.functions.flatMap(Mir.operations)
+
+const provisionalOf = (self: Analysis.Snapshot): ProvisionalMir.Module => {
+  const provisional = Analysis.provisionalMirOf(self)
+  if (provisional._tag === 'Unavailable') throw provisional.error
+  return provisional.value
 }
 
 it.effect('folds copied constructor shapes and direct static runs without name privilege', () =>
@@ -64,7 +74,10 @@ it.effect('folds copied constructor shapes and direct static runs without name p
       ),
     )
     assert.deepEqual(Mir.verify(normalizedProgram), [])
-    assert.strictEqual(MirNormalization.normalize(normalizedProgram), normalizedProgram)
+    assert.strictEqual(
+      MirNormalization.normalize(normalizedProgram, provisionalOf(normalized)),
+      normalizedProgram,
+    )
     const rawEvaluation = Analysis.evaluate(raw)
     const normalizedEvaluation = Analysis.evaluate(normalized)
     assert.strictEqual(rawEvaluation._tag, 'Completed')
@@ -74,18 +87,176 @@ it.effect('folds copied constructor shapes and direct static runs without name p
   }),
 )
 
-it.effect('rejects the whole candidate when suspension is unknown', () =>
+it.effect('retains concrete suspendable runs without a global suspension mode', () =>
   Effect.gen(function* () {
-    const raw = yield* snapshot(false)
+    const raw = yield* Analysis.ofSourceRealized(
+      'test/mir-normalization-suspendable',
+      encoder.encode(`effect fn delayed(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
+  return run Effect.suspend(effect { return value })
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  let selected = delayed(42) |> Effect.provideMut(&mut allocator)
+  return run Effect.catch(move selected, recover)
+}`),
+      'wasm32-unknown-unknown',
+      { normalizeMir: false },
+    )
+    assert.deepEqual(Analysis.diagnostics(raw), [])
     const program = Analysis.loweredMir(raw)
-    const rejected = MirNormalization.normalize(program, { suspension: 'Unknown' })
+    const provisional = provisionalOf(raw)
+    const rejected = MirNormalization.normalize(program, provisional)
     assert.strictEqual(Mir.encode(rejected).includes('run-static-effect'), false)
     assert.isTrue(
       (rejected.normalization ?? []).some(
+        (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'SuspendableRunner',
+      ),
+    )
+    assert.include(ProvisionalMir.encode(provisional), 'relay=existing')
+    assert.deepEqual(Mir.verify(rejected), [])
+  }),
+)
+
+it.effect('retains only the exact execution whose runner fact is unknown', () =>
+  Effect.gen(function* () {
+    const raw = yield* snapshot(false)
+    const program = Analysis.loweredMir(raw)
+    const provisional = provisionalOf(raw)
+    const unknownMain: ProvisionalMir.Module = Object.freeze({
+      ...provisional,
+      executions: Object.freeze(
+        provisional.executions.map((execution) =>
+          execution.key._tag === 'InstanceExecution' &&
+          execution.key.instance.declaration.name === 'main'
+            ? Object.freeze({ ...execution, classification: 'Unknown' as const })
+            : execution,
+        ),
+      ),
+    })
+    const retained = MirNormalization.normalize(program, unknownMain)
+    assert.isFalse(
+      mainOperations(retained).some((operation) => operation._tag === 'RunStaticEffect'),
+    )
+    assert.isTrue(
+      (retained.normalization ?? []).some(
         (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'SuspensionUnknown',
       ),
     )
-    assert.deepEqual(Mir.verify(rejected), [])
+    assert.isTrue(
+      retained.functions
+        .filter((fn) => fn.id.name !== 'main')
+        .flatMap(Mir.operations)
+        .some((operation) => operation._tag === 'RunStaticEffect'),
+      Mir.encode(retained),
+    )
+  }),
+)
+
+it.effect('retains suspendable reification and effect-entry closure control', () =>
+  Effect.gen(function* () {
+    const reified = yield* Analysis.ofSourceRealized(
+      'test/mir-normalization-reify-suspendable',
+      encoder.encode(`effect fn seed(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
+  return run Effect.suspend(effect { return value })
+}
+fn increment(value: i32) -> i32 { return value + 1 }
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  let pending = seed(41) |> Effect.map(increment) |> Effect.provideMut(&mut allocator)
+  return run Effect.catch(move pending, recover)
+}`),
+      'wasm32-unknown-unknown',
+    )
+    const entry = yield* Analysis.ofSourceRealized(
+      'test/mir-normalization-entry-suspendable',
+      encoder.encode('pub effect fn main() -> () { return () }'),
+      'wasm32-unknown-unknown',
+      { normalizeMir: false },
+    )
+    assert.deepEqual(Analysis.diagnostics(reified), [])
+    assert.deepEqual(Analysis.diagnostics(entry), [])
+    const reifiedProgram = Analysis.loweredMir(reified)
+    const rawEntryProgram = Analysis.loweredMir(entry)
+    const closure = allOperations(rawEntryProgram).find(
+      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'CloseEffectEntry' }> =>
+        operation._tag === 'CloseEffectEntry',
+    )
+    assert.isDefined(closure)
+    if (closure === undefined) return
+    const entryFacts = provisionalOf(entry)
+    const suspendableEntryFacts: ProvisionalMir.Module = Object.freeze({
+      ...entryFacts,
+      executions: Object.freeze(
+        entryFacts.executions.map((execution) =>
+          execution.key._tag !== 'InstanceExecution' &&
+          execution.key.runner.module === closure.runner.module &&
+          execution.key.runner.name === closure.runner.name
+            ? Object.freeze({ ...execution, classification: 'Suspendable' as const })
+            : execution,
+        ),
+      ),
+    })
+    const entryProgram = MirNormalization.normalize(rawEntryProgram, suspendableEntryFacts)
+    assert.isTrue(
+      allOperations(reifiedProgram).some((operation) => operation._tag === 'ReifyEffect'),
+      Mir.encode(reifiedProgram),
+    )
+    assert.isTrue(
+      allOperations(entryProgram).some((operation) => operation._tag === 'CloseEffectEntry'),
+      Mir.encode(entryProgram),
+    )
+    for (const program of [reifiedProgram, entryProgram]) {
+      assert.isTrue(
+        (program.normalization ?? []).some(
+          (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'SuspendableRunner',
+        ),
+        Mir.encode(program),
+      )
+    }
+  }),
+)
+
+it.effect('retains a provider-specialized suspendable runner', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'test/mir-normalization-provided-suspendable',
+      encoder.encode(`service Value {
+  effect fn get() -> i32 ! OutOfMemory ? &Value | &mut Allocator
+}
+struct SuspendedValue { value: i32 }
+effect fn get(self: &SuspendedValue) -> i32 ! OutOfMemory ? &mut Allocator {
+  return run Effect.suspend(effect { return self.value })
+}
+impl Value for SuspendedValue { get: SuspendedValue.get }
+effect fn read() -> i32 ! OutOfMemory ? &Value | &mut Allocator { return run Value.get() }
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 {
+  let provider = SuspendedValue { value: 42 }
+  let mut allocator = SystemAllocator.make()
+  let selected = read() |> Effect.provide(&provider)
+  let complete = move selected |> Effect.provideMut(&mut allocator)
+  return run Effect.catch(move complete, recover)
+}`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const program = Analysis.loweredMir(self)
+    assert.isTrue(
+      allOperations(program).some(
+        (operation) =>
+          (operation._tag === 'RunEffectValue' || operation._tag === 'ReifyEffect') &&
+          operation.runner.name.includes('$provided$'),
+      ),
+      Mir.encode(program),
+    )
+    assert.isTrue(
+      (program.normalization ?? []).some(
+        (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'SuspendableRunner',
+      ),
+      Mir.encode(program),
+    )
   }),
 )
 
@@ -127,7 +298,7 @@ it.effect('keeps affine captures materialized and ownership explicit', () =>
         ),
       ),
     })
-    const program = MirNormalization.normalize(affineProgram)
+    const program = MirNormalization.normalize(affineProgram, provisionalOf(raw))
     assert.isTrue(
       (program.normalization ?? []).some(
         (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'AffineCapture',

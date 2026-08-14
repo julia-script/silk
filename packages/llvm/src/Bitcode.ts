@@ -938,6 +938,11 @@ const writeFunctionInstruction = (
       ])
       break
     }
+    case 'Freeze':
+      Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.freeze, [
+        relative(instruction.operand),
+      ])
+      break
     case 'ExtractValue':
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.extractValue, [
         relative(instruction.aggregate),

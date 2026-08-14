@@ -5257,6 +5257,14 @@
       "invariant": "caller proves the selected slot is in bounds and has the initializedness state required by the operation"
     },
     {
+      "operation": "Intrinsic.suspendEffect",
+      "signature": "fn Intrinsic.suspendEffect<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E | OutOfMemory ? R | &mut Allocator>",
+      "unsafe": false,
+      "admission": "Effect",
+      "consumer": "silk/effects.suspendEffect",
+      "identity": "EffectSuspend"
+    },
+    {
       "operation": "Intrinsic.effectResult",
       "signature": "fn Intrinsic.effectResult(protected: Effect<A ! E ? R>) -> Effect<Result<A, Row<!E>> ? R>",
       "unsafe": false,

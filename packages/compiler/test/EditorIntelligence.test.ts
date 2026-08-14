@@ -1039,3 +1039,34 @@ it('keeps the intrinsic catalog identities and ordering stable', () => {
     ),
   )
 })
+
+it.effect('presents and completes the sealed suspension intrinsic with its exact rows', () => {
+  const source = `pub fn main() -> i32 {
+  let deferred = Intrinsic.suspendEffect(effect { return 42 })
+  let pending = Intrinsic.
+  return 42
+}`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const operationOffset = source.indexOf('suspendEffect')
+      const hover = Analysis.hoverSubjectAt(snapshot, 'main', operationOffset)
+      assert.strictEqual(
+        hover?.presentation.text,
+        'fn Intrinsic.suspendEffect<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
+      )
+
+      const completionOffset = encoder.encode(
+        source.slice(0, source.indexOf('Intrinsic.', operationOffset) + 'Intrinsic.'.length),
+      ).length
+      const completion = Analysis.completionAt(snapshot, 'main', completionOffset)
+      const candidate = completion?.candidates.find(
+        (candidate) => candidate.label === 'suspendEffect',
+      )
+      assert.strictEqual(
+        candidate?.detail?.text,
+        'fn Intrinsic.suspendEffect<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
+      )
+      return undefined
+    }),
+  )
+})

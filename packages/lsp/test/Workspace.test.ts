@@ -312,3 +312,39 @@ it.effect('navigates standard-library definitions to the analyzed toolchain sour
     assert.deepEqual(definition?.targetSelectionRange.start, { line: 17, character: 11 })
   }).pipe(Effect.provide(NodeServices.layer)),
 )
+
+it.effect('navigates Effect.suspend to its shipped Silk declaration', () =>
+  Effect.gen(function* () {
+    const root = project()
+    const source = `pub effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator {
+  return run Effect.suspend(effect { return 42 })
+}
+pub fn main() -> i32 { return 42 }`
+    const document = yield* Workspace.open({
+      uri: pathToFileURL(join(root, 'src', 'Main.silk')).href,
+      version: 1,
+      bytes: encoder.encode(source),
+    })
+    const snapshot = yield* Workspace.analyze(document, [])
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const librarySource = Analysis.sources(snapshot).get('silk/effects')
+    assert.isDefined(librarySource)
+    if (librarySource === undefined) return
+    assert.strictEqual(librarySource.origin._tag, 'ToolchainFile')
+    const libraryUri = yield* Workspace.uriOf(librarySource, [document])
+    assert.strictEqual(libraryUri, Stdlib.find('silk/effects')?.sourceUrl.href)
+
+    const definition = Document.definition(
+      document,
+      snapshot,
+      { line: 1, character: source.split('\n')[1]?.indexOf('suspend') ?? 0 },
+      (module) => (module === 'silk/effects' ? libraryUri : undefined),
+    )
+    assert.strictEqual(definition?.targetUri, libraryUri)
+    const libraryLines = decoder.decode(SourceFile.toUint8Array(librarySource)).split('\n')
+    const target = definition?.targetSelectionRange.start
+    assert.isDefined(target)
+    assert.include(target === undefined ? '' : (libraryLines[target.line] ?? ''), 'fn suspend')
+  }).pipe(Effect.provide(NodeServices.layer)),
+)

@@ -27,11 +27,13 @@ import type * as Ownership from './Ownership.js'
 import type * as PhaseReport from './PhaseReport.js'
 import * as Pipeline from './Pipeline.js'
 import * as Presentation from './Presentation.js'
+import * as ProvisionalMir from './ProvisionalMir.js'
 import type * as SemanticInvalidation from './SemanticInvalidation.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as SuspensionOwnership from './SuspensionOwnership.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import type * as SyntaxTree from './SyntaxTree.js'
 import type * as Target from './Target.js'
@@ -873,6 +875,39 @@ export const appliedLayoutsOf = (self: Snapshot): ReadonlyArray<Layout.Entry> =>
         ),
       )
     : Object.freeze([])
+
+/** Returns concrete instances proven able to reach the suspension intrinsic. */
+export const suspendableInstancesOf = (self: Snapshot): ReadonlyArray<Instances.InstanceKey> =>
+  self.instances.suspendable
+
+/** Returns exact concrete function executions that can suspend, excluding lazy result runners. */
+export const suspendableExecutionsOf = (self: Snapshot): ReadonlyArray<Instances.InstanceKey> =>
+  self.instances.suspendableExecutions
+
+/** Returns exact hidden Effect runner identities proven able to suspend. */
+export const suspendableEffectsOf = (self: Snapshot): ReadonlyArray<string> =>
+  self.instances.suspendableEffects
+
+/** Builds target-neutral monomorphic suspension control without exposing it as executable MIR. */
+export const provisionalMirOf = (self: Snapshot): Targeted<ProvisionalMir.Module> =>
+  self.layout._tag === 'Available'
+    ? Object.freeze({
+        _tag: 'Available',
+        value: ProvisionalMir.build(self.instances, self.layout.value, self.index),
+      })
+    : self.layout
+
+/** Plans ownership of normalized MIR locals retained by provisional complete-or-relay control. */
+export const suspensionOwnershipOf = (self: Snapshot): Targeted<SuspensionOwnership.Module> => {
+  if (self.mir._tag === 'Unavailable') return self.mir
+  const provisional = provisionalMirOf(self)
+  return provisional._tag === 'Unavailable'
+    ? provisional
+    : Object.freeze({
+        _tag: 'Available',
+        value: SuspensionOwnership.plan(self.mir.value, provisional.value, self.index),
+      })
+}
 
 /** Returns the snapshot's resolved or unavailable target selection. */
 export const targetOf = (self: Snapshot): Target.Selection => self.target

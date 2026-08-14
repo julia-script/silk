@@ -810,6 +810,7 @@ const validateInstructionOperands = (
     switch (instruction._tag) {
       case 'Unary':
       case 'Cast':
+      case 'Freeze':
         operands.push(instruction.operand)
         break
       case 'Binary':
