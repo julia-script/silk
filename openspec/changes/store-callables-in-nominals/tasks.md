@@ -1,0 +1,31 @@
+## 1. Vertical Slice
+
+- [ ] 1.1 Confirm `introduce-representation-parameters` is complete and identify the existing callable storage fences.
+- [ ] 1.2 Build one named-callable and one affine-capturing nominal field slice through symbolic and resolved field representations.
+- [ ] 1.3 Stop and revise the design if any phase rediscovers callable construction from syntax instead of consuming the shared resolved fact.
+
+## 2. Ownership and Cleanup
+
+- [ ] 2.1 Derive shared, exclusive, and consuming invocation access from aggregate receivers.
+- [ ] 2.2 Carry capture loans, liveness, whole-value moves, and cleanup through nested representation-bearing nominals.
+- [ ] 2.3 Keep representation-bearing nominals move-only and reject direct owned field extraction with a dedicated diagnostic.
+- [ ] 2.4 Add uncalled, called, consuming, moved, typed-failure, and scoped-borrow cleanup traces.
+
+## 3. Layout and MIR
+
+- [ ] 3.1 Plan concrete callable capture fields inline from the resolved representation while keeping structural callable contracts unlayoutable.
+- [ ] 3.2 Extend HIR/MIR aggregate construction, borrow, projection, invocation, movement, and cleanup with static callable facts.
+- [ ] 3.3 Add deterministic layouts, instance keys, symbols, and MIR text for nested callable storage.
+
+## 4. Engine Parity and Fences
+
+- [ ] 4.1 Execute the callable storage matrix in the evaluator.
+- [ ] 4.2 Lower the same matrix through native LLVM with equal target and cleanup behavior.
+- [ ] 4.3 Lower the same matrix through direct Wasm and assert no table or `call_indirect`.
+- [ ] 4.4 Narrow `SEM0103` only for all-engine-proven construction paths and retain it everywhere else.
+
+## 5. Verification
+
+- [ ] 5.1 Run `pnpm typecheck` and `pnpm exec biome check .`.
+- [ ] 5.2 Run `pnpm test`, `pnpm check`, and `pnpm release:candidate`; report exact failures.
+- [ ] 5.3 Repeat cross-engine callable acceptance in fresh processes and compare deterministic facts and artifacts.
