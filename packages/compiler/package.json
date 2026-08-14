@@ -291,6 +291,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@effect/platform-node": "4.0.0-beta.103",
     "@effect/vitest": "catalog:",
     "@types/node": "^24.10.1"
   }

@@ -4,6 +4,7 @@ import * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Ownership from './Ownership.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 /**
@@ -308,7 +309,7 @@ export const storedCallableViolations = (
     if (current === undefined || compareCallSites(call, current) < 0)
       specializingCalls.set(target, call)
   }
-  const reported = new Set<string>()
+  const reported: Array<StoredCallableViolationKey> = []
   return Object.freeze(
     self.instances.flatMap((instance) =>
       instance.function.statements
@@ -322,17 +323,27 @@ export const storedCallableViolations = (
           const declared = DeclarationIndex.storedCallable(index, expression.type)
           const specializing =
             declared === undefined ? specializingCalls.get(keyText(instance.key)) : undefined
-          const diagnostic = Diagnostic.storedCallableConstruction(
-            Type.encode(aggregate),
-            found.path.length === 0 ? undefined : found.path.join('.'),
-            Type.encode(found.callable),
-            specializing?.span ?? expression.span,
-            specializing === undefined ? undefined : expression.span,
-          )
-          const key = storedCallableViolationKey(diagnostic)
-          if (reported.has(key)) return []
-          reported.add(key)
-          return [diagnostic]
+          const span = specializing?.span ?? expression.span
+          const constructionSpan = expression.span
+          const key: StoredCallableViolationKey = {
+            aggregate,
+            path: found.path,
+            callable: found.callable,
+            span,
+            constructionSpan,
+          }
+          if (reported.some((candidate) => sameStoredCallableViolationKey(candidate, key)))
+            return []
+          reported.push(key)
+          return [
+            Diagnostic.storedCallableConstruction(
+              Type.encode(aggregate),
+              found.path.length === 0 ? undefined : found.path.join('.'),
+              Type.encode(found.callable),
+              span,
+              specializing === undefined ? undefined : expression.span,
+            ),
+          ]
         }),
     ),
   )
@@ -346,22 +357,25 @@ const compareCallSites = (left: CallInstance, right: CallInstance): number =>
       ? -1
       : 1
 
-/**
- * The structural identity of one stored-callable violation: its stable diagnostic identity plus
- * the reason facts, so two distinct callables reported at one span never collapse into one.
- */
-const storedCallableViolationKey = (diagnostic: Diagnostic.Diagnostic): string => {
-  const reason = diagnostic.reason._tag === 'StoredCallableConstruction' ? diagnostic.reason : null
-  return JSON.stringify([
-    diagnostic.code,
-    diagnostic.span.sourceId,
-    diagnostic.span.start,
-    diagnostic.span.end,
-    reason?.aggregate ?? '',
-    reason?.field ?? '',
-    reason?.callable ?? '',
-  ])
+/** Stable semantic identity of one stored-callable violation before presentation encoding. */
+interface StoredCallableViolationKey {
+  readonly aggregate: Type.Type
+  readonly path: ReadonlyArray<string>
+  readonly callable: Type.Callable
+  readonly span: SourceSpan.SourceSpan
+  readonly constructionSpan: SourceSpan.SourceSpan
 }
+
+const sameStoredCallableViolationKey = (
+  left: StoredCallableViolationKey,
+  right: StoredCallableViolationKey,
+): boolean =>
+  Type.equals(left.aggregate, right.aggregate) &&
+  left.path.length === right.path.length &&
+  left.path.every((part, index) => part === right.path[index]) &&
+  Type.equals(left.callable, right.callable) &&
+  SourceSpan.equals(left.span, right.span) &&
+  SourceSpan.equals(left.constructionSpan, right.constructionSpan)
 
 /** Produces semantic diagnostics for every finite-discovery violation. */
 export const violationDiagnostics = (self: Discovery): ReadonlyArray<Diagnostic.Diagnostic> =>

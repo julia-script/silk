@@ -1,10 +1,10 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
-import type * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Path from 'effect/Path'
+import * as Stream from 'effect/Stream'
+import { ChildProcess } from 'effect/unstable/process'
 import * as Analysis from '../src/Analysis.js'
 import * as Driver from '../src/Driver.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -41,20 +41,23 @@ const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
 const describe = (outcome: unknown): string =>
   JSON.stringify(outcome, (_, value) => (typeof value === 'bigint' ? value.toString() : value))
 
-/** A scoped temporary directory: acquisition and cleanup stay inside the test's Effect. */
-const withTemporaryDirectory = <A, E, R>(
-  use: (directory: string) => Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | Cause.UnknownError, R> =>
-  Effect.acquireUseRelease(
-    Effect.try(() => mkdtempSync(join(tmpdir(), 'silk-stored-callable-'))),
-    use,
-    (directory) =>
-      Effect.try(() => rmSync(directory, { recursive: true, force: true })).pipe(Effect.ignore),
-  )
+const collectText = Stream.runFold(
+  () => '',
+  (text: string, chunk: string) => text + chunk,
+)
 
-/** One synchronous child execution behind an Effect boundary. */
-const runExecutable = (path: string) =>
-  Effect.try(() => spawnSync(path, [], { encoding: 'utf8' as const }))
+const runExecutable = Effect.fnUntraced(function* (path: string) {
+  const process = yield* ChildProcess.make(path, [], { stdin: 'ignore' })
+  const [code, , stderr] = yield* Effect.all(
+    [
+      process.exitCode,
+      process.stdout.pipe(Stream.decodeText(), collectText),
+      process.stderr.pipe(Stream.decodeText(), collectText),
+    ],
+    { concurrency: 'unbounded' },
+  )
+  return { code, stderr }
+})
 
 /** The minimal reproducer from #184, repaired so declaration and semantic analysis accept it. */
 const reproducer = `struct Parser<A> {
@@ -246,6 +249,9 @@ it.effect(
   'keeps declaration-only and unreachable callable fields compiling on all three engines',
   () =>
     Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fileSystem.makeTempDirectoryScoped()
       const snapshot = yield* analyzed('stored-callable/accepted', accepted)
       assert.deepEqual(messages(snapshot), [])
 
@@ -258,23 +264,19 @@ it.effect(
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42, 'wasm')
 
-      yield* withTemporaryDirectory((directory) =>
-        Effect.gen(function* () {
-          const compiled = yield* Driver.compile({
-            compilation: {
-              root: SourceFile.make('stored-callable/accepted', ascii(accepted)),
-            },
-            toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-            profile: 'release',
-            destination: join(directory, 'accepted'),
-          }).pipe(Effect.provide(SourceResolver.empty))
-          assert.strictEqual(compiled._tag, 'Compiled')
-          if (compiled._tag !== 'Compiled') return
-          const run = yield* runExecutable(compiled.path)
-          assert.strictEqual(run.status, 42, `native: ${run.stderr}`)
-        }),
-      )
-    }),
+      const compiled = yield* Driver.compile({
+        compilation: {
+          root: SourceFile.make('stored-callable/accepted', ascii(accepted)),
+        },
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        profile: 'release',
+        destination: path.join(directory, 'accepted'),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(compiled._tag, 'Compiled')
+      if (compiled._tag !== 'Compiled') return
+      const run = yield* runExecutable(compiled.path)
+      assert.strictEqual(run.code, 42, `native: ${run.stderr}`)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   180_000,
 )
 
