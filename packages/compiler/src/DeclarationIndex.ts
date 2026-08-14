@@ -4570,11 +4570,7 @@ export const storedCallable = (
   const next = new Set(seen).add(key)
   for (const field of declaration.fields) {
     if (field.declaredType._tag !== 'Resolved' || field.name._tag !== 'Present') continue
-    const found = storedCallable(
-      self,
-      Type.substitute(field.declaredType.type, substitution),
-      next,
-    )
+    const found = storedCallable(self, Type.substitute(field.declaredType.type, substitution), next)
     if (found !== undefined)
       return Object.freeze({
         path: Object.freeze([field.name.spelling, ...found.path]),
