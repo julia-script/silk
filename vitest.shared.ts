@@ -28,12 +28,22 @@ export const testWorkers = Math.max(1, availableParallelism())
  * `packages/lsp`'s slowest test runs 2.3 s locally, which needs only a 2.2x amplification to be
  * reported as a timeout rather than as a result.
  *
- * 30 s is not a performance gate and nothing here asserts how fast anything is. It exists so that
- * a correctness assertion is never reported as a timeout. A package whose work genuinely costs
- * more than this says so in its own config, with the measurement that justifies it — see
- * `packages/compiler-cli/test/timeouts.ts`.
+ * The floor is 60 s because 30 s was measured to be too low, not because 60 is a round number.
+ * `pnpm check` saturates the runner end to end — the compiler suite alone is ~2,580 s of test CPU
+ * on a 4-core host — and at that saturation the slowest tests in `packages/compiler` legitimately
+ * run 30–38 s: `StackVmPressureDeterminism` 37.6 s, `ModuleVerification` 31.4 s,
+ * `LexerPressureDeterminism` 30.3 s. Those pass only because each carries an explicit timeout;
+ * `ChildProcess.test.ts > lowers the native execution to reachable native-only runtime symbols`
+ * carries none, inherited a 30 s floor, and was reported as a timeout on CI. A floor a test in the
+ * workspace already exceeds is not a floor. 60 s also matches the value `packages/compiler-cli`
+ * arrived at independently from its own measurement.
+ *
+ * This is not a performance gate and nothing here asserts how fast anything is. It exists so that
+ * a correctness assertion is never reported as a timeout. The cost of raising it is that a test
+ * that genuinely hangs takes a minute to say so, which is the trade `packages/compiler-cli` had
+ * already accepted for the same reason.
  */
-export const testTimeout = 30_000
+export const testTimeout = 60_000
 
 export const silkTestDefaults = {
   testTimeout,
