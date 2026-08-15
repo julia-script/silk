@@ -1,0 +1,15 @@
+interface Renderer<T, F: fn(i32) -> i32> {
+  fn render(value: T) -> i32
+}
+
+struct Box<F: fn(i32) -> i32> {
+  operation: F
+}
+
+fn render<F: fn(i32) -> i32>(value: &Box<F>) -> i32 {
+  return 1
+}
+
+impl<F: fn(i32) -> i32> Renderer<Box<F>, F> for Box<F> {
+  render: Box.render
+}

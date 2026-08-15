@@ -1,8 +1,8 @@
 ## 1. Contract Facts
 
-- [ ] 1.1 Confirm conditional generic conformances are complete and representation parameters are available for witness binders.
-- [ ] 1.2 Extend interface declarations, applications, and mapped operations with literal operand shapes, flow kind, success, failure rows, requirement rows, and access.
-- [ ] 1.3 Add syntax, kind, provider-equality, damaged, and visibility fixtures for complete contracts.
+- [x] 1.1 Confirm conditional generic conformances are complete and representation parameters are available for witness binders.
+- [x] 1.2 Extend interface declarations, applications, and mapped operations with literal operand shapes, flow kind, success, failure rows, requirement rows, and access.
+- [x] 1.3 Add syntax, kind, provider-equality, damaged, and visibility fixtures for complete contracts.
 
 ## 2. Literal Ownership and Subsumption
 

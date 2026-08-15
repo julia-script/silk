@@ -146,13 +146,6 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
   }
 }
 
-const typeParameter = (value: DeclarationIndex.TypeParameterFact): string =>
-  record('TypeParameter', [
-    type(value.type),
-    name(value.name),
-    optional(value.duplicateOf === undefined ? undefined : type(value.duplicateOf)),
-  ])
-
 const opaqueResult = (value: DeclarationIndex.OpaqueResultFact | undefined): string | undefined =>
   value === undefined
     ? undefined
@@ -196,6 +189,69 @@ const requirementRow = (value: DeclarationIndex.RequirementRowFact): string =>
         ]),
       ),
     ),
+  ])
+
+const interfaceOperand = (value: DeclarationIndex.InterfaceOperandFact): string =>
+  record('InterfaceOperand', [
+    number(value.parameter.id.ordinal),
+    declaredType(value.type),
+    value.access,
+  ])
+
+const interfaceOperationContract = (
+  value: DeclarationIndex.InterfaceOperationContractFact,
+): string =>
+  record(value._tag, [
+    name(value.declaration.name),
+    optional(value.provider === undefined ? undefined : type(value.provider)),
+    value.functionKind,
+    array(value.operands.map(interfaceOperand)),
+    declaredType(value.success),
+    failureRow(value.failureRow),
+    requirementRow(value.requirementRow),
+    value.receiverAccess,
+  ])
+
+const interfaceOperationApplication = (
+  value: DeclarationIndex.InterfaceOperationApplicationFact,
+): string =>
+  record(value._tag, [
+    name(value.declaration.name),
+    type(value.capability),
+    type(value.provider),
+    value.functionKind,
+    array(value.operands.map(interfaceOperand)),
+    declaredType(value.success),
+    failureRow(value.failureRow),
+    requirementRow(value.requirementRow),
+    value.receiverAccess,
+  ])
+
+const interfaceApplication = (value: DeclarationIndex.InterfaceApplicationFact): string =>
+  record('InterfaceApplication', [
+    value.declaration.module,
+    value.declaration.name,
+    type(value.capability),
+    type(value.provider),
+    boolean(value.providerMatches),
+    value.visibility,
+    boolean(value.available),
+    array(value.operations.map(interfaceOperationApplication)),
+  ])
+
+const bound = (value: DeclarationIndex.BoundFact | undefined): string | undefined => {
+  if (value === undefined) return undefined
+  return value._tag === 'ResolvedBound'
+    ? record('ResolvedBound', [value.spelling, interfaceApplication(value.application)])
+    : record('UnresolvedBound', [value.spelling, declaredType(value.application)])
+}
+
+const typeParameter = (value: DeclarationIndex.TypeParameterFact): string =>
+  record('TypeParameter', [
+    type(value.type),
+    name(value.name),
+    optional(value.duplicateOf === undefined ? undefined : type(value.duplicateOf)),
+    optional(bound(value.bound)),
   ])
 
 const declaration = (value: DeclarationIndex.DeclarationFact): string =>
@@ -288,6 +344,9 @@ const service = (value: DeclarationIndex.ServiceFact | DeclarationIndex.Interfac
     array(value.typeParameters.map(typeParameter)),
     name(value.name),
     array(value.operations.map(serviceOperation)),
+    ...(value._tag === 'InterfaceDeclaration'
+      ? [array(value.operationContracts.map(interfaceOperationContract))]
+      : []),
   ])
 
 const constantLiteral = (value: DeclarationIndex.ConstantLiteralFact): string => {
@@ -379,6 +438,11 @@ const conformance = (value: DeclarationIndex.ConformanceFact): string =>
           operation.target._tag === 'TypePath'
             ? typePath(operation.target)
             : record('UnavailableTarget'),
+          optional(
+            operation.contract === undefined
+              ? undefined
+              : interfaceOperationApplication(operation.contract),
+          ),
         ]),
       ),
     ),
