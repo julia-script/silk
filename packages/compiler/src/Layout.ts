@@ -3141,7 +3141,23 @@ const verifyEntry = (
           slot.source !== field.source ||
           slot.sourceOrdinal !== field.ordinal ||
           slot.access !== field.access ||
-          !Type.equals(slot.type, field.type) ||
+          !(
+            Type.equals(slot.type, field.type) ||
+            (field.effectIdentity !== undefined &&
+              Type.isEffect(slot.type) &&
+              Type.isEffect(field.type) &&
+              Type.equals(
+                Type.effect(
+                  slot.type.success,
+                  slot.type.failures,
+                  field.type.access,
+                  slot.type.requirements,
+                  slot.type.failureParameters,
+                  slot.type.requirementParameters,
+                ),
+                field.type,
+              ))
+          ) ||
           slot.effectIdentity !== field.effectIdentity ||
           (slot.callableIdentity === undefined && field.callableIdentity !== undefined) ||
           (slot.callableIdentity !== undefined &&

@@ -325,7 +325,21 @@ const sameArguments = (
   left.length === right.length &&
   left.every((argument, ordinal) => {
     const candidate = right.at(ordinal)
-    return candidate !== undefined && Type.equalsGenericArgument(argument, candidate)
+    if (candidate === undefined) return false
+    if (Type.equalsGenericArgument(argument, candidate)) return true
+    if (!Type.isEffectIdentityArgument(argument) || !Type.isEffectIdentityArgument(candidate))
+      return false
+    const retained = argument.owner === undefined ? candidate : argument
+    const discovered = argument.owner === undefined ? argument : candidate
+    const owner = retained.owner
+    if (owner === undefined || !retained.identity.startsWith('effect:')) return false
+    const ownerPrefix = `${owner.declaration.module}\u0000${owner.declaration.name}\u0000${owner.typeArguments
+      .map(Type.genericArgumentKey)
+      .join('\u0000')}\u0002`
+    return (
+      discovered.identity.startsWith(ownerPrefix) &&
+      discovered.identity.endsWith(`\u0004${retained.identity.slice('effect:'.length)}`)
+    )
   })
 
 export const matchesIdentity = (

@@ -2258,10 +2258,29 @@ const storedExecutableText = (
 const borrowKey = (borrow: Hir.BorrowId): string =>
   `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
 
-const instanceText = (self: Instances.InstanceKey): string =>
-  `${self.declaration.module}\u0000${self.declaration.name}\u0000${self.typeArguments
-    .map(SilkType.genericArgumentKey)
-    .join('\u0000')}\u0000${self.contractRow.join('\u0000')}`
+const instanceText = Instances.keyText
+
+const callArgumentCompatible = (actual: Type, expected: Type): boolean => {
+  if (
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(semanticType(actual), semanticType(expected)),
+    )
+  )
+    return true
+  if (
+    actual._tag !== 'EffectValue' ||
+    expected._tag !== 'EffectValue' ||
+    actual.storage !== undefined ||
+    expected.storage?._tag !== 'StoredEffectField'
+  )
+    return false
+  const realization = expected.storage.realization
+  return (
+    SilkType.equals(actual.type, realization.contract) &&
+    Hir.sameExecutableSite(actual.site, realization.site) &&
+    instanceText(actual.environment.instance) === instanceText(realization.runnerInstance)
+  )
+}
 
 const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Type> => {
   switch (cleanup._tag) {
@@ -4933,9 +4952,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               return (
                 actual !== undefined &&
                 expected !== undefined &&
-                TypeCompatibility.isCompatible(
-                  TypeCompatibility.check(semanticType(actual), semanticType(expected)),
-                )
+                callArgumentCompatible(actual, expected)
               )
             }) &&
             SilkType.equals(semanticType(operation.type), semanticType(target.result))
