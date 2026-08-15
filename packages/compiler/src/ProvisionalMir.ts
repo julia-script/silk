@@ -3,7 +3,6 @@ import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type * as SourceSpan from './SourceSpan.js'
-import * as Specialization from './Specialization.js'
 import * as Type from './Type.js'
 
 /**
@@ -449,13 +448,10 @@ const runnerOf = (expression: Hir.Expression, context: BuildContext): Runner => 
       if (selected?.witness?._tag !== 'SourceConformanceWitness') return 'Unknown'
       const implementation = DeclarationIndex.witnessOperation(selected.witness, service.operation)
       if (implementation === undefined) return 'Unknown'
-      const specialization = Specialization.key({
+      const candidates = Instances.matchingSpecialization(context.discovery, {
         declaration: implementation,
         typeArguments: selected.witness.typeArguments,
       })
-      const candidates = context.discovery.instances.filter(
-        (candidate) => Specialization.key(candidate.key) === specialization,
-      )
       if (candidates.length === 0) return 'Unknown'
       if (candidates.some((candidate) => Instances.isSuspendable(context.discovery, candidate.key)))
         return 'Suspendable'

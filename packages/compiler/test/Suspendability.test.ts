@@ -250,13 +250,11 @@ effect fn work() -> i32 ! OutOfMemory {
 ${recover}
 pub fn main() -> i32 { return run Effect.catch(work(), recover) }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    const allocate = self.instances.instances.find(
-      (instance) =>
-        instance.key.declaration.name === 'allocate' &&
-        instance.key.typeArguments.some(
-          (argument) => Type.encodeGenericArgument(argument) === 'suspendability/main.Token',
-        ),
-    )
+    const token = Type.nominal('suspendability/main', 'Token')
+    const allocate = Instances.matchingSpecialization(self.instances, {
+      declaration: { module: 'suspendability/main', name: 'allocate' },
+      typeArguments: [token],
+    }).at(0)
     assert.isDefined(allocate)
     if (allocate === undefined) return
     const other = Type.nominal('suspendability/main', 'Other')

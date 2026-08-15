@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import type * as Instances from '../src/Instances.js'
+import * as Instances from '../src/Instances.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as Type from '../src/Type.js'
 
@@ -143,13 +143,11 @@ pub fn main() -> i32 {
       Analysis.diagnostics(self).map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`),
       [],
     )
-    const get = self.instances.instances.find(
-      (instance) =>
-        instance.key.declaration.name === 'get' &&
-        instance.key.typeArguments.some(
-          (argument) => Type.encodeGenericArgument(argument) === 'provisional-mir/main.Token',
-        ),
-    )
+    const token = Type.nominal('provisional-mir/main', 'Token')
+    const get = Instances.matchingSpecialization(self.instances, {
+      declaration: { module: 'provisional-mir/main', name: 'get' },
+      typeArguments: [token],
+    }).at(0)
     assert.isDefined(get)
     if (get === undefined) return
     const other = Type.nominal('provisional-mir/main', 'Other')

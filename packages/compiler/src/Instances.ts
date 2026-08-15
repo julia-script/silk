@@ -666,6 +666,15 @@ export const keyText = (key: InstanceKey): string =>
     .map(Type.genericArgumentKey)
     .join('\u0000')}\u0002${key.contractRow.join('\u0000')}`
 
+/** Returns every discovered instance with the exact declaration and kinded arguments. */
+export const matchingSpecialization = (
+  self: Discovery,
+  specialization: Specialization.Specialization,
+): ReadonlyArray<Instance> => {
+  const identity = Specialization.key(specialization)
+  return self.instances.filter((candidate) => Specialization.key(candidate.key) === identity)
+}
+
 export const effectIdentity = (owner: InstanceKey, site: Hir.EffectSiteId): string =>
   `${keyText(owner)}\u0004${Hir.executableSiteKey(site)}`
 
@@ -1968,13 +1977,10 @@ export const continuationAllocatorViolations = (
       if (witness?._tag !== 'SourceConformanceWitness') continue
       const implementation = DeclarationIndex.witnessOperation(witness, 'allocate')
       if (implementation === undefined) continue
-      const specialization = Specialization.key({
+      const implementationInstances = matchingSpecialization(self, {
         declaration: implementation,
         typeArguments: witness.typeArguments,
       })
-      const implementationInstances = self.instances.filter(
-        (candidate) => Specialization.key(candidate.key) === specialization,
-      )
       const implementationSuspends = implementationInstances.some(
         (candidate) =>
           isSuspendable(self, candidate.key) ||
