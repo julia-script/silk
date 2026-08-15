@@ -346,6 +346,23 @@ export const admittedModes = (receiver: ReceiverAccess): ReadonlyArray<Type.Call
       ? Object.freeze(['Shared', 'Exclusive'] as const)
       : Object.freeze(['Shared', 'Exclusive', 'Take'] as const)
 
+/**
+ * True when one aggregate receiver access may invoke one callable mode.
+ *
+ * Ownership decides this before specialization, from the field's semantic contract alone, and every
+ * later phase decides it from the realization. Both reach the same rule through this one function so
+ * the pre-layout rejection and the runtime invocation can never disagree.
+ */
+export const admitsMode = (receiver: ReceiverAccess, mode: Type.CallableMode): boolean =>
+  admittedModes(receiver).includes(mode)
+
+/** The weakest receiver access that admits one callable mode. */
+export const requiredAccess = (mode: Type.CallableMode): ReceiverAccess => mode
+
+/** The weaker of two receiver accesses; a borrow anywhere in a place weakens the whole place. */
+export const weakerAccess = (left: ReceiverAccess, right: ReceiverAccess): ReceiverAccess =>
+  admittedModes(left).length <= admittedModes(right).length ? left : right
+
 /** True when one aggregate receiver access may invoke a realization's callable mode. */
 export const admitsInvocation = (receiver: ReceiverAccess, self: Realization): boolean =>
-  admittedModes(receiver).includes(self.invocation)
+  admitsMode(receiver, self.invocation)

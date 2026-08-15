@@ -1,3 +1,4 @@
+import * as CallableFieldRealization from './CallableFieldRealization.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -374,6 +375,66 @@ const representationFieldExtraction = (
   )
 }
 
+/**
+ * The callable contract one place stores, when the place is a nominal field holding a callable.
+ *
+ * A monomorphic body projects a `Represented` field and a generic body projects the field's
+ * declaration-owned representation bound; both name the same contract, and neither is read from the
+ * construction that filled the field. A field of any other type stores no callable.
+ */
+const storedCallableContract = (place: Hir.Expression): Type.Callable | undefined => {
+  if (place._tag !== 'Project') return undefined
+  const type = place.type
+  if (Type.isRepresented(type)) return Type.isCallable(type.contract) ? type.contract : undefined
+  return Type.isCallable(type) ? type : undefined
+}
+
+/** The root expression one place projects from, which owns or borrows the whole aggregate. */
+const placeRoot = (place: Hir.Expression): Hir.Expression =>
+  place._tag === 'Project' || place._tag === 'IndexPlace' ? placeRoot(place.subject) : place
+
+/**
+ * The strongest aggregate receiver access one place offers the callable it stores.
+ *
+ * A whole owner offers take access; any borrow the place travels through weakens the whole place to
+ * that borrow's access, because the stored environment is only ever reached through it.
+ */
+const receiverAccess = (place: Hir.Expression): CallableFieldRealization.ReceiverAccess => {
+  if (place._tag !== 'Project' && place._tag !== 'IndexPlace') return 'Take'
+  const subject = place.subject
+  const subjectType = subject._tag === 'Unavailable' ? undefined : subject.type
+  const through: CallableFieldRealization.ReceiverAccess =
+    subjectType !== undefined && (Type.isReference(subjectType) || Type.isSlice(subjectType))
+      ? subjectType.access
+      : 'Take'
+  return CallableFieldRealization.weakerAccess(receiverAccess(place.subject), through)
+}
+
+/**
+ * Rejects invoking a stored callable through an aggregate receiver too weak for its mode. The rule
+ * itself lives on the shared realization actor, so this pre-specialization rejection and the runtime
+ * invocation it protects can never disagree about which receiver admits which mode.
+ */
+const storedCallableInvocationAccess = (
+  callee: Hir.Expression,
+  access: Type.CallableMode,
+  span: SourceSpan.SourceSpan,
+): Diagnostic.Diagnostic | undefined => {
+  if (callee._tag !== 'Project') return undefined
+  const contract = storedCallableContract(callee)
+  if (contract === undefined) return undefined
+  const receiver = receiverAccess(callee)
+  if (CallableFieldRealization.admitsMode(receiver, access)) return undefined
+  return Diagnostic.storedCallableInvocationAccess(
+    Type.encode(callee.nominal),
+    `#${callee.field.ordinal}`,
+    Type.encode(contract),
+    receiver,
+    CallableFieldRealization.requiredAccess(access),
+    span,
+  )
+}
+
 const checkUse = (
   state: CheckState,
   live: Set<string>,
@@ -450,6 +511,31 @@ const callableCleanup = (environment: CallableEnvironmentFact, type: Type.Callab
         ),
     ),
   })
+
+/**
+ * Checks every operand a place evaluates except its root binding, which the caller uses once with
+ * the access the whole place demands. Splitting the walk keeps one use per root, so a consuming
+ * invocation cannot report the root twice.
+ */
+const checkPlaceInterior = (
+  state: CheckState,
+  live: Set<string>,
+  place: Hir.Expression,
+  guard: boolean,
+  escaping: boolean,
+): void => {
+  if (place._tag === 'Project') {
+    checkPlaceInterior(state, live, place.subject, guard, escaping)
+    return
+  }
+  if (place._tag === 'IndexPlace') {
+    checkPlaceInterior(state, live, place.subject, guard, escaping)
+    checkExpression(state, live, place.index, false, guard, escaping)
+    return
+  }
+  if (useSite(place) !== undefined) return
+  checkExpression(state, live, place, false, guard, escaping)
+}
 
 const checkExpression = (
   state: CheckState,
@@ -615,10 +701,32 @@ const checkExpression = (
       return
     }
     case 'CallableApply': {
+      const stored = storedCallableInvocationAccess(
+        expression.callee,
+        expression.access,
+        expression.span,
+      )
+      if (stored !== undefined) state.diagnostics.push(stored)
       const checkCallee = (): void => {
         const site = useSite(expression.callee)
         if (site !== undefined && expression.access === 'Take') {
           checkUse(state, live, site, expression.callee.span, true)
+          return
+        }
+        if (storedCallableContract(expression.callee) !== undefined) {
+          // A stored callable is invoked through its aggregate, never extracted from it: a
+          // consuming invocation takes the whole owner, and a weaker mode only reads the place.
+          // The extraction rejection stays for `move parser.decode`, which really does try to
+          // leave the aggregate holding a partially released environment.
+          const root = placeRoot(expression.callee)
+          const rootSite = placeSite(expression.callee)
+          checkPlaceInterior(state, live, expression.callee, guard, escaping)
+          const consumesAggregate = expression.access === 'Take' && stored === undefined
+          if (rootSite === undefined) {
+            checkExpression(state, live, root, consumesAggregate, guard, escaping)
+            return
+          }
+          checkUse(state, live, rootSite, root.span, consumesAggregate)
           return
         }
         checkExpression(

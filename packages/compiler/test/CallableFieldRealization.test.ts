@@ -140,6 +140,19 @@ it.effect('derives invocation admissibility from the aggregate receiver access',
     assert.strictEqual(CallableFieldRealization.admitsInvocation('Shared', realization), true)
     assert.strictEqual(CallableFieldRealization.admitsInvocation('Exclusive', realization), true)
     assert.strictEqual(CallableFieldRealization.admitsInvocation('Take', realization), true)
+
+    // Ownership rejects before specialization and the engines invoke after it; both decide through
+    // these three functions, so the fence and the runtime cannot disagree about a receiver.
+    assert.strictEqual(CallableFieldRealization.admitsMode('Shared', 'Take'), false)
+    assert.strictEqual(CallableFieldRealization.admitsMode('Shared', 'Exclusive'), false)
+    assert.strictEqual(CallableFieldRealization.admitsMode('Exclusive', 'Take'), false)
+    assert.strictEqual(CallableFieldRealization.admitsMode('Take', 'Take'), true)
+    assert.strictEqual(CallableFieldRealization.requiredAccess('Take'), 'Take')
+    // A borrow anywhere in a place weakens the whole place to that borrow's access.
+    assert.strictEqual(CallableFieldRealization.weakerAccess('Take', 'Shared'), 'Shared')
+    assert.strictEqual(CallableFieldRealization.weakerAccess('Shared', 'Take'), 'Shared')
+    assert.strictEqual(CallableFieldRealization.weakerAccess('Take', 'Exclusive'), 'Exclusive')
+    assert.strictEqual(CallableFieldRealization.weakerAccess('Take', 'Take'), 'Take')
   }),
 )
 
