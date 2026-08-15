@@ -56,7 +56,8 @@ export const infer = (
   const sources = new Map<string, string>()
   for (const constraint of constraints) {
     const trial = new Map(inferred)
-    if (Type.infer(constraint.pattern, constraint.actual, trial, true)) {
+    const result = Type.inferOpenGenericArguments(constraint.pattern, constraint.actual, trial)
+    if (result.matches) {
       for (const binder of binders) {
         const identity = Type.key(binder)
         if (!inferred.has(identity) && trial.has(identity)) sources.set(identity, constraint.label)
@@ -66,34 +67,26 @@ export const infer = (
       continue
     }
 
-    const isolated = new Map<string, Type.GenericArgument>()
-    if (Type.infer(constraint.pattern, constraint.actual, isolated, true)) {
-      const conflict = binders.find((binder) => {
-        const identity = Type.key(binder)
-        const previous = inferred.get(identity)
-        const next = isolated.get(identity)
-        return (
-          previous !== undefined &&
-          next !== undefined &&
-          !Type.equalsGenericArgument(previous, next)
-        )
-      })
-      if (conflict !== undefined) {
-        const identity = Type.key(conflict)
-        const previous = inferred.get(identity)
-        const conflicting = isolated.get(identity)
-        if (previous !== undefined && conflicting !== undefined)
-          return failed(
-            Object.freeze({
-              _tag: 'ConflictingBinder',
-              binder: conflict,
-              previous,
-              conflicting,
-              previousConstraint: sources.get(identity) ?? 'an earlier contract position',
-              conflictingConstraint: constraint.label,
-            }),
-          )
-      }
+    const conflict = binders.flatMap((binder) => {
+      const found = result.conflicts.find((candidate) => Type.equals(candidate.parameter, binder))
+      return found === undefined ? [] : [{ binder, conflict: found }]
+    })[0]
+    if (conflict !== undefined) {
+      const identity = Type.key(conflict.binder)
+      const previousSource = sources.get(identity)
+      return failed(
+        Object.freeze({
+          _tag: 'ConflictingBinder',
+          binder: conflict.binder,
+          previous: conflict.conflict.previous,
+          conflicting: conflict.conflict.conflicting,
+          previousConstraint: previousSource ?? `${constraint.label} (earlier occurrence)`,
+          conflictingConstraint:
+            previousSource === undefined
+              ? `${constraint.label} (later occurrence)`
+              : constraint.label,
+        }),
+      )
     }
     return failed(Object.freeze({ _tag: 'IncompatibleConstraint', constraint: constraint.label }))
   }

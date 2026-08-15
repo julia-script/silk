@@ -661,6 +661,14 @@ fn mix<T>(left: &Box<T>, right: &T) -> i32 { return 0 }
 impl Mixer<Box<i32>, bool> for Box<i32> { mix: Box.mix }
 pub fn main() -> i32 { return 0 }`,
     )
+    const repeated = yield* analyze(
+      'conditional-conformance/repeated-conflicting-target-binder',
+      `interface Inspect<S> { fn inspect(value: S) -> i32 }
+struct Pair<A, B> { left: A right: B }
+fn inspect<T>(value: &Pair<T, T>) -> i32 { return 0 }
+impl Inspect<Pair<i32, bool>> for Pair<i32, bool> { inspect: Pair.inspect }
+pub fn main() -> i32 { return 0 }`,
+    )
 
     assert.deepEqual(
       Analysis.diagnostics(unresolved).map((diagnostic) => diagnostic.message),
@@ -670,6 +678,12 @@ pub fn main() -> i32 { return 0 }`,
       Analysis.diagnostics(conflicting).map((diagnostic) => diagnostic.message),
       [
         'Invalid conformance: Box.mix: witness target binder T is i32 from receiver left but bool from parameter right',
+      ],
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(repeated).map((diagnostic) => diagnostic.message),
+      [
+        'Invalid conformance: Pair.inspect: witness target binder T is i32 from receiver value (earlier occurrence) but bool from receiver value (later occurrence)',
       ],
     )
   }),

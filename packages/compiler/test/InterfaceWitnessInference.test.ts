@@ -109,3 +109,29 @@ it('reports deterministic conflicting evidence with both contract positions', ()
     },
   })
 })
+
+it('reports repeated conflicting evidence within one structural contract position', () => {
+  const value = binder(0, 'T')
+  const inference = InterfaceWitnessInference.infer(
+    [value],
+    [
+      Object.freeze({
+        label: 'receiver value',
+        pattern: Type.nominal('witness-inference', 'Pair', [value, value]),
+        actual: Type.nominal('witness-inference', 'Pair', ['i32', 'bool']),
+      }),
+    ],
+  )
+
+  assert.deepEqual(inference, {
+    _tag: 'Failed',
+    problem: {
+      _tag: 'ConflictingBinder',
+      binder: value,
+      previous: 'i32',
+      conflicting: 'bool',
+      previousConstraint: 'receiver value (earlier occurrence)',
+      conflictingConstraint: 'receiver value (later occurrence)',
+    },
+  })
+})
