@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
 import type * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Formatter from '../src/Formatter.js'
@@ -31,6 +32,21 @@ const index = (id: string, source: string) =>
     ),
     (closure) => NameResolution.analyze(closure).index,
   )
+
+const indexWithImports = (root: string, sources: Readonly<Record<string, string>>) => {
+  const rootSource = sources[root] ?? assert.fail(`missing root source ${root}`)
+  const imports = new Map(
+    Object.entries(sources).flatMap(([module, source]) =>
+      module === root ? [] : ([[module, encoder.encode(source)] as const] as const),
+    ),
+  )
+  return Effect.map(
+    ModuleClosure.load({ root: SourceFile.make(root, encoder.encode(rootSource)) }).pipe(
+      Effect.provide(SourceResolver.memory(imports)),
+    ),
+    (closure) => NameResolution.analyze(closure).index,
+  )
+}
 
 const declaration = (self: DeclarationIndex.Index, module: string, name: string) =>
   self.modules
@@ -126,6 +142,42 @@ pub fn selected() -> typeof(identity<i32>) { return 0 }`,
       name: 'identity',
     })
     assert.strictEqual(Type.encode(argument.contract), 'fn(i32) -> i32')
+  }),
+)
+
+it.effect('resolves a specialized callable through a module namespace', () =>
+  Effect.gen(function* () {
+    const self = yield* indexWithImports('app/Main', {
+      'app/Main': `import library.Callables as Lib
+pub fn selected() -> typeof(Lib.identity<i32>) { return 0 }`,
+      'library/Callables': 'pub fn identity<T>(value: T) -> T { return value }',
+    })
+    const found = declaration(self, 'app/Main', 'selected')
+    assert.strictEqual(found?.returnType._tag, 'Resolved')
+    if (found?.returnType._tag !== 'Resolved' || !Type.isRepresented(found.returnType.type)) return
+    const argument = found.returnType.type.representation.argument
+    assert.strictEqual(Type.isExactRepresentationArgument(argument), true)
+    if (!Type.isExactRepresentationArgument(argument)) return
+    assert.strictEqual(Type.isCallableIdentityArgument(argument.identity), true)
+    if (!Type.isCallableIdentityArgument(argument.identity)) return
+    assert.deepEqual(argument.identity.target, {
+      _tag: 'Declaration',
+      module: 'library/Callables',
+      name: 'identity',
+    })
+  }),
+)
+
+it.effect('resolves a specialized callable through a selected import alias', () =>
+  Effect.gen(function* () {
+    const self = yield* indexWithImports('app/Main', {
+      'app/Main': `import library.Callables { identity as id }
+pub fn selected() -> typeof(id<i32>) { return 0 }`,
+      'library/Callables': 'pub fn identity<T>(value: T) -> T { return value }',
+    })
+    const found = declaration(self, 'app/Main', 'selected')
+    assert.strictEqual(found?.returnType._tag, 'Resolved')
+    assert.notInclude(codes(self), 'SEM0108')
   }),
 )
 
@@ -229,6 +281,31 @@ it.effect('rejects an unresolved exact representation item', () =>
   }),
 )
 
+it.effect('rejects an ambiguous exact representation item', () =>
+  Effect.gen(function* () {
+    const self = yield* index(
+      'exact-representation/ambiguous',
+      `pub fn duplicated(value: i32) -> i32 { return value }
+pub fn duplicated(value: i64) -> i64 { return value }
+pub fn selected() -> typeof(duplicated) { return 0 }`,
+    )
+    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0109')
+    assert.strictEqual(diagnostic?.reason._tag, 'AmbiguousExactRepresentationItem')
+  }),
+)
+
+it.effect('rejects an inaccessible exact item from another module', () =>
+  Effect.gen(function* () {
+    const self = yield* indexWithImports('app/Main', {
+      'app/Main': `import library.Callables as Lib
+pub fn selected() -> typeof(Lib.hidden) { return 0 }`,
+      'library/Callables': 'fn hidden(value: i32) -> i32 { return value }',
+    })
+    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0108')
+    assert.strictEqual(diagnostic?.reason._tag, 'UnresolvedExactRepresentationItem')
+  }),
+)
+
 it.effect('rejects an Effect construction site named through typeof', () =>
   Effect.gen(function* () {
     const self = yield* index(
@@ -240,6 +317,39 @@ pub fn selected() -> typeof(produce) { return produce }`,
     assert.strictEqual(diagnostic?.reason._tag, 'UncallableExactRepresentationItem')
   }),
 )
+
+it.effect('rejects a non-callable module declaration through the callable diagnostic', () =>
+  Effect.gen(function* () {
+    const self = yield* index(
+      'exact-representation/non-callable',
+      `pub struct Value {}
+pub fn selected() -> typeof(Value) { return 0 }`,
+    )
+    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0110')
+    assert.strictEqual(diagnostic?.reason._tag, 'UncallableExactRepresentationItem')
+  }),
+)
+
+it.effect('navigates valid and invalid exact item tokens to their declaration', () => {
+  const source = `pub fn identity<T>(value: T) -> T { return value }
+pub fn valid() -> typeof(identity<i32>) { return 0 }
+pub fn open() -> typeof(identity) { return 0 }`
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const validOffset = source.indexOf('identity<i32>')
+      const openOffset = source.lastIndexOf('identity)')
+      const valid = Analysis.semanticOccurrenceAt(snapshot, 'main', validOffset)
+      const open = Analysis.semanticOccurrenceAt(snapshot, 'main', openOffset)
+      assert.strictEqual(valid?.role, 'Value')
+      assert.strictEqual(valid?.resolution._tag, 'Available')
+      assert.strictEqual(valid?.declaration?.module, 'main')
+      assert.strictEqual(open?.role, 'Value')
+      assert.strictEqual(open?.resolution._tag, 'Unavailable')
+      assert.strictEqual(open?.declaration?.module, 'main')
+      return undefined
+    }),
+  )
+})
 
 it('contains the damaged exact representation and still parses the next declaration', () => {
   const syntax = parse(

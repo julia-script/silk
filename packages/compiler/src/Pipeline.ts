@@ -229,9 +229,13 @@ const analyzeHeaders = (
     collected.modules.length,
     () => {
       const preliminary = NameResolution.resolve(closure, collected)
-      return DeclarationIndex.complete(collected, (module, path) =>
-        NameResolution.resolveType(preliminary, collected, module, path),
-      )
+      const resolvers: DeclarationIndex.ResolutionSeams = Object.freeze({
+        type: (module: string, path: DeclarationIndex.TypePathFact) =>
+          NameResolution.resolveType(preliminary, collected, module, path),
+        item: (module: string, path: DeclarationIndex.TypePathFact) =>
+          NameResolution.resolveItem(preliminary, collected, module, path),
+      })
+      return DeclarationIndex.complete(collected, resolvers)
     },
     (value) => value.modules.reduce((sum, module) => sum + module.members.length, 0),
     (value) => value.diagnostics.length,

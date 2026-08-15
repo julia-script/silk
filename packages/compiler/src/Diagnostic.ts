@@ -1838,6 +1838,7 @@ export type UncallableExactRepresentationSubject =
   | 'EffectDeclaration'
   | 'LocalBinding'
   | 'CallableSection'
+  | 'NonCallableDeclaration'
 
 const uncallableSubjectProse = (subject: UncallableExactRepresentationSubject): string => {
   switch (subject) {
@@ -1847,6 +1848,8 @@ const uncallableSubjectProse = (subject: UncallableExactRepresentationSubject): 
       return 'a local binding, which exists only where it is written'
     case 'CallableSection':
       return 'a callable section, whose identity belongs to its construction site'
+    case 'NonCallableDeclaration':
+      return 'a declaration that is not callable'
   }
 }
 

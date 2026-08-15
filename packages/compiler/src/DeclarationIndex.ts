@@ -141,6 +141,10 @@ export type DeclaredTypeFact =
       readonly components?: ReadonlyArray<DeclaredTypeFact>
       readonly exposureCause?: Diagnostic.Identity
       readonly unionSource?: UnionSourceFact
+      readonly exactItem?: {
+        readonly path: TypePathFact
+        readonly declaration: CanonicalId
+      }
     }
   | {
       readonly _tag: 'Unresolved'
@@ -231,6 +235,7 @@ export type DeclaredTypeFact =
       readonly token: Token.Token
       readonly syntax: SyntaxTree.Node
       readonly cause?: Diagnostic.Identity
+      readonly itemCandidate?: CanonicalId
     }
   | {
       readonly _tag: 'Unavailable'
@@ -620,6 +625,28 @@ export interface TypeResolution {
 }
 
 export type TypeResolver = (module: string, path: TypePathFact) => TypeResolution
+
+export type ItemResolution =
+  | { readonly _tag: 'Resolved'; readonly declaration: MemberFact }
+  | { readonly _tag: 'Missing' }
+  | { readonly _tag: 'Ambiguous'; readonly count: number; readonly cause?: Diagnostic.Identity }
+  | {
+      readonly _tag: 'Inaccessible'
+      readonly declaration: MemberFact
+      readonly cause: Diagnostic.Identity
+    }
+  | {
+      readonly _tag: 'Unavailable'
+      readonly declaration?: MemberFact
+      readonly cause?: Diagnostic.Identity
+    }
+
+export type ItemResolver = (module: string, path: TypePathFact) => ItemResolution
+
+export interface ResolutionSeams {
+  readonly type: TypeResolver
+  readonly item: ItemResolver
+}
 
 const spelling = (source: SourceFile.SourceFile, token: Token.Token): string =>
   Option.getOrThrowWith(
@@ -2548,16 +2575,21 @@ export const collect = (closure: ModuleClosure.Facts): Index => {
 const resolveExactRepresentation = (
   module: string,
   fact: Extract<DeclaredTypeFact, { readonly _tag: 'ExactRepresentation' }>,
-  resolver: TypeResolver,
+  resolvers: ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
 ): TypeResolution => {
   const arguments_ = fact.arguments.map((argument) =>
-    resolveDeclaredType(module, argument, resolver, modules),
+    resolveDeclaredType(module, argument, resolvers, modules),
   )
   const argumentDiagnostics = arguments_.flatMap((argument) => argument.diagnostics)
-  const reject = (diagnostic: Diagnostic.Diagnostic): TypeResolution => {
+  const reject = (diagnostic: Diagnostic.Diagnostic, candidate?: MemberFact): TypeResolution => {
+    const canonical = candidate?.canonical._tag === 'Canonical' ? candidate.canonical.id : undefined
     return Object.freeze({
-      fact: Object.freeze({ ...fact, cause: Diagnostic.identity(diagnostic) }),
+      fact: Object.freeze({
+        ...fact,
+        cause: Diagnostic.identity(diagnostic),
+        ...(canonical === undefined ? {} : { itemCandidate: canonical }),
+      }),
       diagnostics: Object.freeze([...argumentDiagnostics, diagnostic]),
     })
   }
@@ -2570,52 +2602,69 @@ const resolveExactRepresentation = (
       arguments_.length,
       fact.token.span,
     )
-  if (fact.item.segments.length !== 1) return reject(unresolved())
-  const owner = modules.find((candidate) => candidate.module === module)
-  const lookup = lookupDeclaration(owner?.declarations ?? [], fact.item.spelling)
+  const lookup = resolvers.item(module, fact.item)
   if (lookup._tag === 'Ambiguous')
     return reject(
       Diagnostic.ambiguousExactRepresentationItem(
         fact.item.spelling,
-        lookup.declarations.length,
+        lookup.count,
         fact.token.span,
       ),
     )
-  if (lookup._tag !== 'Resolved') return reject(unresolved())
+  if (lookup._tag !== 'Resolved')
+    return reject(
+      unresolved(),
+      lookup._tag === 'Inaccessible' || lookup._tag === 'Unavailable'
+        ? lookup.declaration
+        : undefined,
+    )
   const declaration = lookup.declaration
-  if (declaration.functionKind !== 'Ordinary')
+  if (declaration._tag !== 'FunctionDeclaration' || declaration.functionKind !== 'Ordinary')
     return reject(
       Diagnostic.uncallableExactRepresentationItem(
         fact.item.spelling,
-        'EffectDeclaration',
+        declaration._tag === 'FunctionDeclaration' ? 'EffectDeclaration' : 'NonCallableDeclaration',
         fact.token.span,
       ),
+      declaration,
     )
   if (declaration.typeParameters.length !== arguments_.length)
-    return reject(open(declaration.typeParameters.length))
+    return reject(open(declaration.typeParameters.length), declaration)
   const supplied = arguments_.flatMap((argument) =>
     argument.fact._tag === 'Resolved' ? [argument.fact.type] : [],
   )
-  if (supplied.length !== arguments_.length) return reject(open(declaration.typeParameters.length))
+  if (supplied.length !== arguments_.length)
+    return reject(open(declaration.typeParameters.length), declaration)
   const substitution = Type.substitution(
     declaration.typeParameters.map((parameter) => parameter.type),
     supplied,
   )
-  if (substitution === undefined) return reject(open(declaration.typeParameters.length))
-  if (declaration.returnType._tag !== 'Resolved') return reject(unresolved())
-  const declaredParameters = declaration.parameters.map((parameter) => parameter.declaredType)
+  if (substitution === undefined)
+    return reject(open(declaration.typeParameters.length), declaration)
+  const canonical =
+    declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : undefined
+  if (canonical === undefined) return reject(unresolved(), declaration)
+  const declaredReturn = resolveDeclaredType(
+    canonical.module,
+    declaration.returnType,
+    resolvers,
+    modules,
+  )
+  if (declaredReturn.fact._tag !== 'Resolved') return reject(unresolved(), declaration)
+  const declaredParameters = declaration.parameters.map(
+    (parameter) =>
+      resolveDeclaredType(canonical.module, parameter.declaredType, resolvers, modules).fact,
+  )
   if (declaredParameters.some((parameter) => parameter._tag !== 'Resolved'))
-    return reject(unresolved())
+    return reject(unresolved(), declaration)
   const structural = Type.callable(
     declaredParameters.flatMap((parameter) =>
       parameter._tag === 'Resolved' ? [Type.substitute(parameter.type, substitution)] : [],
     ),
-    Type.substitute(declaration.returnType.type, substitution),
+    Type.substitute(declaredReturn.fact.type, substitution),
   )
-  if (Type.parameters(structural).length > 0) return reject(open(declaration.typeParameters.length))
-  const canonical =
-    declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : undefined
-  if (canonical === undefined) return reject(unresolved())
+  if (Type.parameters(structural).length > 0)
+    return reject(open(declaration.typeParameters.length), declaration)
   const identityArguments = supplied.map((argument) => argument)
   const identity = Type.callableIdentityArgument(
     `declaration:${canonical.module}:${canonical.name}`,
@@ -2635,6 +2684,7 @@ const resolveExactRepresentation = (
       token: fact.token,
       syntax: fact.syntax,
       components: Object.freeze(arguments_.map((argument) => argument.fact)),
+      exactItem: Object.freeze({ path: fact.item, declaration: canonical }),
     }),
     diagnostics: Object.freeze(argumentDiagnostics),
   })
@@ -2643,13 +2693,13 @@ const resolveExactRepresentation = (
 const resolveDeclaredType = (
   module: string,
   fact: DeclaredTypeFact,
-  resolver: TypeResolver,
+  resolvers: ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
 ): TypeResolution => {
   if (fact._tag === 'ExactRepresentation')
-    return resolveExactRepresentation(module, fact, resolver, modules)
+    return resolveExactRepresentation(module, fact, resolvers, modules)
   if (fact._tag === 'Unresolved') {
-    const resolved = resolver(module, fact.path)
+    const resolved = resolvers.type(module, fact.path)
     if (resolved.fact._tag !== 'Resolved' || !Type.isNominal(resolved.fact.type)) return resolved
     const declaration = memberByNominal(modules, resolved.fact.type)
     const expected =
@@ -2667,9 +2717,9 @@ const resolveDeclaredType = (
   }
   if (fact._tag === 'Callable') {
     const parameters = fact.parameters.map((parameter) =>
-      resolveDeclaredType(module, parameter, resolver, modules),
+      resolveDeclaredType(module, parameter, resolvers, modules),
     )
-    const result = resolveDeclaredType(module, fact.result, resolver, modules)
+    const result = resolveDeclaredType(module, fact.result, resolvers, modules)
     const diagnostics = Object.freeze([
       ...parameters.flatMap((parameter) => parameter.diagnostics),
       ...result.diagnostics,
@@ -2717,14 +2767,14 @@ const resolveDeclaredType = (
     })
   }
   if (fact._tag === 'Effect') {
-    const success = resolveDeclaredType(module, fact.success, resolver, modules)
+    const success = resolveDeclaredType(module, fact.success, resolvers, modules)
     const failures = fact.failures.map((failure) =>
-      resolveDeclaredType(module, failure, resolver, modules),
+      resolveDeclaredType(module, failure, resolvers, modules),
     )
     const requirements = fact.requirements.map((requirement) =>
       Object.freeze({
         ...requirement,
-        capability: resolveDeclaredType(module, requirement.capability, resolver, modules),
+        capability: resolveDeclaredType(module, requirement.capability, resolvers, modules),
       }),
     )
     const diagnostics: Array<Diagnostic.Diagnostic> = [
@@ -2816,10 +2866,10 @@ const resolveDeclaredType = (
   if (fact._tag === 'Applied') {
     const target =
       fact.target._tag === 'Unresolved'
-        ? resolver(module, fact.target.path)
-        : resolveDeclaredType(module, fact.target, resolver, modules)
+        ? resolvers.type(module, fact.target.path)
+        : resolveDeclaredType(module, fact.target, resolvers, modules)
     const arguments_ = fact.arguments.map((argument) =>
-      resolveDeclaredType(module, argument, resolver, modules),
+      resolveDeclaredType(module, argument, resolvers, modules),
     )
     const diagnostics = [
       ...target.diagnostics,
@@ -3038,7 +3088,7 @@ const resolveDeclaredType = (
   }
   if (fact._tag === 'Union') {
     const resolvedMembers = fact.members.map((member) =>
-      resolveDeclaredType(module, member, resolver, modules),
+      resolveDeclaredType(module, member, resolvers, modules),
     )
     const diagnostics: Array<Diagnostic.Diagnostic> = resolvedMembers.flatMap((member) =>
       Array.from(member.diagnostics),
@@ -3089,7 +3139,7 @@ const resolveDeclaredType = (
     })
   }
   if (fact._tag === 'Slice') {
-    const element = resolveDeclaredType(module, fact.element, resolver, modules)
+    const element = resolveDeclaredType(module, fact.element, resolvers, modules)
     if (element.fact._tag === 'Resolved') {
       const type = Type.slice(fact.access, element.fact.type)
       return Object.freeze({
@@ -3118,7 +3168,7 @@ const resolveDeclaredType = (
     })
   }
   if (fact._tag === 'Reference') {
-    const target = resolveDeclaredType(module, fact.target, resolver, modules)
+    const target = resolveDeclaredType(module, fact.target, resolvers, modules)
     if (target.fact._tag === 'Resolved') {
       const type = Type.reference(fact.access, target.fact.type)
       return Object.freeze({
@@ -3146,7 +3196,7 @@ const resolveDeclaredType = (
   }
   if (fact._tag !== 'FixedArray') return Object.freeze({ fact, diagnostics: Object.freeze([]) })
   return (() => {
-    const element = resolveDeclaredType(module, fact.element, resolver, modules)
+    const element = resolveDeclaredType(module, fact.element, resolvers, modules)
     if (fact.length._tag !== 'Available') {
       return Object.freeze({
         fact: Object.freeze({
@@ -3225,7 +3275,7 @@ const memberByNominal = (
 const resolveBounds = (
   module: string,
   typeParameters: ReadonlyArray<TypeParameterFact>,
-  resolver: TypeResolver,
+  resolvers: ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
   diagnostics: Array<Diagnostic.Diagnostic>,
 ): ReadonlyArray<TypeParameterFact> => {
@@ -3239,7 +3289,7 @@ const resolveBounds = (
     typeParameters.map((parameter): TypeParameterFact => {
       const representation = parameter.representationBound
       if (representation !== undefined) {
-        const resolved = resolveDeclaredType(module, representation.contract, resolver, modules)
+        const resolved = resolveDeclaredType(module, representation.contract, resolvers, modules)
         diagnostics.push(...resolved.diagnostics)
         const contract =
           resolved.fact._tag === 'Resolved' &&
@@ -3266,7 +3316,7 @@ const resolveBounds = (
       }
       const bound = parameter.bound
       if (bound === undefined) return parameter
-      const resolved = resolver(module, bound.path).fact
+      const resolved = resolvers.type(module, bound.path).fact
       const capability =
         resolved._tag === 'Resolved' && Type.isNominal(resolved.type) ? resolved.type : undefined
       const declaration =
@@ -3301,12 +3351,18 @@ export const resolveTypeFact = (
   module: string,
   fact: DeclaredTypeFact,
   resolver: TypeResolver,
-): TypeResolution => resolveDeclaredType(module, fact, resolver, index.modules)
+): TypeResolution =>
+  resolveDeclaredType(
+    module,
+    fact,
+    Object.freeze({ type: resolver, item: () => Object.freeze({ _tag: 'Missing' }) }),
+    index.modules,
+  )
 
 const resolveFailureRow = (
   module: string,
   row: FailureRowFact,
-  resolver: TypeResolver,
+  resolvers: ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
 ): {
   readonly fact: FailureRowFact
@@ -3315,7 +3371,7 @@ const resolveFailureRow = (
   if (row.syntax === undefined) return Object.freeze({ fact: row, diagnostics: Object.freeze([]) })
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const members = row.members.map((member) => {
-    const resolved = resolveDeclaredType(module, member, resolver, modules)
+    const resolved = resolveDeclaredType(module, member, resolvers, modules)
     diagnostics.push(...resolved.diagnostics)
     return resolved.fact
   })
@@ -3350,7 +3406,7 @@ const resolveFailureRow = (
 const resolveRequirementRow = (
   module: string,
   row: RequirementRowFact,
-  resolver: TypeResolver,
+  resolvers: ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
 ): {
   readonly fact: RequirementRowFact
@@ -3359,7 +3415,7 @@ const resolveRequirementRow = (
   if (row.syntax === undefined) return Object.freeze({ fact: row, diagnostics: Object.freeze([]) })
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const entries = row.entries.map((entry) => {
-    const capability = resolveDeclaredType(module, entry.capability, resolver, modules)
+    const capability = resolveDeclaredType(module, entry.capability, resolvers, modules)
     diagnostics.push(...capability.diagnostics)
     return Object.freeze({ ...entry, capability: capability.fact })
   })
@@ -3619,17 +3675,17 @@ const stronglyConnected = (
 const resolveOpaqueResult = (
   module: string,
   opaqueResult: OpaqueResultFact | undefined,
-  resolver: TypeResolver,
+  resolvers: ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
   diagnostics: Array<Diagnostic.Diagnostic>,
 ): OpaqueResultFact | undefined => {
   if (opaqueResult === undefined) return undefined
-  const binder = resolveBounds(module, [opaqueResult.binder], resolver, modules, diagnostics).at(0)
+  const binder = resolveBounds(module, [opaqueResult.binder], resolvers, modules, diagnostics).at(0)
   return binder === undefined ? undefined : Object.freeze({ ...opaqueResult, binder })
 }
 
 /** Resolves all retained type paths and validates public exposure and inline dependencies. */
-export const complete = (self: Index, resolver: TypeResolver): Index => {
+export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
   const diagnostics: Array<Diagnostic.Diagnostic> = [...self.diagnostics]
   let modules = self.modules.map((module): ModuleHeaders => {
     const members = module.members.map((member): MemberFact => {
@@ -3637,7 +3693,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         const resolved = resolveDeclaredType(
           module.module,
           member.declaredType,
-          resolver,
+          resolvers,
           self.modules,
         )
         diagnostics.push(...resolved.diagnostics)
@@ -3647,7 +3703,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         const opaqueResult = resolveOpaqueResult(
           module.module,
           member.opaqueResult,
-          resolver,
+          resolvers,
           self.modules,
           diagnostics,
         )
@@ -3655,25 +3711,30 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           const resolved = resolveDeclaredType(
             module.module,
             parameter.declaredType,
-            resolver,
+            resolvers,
             self.modules,
           )
           diagnostics.push(...resolved.diagnostics)
           return Object.freeze({ ...parameter, declaredType: resolved.fact })
         })
-        const result = resolveDeclaredType(module.module, member.returnType, resolver, self.modules)
+        const result = resolveDeclaredType(
+          module.module,
+          member.returnType,
+          resolvers,
+          self.modules,
+        )
         diagnostics.push(...result.diagnostics)
         const failureRow = resolveFailureRow(
           module.module,
           member.failureRow,
-          resolver,
+          resolvers,
           self.modules,
         )
         diagnostics.push(...failureRow.diagnostics)
         const requirementRow = resolveRequirementRow(
           module.module,
           member.requirementRow,
-          resolver,
+          resolvers,
           self.modules,
         )
         diagnostics.push(...requirementRow.diagnostics)
@@ -3682,7 +3743,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           typeParameters: resolveBounds(
             module.module,
             member.typeParameters,
-            resolver,
+            resolvers,
             self.modules,
             diagnostics,
           ),
@@ -3698,7 +3759,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           const opaqueResult = resolveOpaqueResult(
             module.module,
             operation.opaqueResult,
-            resolver,
+            resolvers,
             self.modules,
             diagnostics,
           )
@@ -3706,7 +3767,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             const resolved = resolveDeclaredType(
               module.module,
               parameter.declaredType,
-              resolver,
+              resolvers,
               self.modules,
             )
             diagnostics.push(...resolved.diagnostics)
@@ -3715,19 +3776,19 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           const result = resolveDeclaredType(
             module.module,
             operation.returnType,
-            resolver,
+            resolvers,
             self.modules,
           )
           const failureRow = resolveFailureRow(
             module.module,
             operation.failureRow,
-            resolver,
+            resolvers,
             self.modules,
           )
           const requirementRow = resolveRequirementRow(
             module.module,
             operation.requirementRow,
-            resolver,
+            resolvers,
             self.modules,
           )
           diagnostics.push(
@@ -3750,7 +3811,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         const resolved = resolveDeclaredType(
           module.module,
           field.declaredType,
-          resolver,
+          resolvers,
           self.modules,
         )
         diagnostics.push(...resolved.diagnostics)
@@ -3761,7 +3822,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         typeParameters: resolveBounds(
           module.module,
           member.typeParameters,
-          resolver,
+          resolvers,
           self.modules,
           diagnostics,
         ),
@@ -3772,13 +3833,13 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       const capability = resolveDeclaredType(
         module.module,
         conformance.capability,
-        resolver,
+        resolvers,
         self.modules,
       )
       const provider = resolveDeclaredType(
         module.module,
         conformance.provider,
-        resolver,
+        resolvers,
         self.modules,
       )
       diagnostics.push(...capability.diagnostics, ...provider.diagnostics)
@@ -3789,25 +3850,25 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
               const parameterType = resolveDeclaredType(
                 module.module,
                 conformance.hook.parameterType,
-                resolver,
+                resolvers,
                 self.modules,
               )
               const returnType = resolveDeclaredType(
                 module.module,
                 conformance.hook.returnType,
-                resolver,
+                resolvers,
                 self.modules,
               )
               const failureRow = resolveFailureRow(
                 module.module,
                 conformance.hook.failureRow,
-                resolver,
+                resolvers,
                 self.modules,
               )
               const requirementRow = resolveRequirementRow(
                 module.module,
                 conformance.hook.requirementRow,
-                resolver,
+                resolvers,
                 self.modules,
               )
               diagnostics.push(

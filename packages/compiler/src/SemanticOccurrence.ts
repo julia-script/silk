@@ -307,6 +307,23 @@ const collectResolvedType = (
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
+  if (fact.exactItem !== undefined) {
+    const qualifier =
+      fact.exactItem.path.segments.length > 1 ? fact.exactItem.path.segments.at(0) : undefined
+    if (qualifier !== undefined)
+      collectQualifier(qualifier.token, qualifier.spelling, scope, index, pending)
+    const selected = fact.exactItem.path.segments.at(-1)
+    const declaration = DeclarationIndex.byCanonical(index, fact.exactItem.declaration)
+    push(
+      pending,
+      selected?.token.span,
+      'Value',
+      declaration === undefined
+        ? Object.freeze({ _tag: 'Unavailable' })
+        : available(identityOfDeclaration(declaration)),
+      declaration === undefined ? undefined : locationOfDeclaration(index, declaration),
+    )
+  }
   if (fact.components !== undefined) {
     for (const component of fact.components) collectDeclaredType(component, index, scope, pending)
     return
@@ -448,6 +465,24 @@ const collectDeclaredType = (
     return
   }
   if (fact._tag === 'ExactRepresentation') {
+    const qualifier = fact.item.segments.length > 1 ? fact.item.segments.at(0) : undefined
+    if (qualifier !== undefined)
+      collectQualifier(qualifier.token, qualifier.spelling, scope, index, pending)
+    const selected = fact.item.segments.at(-1)
+    const declaration =
+      fact.itemCandidate === undefined
+        ? undefined
+        : DeclarationIndex.byCanonical(index, fact.itemCandidate)
+    push(
+      pending,
+      selected?.token.span,
+      'Value',
+      Object.freeze({
+        _tag: 'Unavailable',
+        ...(fact.cause === undefined ? {} : { cause: fact.cause }),
+      }),
+      declaration === undefined ? undefined : locationOfDeclaration(index, declaration),
+    )
     for (const argument of fact.arguments) collectDeclaredType(argument, index, scope, pending)
     return
   }
@@ -1129,10 +1164,11 @@ const withCurrentDeclaration = (
   self: Index,
   occurrence: SemanticOccurrence,
 ): SemanticOccurrence => {
-  const current =
-    occurrence.resolution._tag === 'Available'
-      ? self.declarationLocations.get(identityKey(occurrence.resolution.identity))
-      : undefined
+  // Unavailable occurrences can still retain an exact rejected candidate (for example an open
+  // `typeof` item). That location was built from the current declaration index and is the useful
+  // navigation answer even though no available semantic identity can be rebased through the map.
+  if (occurrence.resolution._tag !== 'Available') return occurrence
+  const current = self.declarationLocations.get(identityKey(occurrence.resolution.identity))
   if (current === occurrence.declaration) return occurrence
   const { declaration: _previous, ...withoutDeclaration } = occurrence
   return Object.freeze({

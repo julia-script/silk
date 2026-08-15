@@ -6,9 +6,9 @@
 
 ## 2. Exact Identity Contracts
 
-- [ ] 2.1 Resolve exact named callable identities only after overload and generic specialization are complete.
-- [ ] 2.2 Enforce public-contract visibility and reject locals, sections, Effects, private leaks, and partial generic items.
-- [ ] 2.3 Add navigation and diagnostics for valid and invalid exact identity contracts.
+- [x] 2.1 Resolve exact named callable identities only after overload and generic specialization are complete.
+- [x] 2.2 Enforce public-contract visibility and reject locals, sections, Effects, private leaks, and partial generic items.
+- [x] 2.3 Add navigation and diagnostics for valid and invalid exact identity contracts.
 
 ## 3. Opaque Families and Realizations
 
