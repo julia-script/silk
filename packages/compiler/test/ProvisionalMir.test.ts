@@ -1,7 +1,9 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import type * as Instances from '../src/Instances.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
+import * as Type from '../src/Type.js'
 
 const encoder = new TextEncoder()
 
@@ -117,6 +119,77 @@ pub fn main() -> i32 {
       assert.strictEqual(selected.runner.classification, 'Suspendable')
       assert.strictEqual(selected.runner.execution._tag, 'ProvidedEffectRunnerExecution')
     }
+  }),
+)
+
+it.effect('does not contaminate a generic service provider with another specialization', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`service Value<S> {
+  effect fn get(value: &S) -> i32 ? &Value<S>
+}
+
+struct Token {}
+struct Other {}
+struct Fixed<S> {}
+effect fn get<S>(self: &Fixed<S>, value: &S) -> i32 { return 42 }
+impl<S> Value<S> for Fixed<S> { get: Fixed.get }
+effect fn read(value: &Token) -> i32 ? &Value<Token> { return run Value.get<Token>(value) }
+pub fn main() -> i32 {
+  let provider = Fixed<Token> {}
+  let token = Token {}
+  return run Effect.provide(read(&token), &provider)
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`),
+      [],
+    )
+    const get = self.instances.instances.find(
+      (instance) =>
+        instance.key.declaration.name === 'get' &&
+        instance.key.typeArguments.some(
+          (argument) => Type.encodeGenericArgument(argument) === 'provisional-mir/main.Token',
+        ),
+    )
+    assert.isDefined(get)
+    if (get === undefined) return
+    const other = Type.nominal('provisional-mir/main', 'Other')
+    const substitution = Type.substitution(
+      get.function.declaration.typeParameters.map((parameter) => parameter.type),
+      [other],
+    )
+    assert.isDefined(substitution)
+    if (substitution === undefined) return
+    const otherKey: Instances.InstanceKey = Object.freeze({
+      ...get.key,
+      typeArguments: Object.freeze([other]),
+    })
+    const otherInstance: Instances.Instance = Object.freeze({
+      ...get,
+      key: otherKey,
+      substitution,
+    })
+    const discovery: Instances.Discovery = Object.freeze({
+      ...self.instances,
+      instances: Object.freeze([...self.instances.instances, otherInstance]),
+      suspendable: Object.freeze([...self.instances.suspendable, otherKey]),
+      suspendableExecutions: Object.freeze([...self.instances.suspendableExecutions, otherKey]),
+    })
+    assert.strictEqual(self.layout._tag, 'Available')
+    if (self.layout._tag !== 'Available') return
+    const provisional = ProvisionalMir.build(
+      discovery,
+      self.layout.value,
+      Analysis.declarationIndex(self),
+    )
+    const provided = outcomes(provisional).filter(
+      (
+        outcome,
+      ): outcome is Extract<ProvisionalMir.Outcome, { readonly _tag: 'RunSuspendableEffect' }> =>
+        outcome._tag === 'RunSuspendableEffect' &&
+        outcome.runner.execution._tag === 'ProvidedEffectRunnerExecution' &&
+        outcome.runner.providers.some((provider) => provider.capability.name === 'Value'),
+    )
+    assert.lengthOf(provided, 0, ProvisionalMir.encode(provisional))
   }),
 )
 

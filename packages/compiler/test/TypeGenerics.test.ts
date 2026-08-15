@@ -176,6 +176,82 @@ it('infers failure and requirement row arguments nested in nominal applications'
       new Map(),
     ),
   )
+
+  const x = Type.parameter(owner, 4, 'X', 'Value')
+  const y = Type.parameter(owner, 5, 'Y', 'Value')
+  const a = Type.nominal('generics/NominalRows', 'A')
+  const b = Type.nominal('generics/NominalRows', 'B')
+  const c = Type.nominal('generics/NominalRows', 'C')
+  const pair = (left: Type.Type, right: Type.Type): Type.Nominal =>
+    Type.nominal('generics/NominalRows', 'Pair', [left, right])
+  const ambiguousFailures = new Map<string, Type.GenericArgument>()
+  assert.isTrue(
+    Type.infer(
+      Type.nominal('generics/NominalRows', 'Backtracking', [
+        Type.failureRowArgument([pair(a, y), pair(x, b)]),
+      ]),
+      Type.nominal('generics/NominalRows', 'Backtracking', [
+        Type.failureRowArgument([pair(a, b), pair(a, c)]),
+      ]),
+      ambiguousFailures,
+    ),
+  )
+  assert.strictEqual(
+    Type.encodeGenericArgument(ambiguousFailures.get(Type.key(x)) ?? 'never'),
+    Type.encodeGenericArgument(a),
+  )
+  assert.strictEqual(
+    Type.encodeGenericArgument(ambiguousFailures.get(Type.key(y)) ?? 'never'),
+    Type.encodeGenericArgument(c),
+  )
+
+  const requirement = (capability: Type.Nominal): Type.Requirement =>
+    Object.freeze({ capability, role: 'DefaultRole', access: 'Shared' })
+  const ambiguousRequirements = new Map<string, Type.GenericArgument>()
+  assert.isTrue(
+    Type.infer(
+      Type.nominal('generics/NominalRows', 'Backtracking', [
+        Type.requirementRowArgument([requirement(pair(a, y)), requirement(pair(x, b))]),
+      ]),
+      Type.nominal('generics/NominalRows', 'Backtracking', [
+        Type.requirementRowArgument([requirement(pair(a, b)), requirement(pair(a, c))]),
+      ]),
+      ambiguousRequirements,
+    ),
+  )
+  assert.strictEqual(
+    Type.encodeGenericArgument(ambiguousRequirements.get(Type.key(x)) ?? 'never'),
+    Type.encodeGenericArgument(a),
+  )
+  assert.strictEqual(
+    Type.encodeGenericArgument(ambiguousRequirements.get(Type.key(y)) ?? 'never'),
+    Type.encodeGenericArgument(c),
+  )
+
+  const remainder = Type.parameter(owner, 6, 'Remainder', 'FailureRow')
+  const d = Type.nominal('generics/NominalRows', 'D')
+  const constrainedRemainder = new Map<string, Type.GenericArgument>([
+    [Type.key(remainder), Type.failureRowArgument([pair(a, b)])],
+  ])
+  assert.isTrue(
+    Type.infer(
+      Type.nominal('generics/NominalRows', 'BacktrackingRemainder', [
+        Type.failureRowArgument([pair(a, y), pair(x, b)], [remainder]),
+      ]),
+      Type.nominal('generics/NominalRows', 'BacktrackingRemainder', [
+        Type.failureRowArgument([pair(a, b), pair(a, c), pair(d, b)]),
+      ]),
+      constrainedRemainder,
+    ),
+  )
+  assert.strictEqual(
+    Type.encodeGenericArgument(constrainedRemainder.get(Type.key(x)) ?? 'never'),
+    Type.encodeGenericArgument(d),
+  )
+  assert.strictEqual(
+    Type.encodeGenericArgument(constrainedRemainder.get(Type.key(y)) ?? 'never'),
+    Type.encodeGenericArgument(c),
+  )
 })
 
 it('projects an erased failure row into its ordinary structural value sum', () => {

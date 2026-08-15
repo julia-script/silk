@@ -227,6 +227,69 @@ pub fn main() -> i32 { return run Effect.catch(work(), recover) }`
   }),
 )
 
+it.effect('checks continuation allocators by exact witness specialization', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`struct Token {}
+struct Other {}
+struct GenericAllocator<S> {}
+
+effect fn allocate<S>(
+  self: &mut GenericAllocator<S>,
+  layout: Layout
+) -> Allocation ! OutOfMemory {
+  return run Intrinsic.systemAllocationAcquire(move layout)
+}
+impl<S> Allocator for GenericAllocator<S> { allocate: GenericAllocator.allocate }
+
+effect fn work() -> i32 ! OutOfMemory {
+  let mut allocator = GenericAllocator<Token> {}
+  let delayed = Effect.suspend(effect { return 42 }) |> Effect.provideMut(&mut allocator)
+  return run delayed
+}
+
+${recover}
+pub fn main() -> i32 { return run Effect.catch(work(), recover) }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const allocate = self.instances.instances.find(
+      (instance) =>
+        instance.key.declaration.name === 'allocate' &&
+        instance.key.typeArguments.some(
+          (argument) => Type.encodeGenericArgument(argument) === 'suspendability/main.Token',
+        ),
+    )
+    assert.isDefined(allocate)
+    if (allocate === undefined) return
+    const other = Type.nominal('suspendability/main', 'Other')
+    const substitution = Type.substitution(
+      allocate.function.declaration.typeParameters.map((parameter) => parameter.type),
+      [other],
+    )
+    assert.isDefined(substitution)
+    if (substitution === undefined) return
+    const otherKey: Instances.InstanceKey = Object.freeze({
+      ...allocate.key,
+      typeArguments: Object.freeze([other]),
+    })
+    const discovery: Instances.Discovery = Object.freeze({
+      ...self.instances,
+      instances: Object.freeze([
+        ...self.instances.instances,
+        Object.freeze({ ...allocate, key: otherKey, substitution }),
+      ]),
+      suspendable: Object.freeze([...self.instances.suspendable, otherKey]),
+      suspendableExecutions: Object.freeze([...self.instances.suspendableExecutions, otherKey]),
+    })
+    assert.deepEqual(
+      Instances.continuationAllocatorViolations(
+        discovery,
+        Analysis.declarationIndex(self),
+        self.results,
+      ),
+      [],
+    )
+  }),
+)
+
 it.effect('allows non-suspending allocator use and the system continuation allocator', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`${suspendingAllocator}

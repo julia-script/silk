@@ -1933,11 +1933,6 @@ export const isEffectSuspendable = (self: Discovery, identity: string): boolean 
 const sameInstanceKey = (left: InstanceKey, right: InstanceKey): boolean =>
   keyText(left) === keyText(right)
 
-const sameDeclaration = (
-  left: DeclarationIndex.CanonicalId,
-  right: DeclarationIndex.CanonicalId,
-): boolean => left.module === right.module && left.name === right.name
-
 /**
  * Rejects a concrete allocator selected for a suspendable Effect when its allocation operation can
  * itself suspend. Such a provider would need continuation storage in order to allocate that same
@@ -1973,8 +1968,12 @@ export const continuationAllocatorViolations = (
       if (witness?._tag !== 'SourceConformanceWitness') continue
       const implementation = DeclarationIndex.witnessOperation(witness, 'allocate')
       if (implementation === undefined) continue
-      const implementationInstances = self.instances.filter((candidate) =>
-        sameDeclaration(candidate.key.declaration, implementation),
+      const specialization = Specialization.key({
+        declaration: implementation,
+        typeArguments: witness.typeArguments,
+      })
+      const implementationInstances = self.instances.filter(
+        (candidate) => Specialization.key(candidate.key) === specialization,
       )
       const implementationSuspends = implementationInstances.some(
         (candidate) =>

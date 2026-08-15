@@ -1530,6 +1530,39 @@ const commitInference = (
   for (const [identity, argument] of source) target.set(identity, argument)
 }
 
+/** Finds the first deterministic complete matching of normalized row members. */
+const inferRowMembers = <Member>(
+  pattern: ReadonlyArray<Member>,
+  actual: ReadonlyArray<Member>,
+  inferred: ReadonlyMap<string, GenericArgument>,
+  matches: (pattern: Member, actual: Member, inferred: Map<string, GenericArgument>) => boolean,
+  complete: (remaining: ReadonlyArray<Member>, inferred: Map<string, GenericArgument>) => boolean,
+): ReadonlyMap<string, GenericArgument> | undefined => {
+  const search = (
+    position: number,
+    remaining: ReadonlyArray<Member>,
+    current: ReadonlyMap<string, GenericArgument>,
+  ): ReadonlyMap<string, GenericArgument> | undefined => {
+    const member = pattern.at(position)
+    if (member === undefined) {
+      const completed = new Map(current)
+      return complete(remaining, completed) ? completed : undefined
+    }
+    for (const [candidatePosition, candidate] of remaining.entries()) {
+      const trial = new Map(current)
+      if (!matches(member, candidate, trial)) continue
+      const found = search(
+        position + 1,
+        remaining.filter((_, index) => index !== candidatePosition),
+        trial,
+      )
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  return search(0, actual, inferred)
+}
+
 /** Infers one normalized failure-row argument, assigning at most one open remainder. */
 const inferFailureRowArgument = (
   pattern: FailureRowArgument,
@@ -1539,32 +1572,24 @@ const inferFailureRowArgument = (
 ): boolean => {
   if (!allowOpenActual && actual.parameters.length > 0) return false
   if (genericArgumentKey(pattern) === genericArgumentKey(actual)) return true
-  const trial = new Map(inferred)
-  const remaining = [...actual.failures]
-  for (const failure of pattern.failures) {
-    let matched = false
-    for (const [index, supplied] of remaining.entries()) {
-      const memberTrial = new Map(trial)
-      if (!infer(failure, supplied, memberTrial)) continue
-      remaining.splice(index, 1)
-      commitInference(trial, memberTrial)
-      matched = true
-      break
-    }
-    if (!matched) return false
-  }
-  if (pattern.parameters.length === 0) {
-    if (remaining.length !== 0 || actual.parameters.length !== 0) return false
-    commitInference(inferred, trial)
-    return true
-  }
-  const parameter_ = pattern.parameters.at(0)
-  if (
-    pattern.parameters.length !== 1 ||
-    parameter_ === undefined ||
-    !bindGenericArgument(parameter_, failureRowArgument(remaining, actual.parameters), trial)
+  const matched = inferRowMembers(
+    pattern.failures,
+    actual.failures,
+    inferred,
+    (failure, supplied, trial) => infer(failure, supplied, trial),
+    (remaining, trial) => {
+      if (pattern.parameters.length === 0)
+        return remaining.length === 0 && actual.parameters.length === 0
+      const parameter_ = pattern.parameters.at(0)
+      return (
+        pattern.parameters.length === 1 &&
+        parameter_ !== undefined &&
+        bindGenericArgument(parameter_, failureRowArgument(remaining, actual.parameters), trial)
+      )
+    },
   )
-    return false
+  if (matched === undefined) return false
+  const trial = new Map(matched)
   commitInference(inferred, trial)
   return true
 }
@@ -1578,37 +1603,31 @@ const inferRequirementRowArgument = (
 ): boolean => {
   if (!allowOpenActual && actual.parameters.length > 0) return false
   if (genericArgumentKey(pattern) === genericArgumentKey(actual)) return true
-  const trial = new Map(inferred)
-  const remaining = [...actual.requirements]
-  for (const requirement of pattern.requirements) {
-    let matched = false
-    for (const [index, supplied] of remaining.entries()) {
+  const matched = inferRowMembers(
+    pattern.requirements,
+    actual.requirements,
+    inferred,
+    (requirement, supplied, trial) => {
       if (
         (requirement.access !== supplied.access && requirement.access !== 'Exclusive') ||
         requirement.role !== supplied.role
       )
-        continue
-      const memberTrial = new Map(trial)
-      if (!infer(requirement.capability, supplied.capability, memberTrial)) continue
-      remaining.splice(index, 1)
-      commitInference(trial, memberTrial)
-      matched = true
-      break
-    }
-    if (!matched) return false
-  }
-  if (pattern.parameters.length === 0) {
-    if (remaining.length !== 0 || actual.parameters.length !== 0) return false
-    commitInference(inferred, trial)
-    return true
-  }
-  const parameter_ = pattern.parameters.at(0)
-  if (
-    pattern.parameters.length !== 1 ||
-    parameter_ === undefined ||
-    !bindGenericArgument(parameter_, requirementRowArgument(remaining, actual.parameters), trial)
+        return false
+      return infer(requirement.capability, supplied.capability, trial)
+    },
+    (remaining, trial) => {
+      if (pattern.parameters.length === 0)
+        return remaining.length === 0 && actual.parameters.length === 0
+      const parameter_ = pattern.parameters.at(0)
+      return (
+        pattern.parameters.length === 1 &&
+        parameter_ !== undefined &&
+        bindGenericArgument(parameter_, requirementRowArgument(remaining, actual.parameters), trial)
+      )
+    },
   )
-    return false
+  if (matched === undefined) return false
+  const trial = new Map(matched)
   commitInference(inferred, trial)
   return true
 }

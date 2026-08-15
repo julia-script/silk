@@ -4302,7 +4302,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
                 Type.substitute(contract.returnType.type, serviceSubstitution),
               ),
             )
-          const specializedRows = specialize(
+          const implementationRows = specialize(
             Type.effect(
               Type.unit,
               implementation.failureRow.failures,
@@ -4312,36 +4312,50 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
               implementation.requirementRow.parameters,
             ),
           )
-          const validFailures =
-            Type.isEffect(specializedRows) &&
-            specializedRows.failures.every((failure) =>
-              contract.failureRow.failures.some((allowed) =>
-                Type.equals(failure, Type.substitute(allowed, serviceSubstitution)),
-              ),
-            )
-          const contractRequirements = contract.requirementRow.requirements.filter(
-            (requirement) =>
-              !Type.equals(
-                Type.substitute(requirement.capability, serviceSubstitution),
-                capability,
-              ),
+          const contractRows = Type.substitute(
+            Type.effect(
+              Type.unit,
+              contract.failureRow.failures,
+              'Shared',
+              contract.requirementRow.requirements,
+              contract.failureRow.parameters,
+              contract.requirementRow.parameters,
+            ),
+            serviceSubstitution,
           )
+          const validFailures =
+            Type.isEffect(implementationRows) &&
+            Type.isEffect(contractRows) &&
+            implementationRows.failures.every((failure) =>
+              contractRows.failures.some((allowed) => Type.equals(failure, allowed)),
+            ) &&
+            implementationRows.failureParameters.every((parameter) =>
+              contractRows.failureParameters.some((allowed) => Type.equals(parameter, allowed)),
+            )
+          const contractRequirements = !Type.isEffect(contractRows)
+            ? []
+            : contractRows.requirements.filter(
+                (requirement) => !Type.equals(requirement.capability, capability),
+              )
           const validRequirements =
-            Type.isEffect(specializedRows) &&
-            specializedRows.requirements.every((requirement) =>
+            Type.isEffect(implementationRows) &&
+            Type.isEffect(contractRows) &&
+            implementationRows.requirements.every((requirement) =>
               contractRequirements.some(
                 (allowed) =>
-                  Type.equals(
-                    requirement.capability,
-                    Type.substitute(allowed.capability, serviceSubstitution),
-                  ) &&
+                  Type.equals(requirement.capability, allowed.capability) &&
                   requirement.role === allowed.role &&
                   (requirement.access === 'Shared' || allowed.access === 'Exclusive'),
               ),
+            ) &&
+            implementationRows.requirementParameters.every((parameter) =>
+              contractRows.requirementParameters.some((allowed) => Type.equals(parameter, allowed)),
             )
-          const contractSelf = contract.requirementRow.requirements.find((requirement) =>
-            Type.equals(Type.substitute(requirement.capability, serviceSubstitution), capability),
-          )
+          const contractSelf = !Type.isEffect(contractRows)
+            ? undefined
+            : contractRows.requirements.find((requirement) =>
+                Type.equals(requirement.capability, capability),
+              )
           const validSelfAccess =
             validSelf &&
             self._tag === 'Resolved' &&
@@ -4355,9 +4369,8 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             !validResult ||
             !validFailures ||
             !validRequirements ||
-            !Type.isEffect(specializedRows) ||
-            specializedRows.failureParameters.length > 0 ||
-            specializedRows.requirementParameters.length > 0
+            !Type.isEffect(implementationRows) ||
+            !Type.isEffect(contractRows)
           )
             diagnostics.push(
               Diagnostic.invalidConformance(
