@@ -139,8 +139,54 @@ const lowerSource = Effect.fnUntraced(function* (
  * evaluator harness and drives the phases directly instead of reading `snapshot.mir`. The fence
  * assertion is deliberate: task 4.4 narrows it only for shapes these engines prove first.
  */
-const lowerStored = (name: string, source: string, target: Target.Target) =>
-  lowerSource(name, source, target, 'stored')
+const lowerStored = Effect.fnUntraced(function* (
+  name: string,
+  source: string,
+  target: Target.Target,
+) {
+  return yield* lowerSource(name, source, target, 'stored')
+})
+
+const emitLlvm = Effect.fnUntraced(function* (module: Mir.Module, label: string) {
+  const llvm = yield* Backend.emit(Backend.LlvmBackend, module, { mode: 'release' })
+  assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact', label)
+  if (llvm._tag !== 'LlvmBitcodeArtifact') return unreachable('expected LLVM artifact')
+  return llvm
+})
+
+const assertLlvmDropCall = (ir: string, module: Mir.Module, label: string): void => {
+  const dropFn =
+    module.functions.find((candidate) => candidate.id.name.startsWith('drop@impl')) ??
+    unreachable(`expected an emitted Drop hook for ${label}`)
+  const dropSymbol = Backend.symbolFor(dropFn, Mir.machineEntry(module))
+  assert.match(
+    ir,
+    new RegExp(`\\bcall\\b[^\\n]*@${escapeRegExp(dropSymbol)}\\(`),
+    `${label} LLVM Drop call`,
+  )
+}
+
+/**
+ * A Drop that divides by zero on first entry. Completing with 42 means the hook never ran; a trap
+ * or any other exit is the ≥1 signal. Pair with the poison program (exit 42) to pin exactly once.
+ */
+const assertNativeWitnessTraps = Effect.fnUntraced(function* (
+  toolchain: NativeToolchain.Toolchain,
+  module: Mir.Module,
+  host: Target.Target,
+  label: string,
+) {
+  const llvm = yield* emitLlvm(module, `${label} witness`)
+  const outcome = yield* Effect.exit(runNative(toolchain, llvm, host))
+  assert.isFalse(
+    outcome._tag === 'Success' && Number(outcome.value.exitCode) === 42,
+    `${label} native witness must trap rather than return 42`,
+  )
+})
+
+/** Matches `heapTableBase` in WasmBackend: free-list heads live at the first Wasm heap page. */
+const wasmPageBytes = 65536
+const wasmHeapTableBase = wasmPageBytes
 
 const runWasm = Effect.fnUntraced(function* (bytes: Uint8Array) {
   const result = yield* Effect.try(() => {
@@ -381,11 +427,7 @@ layer(NodeServices.layer)('stored Effect engine parity', (it) => {
           const nativeRunner = storedRunner(nativeLowering.module, testCase.name)
           // The native lowering carries the same exact rows the Wasm lowering and evaluator proved.
           assertExactRows(nativeLowering.module, testCase.name)
-          const llvm = yield* Backend.emit(Backend.LlvmBackend, nativeLowering.module, {
-            mode: 'release',
-          })
-          assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact', testCase.name)
-          if (llvm._tag !== 'LlvmBitcodeArtifact') return
+          const llvm = yield* emitLlvm(nativeLowering.module, testCase.name)
           assert.include(llvm.ir, 'define i32 @silk_main', testCase.name)
           assertDirectLlvmRunner(
             llvm.ir,
@@ -436,27 +478,34 @@ layer(NodeServices.layer)('stored Effect engine parity', (it) => {
     180_000,
   )
 
-  type CleanupExit = 'unrun' | 'failure'
+  type CleanupExit = 'success' | 'unrun' | 'failure'
+  type DropKind = 'poison' | 'witness'
 
   /**
    * Shared stored-Effect cleanup surface.
    *
-   * Guard.drop poisons `tag` on the first call and traps on the second, so a double cleanup cannot
-   * return 42. A missed cleanup leaves the capture's `i32` block off Wasm free-list class 0
-   * (`heapTableBase` 65536). A mut-borrow ticket cannot be read after the stored Effect is dropped
-   * (OWN0011 / InvalidLoan), so the free-list head is the 0-vs-1 signal both backends can share
-   * with poison for 2.
+   * Poison: first Drop zeros `tag`, a second Drop traps, so a duplicate cannot return 42.
+   * Witness: the first Drop divides by zero, so a missing Drop returns 42 and a real Drop traps.
+   * Together those two native processes pass only for exactly one Drop. A mut-borrow ticket cannot
+   * be read after a stored Effect is dropped (OWN0011 / InvalidLoan), so native cannot count in
+   * process; Wasm still uses a non-zero class-0 free-list head at `wasmHeapTableBase` as the
+   * missing-cleanup signal for the poison program.
    */
-  const cleanupSurface = `struct Problem { code: i32 }
+  const cleanupSurface = (kind: DropKind = 'poison'): string => `struct Problem { code: i32 }
 struct Guard { tag: i32 storage: Allocation }
 impl Drop for Guard {
   fn drop(self: &mut Guard) -> () {
-    if self.tag == 0 {
+    ${
+      kind === 'witness'
+        ? `let boom = self.tag / 0
+    return ()`
+        : `if self.tag == 0 {
       let boom = 1 / 0
       return ()
     }
     self.tag = 0
-    return ()
+    return ()`
+    }
   }
 }
 struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
@@ -464,6 +513,9 @@ fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
   operation: F
 ) -> Deferred<A, E, R, F> {
   return Deferred<A, E, R> { operation: move operation }
+}
+effect fn succeeding(guard: Guard) -> i32 {
+  return 40 + guard.tag
 }
 effect fn failing(guard: Guard) -> i32 ! Problem {
   let result = guard.tag
@@ -478,7 +530,10 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
    * (`[i64; 256]`) so 80 leaked cycles must grow the Wasm heap past a 64KiB page; an `i32` leak
    * would stay inside the first page and the comparison would pass. A double Drop traps.
    */
-  const cleanupCycles = (exit: CleanupExit, count: number): string => `${cleanupSurface}
+  const cleanupCycles = (
+    exit: Exclude<CleanupExit, 'success'>,
+    count: number,
+  ): string => `${cleanupSurface()}
 effect fn cycle() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<[i64; 256]>())
   let guard = Guard { tag: 7, storage: move storage }
@@ -506,7 +561,7 @@ pub fn main() -> i32 {
     const memory = instance.exports[StandardStreams.wasmMemoryExport]
     assert.instanceOf(memory, WebAssembly.Memory)
     return memory instanceof WebAssembly.Memory
-      ? memory.buffer.byteLength / 65536
+      ? memory.buffer.byteLength / wasmPageBytes
       : Number.POSITIVE_INFINITY
   }
 
@@ -519,29 +574,38 @@ pub fn main() -> i32 {
       const value = main()
       const memory = instance.exports[StandardStreams.wasmMemoryExport]
       const class0 =
-        memory instanceof WebAssembly.Memory ? new DataView(memory.buffer).getInt32(65536, true) : 0
+        memory instanceof WebAssembly.Memory
+          ? new DataView(memory.buffer).getInt32(wasmHeapTableBase, true)
+          : 0
       return Object.freeze({ value, pages: pagesOf(instance), class0 })
     })
   })
 
-  const cleanupProgram = (exit: CleanupExit): string => `${cleanupSurface}
-effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
-effect fn build() -> i32 ! Problem | OutOfMemory {
+  const cleanupProgram = (exit: CleanupExit, kind: DropKind = 'poison'): string => {
+    const tag = exit === 'success' ? 2 : 7
+    const failures = exit === 'success' ? 'OutOfMemory' : 'Problem | OutOfMemory'
+    const recoverValue = exit === 'success' ? 0 : 42
+    const construct = exit === 'success' ? 'succeeding(move guard)' : 'failing(move guard)'
+    const runLine = exit === 'unrun' ? 'return 42' : 'return run deferred.operation'
+    return `${cleanupSurface(kind)}
+effect fn recover(error: ${failures}) -> i32 { return ${recoverValue} }
+effect fn build() -> i32 ! ${failures} {
   let mut allocator = SystemAllocator.make()
   let storage = run Allocator.allocate(Layout.of<i32>()) |> Effect.provideMut(&mut allocator)
-  let guard = Guard { tag: 7, storage: move storage }
-  let deferred = defer(failing(move guard))
-  ${exit === 'failure' ? 'return run deferred.operation' : 'return 42'}
+  let guard = Guard { tag: ${tag}, storage: move storage }
+  let deferred = defer(${construct})
+  ${runLine}
 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+  }
 
   it.effect(
-    'cleans unrun and failing stored Effect environments exactly once in every engine',
+    'cleans successful, unrun, and failing stored Effect environments exactly once in every engine',
     () =>
       Effect.gen(function* () {
         const host = yield* Target.host()
         const toolchain = yield* makeToolchain()
-        for (const exit of ['unrun', 'failure'] as const) {
+        for (const exit of ['success', 'unrun', 'failure'] as const) {
           const moduleName = `stored-effect-parity/cleanup-${exit}`
           const { snapshot, module } = yield* lowerStored(
             moduleName,
@@ -563,7 +627,7 @@ pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
           assert.strictEqual(wasmRun.value, 42, `${exit} Wasm`)
           assert.notStrictEqual(wasmRun.class0, 0, `${exit} Wasm capture returned to class 0`)
           assert.notInclude(wasm.wat, 'call_indirect', exit)
-          if (exit === 'failure') {
+          if (exit !== 'unrun') {
             assertDirectWasmRunner(
               wasm.wat,
               module,
@@ -573,21 +637,9 @@ pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
           }
 
           const native = yield* lowerStored(moduleName, cleanupProgram(exit), host)
-          const llvm = yield* Backend.emit(Backend.LlvmBackend, native.module, { mode: 'release' })
-          assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact', exit)
-          if (llvm._tag !== 'LlvmBitcodeArtifact') return
-          // The Drop hook that cleans the stored environment survives into native code.
-          const dropFn =
-            native.module.functions.find((candidate) =>
-              candidate.id.name.startsWith('drop@impl'),
-            ) ?? unreachable(`expected an emitted Drop hook for ${exit}`)
-          const dropSymbol = Backend.symbolFor(dropFn, Mir.machineEntry(native.module))
-          assert.match(
-            llvm.ir,
-            new RegExp(`\\bcall\\b[^\\n]*@${escapeRegExp(dropSymbol)}\\(`),
-            `${exit} LLVM Drop call`,
-          )
-          if (exit === 'failure') {
+          const llvm = yield* emitLlvm(native.module, exit)
+          assertLlvmDropCall(llvm.ir, native.module, exit)
+          if (exit !== 'unrun') {
             assertDirectLlvmRunner(
               llvm.ir,
               native.module,
@@ -597,6 +649,13 @@ pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
           }
           const nativeRun = yield* runNative(toolchain, llvm, host)
           assert.strictEqual(Number(nativeRun.exitCode), 42, `${exit} native: ${nativeRun.stderr}`)
+
+          const witness = yield* lowerStored(
+            `${moduleName}-witness`,
+            cleanupProgram(exit, 'witness'),
+            host,
+          )
+          yield* assertNativeWitnessTraps(toolchain, witness.module, host, exit)
 
           // `unrun` never reaches a run operation, so the realization is the only runner fact.
           const runner = storedRealization(module, exit).runner
@@ -609,19 +668,20 @@ pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
                     event.target.name === runner.name,
                 ).length
               : -1
-          assert.strictEqual(runnerCalls, exit === 'failure' ? 1 : 0, `${exit} stored runner calls`)
-          if (exit === 'failure') {
-            assert.isAbove(traceCount(outcome, 'EffectFailure'), 0, 'typed failure trace')
-            // A typed failure keeps its exact failure rows through both lowerings.
+          assert.strictEqual(runnerCalls, exit === 'unrun' ? 0 : 1, `${exit} stored runner calls`)
+          if (exit !== 'unrun') {
             assertExactRows(module, exit)
             assertExactRows(native.module, `${exit} native`)
           }
+          if (exit === 'failure') {
+            assert.isAbove(traceCount(outcome, 'EffectFailure'), 0, 'typed failure trace')
+          }
         }
       }).pipe(Effect.scoped),
-    180_000,
+    240_000,
   )
 
-  const suspending = `${cleanupSurface}
+  const suspendingProgram = (kind: DropKind = 'poison'): string => `${cleanupSurface(kind)}
 effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
@@ -647,7 +707,7 @@ pub fn main() -> i32 {
         const moduleName = 'stored-effect-parity/suspending'
         const { snapshot, module } = yield* lowerStored(
           moduleName,
-          suspending,
+          suspendingProgram(),
           Target.wasm32UnknownUnknown,
         )
         const outcome = BootstrapEvaluation.evaluate(snapshot.instances, module)
@@ -669,11 +729,10 @@ pub fn main() -> i32 {
           'suspending',
         )
 
-        const native = yield* lowerStored(moduleName, suspending, host)
-        const llvm = yield* Backend.emit(Backend.LlvmBackend, native.module, { mode: 'release' })
-        assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact')
-        if (llvm._tag !== 'LlvmBitcodeArtifact') return
+        const native = yield* lowerStored(moduleName, suspendingProgram(), host)
+        const llvm = yield* emitLlvm(native.module, 'suspending')
         assert.include(llvm.ir, 'define i32 @silk_main')
+        assertLlvmDropCall(llvm.ir, native.module, 'suspending')
         assertDirectLlvmRunner(
           llvm.ir,
           native.module,
@@ -682,8 +741,15 @@ pub fn main() -> i32 {
         )
         const nativeRun = yield* runNative(toolchain, llvm, host)
         assert.strictEqual(Number(nativeRun.exitCode), 42, `suspending native: ${nativeRun.stderr}`)
+
+        const witness = yield* lowerStored(
+          `${moduleName}-witness`,
+          suspendingProgram('witness'),
+          host,
+        )
+        yield* assertNativeWitnessTraps(toolchain, witness.module, host, 'suspending')
       }).pipe(Effect.scoped),
-    180_000,
+    240_000,
   )
 
   /**
@@ -703,7 +769,7 @@ pub fn main() -> i32 {
   return run Effect.catch(drive() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-  const suspendCycles = (count: number): string => `${cleanupSurface}
+  const suspendCycles = (count: number): string => `${cleanupSurface()}
 effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
