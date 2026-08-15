@@ -399,16 +399,27 @@ it.effect(
   180_000,
 )
 
+type CleanupExit = 'unrun' | 'failure'
+
 /**
- * Repeats one stored-Effect construct-and-clean cycle `count` times.
+ * Shared stored-Effect cleanup surface.
  *
- * Returning 42 does not distinguish a released capture from a leaked one, so the cleanup parity
- * check runs the cycle in a loop and measures the Wasm heap: an environment the backend fails to
- * release once per iteration grows memory, while exactly-once cleanup keeps it flat.
+ * Guard.drop poisons `tag` on the first call and traps on the second, so a double cleanup cannot
+ * return 42. A missed cleanup is a leak: the cycle programs compare heap pages as the iteration
+ * count grows. Together those two observations fail unless each live capture is cleaned once.
  */
-const cleanupCycles = (exit: CleanupExit, count: number): string => `struct Problem { code: i32 }
+const cleanupSurface = `struct Problem { code: i32 }
 struct Guard { tag: i32 storage: Allocation }
-impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    if self.tag == 0 {
+      let boom = 1 / 0
+      return ()
+    }
+    self.tag = 0
+    return ()
+  }
+}
 struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
 fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
   operation: F
@@ -419,7 +430,15 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
   let result = guard.tag
   if result == 0 { return 0 }
   fail Problem { code: result }
-}
+}`
+
+/**
+ * Repeats one stored-Effect construct-and-clean cycle `count` times.
+ *
+ * Failure recovers inside each iteration so the loop can actually repeat. A leaked capture grows
+ * the Wasm heap as `count` grows; a double Drop traps on the poisoned tag.
+ */
+const cleanupCycles = (exit: CleanupExit, count: number): string => `${cleanupSurface}
 effect fn cycle() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard { tag: 7, storage: move storage }
@@ -431,7 +450,7 @@ effect fn drive() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
   let mut index = 0
   let mut total = 0
   while index < ${count} {
-    total = total + run cycle()
+    total = total + run Effect.catch(cycle(), recover)
     index = index + 1
   }
   return total
@@ -439,7 +458,7 @@ effect fn drive() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let total = run Effect.catch(drive() |> Effect.provideMut(&mut allocator), recover)
-  if total == ${exit === 'failure' ? 42 : count * 42} { return 42 }
+  if total == ${count * 42} { return 42 }
   return 1
 }`
 
@@ -462,22 +481,8 @@ const runWasmMeasured = Effect.fnUntraced(function* (bytes: Uint8Array) {
   })
 })
 
-type CleanupExit = 'unrun' | 'failure'
-
-const cleanupProgram = (exit: CleanupExit): string => `struct Problem { code: i32 }
-struct Guard { tag: i32 storage: Allocation }
-impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
-struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
-fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
-  operation: F
-) -> Deferred<A, E, R, F> {
-  return Deferred<A, E, R> { operation: move operation }
-}
-effect fn failing(guard: Guard) -> i32 ! Problem {
-  let result = guard.tag
-  if result == 0 { return 0 }
-  fail Problem { code: result }
-}
+const cleanupProgram = (exit: CleanupExit): string => `${cleanupSurface}
+effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
 effect fn build() -> i32 ! Problem | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let storage = run Allocator.allocate(Layout.of<i32>()) |> Effect.provideMut(&mut allocator)
@@ -485,7 +490,6 @@ effect fn build() -> i32 ! Problem | OutOfMemory {
   let deferred = defer(failing(move guard))
   ${exit === 'failure' ? 'return run deferred.operation' : 'return 42'}
 }
-effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect('cleans unrun and failing stored Effect environments exactly once in every engine', () =>
@@ -513,6 +517,7 @@ it.effect('cleans unrun and failing stored Effect environments exactly once in e
       const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'debug' })
       assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact', exit)
       if (wasm._tag !== 'WebAssemblyModuleArtifact') return
+      // 42 means the poisoned Drop did not run twice. A missed cleanup is a leak, proven by cycles.
       assert.strictEqual(yield* runWasm(wasm.bytes), 42, `${exit} Wasm`)
       assert.notInclude(wasm.wat, 'call_indirect', exit)
       if (exit === 'failure') {
@@ -554,25 +559,18 @@ it.effect('cleans unrun and failing stored Effect environments exactly once in e
   180_000,
 )
 
-const suspending = `struct Guard { tag: i32 storage: Allocation }
-impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
-struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
-fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
-  operation: F
-) -> Deferred<A, E, R, F> {
-  return Deferred<A, E, R> { operation: move operation }
-}
+const suspending = `${cleanupSurface}
 effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
 }
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard { tag: 2, storage: move storage }
   let deferred = defer(delayed(move guard))
   return run deferred.operation
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
@@ -601,6 +599,7 @@ it.effect('resumes a suspending stored Effect with matching cleanup in every eng
     const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'debug' })
     assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact')
     if (wasm._tag !== 'WebAssemblyModuleArtifact') return
+    // 42 means resume succeeded and the poisoned Drop did not run twice.
     assert.strictEqual(yield* runWasm(wasm.bytes), 42)
     assertDirectWasmRunner(
       wasm.wat,
@@ -624,19 +623,50 @@ it.effect('resumes a suspending stored Effect with matching cleanup in every eng
   180_000,
 )
 
+const suspendCycles = (count: number): string => `${cleanupSurface}
+effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
+  let base = run Effect.suspend(effect { return 40 })
+  return base + guard.tag
+}
+effect fn cycle() -> i32 ! OutOfMemory ? &mut Allocator {
+  let storage = run Allocator.allocate(Layout.of<i32>())
+  let guard = Guard { tag: 2, storage: move storage }
+  let deferred = defer(delayed(move guard))
+  return run deferred.operation
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn drive() -> i32 ! OutOfMemory ? &mut Allocator {
+  ${Array.from({ length: count }, (_, index) => `let value${index} = run cycle()`).join('\n  ')}
+  return ${Array.from({ length: count }, (_, index) => `value${index}`).join(' + ')}
+}
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  let total = run Effect.catch(drive() |> Effect.provideMut(&mut allocator), recover)
+  if total == ${count * 42} { return 42 }
+  return 1
+}`
+
 it.effect('keeps the Wasm heap flat across repeated stored Effect cleanup cycles', () =>
   Effect.gen(function* () {
-    // Only the unrun exit repeats: a typed failure aborts the loop on its first cycle, so its
-    // iteration count would not vary and the heap comparison would prove nothing.
-    for (const exit of ['unrun'] as const) {
+    const programs = [
+      { name: 'unrun', short: 8, long: 80, source: (count: number) => cleanupCycles('unrun', count) },
+      {
+        name: 'failure',
+        short: 8,
+        long: 80,
+        source: (count: number) => cleanupCycles('failure', count),
+      },
+      { name: 'suspending', short: 4, long: 20, source: suspendCycles },
+    ] as const
+    for (const testCase of programs) {
       const short = yield* lowerStored(
-        `stored-effect-parity/cycles-${exit}-short`,
-        cleanupCycles(exit, 8),
+        `stored-effect-parity/cycles-${testCase.name}-short`,
+        testCase.source(testCase.short),
         Target.wasm32UnknownUnknown,
       )
       const long = yield* lowerStored(
-        `stored-effect-parity/cycles-${exit}-long`,
-        cleanupCycles(exit, 80),
+        `stored-effect-parity/cycles-${testCase.name}-long`,
+        testCase.source(testCase.long),
         Target.wasm32UnknownUnknown,
       )
       const shortWasm = yield* Backend.emit(WasmBackend.WasmBackend, short.module, {
@@ -645,16 +675,16 @@ it.effect('keeps the Wasm heap flat across repeated stored Effect cleanup cycles
       const longWasm = yield* Backend.emit(WasmBackend.WasmBackend, long.module, {
         mode: 'release',
       })
-      assert.strictEqual(shortWasm._tag, 'WebAssemblyModuleArtifact', exit)
-      assert.strictEqual(longWasm._tag, 'WebAssemblyModuleArtifact', exit)
+      assert.strictEqual(shortWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
+      assert.strictEqual(longWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
       if (shortWasm._tag !== 'WebAssemblyModuleArtifact') return
       if (longWasm._tag !== 'WebAssemblyModuleArtifact') return
       const shortRun = yield* runWasmMeasured(shortWasm.bytes)
       const longRun = yield* runWasmMeasured(longWasm.bytes)
-      assert.strictEqual(shortRun.value, 42, `${exit} short cycles`)
-      assert.strictEqual(longRun.value, 42, `${exit} long cycles`)
+      assert.strictEqual(shortRun.value, 42, `${testCase.name} short cycles`)
+      assert.strictEqual(longRun.value, 42, `${testCase.name} long cycles`)
       // Ten times the cycles must not cost more heap: a capture leaked once per cycle would grow it.
-      assert.strictEqual(longRun.pages, shortRun.pages, `${exit} heap growth across cycles`)
+      assert.strictEqual(longRun.pages, shortRun.pages, `${testCase.name} heap growth across cycles`)
     }
   }),
 )
