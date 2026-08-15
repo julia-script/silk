@@ -175,52 +175,54 @@ const runtimeMatrix = [
   { name: 'provided', source: provided, result: 42, access: 'Take' },
 ] as const
 
-it.effect('executes stored Effects with identical results and runner identity in every engine', () =>
-  Effect.gen(function* () {
-    const host = yield* Target.host()
-    for (const testCase of runtimeMatrix) {
-      // One module name for both targets: the runner identity must not depend on the target.
-      const moduleName = `stored-effect-parity/${testCase.name}`
-      const wasmLowering = yield* lowerStored(
-        moduleName,
-        testCase.source,
-        Target.wasm32UnknownUnknown,
-      )
-      const { realization } = storedRunner(wasmLowering.module, testCase.name)
-      assert.strictEqual(realization.access, testCase.access, testCase.name)
+it.effect(
+  'executes stored Effects with identical results and runner identity in every engine',
+  () =>
+    Effect.gen(function* () {
+      const host = yield* Target.host()
+      for (const testCase of runtimeMatrix) {
+        // One module name for both targets: the runner identity must not depend on the target.
+        const moduleName = `stored-effect-parity/${testCase.name}`
+        const wasmLowering = yield* lowerStored(
+          moduleName,
+          testCase.source,
+          Target.wasm32UnknownUnknown,
+        )
+        const { realization } = storedRunner(wasmLowering.module, testCase.name)
+        assert.strictEqual(realization.access, testCase.access, testCase.name)
 
-      const evaluated = BootstrapEvaluation.evaluate(
-        wasmLowering.snapshot.instances,
-        wasmLowering.module,
-      )
-      assert.strictEqual(completedValue(evaluated), testCase.result, testCase.name)
+        const evaluated = BootstrapEvaluation.evaluate(
+          wasmLowering.snapshot.instances,
+          wasmLowering.module,
+        )
+        assert.strictEqual(completedValue(evaluated), testCase.result, testCase.name)
 
-      const wasm = yield* Backend.emit(WasmBackend.WasmBackend, wasmLowering.module, {
-        mode: 'release',
-      })
-      assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
-      if (wasm._tag !== 'WebAssemblyModuleArtifact') return
-      assert.strictEqual(yield* runWasm(wasm.bytes), testCase.result, `${testCase.name} Wasm`)
-      // Stored Effects stay statically dispatched: no runtime dictionary, no indirect call.
-      assert.notInclude(wasm.wat, 'call_indirect', testCase.name)
+        const wasm = yield* Backend.emit(WasmBackend.WasmBackend, wasmLowering.module, {
+          mode: 'release',
+        })
+        assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
+        if (wasm._tag !== 'WebAssemblyModuleArtifact') return
+        assert.strictEqual(yield* runWasm(wasm.bytes), testCase.result, `${testCase.name} Wasm`)
+        // Stored Effects stay statically dispatched: no runtime dictionary, no indirect call.
+        assert.notInclude(wasm.wat, 'call_indirect', testCase.name)
 
-      const nativeLowering = yield* lowerStored(moduleName, testCase.source, host)
-      const nativeRunner = storedRunner(nativeLowering.module, testCase.name)
-      const llvm = yield* Backend.emit(Backend.LlvmBackend, nativeLowering.module, {
-        mode: 'release',
-      })
-      assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact', testCase.name)
-      if (llvm._tag !== 'LlvmBitcodeArtifact') return
-      assert.include(llvm.ir, 'define i32 @silk_main', testCase.name)
-      // The same static runner the evaluator called is the one LLVM emitted.
-      assert.include(llvm.ir, sanitize(nativeRunner.realization.runner.name), testCase.name)
-      assert.deepEqual(
-        nativeRunner.realization.runner,
-        realization.runner,
-        `${testCase.name} runner identity across targets`,
-      )
-    }
-  }),
+        const nativeLowering = yield* lowerStored(moduleName, testCase.source, host)
+        const nativeRunner = storedRunner(nativeLowering.module, testCase.name)
+        const llvm = yield* Backend.emit(Backend.LlvmBackend, nativeLowering.module, {
+          mode: 'release',
+        })
+        assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact', testCase.name)
+        if (llvm._tag !== 'LlvmBitcodeArtifact') return
+        assert.include(llvm.ir, 'define i32 @silk_main', testCase.name)
+        // The same static runner the evaluator called is the one LLVM emitted.
+        assert.include(llvm.ir, sanitize(nativeRunner.realization.runner.name), testCase.name)
+        assert.deepEqual(
+          nativeRunner.realization.runner,
+          realization.runner,
+          `${testCase.name} runner identity across targets`,
+        )
+      }
+    }),
 )
 
 type CleanupExit = 'unrun' | 'failure'
