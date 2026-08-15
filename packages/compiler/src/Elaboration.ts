@@ -2738,7 +2738,7 @@ export const representationOfExpression = (
     if (!Type.isEffect(contract)) return undefined
     const site = expression.site
     return Type.exactRepresentationArgument(
-      Type.effectIdentityArgument(`effect:${Hir.executableSiteKey(site)}`),
+      Type.effectIdentityArgument(Hir.effectRepresentationIdentity(site)),
       contract,
     )
   }

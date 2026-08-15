@@ -33,11 +33,26 @@ const realizationsOf = (snapshot: Analysis.Snapshot): CallableFieldRealization.I
 
 const soleRealization = (
   index: CallableFieldRealization.Index,
-): CallableFieldRealization.Realization => {
+): CallableFieldRealization.CallableRealization => {
   const supported = index.entries.flatMap((entry) =>
-    entry.support._tag === 'Supported' ? [entry.support.realization] : [],
+    entry.support._tag === 'Supported' &&
+    CallableFieldRealization.isCallableRealization(entry.support.realization)
+      ? [entry.support.realization]
+      : [],
   )
   return supported.at(0) ?? unreachable('expected one supported callable field realization')
+}
+
+const soleEffectRealization = (
+  index: CallableFieldRealization.Index,
+): CallableFieldRealization.EffectRealization => {
+  const supported = index.entries.flatMap((entry) =>
+    entry.support._tag === 'Supported' &&
+    CallableFieldRealization.isEffectRealization(entry.support.realization)
+      ? [entry.support.realization]
+      : [],
+  )
+  return supported.at(0) ?? unreachable('expected one supported Effect field realization')
 }
 
 const namedCallable = `struct Parser<F: fn(i32) -> i32> { parse: F }
@@ -97,6 +112,85 @@ it.effect('realizes a capturing section field with one ordered inline capture la
     assert.deepEqual(realization.loans, [])
     assert.deepEqual(realization.cleanup.lanes, [])
     assert.strictEqual(realization.invocation, 'Shared')
+  }),
+)
+
+it.effect(
+  'records exactly-once cleanup for an unrun stored Effect without crossing its fence',
+  () =>
+    Effect.gen(function* () {
+      const module = 'effect-field/unrun-cleanup'
+      const snapshot = yield* realized(
+        module,
+        `struct Token { value: i32 }
+struct Deferred<F: once Effect<i32>> { operation: F }
+fn consume(token: Token) -> i32 { return token.value }
+pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  let deferred = Deferred { operation: effect { return consume(move token) } }
+  return 0
+}`,
+      )
+      const realization = soleEffectRealization(realizationsOf(snapshot))
+
+      assert.include(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        'SEM0107',
+      )
+      assert.strictEqual(snapshot.layoutCatalog._tag, 'Unavailable')
+      assert.deepEqual(realization.runner, {
+        _tag: 'CanonicalDeclarationId',
+        module,
+        name: 'main$effect$0',
+      })
+      assert.deepEqual(realization.runnerArguments, [])
+      assert.strictEqual(realization.access, 'Take')
+      assert.strictEqual(realization.suspendable, false)
+      assert.deepEqual(realization.rows.failures, [])
+      assert.deepEqual(realization.rows.requirements, [])
+      assert.strictEqual(realization.environment.length, 1)
+      const capture =
+        realization.environment.at(0) ?? unreachable('expected one owned Effect environment slot')
+      assert.strictEqual(capture.source, 'Binding')
+      assert.strictEqual(capture.sourceOrdinal, 0)
+      assert.strictEqual(capture.access, 'Take')
+      assert.strictEqual(Type.encode(capture.type), `${module}.Token`)
+      assert.strictEqual(capture.owned, true)
+      assert.deepEqual(realization.cleanup.unrunLanes, [0])
+      assert.strictEqual(realization.cleanup.consumedByRun, true)
+    }),
+)
+
+it.effect('realizes a suspending stored runner with exact rows and no structural Effect ABI', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'effect-field/suspending',
+      `struct Deferred<F: Effect<i32>> { operation: F }
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn delayed() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  let provided = Effect.suspend(effect { return 42 }) |> Effect.provideMut(&mut allocator)
+  return run Effect.catch(move provided, recover)
+}
+pub fn main() -> i32 {
+  let deferred = Deferred { operation: effect { return run delayed() } }
+  return 0
+}`,
+    )
+    const realization = soleEffectRealization(realizationsOf(snapshot))
+
+    assert.include(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      'SEM0107',
+    )
+    assert.strictEqual(snapshot.layoutCatalog._tag, 'Unavailable')
+    assert.strictEqual(realization.suspendable, true)
+    assert.strictEqual(realization.runner.module, 'effect-field/suspending')
+    assert.strictEqual(realization.runner.name, 'main$effect$0')
+    assert.strictEqual(realization.runnerArguments.every(Type.isConcreteGenericArgument), true)
+    assert.deepEqual(realization.rows.failures, [])
+    assert.deepEqual(realization.rows.requirements, [])
+    assert.deepEqual(realization.environment, [])
   }),
 )
 
@@ -181,14 +275,18 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
         plan.id,
       ) ?? unreachable('expected an unavailable representation field resolution')
     assert.strictEqual(openResolution._tag, 'UnavailableRepresentationField')
-    const open = CallableFieldRealization.realizeField(openResolution, snapshot.instances.callables)
+    const open = CallableFieldRealization.realizeField(
+      openResolution,
+      snapshot.instances.callables,
+      snapshot.instances.effects,
+    )
     assert.strictEqual(open._tag, 'Unsupported')
     assert.strictEqual(
       open._tag === 'Unsupported' ? open.reason._tag : undefined,
       'UnresolvedRepresentation',
     )
 
-    // An Effect identity is a resolved representation, but never a callable realization.
+    // An Effect identity without its canonical discovered runner stays explicitly unsupported.
     const effect = Type.effect('i32', [])
     const stored = CallableFieldRealization.realizeField(
       Object.freeze({
@@ -203,11 +301,12 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
         admissibility: Object.freeze({ _tag: 'Admitted' }),
       }),
       snapshot.instances.callables,
+      snapshot.instances.effects,
     )
     assert.strictEqual(stored._tag, 'Unsupported')
     assert.strictEqual(
       stored._tag === 'Unsupported' ? stored.reason._tag : undefined,
-      'EffectRepresentation',
+      'MissingEffectRunner',
     )
 
     // A section identity whose specialized environment was never discovered stays unsupported.
@@ -243,6 +342,7 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
         admissibility: Object.freeze({ _tag: 'Admitted' }),
       }),
       snapshot.instances.callables,
+      snapshot.instances.effects,
     )
     assert.strictEqual(missing._tag, 'Unsupported')
     assert.strictEqual(
@@ -320,6 +420,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const realizations = realizationsOf(snapshot).entries.flatMap((entry) =>
       entry.support._tag === 'Supported' &&
+      CallableFieldRealization.isCallableRealization(entry.support.realization) &&
       entry.support.realization.target._tag === 'Declaration' &&
       entry.support.realization.target.name === 'consume'
         ? [entry.support.realization]
@@ -355,7 +456,10 @@ pub fn main() -> i32 { return apply<i32>(0, 20) + apply<bool>(true, 20) }`
     const snapshot = yield* realized('callable-field/equal-specializations', source)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const realizations = realizationsOf(snapshot).entries.flatMap((entry) =>
-      entry.support._tag === 'Supported' ? [entry.support.realization] : [],
+      entry.support._tag === 'Supported' &&
+      CallableFieldRealization.isCallableRealization(entry.support.realization)
+        ? [entry.support.realization]
+        : [],
     )
 
     assert.strictEqual(realizations.length, 2)
@@ -392,6 +496,27 @@ it.effect('mints the callable environment identity in exactly one frontend modul
 
     // HIR is the only actor allowed to project an executable site into a semantic environment
     // identity. Every later phase delegates to that projection rather than parsing an encoding.
+    assert.deepEqual(minting, ['Hir.ts'])
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)
+
+it.effect('mints the represented Effect origin in exactly one frontend module', () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const sourceRoot = yield* path.fromFileUrl(new URL('../src/', import.meta.url))
+    const sources = (yield* fileSystem.readDirectory(sourceRoot)).filter((name) =>
+      name.endsWith('.ts'),
+    )
+    const minting: Array<string> = []
+    const originMint = '`effect:' + '$' + '{executableSiteKey(self)}`'
+    for (const name of sources) {
+      const source = yield* fileSystem.readFileString(path.join(sourceRoot, name))
+      if (source.includes(originMint)) minting.push(name)
+    }
+
+    // HIR owns the semantic origin projection. Realization and lowering both delegate to it, so a
+    // second minting site would be a syntax-recovery path around the shared Effect fact.
     assert.deepEqual(minting, ['Hir.ts'])
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )

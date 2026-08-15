@@ -4,17 +4,18 @@ import * as RepresentationField from './RepresentationField.js'
 import * as Type from './Type.js'
 
 /**
- * The runtime half of nominal callable storage.
+ * The runtime half of nominal executable storage.
  *
  * `RepresentationField` owns the semantic half: stable field identities, the concrete or explicitly
  * unavailable representation argument, the substituted required bound, and admissibility. This
- * actor consumes one of those resolutions and enriches it with everything a runtime phase needs —
- * the static target, its concrete arguments, the ordered capture environment, the receiver access
- * each invocation demands, capture loans, liveness, and cleanup.
+ * actor consumes one of those resolutions and enriches it with one tagged callable or Effect
+ * realization. Effect realizations carry the canonical runner selected by instance discovery, its
+ * concrete arguments, exact compile-time rows, run access, ordered environment, cleanup, and
+ * suspendability without assigning the structural `Effect` contract a standalone target ABI.
  *
- * Ownership, layout, MIR, and every engine read this one record. None of them recovers callable
- * identity from initializer syntax: the target and captures come from the representation argument
- * the frontend already retained and from the specialized callable instance it names.
+ * Existing callable consumers keep reading this record. Effect consumers are deliberately not
+ * enabled by this slice; when later phases arrive, they must consume the Effect tag rather than
+ * recover runners from initializer syntax.
  */
 
 /** How a capture reaches the callable environment stored inside the enclosing aggregate. */
@@ -66,7 +67,7 @@ export interface Cleanup {
 }
 
 /** One resolved callable field enriched with everything construction through cleanup needs. */
-export interface Realization {
+export interface CallableRealization {
   readonly _tag: 'CallableFieldRealization'
   readonly field: RepresentationField.Id
   readonly instance: Type.Nominal
@@ -84,11 +85,76 @@ export interface Realization {
   readonly cleanup: Cleanup
 }
 
+/** One ordered Effect environment slot, still independent of target size and alignment. */
+export interface EffectEnvironmentSlot {
+  readonly _tag: 'EffectEnvironmentSlot'
+  readonly ordinal: number
+  readonly source: 'Parameter' | 'Binding'
+  readonly sourceOrdinal: number
+  readonly access: CaptureAccess
+  readonly type: Type.Type
+  readonly effectIdentity?: string
+  readonly callableIdentity?: Type.CallableIdentityArgument
+  readonly owned: boolean
+  readonly borrowed: boolean
+}
+
+/** Exact compile-time rows carried by one concrete stored Effect. */
+export interface EffectRows {
+  readonly _tag: 'EffectFieldRows'
+  readonly failures: ReadonlyArray<Type.Nominal>
+  readonly requirements: ReadonlyArray<Type.Requirement>
+}
+
+/** The exactly-once obligation retained while a stored Effect has not run. */
+export interface EffectCleanup {
+  readonly _tag: 'EffectFieldCleanup'
+  /** Owned environment ordinals released if the enclosing nominal is dropped before execution. */
+  readonly unrunLanes: ReadonlyArray<number>
+  /** A consuming run transfers those lanes to the runner instead of cleaning them at scope exit. */
+  readonly consumedByRun: boolean
+}
+
+/**
+ * One resolved Effect field. This is a specialization fact for an enclosing nominal, not a
+ * structural Effect layout: no sizes, offsets, runtime row dictionaries, or indirect dispatch live
+ * here.
+ */
+export interface EffectRealization {
+  readonly _tag: 'EffectFieldRealization'
+  readonly field: RepresentationField.Id
+  readonly instance: Type.Nominal
+  readonly contract: Type.Effect
+  readonly requiredBound: Type.Effect
+  readonly runnerIdentity: string
+  readonly runner: Instances.EffectInstance['runner']
+  readonly runnerInstance: Instances.InstanceKey
+  readonly runnerArguments: ReadonlyArray<Type.GenericArgument>
+  readonly site: Hir.EffectSiteId
+  readonly rows: EffectRows
+  readonly access: Type.Effect['access']
+  readonly environment: ReadonlyArray<EffectEnvironmentSlot>
+  readonly cleanup: EffectCleanup
+  readonly suspendable: boolean
+}
+
+/** The one shared tagged realization consumed by represented-field lookups. */
+export type Realization = CallableRealization | EffectRealization
+
 /** Why one resolved representation field has no runtime realization. */
 export type UnsupportedReason =
   | { readonly _tag: 'UnresolvedRepresentation' }
-  | { readonly _tag: 'EffectRepresentation' }
   | { readonly _tag: 'NonCallableBound' }
+  | { readonly _tag: 'NonEffectBound' }
+  | { readonly _tag: 'MissingEffectRunner'; readonly identity: string }
+  | { readonly _tag: 'AmbiguousEffectRunner'; readonly identity: string }
+  | { readonly _tag: 'OpenEffectContract'; readonly identity: string }
+  | {
+      readonly _tag: 'EffectContractMismatch'
+      readonly identity: string
+      readonly expected: Type.Effect
+      readonly actual: Type.Effect
+    }
   | { readonly _tag: 'MissingCallableEnvironment'; readonly environment: string }
   | { readonly _tag: 'AmbiguousCallableEnvironment'; readonly environment: string }
   | {
@@ -180,6 +246,46 @@ const cleanupOf = (captures: ReadonlyArray<CaptureSlot>, invocation: ReceiverAcc
     consumedByInvocation: invocation === 'Take',
   })
 
+const effectEnvironmentSlot = (
+  capture: Instances.EffectInstance['captures'][number],
+): EffectEnvironmentSlot =>
+  Object.freeze({
+    _tag: 'EffectEnvironmentSlot' as const,
+    ordinal: capture.ordinal,
+    source: capture.source,
+    sourceOrdinal: capture.sourceOrdinal,
+    access: capture.access,
+    type: capture.type,
+    ...(capture.effectIdentity === undefined ? {} : { effectIdentity: capture.effectIdentity }),
+    ...(capture.callableIdentity === undefined
+      ? {}
+      : { callableIdentity: capture.callableIdentity }),
+    owned: ownedAccess(capture.access),
+    borrowed: borrowedAccess(capture.access),
+  })
+
+const compareEffectEnvironmentSlots = (
+  left: EffectEnvironmentSlot,
+  right: EffectEnvironmentSlot,
+): number => left.ordinal - right.ordinal || left.sourceOrdinal - right.sourceOrdinal
+
+const effectRows = (contract: Type.Effect): EffectRows =>
+  Object.freeze({
+    _tag: 'EffectFieldRows',
+    failures: Object.freeze([...contract.failures]),
+    requirements: Object.freeze([...contract.requirements]),
+  })
+
+const effectCleanup = (
+  environment: ReadonlyArray<EffectEnvironmentSlot>,
+  access: Type.Effect['access'],
+): EffectCleanup =>
+  Object.freeze({
+    _tag: 'EffectFieldCleanup',
+    unrunLanes: Object.freeze(environment.flatMap((slot) => (slot.owned ? [slot.ordinal] : []))),
+    consumedByRun: access === 'Take',
+  })
+
 /** Structural executable values need their own hidden identity and cannot be an inline lane yet. */
 const hasUnsupportedCaptureLayout = (type: Type.Type): boolean =>
   Type.isCallable(type) ||
@@ -269,27 +375,16 @@ const environmentCaptures = (
   })
 }
 
-/**
- * Enriches one resolved representation field into a runtime realization. The callable instances are
- * the discovery's already-specialized sections; this function never inspects initializer syntax.
- */
-export const realizeField = (
-  resolution: RepresentationField.Resolution,
+type ResolvedField = Extract<
+  RepresentationField.Resolution,
+  { readonly _tag: 'ResolvedRepresentationField' }
+>
+
+const realizeCallableField = (
+  resolution: ResolvedField,
+  identity: Type.CallableIdentityArgument,
   callables: ReadonlyArray<Instances.CallableInstance>,
 ): Support => {
-  if (resolution._tag !== 'ResolvedRepresentationField')
-    return unsupported(
-      resolution.id,
-      resolution.instance,
-      Object.freeze({ _tag: 'UnresolvedRepresentation' }),
-    )
-  const identity = resolution.argument.identity
-  if (!Type.isCallableIdentityArgument(identity))
-    return unsupported(
-      resolution.id,
-      resolution.instance,
-      Object.freeze({ _tag: 'EffectRepresentation' }),
-    )
   const contract = Type.isCallable(resolution.requiredBound)
     ? resolution.requiredBound
     : Type.isCallable(resolution.argument.contract)
@@ -340,10 +435,122 @@ export const realizeField = (
   })
 }
 
+/** One construction shape signature, used only to reject inconsistent duplicate runner facts. */
+const effectShape = (effect: Instances.EffectInstance): string =>
+  [
+    effect.identity,
+    `${effect.runner.module}.${effect.runner.name}`,
+    effect.typeArguments.map(Type.genericArgumentKey).join(','),
+    Type.key(effect.type),
+    effect.suspendable ? 'suspendable' : 'synchronous',
+    ...effect.captures.map(
+      (capture) =>
+        `${capture.ordinal}:${capture.source}:${capture.sourceOrdinal}:${capture.access}:${Type.key(capture.type)}`,
+    ),
+  ].join(' ')
+
+const realizeEffectField = (
+  resolution: ResolvedField,
+  identity: Type.EffectIdentityArgument,
+  effects: ReadonlyArray<Instances.EffectInstance>,
+): Support => {
+  const contract = Type.isEffect(resolution.argument.contract)
+    ? resolution.argument.contract
+    : undefined
+  const requiredBound = Type.isEffect(resolution.requiredBound)
+    ? resolution.requiredBound
+    : undefined
+  if (contract === undefined || requiredBound === undefined)
+    return unsupported(
+      resolution.id,
+      resolution.instance,
+      Object.freeze({ _tag: 'NonEffectBound' }),
+    )
+  if (!Type.isConcrete(contract))
+    return unsupported(
+      resolution.id,
+      resolution.instance,
+      Object.freeze({ _tag: 'OpenEffectContract', identity: identity.identity }),
+    )
+  const candidates = effects.filter(
+    (effect) =>
+      effect.identity === identity.identity || effect.representationIdentity === identity.identity,
+  )
+  const selected = candidates.at(0)
+  if (selected === undefined)
+    return unsupported(
+      resolution.id,
+      resolution.instance,
+      Object.freeze({ _tag: 'MissingEffectRunner', identity: identity.identity }),
+    )
+  if (new Set(candidates.map(effectShape)).size > 1)
+    return unsupported(
+      resolution.id,
+      resolution.instance,
+      Object.freeze({ _tag: 'AmbiguousEffectRunner', identity: identity.identity }),
+    )
+  if (!Type.equals(selected.type, contract))
+    return unsupported(
+      resolution.id,
+      resolution.instance,
+      Object.freeze({
+        _tag: 'EffectContractMismatch',
+        identity: identity.identity,
+        expected: contract,
+        actual: selected.type,
+      }),
+    )
+  const environment = Object.freeze(
+    [...selected.captures.map(effectEnvironmentSlot)].sort(compareEffectEnvironmentSlots),
+  )
+  return Object.freeze({
+    _tag: 'Supported',
+    realization: Object.freeze({
+      _tag: 'EffectFieldRealization' as const,
+      field: resolution.id,
+      instance: resolution.instance,
+      contract,
+      requiredBound,
+      runnerIdentity: selected.identity,
+      runner: selected.runner,
+      runnerInstance: selected.owner,
+      runnerArguments: Object.freeze([...selected.typeArguments]),
+      site: selected.site,
+      rows: effectRows(contract),
+      access: contract.access,
+      environment,
+      cleanup: effectCleanup(environment, contract.access),
+      suspendable: selected.suspendable,
+    }),
+  })
+}
+
+/**
+ * Enriches one resolved representation field from the discovery's specialized executable facts.
+ * This function never inspects initializer syntax and never invents a second field identity.
+ */
+export const realizeField = (
+  resolution: RepresentationField.Resolution,
+  callables: ReadonlyArray<Instances.CallableInstance>,
+  effects: ReadonlyArray<Instances.EffectInstance>,
+): Support => {
+  if (resolution._tag !== 'ResolvedRepresentationField')
+    return unsupported(
+      resolution.id,
+      resolution.instance,
+      Object.freeze({ _tag: 'UnresolvedRepresentation' }),
+    )
+  const identity = resolution.argument.identity
+  return Type.isCallableIdentityArgument(identity)
+    ? realizeCallableField(resolution, identity, callables)
+    : realizeEffectField(resolution, identity, effects)
+}
+
 /** Realizes every callable field of one resolved field index in deterministic key order. */
 export const realize = (
   fields: RepresentationField.Index,
   callables: ReadonlyArray<Instances.CallableInstance>,
+  effects: ReadonlyArray<Instances.EffectInstance>,
 ): Index => {
   const entries = new Map<string, Entry>()
   for (const resolution of fields.resolutions) {
@@ -354,7 +561,7 @@ export const realize = (
       Object.freeze({
         _tag: 'CallableFieldRealizationEntry' as const,
         key: entryKey,
-        support: realizeField(resolution, callables),
+        support: realizeField(resolution, callables, effects),
       }),
     )
   }
@@ -388,6 +595,34 @@ export const realizationOf = (
   return support?._tag === 'Supported' ? support.realization : undefined
 }
 
+/** Narrows the shared realization union to the callable variant. */
+export const isCallableRealization = (self: Realization): self is CallableRealization =>
+  self._tag === 'CallableFieldRealization'
+
+/** Narrows the shared realization union to the Effect variant. */
+export const isEffectRealization = (self: Realization): self is EffectRealization =>
+  self._tag === 'EffectFieldRealization'
+
+/** Returns only callable realizations, preserving the Effect storage fence in callable consumers. */
+export const callableRealizationOf = (
+  self: Index,
+  instance: Type.Nominal,
+  id: RepresentationField.Id,
+): CallableRealization | undefined => {
+  const realization = realizationOf(self, instance, id)
+  return realization !== undefined && isCallableRealization(realization) ? realization : undefined
+}
+
+/** Returns only Effect realizations to consumers that are explicitly prepared for that variant. */
+export const effectRealizationOf = (
+  self: Index,
+  instance: Type.Nominal,
+  id: RepresentationField.Id,
+): EffectRealization | undefined => {
+  const realization = realizationOf(self, instance, id)
+  return realization !== undefined && isEffectRealization(realization) ? realization : undefined
+}
+
 /** True when every realized field of one complete instance has a runtime realization. */
 export const supportsInstance = (self: Index, instance: Type.Nominal): boolean => {
   const entries = self.entries.filter((entry) =>
@@ -403,7 +638,7 @@ export const supportsInstance = (self: Index, instance: Type.Nominal): boolean =
 
 /** True when a discovered callable is the complete specialization this realization names. */
 export const matchesCallable = (
-  self: Realization,
+  self: CallableRealization,
   candidate: Instances.CallableInstance,
 ): boolean =>
   self.site !== undefined &&
@@ -416,8 +651,8 @@ export const matchesCallable = (
     Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
   )
 
-/** Structural equality for the runtime fact owned by this actor. */
-export const equals = (left: Realization, right: Realization): boolean =>
+/** Structural equality for callable runtime facts owned by this actor. */
+const equalsCallable = (left: CallableRealization, right: CallableRealization): boolean =>
   key(left.instance, left.field) === key(right.instance, right.field) &&
   Type.equals(left.contract, right.contract) &&
   Hir.sameCallableTarget(
@@ -451,6 +686,53 @@ export const equals = (left: Realization, right: Realization): boolean =>
   left.cleanup.lanes.length === right.cleanup.lanes.length &&
   left.cleanup.lanes.every((lane, ordinal) => lane === right.cleanup.lanes.at(ordinal))
 
+const equalsEffectEnvironment = (
+  left: ReadonlyArray<EffectEnvironmentSlot>,
+  right: ReadonlyArray<EffectEnvironmentSlot>,
+): boolean =>
+  left.length === right.length &&
+  left.every((slot, ordinal) => {
+    const candidate = right.at(ordinal)
+    return (
+      candidate !== undefined &&
+      slot.ordinal === candidate.ordinal &&
+      slot.source === candidate.source &&
+      slot.sourceOrdinal === candidate.sourceOrdinal &&
+      slot.access === candidate.access &&
+      Type.equals(slot.type, candidate.type) &&
+      slot.effectIdentity === candidate.effectIdentity &&
+      ((slot.callableIdentity === undefined && candidate.callableIdentity === undefined) ||
+        (slot.callableIdentity !== undefined &&
+          candidate.callableIdentity !== undefined &&
+          Type.equalsGenericArgument(slot.callableIdentity, candidate.callableIdentity))) &&
+      slot.owned === candidate.owned &&
+      slot.borrowed === candidate.borrowed
+    )
+  })
+
+const equalsEffect = (left: EffectRealization, right: EffectRealization): boolean =>
+  key(left.instance, left.field) === key(right.instance, right.field) &&
+  Type.equals(left.contract, right.contract) &&
+  Type.equals(left.requiredBound, right.requiredBound) &&
+  left.runnerIdentity === right.runnerIdentity &&
+  left.runner.module === right.runner.module &&
+  left.runner.name === right.runner.name &&
+  sameArguments(left.runnerArguments, right.runnerArguments) &&
+  Hir.sameExecutableSite(left.site, right.site) &&
+  equalsEffectEnvironment(left.environment, right.environment) &&
+  left.cleanup.consumedByRun === right.cleanup.consumedByRun &&
+  left.cleanup.unrunLanes.length === right.cleanup.unrunLanes.length &&
+  left.cleanup.unrunLanes.every((lane, ordinal) => lane === right.cleanup.unrunLanes.at(ordinal)) &&
+  left.suspendable === right.suspendable
+
+/** Structural equality for the shared tagged realization fact owned by this actor. */
+export const equals = (left: Realization, right: Realization): boolean =>
+  left._tag === 'CallableFieldRealization' && right._tag === 'CallableFieldRealization'
+    ? equalsCallable(left, right)
+    : left._tag === 'EffectFieldRealization' && right._tag === 'EffectFieldRealization'
+      ? equalsEffect(left, right)
+      : false
+
 /** Every invocation mode one receiver access admits, weakest receiver first. */
 export const admittedModes = (receiver: ReceiverAccess): ReadonlyArray<Type.CallableMode> =>
   receiver === 'Shared'
@@ -474,5 +756,5 @@ export const weakerAccess = (left: ReceiverAccess, right: ReceiverAccess): Recei
   admittedModes(left).length <= admittedModes(right).length ? left : right
 
 /** True when one aggregate receiver access may invoke a realization's callable mode. */
-export const admitsInvocation = (self: Realization, receiver: ReceiverAccess): boolean =>
+export const admitsInvocation = (self: CallableRealization, receiver: ReceiverAccess): boolean =>
   admitsMode(receiver, self.invocation)

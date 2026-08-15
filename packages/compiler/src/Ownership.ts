@@ -2206,7 +2206,7 @@ export const specializeCleanup = (
  */
 export const realizedCallableCleanup = (
   index: DeclarationIndex.Index,
-  realization: CallableFieldRealization.Realization,
+  realization: CallableFieldRealization.CallableRealization,
 ): CleanupPlan => {
   const type = realization.contract
   const site = realization.site

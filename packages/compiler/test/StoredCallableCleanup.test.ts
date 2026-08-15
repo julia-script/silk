@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import type * as CallableFieldRealization from '../src/CallableFieldRealization.js'
+import * as CallableFieldRealization from '../src/CallableFieldRealization.js'
 import * as Instances from '../src/Instances.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Type from '../src/Type.js'
@@ -38,20 +38,27 @@ const bindingCleanup = (
   return binding?.cleanup ?? unreachable(`expected a cleanup plan for ${name}`)
 }
 
-const soleRealization = (snapshot: Analysis.Snapshot): CallableFieldRealization.Realization =>
+const soleRealization = (
+  snapshot: Analysis.Snapshot,
+): CallableFieldRealization.CallableRealization =>
   Instances.callableFieldRealizations(snapshot.instances, snapshot.index)
     .entries.flatMap((entry) =>
-      entry.support._tag === 'Supported' ? [entry.support.realization] : [],
+      entry.support._tag === 'Supported' &&
+      CallableFieldRealization.isCallableRealization(entry.support.realization)
+        ? [entry.support.realization]
+        : [],
     )
     .at(0) ?? unreachable('expected one supported callable field realization')
 
 const realizationOf = (
   snapshot: Analysis.Snapshot,
   owner: string,
-): CallableFieldRealization.Realization =>
+): CallableFieldRealization.CallableRealization =>
   Instances.callableFieldRealizations(snapshot.instances, snapshot.index)
     .entries.flatMap((entry) =>
-      entry.support._tag === 'Supported' && entry.support.realization.instance.name === owner
+      entry.support._tag === 'Supported' &&
+      CallableFieldRealization.isCallableRealization(entry.support.realization) &&
+      entry.support.realization.instance.name === owner
         ? [entry.support.realization]
         : [],
     )
