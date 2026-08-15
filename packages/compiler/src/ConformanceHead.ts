@@ -99,21 +99,6 @@ const occurringParameters = (terms: ReadonlyArray<Type.Type>): ReadonlyArray<Typ
   return Object.freeze([...found.values()])
 }
 
-/** Reifies one canonical binder as an argument of its own kind. */
-const parameterArgument = (parameter: Type.Parameter): Type.GenericArgument => {
-  switch (parameter.kind) {
-    case 'Value':
-      return parameter
-    case 'FailureRow':
-      return Type.failureRowArgument([], [parameter])
-    case 'RequirementRow':
-      return Type.requirementRowArgument([], [parameter])
-    case 'CallableRepresentation':
-    case 'EffectRepresentation':
-      return Type.representationParameterArgument(parameter)
-  }
-}
-
 /** Builds the renumbering that maps each occurring parameter onto its canonical position. */
 const normalization = (
   parameters: ReadonlyArray<Type.Parameter>,
@@ -129,7 +114,7 @@ const normalization = (
     parameters.map((parameter, position) => {
       const replacement = placeholders.at(position)
       if (replacement === undefined) throw new RangeError('Head normalization lost a parameter')
-      return [Type.key(parameter), parameterArgument(replacement)] as const
+      return [Type.key(parameter), Type.parameterArgument(replacement)] as const
     }),
   )
   // Representation bounds are terms in the same binder vocabulary as the head. Renumbering only
@@ -154,7 +139,7 @@ const normalization = (
       parameters.map((parameter, position) => {
         const replacement = normalized.at(position)
         if (replacement === undefined) throw new RangeError('Head normalization lost a parameter')
-        return [Type.key(parameter), parameterArgument(replacement)] as const
+        return [Type.key(parameter), Type.parameterArgument(replacement)] as const
       }),
     ),
     parameters: Object.freeze(normalized),
@@ -270,6 +255,16 @@ const bind = (
   return true
 }
 
+/** Alpha-normalizes one representation contract independently of declaration ownership. */
+const normalizedRepresentationBound = (
+  self: Type.RepresentationBound,
+): Type.RepresentationBound => {
+  const renumbered = normalization(occurringParameters([self]), normalOwner)
+  const normalized = Type.substitute(self, renumbered.substitution)
+  if (Type.isCallable(normalized) || Type.isEffect(normalized)) return normalized
+  throw new RangeError('Representation-bound normalization changed its kind')
+}
+
 /**
  * Reports whether two representation arguments could name one concrete representation.
  *
@@ -307,7 +302,18 @@ const representationsMayOverlap = (
     return true
   const bound = open.parameter.representationBound
   if (bound === undefined) return true
-  return Type.representationAdmissibility(exact.contract, bound)._tag !== 'Unavailable'
+  // The open and exact contracts came from independently normalized heads, so parameters that
+  // occupy the same structural positions still carry opposing owners. Normalize each contract in
+  // isolation into one shared vocabulary before asking the directional admissibility question.
+  const normalizedBound = normalizedRepresentationBound(bound)
+  const normalizedContract = normalizedRepresentationBound(exact.contract)
+  // A contract that remains open after alpha-normalization denotes a family. Exact admissibility
+  // only answers ground equality, so it cannot prove two such families disjoint; coherence must
+  // conservatively keep the overlap until specialization supplies their ordinary binders.
+  if (occurringParameters([normalizedBound, normalizedContract]).length > 0) return true
+  return (
+    Type.representationAdmissibility(normalizedContract, normalizedBound)._tag !== 'Unavailable'
+  )
 }
 
 /**

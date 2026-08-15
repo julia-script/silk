@@ -6,6 +6,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as Ownership from './Ownership.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as SourceSpan from './SourceSpan.js'
+import * as Specialization from './Specialization.js'
 import * as Type from './Type.js'
 
 /**
@@ -2115,8 +2116,7 @@ export const discover = (
         ? entry.failures.flatMap((failure) => hookCalls(Ownership.cleanupPlan(index, failure.type)))
         : []),
     ]
-    const identityOfCall = (call: CallTarget): string =>
-      `${call.declaration.module}\u0000${call.declaration.name}\u0000${call.typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
+    const identityOfCall = Specialization.key
     const cleanupIdentities = new Set(cleanupTargets.map(identityOfCall))
     const reachableCalls: ReadonlyArray<CallTarget> = [
       ...bodyCallTargets(fn),

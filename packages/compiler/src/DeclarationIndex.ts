@@ -9,6 +9,7 @@ import * as LiteralForm from './LiteralForm.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as Specialization from './Specialization.js'
 import * as StaticText from './StaticText.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
@@ -3111,27 +3112,6 @@ const resolveBounds = (
 }
 
 /**
- * Reads one binder as the argument that re-supplies it to a declaration expecting its kind.
- *
- * A row or representation binder is not an ordinary type argument, so handing the bare parameter to
- * a kind-checked substitution rejects it. This is what lets a witness function be generic in the
- * same rows and representations its header binds rather than in ordinary types alone.
- */
-const binderArgument = (parameter: Type.Parameter): Type.GenericArgument => {
-  switch (parameter.kind) {
-    case 'FailureRow':
-      return Type.failureRowArgument([], [parameter])
-    case 'RequirementRow':
-      return Type.requirementRowArgument([], [parameter])
-    case 'CallableRepresentation':
-    case 'EffectRepresentation':
-      return Type.representationParameterArgument(parameter)
-    case 'Value':
-      return parameter
-  }
-}
-
-/**
  * Reads one conformance's requirements as the interface applications proof search will follow.
  *
  * A requirement that resolved to something other than an applied interface, or that never stated
@@ -4046,7 +4026,10 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             const witnessSubstitution =
               witnessParameters.length === 0
                 ? new Map<string, Type.GenericArgument>()
-                : Type.substitution(witnessParameters, declaredParameters.map(binderArgument))
+                : Type.substitution(
+                    witnessParameters,
+                    declaredParameters.map(Type.parameterArgument),
+                  )
             // A witness may only ask for what the header already promises. Its own bounds are the
             // obligations its body will discharge, so a bound the header never requires would be
             // proved nowhere and would surface as a call with no lowering rather than a diagnostic.
@@ -5044,9 +5027,10 @@ export const interfaceWitnessDependencyTargets = (
         mapping.name.spelling,
       )
       if (implementation === undefined) continue
-      const identity = `${implementation.module}\u0000${implementation.name}\u0000${dependency.typeArguments
-        .map(Type.genericArgumentKey)
-        .join('\u0000')}`
+      const identity = Specialization.key({
+        declaration: implementation,
+        typeArguments: dependency.typeArguments,
+      })
       if (!found.has(identity))
         found.set(
           identity,

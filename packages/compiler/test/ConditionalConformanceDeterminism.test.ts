@@ -2,56 +2,60 @@ import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Path from 'effect/Path'
+import * as Schema from 'effect/Schema'
 import * as Process from './support/Process.js'
 
-interface ConformanceReport {
-  readonly head: string
-  readonly encoded: string
-  readonly coherence: string
-  readonly termination: string
-  readonly requirements: ReadonlyArray<string>
-  readonly requirementProviders: ReadonlyArray<string>
-  readonly parameters: number
-}
+const ConformanceReport = Schema.Struct({
+  head: Schema.String,
+  encoded: Schema.String,
+  coherence: Schema.String,
+  termination: Schema.String,
+  requirements: Schema.Array(Schema.String),
+  requirementProviders: Schema.Array(Schema.String),
+  parameters: Schema.Number,
+})
 
-interface ProofReport {
-  readonly goal: string
-  readonly encoded: string
-  readonly proved: boolean
-  readonly selection: string
-  readonly typeArguments: ReadonlyArray<string>
-  readonly dependencies: ReadonlyArray<string>
-  readonly trace: ReadonlyArray<string>
-}
+const ProofReport = Schema.Struct({
+  goal: Schema.String,
+  encoded: Schema.String,
+  proved: Schema.Boolean,
+  selection: Schema.String,
+  typeArguments: Schema.Array(Schema.String),
+  dependencies: Schema.Array(Schema.String),
+  trace: Schema.Array(Schema.String),
+})
+type ProofReport = typeof ProofReport.Type
 
-interface InstanceReport {
-  readonly declaration: string
-  readonly module: string
-  readonly arguments: ReadonlyArray<string>
-}
+const InstanceReport = Schema.Struct({
+  declaration: Schema.String,
+  module: Schema.String,
+  arguments: Schema.Array(Schema.String),
+})
 
-interface Report {
-  readonly diagnostics: ReadonlyArray<{ readonly code: string; readonly message: string }>
-  readonly conformances: ReadonlyArray<ConformanceReport>
-  readonly normalization: {
-    readonly canonical: string
-    readonly scrambled: string
-    readonly canonicalRequirements: ReadonlyArray<string>
-    readonly scrambledRequirements: ReadonlyArray<string>
-    readonly overlaps: ReadonlyArray<{ readonly overlaps: boolean }>
-  }
-  readonly proofs: ReadonlyArray<ProofReport>
-  readonly reversedProofs: ReadonlyArray<ProofReport>
-  readonly instances: ReadonlyArray<InstanceReport>
-  readonly mir: string
-  readonly evaluation: {
-    readonly outcome: string
-    readonly result?: number
-    readonly events: ReadonlyArray<string>
-  }
-  readonly wasm: string
-  readonly native: string
-}
+const Report = Schema.Struct({
+  diagnostics: Schema.Array(Schema.Struct({ code: Schema.String, message: Schema.String })),
+  conformances: Schema.Array(ConformanceReport),
+  normalization: Schema.Struct({
+    canonical: Schema.String,
+    scrambled: Schema.String,
+    canonicalRequirements: Schema.Array(Schema.String),
+    scrambledRequirements: Schema.Array(Schema.String),
+    overlaps: Schema.Array(Schema.Struct({ overlaps: Schema.Boolean })),
+  }),
+  proofs: Schema.Array(ProofReport),
+  reversedProofs: Schema.Array(ProofReport),
+  instances: Schema.Array(InstanceReport),
+  mir: Schema.String,
+  evaluation: Schema.Struct({
+    outcome: Schema.String,
+    result: Schema.optionalKey(Schema.Number),
+    events: Schema.Array(Schema.String),
+  }),
+  wasm: Schema.String,
+  native: Schema.String,
+})
+
+const decodeReport = Schema.decodeUnknownEffect(Schema.fromJsonString(Report))
 
 const module_ = 'fixture/conditional-conformance-determinism'
 const qualified = (spelling: string): string => `${module_}.${spelling}`
@@ -70,7 +74,7 @@ it.effect(
       assert.strictEqual(first.exitCode, 0, first.stderr)
       assert.strictEqual(second.exitCode, 0, second.stderr)
       assert.strictEqual(first.stdout, second.stdout)
-      const encoded = JSON.parse(first.stdout) as Report
+      const encoded = yield* decodeReport(first.stdout)
 
       // A fixture that stopped compiling, or that quietly answered nothing, would still emit a stable
       // blob, so every fact the report exists to pin is asserted rather than assumed.

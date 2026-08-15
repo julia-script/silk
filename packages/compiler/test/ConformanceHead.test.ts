@@ -230,6 +230,78 @@ it('normalizes ordinary binders nested only inside Effect representation bounds'
   assert.strictEqual(ConformanceHead.key(left), ConformanceHead.key(right))
 })
 
+it('reports overlap between an open callable bound and an alpha-renamed exact callable', () => {
+  const openValue = binder('open', 0, 'T')
+  const openBound = Type.callable([openValue], openValue)
+  const openRepresentation = binder('open', 1, 'F', 'CallableRepresentation', openBound)
+  const exactValue = binder('exact', 0, 'Element')
+  const exactContract = Type.callable([exactValue], exactValue)
+  const exactRepresentation = Type.exactRepresentationArgument(
+    Type.callableIdentityArgument(
+      'heads.identity',
+      { _tag: 'Declaration', module: 'heads', name: 'identity' },
+      [exactValue],
+    ),
+    exactContract,
+  )
+  const open = ConformanceHead.make(
+    Type.nominal('heads', 'Holder', [Type.representationParameterArgument(openRepresentation)]),
+    Type.nominal('heads', 'Holder', [Type.representationParameterArgument(openRepresentation)]),
+  )
+  const exact = ConformanceHead.make(
+    Type.nominal('heads', 'Holder', [exactRepresentation]),
+    Type.nominal('heads', 'Holder', [exactRepresentation]),
+  )
+  const groundRepresentation = Type.exactRepresentationArgument(
+    Type.callableIdentityArgument('heads.i32Identity', {
+      _tag: 'Declaration',
+      module: 'heads',
+      name: 'i32Identity',
+    }),
+    Type.callable(['i32'], 'i32'),
+  )
+  const ground = ConformanceHead.make(
+    Type.nominal('heads', 'Holder', [groundRepresentation]),
+    Type.nominal('heads', 'Holder', [groundRepresentation]),
+  )
+  assert.isTrue(ConformanceHead.mayOverlap(open, exact))
+  assert.isTrue(ConformanceHead.mayOverlap(exact, open))
+  assert.isTrue(ConformanceHead.mayOverlap(open, ground))
+  assert.isTrue(ConformanceHead.mayOverlap(ground, open))
+})
+
+it('reports overlap between an open Effect bound and an alpha-renamed exact Effect', () => {
+  const openValue = binder('open', 0, 'T')
+  const openBound = Type.effect(openValue, [])
+  const openRepresentation = binder('open', 1, 'F', 'EffectRepresentation', openBound)
+  const exactValue = binder('exact', 0, 'Element')
+  const exactContract = Type.effect(exactValue, [])
+  const exactRepresentation = Type.exactRepresentationArgument(
+    Type.effectIdentityArgument('heads.identityEffect'),
+    exactContract,
+  )
+  const open = ConformanceHead.make(
+    Type.nominal('heads', 'Holder', [Type.representationParameterArgument(openRepresentation)]),
+    Type.nominal('heads', 'Holder', [Type.representationParameterArgument(openRepresentation)]),
+  )
+  const exact = ConformanceHead.make(
+    Type.nominal('heads', 'Holder', [exactRepresentation]),
+    Type.nominal('heads', 'Holder', [exactRepresentation]),
+  )
+  const groundRepresentation = Type.exactRepresentationArgument(
+    Type.effectIdentityArgument('heads.i32IdentityEffect'),
+    Type.effect('i32', []),
+  )
+  const ground = ConformanceHead.make(
+    Type.nominal('heads', 'Holder', [groundRepresentation]),
+    Type.nominal('heads', 'Holder', [groundRepresentation]),
+  )
+  assert.isTrue(ConformanceHead.mayOverlap(open, exact))
+  assert.isTrue(ConformanceHead.mayOverlap(exact, open))
+  assert.isTrue(ConformanceHead.mayOverlap(open, ground))
+  assert.isTrue(ConformanceHead.mayOverlap(ground, open))
+})
+
 it('accepts a requirement that names the immediate inner provider', () => {
   const inner = binder('a', 0, 'S')
   const head = ConformanceHead.make(decoder(wrap(inner)), wrap(inner), [

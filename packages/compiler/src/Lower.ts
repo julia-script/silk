@@ -7,6 +7,7 @@ import * as Mir from './Mir.js'
 import * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as Specialization from './Specialization.js'
 import * as TargetConstant from './TargetConstant.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
@@ -349,8 +350,7 @@ interface GeneratedEffectRunner {
 const instanceText = (
   declaration: { readonly module: string; readonly name: string },
   typeArguments: ReadonlyArray<Type.GenericArgument>,
-): string =>
-  `${declaration.module}\u0000${declaration.name}\u0000${typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
+): string => Specialization.key({ declaration, typeArguments })
 
 const effectEntryAdapterId = (module: string): DeclarationIndex.CanonicalId =>
   Object.freeze({

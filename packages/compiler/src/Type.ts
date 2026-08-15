@@ -523,6 +523,21 @@ export const exactRepresentationArgument = (
 ): ExactRepresentationArgument =>
   Object.freeze({ _tag: 'ExactRepresentationArgument', identity, contract })
 
+/** Reifies one declaration parameter as an open generic argument of the same kind. */
+export const parameterArgument = (self: Parameter): GenericArgument => {
+  switch (self.kind) {
+    case 'Value':
+      return self
+    case 'FailureRow':
+      return failureRowArgument([], [self])
+    case 'RequirementRow':
+      return requirementRowArgument([], [self])
+    case 'CallableRepresentation':
+    case 'EffectRepresentation':
+      return representationParameterArgument(self)
+  }
+}
+
 const accessRank = (access: CallableMode | Effect['access']): number =>
   access === 'Shared' ? 0 : access === 'Exclusive' ? 1 : 2
 
