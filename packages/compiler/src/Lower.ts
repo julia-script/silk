@@ -367,7 +367,7 @@ const witnessKey = (witness: DeclarationIndex.ConformanceWitness): string =>
     ? `${witness._tag}:${witness.operations
         .map(
           (operation) =>
-            `${operation.name}=${operation.implementation.module}.${operation.implementation.name}`,
+            `${operation.name}=${instanceText(operation.implementation, witness.typeArguments)}`,
         )
         .join(',')}`
     : `${witness._tag}:${Type.key(witness.provider)}`
@@ -855,7 +855,7 @@ const lowerServiceEffectValue = (
   if (target === undefined) return undefined
   const loweredArguments = subject.arguments.map((argument) => lowerExpression(fn, argument))
   if (loweredArguments.some((argument) => argument === undefined)) return undefined
-  const typeArguments = Object.freeze<ReadonlyArray<Type.GenericArgument>>([])
+  const typeArguments = provided.witness.typeArguments
   const effectResult = fn.effectResults.get(instanceText(target, typeArguments))
   if (effectResult === undefined) return undefined
   const effect = fn.alloc(effectResult)

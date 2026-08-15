@@ -1,7 +1,16 @@
+import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
+import * as Driver from '../src/Driver.js'
 import * as Hir from '../src/Hir.js'
+import * as Mir from '../src/Mir.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
+import * as Type from '../src/Type.js'
+import * as Process from './support/Process.js'
 
 const encoder = new TextEncoder()
 
@@ -35,6 +44,134 @@ it.effect('dispatches a shared source service through its complete witness', () 
       hir === undefined ? '' : Hir.encode(hir),
       'service-call user-services/main.Counter.get',
     )
+  }),
+)
+
+it.effect(
+  'specializes a conditional generic service witness and its unused proof dependency',
+  () =>
+    Effect.gen(function* () {
+      const source = `interface Marker<T> { fn mark(value: T) -> i32 }
+
+struct Token {}
+fn markToken(value: &Token) -> i32 { return 1 }
+impl Marker<Token> for Token { mark: Token.markToken }
+
+interface Decoder<T> { fn decode(value: T) -> i32 }
+struct Schema { tag: i32 }
+fn schemaDecode(value: &Schema) -> i32 { return value.tag }
+impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
+
+struct Mapped<S> { source: S }
+fn mappedDecode<S: Decoder>(value: &Mapped<S>) -> i32 {
+  return Decoder.decode(value.source) + 1
+}
+impl<S: Decoder<S>> Decoder<Mapped<S>> for Mapped<S> { decode: Mapped.mappedDecode }
+
+struct Optional<S> { source: S }
+fn optionalDecode<S: Decoder>(value: &Optional<S>) -> i32 {
+  return Decoder.decode(value.source) + 1
+}
+impl<S: Decoder<S>> Decoder<Optional<S>> for Optional<S> { decode: Optional.optionalDecode }
+
+fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(value) }
+
+service Counter<Prefix, Value> {
+  effect fn get(value: &Value) -> i32 ? &Counter<Prefix, Value>
+}
+
+struct Fixed<S> {}
+effect fn get<S: Marker>(self: &Fixed<S>, value: &S) -> i32 {
+  return decodeOf(Optional<Mapped<Schema>> {
+    source: Mapped<Schema> { source: Schema { tag: 40 } }
+  })
+}
+impl<S: Marker<S>> Counter<i32, S> for Fixed<S> { get: Fixed.get }
+
+effect fn read(value: &Token) -> i32 ? &Counter<i32, Token> {
+  return run Counter.get<i32, Token>(value)
+}
+
+pub fn main() -> i32 {
+  let provider = Fixed<Token> {}
+  let token = Token {}
+  return run Effect.provide(read(&token), &provider)
+}`
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fileSystem.makeTempDirectoryScoped()
+      const self = yield* snapshot(source)
+      assert.deepEqual(
+        Analysis.diagnostics(self).map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`),
+        [],
+      )
+      const outcome = Analysis.evaluate(self)
+      assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+
+      const instances = Analysis.instancesOf(self).instances
+      const get = instances.filter((instance) => instance.key.declaration.name === 'get')
+      assert.strictEqual(get.length, 1)
+      assert.deepEqual(get.at(0)?.key.typeArguments.map(Type.encodeGenericArgument), [
+        'user-services/main.Token',
+      ])
+      assert.strictEqual(
+        instances.filter((instance) => instance.key.declaration.name === 'markToken').length,
+        1,
+      )
+      const mir = Analysis.loweredMir(self)
+      const loweredTargets = mir.functions.filter(
+        (fn) => fn.id.name === 'get' || fn.id.name === 'get$effect$-1',
+      )
+      assert.strictEqual(loweredTargets.length, 2, Mir.encode(mir))
+      for (const target of loweredTargets)
+        assert.deepEqual(target.instance.typeArguments.map(Type.encodeGenericArgument), [
+          'user-services/main.Token',
+        ])
+      for (const name of ['optionalDecode', 'mappedDecode', 'schemaDecode'])
+        assert.strictEqual(
+          mir.functions.filter((fn) => fn.id.name === name).length,
+          1,
+          `${name} did not reach MIR exactly once`,
+        )
+      const encoded = Mir.encode(mir)
+      for (const spelling of ['dictionary', 'vtable', 'witnessTable', 'interfaceTag', 'typeTag'])
+        assert.isFalse(encoded.includes(spelling), `${spelling} reached MIR`)
+
+      const wasmSnapshot = yield* snapshot(source, 'wasm32-unknown-unknown')
+      const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
+      const wasmInstance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      const main = wasmInstance.exports.silk_main
+      assert.strictEqual(typeof main, 'function')
+      if (typeof main === 'function') assert.strictEqual(main(), 42)
+
+      const compiled = yield* Driver.compile({
+        compilation: { root: SourceFile.make('user-services/main', encoder.encode(source)) },
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: 'clang' }),
+        profile: 'release',
+        destination: path.join(directory, 'conditional-service'),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(compiled._tag, 'Compiled')
+      if (compiled._tag !== 'Compiled') return
+      const native = yield* Process.run(compiled.path, [])
+      assert.strictEqual(native.exitCode, 42, `native: ${native.stderr}`)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  180_000,
+)
+
+it.effect('rejects a generic service witness bound its header never promises', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`interface Marker<T> { fn mark(value: T) -> i32 }
+interface Other<T> { fn mark(value: T) -> i32 }
+service Counter<Value> { effect fn get(value: &Value) -> i32 ? &Counter<Value> }
+struct Fixed<S> {}
+effect fn get<S: Other>(self: &Fixed<S>, value: &S) -> i32 { return 42 }
+impl<S: Marker<S>> Counter<S> for Fixed<S> { get: Fixed.get }
+pub fn main() -> i32 { return 0 }`)
+    const invalid = Analysis.diagnostics(self).filter((diagnostic) => diagnostic.code === 'SEM0083')
+    assert.strictEqual(invalid.length, 1)
+    assert.include(invalid.at(0)?.message ?? '', 'does not require')
+    assert.include(invalid.at(0)?.message ?? '', 'Other')
   }),
 )
 

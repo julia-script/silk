@@ -468,20 +468,6 @@ const countIn = (parameter: Type.Parameter, term: Type.Type): number => {
   return count
 }
 
-/** Reports whether one term occurs strictly inside another. */
-const isStrictSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
-  if (Type.equals(candidate, whole)) return false
-  return containsSubterm(candidate, whole)
-}
-
-const containsSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
-  let found = false
-  Type.visit(whole, (type) => {
-    if (Type.equals(candidate, type)) found = true
-  })
-  return found
-}
-
 /**
  * Reports every way one declaration's requirements could fail to descend toward a base witness.
  *
@@ -498,7 +484,7 @@ export const terminationFailures = (self: ConformanceHead): ReadonlyArray<Termin
     self.requirements.flatMap((requirement): ReadonlyArray<TerminationFailure> => {
       const spelling = `${Type.encode(requirement.capability)} for ${Type.encode(requirement.provider)}`
       const failures: Array<TerminationFailure> = []
-      if (!isStrictSubterm(requirement.provider, self.provider))
+      if (!Type.isStrictStructuralSubterm(requirement.provider, self.provider))
         failures.push(
           Object.freeze({
             _tag: 'ProviderNotStrictSubterm' as const,

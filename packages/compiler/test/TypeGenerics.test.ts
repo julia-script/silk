@@ -95,6 +95,89 @@ it('normalizes contract rows and infers selected-entry remainders', () => {
   assert.strictEqual(Type.encode(Type.substitute(pattern, inferred)), Type.encode(actual))
 })
 
+it('infers failure and requirement row arguments nested in nominal applications', () => {
+  const owner = { module: 'generics/NominalRows', name: 'Carrier' }
+  const failures = Type.parameter(owner, 0, 'E', 'FailureRow')
+  const requirements = Type.parameter(owner, 1, 'R', 'RequirementRow')
+  const problem = Type.nominal('generics/NominalRows', 'Problem')
+  const other = Type.nominal('generics/NominalRows', 'Other')
+  const clock = Type.nominal('generics/NominalRows', 'Clock')
+  const allocator = Type.nominal('generics/NominalRows', 'Allocator')
+  const pattern = Type.nominal('generics/NominalRows', 'Carrier', [
+    Type.failureRowArgument([problem], [failures]),
+    Type.requirementRowArgument(
+      [{ capability: clock, role: 'DefaultRole', access: 'Shared' }],
+      [requirements],
+    ),
+  ])
+  const actual = Type.nominal('generics/NominalRows', 'Carrier', [
+    Type.failureRowArgument([problem, other]),
+    Type.requirementRowArgument([
+      { capability: clock, role: 'DefaultRole', access: 'Shared' },
+      { capability: allocator, role: 'DefaultRole', access: 'Exclusive' },
+    ]),
+  ])
+  const inferred = new Map<string, Type.GenericArgument>()
+
+  assert.isTrue(Type.infer(pattern, actual, inferred))
+  assert.strictEqual(
+    Type.encodeGenericArgument(inferred.get(Type.key(failures)) ?? 'never'),
+    '! generics/NominalRows.Other',
+  )
+  assert.strictEqual(
+    Type.encodeGenericArgument(inferred.get(Type.key(requirements)) ?? 'never'),
+    '? &mut generics/NominalRows.Allocator',
+  )
+
+  const repeated = Type.nominal('generics/NominalRows', 'Repeated', [
+    Type.failureRowArgument([], [failures]),
+    Type.failureRowArgument([], [failures]),
+  ])
+  assert.isFalse(
+    Type.infer(
+      repeated,
+      Type.nominal('generics/NominalRows', 'Repeated', [
+        Type.failureRowArgument([problem]),
+        Type.failureRowArgument([other]),
+      ]),
+      new Map(),
+    ),
+  )
+
+  const repeatedRequirements = Type.nominal('generics/NominalRows', 'Repeated', [
+    Type.requirementRowArgument([], [requirements]),
+    Type.requirementRowArgument([], [requirements]),
+  ])
+  assert.isFalse(
+    Type.infer(
+      repeatedRequirements,
+      Type.nominal('generics/NominalRows', 'Repeated', [
+        Type.requirementRowArgument([{ capability: clock, role: 'DefaultRole', access: 'Shared' }]),
+        Type.requirementRowArgument([
+          { capability: allocator, role: 'DefaultRole', access: 'Exclusive' },
+        ]),
+      ]),
+      new Map(),
+    ),
+  )
+
+  const openFailures = Type.parameter(owner, 2, 'OpenE', 'FailureRow')
+  const openRequirements = Type.parameter(owner, 3, 'OpenR', 'RequirementRow')
+  assert.isFalse(
+    Type.infer(
+      pattern,
+      Type.nominal('generics/NominalRows', 'Carrier', [
+        Type.failureRowArgument([problem], [openFailures]),
+        Type.requirementRowArgument(
+          [{ capability: clock, role: 'DefaultRole', access: 'Shared' }],
+          [openRequirements],
+        ),
+      ]),
+      new Map(),
+    ),
+  )
+})
+
 it('projects an erased failure row into its ordinary structural value sum', () => {
   const owner = { module: 'generics/Rows', name: 'result' }
   const failures = Type.parameter(owner, 0, 'E', 'FailureRow')

@@ -3132,6 +3132,52 @@ const declaredRequirements = (
     }),
   )
 
+/** Positional specialization shared by interface and service witness validation. */
+const witnessBinding = (
+  implementation: DeclarationFact,
+  declaredParameters: ReadonlyArray<Type.Parameter>,
+): {
+  readonly binders: ReadonlyArray<TypeParameterFact>
+  readonly parameters: ReadonlyArray<Type.Parameter>
+  readonly substitution: Type.Substitution | undefined
+} => {
+  const binders = implementation.typeParameters.filter(
+    (parameter) => parameter.duplicateOf === undefined,
+  )
+  const parameters = binders.map((parameter) => parameter.type)
+  return Object.freeze({
+    binders,
+    parameters,
+    substitution:
+      parameters.length === 0
+        ? new Map<string, Type.GenericArgument>()
+        : Type.substitution(parameters, declaredParameters.map(Type.parameterArgument)),
+  })
+}
+
+/** Finds the first implementation bound the conformance header never promises. */
+const unpromisedWitnessBound = (
+  binding: ReturnType<typeof witnessBinding>,
+  declaredParameters: ReadonlyArray<Type.Parameter>,
+  conformance: ConformanceFact,
+): TypeParameterFact | undefined =>
+  binding.binders.find((binder, position) => {
+    const bound = binder.bound
+    if (bound?._tag !== 'ResolvedBound') return bound !== undefined
+    const header = declaredParameters.at(position)
+    return (
+      header === undefined ||
+      !conformance.requirements.some(
+        (requirement) =>
+          requirement.capability._tag === 'Resolved' &&
+          Type.isNominal(requirement.capability.type) &&
+          requirement.capability.type.module === bound.capability.module &&
+          requirement.capability.type.name === bound.capability.name &&
+          Type.equals(requirement.parameter, header),
+      )
+    )
+  })
+
 /** Resolves one retained type fact through a supplied module resolver and complete index. */
 export const resolveTypeFact = (
   index: Index,
@@ -3825,6 +3871,12 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             interface_.canonical._tag === 'Canonical' &&
             interface_.canonical.id.name === capability.name,
         )
+      const sourceService = modules
+        .find((candidate) => candidate.module === capability.module)
+        ?.services.find(
+          (service) =>
+            service.canonical._tag === 'Canonical' && service.canonical.id.name === capability.name,
+        )
       if (sourceInterface === undefined && !Type.isNominal(provider)) {
         diagnostics.push(
           Diagnostic.invalidConformance(
@@ -3837,12 +3889,13 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       const declaredParameters = conformance.typeParameters
         .filter((parameter) => parameter.duplicateOf === undefined)
         .map((parameter) => parameter.type)
-      // A source interface's own arguments may mention the header's binders, because that is how a
-      // conditional conformance states which specialization it covers. Every other capability names
-      // a compiler-sealed contract or a service, neither of which is parameterized by the provider.
+      // Source interface and service arguments may mention the header's binders, because one
+      // parametric provider may implement one equally parametric source capability. Compiler-sealed
+      // capabilities remain concrete.
       if (
         !Type.isConcrete(capability) &&
-        (sourceInterface === undefined || declaredParameters.length === 0)
+        ((sourceInterface === undefined && sourceService === undefined) ||
+          declaredParameters.length === 0)
       ) {
         diagnostics.push(
           Diagnostic.invalidConformance(
@@ -4019,36 +4072,11 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             // positionally. That correspondence is what lets one witness serve every
             // specialization the header covers, and it is the same shape the hidden Drop hook
             // already uses. A conformance that declares no binders still admits no generic witness.
-            const witnessBinders = implementation.typeParameters.filter(
-              (parameter) => parameter.duplicateOf === undefined,
-            )
-            const witnessParameters = witnessBinders.map((parameter) => parameter.type)
-            const witnessSubstitution =
-              witnessParameters.length === 0
-                ? new Map<string, Type.GenericArgument>()
-                : Type.substitution(
-                    witnessParameters,
-                    declaredParameters.map(Type.parameterArgument),
-                  )
+            const binding = witnessBinding(implementation, declaredParameters)
             // A witness may only ask for what the header already promises. Its own bounds are the
             // obligations its body will discharge, so a bound the header never requires would be
             // proved nowhere and would surface as a call with no lowering rather than a diagnostic.
-            const unpromisedBound = witnessBinders.find((binder, position) => {
-              const bound = binder.bound
-              if (bound?._tag !== 'ResolvedBound') return bound !== undefined
-              const header = declaredParameters.at(position)
-              return (
-                header === undefined ||
-                !conformance.requirements.some(
-                  (requirement) =>
-                    requirement.capability._tag === 'Resolved' &&
-                    Type.isNominal(requirement.capability.type) &&
-                    requirement.capability.type.module === bound.capability.module &&
-                    requirement.capability.type.name === bound.capability.name &&
-                    Type.equals(requirement.parameter, header),
-                )
-              )
-            })
+            const unpromisedBound = unpromisedWitnessBound(binding, declaredParameters, conformance)
             if (unpromisedBound !== undefined) {
               diagnostics.push(
                 Diagnostic.invalidConformance(
@@ -4059,9 +4087,11 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
               continue
             }
             const specialize = (type: Type.Type): Type.Type =>
-              witnessSubstitution === undefined ? type : Type.substitute(type, witnessSubstitution)
+              binding.substitution === undefined
+                ? type
+                : Type.substitute(type, binding.substitution)
             const validParameters =
-              witnessSubstitution !== undefined &&
+              binding.substitution !== undefined &&
               implementation.parameters.length === contract.parameters.length &&
               contract.parameters.every((parameter, ordinal) => {
                 const actual = implementation.parameters.at(ordinal)?.declaredType
@@ -4088,7 +4118,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
               !validParameters ||
               !validResult ||
               implementation.functionKind !== 'Ordinary' ||
-              witnessParameters.length !== declaredParameters.length ||
+              binding.parameters.length !== declaredParameters.length ||
               implementation.failureRow.failures.length > 0 ||
               implementation.requirementRow.requirements.length > 0
             )
@@ -4133,12 +4163,6 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
 
       if (!Type.isNominal(provider)) continue
 
-      const sourceService = modules
-        .find((candidate) => candidate.module === capability.module)
-        ?.services.find(
-          (service) =>
-            service.canonical._tag === 'Canonical' && service.canonical.id.name === capability.name,
-        )
       if (sourceService !== undefined) {
         if (conformance.hook !== undefined) {
           diagnostics.push(
@@ -4234,11 +4258,25 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             )
             continue
           }
+          const binding = witnessBinding(implementation, declaredParameters)
+          const unpromisedBound = unpromisedWitnessBound(binding, declaredParameters, conformance)
+          if (unpromisedBound !== undefined) {
+            diagnostics.push(
+              Diagnostic.invalidConformance(
+                `${target.spelling} requires ${unpromisedBound.bound?.spelling ?? 'a bound'} for ${unpromisedBound.type.name}, which ${capability.name} for ${Type.encode(provider)} does not require`,
+                mapping.syntax.span,
+              ),
+            )
+            continue
+          }
+          const specialize = (type: Type.Type): Type.Type =>
+            binding.substitution === undefined ? type : Type.substitute(type, binding.substitution)
           const self = implementation.parameters.at(0)?.declaredType
           const validSelf =
+            binding.substitution !== undefined &&
             self?._tag === 'Resolved' &&
             Type.isReference(self.type) &&
-            Type.equals(self.type.target, provider)
+            Type.equals(specialize(self.type.target), provider)
           const implementationParameters = implementation.parameters.slice(1)
           const validParameters =
             implementationParameters.length === contract.parameters.length &&
@@ -4250,7 +4288,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
                 TypeCompatibility.isCompatible(
                   TypeCompatibility.check(
                     Type.substitute(expected.type, serviceSubstitution),
-                    parameter.declaredType.type,
+                    specialize(parameter.declaredType.type),
                   ),
                 )
               )
@@ -4260,15 +4298,27 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             contract.returnType._tag === 'Resolved' &&
             TypeCompatibility.isCompatible(
               TypeCompatibility.check(
-                implementation.returnType.type,
+                specialize(implementation.returnType.type),
                 Type.substitute(contract.returnType.type, serviceSubstitution),
               ),
             )
-          const validFailures = implementation.failureRow.failures.every((failure) =>
-            contract.failureRow.failures.some((allowed) =>
-              Type.equals(failure, Type.substitute(allowed, serviceSubstitution)),
+          const specializedRows = specialize(
+            Type.effect(
+              Type.unit,
+              implementation.failureRow.failures,
+              'Shared',
+              implementation.requirementRow.requirements,
+              implementation.failureRow.parameters,
+              implementation.requirementRow.parameters,
             ),
           )
+          const validFailures =
+            Type.isEffect(specializedRows) &&
+            specializedRows.failures.every((failure) =>
+              contract.failureRow.failures.some((allowed) =>
+                Type.equals(failure, Type.substitute(allowed, serviceSubstitution)),
+              ),
+            )
           const contractRequirements = contract.requirementRow.requirements.filter(
             (requirement) =>
               !Type.equals(
@@ -4276,8 +4326,9 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
                 capability,
               ),
           )
-          const validRequirements = implementation.requirementRow.requirements.every(
-            (requirement) =>
+          const validRequirements =
+            Type.isEffect(specializedRows) &&
+            specializedRows.requirements.every((requirement) =>
               contractRequirements.some(
                 (allowed) =>
                   Type.equals(
@@ -4287,7 +4338,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
                   requirement.role === allowed.role &&
                   (requirement.access === 'Shared' || allowed.access === 'Exclusive'),
               ),
-          )
+            )
           const contractSelf = contract.requirementRow.requirements.find((requirement) =>
             Type.equals(Type.substitute(requirement.capability, serviceSubstitution), capability),
           )
@@ -4298,13 +4349,15 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             (self.type.access === 'Shared' || contractSelf?.access === 'Exclusive')
           if (
             implementation.functionKind !== contract.functionKind ||
+            binding.parameters.length !== declaredParameters.length ||
             !validSelfAccess ||
             !validParameters ||
             !validResult ||
             !validFailures ||
             !validRequirements ||
-            implementation.failureRow.parameters.length > 0 ||
-            implementation.requirementRow.parameters.length > 0
+            !Type.isEffect(specializedRows) ||
+            specializedRows.failureParameters.length > 0 ||
+            specializedRows.requirementParameters.length > 0
           )
             diagnostics.push(
               Diagnostic.invalidConformance(
@@ -4968,8 +5021,8 @@ const witnessImplementation = (
 export interface InterfaceWitnessTarget {
   readonly implementation: CanonicalId
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
-  /** The selected declaration proved at least one strict-subterm requirement for this target. */
-  readonly structurallyDescending: boolean
+  /** The concrete provider whose terminating conditional proof selected this target. */
+  readonly structuralProvider?: Type.Type
 }
 
 /**
@@ -4992,7 +5045,9 @@ export const interfaceWitnessTarget = (
   return Object.freeze({
     implementation,
     typeArguments: proof._tag === 'Proved' ? proof.typeArguments : noGenericArguments,
-    structurallyDescending: proof._tag === 'Proved' && proof.requirements.length > 0,
+    ...(proof._tag === 'Proved' && proof.requirements.length > 0
+      ? { structuralProvider: provider }
+      : {}),
   })
 }
 
@@ -5004,7 +5059,7 @@ export const interfaceWitnessTarget = (
  * body: a declared requirement is part of admitting the witness even when that operation never
  * invokes the required interface itself.
  */
-export const interfaceWitnessDependencyTargets = (
+export const witnessDependencyTargets = (
   self: Index,
   provider: Type.Type,
   capability: Type.Nominal,
@@ -5037,7 +5092,7 @@ export const interfaceWitnessDependencyTargets = (
           Object.freeze({
             implementation,
             typeArguments: dependency.typeArguments,
-            structurallyDescending: true,
+            structuralProvider: dependency.goal.provider,
           }),
         )
     }
@@ -5063,29 +5118,13 @@ export const witness = (
       provider,
     })
   }
-  const matches = self.modules.flatMap((module) =>
-    module.conformances.flatMap((conformance) => {
-      if (
-        conformance.capability._tag !== 'Resolved' ||
-        !Type.equals(conformance.capability.type, capability) ||
-        conformance.provider._tag !== 'Resolved'
-      )
-        return []
-      if (conformance.typeParameters.length === 0) {
-        return Type.equals(conformance.provider.type, provider)
-          ? [Object.freeze({ module, conformance })]
-          : []
-      }
-      // A parametric conformance matches any provider its pattern infers against.
-      return Type.infer(conformance.provider.type, provider, new Map())
-        ? [Object.freeze({ module, conformance })]
-        : []
-    }),
-  )
-  if (matches.length !== 1) return undefined
-  const selected = matches.at(0)
-  if (selected === undefined) return undefined
-  const conformance = selected.conformance
+  // Proof selection is the single authority for matching both the provider and capability heads.
+  // Repeating only provider inference here would lose capability binders and could select a header
+  // whose requirements failed.
+  const proof = prove(self, provider, capability)
+  if (proof._tag !== 'Proved' || proof.selection._tag !== 'SourceSelection') return undefined
+  const conformance = selectedConformance(self, proof.selection)
+  if (conformance === undefined) return undefined
   const service = self.modules
     .find((module) => module.module === capability.module)
     ?.services.find(
@@ -5139,17 +5178,6 @@ export const witness = (
         )
   const completeOperationSet =
     service === undefined || operations.length === service.operations.length
-  // A conditional header admits a witness only where its requirements hold. The proof is consulted
-  // rather than re-derived so one specialization cannot select this header while another rejects it.
-  const proof = prove(self, provider, capability)
-  const provedHere =
-    proof._tag === 'Proved' &&
-    proof.selection._tag === 'SourceSelection' &&
-    proof.selection.module === conformance.module &&
-    proof.selection.ordinal === conformance.ordinal
-  if (conformance.requirements.length > 0 && !provedHere) return undefined
-  const typeArguments =
-    proof._tag === 'Proved' && provedHere ? proof.typeArguments : noGenericArguments
   return Type.equals(capability, Type.dropCapability) ||
     (completeService && completeOperationSet) ||
     (Type.equals(capability, Type.reportCapability) &&
@@ -5162,7 +5190,7 @@ export const witness = (
         capability,
         provider,
         operations,
-        typeArguments,
+        typeArguments: proof.typeArguments,
       })
     : undefined
 }

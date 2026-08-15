@@ -107,6 +107,112 @@ pub fn main() -> i32 { return 0 }`,
   }),
 )
 
+it.effect('infers nominal failure and requirement rows through conditional witness instances', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance/kinded-rows',
+      `interface Decoder<T> { fn decode(value: T) -> i32 }
+
+struct Schema { tag: i32 }
+fn schemaDecode(value: &Schema) -> i32 { return value.tag }
+impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
+
+struct Problem {}
+struct FailureBox<S, !E> { source: S }
+fn makeFailure<S, !E>(source: S, pending: once Effect<i32 ! E>) -> FailureBox<S, E> {
+  drop pending
+  return FailureBox<S, E> { source: move source }
+}
+fn failureDecode<S: Decoder, !E>(value: &FailureBox<S, E>) -> i32 { return 1 }
+impl<S: Decoder<S>, !E> Decoder<FailureBox<S, E>> for FailureBox<S, E> {
+  decode: FailureBox.failureDecode
+}
+
+struct RequirementBox<S, ?R> { source: S }
+fn makeRequirement<S, ?R>(source: S, pending: once Effect<i32 ? R>) -> RequirementBox<S, R> {
+  drop pending
+  return RequirementBox<S, R> { source: move source }
+}
+fn requirementDecode<S: Decoder, ?R>(value: &RequirementBox<S, R>) -> i32 { return 2 }
+impl<S: Decoder<S>, ?R> Decoder<RequirementBox<S, R>> for RequirementBox<S, R> {
+  decode: RequirementBox.requirementDecode
+}
+
+service Clock { effect fn tick() -> i32 ? &Clock }
+effect fn problem() -> i32 ! Problem { fail Problem {} }
+effect fn requiringClock() -> i32 ? &Clock { return 2 }
+fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(value) }
+
+pub fn main() -> i32 {
+  let failure = makeFailure(Schema { tag: 1 }, problem())
+  let requirement = makeRequirement(Schema { tag: 2 }, requiringClock())
+  return decodeOf(move failure) + decodeOf(move requirement)
+}`,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map(
+        (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`,
+      ),
+      [],
+    )
+    const instances = Analysis.instancesOf(snapshot).instances
+    const failure = instances.filter(
+      (instance) => instance.key.declaration.name === 'failureDecode',
+    )
+    const requirement = instances.filter(
+      (instance) => instance.key.declaration.name === 'requirementDecode',
+    )
+    assert.strictEqual(failure.length, 1)
+    assert.strictEqual(requirement.length, 1)
+    assert.deepEqual(failure.at(0)?.key.typeArguments.map(Type.encodeGenericArgument), [
+      'conditional-conformance/kinded-rows.Schema',
+      '! conditional-conformance/kinded-rows.Problem',
+    ])
+    assert.deepEqual(requirement.at(0)?.key.typeArguments.map(Type.encodeGenericArgument), [
+      'conditional-conformance/kinded-rows.Schema',
+      '? &conditional-conformance/kinded-rows.Clock',
+    ])
+    const index = Analysis.declarationIndex(snapshot)
+    const module = 'conditional-conformance/kinded-rows'
+    const schema = Type.nominal(module, 'Schema')
+    const problem = Type.nominal(module, 'Problem')
+    const clock = Type.nominal(module, 'Clock')
+    const failureBox = Type.nominal(module, 'FailureBox', [
+      schema,
+      Type.failureRowArgument([problem]),
+    ])
+    const requirementBox = Type.nominal(module, 'RequirementBox', [
+      schema,
+      Type.requirementRowArgument([{ capability: clock, role: 'DefaultRole', access: 'Shared' }]),
+    ])
+    const failureProof = DeclarationIndex.prove(
+      index,
+      failureBox,
+      Type.nominal(module, 'Decoder', [failureBox]),
+    )
+    const requirementProof = DeclarationIndex.prove(
+      index,
+      requirementBox,
+      Type.nominal(module, 'Decoder', [requirementBox]),
+    )
+    assert.strictEqual(failureProof._tag, 'Proved')
+    assert.strictEqual(requirementProof._tag, 'Proved')
+    if (failureProof._tag === 'Proved')
+      assert.deepEqual(failureProof.typeArguments.map(Type.encodeGenericArgument), [
+        'conditional-conformance/kinded-rows.Schema',
+        '! conditional-conformance/kinded-rows.Problem',
+      ])
+    if (requirementProof._tag === 'Proved')
+      assert.deepEqual(requirementProof.typeArguments.map(Type.encodeGenericArgument), [
+        'conditional-conformance/kinded-rows.Schema',
+        '? &conditional-conformance/kinded-rows.Clock',
+      ])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 3)
+  }),
+)
+
 it.effect('rejects a specialization whose source type has no witness', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyze(
@@ -257,6 +363,157 @@ pub fn main() -> i32 {
       instances.filter((instance) => instance.key.declaration.name === 'schemaDecode').length,
       1,
     )
+  }),
+)
+
+it.effect('discovers unused proof dependencies before a conditional Drop hook', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance/drop-dependency',
+      `interface Releasable<T> { fn release(value: T) -> i32 }
+
+struct Token { code: i32 }
+fn releaseToken(value: &Token) -> i32 { return value.code }
+impl Releasable<Token> for Token { release: Token.releaseToken }
+
+struct Guard<T, U> {
+  first: T
+  second: U
+  storage: Allocation
+}
+
+impl<T: Releasable<T>> Drop for Guard<T, T> {
+  fn drop(self: &mut Guard<T, T>) -> () { return () }
+}
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[i32; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let allocation = run recipe
+  let guard = Guard<Token, Token> {
+    first: Token { code: 1 },
+    second: Token { code: 2 },
+    storage: move allocation
+  }
+  return 42
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map(
+        (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`,
+      ),
+      [],
+    )
+    const instances = Analysis.instancesOf(snapshot).instances
+    const releaseOrdinal = instances.findIndex(
+      (instance) => instance.key.declaration.name === 'releaseToken',
+    )
+    const dropOrdinal = instances.findIndex((instance) =>
+      instance.key.declaration.name.startsWith('drop@impl#'),
+    )
+    assert.isAtLeast(releaseOrdinal, 0)
+    assert.isAtLeast(dropOrdinal, 0)
+    assert.isBelow(releaseOrdinal, dropOrdinal)
+    assert.deepEqual(instances.at(dropOrdinal)?.key.typeArguments.map(Type.encodeGenericArgument), [
+      'conditional-conformance/drop-dependency.Token',
+    ])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') {
+      assert.strictEqual(outcome.result.value, 42)
+      assert.strictEqual(
+        outcome.trace.filter(
+          (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl#'),
+        ).length,
+        1,
+      )
+    }
+  }),
+)
+
+it.effect('marks only proof dependencies, never the selected witness root, as descending', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance/root-edge',
+      `${mappedDecoder}
+
+pub fn main() -> i32 { return 0 }`,
+    )
+    const schema = Type.nominal('conditional-conformance/root-edge', 'Schema')
+    const wrapper = Type.nominal('conditional-conformance/root-edge', 'MappedSchema', [schema])
+    const capability = Type.nominal('conditional-conformance/root-edge', 'Decoder', [wrapper])
+    const target = DeclarationIndex.interfaceWitnessTarget(
+      Analysis.declarationIndex(snapshot),
+      wrapper,
+      capability,
+      'decode',
+    )
+    assert.isDefined(target)
+    assert.notProperty(target ?? {}, 'structurallyDescending')
+    assert.strictEqual(target?.implementation.name, 'mappedDecode')
+    assert.strictEqual(target?.structuralProvider === undefined, false)
+  }),
+)
+
+it.effect('tracks structural descent by provider when witness argument positions change', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance/provider-descent',
+      `interface Decoder<T> { fn decode(value: T) -> i32 }
+
+struct X { tag: i32 }
+struct Y {}
+struct Z {}
+fn decodeX(value: &X) -> i32 { return value.tag }
+impl Decoder<X> for X { decode: X.decodeX }
+
+struct Pair<A, B> { left: A right: B }
+fn decodePair<A: Decoder, B>(value: &Pair<A, B>) -> i32 {
+  return Decoder.decode(value.left) + 1
+}
+impl<A: Decoder<A>, B> Decoder<Pair<A, B>> for Pair<A, B> {
+  decode: Pair.decodePair
+}
+
+fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(value) }
+pub fn main() -> i32 {
+  let inner = Pair<X, Y> { left: X { tag: 40 }, right: Y {} }
+  return decodeOf<Pair<Pair<X, Y>, Z>>(Pair<Pair<X, Y>, Z> {
+    left: move inner,
+    right: Z {}
+  })
+}`,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map(
+        (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`,
+      ),
+      [],
+    )
+    const pairInstances = Analysis.instancesOf(snapshot).instances.filter(
+      (instance) => instance.key.declaration.name === 'decodePair',
+    )
+    assert.strictEqual(pairInstances.length, 2)
+    assert.deepEqual(
+      pairInstances.map((instance) => instance.key.typeArguments.map(Type.encodeGenericArgument)),
+      [
+        [
+          'conditional-conformance/provider-descent.X',
+          'conditional-conformance/provider-descent.Y',
+        ],
+        [
+          'conditional-conformance/provider-descent.Pair<conditional-conformance/provider-descent.X, conditional-conformance/provider-descent.Y>',
+          'conditional-conformance/provider-descent.Z',
+        ],
+      ],
+    )
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
   }),
 )
 
