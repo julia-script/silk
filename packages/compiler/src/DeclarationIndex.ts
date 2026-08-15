@@ -5357,14 +5357,16 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             if (inference === undefined || inference._tag === 'Failed') {
               if (inference?._tag === 'Failed') {
                 const problem = inference.problem
+                if (problem._tag === 'IncompatibleConstraint') {
+                  rejectIncompatibleMapping()
+                  continue
+                }
                 const detail =
                   problem._tag === 'UnresolvedBinder'
                     ? `cannot infer witness target binder ${problem.binder.name}`
                     : problem._tag === 'ConflictingBinder'
                       ? `witness target binder ${problem.binder.name} is ${Type.encodeGenericArgument(problem.previous)} from ${problem.previousConstraint} but ${Type.encodeGenericArgument(problem.conflicting)} from ${problem.conflictingConstraint}`
-                      : problem._tag === 'IncompatibleArguments'
-                        ? `witness target binder ${problem.binder.name} cannot accept ${Type.encodeGenericArgument(problem.argument)}`
-                        : `${problem.constraint} cannot determine a compatible witness target`
+                      : `witness target binder ${problem.binder.name} cannot accept ${Type.encodeGenericArgument(problem.argument)}`
                 diagnostics.push(
                   invalidDiagnostic(`${target.spelling}: ${detail}`, mapping.syntax.span),
                 )
