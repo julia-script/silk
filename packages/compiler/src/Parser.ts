@@ -1816,6 +1816,32 @@ const parseTypeParameterList = (
   })
 }
 
+/** Parses the one callable or Effect representation binder admitted by an opaque result. */
+const parseOpaqueResultBinderList = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+): NodeResult => {
+  const left = expect(initial, 'Less', ['Identifier', 'Greater', ...following])
+  const name = expect(left.state, 'Identifier', ['Colon', 'Greater', ...following])
+  const colon = expect(name.state, 'Colon', [...typeStarts, 'Greater', ...following])
+  const bound = parseType(colon.state, ['Comma', 'Greater', ...following], true)
+  // A comma proves that source supplied more than the single binder this form admits. Consume the
+  // extra binder region through the real `>` so parsing resumes at the result. Otherwise, type
+  // starts synchronize a missing `>` without consuming the result type that follows it.
+  const right =
+    nextSignificantKind(bound.state) === 'Comma'
+      ? expect(bound.state, 'Greater', following)
+      : expect(bound.state, 'Greater', [...typeStarts, ...following])
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'TypeParameterList', [
+      ...left.elements,
+      syntaxNode(bound.state, 'TypeParameter', [...name.elements, ...colon.elements, bound.node]),
+      ...right.elements,
+    ]),
+  })
+}
+
 /** Parses one named type reference: a path with an optional applied type-argument list. */
 const parseNamedTypeReference = (
   initial: State,
@@ -2035,7 +2061,7 @@ const parseReturnType = (initial: State): NodeResult => {
     const keyword = expect(arrow.state, 'Identifier', ['Less', ...following])
     // The binder list is followed by a type, so its recovery set must exclude every type start:
     // `parseTypeParameterList` stops at any token it is told follows the list.
-    const binders = parseTypeParameterList(keyword.state, following)
+    const binders = parseOpaqueResultBinderList(keyword.state, following)
     const result = parseType(binders.state, following)
     const opaque = syntaxNode(result.state, 'OpaqueResultType', [
       ...keyword.elements,

@@ -220,6 +220,24 @@ const typeParameterFact = (
     for (const member of module.members) {
       const parameter = member.typeParameters.find((candidate) => Type.equals(candidate.type, type))
       if (parameter !== undefined) return parameter
+      if (
+        (member._tag === 'FunctionDeclaration' &&
+          member.opaqueResult !== undefined &&
+          Type.equals(member.opaqueResult.binder.type, type)) ||
+        ((member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') &&
+          member.operations.some(
+            (operation) =>
+              operation.opaqueResult !== undefined &&
+              Type.equals(operation.opaqueResult.binder.type, type),
+          ))
+      ) {
+        if (member._tag === 'FunctionDeclaration') return member.opaqueResult?.binder
+        return member.operations.find(
+          (operation) =>
+            operation.opaqueResult !== undefined &&
+            Type.equals(operation.opaqueResult.binder.type, type),
+        )?.opaqueResult?.binder
+      }
     }
   return undefined
 }
@@ -309,6 +327,21 @@ const collectResolvedType = (
       index,
       pending,
     )
+  }
+  if (
+    Type.isRepresented(fact.type) &&
+    Type.isRepresentationParameterArgument(fact.type.representation.argument)
+  ) {
+    const parameter = fact.type.representation.argument.parameter
+    const declaration = typeParameterFact(index, parameter)
+    push(
+      pending,
+      token.span,
+      'Type',
+      available(Object.freeze({ _tag: 'TypeParameterIdentity', id: parameter })),
+      declaration === undefined ? undefined : locationOfTypeParameter(declaration),
+    )
+    return
   }
   if (Type.isParameter(fact.type)) {
     const declaration = typeParameterFact(index, fact.type)
@@ -863,6 +896,15 @@ const collectMember = (
       )
   }
   if (member._tag === 'FunctionDeclaration') {
+    const opaqueBinder = member.opaqueResult?.binder
+    if (opaqueBinder?.name._tag === 'Present')
+      push(
+        pending,
+        opaqueBinder.name.token.span,
+        'Declaration',
+        available(Object.freeze({ _tag: 'TypeParameterIdentity', id: opaqueBinder.type })),
+        locationOfTypeParameter(opaqueBinder),
+      )
     for (const parameter of member.parameters) {
       if (parameter.name._tag === 'Present')
         push(
@@ -887,6 +929,15 @@ const collectMember = (
   }
   if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
     for (const operation of member.operations) {
+      const opaqueBinder = operation.opaqueResult?.binder
+      if (opaqueBinder?.name._tag === 'Present')
+        push(
+          pending,
+          opaqueBinder.name.token.span,
+          'Declaration',
+          available(Object.freeze({ _tag: 'TypeParameterIdentity', id: opaqueBinder.type })),
+          locationOfTypeParameter(opaqueBinder),
+        )
       for (const typeParameter of operation.typeParameters) {
         const parameterLocation = locationOfTypeParameter(typeParameter)
         if (typeParameter.name._tag === 'Present')

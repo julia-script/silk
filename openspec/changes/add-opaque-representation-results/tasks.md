@@ -2,7 +2,7 @@
 
 - [x] 1.1 Confirm `introduce-representation-parameters` is complete and its runtime storage fences remain active.
 - [x] 1.2 Add fully specialized `typeof(item)` parsing, formatting, syntax correspondence, and damaged recovery.
-- [ ] 1.3 Add contextual scoped `some<F: Contract> Result` parsing, formatting, and binder resolution.
+- [x] 1.3 Add contextual scoped `some<F: Contract> Result` parsing, formatting, and binder resolution.
 
 ## 2. Exact Identity Contracts
 

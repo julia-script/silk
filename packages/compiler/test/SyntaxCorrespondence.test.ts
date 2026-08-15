@@ -112,3 +112,28 @@ it('produces deterministic ordered evidence across repeated constructions', () =
   }
   assert.deepEqual(build(), build())
 })
+
+it('corresponds an unchanged opaque result subtree after a preceding declaration is inserted', () => {
+  const opaque = 'pub fn make() -> some<F: fn(i32) -> i32> fn(F) -> F { return 0 }'
+  const previous = parse('app/Main', opaque)
+  const current = parse('app/Main', `${source('before', 0)}${opaque}`)
+  const correspondence = Option.getOrThrow(SyntaxCorrespondence.between(previous, current))
+  const previousOpaque = SyntaxTree.directNode(
+    SyntaxTree.directNode(functionAt(previous, 0), 'ReturnType') ?? assert.fail('return type'),
+    'OpaqueResultType',
+  )
+  const currentOpaque = SyntaxTree.directNode(
+    SyntaxTree.directNode(functionAt(current, 1), 'ReturnType') ?? assert.fail('return type'),
+    'OpaqueResultType',
+  )
+  assert.isDefined(previousOpaque)
+  assert.strictEqual(
+    Option.getOrThrow(
+      SyntaxCorrespondence.currentOf(
+        correspondence,
+        previousOpaque ?? assert.fail('previous opaque result'),
+      ),
+    ),
+    currentOpaque,
+  )
+})
