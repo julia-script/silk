@@ -46,8 +46,9 @@ pub fn main() -> i32 { return run make(42) }`,
   }),
 ])
 
-const snapshot = (source: string, target: string) =>
-  Analysis.ofSourceRealized(module, encoder.encode(source), target)
+const snapshot = Effect.fnUntraced(function* (source: string, target: string) {
+  return yield* Analysis.ofSourceRealized(module, encoder.encode(source), target)
+})
 
 const assertStaticMir = (self: Analysis.Snapshot, name: string): void => {
   assert.strictEqual(self.mir._tag, 'Available', name)

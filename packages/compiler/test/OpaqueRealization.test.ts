@@ -10,21 +10,23 @@ import { raise } from './support/raise.js'
 
 const encoder = new TextEncoder()
 
-const snapshot = (module: string, source: string) =>
-  Analysis.ofSource(module, encoder.encode(source))
+const snapshot = Effect.fnUntraced(function* (module: string, source: string) {
+  return yield* Analysis.ofSource(module, encoder.encode(source))
+})
 
-const snapshotWithImports = (
+const snapshotWithImports = Effect.fnUntraced(function* (
   root: string,
   source: string,
   imports: Readonly<Record<string, string>>,
-) =>
-  Analysis.make({ root: SourceFile.make(root, encoder.encode(source)) }).pipe(
+) {
+  return yield* Analysis.make({ root: SourceFile.make(root, encoder.encode(source)) }).pipe(
     Effect.provide(
       SourceResolver.memory(
         new Map(Object.entries(imports).map(([module, text]) => [module, encoder.encode(text)])),
       ),
     ),
   )
+})
 
 const opaqueArgument = (
   self: Analysis.FrontendSnapshot,

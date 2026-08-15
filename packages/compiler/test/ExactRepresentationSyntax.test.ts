@@ -230,6 +230,58 @@ pub fn selected<A, !E, ?R, F: fn(A) -> A, G: Effect<A>>() -> typeof(target<A, E,
   }),
 )
 
+const isolatedOpenKinds = Object.freeze([
+  Object.freeze({
+    name: 'value',
+    parameter: 'A',
+    target: 'A',
+    selected: 'A',
+  }),
+  Object.freeze({
+    name: 'failure row',
+    parameter: '!E',
+    target: 'E',
+    selected: 'E',
+  }),
+  Object.freeze({
+    name: 'requirement row',
+    parameter: '?R',
+    target: 'R',
+    selected: 'R',
+  }),
+  Object.freeze({
+    name: 'callable representation',
+    parameter: 'F: fn(i32) -> i32',
+    target: 'F',
+    selected: 'F',
+  }),
+  Object.freeze({
+    name: 'Effect representation',
+    parameter: 'G: Effect<i32>',
+    target: 'G',
+    selected: 'G',
+  }),
+])
+
+for (const fixture of isolatedOpenKinds)
+  it.effect(`rejects an isolated open ${fixture.name} exact argument`, () =>
+    Effect.gen(function* () {
+      const module = `exact-representation/open-${fixture.name.replaceAll(' ', '-')}`
+      const self = yield* index(
+        module,
+        `pub fn target<${fixture.parameter}>() -> i32 { return 0 }
+pub fn selected<${fixture.parameter}>() -> typeof(target<${fixture.target}>) { loop {} }`,
+      )
+      const found = declaration(self, module, 'selected')
+      assert.notStrictEqual(found?.returnType._tag, 'Resolved', fixture.name)
+      assert.strictEqual(
+        self.diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0111').length,
+        1,
+        fixture.name,
+      )
+    }),
+  )
+
 it.effect(
   'preserves every source-nameable concrete kind in a specialized exact item identity',
   () =>
