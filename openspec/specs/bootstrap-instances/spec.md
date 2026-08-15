@@ -268,10 +268,9 @@ ordinals, provider object identities, logical addresses, or cleanup-event identi
 ### Requirement: Parametric conformances monomorphize per instantiation
 
 Instance discovery SHALL resolve capability dispatch and Drop cleanup for generic nominal types
-through parametric and conditional conformances, substituting the instantiation's concrete kinded
-arguments into the conformance head and proving every strict-subterm requirement. Each reachable
-provider/interface instantiation SHALL produce exactly one concrete witness or hook instance with a
-canonical normalized key, and the worklist SHALL remain finite without runtime dictionaries.
+through parametric conformances, substituting the instantiation's concrete arguments into the
+conformance's bound parameters. Each reachable instantiation SHALL produce exactly one concrete
+witness or hook instance with a canonical normalized key, and the worklist SHALL remain finite.
 
 #### Scenario: One parametric Drop serves two element types
 
@@ -282,11 +281,6 @@ canonical normalized key, and the worklist SHALL remain finite without runtime d
 
 - **WHEN** a capability requirement is satisfied by a provider whose conformance is parametric
 - **THEN** the run site dispatches to the substituted concrete operation identically to an equivalent hand-written concrete conformance
-
-#### Scenario: Conditional witness follows its proof dependencies
-
-- **WHEN** a reachable mapped provider requires and finds one concrete source-provider witness
-- **THEN** discovery records the source witness and one mapped witness before lowering the static target
 
 ### Requirement: Instance discovery closes arbitrary service and primitive conformances
 

@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as DeclarationIndex from '../src/DeclarationIndex.js'
+import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array => Uint8Array.from(value, (unit) => unit.charCodeAt(0))
 
@@ -115,6 +117,71 @@ pub fn main() -> i32 { return 0 }`,
         'conditional-conformance-rejection/open-row.Marker<Effect<i32 ! %0>> for Effect<i32 ! %0> may overlap conditional-conformance-rejection/open-row.Marker<Effect<i32 ! conditional-conformance-rejection/open-row.Problem>> for Effect<i32 ! conditional-conformance-rejection/open-row.Problem>',
       ],
     )
+  }),
+)
+
+it.effect('accepts closed Effect heads with disjoint success, failure, and requirement rows', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance-rejection/disjoint-effects',
+      `interface SuccessMarker<T> {}
+interface FailureMarker<T> {}
+interface RequirementMarker<T> {}
+
+struct Problem {}
+struct Other {}
+
+service Left { effect fn value() -> i32 ? &Left }
+service Right { effect fn value() -> i32 ? &Right }
+
+impl SuccessMarker<Effect<i32>> for Effect<i32> {}
+impl SuccessMarker<Effect<bool>> for Effect<bool> {}
+
+impl FailureMarker<Effect<i32 ! Problem>> for Effect<i32 ! Problem> {}
+impl FailureMarker<Effect<i32 ! Other>> for Effect<i32 ! Other> {}
+
+impl RequirementMarker<Effect<i32 ? &Left>> for Effect<i32 ? &Left> {}
+impl RequirementMarker<Effect<i32 ? &Right>> for Effect<i32 ? &Right> {}
+
+pub fn main() -> i32 { return 0 }`,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
+it.effect('rejects a service used as a conditional proof requirement', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance-rejection/service-bound',
+      `interface Mark<T> {}
+service Gate<T> { effect fn read() -> i32 ? &Gate<T> }
+struct Wrap<S> { value: S }
+
+impl<S: Gate<S>> Mark<Wrap<S>> for Wrap<S> {}
+
+pub fn main() -> i32 { return 0 }`,
+    )
+    assert.deepEqual(
+      reported(snapshot, 'SEM0083').map((diagnostic) => diagnostic.message),
+      ['Invalid conformance: requirement Gate must be an interface applied to its own provider'],
+    )
+    assert.deepEqual(reported(snapshot, 'SEM0108'), [])
+    assert.deepEqual(reported(snapshot, 'SEM0109'), [])
+    const index = Analysis.declarationIndex(snapshot)
+    assert.strictEqual(index.modules.at(0)?.conformances.at(0)?.validity._tag, 'InvalidConformance')
+    assert.strictEqual(
+      index.modules.at(0)?.conformances.at(0)?.termination._tag,
+      'UnavailableTermination',
+    )
+    const provider = Type.nominal('conditional-conformance-rejection/service-bound', 'Wrap', [
+      'i32',
+    ])
+    const capability = Type.nominal('conditional-conformance-rejection/service-bound', 'Mark', [
+      provider,
+    ])
+    assert.strictEqual(DeclarationIndex.prove(index, provider, capability)._tag, 'Unproved')
+    assert.isUndefined(DeclarationIndex.witness(index, provider, capability))
+    assert.isFalse(DeclarationIndex.conforms(index, provider, capability))
   }),
 )
 

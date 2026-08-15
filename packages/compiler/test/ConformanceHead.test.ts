@@ -134,6 +134,71 @@ it('separates two closed failure rows that name different members', () => {
   assert.isFalse(ConformanceHead.mayOverlap(left, right))
 })
 
+it('separates closed Effect heads with disjoint success types', () => {
+  const leftEffect = Type.effect('i32', [])
+  const rightEffect = Type.effect('bool', [])
+  const left = ConformanceHead.make(decoder(leftEffect), leftEffect)
+  const right = ConformanceHead.make(decoder(rightEffect), rightEffect)
+  assert.isFalse(ConformanceHead.mayOverlap(left, right))
+})
+
+it('separates closed Effect heads with disjoint failure rows', () => {
+  const leftEffect = Type.effect('i32', [Type.nominal('heads', 'Problem')])
+  const rightEffect = Type.effect('i32', [Type.nominal('heads', 'Other')])
+  const left = ConformanceHead.make(decoder(leftEffect), leftEffect)
+  const right = ConformanceHead.make(decoder(rightEffect), rightEffect)
+  assert.isFalse(ConformanceHead.mayOverlap(left, right))
+})
+
+it('separates closed Effect heads with disjoint requirement rows', () => {
+  const leftEffect = Type.effect('i32', [], 'Shared', [
+    Object.freeze({
+      capability: Type.nominal('heads', 'Left'),
+      role: 'provider',
+      access: 'Shared',
+    }),
+  ])
+  const rightEffect = Type.effect('i32', [], 'Shared', [
+    Object.freeze({
+      capability: Type.nominal('heads', 'Right'),
+      role: 'provider',
+      access: 'Shared',
+    }),
+  ])
+  const left = ConformanceHead.make(decoder(leftEffect), leftEffect)
+  const right = ConformanceHead.make(decoder(rightEffect), rightEffect)
+  assert.isFalse(ConformanceHead.mayOverlap(left, right))
+})
+
+it('treats an open Effect requirement row as covering a compatible closed row', () => {
+  const openEffect = Type.effect(
+    'i32',
+    [],
+    'Shared',
+    [],
+    [],
+    [binder('a', 0, 'R', 'RequirementRow')],
+  )
+  const closedEffect = Type.effect('i32', [], 'Shared', [
+    Object.freeze({
+      capability: Type.nominal('heads', 'Clock'),
+      role: 'provider',
+      access: 'Shared',
+    }),
+  ])
+  const left = ConformanceHead.make(decoder(openEffect), openEffect)
+  const right = ConformanceHead.make(decoder(closedEffect), closedEffect)
+  assert.isTrue(ConformanceHead.mayOverlap(left, right))
+})
+
+it('separates Effect heads with different access modes', () => {
+  const shared = Type.effect('i32', [], 'Shared')
+  const exclusive = Type.effect('i32', [], 'Exclusive')
+  const left = ConformanceHead.make(decoder(shared), shared)
+  const right = ConformanceHead.make(decoder(exclusive), exclusive)
+  assert.isFalse(ConformanceHead.mayOverlap(left, right))
+})
+
 it('separates representation-bounded headers whose bounds cannot intersect', () => {
   // The admissibility and intersection answers are the ones representation parameters already own;
   // this only asks them the coherence question.

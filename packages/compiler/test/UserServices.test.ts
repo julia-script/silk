@@ -1,5 +1,6 @@
 import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
+import * as WasmError from '@silk-effect/wasm/WasmError'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
@@ -140,7 +141,15 @@ pub fn main() -> i32 {
 
       const wasmSnapshot = yield* snapshot(source, 'wasm32-unknown-unknown')
       const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
-      const wasmInstance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      const wasmInstance = yield* Effect.try({
+        try: () => new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {}),
+        catch: (cause) =>
+          WasmError.wrappedFailure({
+            operation: 'UserServices.instantiateWasm',
+            message: 'The host could not instantiate the generated WebAssembly module',
+            cause,
+          }),
+      })
       const main = wasmInstance.exports.silk_main
       assert.strictEqual(typeof main, 'function')
       if (typeof main === 'function') assert.strictEqual(main(), 42)

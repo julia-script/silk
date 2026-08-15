@@ -26,6 +26,6 @@
 
 ## 5. Verification
 
-- [x] 5.1 Run `pnpm typecheck` and `pnpm exec biome check .`.
-- [x] 5.2 Run `pnpm test`, `pnpm check`, and `pnpm release:candidate`; report exact failures.
-- [x] 5.3 Repeat conformance proof and instance artifacts in fresh processes to verify determinism.
+- [ ] 5.1 Run `pnpm typecheck` and `pnpm exec biome check .`.
+- [ ] 5.2 Run `pnpm test`, `pnpm check`, and `pnpm release:candidate`; report exact failures.
+- [ ] 5.3 Repeat conformance proof and instance artifacts in fresh processes to verify determinism.

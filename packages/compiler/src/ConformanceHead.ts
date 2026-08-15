@@ -408,10 +408,24 @@ const unify = (
     )
   if (Type.isRepresented(left) && Type.isRepresented(right))
     return representationsMayOverlap(left.representation.argument, right.representation.argument)
-  // An Effect carries two open rows, a union has no canonical decomposition into cases, and a
-  // failure projection stands for whatever row it is instantiated with — so none of the three can
-  // be shown disjoint here. All report overlap rather than leaving a coherence hole.
-  if (Type.isEffect(left) && Type.isEffect(right)) return true
+  if (Type.isEffect(left) && Type.isEffect(right))
+    return (
+      left.access === right.access &&
+      unify(left.success, right.success, bindings) &&
+      unifyArgument(
+        Type.failureRowArgument(left.failures, left.failureParameters),
+        Type.failureRowArgument(right.failures, right.failureParameters),
+        bindings,
+      ) &&
+      unifyArgument(
+        Type.requirementRowArgument(left.requirements, left.requirementParameters),
+        Type.requirementRowArgument(right.requirements, right.requirementParameters),
+        bindings,
+      )
+    )
+  // A union has no canonical decomposition into cases, and a failure projection stands for
+  // whatever row it is instantiated with, so neither can be shown disjoint here. Both report
+  // overlap rather than leaving a coherence hole.
   if (Type.isUnion(left) || Type.isUnion(right)) return true
   if (Type.isFailureProjection(left) || Type.isFailureProjection(right)) return true
   return false

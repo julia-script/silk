@@ -3127,6 +3127,7 @@ const resolveBounds = (
  * descent step would let a damaged fact stand in for a proof obligation.
  */
 const declaredRequirements = (
+  modules: ReadonlyArray<ModuleHeaders>,
   conformance: ConformanceFact,
 ): ReadonlyArray<ConformanceHead.Requirement> =>
   Object.freeze(
@@ -3134,6 +3135,7 @@ const declaredRequirements = (
       if (requirement.capability._tag !== 'Resolved') return []
       const capability = requirement.capability.type
       if (!Type.isNominal(capability)) return []
+      if (memberByNominal(modules, capability)?._tag !== 'InterfaceDeclaration') return []
       const provider = capability.arguments.at(ConformanceHead.providerOrdinal)
       if (provider === undefined || !Type.isTypeArgument(provider)) return []
       return Object.freeze([Object.freeze({ capability, provider })])
@@ -3738,7 +3740,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             conformance.provider._tag !== 'Resolved'
           )
             return conformance
-          const requirements = declaredRequirements(conformance)
+          const requirements = declaredRequirements(modules, conformance)
           const head = ConformanceHead.make(
             conformance.capability.type,
             conformance.provider.type,
@@ -3951,6 +3953,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         if (requirement.capability._tag !== 'Resolved') return true
         const applied = requirement.capability.type
         if (!Type.isNominal(applied)) return true
+        if (memberByNominal(modules, applied)?._tag !== 'InterfaceDeclaration') return true
         const stated = applied.arguments.at(ConformanceHead.providerOrdinal)
         return stated === undefined || !Type.isTypeArgument(stated)
       })
@@ -4897,7 +4900,7 @@ const proveGoal = (
       )
     const nested = Object.freeze([...active, goal])
     const requirements: Array<ConformanceGoal.Proof> = []
-    for (const requirement of declaredRequirements(selected.conformance)) {
+    for (const requirement of declaredRequirements(self.modules, selected.conformance)) {
       const capability = Type.substitute(requirement.capability, selected.substitution)
       const provider = Type.substitute(requirement.provider, selected.substitution)
       if (!Type.isNominal(capability))
