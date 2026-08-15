@@ -138,3 +138,43 @@ pub fn main() -> i32 {
     assert.isFalse(first.plan.entries.some((entry) => Type.isEffect(entry.type)))
   }),
 )
+
+it.effect('shapes nested Effect and callable captures from their concrete environments', () =>
+  Effect.gen(function* () {
+    const { plan } = yield* storedLayout(
+      'stored-effect-layout/nested-executables',
+      `struct Token { value: i32 }
+struct Deferred<F: once Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  let nested = effect { return token.value }
+  let transform = i32.add(1)
+  let deferred = Deferred { operation: effect {
+    let base = run move nested
+    return transform(base)
+  } }
+  return 0
+}`,
+      Target.wasm32UnknownUnknown,
+    )
+    const represented = representedEntry(plan)
+    const shape = Layout.callingShape(plan, represented.type)
+
+    assert.strictEqual(represented.representation._tag, 'StoredEffectEnvironment')
+    assert.strictEqual(shape?.tree._tag, 'EffectEnvironmentShape')
+    if (
+      represented.representation._tag !== 'StoredEffectEnvironment' ||
+      shape?.tree._tag !== 'EffectEnvironmentShape'
+    )
+      return
+    assert.deepEqual(
+      shape.tree.fields.map((field) => field.shape._tag),
+      ['EffectEnvironmentShape', 'CallableEnvironmentShape'],
+    )
+    assert.strictEqual(
+      shape.laneCount,
+      shape.tree.fields.reduce((total, field) => total + field.shape.laneCount, 0),
+    )
+    assert.deepEqual(Layout.verify(plan), [])
+  }),
+)

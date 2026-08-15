@@ -349,7 +349,7 @@ export type CallingShapeNode =
     }
   | {
       readonly _tag: 'CallableEnvironmentShape'
-      readonly type: Type.Represented
+      readonly type: DeclarationIndex.SemanticType
       readonly fields: ReadonlyArray<{
         readonly capture: number
         readonly shape: CallingShapeNode
@@ -358,7 +358,7 @@ export type CallingShapeNode =
     }
   | {
       readonly _tag: 'EffectEnvironmentShape'
-      readonly type: Type.Represented
+      readonly type: DeclarationIndex.SemanticType
       readonly fields: ReadonlyArray<{
         readonly capture: number
         readonly shape: CallingShapeNode
@@ -1956,6 +1956,8 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
       self.target,
       orderedEntries,
       [...specializedShapeTypes.values()].sort(Type.compare),
+      effectPlans,
+      callablePlans,
     ),
     staticData,
     literalVerdicts: literals.verdicts,
@@ -1982,11 +1984,108 @@ export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>):
   })
 }
 
-const shapeNode = (
-  target: Target.Target,
+interface ShapeContext {
+  readonly target: Target.Target
+  readonly entries: ReadonlyMap<string, Entry>
+  readonly effectEnvironments: ReadonlyArray<EffectEnvironment>
+  readonly callableEnvironments: ReadonlyArray<CallableEnvironment>
+  readonly active: ReadonlySet<string>
+}
+
+const withActiveShape = (context: ShapeContext, identity: string): ShapeContext => {
+  if (context.active.has(identity))
+    throw new RangeError(`recursive executable environment ${identity} has no calling shape`)
+  return Object.freeze({ ...context, active: new Set([...context.active, identity]) })
+}
+
+const borrowedShape = (
+  context: ShapeContext,
   type: DeclarationIndex.SemanticType,
-  entries: ReadonlyMap<string, Entry>,
+): Extract<CallingShapeNode, { readonly _tag: 'AddressShape' }> =>
+  Object.freeze({
+    _tag: 'AddressShape',
+    type,
+    address: Object.freeze({
+      type: Object.freeze({
+        _tag: 'Address',
+        element: type,
+        bits: context.target.pointerSize === 4 ? 32 : 64,
+      }),
+      lane: 0,
+    }),
+    laneCount: 1,
+  })
+
+const executableEnvironmentFieldShape = (
+  context: ShapeContext,
+  field: EffectEnvironmentField,
 ): CallingShapeNode => {
+  if (field.representation === 'Borrow') return borrowedShape(context, field.type)
+  if (field.callableIdentity !== undefined) {
+    const identity = field.callableIdentity
+    const environment = context.callableEnvironments.find(
+      (
+        candidate,
+      ): candidate is Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
+        candidate._tag === 'CallableEnvironment' &&
+        CallableFieldRealization.matchesIdentity(identity, candidate.callable),
+    )
+    if (environment === undefined)
+      throw new RangeError(
+        `callable environment ${Type.genericArgumentKey(identity)} is unavailable to calling-shape planning`,
+      )
+    const nested = withActiveShape(context, `callable:${Type.genericArgumentKey(identity)}`)
+    const fields = environment.fields.map((capture) =>
+      Object.freeze({
+        capture: capture.ordinal,
+        shape:
+          capture.representation === 'Borrow'
+            ? borrowedShape(nested, capture.type)
+            : shapeNode(capture.type, nested),
+      }),
+    )
+    return Object.freeze({
+      _tag: 'CallableEnvironmentShape',
+      type: field.type,
+      fields: Object.freeze(fields),
+      laneCount: fields.reduce((total, capture) => total + capture.shape.laneCount, 0),
+    })
+  }
+  if (field.effectIdentity !== undefined) {
+    const environment = context.effectEnvironments.find(
+      (
+        candidate,
+      ): candidate is Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
+        candidate._tag === 'EffectEnvironment' &&
+        (Instances.effectIdentity(candidate.instance, candidate.site) === field.effectIdentity ||
+          candidate.successEffectIdentity === field.effectIdentity),
+    )
+    if (environment === undefined)
+      throw new RangeError(
+        `Effect environment ${field.effectIdentity} is unavailable to calling-shape planning`,
+      )
+    const nested = withActiveShape(context, `effect:${field.effectIdentity}`)
+    const fields = environment.fields.map((capture) =>
+      Object.freeze({
+        capture: capture.ordinal,
+        shape: executableEnvironmentFieldShape(nested, capture),
+      }),
+    )
+    return Object.freeze({
+      _tag: 'EffectEnvironmentShape',
+      type: field.type,
+      fields: Object.freeze(fields),
+      laneCount: fields.reduce((total, capture) => total + capture.shape.laneCount, 0),
+    })
+  }
+  return shapeNode(field.type, context)
+}
+
+const shapeNode = (
+  type: DeclarationIndex.SemanticType,
+  context: ShapeContext,
+): CallingShapeNode => {
+  const { target, entries } = context
   if (Type.isBuiltin(type)) {
     return Object.freeze({ _tag: 'ScalarShape', type, laneCount: 1 })
   }
@@ -2061,31 +2160,23 @@ const shapeNode = (
         `represented executable ${Type.encode(type)} is unavailable to calling-shape planning`,
       )
     }
-    const environmentFields =
+    const fields =
       representation._tag === 'CallableEnvironment'
-        ? representation.fields.map((field) => Object.freeze({ capture: field.ordinal, field }))
-        : representation.fields.map((field) => Object.freeze({ capture: field.capture, field }))
-    const fields = environmentFields.map(({ capture, field }) =>
-      Object.freeze({
-        capture,
-        shape:
-          field.representation === 'Borrow'
-            ? Object.freeze({
-                _tag: 'AddressShape' as const,
-                type: field.type,
-                address: Object.freeze({
-                  type: Object.freeze({
-                    _tag: 'Address' as const,
-                    element: field.type,
-                    bits: target.pointerSize === 4 ? (32 as const) : (64 as const),
-                  }),
-                  lane: 0 as const,
-                }),
-                laneCount: 1 as const,
-              })
-            : shapeNode(target, field.type, entries),
-      }),
-    )
+        ? representation.fields.map((field) =>
+            Object.freeze({
+              capture: field.ordinal,
+              shape:
+                field.representation === 'Borrow'
+                  ? borrowedShape(context, field.type)
+                  : shapeNode(field.type, context),
+            }),
+          )
+        : representation.fields.map((field) =>
+            Object.freeze({
+              capture: field.capture,
+              shape: executableEnvironmentFieldShape(context, field),
+            }),
+          )
     return Object.freeze({
       _tag:
         representation._tag === 'CallableEnvironment'
@@ -2098,7 +2189,7 @@ const shapeNode = (
   }
   const candidate = entries.get(Type.key(type))
   if (Type.isFixedArray(type)) {
-    const element = shapeNode(target, type.element, entries)
+    const element = shapeNode(type.element, context)
     const laneCount = element.laneCount * type.length
     if (!Number.isSafeInteger(laneCount)) {
       throw new RangeError(`Calling shape lane count overflows for ${Type.encode(type)}`)
@@ -2114,7 +2205,7 @@ const shapeNode = (
   if (Type.isUnion(type)) {
     const members = Object.freeze(
       type.members.map((member, ordinal) => {
-        const shape = shapeNode(target, member, entries)
+        const shape = shapeNode(member, context)
         return Object.freeze({
           member,
           ordinal,
@@ -2160,12 +2251,12 @@ const shapeNode = (
     })
   }
   if (Type.isEffect(type)) {
-    const success = shapeNode(target, type.success, entries)
+    const success = shapeNode(type.success, context)
     const failures = type.failures.map((failure, index) =>
       Object.freeze({
         type: failure,
         tag: index + 1,
-        shape: shapeNode(target, failure, entries),
+        shape: shapeNode(failure, context),
       }),
     )
     const variants = [success, ...failures.map((failure) => failure.shape)]
@@ -2207,7 +2298,7 @@ const shapeNode = (
   const fields =
     candidate?.representation._tag === 'Aggregate'
       ? candidate.representation.fields.map((field) =>
-          Object.freeze({ field: field.id, shape: shapeNode(target, field.type, entries) }),
+          Object.freeze({ field: field.id, shape: shapeNode(field.type, context) }),
         )
       : []
   return Object.freeze({
@@ -2334,8 +2425,19 @@ const shapeOf = (
   target: Target.Target,
   type: DeclarationIndex.SemanticType,
   entries: ReadonlyMap<string, Entry>,
+  effectEnvironments: ReadonlyArray<EffectEnvironment>,
+  callableEnvironments: ReadonlyArray<CallableEnvironment>,
 ): CallingShape => {
-  const tree = shapeNode(target, type, entries)
+  const tree = shapeNode(
+    type,
+    Object.freeze({
+      target,
+      entries,
+      effectEnvironments,
+      callableEnvironments,
+      active: new Set<string>(),
+    }),
+  )
   let materialized: ReadonlyArray<CallingLane> | undefined
   return Object.freeze({
     _tag: 'CallingShape' as const,
@@ -2353,9 +2455,13 @@ const callingShapes = (
   target: Target.Target,
   entries: ReadonlyArray<Entry>,
   types: ReadonlyArray<DeclarationIndex.SemanticType> = entries.map((entry) => entry.type),
+  effectEnvironments: ReadonlyArray<EffectEnvironment> = Object.freeze([]),
+  callableEnvironments: ReadonlyArray<CallableEnvironment> = Object.freeze([]),
 ): ReadonlyArray<CallingShape> => {
   const byType = new Map(entries.map((candidate) => [Type.key(candidate.type), candidate]))
-  return Object.freeze(types.map((type) => shapeOf(target, type, byType)))
+  return Object.freeze(
+    types.map((type) => shapeOf(target, type, byType, effectEnvironments, callableEnvironments)),
+  )
 }
 
 /** Looks up one canonical runtime-plan entry. */
@@ -2418,7 +2524,9 @@ export const effectEnvironmentLanes = (
         const captured = self.effectEnvironments.find(
           (candidate) =>
             candidate._tag === 'EffectEnvironment' &&
-            Instances.effectIdentity(candidate.instance, candidate.site) === field.effectIdentity,
+            (Instances.effectIdentity(candidate.instance, candidate.site) ===
+              field.effectIdentity ||
+              candidate.successEffectIdentity === field.effectIdentity),
         )
         return captured?._tag === 'EffectEnvironment'
           ? effectEnvironmentLanes(self, captured)
@@ -3242,7 +3350,13 @@ const callingScalarEquals = (left: CallingScalar, right: CallingScalar): boolean
       left.bits === right.bits
 
 const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
-  const expected = callingShapes(self.target, self.entries)
+  const expected = callingShapes(
+    self.target,
+    self.entries,
+    self.entries.map((entry) => entry.type),
+    self.effectEnvironments,
+    self.callableEnvironments,
+  )
   const violations: Array<Violation> = []
   for (const entry of self.entries) {
     const actual = callingShape(self, entry.type)

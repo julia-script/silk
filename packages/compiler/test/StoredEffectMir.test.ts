@@ -54,6 +54,75 @@ const finalizeSuspension = (
   )
 }
 
+const replaceDrop = (
+  module: Mir.Module,
+  target: Extract<Mir.Operation, { readonly _tag: 'Drop' }>,
+  replacement: Extract<Mir.Operation, { readonly _tag: 'Drop' }>,
+): Mir.Module =>
+  Object.freeze({
+    ...module,
+    functions: Object.freeze(
+      module.functions.map((fn) =>
+        Object.freeze({
+          ...fn,
+          regions: Object.freeze(
+            fn.regions.map((region) =>
+              region._tag === 'OperationRegion'
+                ? Object.freeze({
+                    ...region,
+                    operations: Object.freeze(
+                      region.operations.map((operation) =>
+                        operation === target ? replacement : operation,
+                      ),
+                    ),
+                  })
+                : region._tag === 'CleanupRegion'
+                  ? Object.freeze({
+                      ...region,
+                      releases: Object.freeze(
+                        region.releases.map((operation) =>
+                          operation === target ? replacement : operation,
+                        ),
+                      ),
+                    })
+                  : region,
+            ),
+          ),
+        }),
+      ),
+    ),
+  })
+
+const replaceOperation = (
+  module: Mir.Module,
+  target: Mir.Operation,
+  replacement: Mir.Operation,
+): Mir.Module =>
+  Object.freeze({
+    ...module,
+    functions: Object.freeze(
+      module.functions.map((fn) =>
+        Object.freeze({
+          ...fn,
+          regions: Object.freeze(
+            fn.regions.map((region) =>
+              region._tag === 'OperationRegion'
+                ? Object.freeze({
+                    ...region,
+                    operations: Object.freeze(
+                      region.operations.map((operation) =>
+                        operation === target ? replacement : operation,
+                      ),
+                    ),
+                  })
+                : region,
+            ),
+          ),
+        }),
+      ),
+    ),
+  })
+
 it.effect('carries lazy construction and exact stored Effect execution through MIR', () =>
   Effect.gen(function* () {
     const name = 'stored-effect-mir/lifecycle'
@@ -61,6 +130,8 @@ it.effect('carries lazy construction and exact stored Effect execution through M
       name,
       `struct Deferred<F: Effect<i32>> { operation: F }
 pub fn main() -> i32 {
+  let other = effect { return 0 }
+  let ignored = run other
   let deferred = Deferred { operation: effect { return 42 } }
   return run deferred.operation
 }`,
@@ -68,7 +139,13 @@ pub fn main() -> i32 {
     const operations = module.functions.flatMap(Mir.operations)
     const make = operations.find((operation) => operation._tag === 'MakeEffect')
     const construct = operations.find((operation) => operation._tag === 'Construct')
-    const run = operations.find((operation) => operation._tag === 'RunEffectValue')
+    const run = module.functions
+      .flatMap((fn) => Mir.operations(fn).map((operation) => Object.freeze({ fn, operation })))
+      .find(({ fn, operation }) => {
+        if (operation._tag !== 'RunEffectValue') return false
+        const type = fn.localTypes.at(operation.effect.ordinal)
+        return type?._tag === 'EffectValue' && type.storage !== undefined
+      })?.operation
     const stored = construct?._tag === 'Construct' ? construct.fields.at(0)?.stored : undefined
     const projected = module.functions
       .flatMap((fn) => fn.localTypes)
@@ -92,6 +169,21 @@ pub fn main() -> i32 {
     assert.deepEqual(run.outcomeType.type.failures, stored.realization.rows.failures)
     assert.deepEqual(run.outcomeType.type.requirements, stored.realization.rows.requirements)
     assert.deepEqual(Mir.verify(module), [])
+    const alternate = operations.find(
+      (operation) => operation._tag === 'RunEffectValue' && operation !== run,
+    )
+    assert.strictEqual(alternate?._tag, 'RunEffectValue')
+    if (alternate?._tag !== 'RunEffectValue') return
+    const forged = Object.freeze({
+      ...run,
+      runner: alternate.runner,
+      runnerTypeArguments: alternate.runnerTypeArguments,
+      arguments: Object.freeze([run.effect]),
+    })
+    assert.include(
+      Mir.verify(replaceOperation(module, run, forged)).map((violation) => violation.rule),
+      'InvalidEffectOperation',
+    )
   }),
 )
 
@@ -125,6 +217,66 @@ pub fn main() -> i32 {
       'EffectCleanup',
     )
     assert.deepEqual(Mir.verify(module), [])
+
+    const drop = module.functions
+      .flatMap(Mir.operations)
+      .find(
+        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
+          operation._tag === 'Drop' &&
+          operation.cleanup._tag === 'StructCleanup' &&
+          operation.cleanup.fields.some((field) => field.cleanup._tag === 'EffectCleanup'),
+      )
+    assert.isDefined(drop)
+    if (drop === undefined || drop.cleanup._tag !== 'StructCleanup') return
+    const structCleanup = drop.cleanup
+    const field = structCleanup.fields.find(
+      (candidate) => candidate.cleanup._tag === 'EffectCleanup',
+    )
+    assert.strictEqual(field?.cleanup._tag, 'EffectCleanup')
+    if (field?.cleanup._tag !== 'EffectCleanup') return
+    const slot = field.cleanup.slots.at(0) ?? unreachable('expected owned stored Effect slot')
+    const withEffectCleanup = (
+      cleanup: Extract<Ownership.CleanupPlan, { readonly _tag: 'EffectCleanup' }>,
+    ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
+      Object.freeze({
+        ...drop,
+        cleanup: Object.freeze({
+          ...structCleanup,
+          fields: Object.freeze(
+            structCleanup.fields.map((candidate) =>
+              candidate === field ? Object.freeze({ ...candidate, cleanup }) : candidate,
+            ),
+          ),
+        }),
+      })
+    const malformed = [
+      Object.freeze({ ...field.cleanup, slots: Object.freeze([]) }),
+      Object.freeze({
+        ...field.cleanup,
+        slots: Object.freeze([Object.freeze({ ...slot, laneOffset: slot.laneOffset + 1 })]),
+      }),
+      Object.freeze({
+        ...field.cleanup,
+        slots: Object.freeze([Object.freeze({ ...slot, laneCount: slot.laneCount + 1 })]),
+      }),
+      Object.freeze({
+        ...field.cleanup,
+        slots: Object.freeze([
+          Object.freeze({
+            ...slot,
+            cleanup: Object.freeze({ _tag: 'NoCleanup' as const, type: slot.cleanup.type }),
+          }),
+        ]),
+      }),
+    ]
+    for (const cleanup of malformed) {
+      assert.include(
+        Mir.verify(replaceDrop(module, drop, withEffectCleanup(cleanup))).map(
+          (violation) => violation.rule,
+        ),
+        'InvalidAggregateOperation',
+      )
+    }
   }),
 )
 

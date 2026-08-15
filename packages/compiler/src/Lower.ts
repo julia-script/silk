@@ -422,7 +422,8 @@ const effectValueByIdentity = (
       candidate,
     ): candidate is Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
       candidate._tag === 'EffectEnvironment' &&
-      Instances.effectIdentity(candidate.instance, candidate.site) === identity,
+      (Instances.effectIdentity(candidate.instance, candidate.site) === identity ||
+        candidate.successEffectIdentity === identity),
   )
   return environment === undefined
     ? undefined
@@ -699,6 +700,24 @@ const runtimeRequirementArguments = (
     ) ?? [],
   )
 
+const providerBindings = (
+  requirements: ReadonlyArray<ProvidedRequirement> | undefined,
+): Extract<Mir.Operation, { readonly _tag: 'RunEffectValue' }>['providers'] =>
+  Object.freeze(
+    requirements?.map((requirement) =>
+      Object.freeze({
+        capability: requirement.capability,
+        providerType: requirement.providerType,
+        role: requirement.role,
+        access: requirement.access,
+        ...(requirement.witness._tag === 'SourceConformanceWitness' &&
+        requirement.local !== undefined
+          ? { argument: requirement.local }
+          : {}),
+      }),
+    ) ?? [],
+  )
+
 const sameSite = (left: Hir.CallableSiteId, right: Hir.CallableSiteId): boolean =>
   Hir.sameExecutableSite(left, right)
 
@@ -810,19 +829,28 @@ const lowerRunEffectValue = (
       : ensureProvidedRunner(fn, effectType, provided)
   if (provided !== undefined && provided.length > 0 && providedRunner === undefined)
     return undefined
+  const baseRunner =
+    effectType.storage?.realization.runner ??
+    Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site)
+  const baseRunnerTypeArguments =
+    effectType.storage?.realization.runnerArguments ?? effectType.environment.instance.typeArguments
   fn.emit(
     Object.freeze({
       _tag: 'RunEffectValue',
       destination,
       outcome,
       effect,
-      runner:
-        providedRunner ??
-        effectType.storage?.realization.runner ??
-        Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site),
-      runnerTypeArguments:
-        effectType.storage?.realization.runnerArguments ??
-        effectType.environment.instance.typeArguments,
+      runner: providedRunner ?? baseRunner,
+      runnerTypeArguments: baseRunnerTypeArguments,
+      ...(providedRunner === undefined
+        ? {}
+        : {
+            runnerBase: Object.freeze({
+              declaration: baseRunner,
+              typeArguments: baseRunnerTypeArguments,
+            }),
+          }),
+      providers: providerBindings(provided),
       arguments: runtimeRequirementArguments(provided),
       outcomeType,
       ...(propagationType === undefined ? {} : { propagationType }),
@@ -2093,22 +2121,29 @@ function lowerExpressionInner(
             : ensureProvidedRunner(fn, effectValueType, provided)
         if (provided !== undefined && provided.length > 0 && providedRunner === undefined)
           return undefined
+        const baseRunner =
+          effectValueType.storage?.realization.runner ??
+          Hir.effectRunnerId(effectValueType.environment.instance.declaration, effectValueType.site)
+        const baseRunnerTypeArguments =
+          effectValueType.storage?.realization.runnerArguments ??
+          effectValueType.environment.instance.typeArguments
         fn.emit(
           Object.freeze({
             _tag: 'RunEffectValue',
             destination,
             outcome,
             effect: loweredSubject.result,
-            runner:
-              providedRunner ??
-              effectValueType.storage?.realization.runner ??
-              Hir.effectRunnerId(
-                effectValueType.environment.instance.declaration,
-                effectValueType.site,
-              ),
-            runnerTypeArguments:
-              effectValueType.storage?.realization.runnerArguments ??
-              effectValueType.environment.instance.typeArguments,
+            runner: providedRunner ?? baseRunner,
+            runnerTypeArguments: baseRunnerTypeArguments,
+            ...(providedRunner === undefined
+              ? {}
+              : {
+                  runnerBase: Object.freeze({
+                    declaration: baseRunner,
+                    typeArguments: baseRunnerTypeArguments,
+                  }),
+                }),
+            providers: providerBindings(provided),
             arguments: runtimeRequirementArguments(provided),
             outcomeType,
             ...(propagationType === undefined ? {} : { propagationType }),
@@ -3693,18 +3728,23 @@ function effectLocalCleanup(
               : Layout.callableEnvironmentLanes(fn.layout, callable.environment).length
       const currentOffset = laneOffset
       laneOffset += laneCount
-      if (field.representation === 'Borrow') return []
+      const realizationOrdinal =
+        effectValue.storage?.realization.environment.at(ordinal)?.ordinal ?? ordinal
+      const storedOwned =
+        effectValue.storage?.realization.cleanup.unrunLanes.includes(realizationOrdinal) ?? false
+      if (effectValue.storage === undefined ? field.representation === 'Borrow' : !storedOwned)
+        return []
       const fieldCleanup =
         callable === undefined
           ? nested === undefined
             ? concreteCleanup(fn, field.type)
             : effectLocalCleanup(fn, nested, next)
           : callableLocalCleanup(fn, callable)
-      return fieldCleanup._tag === 'NoCleanup'
+      return fieldCleanup._tag === 'NoCleanup' && effectValue.storage === undefined
         ? []
         : [
             Object.freeze({
-              ordinal: effectValue.storage?.realization.environment.at(ordinal)?.ordinal ?? ordinal,
+              ordinal: realizationOrdinal,
               laneOffset: currentOffset,
               laneCount,
               cleanup: fieldCleanup,
