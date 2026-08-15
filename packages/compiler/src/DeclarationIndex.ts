@@ -2630,13 +2630,8 @@ const resolveExactRepresentation = (
   }
   const unresolved = () =>
     Diagnostic.unresolvedExactRepresentationItem(fact.item.spelling, fact.token.span)
-  const open = (expected: number) =>
-    Diagnostic.openExactRepresentationItem(
-      fact.item.spelling,
-      expected,
-      arguments_.length,
-      fact.token.span,
-    )
+  const open = (expected: number, actual = arguments_.length) =>
+    Diagnostic.openExactRepresentationItem(fact.item.spelling, expected, actual, fact.token.span)
   const lookup = resolvers.item(module, fact.item)
   if (lookup._tag === 'Ambiguous')
     return reject(
@@ -2678,6 +2673,9 @@ const resolveExactRepresentation = (
   const concrete = supplied.filter(
     (argument): argument is Type.GenericArgument => argument !== undefined,
   )
+  const concreteCount = concrete.filter(Type.isConcreteGenericArgument).length
+  if (concreteCount !== concrete.length)
+    return reject(open(declaration.typeParameters.length, concreteCount), declaration)
   const substitution = Type.substitution(
     declaration.typeParameters.map((parameter) => parameter.type),
     concrete,

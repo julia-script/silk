@@ -9747,6 +9747,53 @@ const directExpressionChildren = (expression: ExpressionFact): ReadonlyArray<Exp
   }
 }
 
+/** Callbacks for one deterministic traversal of elaborated statement and expression facts. */
+export interface FactVisitor {
+  readonly statement?: (statement: StatementFact) => void
+  readonly expression?: (expression: ExpressionFact) => void
+  readonly descendExpressions?: boolean
+}
+
+const visitExpressionFact = (expression: ExpressionFact, visitor: FactVisitor): void => {
+  visitor.expression?.(expression)
+  if (expression._tag === 'Match') {
+    visitExpressionFact(expression.scrutinee, visitor)
+    for (const arm of expression.arms) {
+      if (arm.guard !== undefined) visitExpressionFact(arm.guard, visitor)
+      visitExpressionFact(arm.result, visitor)
+    }
+    return
+  }
+  if (expression._tag === 'EffectBlock') {
+    visitStatementFacts(expression.statements, visitor)
+    return
+  }
+  for (const child of directExpressionChildren(expression)) visitExpressionFact(child, visitor)
+}
+
+/** Visits one expression tree in deterministic source order. */
+export const visitExpressionFacts = (self: ExpressionFact, visitor: FactVisitor): void =>
+  visitExpressionFact(self, visitor)
+
+/** Visits statement trees and, by default, every nested expression in source order. */
+export const visitStatementFacts = (
+  self: ReadonlyArray<StatementFact>,
+  visitor: FactVisitor,
+): void => {
+  const descendExpressions = visitor.descendExpressions !== false
+  for (const statement of self) {
+    visitor.statement?.(statement)
+    if (descendExpressions)
+      for (const expression of directStatementExpressions(statement))
+        visitExpressionFact(expression, visitor)
+    if (statement._tag === 'UnsafeStatement') visitStatementFacts(statement.statements, visitor)
+    else if (statement._tag === 'IfStatement') {
+      visitStatementFacts(statement.taken, visitor)
+      visitStatementFacts(statement.otherwise, visitor)
+    } else if (statement._tag === 'WhileStatement') visitStatementFacts(statement.body, visitor)
+  }
+}
+
 const lexicalScopesOf = (
   source: SourceFile.SourceFile,
   functions: ReadonlyArray<FunctionFact>,

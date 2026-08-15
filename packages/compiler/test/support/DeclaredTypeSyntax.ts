@@ -26,29 +26,29 @@ export const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Ele
   )
 
 /** Completes the declaration index for one in-memory module. */
-export const index = (id: string, source: string) =>
-  Effect.map(
-    ModuleClosure.load({ root: SourceFile.make(id, encoder.encode(source)) }).pipe(
-      Effect.provide(SourceResolver.memory(new Map())),
-    ),
-    (closure) => NameResolution.analyze(closure).index,
-  )
+export const index = Effect.fnUntraced(function* (id: string, source: string) {
+  const closure = yield* ModuleClosure.load({
+    root: SourceFile.make(id, encoder.encode(source)),
+  }).pipe(Effect.provide(SourceResolver.memory(new Map())))
+  return NameResolution.analyze(closure).index
+})
 
 /** Completes the declaration index for one root and its in-memory imports. */
-export const indexWithImports = (root: string, sources: Readonly<Record<string, string>>) => {
+export const indexWithImports = Effect.fnUntraced(function* (
+  root: string,
+  sources: Readonly<Record<string, string>>,
+) {
   const rootSource = sources[root] ?? raise(`missing root source ${root}`)
   const imports = new Map(
     Object.entries(sources).flatMap(([module, source]) =>
       module === root ? [] : [[module, encoder.encode(source)] as const],
     ),
   )
-  return Effect.map(
-    ModuleClosure.load({ root: SourceFile.make(root, encoder.encode(rootSource)) }).pipe(
-      Effect.provide(SourceResolver.memory(imports)),
-    ),
-    (closure) => NameResolution.analyze(closure).index,
-  )
-}
+  const closure = yield* ModuleClosure.load({
+    root: SourceFile.make(root, encoder.encode(rootSource)),
+  }).pipe(Effect.provide(SourceResolver.memory(imports)))
+  return NameResolution.analyze(closure).index
+})
 
 /** Finds one named ordinary or Effect declaration in a completed index. */
 export const declaration = (self: DeclarationIndex.Index, module: string, name: string) =>

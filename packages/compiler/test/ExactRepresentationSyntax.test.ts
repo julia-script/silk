@@ -212,10 +212,10 @@ pub fn selected() -> typeof(identity) { return 0 }`,
   }),
 )
 
-it.effect('preserves every supplied generic kind in an exact item identity', () =>
+it.effect('rejects fully supplied exact arguments that remain open in every generic kind', () =>
   Effect.gen(function* () {
     const self = yield* index(
-      'exact-representation/kinded',
+      'exact-representation/open-kinded',
       `pub fn target<A, !E, ?R, F: fn(A) -> A, G: Effect<A>>(value: A) -> A {
   return move value
 }
@@ -223,28 +223,58 @@ pub fn selected<A, !E, ?R, F: fn(A) -> A, G: Effect<A>>() -> typeof(target<A, E,
   loop {}
 }`,
     )
-    const found = declaration(self, 'exact-representation/kinded', 'selected')
-    assert.strictEqual(found?.returnType._tag, 'Resolved')
-    if (found?.returnType._tag !== 'Resolved' || !Type.isRepresented(found.returnType.type)) return
-    const exact = found.returnType.type.representation.argument
-    assert.strictEqual(Type.isExactRepresentationArgument(exact), true)
-    if (!Type.isExactRepresentationArgument(exact)) return
-    assert.strictEqual(Type.isCallableIdentityArgument(exact.identity), true)
-    if (!Type.isCallableIdentityArgument(exact.identity)) return
-    const [value, failures, requirements, callable, effect] = exact.identity.typeArguments
-    assert.strictEqual(value !== undefined && Type.isTypeArgument(value), true)
-    assert.strictEqual(failures !== undefined && Type.isFailureRowArgument(failures), true)
-    assert.strictEqual(
-      requirements !== undefined && Type.isRequirementRowArgument(requirements),
-      true,
-    )
-    assert.strictEqual(
-      callable !== undefined && Type.isRepresentationParameterArgument(callable),
-      true,
-    )
-    assert.strictEqual(effect !== undefined && Type.isRepresentationParameterArgument(effect), true)
-    assert.notInclude(codes(self), 'SEM0111')
+    const found = declaration(self, 'exact-representation/open-kinded', 'selected')
+    assert.notStrictEqual(found?.returnType._tag, 'Resolved')
+    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0111')
+    assert.strictEqual(diagnostic?.reason._tag, 'OpenExactRepresentationItem')
   }),
+)
+
+it.effect(
+  'preserves every source-nameable concrete kind in a specialized exact item identity',
+  () =>
+    Effect.gen(function* () {
+      const self = yield* index(
+        'exact-representation/concrete-kinded',
+        `pub struct Failure {}
+pub service Capability {}
+pub fn callable(value: i32) -> i32 { return value }
+pub fn target<A, !E, ?R, F: fn(A) -> A>(value: A) -> A {
+  return move value
+}
+pub fn selected() -> typeof(target<i32, Failure, Capability, typeof(callable)>) {
+  loop {}
+}`,
+      )
+      assert.deepEqual(
+        self.diagnostics.map((diagnostic) => ({
+          code: diagnostic.code,
+          reason: diagnostic.reason,
+        })),
+        [],
+      )
+      const found = declaration(self, 'exact-representation/concrete-kinded', 'selected')
+      assert.strictEqual(found?.returnType._tag, 'Resolved')
+      if (found?.returnType._tag !== 'Resolved' || !Type.isRepresented(found.returnType.type))
+        return
+      const exact = found.returnType.type.representation.argument
+      assert.strictEqual(Type.isExactRepresentationArgument(exact), true)
+      if (!Type.isExactRepresentationArgument(exact)) return
+      assert.strictEqual(Type.isCallableIdentityArgument(exact.identity), true)
+      if (!Type.isCallableIdentityArgument(exact.identity)) return
+      const [value, failures, requirements, callable] = exact.identity.typeArguments
+      assert.strictEqual(value !== undefined && Type.isTypeArgument(value), true)
+      assert.strictEqual(failures !== undefined && Type.isFailureRowArgument(failures), true)
+      assert.strictEqual(
+        requirements !== undefined && Type.isRequirementRowArgument(requirements),
+        true,
+      )
+      assert.strictEqual(
+        callable !== undefined && Type.isExactRepresentationArgument(callable),
+        true,
+      )
+      assert.notInclude(codes(self), 'SEM0111')
+    }),
 )
 
 it.effect('rejects private exact identities nested in every non-value generic position', () =>

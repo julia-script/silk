@@ -68,6 +68,16 @@ const assertStaticMir = (self: Analysis.Snapshot, name: string): void => {
 const nativeIndirectCalls = (ir: string): ReadonlyArray<string> =>
   ir.split('\n').filter((line) => /\b(?:call|invoke)\b[^(]*%[-.\w"]+\s*\(/.test(line))
 
+const executeWasm = Effect.fnUntraced(function* (bytes: Uint8Array) {
+  return yield* Effect.try(() => {
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice()), {})
+    const main = instance.exports.silk_main
+    return typeof main === 'function'
+      ? Object.freeze({ _tag: 'Completed', value: main() })
+      : Object.freeze({ _tag: 'MissingMain' })
+  })
+})
+
 it.effect(
   'executes exact and opaque representations identically on bootstrap, Wasm, and native engines',
   () =>
@@ -93,14 +103,10 @@ it.effect(
         assert.strictEqual(interpreted.result.value, 42, program.name)
 
         const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
-        const wasmInstance = new WebAssembly.Instance(
-          new WebAssembly.Module(wasm.bytes.slice()),
-          {},
-        )
-        const wasmMain = wasmInstance.exports.silk_main
-        assert.strictEqual(typeof wasmMain, 'function', program.name)
-        if (typeof wasmMain !== 'function') continue
-        assert.strictEqual(wasmMain(), 42, program.name)
+        const wasmExecution = yield* executeWasm(wasm.bytes)
+        assert.strictEqual(wasmExecution._tag, 'Completed', program.name)
+        if (wasmExecution._tag !== 'Completed') continue
+        assert.strictEqual(wasmExecution.value, 42, program.name)
         assert.notInclude(wasm.wat, 'call_indirect', program.name)
         assert.notInclude(wasm.wat, 'memory.grow', program.name)
 

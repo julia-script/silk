@@ -89,109 +89,6 @@ interface Producer {
 
 const familyKey = (family: Type.OpaqueFamilyKey): string => Type.opaqueFamilyKey(family)
 
-interface ElaborationVisitor {
-  readonly statement?: (statement: Elaboration.StatementFact) => void
-  readonly expression?: (expression: Elaboration.ExpressionFact) => void
-  readonly descendExpressions?: boolean
-}
-
-const walkExpression = (
-  expression: Elaboration.ExpressionFact,
-  visitor: ElaborationVisitor,
-): void => {
-  visitor.expression?.(expression)
-  if (expression._tag === 'Match') {
-    walkExpression(expression.scrutinee, visitor)
-    for (const arm of expression.arms) {
-      if (arm.guard !== undefined) walkExpression(arm.guard, visitor)
-      walkExpression(arm.result, visitor)
-    }
-    return
-  }
-  if (expression._tag === 'EffectBlock') {
-    walkStatements(expression.statements, visitor)
-    return
-  }
-  const children: ReadonlyArray<Elaboration.ExpressionFact> = (() => {
-    switch (expression._tag) {
-      case 'Move':
-      case 'Borrow':
-      case 'FieldProjection':
-      case 'Run':
-        return Object.freeze([expression.subject])
-      case 'PlaceReplace':
-        return Object.freeze([expression.destination, expression.value])
-      case 'IndexProjection':
-        return Object.freeze([expression.subject, expression.index])
-      case 'ArrayLiteral':
-        return Object.freeze(expression.elements.map((element) => element.expression))
-      case 'StructLiteral':
-        return Object.freeze(expression.initializers.map((initializer) => initializer.expression))
-      case 'Grouped':
-        return Object.freeze([expression.expression])
-      case 'EffectResult':
-      case 'EffectBindRequirement':
-        return Object.freeze([expression.protected])
-      case 'EffectCatch':
-        return Object.freeze([expression.protected, expression.handler])
-      case 'CallableSection':
-        return Object.freeze(expression.captures.map((capture) => capture.expression))
-      case 'CallableApply':
-        return Object.freeze([
-          expression.callee,
-          ...expression.arguments.map((argument) => argument.expression),
-        ])
-      case 'Operator':
-      case 'ShortCircuit':
-      case 'Call':
-        return Object.freeze(expression.arguments.map((argument) => argument.expression))
-      case 'Integer':
-      case 'Floating':
-      case 'StaticText':
-      case 'Character':
-      case 'Unit':
-      case 'Boolean':
-      case 'Constant':
-      case 'Identifier':
-      case 'FunctionItem':
-        return Object.freeze([])
-    }
-  })()
-  for (const child of children) walkExpression(child, visitor)
-}
-
-const walkStatements = (
-  statements: ReadonlyArray<Elaboration.StatementFact>,
-  visitor: ElaborationVisitor,
-): void => {
-  const descendExpressions = visitor.descendExpressions !== false
-  for (const statement of statements) {
-    visitor.statement?.(statement)
-    if (statement._tag === 'UnsafeStatement') walkStatements(statement.statements, visitor)
-    else if (statement._tag === 'IfStatement') {
-      if (descendExpressions) walkExpression(statement.condition, visitor)
-      walkStatements(statement.taken, visitor)
-      walkStatements(statement.otherwise, visitor)
-    } else if (statement._tag === 'WhileStatement') {
-      if (descendExpressions) walkExpression(statement.condition, visitor)
-      walkStatements(statement.body, visitor)
-    } else if (descendExpressions && statement._tag === 'BindStatement')
-      walkExpression(statement.binding.initializer, visitor)
-    else if (descendExpressions && statement._tag === 'ExpressionStatement')
-      walkExpression(statement.expression, visitor)
-    else if (descendExpressions && statement._tag === 'WriteStatement') {
-      walkExpression(statement.destination, visitor)
-      walkExpression(statement.value, visitor)
-    } else if (
-      descendExpressions &&
-      (statement._tag === 'ReturnStatement' ||
-        statement._tag === 'FailStatement' ||
-        statement._tag === 'DropStatement')
-    )
-      walkExpression(statement.expression, visitor)
-  }
-}
-
 const reachableResults = (
   expression: Elaboration.ExpressionFact,
 ): ReadonlyArray<Elaboration.ExpressionFact> => {
@@ -206,7 +103,7 @@ const returnExpressions = (
   statements: ReadonlyArray<Elaboration.StatementFact>,
 ): ReadonlyArray<Elaboration.ExpressionFact> => {
   const found: Array<Elaboration.ExpressionFact> = []
-  walkStatements(statements, {
+  Elaboration.visitStatementFacts(statements, {
     descendExpressions: false,
     statement: (statement) => {
       if (statement._tag === 'ReturnStatement')
@@ -336,7 +233,7 @@ const capturesOf = (expression: Elaboration.ExpressionFact): ReadonlyArray<Captu
 
 const expressionSuspends = (expression: Elaboration.ExpressionFact): boolean => {
   let suspendable = false
-  walkExpression(expression, {
+  Elaboration.visitExpressionFacts(expression, {
     expression: (current) => {
       if (current._tag === 'Run') suspendable = true
     },
