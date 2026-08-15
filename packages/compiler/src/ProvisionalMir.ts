@@ -303,6 +303,17 @@ const storedEffectRealizationOf = (
   expression: Hir.Expression,
   context: BuildContext,
 ): CallableFieldRealization.EffectRealization | undefined => {
+  if (expression._tag === 'BindingReference') {
+    const initializer = context.bindings.get(expression.binding.ordinal)
+    return initializer === undefined ? undefined : storedEffectRealizationOf(initializer, context)
+  }
+  if (expression._tag === 'Move') return storedEffectRealizationOf(expression.subject, context)
+  if (expression._tag === 'UnionConvert')
+    return storedEffectRealizationOf(expression.source, context)
+  if (expression._tag === 'EffectBindRequirement')
+    return storedEffectRealizationOf(expression.protected, context)
+  if (expression._tag === 'EffectResult')
+    return storedEffectRealizationOf(expression.protected, context)
   if (expression._tag !== 'Project') return undefined
   const represented = Type.substitute(expression.type, context.instance.substitution)
   const planned = Layout.entry(context.layout, represented)?.representation
@@ -645,6 +656,8 @@ const controlsOf = (
           expression.subject._tag === 'EffectResult'
             ? expression.subject.protected
             : expression.subject
+        const storedSuspendable =
+          storedEffectRealizationOf(protected_, context)?.suspendable === true
         const runner = runnerOf(protected_, context)
         // The concrete fixed point proves that no call or run in this execution can transfer.
         // Stored Effects add their realization's suspendability dependency after the ordinary
@@ -652,7 +665,7 @@ const controlsOf = (
         if (
           executionClassification === 'Synchronous' &&
           !maySpecializeProviders &&
-          runner.classification === 'Synchronous'
+          !storedSuspendable
         ) {
           for (const child of Hir.expressionChildren(expression)) visit(child)
           return

@@ -3053,20 +3053,10 @@ const suspensionCallTargets = (operation: Operation): ReadonlyArray<SuspensionCa
 }
 
 const originReachableSuspensionFunctions = (self: Module): ReadonlySet<string> => {
-  const realizedSuspendableRunners = self.layout.entries.flatMap((entry) =>
-    entry.representation._tag === 'StoredEffectEnvironment' &&
-    entry.representation.realization.suspendable
-      ? [entry.representation.realization]
-      : [],
-  )
   const reachable = new Set(
     self.functions
-      .filter(
-        (fn) =>
-          fn.suspension?.regions.some((region) => region._tag === 'SuspendEffectRegion') ||
-          realizedSuspendableRunners.some((realization) =>
-            matchesInstance(fn, realization.runner, realization.runnerArguments),
-          ),
+      .filter((fn) =>
+        fn.suspension?.regions.some((region) => region._tag === 'SuspendEffectRegion'),
       )
       .map((fn) => instanceText(fn.instance)),
   )

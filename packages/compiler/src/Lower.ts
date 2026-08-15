@@ -417,14 +417,16 @@ const effectValueByIdentity = (
   layout: Layout.Plan,
   identity: string,
 ): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
-  const environment = layout.effectEnvironments.find(
+  const available = layout.effectEnvironments.filter(
     (
       candidate,
     ): candidate is Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
-      candidate._tag === 'EffectEnvironment' &&
-      (Instances.effectIdentity(candidate.instance, candidate.site) === identity ||
-        candidate.successEffectIdentity === identity),
+      candidate._tag === 'EffectEnvironment',
   )
+  const environment =
+    available.find(
+      (candidate) => Instances.effectIdentity(candidate.instance, candidate.site) === identity,
+    ) ?? available.find((candidate) => candidate.successEffectIdentity === identity)
   return environment === undefined
     ? undefined
     : Object.freeze({
@@ -613,6 +615,7 @@ const storedEffectValueType = (
   type: Type.Type,
 ): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
   if (!Type.isRepresented(type) || !Type.isEffect(type.contract)) return undefined
+  if (Type.isOpaqueRepresentationArgument(type.representation.argument)) return undefined
   const entry = Layout.entry(layout, type)
   const representation = entry?.representation
   if (entry === undefined || representation?._tag !== 'StoredEffectEnvironment') return undefined
@@ -3684,19 +3687,25 @@ const concreteCleanup = (
   seen = new Set<string>(),
 ): Ownership.CleanupPlan => {
   const specialized = Type.substitute(type, fn.substitution)
-  if (Type.isRepresented(specialized)) {
-    const representation = Layout.entry(fn.layout, specialized)?.representation
-    if (representation?._tag === 'CallableEnvironment')
-      return Ownership.realizedCallableCleanup(fn.index, representation.realization)
-    if (representation?._tag === 'StoredEffectEnvironment') {
-      const effectValue = storedEffectValueType(fn.layout, specialized)
-      if (effectValue !== undefined) return effectLocalCleanup(fn, effectValue, new Set())
-    }
+  const resolveRepresented = (candidate: Type.Type): Ownership.CleanupPlan | undefined => {
+    const concrete = Type.substitute(candidate, fn.substitution)
+    if (!Type.isRepresented(concrete)) return undefined
+    const value =
+      storedCallableValueType(fn.layout, concrete) ??
+      storedEffectValueType(fn.layout, concrete) ??
+      representedValueType(fn.layout, fn.opaqueRealizations, concrete, new Map())
+    return value?._tag === 'CallableValue'
+      ? callableLocalCleanup(fn, value)
+      : value?._tag === 'EffectValue'
+        ? effectLocalCleanup(fn, value, new Set())
+        : undefined
   }
+  const realized = resolveRepresented(specialized)
+  if (realized !== undefined) return realized
   return Ownership.specializeCleanup(
     Ownership.cleanupPlan(fn.index, specialized, seen),
     new Map(),
-    (nested) => concreteCleanup(fn, nested, seen),
+    (nested) => resolveRepresented(nested) ?? Ownership.cleanupPlan(fn.index, nested, seen),
   )
 }
 
