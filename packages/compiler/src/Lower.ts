@@ -172,6 +172,7 @@ class FunctionLowering {
     const specialized = Type.substitute(type, this.substitution)
     return (
       storedCallableValueType(this.layout, specialized) ??
+      storedEffectValueType(this.layout, specialized) ??
       representedValueType(this.layout, this.opaqueRealizations, type, this.substitution) ??
       mirType(specialized)
     )
@@ -606,6 +607,39 @@ const storedCallableValueType = (
   })
 }
 
+const storedEffectValueType = (
+  layout: Layout.Plan,
+  type: Type.Type,
+): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
+  if (!Type.isRepresented(type) || !Type.isEffect(type.contract)) return undefined
+  const entry = Layout.entry(layout, type)
+  const representation = entry?.representation
+  if (entry === undefined || representation?._tag !== 'StoredEffectEnvironment') return undefined
+  const realization = representation.realization
+  const environment: Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =
+    Object.freeze({
+      _tag: 'EffectEnvironment',
+      instance: realization.runnerInstance,
+      site: realization.site,
+      effect: realization.contract,
+      fields: representation.fields,
+      size: entry.size,
+      alignment: entry.alignment,
+      tailPadding: representation.tailPadding,
+    })
+  return Object.freeze({
+    _tag: 'EffectValue',
+    type: realization.contract,
+    site: realization.site,
+    environment,
+    storage: Object.freeze({
+      _tag: 'StoredEffectField',
+      type,
+      realization,
+    }),
+  })
+}
+
 const requirementsFor = (
   available: ReadonlyArray<ProvidedRequirement>,
   effect: Type.Effect,
@@ -784,8 +818,11 @@ const lowerRunEffectValue = (
       effect,
       runner:
         providedRunner ??
+        effectType.storage?.realization.runner ??
         Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site),
-      runnerTypeArguments: effectType.environment.instance.typeArguments,
+      runnerTypeArguments:
+        effectType.storage?.realization.runnerArguments ??
+        effectType.environment.instance.typeArguments,
       arguments: runtimeRequirementArguments(provided),
       outcomeType,
       ...(propagationType === undefined ? {} : { propagationType }),
@@ -889,7 +926,10 @@ const lowerPlace = (
       root: place.root,
       selectors: place.selectors,
       type,
-      ...(type._tag === 'CallableValue' && type.storage !== undefined && type.type.mode === 'Take'
+      ...((type._tag === 'CallableValue' &&
+        type.storage !== undefined &&
+        type.type.mode === 'Take') ||
+      (type._tag === 'EffectValue' && type.storage !== undefined && type.type.access === 'Take')
         ? { consume: true as const }
         : {}),
       provenance: Object.freeze({ span: expression.span, generated: false }),
@@ -1893,7 +1933,11 @@ function lowerExpressionInner(
         if (provided === undefined) return undefined
         const runner =
           provided.length === 0
-            ? Hir.effectRunnerId(protectedType.environment.instance.declaration, protectedType.site)
+            ? (protectedType.storage?.realization.runner ??
+              Hir.effectRunnerId(
+                protectedType.environment.instance.declaration,
+                protectedType.site,
+              ))
             : ensureProvidedRunner(fn, protectedType, provided)
         if (runner === undefined) return undefined
         const arguments_ = runtimeRequirementArguments(provided)
@@ -1963,7 +2007,9 @@ function lowerExpressionInner(
             outcome,
             effect: loweredProtected.result,
             runner,
-            runnerTypeArguments: protectedType.environment.instance.typeArguments,
+            runnerTypeArguments:
+              protectedType.storage?.realization.runnerArguments ??
+              protectedType.environment.instance.typeArguments,
             arguments: arguments_,
             outcomeType,
             resultType,
@@ -2055,11 +2101,14 @@ function lowerExpressionInner(
             effect: loweredSubject.result,
             runner:
               providedRunner ??
+              effectValueType.storage?.realization.runner ??
               Hir.effectRunnerId(
                 effectValueType.environment.instance.declaration,
                 effectValueType.site,
               ),
-            runnerTypeArguments: effectValueType.environment.instance.typeArguments,
+            runnerTypeArguments:
+              effectValueType.storage?.realization.runnerArguments ??
+              effectValueType.environment.instance.typeArguments,
             arguments: runtimeRequirementArguments(provided),
             outcomeType,
             ...(propagationType === undefined ? {} : { propagationType }),
@@ -2634,7 +2683,8 @@ function lowerExpressionInner(
         const stored =
           declared === undefined
             ? undefined
-            : storedCallableValueType(fn.layout, declared.type)?.storage
+            : (storedCallableValueType(fn.layout, declared.type)?.storage ??
+              storedEffectValueType(fn.layout, declared.type)?.storage)
         return value === undefined
           ? []
           : [
@@ -3602,8 +3652,74 @@ const concreteCleanup = (
     const representation = Layout.entry(fn.layout, specialized)?.representation
     if (representation?._tag === 'CallableEnvironment')
       return Ownership.realizedCallableCleanup(fn.index, representation.realization)
+    if (representation?._tag === 'StoredEffectEnvironment') {
+      const effectValue = storedEffectValueType(fn.layout, specialized)
+      if (effectValue !== undefined) return effectLocalCleanup(fn, effectValue, new Set())
+    }
   }
   return Ownership.cleanupPlan(fn.index, specialized, seen)
+}
+
+function effectLocalCleanup(
+  fn: FunctionLowering,
+  effectValue: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>,
+  seen: ReadonlySet<string>,
+): Ownership.CleanupPlan {
+  const identity =
+    effectValue.storage?.realization.runnerIdentity ??
+    Instances.effectIdentity(effectValue.environment.instance, effectValue.site)
+  if (seen.has(identity)) return Object.freeze({ _tag: 'NoCleanup', type: effectValue.type })
+  const next = new Set(seen).add(identity)
+  let laneOffset = 0
+  const slots = effectValue.environment.fields
+    .flatMap((field, ordinal) => {
+      const nested =
+        field.effectIdentity === undefined
+          ? undefined
+          : effectValueByIdentity(fn.layout, field.effectIdentity)
+      const callable =
+        field.callableIdentity === undefined || !Type.isCallable(field.type)
+          ? undefined
+          : callableValueByIdentity(fn.layout, field.callableIdentity, field.type)
+      const laneCount =
+        field.representation === 'Borrow'
+          ? 1
+          : callable === undefined
+            ? nested === undefined
+              ? (Layout.callingShape(fn.layout, field.type)?.laneCount ?? 0)
+              : Layout.effectEnvironmentLanes(fn.layout, nested.environment).length
+            : callable.environment === undefined
+              ? 0
+              : Layout.callableEnvironmentLanes(fn.layout, callable.environment).length
+      const currentOffset = laneOffset
+      laneOffset += laneCount
+      if (field.representation === 'Borrow') return []
+      const fieldCleanup =
+        callable === undefined
+          ? nested === undefined
+            ? concreteCleanup(fn, field.type)
+            : effectLocalCleanup(fn, nested, next)
+          : callableLocalCleanup(fn, callable)
+      return fieldCleanup._tag === 'NoCleanup'
+        ? []
+        : [
+            Object.freeze({
+              ordinal: effectValue.storage?.realization.environment.at(ordinal)?.ordinal ?? ordinal,
+              laneOffset: currentOffset,
+              laneCount,
+              cleanup: fieldCleanup,
+            }),
+          ]
+    })
+    .reverse()
+  return slots.length === 0
+    ? Object.freeze({ _tag: 'NoCleanup', type: effectValue.type })
+    : Object.freeze({
+        _tag: 'EffectCleanup',
+        type: effectValue.type,
+        site: effectValue.site,
+        slots: Object.freeze(slots),
+      })
 }
 
 const specializedCleanup = (
@@ -3619,65 +3735,7 @@ const cleanupForLocal = (
 ): Ownership.CleanupPlan => {
   const specialized = specializedCleanup(fn, cleanup)
   if (localType._tag === 'EffectValue') {
-    const cleanupForEnvironment = (
-      effectValue: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>,
-      seen: ReadonlySet<string>,
-    ): Ownership.CleanupPlan => {
-      const identity = Instances.effectIdentity(effectValue.environment.instance, effectValue.site)
-      if (seen.has(identity)) return Object.freeze({ _tag: 'NoCleanup', type: effectValue.type })
-      const next = new Set(seen).add(identity)
-      let laneOffset = 0
-      const slots = effectValue.environment.fields
-        .flatMap((field, ordinal) => {
-          const nested =
-            field.effectIdentity === undefined
-              ? undefined
-              : effectValueByIdentity(fn.layout, field.effectIdentity)
-          const callable =
-            field.callableIdentity === undefined || !Type.isCallable(field.type)
-              ? undefined
-              : callableValueByIdentity(fn.layout, field.callableIdentity, field.type)
-          const laneCount =
-            field.representation === 'Borrow'
-              ? 1
-              : callable === undefined
-                ? nested === undefined
-                  ? (Layout.callingShape(fn.layout, field.type)?.laneCount ?? 0)
-                  : Layout.effectEnvironmentLanes(fn.layout, nested.environment).length
-                : callable.environment === undefined
-                  ? 0
-                  : Layout.callableEnvironmentLanes(fn.layout, callable.environment).length
-          const currentOffset = laneOffset
-          laneOffset += laneCount
-          if (field.representation === 'Borrow') return []
-          const fieldCleanup =
-            callable === undefined
-              ? nested === undefined
-                ? concreteCleanup(fn, field.type)
-                : cleanupForEnvironment(nested, next)
-              : callableLocalCleanup(fn, callable)
-          return fieldCleanup._tag === 'NoCleanup'
-            ? []
-            : [
-                Object.freeze({
-                  ordinal,
-                  laneOffset: currentOffset,
-                  laneCount,
-                  cleanup: fieldCleanup,
-                }),
-              ]
-        })
-        .reverse()
-      return slots.length === 0
-        ? Object.freeze({ _tag: 'NoCleanup', type: effectValue.type })
-        : Object.freeze({
-            _tag: 'EffectCleanup',
-            type: effectValue.type,
-            site: effectValue.site,
-            slots: Object.freeze(slots),
-          })
-    }
-    return cleanupForEnvironment(localType, new Set())
+    return effectLocalCleanup(fn, localType, new Set())
   }
   if (localType._tag !== 'CallableValue') {
     return specialized
@@ -4716,6 +4774,8 @@ const lowerInstance = (
             return callable === undefined ? [] : [callable]
           }
           const lowered =
+            storedCallableValueType(layout, specialized) ??
+            storedEffectValueType(layout, specialized) ??
             representedValueType(layout, opaqueRealizations, type, instance.substitution) ??
             mirType(type, instance.substitution)
           return lowered === undefined ? [] : [lowered]
@@ -4747,12 +4807,21 @@ const lowerInstance = (
     specializedEffectResult ??
     hiddenEffectResult ??
     (contract._tag === 'Contract'
-      ? (representedValueType(
+      ? (storedCallableValueType(
+          layout,
+          Type.substitute(effectOutcome ?? contract.result, instance.substitution),
+        ) ??
+        storedEffectValueType(
+          layout,
+          Type.substitute(effectOutcome ?? contract.result, instance.substitution),
+        ) ??
+        representedValueType(
           layout,
           opaqueRealizations,
           effectOutcome ?? contract.result,
           instance.substitution,
-        ) ?? mirType(effectOutcome ?? contract.result, instance.substitution))
+        ) ??
+        mirType(effectOutcome ?? contract.result, instance.substitution))
       : i32)
   if (resultType === undefined) {
     return trapFunction(instance, 'unavailable contract type', bodySpan(fn))

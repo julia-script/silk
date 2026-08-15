@@ -61,9 +61,11 @@ pub fn main() -> i32 {
           : undefined
 
       assert.strictEqual(construction?._tag, 'Construct')
+      const constructionStorage =
+        construction?._tag === 'Construct' ? construction.fields.at(0)?.stored : undefined
       assert.strictEqual(
-        construction?._tag === 'Construct'
-          ? construction.fields.at(0)?.stored?.realization.target._tag
+        constructionStorage?._tag === 'StoredCallableField'
+          ? constructionStorage.realization.target._tag
           : undefined,
         'Declaration',
       )

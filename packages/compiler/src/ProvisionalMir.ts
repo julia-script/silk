@@ -1,3 +1,4 @@
+import type * as CallableFieldRealization from './CallableFieldRealization.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -298,6 +299,17 @@ interface BuildContext {
   readonly bindings: ReadonlyMap<number, Hir.Expression>
 }
 
+const storedEffectRealizationOf = (
+  expression: Hir.Expression,
+  context: BuildContext,
+): CallableFieldRealization.EffectRealization | undefined => {
+  if (expression._tag !== 'Project') return undefined
+  const represented = Type.substitute(expression.type, context.instance.substitution)
+  const planned = Layout.entry(context.layout, represented)?.representation
+  if (planned?._tag === 'StoredEffectEnvironment') return planned.realization
+  return undefined
+}
+
 const effectIdentityOf = (
   expression: Hir.Expression,
   context: BuildContext,
@@ -311,6 +323,18 @@ const effectIdentityOf = (
   if (expression._tag === 'EffectBindRequirement')
     return effectIdentityOf(expression.protected, context)
   if (expression._tag === 'EffectResult') return effectIdentityOf(expression.protected, context)
+  if (expression._tag === 'Project') {
+    const realization = storedEffectRealizationOf(expression, context)
+    const represented = Type.substitute(expression.type, context.instance.substitution)
+    const retainedIdentity =
+      Type.isRepresented(represented) &&
+      Type.isEffect(represented.contract) &&
+      Type.isExactRepresentationArgument(represented.representation.argument) &&
+      Type.isEffectIdentityArgument(represented.representation.argument.identity)
+        ? represented.representation.argument.identity.identity
+        : undefined
+    return realization?.runnerIdentity ?? retainedIdentity
+  }
   if (expression._tag === 'EffectBlock')
     return Instances.effectIdentity(context.instance.key, expression.site)
   if (expression._tag === 'ParameterReference')
@@ -365,6 +389,7 @@ const providersOf = (
 }
 
 const runnerOf = (expression: Hir.Expression, context: BuildContext): Runner => {
+  const stored = storedEffectRealizationOf(expression, context)
   const identity = effectIdentityOf(expression, context)
   const environment = context.layout.effectEnvironments.find(
     (candidate) =>
@@ -376,7 +401,9 @@ const runnerOf = (expression: Hir.Expression, context: BuildContext): Runner => 
     'type' in expression
       ? Type.substitute(expression.type, context.instance.substitution)
       : Type.effect('never', [])
-  const effect = Type.isEffect(expressionType) ? expressionType : Type.effect(expressionType, [])
+  const effect =
+    stored?.contract ??
+    (Type.isEffect(expressionType) ? expressionType : Type.effect(expressionType, []))
   const providers = providersOf(expression, context)
   if (environment?._tag !== 'EffectEnvironment' || identity === undefined) {
     return Object.freeze({
@@ -393,10 +420,11 @@ const runnerOf = (expression: Hir.Expression, context: BuildContext): Runner => 
   }
   const baseExecution: ExecutionKey = Object.freeze({
     _tag: 'EffectRunnerExecution',
-    owner: environment.instance,
-    site: environment.site,
+    owner: stored?.runnerInstance ?? environment.instance,
+    site: stored?.site ?? environment.site,
     identity,
-    runner: Hir.effectRunnerId(environment.instance.declaration, environment.site),
+    runner:
+      stored?.runner ?? Hir.effectRunnerId(environment.instance.declaration, environment.site),
   })
   const providedIdentity =
     providers.length === 0
@@ -414,7 +442,12 @@ const runnerOf = (expression: Hir.Expression, context: BuildContext): Runner => 
           runner: baseExecution.runner,
           providers,
         })
-  const baseClassification = classificationOfEffect(context.discovery, identity)
+  const baseClassification =
+    stored === undefined
+      ? classificationOfEffect(context.discovery, identity)
+      : stored.suspendable
+        ? 'Suspendable'
+        : 'Synchronous'
   const providedClassification = (): Classification => {
     if (providedIdentity === undefined || baseClassification === 'Suspendable')
       return baseClassification
@@ -462,11 +495,11 @@ const runnerOf = (expression: Hir.Expression, context: BuildContext): Runner => 
     execution,
     classification: providedClassification(),
     declaration: execution.runner,
-    instance: environment.instance,
+    instance: stored?.runnerInstance ?? environment.instance,
     effectIdentity: identity,
     ...(providedIdentity === undefined ? {} : { providedIdentity }),
-    typeArguments: environment.instance.typeArguments,
-    outcome: environment.effect,
+    typeArguments: stored?.runnerArguments ?? environment.instance.typeArguments,
+    outcome: stored?.contract ?? environment.effect,
     captures: Object.freeze(
       environment.fields.map((field, ordinal) =>
         Object.freeze({
@@ -608,17 +641,22 @@ const controlsOf = (
           )
         }
       } else {
-        // The concrete fixed point proves that no call or run in this execution can transfer.
-        // Unknown local origin recovery must not manufacture suspension control in that case.
-        if (executionClassification === 'Synchronous' && !maySpecializeProviders) {
-          for (const child of Hir.expressionChildren(expression)) visit(child)
-          return
-        }
         const protected_ =
           expression.subject._tag === 'EffectResult'
             ? expression.subject.protected
             : expression.subject
         const runner = runnerOf(protected_, context)
+        // The concrete fixed point proves that no call or run in this execution can transfer.
+        // Stored Effects add their realization's suspendability dependency after the ordinary
+        // execution fixed point, so that exact runner may still require relay control here.
+        if (
+          executionClassification === 'Synchronous' &&
+          !maySpecializeProviders &&
+          runner.classification === 'Synchronous'
+        ) {
+          for (const child of Hir.expressionChildren(expression)) visit(child)
+          return
+        }
         if (runner.classification !== 'Synchronous') {
           const policy =
             expression.subject._tag === 'EffectResult'
@@ -672,6 +710,16 @@ const controlsOf = (
   return Object.freeze(regions)
 }
 
+const classificationWithRegions = (
+  base: Classification,
+  regions: ReadonlyArray<Region>,
+): Classification =>
+  regions.reduce<Classification>((classification, region) => {
+    if (region.outcome._tag !== 'RunSuspendableEffect') return classification
+    if (region.outcome.runner.classification === 'Suspendable') return 'Suspendable'
+    return classification === 'Synchronous' ? 'Unknown' : classification
+  }, base)
+
 /** Builds deterministic provisional control without producing executable final MIR. */
 export const build = (
   discovery: Instances.Discovery,
@@ -699,17 +747,18 @@ export const build = (
     )
       ? 'Suspendable'
       : 'Synchronous'
+    const instanceRegions = controlsOf(
+      instance.function.statements,
+      instanceKey,
+      instanceClassification,
+      context,
+    )
     executions.push(
       Object.freeze({
         _tag: 'ProvisionalExecution',
         key: instanceKey,
-        classification: instanceClassification,
-        regions: controlsOf(
-          instance.function.statements,
-          instanceKey,
-          instanceClassification,
-          context,
-        ),
+        classification: classificationWithRegions(instanceClassification, instanceRegions),
+        regions: instanceRegions,
       }),
     )
     for (const expression of instance.function.statements
@@ -730,11 +779,7 @@ export const build = (
         bindings: new Map([...context.bindings, ...bindingsOfStatements(expression.statements)]),
       }
       const regions = controlsOf(expression.statements, key, runnerClassification, runnerContext)
-      const specializedClassification = regions.reduce<Classification>((classification, region) => {
-        if (region.outcome._tag !== 'RunSuspendableEffect') return classification
-        if (region.outcome.runner.classification === 'Suspendable') return 'Suspendable'
-        return classification === 'Synchronous' ? 'Unknown' : classification
-      }, runnerClassification)
+      const specializedClassification = classificationWithRegions(runnerClassification, regions)
       executions.push(
         Object.freeze({
           _tag: 'ProvisionalExecution',

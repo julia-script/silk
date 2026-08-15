@@ -394,7 +394,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('leaves a stored Effect representation without a callable obligation', () =>
+it.effect('records a distinct symbolic cleanup obligation for a stored Effect', () =>
   Effect.gen(function* () {
     const module = 'stored-callable-cleanup/effect'
     const snapshot = yield* realized(
@@ -407,7 +407,6 @@ pub fn main() -> i32 {
     )
     const stored = fieldCleanup(bindingCleanup(snapshot, module, 'deferred'), 0)
 
-    // Stored Effect storage is a separate change's obligation and stays exactly as it was.
-    assert.strictEqual(stored._tag, 'NoCleanup')
+    assert.strictEqual(stored._tag, 'RepresentedEffectCleanup')
   }),
 )

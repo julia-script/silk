@@ -178,6 +178,12 @@ export type CleanupPlan =
       readonly contract: Type.Callable
     }
   | {
+      /** The complete stored Effect environment is selected only after instance layout. */
+      readonly _tag: 'RepresentedEffectCleanup'
+      readonly type: Type.Represented
+      readonly contract: Type.Effect
+    }
+  | {
       readonly _tag: 'EffectCleanup'
       readonly type: Type.Effect
       readonly site: Hir.EffectSiteId
@@ -892,11 +898,7 @@ const checkExpression = (
       if (stored !== undefined) state.diagnostics.push(stored)
       const storedContract = storedEffectContract(expression.subject)
       const rootSite = placeSite(expression.subject)
-      if (
-        storedContract?.access === 'Take' &&
-        stored === undefined &&
-        rootSite !== undefined
-      ) {
+      if (storedContract?.access === 'Take' && stored === undefined && rootSite !== undefined) {
         // A stored consuming Effect owns its environment through the aggregate. Running it moves
         // the complete root in one use, including through nested field projections; the Effect
         // field is never extracted as an independently owned value.
@@ -1833,10 +1835,10 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
             'Read',
             initializerType._tag === 'Available' && Type.isEffect(initializerType.type)
               ? (runEnds.get(statement.binding.id.ordinal) ??
-                callableEnds.get(statement.binding.id.ordinal) ?? {
-                  region: statement.region,
-                  span: fn.declaration.syntax.span,
-                })
+                  callableEnds.get(statement.binding.id.ordinal) ?? {
+                    region: statement.region,
+                    span: fn.declaration.syntax.span,
+                  })
               : // A binding that stores an executable holds its captured borrows for as long as it
                 // holds that environment, whether it is the binding's own value or sits in a field
                 // of the aggregate it names.
@@ -1993,12 +1995,14 @@ export const cleanupPlan = (
     })
   }
   if (Type.isCallable(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  // A stored callable representation owes its enclosing aggregate an exactly-once release of every
-  // owned capture lane. A stored Effect representation is issue #190's obligation, not this one.
+  // A stored executable representation owes its enclosing aggregate an exactly-once release of
+  // every owned environment lane. Concrete specialization resolves the shared realization.
   if (Type.isRepresented(type))
     return Type.isCallable(type.contract)
       ? Object.freeze({ _tag: 'RepresentedCallableCleanup', type, contract: type.contract })
-      : Object.freeze({ _tag: 'NoCleanup', type })
+      : Type.isEffect(type.contract)
+        ? Object.freeze({ _tag: 'RepresentedEffectCleanup', type, contract: type.contract })
+        : Object.freeze({ _tag: 'NoCleanup', type })
   const key = Type.key(type)
   if (seen.has(key)) return Object.freeze({ _tag: 'NoCleanup', type })
   const declaration = DeclarationIndex.byCanonical(index, {
@@ -2213,6 +2217,14 @@ export const specializeCleanup = (
             type,
             contract: type.contract,
           })
+        : resolved
+    }
+    case 'RepresentedEffectCleanup': {
+      if (!Type.isRepresented(type) || !Type.isEffect(type.contract))
+        return Object.freeze({ _tag: 'NoCleanup', type })
+      const resolved = resolveConcrete?.(type)
+      return resolved === undefined
+        ? Object.freeze({ _tag: 'RepresentedEffectCleanup', type, contract: type.contract })
         : resolved
     }
   }
@@ -2869,6 +2881,9 @@ const cleanupText = (cleanup: CleanupPlan): string => {
   }
   if (cleanup._tag === 'RepresentedCallableCleanup') {
     return `represented-callable:${Type.encode(cleanup.contract)}`
+  }
+  if (cleanup._tag === 'RepresentedEffectCleanup') {
+    return `represented-effect:${Type.encode(cleanup.contract)}`
   }
   if (cleanup._tag === 'HookCleanup') {
     return `hook:${Type.encode(cleanup.type)} target=${cleanup.hook.module}.${cleanup.hook.name}${
