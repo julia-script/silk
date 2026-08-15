@@ -1,5 +1,15 @@
 struct Problem {}
 
 interface Broken<S, !E> {
-  effect fn decode(self: &S, encoded: Missing) -> Missing ! E ? &MissingRow
+  effect fn decode(
+    self: &S,
+    encoded: Missing,
+    shared: &[u8],
+    exclusive: &mut [u8],
+    damaged: &mut Missing,
+  ) -> Missing ! E ? &MissingRow
+}
+
+fn broken<T: Broken<T ! Problem>>(value: T) -> T {
+  return move value
 }

@@ -107,6 +107,30 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
       return record('AppliedType', [
         declaredType(value.target),
         array(value.arguments.map(declaredType)),
+        optional(
+          value.failureRow === undefined
+            ? undefined
+            : record('FailureRowArgument', [
+                array(value.failureRow.failures.map(declaredType)),
+                array(value.failureRow.parameters.map(type)),
+              ]),
+        ),
+        optional(
+          value.requirementRow === undefined
+            ? undefined
+            : record('RequirementRowArgument', [
+                array(
+                  value.requirementRow.requirements.map((requirement) =>
+                    record('Requirement', [
+                      declaredType(requirement.capability),
+                      requirement.role,
+                      requirement.access,
+                    ]),
+                  ),
+                ),
+                array(value.requirementRow.parameters.map(type)),
+              ]),
+        ),
         boolean(value.cause !== undefined),
       ])
     case 'Effect':

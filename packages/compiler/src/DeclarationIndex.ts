@@ -583,8 +583,10 @@ export interface InterfaceFact {
 }
 
 const interfaceOperandAccess = (type: DeclaredTypeFact): InterfaceOperandAccess => {
+  if (type._tag === 'Reference' || type._tag === 'Slice') return type.access
   if (type._tag !== 'Resolved') return 'Unavailable'
-  return Type.isReference(type.type) ? type.type.access : 'Take'
+  if (Type.isReference(type.type) || Type.isSlice(type.type)) return type.type.access
+  return 'Take'
 }
 
 const interfaceReceiverAccess = (
@@ -703,8 +705,22 @@ const applyInterfaceOperation = (
   source: InterfaceOperationContractFact,
   capability: Type.Nominal,
   provider: Type.Type,
-  substitution: Type.Substitution,
+  substitution: Type.Substitution | undefined,
 ): InterfaceOperationApplicationFact => {
+  if (substitution === undefined)
+    return Object.freeze({
+      _tag: 'InterfaceOperationApplication',
+      declaration: source.declaration,
+      capability,
+      provider,
+      source,
+      functionKind: source.functionKind,
+      operands: source.operands,
+      success: source.success,
+      failureRow: source.failureRow,
+      requirementRow: source.requirementRow,
+      receiverAccess: source.receiverAccess,
+    })
   const operands = Object.freeze(
     source.operands.map((operand): InterfaceOperandFact => {
       const type = substituteDeclaredTypeFact(operand.type, substitution)
@@ -745,6 +761,13 @@ const applyInterfaceOperation = (
   })
 }
 
+const interfaceOperationAvailable = (operation: InterfaceOperationApplicationFact): boolean =>
+  operation.operands.every((operand) => operand.type._tag === 'Resolved') &&
+  operation.success._tag === 'Resolved' &&
+  operation.failureRow.available &&
+  operation.requirementRow.available &&
+  operation.receiverAccess !== 'Unavailable'
+
 const interfaceApplication = (
   declaration: InterfaceFact,
   capability: Type.Nominal,
@@ -760,11 +783,17 @@ const interfaceApplication = (
     declaration.typeParameters.map((parameter) => parameter.type),
     capability.arguments,
   )
-  const available = providerMatches && substitution !== undefined
   const sourceContracts =
     declaration.operationContracts.length === declaration.operations.length
       ? declaration.operationContracts
       : interfaceOperationContracts(declaration.typeParameters, declaration.operations)
+  const operations = Object.freeze(
+    sourceContracts.map((operation) =>
+      applyInterfaceOperation(operation, capability, provider, substitution),
+    ),
+  )
+  const available =
+    providerMatches && substitution !== undefined && operations.every(interfaceOperationAvailable)
   return Object.freeze({
     _tag: 'InterfaceApplication',
     declaration: declaration.canonical.id,
@@ -772,14 +801,7 @@ const interfaceApplication = (
     provider,
     providerMatches,
     visibility: declaration.visibility,
-    operations:
-      available && substitution !== undefined
-        ? Object.freeze(
-            sourceContracts.map((operation) =>
-              applyInterfaceOperation(operation, capability, provider, substitution),
-            ),
-          )
-        : Object.freeze([]),
+    operations,
     available,
   })
 }

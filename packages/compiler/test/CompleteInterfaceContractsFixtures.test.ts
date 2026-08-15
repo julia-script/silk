@@ -117,6 +117,14 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       assert.strictEqual(matching.application.available, true)
       assert.strictEqual(mismatched.application.providerMatches, false)
       assert.strictEqual(mismatched.application.available, false)
+      assert.strictEqual(mismatched.application.operations.length, 1)
+      const mismatchedOperation = mismatched.application.operations.at(0)
+      assert.strictEqual(
+        mismatchedOperation?.declaration.name._tag === 'Present'
+          ? mismatchedOperation.declaration.name.spelling
+          : undefined,
+        'decode',
+      )
       assert.isTrue(
         Analysis.diagnostics(snapshot).some((diagnostic) =>
           diagnostic.message.includes('Decoder must be applied to its own provider'),
@@ -155,13 +163,28 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       const declaration = namedInterface(Analysis.declarationIndex(snapshot), 'Broken')
       const contract = declaration?.operationContracts.at(0)
       assert.strictEqual(declaration?.operationContracts.length, 1)
-      assert.deepEqual(contract?.operands.map(encodedOperand), ['&S', 'Unresolved'])
+      assert.deepEqual(contract?.operands.map(encodedOperand), [
+        '&S',
+        'Unresolved',
+        '&[u8]',
+        '&mut [u8]',
+        'Reference',
+      ])
       assert.deepEqual(
         contract?.operands.map((operand) => operand.access),
-        ['Shared', 'Unavailable'],
+        ['Shared', 'Unavailable', 'Shared', 'Exclusive', 'Exclusive'],
       )
       assert.strictEqual(contract?.success._tag, 'Unresolved')
       assert.strictEqual(contract?.requirementRow.available, false)
+      const bound = namedDeclaration(
+        Analysis.declarationIndex(snapshot),
+        'broken',
+      )?.typeParameters.at(0)?.bound
+      assert.strictEqual(bound?._tag, 'ResolvedBound')
+      if (bound?._tag !== 'ResolvedBound') return
+      assert.strictEqual(bound.application.available, false)
+      assert.strictEqual(bound.application.operations.length, 1)
+      assert.strictEqual(bound.application.operations.at(0)?.success._tag, 'Unresolved')
     }),
   )
 
@@ -195,8 +218,19 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       const index = Analysis.declarationIndex(snapshot)
       const conformance = index.modules.flatMap((module) => module.conformances).at(0)
       const witness = namedDeclaration(index, 'render')
-      assert.strictEqual(conformance?.typeParameters.at(0)?.type.kind, 'CallableRepresentation')
-      assert.strictEqual(witness?.typeParameters.at(0)?.type.kind, 'CallableRepresentation')
+      assert.strictEqual(conformance?.requirements.length, 1)
+      assert.strictEqual(
+        conformance?.typeParameters.find(
+          (parameter) => parameter.type.kind === 'CallableRepresentation',
+        )?.type.kind,
+        'CallableRepresentation',
+      )
+      assert.strictEqual(
+        witness?.typeParameters.find(
+          (parameter) => parameter.type.kind === 'CallableRepresentation',
+        )?.type.kind,
+        'CallableRepresentation',
+      )
       assert.strictEqual(conformance?.operations.at(0)?.contract?.receiverAccess, 'Take')
       assert.strictEqual(conformance?.validity._tag, 'ValidConformance')
     }),
