@@ -164,8 +164,9 @@ pub fn main() -> i32 {
     const facts =
       snapshot.ownership.get(module) ?? unreachable('expected ownership for the moved module')
     const main =
-      facts.functions.find((fn) => fn.declaration.name.spelling === 'main') ??
-      unreachable('expected the entry function')
+      facts.functions.find(
+        (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'main',
+      ) ?? unreachable('expected the entry function')
     const holder =
       main.bindings.find((binding) => binding.name === 'holder') ??
       unreachable('expected the holder binding')
@@ -194,8 +195,9 @@ it.effect('releases an uncalled stored callable once at scope exit', () =>
     )
     const facts = snapshot.ownership.get(module) ?? unreachable('expected ownership facts')
     const main =
-      facts.functions.find((fn) => fn.declaration.name.spelling === 'main') ??
-      unreachable('expected the entry function')
+      facts.functions.find(
+        (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'main',
+      ) ?? unreachable('expected the entry function')
     const releases = main.exits.flatMap((exit) =>
       exit.releases.filter((release) => release.binding.name === 'holder'),
     )
@@ -228,8 +230,9 @@ pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
     )
     const facts = snapshot.ownership.get(module) ?? unreachable('expected ownership facts')
     const build =
-      facts.functions.find((fn) => fn.declaration.name.spelling === 'build') ??
-      unreachable('expected the fallible function')
+      facts.functions.find(
+        (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'build',
+      ) ?? unreachable('expected the fallible function')
     const propagation = build.exits.filter((exit) => exit.kind === 'Propagation')
 
     // The stranded aggregate is released on the failure path, not only on the success path.
