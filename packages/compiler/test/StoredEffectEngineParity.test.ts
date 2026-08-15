@@ -141,8 +141,22 @@ const storedRealization = (module: Mir.Module, label: string) => {
     : unreachable(`expected one ${label} realization (${realizations.length} found)`)
 }
 
-/** Mirrors the LLVM symbol sanitizer so IR assertions name the emitted runner, not the MIR spelling. */
-const sanitize = (name: string): string => name.replace(/[^A-Za-z0-9_]/g, '_')
+/**
+ * The exact symbol the LLVM backend emits for one runner.
+ *
+ * Asserting the full mangled symbol — rather than a sanitized name fragment — pins the runner's
+ * concrete instance key too, so a correct spelling paired with the wrong specialization fails.
+ */
+const emittedSymbol = (module: Mir.Module, runner: { module: string; name: string }): string => {
+  const candidates = module.functions.filter((candidate) => candidate.id.module === runner.module)
+  // Provider specialization renames a runner in place (`f$effect$-1` -> `f$effect$-1$provided$N`),
+  // so accept the exact runner or its single specialization, and nothing else.
+  const fn =
+    candidates.find((candidate) => candidate.id.name === runner.name) ??
+    candidates.find((candidate) => candidate.id.name.startsWith(`${runner.name}$provided$`)) ??
+    unreachable(`expected an emitted function for ${runner.module}.${runner.name}`)
+  return Backend.symbolFor(fn, Mir.machineEntry(module))
+}
 
 const dropCalls = (outcome: BootstrapEvaluation.Outcome): number =>
   outcome._tag === 'Completed'
@@ -249,7 +263,11 @@ it.effect(
         if (llvm._tag !== 'LlvmBitcodeArtifact') return
         assert.include(llvm.ir, 'define i32 @silk_main', testCase.name)
         // The same static runner the evaluator called is the one LLVM emitted.
-        assert.include(llvm.ir, sanitize(nativeRunner.realization.runner.name), testCase.name)
+        assert.include(
+          llvm.ir,
+          emittedSymbol(nativeLowering.module, nativeRunner.realization.runner),
+          testCase.name,
+        )
         assert.deepEqual(
           nativeRunner.realization.runner,
           realization.runner,
@@ -269,7 +287,11 @@ it.effect(
           if (specialized?._tag !== 'RunEffectValue') return
           assert.match(specialized.runner.name, /^count\$effect\$-1\$provided\$/)
           assert.lengthOf(specialized.providers, 1, testCase.name)
-          assert.include(llvm.ir, sanitize(specialized.runner.name), testCase.name)
+          assert.include(
+            llvm.ir,
+            emittedSymbol(nativeLowering.module, specialized.runner),
+            testCase.name,
+          )
         }
       }
     }),
@@ -392,7 +414,10 @@ it.effect('cleans unrun and failing stored Effect environments exactly once in e
       assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact', exit)
       if (llvm._tag !== 'LlvmBitcodeArtifact') return
       // The Drop hook that cleans the stored environment survives into native code.
-      assert.include(llvm.ir, sanitize('drop@impl'), exit)
+      const dropFn =
+        native.module.functions.find((candidate) => candidate.id.name.startsWith('drop@impl')) ??
+        unreachable(`expected an emitted Drop hook for ${exit}`)
+      assert.include(llvm.ir, Backend.symbolFor(dropFn, Mir.machineEntry(native.module)), exit)
 
       // `unrun` never reaches a run operation, so the realization is the only runner fact.
       const runner = storedRealization(module, exit).runner
@@ -468,7 +493,7 @@ it.effect('resumes a suspending stored Effect with matching cleanup in every eng
     assert.include(llvm.ir, 'define i32 @silk_main')
     assert.include(
       llvm.ir,
-      sanitize(storedRunner(native.module, 'suspending').realization.runner.name),
+      emittedSymbol(native.module, storedRunner(native.module, 'suspending').realization.runner),
     )
   }),
 )
