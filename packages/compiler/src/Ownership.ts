@@ -61,6 +61,7 @@ export interface LoanFact {
     | 'ValueBorrow'
     | 'EffectCapture'
     | 'CallableCapture'
+    | 'InterfaceOperand'
     | 'ReturnedView'
   readonly parent?: BindingSite
   readonly suspendsParent: boolean
@@ -838,10 +839,34 @@ const checkExpression = (
       }
       return
     }
-    case 'BuiltinCall':
+    case 'BuiltinCall': {
+      for (const [ordinal, argument] of expression.arguments.entries()) {
+        const operand = expression.interfaceOperation?.contract.operands.at(ordinal)
+        const type = operand?.type._tag === 'Resolved' ? operand.type.type : undefined
+        checkExpression(
+          state,
+          live,
+          argument,
+          type !== undefined && !Type.isReference(type) && !Type.isSlice(type),
+          guard,
+          escaping,
+        )
+      }
+      return
+    }
     case 'BoundOperationCall': {
-      for (const argument of expression.arguments)
-        checkExpression(state, live, argument, false, guard, escaping)
+      for (const [ordinal, argument] of expression.arguments.entries()) {
+        const operand = expression.contract.operands.at(ordinal)
+        const type = operand?.type._tag === 'Resolved' ? operand.type.type : undefined
+        checkExpression(
+          state,
+          live,
+          argument,
+          type !== undefined && !Type.isReference(type) && !Type.isSlice(type),
+          guard,
+          escaping,
+        )
+      }
       return
     }
     case 'Call': {
@@ -1517,7 +1542,69 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
           inspect(arm.result, region, active, access)
         }
         return
-      case 'Operator':
+      case 'Operator': {
+        const callActive: Array<LoanFact> = [...active]
+        for (const [ordinal, argument] of expression.arguments.entries()) {
+          const candidate = argument.expression
+          const operand = expression.interfaceOperation?.contract.operands.at(ordinal)
+          const operandType = operand?.type._tag === 'Resolved' ? operand.type.type : undefined
+          if (
+            operandType === undefined ||
+            (!Type.isReference(operandType) && !Type.isSlice(operandType))
+          ) {
+            inspect(candidate, region, callActive, naturalAccess(candidate))
+            continue
+          }
+          const direct = directSite(candidate)
+          if (direct === undefined) {
+            inspect(
+              candidate,
+              region,
+              callActive,
+              operandType.access === 'Exclusive' ? 'Write' : 'Read',
+            )
+            continue
+          }
+          const root =
+            direct.site._tag === 'Let'
+              ? (viewRoots.get(direct.site.binding.ordinal) ?? direct.site)
+              : direct.site
+          const conflict = callActive.find(
+            (loan) =>
+              sameSite(loan.root, root) &&
+              (loan.access === 'Exclusive' || operandType.access === 'Exclusive'),
+          )
+          if (conflict !== undefined)
+            diagnostics.push(
+              Diagnostic.conflictingSliceLoan(
+                conflict.access,
+                operandType.access,
+                conflict.startSpan,
+                candidate.syntax.span,
+              ),
+            )
+          const loan: LoanFact = Object.freeze({
+            _tag: 'Loan',
+            id: Object.freeze({
+              _tag: 'BorrowId',
+              function: fn.declaration.id,
+              callSpan: expression.syntax.span,
+              ordinal,
+            }),
+            root,
+            access: operandType.access,
+            origin: 'InterfaceOperand',
+            suspendsParent: false,
+            startRegion: region,
+            endRegion: region,
+            startSpan: candidate.syntax.span,
+            endSpan: expression.syntax.span,
+          })
+          loans.push(loan)
+          callActive.push(loan)
+        }
+        return
+      }
       case 'ShortCircuit':
         for (const argument of expression.arguments) {
           inspect(argument.expression, region, active, 'Read')

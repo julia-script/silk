@@ -768,3 +768,37 @@ pub fn main() -> i32 { return 0 }`,
     )
   }),
 )
+
+it.effect('infers operand binders before admitting a smaller generic witness row', () =>
+  Effect.gen(function* () {
+    const module = 'conditional-conformance/smaller-generic-row'
+    const snapshot = yield* analyze(
+      module,
+      `struct Problem {}
+struct Extra {}
+
+interface Decoder<T> {
+  effect fn decode(value: &T) -> i32 ! Problem | Extra
+}
+
+struct Box<A> { value: A }
+
+effect fn decodeBox<A>(value: &Box<A>) -> i32 ! Problem { return 42 }
+
+impl Decoder<Box<i32>> for Box<i32> { decode: Box.decodeBox }
+
+pub fn main() -> i32 { return 0 }`,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const provider = Type.nominal(module, 'Box', ['i32'])
+    const capability = Type.nominal(module, 'Decoder', [provider])
+    const target = DeclarationIndex.interfaceWitnessTarget(
+      Analysis.declarationIndex(snapshot),
+      provider,
+      capability,
+      'decode',
+    )
+    assert.strictEqual(target?.implementation.name, 'decodeBox')
+    assert.deepEqual(target?.typeArguments.map(Type.encodeGenericArgument), ['i32'])
+  }),
+)

@@ -32,7 +32,7 @@ const reported = (
  * told apart from one that was admitted and simply had nothing to prove.
  */
 const decoderBase = `interface Decoder<T> {
-  fn decode(value: T) -> i32
+  fn decode(value: &T) -> i32
 }
 
 struct Schema { tag: i32 }
@@ -44,7 +44,7 @@ impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
 struct MappedSchema<S> { source: S }
 
 fn mappedDecode<S: Decoder>(value: &MappedSchema<S>) -> i32 {
-  return Decoder.decode(value.source) + 1
+  return Decoder.decode(&value.source) + 1
 }
 `
 

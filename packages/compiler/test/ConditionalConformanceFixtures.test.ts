@@ -51,7 +51,7 @@ layer(NodeServices.layer)('conditional conformance fixtures', (it) => {
       assert.strictEqual(
         text,
         `interface Decoder<T> {
-  fn decode(value: T) -> i32
+  fn decode(value: &T) -> i32
 }
 
 struct Wrapper<S> {
@@ -59,7 +59,7 @@ struct Wrapper<S> {
 }
 
 fn wrapperDecode<S: Decoder>(value: &Wrapper<S>) -> i32 {
-  return Decoder.decode(value.source)
+  return Decoder.decode(&value.source)
 }
 
 impl<S: Decoder<S>> Decoder<Wrapper<S>> for Wrapper<S> {

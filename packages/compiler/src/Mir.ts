@@ -2071,11 +2071,16 @@ const placeType = (
   layout: Layout.Plan,
   root: LocalId,
   selectors: ReadonlyArray<PlaceSelector>,
+  dereferenceReference = false,
 ): DeclarationIndex.SemanticType | undefined => {
   const rootType = fn.localTypes.at(root.ordinal)
   let current = rootType === undefined ? undefined : semanticType(rootType)
   // A reference root reads and writes through the borrow, so the place is on its target.
-  if (current !== undefined && SilkType.isReference(current) && selectors.length > 0) {
+  if (
+    current !== undefined &&
+    SilkType.isReference(current) &&
+    (selectors.length > 0 || dereferenceReference)
+  ) {
     current = current.target
   }
   for (const selector of selectors) {
@@ -2515,17 +2520,20 @@ const loanViolations = (
           operation.sourceType._tag === 'FixedArray' || operation.sourceType._tag === 'Slice'
             ? operation.sourceType.type.element
             : undefined
+        const sourceReferenceTarget =
+          operation.sourceType._tag === 'Reference' ? operation.sourceType.type.target : undefined
         const parent = [...active.entries()].find(
           ([, loan]) => loan.operation.destination.ordinal === operation.root.ordinal,
         )
-        const reborrowValid =
-          operation.sourceType._tag === 'Slice'
-            ? operation.reborrow &&
-              operation.suspendsParent === (operation.sourceType.type.access === 'Exclusive')
-            : !operation.reborrow && !operation.suspendsParent
+        const reborrowSource =
+          operation.sourceType._tag === 'Slice' || operation.sourceType._tag === 'Reference'
+        const reborrowValid = reborrowSource
+          ? operation.reborrow &&
+            operation.suspendsParent === (operation.sourceType.type.access === 'Exclusive')
+          : !operation.reborrow && !operation.suspendsParent
         const parentValid =
           parent === undefined ||
-          (operation.sourceType._tag === 'Slice' &&
+          (reborrowSource &&
             parent[1].operation.access === operation.sourceType.type.access &&
             operation.suspendsParent === (parent[1].operation.access === 'Exclusive'))
         if (
@@ -2539,8 +2547,10 @@ const loanViolations = (
           borrowed.access !== operation.access ||
           (SilkType.isSlice(borrowed)
             ? sourceElement === undefined || !SilkType.equals(borrowed.element, sourceElement)
-            : !SilkType.equals(borrowed.target, sourceSemantic)) ||
-          (operation.sourceType._tag === 'Slice' &&
+            : sourceReferenceTarget === undefined
+              ? !SilkType.equals(borrowed.target, sourceSemantic)
+              : !SilkType.equals(borrowed.target, sourceReferenceTarget)) ||
+          (reborrowSource &&
             operation.sourceType.type.access === 'Shared' &&
             operation.access === 'Exclusive') ||
           !reborrowValid ||
@@ -4360,7 +4370,13 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           }
         }
         if (operation._tag === 'ReadPlace' || operation._tag === 'CheckPlace') {
-          const selected = placeType(fn, self.layout, operation.root, operation.selectors)
+          const selected = placeType(
+            fn,
+            self.layout,
+            operation.root,
+            operation.selectors,
+            operation._tag === 'ReadPlace',
+          )
           const sliceSelector = operation.selectors.find(
             (selector) => selector._tag === 'SliceElementSelector',
           )

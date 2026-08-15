@@ -167,9 +167,227 @@ fn cellCombine(left: Cell, right: Cell) -> i32 { return left.weight + right.weig
 
 impl Combined<Cell> for Cell { combine: Cell.cellCombine }
 
-fn combineOf<T: Combined>(left: T, right: T) -> i32 { return Combined.combine(left, right) }
+fn combineOf<T: Combined>(left: T, right: T) -> i32 {
+  return Combined.combine(move left, move right)
+}
 
 pub fn main() -> i32 { return combineOf<Cell>(Cell { weight: 20 }, Cell { weight: 22 }) }`,
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('requires explicit moves for operator-spelled value operands', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyzed(
+      'bound-operation-witness/operator-value-ownership',
+      `interface Combined<T> {
+  fn add(left: T, right: T) -> T
+}
+
+struct Token { code: i32 }
+
+fn tokenAdd(left: Token, right: Token) -> Token {
+  return Token { code: left.code + right.code }
+}
+
+impl Combined<Token> for Token { add: Token.tokenAdd }
+
+fn implicitTwice<T: Combined>(left: T, right: T) -> T {
+  let first = left + right
+  return left + right
+}
+
+pub fn main() -> i32 { return 0 }`,
+    )
+    assert.deepEqual(messages(snapshot), [
+      'Moving left requires an explicit move',
+      'Moving right requires an explicit move',
+      'Moving left requires an explicit move',
+      'Moving right requires an explicit move',
+    ])
+  }),
+)
+
+it.effect('weakens exclusive contract operands only at a selected source witness', () =>
+  Effect.gen(function* () {
+    const value = yield* evaluatedValue(
+      'bound-operation-witness/weaker-source-access',
+      `interface Observe<T> {
+  fn inspect(value: &mut T) -> i32
+}
+
+struct Cell { code: i32 }
+
+fn inspectCell(value: &Cell) -> i32 { return value.code }
+
+impl Observe<Cell> for Cell { inspect: Cell.inspectCell }
+
+fn inspectOf<T: Observe>(value: &mut T) -> i32 { return Observe.inspect(value) }
+
+pub fn main() -> i32 {
+  let mut cell = Cell { code: 42 }
+  return inspectOf<Cell>(&mut cell)
+}`,
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('weakens implicit operator borrows to a source witness demand', () =>
+  Effect.gen(function* () {
+    const value = yield* evaluatedValue(
+      'bound-operation-witness/weaker-operator-access',
+      `interface Combined<T> {
+  fn add(left: &mut T, right: &mut T) -> T
+}
+
+struct Cell { code: i32 }
+
+fn cellAdd(left: &Cell, right: &Cell) -> Cell {
+  return Cell { code: left.code + right.code }
+}
+
+impl Combined<Cell> for Cell { add: Cell.cellAdd }
+
+fn combine<T: Combined>(left: T, right: T) -> T { return left + right }
+
+pub fn main() -> i32 {
+  let out = combine<Cell>(Cell { code: 20 }, Cell { code: 22 })
+  return out.code
+}`,
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('unwraps an already-borrowed operand only for a sealed intrinsic witness', () =>
+  Effect.gen(function* () {
+    const value = yield* evaluatedValue(
+      'bound-operation-witness/preborrowed-intrinsic',
+      `interface Keyed<T> {
+  fn digest(left: &T, right: &T) -> T
+}
+
+impl Keyed<i32> for i32 { digest: Intrinsic.i32WrappingAdd }
+
+fn digestOf<T: Keyed>(left: &T, right: &T) -> T { return Keyed.digest(left, right) }
+
+pub fn main() -> i32 {
+  let left = 20
+  let right = 22
+  return digestOf<i32>(&left, &right)
+}`,
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('widens a pure source witness to the exact interface Effect contract', () =>
+  Effect.gen(function* () {
+    const value = yield* evaluatedValue(
+      'bound-operation-witness/pure-effect-boundary',
+      `import silk.result { Result, Success, Failure }
+
+pub struct Problem {}
+
+interface Decoder<T> {
+  effect fn decode(value: &T) -> i32 ! Problem
+}
+
+struct Cell { code: i32 }
+
+fn decodeCell(value: &Cell) -> i32 { return value.code }
+
+impl Decoder<Cell> for Cell { decode: Cell.decodeCell }
+
+fn pending<T: Decoder>(value: &T) -> Effect<i32 ! Problem> {
+  return Decoder.decode(value)
+}
+
+fn observe(result: Result<i32, Problem>) -> i32 {
+  return match move result {
+    Result<i32, Problem> { value: outcome } => match move outcome {
+      Success<i32> { value } => value
+      Failure<Problem> { error } => 0
+    }
+  }
+}
+
+pub fn main() -> i32 {
+  let cell = Cell { code: 42 }
+  return observe(run Effect.result(pending<Cell>(&cell)))
+}`,
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('widens a smaller Effect witness row at the interface boundary', () =>
+  Effect.gen(function* () {
+    const value = yield* evaluatedValue(
+      'bound-operation-witness/smaller-effect-row',
+      `import silk.result { Result, Success, Failure }
+
+pub struct Problem {}
+pub struct Extra {}
+
+interface Decoder<T> {
+  effect fn decode(value: &T) -> i32 ! Problem | Extra
+}
+
+struct Cell { code: i32 }
+
+effect fn decodeCell(value: &Cell) -> i32 ! Problem { return value.code }
+
+impl Decoder<Cell> for Cell { decode: Cell.decodeCell }
+
+fn pending<T: Decoder>(value: &T) -> Effect<i32 ! Problem | Extra> {
+  return Decoder.decode(value)
+}
+
+fn observe(result: Result<i32, Problem | Extra>) -> i32 {
+  return match move result {
+    Result<i32, Problem | Extra> { value: outcome } => match move outcome {
+      Success<i32> { value } => value
+      Failure<Problem | Extra> { error } => match move error {
+        Problem {} => 0
+        Extra {} => 0
+      }
+    }
+  }
+}
+
+pub fn main() -> i32 {
+  let cell = Cell { code: 42 }
+  return observe(run Effect.result(pending<Cell>(&cell)))
+}`,
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('wraps an operator-spelled pure source witness in Effect', () =>
+  Effect.gen(function* () {
+    const value = yield* evaluatedValue(
+      'bound-operation-witness/effect-operator-boundary',
+      `interface Combined<T> {
+  effect fn add(left: &T, right: &T) -> T
+}
+
+struct Cell { code: i32 }
+
+fn cellAdd(left: &Cell, right: &Cell) -> Cell {
+  return Cell { code: left.code + right.code }
+}
+
+impl Combined<Cell> for Cell { add: Cell.cellAdd }
+fn combined<T: Combined>(left: T, right: T) -> T { return run (left + right) }
+
+pub fn main() -> i32 {
+  let cell = combined<Cell>(Cell { code: 20 }, Cell { code: 1 })
+  return cell.code + 21
+}`,
     )
     assert.strictEqual(value, 42)
   }),
@@ -331,7 +549,9 @@ it.effect('reports nothing for either witness kind a conformance may name', () =
 
 impl Keyed<i32> for i32 { digest: Intrinsic.i32WrappingAdd }
 
-fn digestOf<T: Keyed>(left: T, right: T) -> T { return Keyed.digest(left, right) }
+fn digestOf<T: Keyed>(left: T, right: T) -> T {
+  return Keyed.digest(move left, move right)
+}
 
 pub fn main() -> i32 { return digestOf<i32>(20, 22) }`,
     )

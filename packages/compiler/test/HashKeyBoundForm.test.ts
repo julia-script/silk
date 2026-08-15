@@ -41,13 +41,13 @@ const evaluatedValue = (name: string, source: string) =>
  * over one bound and mapped by one witness. `i32` answers both with sealed intrinsics.
  */
 const scalarKey = `pub interface HashKey<T> {
-  fn equals(left: T, right: T) -> bool
-  fn digest(left: T, right: T) -> T
+  fn equals(left: &T, right: &T) -> bool
+  fn digest(left: &T, right: &T) -> T
 }
 impl HashKey<i32> for i32 { equals: Intrinsic.i32Equals digest: Intrinsic.i32WrappingAdd }
 pub fn probe<T: HashKey>(left: T, right: T) -> T {
-  if left == right { return HashKey.digest(left, right) }
-  return HashKey.digest(right, left)
+  if left == right { return HashKey.digest(&left, &right) }
+  return HashKey.digest(&right, &left)
 }`
 
 it.effect('accepts a two-operation bound whose second operation no operator spells', () =>
@@ -75,7 +75,9 @@ it.effect('reaches a different witness per specialization for the non-operator o
 }
 impl HashKey<i32> for i32 { equals: Intrinsic.i32Equals digest: Intrinsic.i32WrappingAdd }
 impl HashKey<u8> for u8 { equals: Intrinsic.u8Equals digest: Intrinsic.u8SaturatingAdd }
-pub fn digestOf<T: HashKey>(left: T, right: T) -> T { return HashKey.digest(left, right) }
+pub fn digestOf<T: HashKey>(left: T, right: T) -> T {
+  return HashKey.digest(move left, move right)
+}
 pub fn main() -> i32 {
   let saturated = digestOf<u8>(200, 100)
   let wrapped = digestOf<i32>(2147483647, 1)

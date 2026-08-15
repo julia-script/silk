@@ -4148,31 +4148,35 @@ const inferInterfaceWitnessTarget = (
       actual: contract.success._tag === 'Resolved' ? contract.success.type : 'never',
     }),
   )
-  constraints.push(
-    Object.freeze({
-      label: 'failure and requirement rows',
-      pattern: Type.effect(
-        Type.unit,
-        implementation.failureRow.failures,
-        'Shared',
-        implementation.requirementRow.requirements.map((requirement) =>
-          Object.freeze({ ...requirement, access: 'Shared' as const }),
-        ),
-        implementation.failureRow.parameters,
-        implementation.requirementRow.parameters,
-      ),
-      actual: Type.effect(
-        Type.unit,
-        contract.failureRow.failures,
-        'Shared',
-        contract.requirementRow.requirements.map((requirement) =>
-          Object.freeze({ ...requirement, access: 'Shared' as const }),
-        ),
-        contract.failureRow.parameters,
-        contract.requirementRow.parameters,
-      ),
-    }),
+  const covered = new Set(
+    constraints.flatMap((constraint) => Type.parameters(constraint.pattern).map(Type.key)),
   )
+  if (binders.some((binder) => !covered.has(Type.key(binder))))
+    constraints.push(
+      Object.freeze({
+        label: 'failure and requirement rows',
+        pattern: Type.effect(
+          Type.unit,
+          implementation.failureRow.failures,
+          'Shared',
+          implementation.requirementRow.requirements.map((requirement) =>
+            Object.freeze({ ...requirement, access: 'Shared' as const }),
+          ),
+          implementation.failureRow.parameters,
+          implementation.requirementRow.parameters,
+        ),
+        actual: Type.effect(
+          Type.unit,
+          contract.failureRow.failures,
+          'Shared',
+          contract.requirementRow.requirements.map((requirement) =>
+            Object.freeze({ ...requirement, access: 'Shared' as const }),
+          ),
+          contract.failureRow.parameters,
+          contract.requirementRow.parameters,
+        ),
+      }),
+    )
   return InterfaceWitnessInference.infer(binders, constraints)
 }
 

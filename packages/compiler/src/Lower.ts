@@ -2,6 +2,7 @@ import * as CallableFieldRealization from './CallableFieldRealization.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
+import type * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -346,7 +347,8 @@ const inlineForwardedRequirement = (
   })
 }
 
-interface GeneratedEffectRunner {
+interface GeneratedBlockEffectRunner {
+  readonly _tag: 'BlockEffectRunner'
   readonly id: DeclarationIndex.CanonicalId
   readonly owner: Instances.Instance
   readonly block: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>
@@ -354,6 +356,23 @@ interface GeneratedEffectRunner {
   readonly specializationKey: string
   readonly providedRequirements: ReadonlyArray<Omit<ProvidedRequirement, 'local'>>
 }
+
+interface GeneratedWitnessEffectRunner {
+  readonly _tag: 'WitnessEffectRunner'
+  readonly id: DeclarationIndex.CanonicalId
+  readonly owner: Instances.Instance
+  readonly expression: Extract<
+    Hir.Expression,
+    { readonly _tag: 'BuiltinCall' | 'BoundOperationCall' }
+  >
+  readonly target?: DeclarationIndex.InterfaceWitnessTarget
+  readonly intrinsic?: Intrinsic.Operation
+  readonly type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
+  readonly specializationKey: string
+  readonly providedRequirements: ReadonlyArray<Omit<ProvidedRequirement, 'local'>>
+}
+
+type GeneratedEffectRunner = GeneratedBlockEffectRunner | GeneratedWitnessEffectRunner
 
 const instanceText = (
   declaration: { readonly module: string; readonly name: string },
@@ -410,6 +429,23 @@ const effectValueType = (
     site: block.site,
     environment,
   })
+}
+
+const witnessEffectValueType = (
+  layout: Layout.Plan,
+  instance: Instances.InstanceKey,
+  site: Hir.EffectSiteId,
+): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
+  const environment = layout.effectEnvironments.find(
+    (candidate) =>
+      candidate._tag === 'EffectEnvironment' &&
+      instanceText(candidate.instance.declaration, candidate.instance.typeArguments) ===
+        instanceText(instance.declaration, instance.typeArguments) &&
+      Hir.sameExecutableSite(candidate.site, site),
+  )
+  return environment?._tag !== 'EffectEnvironment'
+    ? undefined
+    : Object.freeze({ _tag: 'EffectValue', type: environment.effect, site, environment })
 }
 
 const effectValueByIdentity = (
@@ -641,10 +677,8 @@ const ensureProvidedRunner = (
   })
   fn.generatedRunners.push(
     Object.freeze({
+      ...base,
       id,
-      owner: base.owner,
-      block: base.block,
-      type: base.type,
       specializationKey: key,
       providedRequirements: Object.freeze(
         requirements.map(({ local: _local, ...requirement }) => Object.freeze(requirement)),
@@ -922,7 +956,12 @@ const endRunLoans = (fn: FunctionLowering, span: SourceSpan.SourceSpan): void =>
   // A constructed effect holds its argument borrows until the run that consumes it: ownership
   // records that end site, so every lowering path for run must release them here.
   for (const loan of fn.ownership?.loans ?? []) {
-    if (loan.origin !== 'EffectCapture' && loan.origin !== 'ValueBorrow') continue
+    if (
+      loan.origin !== 'EffectCapture' &&
+      loan.origin !== 'ValueBorrow' &&
+      loan.origin !== 'InterfaceOperand'
+    )
+      continue
     if (loan.endSpan.sourceId !== span.sourceId || loan.endSpan.end > span.end) {
       continue
     }
@@ -953,6 +992,24 @@ const retainedEffectLoans = (
     if (child._tag === 'BindingReference') {
       for (const borrow of fn.effectLoanEnds.get(child.binding.ordinal) ?? [])
         retained.set(borrowKey(borrow), borrow)
+    }
+    if (child._tag === 'SliceBorrow' || child._tag === 'ValueBorrow') {
+      retained.set(borrowKey(child.borrow), child.borrow)
+      continue
+    }
+    if (
+      (child._tag === 'BuiltinCall' || child._tag === 'BoundOperationCall') &&
+      child.witnessEffectSite !== undefined
+    ) {
+      for (const loan of fn.ownership?.loans ?? []) {
+        if (
+          loan.origin === 'InterfaceOperand' &&
+          loan.id.callSpan.sourceId === child.span.sourceId &&
+          loan.id.callSpan.start === child.span.start &&
+          loan.id.callSpan.end === child.span.end
+        )
+          retained.set(borrowKey(loan.id), loan.id)
+      }
     }
     if (child._tag !== 'CallableSection') continue
     for (const capture of child.captures) {
@@ -1229,6 +1286,8 @@ const emitWitnessDispatch = (
     borrows.push(Object.freeze({ borrow, local: destination }))
     arguments_.push(destination)
   }
+  const witnessArguments = sourceWitnessArguments(fn, target, arguments_, span)
+  if (witnessArguments === undefined) return undefined
   const destination = fn.alloc(resultType)
   fn.emit(
     Object.freeze({
@@ -1239,11 +1298,12 @@ const emitWitnessDispatch = (
       // arguments this specialization proved. Nothing else travels: a requirement's own witness is
       // reached through its own instance, never through a value handed to this call.
       typeArguments: target.typeArguments,
-      arguments: Object.freeze(arguments_),
+      arguments: witnessArguments.arguments,
       type: resultType,
       provenance: generated(span),
     }),
   )
+  endWitnessReborrows(fn, witnessArguments.reborrows, span)
   for (const entry of borrows)
     fn.emit(
       Object.freeze({
@@ -1287,6 +1347,257 @@ const lowerInterfaceWitnessCall = (
   return emitWitnessDispatch(fn, target, argumentLocals, operandTypes, resultType, expression.span)
 }
 
+interface WitnessArguments {
+  readonly arguments: ReadonlyArray<Mir.LocalId>
+  readonly reborrows: ReadonlyArray<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }>
+}
+
+interface InterfaceOperands {
+  readonly arguments: ReadonlyArray<Mir.LocalId>
+  readonly borrows: ReadonlyArray<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }>
+}
+
+const lowerInterfaceOperands = (
+  fn: FunctionLowering,
+  arguments_: ReadonlyArray<Hir.Expression>,
+  operands: ReadonlyArray<DeclarationIndex.InterfaceOperandFact>,
+  span: SourceSpan.SourceSpan,
+): InterfaceOperands | undefined => {
+  if (arguments_.length !== operands.length) return undefined
+  const lowered: Array<Mir.LocalId> = []
+  const borrows: Array<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }> = []
+  for (const [ordinal, argument] of arguments_.entries()) {
+    const value = lowerExpression(fn, argument)
+    const operand = operands.at(ordinal)
+    if (value === undefined || operand?.type._tag !== 'Resolved') return undefined
+    const expected = fn.type(fn.semantic(operand.type.type))
+    const actual = fn.localTypes.at(value.result.ordinal)
+    if (expected === undefined || actual === undefined) return undefined
+    if (Type.equals(Mir.semanticType(actual), Mir.semanticType(expected))) {
+      lowered.push(value.result)
+      continue
+    }
+    if (
+      expected._tag !== 'Reference' ||
+      !Type.equals(Mir.semanticType(actual), expected.type.target)
+    )
+      return undefined
+    const borrow: Hir.BorrowId = Object.freeze({
+      _tag: 'BorrowId',
+      function: fn.owner.function.declaration.id,
+      callSpan: span,
+      ordinal,
+    })
+    const destination = fn.alloc(expected)
+    fn.emit(
+      Object.freeze({
+        _tag: 'BeginLoan',
+        borrow,
+        destination,
+        root: value.result,
+        selectors: Object.freeze([]),
+        sourceType: actual,
+        type: expected,
+        access: expected.type.access,
+        reborrow: false,
+        suspendsParent: false,
+        provenance: generated(span),
+      }),
+    )
+    fn.loanLocals.set(borrowKey(borrow), destination)
+    lowered.push(destination)
+    borrows.push(Object.freeze({ borrow, local: destination }))
+  }
+  return Object.freeze({ arguments: Object.freeze(lowered), borrows: Object.freeze(borrows) })
+}
+
+const sourceWitnessParameterTypes = (
+  fn: FunctionLowering,
+  target: DeclarationIndex.InterfaceWitnessTarget,
+): ReadonlyArray<Mir.Type> | undefined => {
+  const declaration = DeclarationIndex.byCanonical(fn.index, target.implementation)
+  if (declaration?._tag !== 'FunctionDeclaration') return undefined
+  const binders = declaration.typeParameters
+    .filter((parameter) => parameter.duplicateOf === undefined)
+    .map((parameter) => parameter.type)
+  const substitution = Type.substitution(binders, target.typeArguments)
+  if (substitution === undefined) return undefined
+  const parameters = declaration.parameters.flatMap((parameter) => {
+    if (parameter.declaredType._tag !== 'Resolved') return []
+    const type = fn.type(Type.substitute(parameter.declaredType.type, substitution))
+    return type === undefined ? [] : [type]
+  })
+  return parameters.length === declaration.parameters.length ? Object.freeze(parameters) : undefined
+}
+
+/** Realizes only access weakening already admitted by the compatibility actor. */
+const sourceWitnessArguments = (
+  fn: FunctionLowering,
+  target: DeclarationIndex.InterfaceWitnessTarget,
+  arguments_: ReadonlyArray<Mir.LocalId>,
+  span: SourceSpan.SourceSpan,
+): WitnessArguments | undefined => {
+  const parameters = sourceWitnessParameterTypes(fn, target)
+  if (parameters === undefined || parameters.length !== arguments_.length) return undefined
+  const lowered: Array<Mir.LocalId> = []
+  const reborrows: Array<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }> = []
+  for (const [ordinal, argument] of arguments_.entries()) {
+    const actual = fn.localTypes.at(argument.ordinal)
+    const expected = parameters.at(ordinal)
+    if (actual === undefined || expected === undefined) return undefined
+    if (Type.equals(Mir.semanticType(actual), Mir.semanticType(expected))) {
+      lowered.push(argument)
+      continue
+    }
+    const actualReference = actual._tag === 'Reference' || actual._tag === 'Slice'
+    const expectedReference = expected._tag === 'Reference' || expected._tag === 'Slice'
+    const sameTarget =
+      actual._tag === 'Reference' && expected._tag === 'Reference'
+        ? Type.equals(actual.type.target, expected.type.target)
+        : actual._tag === 'Slice' && expected._tag === 'Slice'
+          ? Type.equals(actual.type.element, expected.type.element)
+          : false
+    if (
+      !actualReference ||
+      !expectedReference ||
+      !sameTarget ||
+      actual.type.access !== 'Exclusive' ||
+      expected.type.access !== 'Shared'
+    )
+      return undefined
+    const borrow: Hir.BorrowId = Object.freeze({
+      _tag: 'BorrowId',
+      function: fn.owner.function.declaration.id,
+      callSpan: span,
+      ordinal: arguments_.length + ordinal,
+    })
+    const destination = fn.alloc(expected)
+    fn.emit(
+      Object.freeze({
+        _tag: 'BeginLoan',
+        borrow,
+        destination,
+        root: argument,
+        selectors: Object.freeze([]),
+        sourceType: actual,
+        type: expected,
+        access: 'Shared',
+        reborrow: true,
+        suspendsParent: true,
+        provenance: generated(span),
+      }),
+    )
+    lowered.push(destination)
+    reborrows.push(Object.freeze({ borrow, local: destination }))
+  }
+  return Object.freeze({ arguments: Object.freeze(lowered), reborrows: Object.freeze(reborrows) })
+}
+
+const endWitnessReborrows = (
+  fn: FunctionLowering,
+  reborrows: WitnessArguments['reborrows'],
+  span: SourceSpan.SourceSpan,
+): void => {
+  for (const reborrow of reborrows)
+    fn.emit(
+      Object.freeze({
+        _tag: 'EndLoan',
+        borrow: reborrow.borrow,
+        slice: reborrow.local,
+        provenance: generated(span),
+      }),
+    )
+}
+
+const witnessEffectContract = (
+  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' | 'BoundOperationCall' }>,
+): DeclarationIndex.InterfaceOperationApplicationFact | undefined =>
+  expression._tag === 'BoundOperationCall'
+    ? expression.contract
+    : expression.interfaceOperation?.contract
+
+const lowerWitnessEffect = (
+  fn: FunctionLowering,
+  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' | 'BoundOperationCall' }>,
+): LoweredExpression | undefined => {
+  const site = expression.witnessEffectSite
+  const contract = witnessEffectContract(expression)
+  if (site === undefined || contract === undefined) return undefined
+  const capability = fn.semantic(
+    expression._tag === 'BoundOperationCall'
+      ? expression.capability
+      : (expression.interfaceOperation?.capability ?? 'never'),
+  )
+  const provider = fn.semantic(
+    expression._tag === 'BoundOperationCall'
+      ? expression.provider
+      : (expression.interfaceOperation?.provider ?? 'never'),
+  )
+  if (!Type.isNominal(capability)) return undefined
+  const target = DeclarationIndex.interfaceWitnessTarget(
+    fn.index,
+    provider,
+    capability,
+    expression._tag === 'BoundOperationCall'
+      ? expression.operation
+      : (expression.interfaceOperation?.operation ?? ''),
+  )
+  const intrinsic = DeclarationIndex.interfaceOperationIntrinsic(
+    fn.index,
+    provider,
+    capability,
+    expression._tag === 'BoundOperationCall'
+      ? expression.operation
+      : (expression.interfaceOperation?.operation ?? ''),
+  )
+  if (target === undefined && intrinsic?.rule._tag !== 'BuiltinRule') return undefined
+  const type = witnessEffectValueType(fn.layout, fn.owner.key, site)
+  if (type === undefined) return undefined
+  const operands = lowerInterfaceOperands(
+    fn,
+    expression.arguments,
+    contract.operands,
+    expression.span,
+  )
+  if (operands === undefined) return undefined
+  const destination = fn.alloc(type)
+  const runner = Hir.effectRunnerId(fn.owner.key.declaration, site)
+  fn.emit(
+    Object.freeze({
+      _tag: 'MakeEffect',
+      destination,
+      runner,
+      runnerTypeArguments: fn.owner.key.typeArguments,
+      captures: Object.freeze(
+        operands.arguments.map((source, ordinal) =>
+          Object.freeze({
+            source,
+            access: type.environment.fields.at(ordinal)?.access ?? ('Take' as const),
+          }),
+        ),
+      ),
+      type,
+      provenance: generated(expression.span),
+    }),
+  )
+  const key = baseRunnerKey(fn.owner.key, site)
+  if (!fn.generatedRunners.some((candidate) => candidate.specializationKey === key))
+    fn.generatedRunners.push(
+      Object.freeze({
+        _tag: 'WitnessEffectRunner',
+        id: runner,
+        owner: fn.owner,
+        expression,
+        ...(target === undefined ? {} : { target }),
+        ...(intrinsic?.rule._tag === 'BuiltinRule' ? { intrinsic } : {}),
+        type,
+        specializationKey: key,
+        providedRequirements: Object.freeze([]),
+      }),
+    )
+  return Object.freeze({ result: destination })
+}
+
 /**
  * Redirects one bound operation call to the provider's own function, the fallback the operator path
  * reaches through `lowerInterfaceWitnessCall`.
@@ -1310,6 +1621,8 @@ const lowerBoundWitnessCall = (
   )
   const resultType = fn.type(expression.type)
   if (target === undefined || resultType === undefined) return undefined
+  const witnessArguments = sourceWitnessArguments(fn, target, argumentLocals, expression.span)
+  if (witnessArguments === undefined) return undefined
   const destination = fn.alloc(resultType)
   fn.emit(
     Object.freeze({
@@ -1317,61 +1630,45 @@ const lowerBoundWitnessCall = (
       destination,
       target: target.implementation,
       typeArguments: target.typeArguments,
-      arguments: Object.freeze(argumentLocals),
+      arguments: witnessArguments.arguments,
       type: resultType,
       provenance: generated(expression.span),
     }),
   )
+  endWitnessReborrows(fn, witnessArguments.reborrows, expression.span)
   return destination
 }
 
 /**
- * Reads through one explicit shared borrow only for the legacy value-shaped builtin selected by
- * an intrinsic conformance. The interface contract remains literal everywhere else: source
- * witnesses lower through `lowerBoundWitnessCall`, which forwards their reference locals.
+ * Reads through one shared interface operand only for the legacy value-shaped builtin selected by
+ * an intrinsic conformance. The operand may be a fresh borrow or an already-borrowed parameter;
+ * ordinary source witnesses never enter this bridge.
  */
 const lowerIntrinsicWitnessOperand = (
   fn: FunctionLowering,
   argument: Hir.Expression,
   operand: DeclarationIndex.InterfaceOperandFact | undefined,
 ): LoweredExpression | undefined => {
-  if (
-    argument._tag !== 'ValueBorrow' ||
-    argument.access !== 'Shared' ||
-    operand?.type._tag !== 'Resolved'
-  )
-    return lowerExpression(fn, argument)
+  const lowered = lowerExpression(fn, argument)
+  if (lowered === undefined || operand?.type._tag !== 'Resolved') return lowered
   const contractType = fn.semantic(operand.type.type)
-  const sourceType = fn.semantic(argument.source)
+  const sourceType = fn.localTypes.at(lowered.result.ordinal)
   if (
     !Type.isReference(contractType) ||
     contractType.access !== 'Shared' ||
-    Type.key(contractType.target) !== Type.key(sourceType)
+    sourceType?._tag !== 'Reference' ||
+    !Type.equals(sourceType.type, contractType)
   )
-    return lowerExpression(fn, argument)
-  const root =
-    argument.root._tag === 'BindingSliceRoot'
-      ? fn.bindingLocals.get(argument.root.binding.ordinal)
-      : argument.root._tag === 'ParameterSliceRoot'
-        ? fn.parameterLocals.get(argument.root.parameter.ordinal)
-        : fn.patternLocals.get(patternKey(argument.root.binding))
-  const type = fn.type(sourceType)
-  if (root === undefined || type === undefined) return undefined
+    return lowered
+  const type = fn.type(contractType.target)
+  if (type === undefined) return undefined
   const destination = fn.alloc(type)
   fn.emit(
     Object.freeze({
       _tag: 'ReadPlace',
       destination,
-      root,
-      selectors: Object.freeze(
-        argument.path.map((field) =>
-          Object.freeze({
-            _tag: 'FieldSelector' as const,
-            field,
-            provenance: authored(argument.span),
-          }),
-        ),
-      ),
+      root: lowered.result,
+      selectors: Object.freeze([]),
       type,
       provenance: generated(argument.span),
     }),
@@ -1917,6 +2214,7 @@ function lowerExpressionInner(
       ) {
         fn.generatedRunners.push(
           Object.freeze({
+            _tag: 'BlockEffectRunner',
             id: runner,
             owner: fn.owner,
             block: expression,
@@ -2059,7 +2357,9 @@ function lowerExpressionInner(
       // Compiler-backed effects lower directly from their recipe. Lowering the effect expression
       // first would form every borrowed argument twice before the dedicated operation is emitted.
       const loweredSubject =
-        recipe?._tag === 'BuiltinCall' ? undefined : lowerExpression(fn, expression.subject)
+        recipe?._tag === 'BuiltinCall' && recipe.witnessEffectSite === undefined
+          ? undefined
+          : lowerExpression(fn, expression.subject)
       const effectValueType =
         loweredSubject === undefined ? undefined : fn.localTypes.at(loweredSubject.result.ordinal)
       if (loweredSubject !== undefined && effectValueType?._tag === 'EffectValue') {
@@ -2885,6 +3185,7 @@ function lowerExpressionInner(
       return { result: destination }
     }
     case 'BoundOperationCall': {
+      if (expression.witnessEffectSite !== undefined) return lowerWitnessEffect(fn, expression)
       // The bound named the operation; the specialization names the witness. Only here is the type
       // argument known, so only here can the conformance say which compiler-known operation the
       // call runs — two providers of one interface may answer one operation with two unrelated
@@ -2944,6 +3245,7 @@ function lowerExpressionInner(
       )
     }
     case 'BuiltinCall': {
+      if (expression.witnessEffectSite !== undefined) return lowerWitnessEffect(fn, expression)
       const argumentLocals: Array<Mir.LocalId> = []
       for (const [ordinal, argument] of expression.arguments.entries()) {
         const lowered =
@@ -4864,7 +5166,7 @@ const lowerInstance = (
 }
 
 const lowerEffectRunner = (
-  spec: GeneratedEffectRunner,
+  spec: GeneratedBlockEffectRunner,
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
   index: DeclarationIndex.Index,
@@ -4978,6 +5280,201 @@ const lowerEffectRunner = (
   })
 }
 
+const lowerWitnessEffectRunner = (
+  spec: GeneratedWitnessEffectRunner,
+  ownership: Ownership.ModuleOwnership | undefined,
+  layout: Layout.Plan,
+  index: DeclarationIndex.Index,
+  instances: ReadonlyArray<Instances.Instance>,
+  calls: ReadonlyArray<Instances.CallInstance>,
+  effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
+  generatedRunners: Array<GeneratedEffectRunner>,
+  opaqueRealizations: OpaqueRealization.Catalog,
+): Mir.MirFunction | undefined => {
+  const parameterTypes = spec.type.environment.fields.flatMap((field) => {
+    const type = mirType(field.type)
+    return type === undefined ? [] : [type]
+  })
+  if (parameterTypes.length !== spec.type.environment.fields.length) return undefined
+  const parameterizedRequirements = spec.providedRequirements.filter(
+    (requirement) => requirement.witness._tag === 'SourceConformanceWitness',
+  )
+  const requirementParameterTypes = parameterizedRequirements.flatMap((requirement) => {
+    if (requirement.access === 'Take') return []
+    const type = mirType(Type.reference(requirement.access, requirement.providerType))
+    return type === undefined ? [] : [type]
+  })
+  if (requirementParameterTypes.length !== parameterizedRequirements.length) return undefined
+  const allParameters = Object.freeze([...parameterTypes, ...requirementParameterTypes])
+  const instance: Instances.InstanceKey = Object.freeze({
+    _tag: 'InstanceKey',
+    declaration: spec.id,
+    typeArguments: spec.owner.key.typeArguments,
+    contractRow: Object.freeze([
+      ...spec.owner.key.contractRow,
+      `witness-effect-site:${Hir.executableSiteKey(spec.type.site)}`,
+    ]),
+  })
+  const lowering = new FunctionLowering(
+    layout,
+    index,
+    allParameters,
+    planFor(ownership, spec.owner.function),
+    spec.owner.substitution,
+    spec.type.type,
+    spec.owner,
+    instances,
+    calls,
+    effectResults,
+    generatedRunners,
+    opaqueRealizations,
+    Object.freeze(
+      spec.providedRequirements.map((requirement) => {
+        const ordinal = parameterizedRequirements.indexOf(requirement)
+        return Object.freeze({
+          ...requirement,
+          ...(ordinal < 0 ? {} : { local: local(parameterTypes.length + ordinal) }),
+        })
+      }),
+    ),
+  )
+  const region = lowering.reserve()
+  const [returned, operations] = lowering.capture((): Mir.LocalId | undefined => {
+    let success: LoweredExpression | undefined
+    let reborrows: WitnessArguments['reborrows'] = Object.freeze([])
+    if (spec.target !== undefined) {
+      const declaration = DeclarationIndex.byCanonical(index, spec.target.implementation)
+      if (declaration?._tag !== 'FunctionDeclaration') return undefined
+      const arguments_ = sourceWitnessArguments(
+        lowering,
+        spec.target,
+        parameterTypes.map((_, ordinal) => local(ordinal)),
+        spec.expression.span,
+      )
+      if (arguments_ === undefined) return undefined
+      reborrows = arguments_.reborrows
+      if (declaration.functionKind === 'Ordinary') {
+        const binders = declaration.typeParameters
+          .filter((parameter) => parameter.duplicateOf === undefined)
+          .map((parameter) => parameter.type)
+        const substitution = Type.substitution(binders, spec.target.typeArguments)
+        const result =
+          substitution === undefined || declaration.returnType._tag !== 'Resolved'
+            ? undefined
+            : lowering.type(Type.substitute(declaration.returnType.type, substitution))
+        if (result === undefined) return undefined
+        const destination = lowering.alloc(result)
+        lowering.emit(
+          Object.freeze({
+            _tag: 'Call',
+            destination,
+            target: spec.target.implementation,
+            typeArguments: spec.target.typeArguments,
+            arguments: arguments_.arguments,
+            type: result,
+            provenance: generated(spec.expression.span),
+          }),
+        )
+        success = Object.freeze({ result: destination })
+      } else {
+        const effectType = effectResults.get(
+          instanceText(spec.target.implementation, spec.target.typeArguments),
+        )
+        if (effectType === undefined) return undefined
+        const effect = lowering.alloc(effectType)
+        lowering.emit(
+          Object.freeze({
+            _tag: 'Call',
+            destination: effect,
+            target: spec.target.implementation,
+            typeArguments: spec.target.typeArguments,
+            arguments: arguments_.arguments,
+            type: effectType,
+            provenance: generated(spec.expression.span),
+          }),
+        )
+        success = lowerRunEffectValue(
+          lowering,
+          effect,
+          effectType,
+          spec.type.type.success,
+          spec.expression.span,
+        )
+      }
+    } else if (spec.intrinsic?.rule._tag === 'BuiltinRule') {
+      const contract = witnessEffectContract(spec.expression)
+      if (contract === undefined) return undefined
+      success = lowerExpressionInner(
+        lowering,
+        Object.freeze({
+          _tag: 'BuiltinCall',
+          operation: spec.intrinsic.rule.operation,
+          intrinsic: spec.intrinsic.id,
+          typeArguments: Object.freeze([]),
+          arguments: Object.freeze(
+            contract.operands.map((operand) =>
+              Object.freeze({
+                _tag: 'ParameterReference' as const,
+                parameter: operand.parameter.id,
+                type: operand.type._tag === 'Resolved' ? operand.type.type : 'never',
+                span: spec.expression.span,
+              }),
+            ),
+          ),
+          intrinsicWitnessOperands: contract.operands,
+          loanEnds: Object.freeze([]),
+          heldLoans: Object.freeze([]),
+          type: spec.type.type.success,
+          span: spec.expression.span,
+        }),
+      )
+    }
+    if (success === undefined) return undefined
+    endWitnessReborrows(lowering, reborrows, spec.expression.span)
+    const outcome: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
+      _tag: 'EffectOutcome',
+      type: spec.type.type,
+    })
+    const destination = lowering.alloc(outcome)
+    lowering.emit(
+      Object.freeze({
+        _tag: 'PackEffectOutcome',
+        destination,
+        source: success.result,
+        tag: 0,
+        type: outcome,
+        provenance: generated(spec.expression.span),
+      }),
+    )
+    return destination
+  })
+  if (returned === undefined) return undefined
+  lowering.publish(
+    Object.freeze({
+      _tag: 'OperationRegion',
+      id: region,
+      operations,
+      outcome: Object.freeze({
+        _tag: 'Return',
+        value: returned,
+        provenance: generated(spec.expression.span),
+      }),
+    }),
+  )
+  return Object.freeze({
+    _tag: 'MirFunction',
+    id: spec.id,
+    instance,
+    parameterCount: allParameters.length,
+    localTypes: Object.freeze([...lowering.localTypes]),
+    result: Object.freeze({ _tag: 'EffectOutcome', type: spec.type.type }),
+    entry: region,
+    regions: Object.freeze(
+      lowering.regions.flatMap((candidate) => (candidate === undefined ? [] : [candidate])),
+    ),
+  })
+}
+
 /** Lowers the discovered instances into one MIR program module in discovery order. */
 export const lowerProgram = (
   discovery: Instances.Discovery,
@@ -5014,6 +5511,7 @@ export const lowerProgram = (
       effectResults.set(instanceText(instance.key.declaration, instance.key.typeArguments), type)
       generatedRunners.push(
         Object.freeze({
+          _tag: 'BlockEffectRunner',
           id: Hir.effectRunnerId(instance.key.declaration, block.site),
           owner: instance,
           block,
@@ -5044,17 +5542,30 @@ export const lowerProgram = (
   for (let ordinal = 0; ordinal < generatedRunners.length; ordinal += 1) {
     const generated = generatedRunners.at(ordinal)
     if (generated === undefined) continue
-    const runner = lowerEffectRunner(
-      generated,
-      ownership.get(generated.owner.key.declaration.module),
-      layout,
-      index,
-      discovery.instances,
-      discovery.calls,
-      effectResults,
-      generatedRunners,
-      opaqueRealizations,
-    )
+    const runner =
+      generated._tag === 'BlockEffectRunner'
+        ? lowerEffectRunner(
+            generated,
+            ownership.get(generated.owner.key.declaration.module),
+            layout,
+            index,
+            discovery.instances,
+            discovery.calls,
+            effectResults,
+            generatedRunners,
+            opaqueRealizations,
+          )
+        : lowerWitnessEffectRunner(
+            generated,
+            ownership.get(generated.owner.key.declaration.module),
+            layout,
+            index,
+            discovery.instances,
+            discovery.calls,
+            effectResults,
+            generatedRunners,
+            opaqueRealizations,
+          )
     if (runner !== undefined) loweredRunners.push(Object.freeze({ spec: generated, runner }))
   }
   // Lowering a provided parent can discover provided children after their open bases were already

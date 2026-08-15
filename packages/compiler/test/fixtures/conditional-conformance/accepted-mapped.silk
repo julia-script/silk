@@ -1,5 +1,5 @@
 interface Decoder<T> {
-  fn decode(value: T) -> i32
+  fn decode(value: &T) -> i32
 }
 
 struct Schema { tag: i32 }
@@ -8,13 +8,13 @@ impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
 
 struct MappedSchema<S> { source: S }
 fn mappedDecode<S: Decoder>(value: &MappedSchema<S>) -> i32 {
-  return Decoder.decode(value.source) + 1
+  return Decoder.decode(&value.source) + 1
 }
 impl<S: Decoder<S>> Decoder<MappedSchema<S>> for MappedSchema<S> {
   decode: MappedSchema.mappedDecode
 }
 
-fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(value) }
+fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(&value) }
 pub fn main() -> i32 {
   return decodeOf<MappedSchema<Schema>>(MappedSchema<Schema> { source: Schema { tag: 41 } })
 }

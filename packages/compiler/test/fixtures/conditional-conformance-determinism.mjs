@@ -19,13 +19,13 @@ import * as Type from '../../dist/Type.js'
  */
 const module_ = 'fixture/conditional-conformance-determinism'
 const source = `interface Decoder<T> {
-  fn decode(value: T) -> i32
+  fn decode(value: &T) -> i32
 }
 
 struct OptionalSchema<S> { source: S }
 
 fn optionalDecode<S: Decoder>(value: &OptionalSchema<S>) -> i32 {
-  return Decoder.decode(value.source) + 2
+  return Decoder.decode(&value.source) + 2
 }
 
 impl<S: Decoder<S>> Decoder<OptionalSchema<S>> for OptionalSchema<S> {
@@ -35,7 +35,7 @@ impl<S: Decoder<S>> Decoder<OptionalSchema<S>> for OptionalSchema<S> {
 struct MappedSchema<S> { source: S }
 
 fn mappedDecode<S: Decoder>(value: &MappedSchema<S>) -> i32 {
-  return Decoder.decode(value.source) + 1
+  return Decoder.decode(&value.source) + 1
 }
 
 impl<S: Decoder<S>> Decoder<MappedSchema<S>> for MappedSchema<S> {
@@ -56,7 +56,7 @@ fn schemaDecode(value: &Schema) -> i32 { return value.tag }
 
 impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
 
-fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(value) }
+fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(&value) }
 
 pub fn main() -> i32 {
   let nested = decodeOf<OptionalSchema<MappedSchema<Schema>>>(

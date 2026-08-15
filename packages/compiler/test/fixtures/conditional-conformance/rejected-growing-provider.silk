@@ -1,6 +1,6 @@
-interface Decoder<T> { fn decode(value: T) -> i32 }
+interface Decoder<T> { fn decode(value: &T) -> i32 }
 struct Wrapper<S> { source: S }
-fn decode<S: Decoder>(value: &Wrapper<S>) -> i32 { return Decoder.decode(value.source) }
+fn decode<S: Decoder>(value: &Wrapper<S>) -> i32 { return Decoder.decode(&value.source) }
 impl<S: Decoder<Wrapper<Wrapper<S>>>> Decoder<Wrapper<S>> for Wrapper<S> {
   decode: Wrapper.decode
 }
