@@ -656,6 +656,21 @@ export const exactRepresentationArgument = (
 ): ExactRepresentationArgument =>
   Object.freeze({ _tag: 'ExactRepresentationArgument', identity, contract })
 
+/** Reifies one declaration parameter as an open generic argument of the same kind. */
+export const parameterArgument = (self: Parameter): GenericArgument => {
+  switch (self.kind) {
+    case 'Value':
+      return self
+    case 'FailureRow':
+      return failureRowArgument([], [self])
+    case 'RequirementRow':
+      return requirementRowArgument([], [self])
+    case 'CallableRepresentation':
+    case 'EffectRepresentation':
+      return representationParameterArgument(self)
+  }
+}
+
 const accessRank = (access: CallableMode | Effect['access']): number =>
   access === 'Shared' ? 0 : access === 'Exclusive' ? 1 : 2
 
@@ -1080,6 +1095,10 @@ export const key = (self: Type): string => {
   }
   return cached
 }
+
+/** The canonical identity of one provider's application of an interface. */
+export const conformanceKey = (capability: Nominal, provider: Type): string =>
+  `${key(capability)}\u0000${key(provider)}`
 
 const computeKey = (self: Type): string => {
   if (isString(self)) return 'string'
@@ -1538,6 +1557,7 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
   const visitArgument = (argument: GenericArgument): void => {
     append(visitor.argument?.(argument))
     if (isTypeArgument(argument)) visitType(argument)
+    else if (isRepresentationParameterArgument(argument)) visitType(argument.parameter)
     else if (isOpaqueRepresentationArgument(argument)) {
       visitType(argument.contract)
       for (const enclosing of argument.arguments) visitArgument(enclosing)
@@ -1682,6 +1702,21 @@ export const exactRepresentationDeclarations = (
 /** Returns every canonical nominal nested in a type, in deterministic preorder. */
 export const nominals = (self: Type): ReadonlyArray<Nominal> =>
   fold(self, { type: (type) => (isNominal(type) ? type : undefined) })
+
+/** Visits every structural type occurrence in deterministic pre-order. */
+export const visit = (self: Type, visitor: (type: Type) => void): void => {
+  fold(self, { type: (type) => visitor(type) })
+}
+
+/** Reports whether one type occurs strictly inside another type's structural representation. */
+export const isStrictStructuralSubterm = (candidate: Type, whole: Type): boolean => {
+  if (equals(candidate, whole)) return false
+  let found = false
+  visit(whole, (type) => {
+    if (equals(candidate, type)) found = true
+  })
+  return found
+}
 
 /** Returns every declaration-owned parameter nested in a type, without duplicates. */
 export const parameters = (self: Type): ReadonlyArray<Parameter> => {
@@ -2006,6 +2041,116 @@ const bindGenericArgument = (
   return genericArgumentKey(existing) === genericArgumentKey(actual)
 }
 
+const commitInference = (
+  target: Map<string, GenericArgument>,
+  source: ReadonlyMap<string, GenericArgument>,
+): void => {
+  target.clear()
+  for (const [identity, argument] of source) target.set(identity, argument)
+}
+
+/** Finds the first deterministic complete matching of normalized row members. */
+const inferRowMembers = <Member>(
+  pattern: ReadonlyArray<Member>,
+  actual: ReadonlyArray<Member>,
+  inferred: ReadonlyMap<string, GenericArgument>,
+  matches: (pattern: Member, actual: Member, inferred: Map<string, GenericArgument>) => boolean,
+  complete: (remaining: ReadonlyArray<Member>, inferred: Map<string, GenericArgument>) => boolean,
+): ReadonlyMap<string, GenericArgument> | undefined => {
+  const search = (
+    position: number,
+    remaining: ReadonlyArray<Member>,
+    current: ReadonlyMap<string, GenericArgument>,
+  ): ReadonlyMap<string, GenericArgument> | undefined => {
+    const member = pattern.at(position)
+    if (member === undefined) {
+      const completed = new Map(current)
+      return complete(remaining, completed) ? completed : undefined
+    }
+    for (const [candidatePosition, candidate] of remaining.entries()) {
+      const trial = new Map(current)
+      if (!matches(member, candidate, trial)) continue
+      const found = search(
+        position + 1,
+        remaining.filter((_, index) => index !== candidatePosition),
+        trial,
+      )
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  return search(0, actual, inferred)
+}
+
+/** Infers one normalized failure-row argument, assigning at most one open remainder. */
+const inferFailureRowArgument = (
+  pattern: FailureRowArgument,
+  actual: FailureRowArgument,
+  inferred: Map<string, GenericArgument>,
+  allowOpenActual = true,
+): boolean => {
+  if (!allowOpenActual && actual.parameters.length > 0) return false
+  if (genericArgumentKey(pattern) === genericArgumentKey(actual)) return true
+  const matched = inferRowMembers(
+    pattern.failures,
+    actual.failures,
+    inferred,
+    (failure, supplied, trial) => infer(failure, supplied, trial),
+    (remaining, trial) => {
+      if (pattern.parameters.length === 0)
+        return remaining.length === 0 && actual.parameters.length === 0
+      const parameter_ = pattern.parameters.at(0)
+      return (
+        pattern.parameters.length === 1 &&
+        parameter_ !== undefined &&
+        bindGenericArgument(parameter_, failureRowArgument(remaining, actual.parameters), trial)
+      )
+    },
+  )
+  if (matched === undefined) return false
+  const trial = new Map(matched)
+  commitInference(inferred, trial)
+  return true
+}
+
+/** Infers one normalized requirement-row argument, assigning at most one open remainder. */
+const inferRequirementRowArgument = (
+  pattern: RequirementRowArgument,
+  actual: RequirementRowArgument,
+  inferred: Map<string, GenericArgument>,
+  allowOpenActual = true,
+): boolean => {
+  if (!allowOpenActual && actual.parameters.length > 0) return false
+  if (genericArgumentKey(pattern) === genericArgumentKey(actual)) return true
+  const matched = inferRowMembers(
+    pattern.requirements,
+    actual.requirements,
+    inferred,
+    (requirement, supplied, trial) => {
+      if (
+        (requirement.access !== supplied.access && requirement.access !== 'Exclusive') ||
+        requirement.role !== supplied.role
+      )
+        return false
+      return infer(requirement.capability, supplied.capability, trial)
+    },
+    (remaining, trial) => {
+      if (pattern.parameters.length === 0)
+        return remaining.length === 0 && actual.parameters.length === 0
+      const parameter_ = pattern.parameters.at(0)
+      return (
+        pattern.parameters.length === 1 &&
+        parameter_ !== undefined &&
+        bindGenericArgument(parameter_, requirementRowArgument(remaining, actual.parameters), trial)
+      )
+    },
+  )
+  if (matched === undefined) return false
+  const trial = new Map(matched)
+  commitInference(inferred, trial)
+  return true
+}
+
 const inferGenericArgument = (
   pattern: GenericArgument,
   actual: GenericArgument,
@@ -2015,78 +2160,35 @@ const inferGenericArgument = (
     return (
       isRepresentationArgument(actual) && bindGenericArgument(pattern.parameter, actual, inferred)
     )
+  if (isFailureRowArgument(pattern) && isFailureRowArgument(actual))
+    return inferFailureRowArgument(pattern, actual, inferred, false)
+  if (isRequirementRowArgument(pattern) && isRequirementRowArgument(actual))
+    return inferRequirementRowArgument(pattern, actual, inferred, false)
   if (isTypeArgument(pattern) && isTypeArgument(actual)) return infer(pattern, actual, inferred)
   return genericArgumentKey(pattern) === genericArgumentKey(actual)
-}
-
-const commitInference = (
-  target: Map<string, GenericArgument>,
-  source: ReadonlyMap<string, GenericArgument>,
-): void => {
-  target.clear()
-  for (const [identity, argument] of source) target.set(identity, argument)
 }
 
 const inferFailureRows = (
   pattern: Effect,
   actual: Effect,
   inferred: Map<string, GenericArgument>,
-): boolean => {
-  const remaining = [...actual.failures]
-  for (const failure of pattern.failures) {
-    let matched = false
-    for (const [index, supplied] of remaining.entries()) {
-      const trial = new Map(inferred)
-      if (!infer(failure, supplied, trial)) continue
-      remaining.splice(index, 1)
-      commitInference(inferred, trial)
-      matched = true
-      break
-    }
-    if (!matched) return false
-  }
-  if (pattern.failureParameters.length === 0) return remaining.length === 0
-  const remainder = failureRowArgument(remaining, actual.failureParameters)
-  const parameter_ = pattern.failureParameters.at(0)
-  return (
-    pattern.failureParameters.length === 1 &&
-    parameter_ !== undefined &&
-    bindGenericArgument(parameter_, remainder, inferred)
+): boolean =>
+  inferFailureRowArgument(
+    failureRowArgument(pattern.failures, pattern.failureParameters),
+    failureRowArgument(actual.failures, actual.failureParameters),
+    inferred,
   )
-}
 
 const inferRequirementRows = (
   pattern: Effect,
   actual: Effect,
   inferred: Map<string, GenericArgument>,
-): boolean => {
-  const remaining = [...actual.requirements]
-  for (const requirement of pattern.requirements) {
-    let matched = false
-    for (const [index, supplied] of remaining.entries()) {
-      if (
-        (requirement.access !== supplied.access && requirement.access !== 'Exclusive') ||
-        requirement.role !== supplied.role
-      )
-        continue
-      const trial = new Map(inferred)
-      if (!infer(requirement.capability, supplied.capability, trial)) continue
-      remaining.splice(index, 1)
-      commitInference(inferred, trial)
-      matched = true
-      break
-    }
-    if (!matched) return false
-  }
-  if (pattern.requirementParameters.length === 0) return remaining.length === 0
-  const remainder = requirementRowArgument(remaining, actual.requirementParameters)
-  const parameter_ = pattern.requirementParameters.at(0)
-  return (
-    pattern.requirementParameters.length === 1 &&
-    parameter_ !== undefined &&
-    bindGenericArgument(parameter_, remainder, inferred)
+): boolean =>
+  inferRequirementRowArgument(
+    requirementRowArgument(pattern.requirements, pattern.requirementParameters),
+    requirementRowArgument(actual.requirements, actual.requirementParameters),
+    inferred,
   )
-}
 
 /** Explains a failed Effect-row decomposition without replacing ordinary type diagnostics. */
 export const rowInferenceFailure = (

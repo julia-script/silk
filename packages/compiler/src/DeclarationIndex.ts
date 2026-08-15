@@ -1,4 +1,6 @@
 import * as Option from 'effect/Option'
+import * as ConformanceGoal from './ConformanceGoal.js'
+import * as ConformanceHead from './ConformanceHead.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
@@ -8,6 +10,7 @@ import type * as ModuleClosure from './ModuleClosure.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as Specialization from './Specialization.js'
 import * as StaticText from './StaticText.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
@@ -506,14 +509,60 @@ export interface InterfaceFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/**
+ * One interface application a conditional conformance must prove before it admits a witness.
+ *
+ * The requirement is written in the header's own parameter list, as the bound of the binder it
+ * constrains, and it states its provider explicitly: `impl<S: Decoder<S>>` requires a decoder for
+ * `S`, not for some implicit `Self`. Retaining the applied capability rather than the bound's bare
+ * spelling is what lets a requirement name a different specialization of the same interface.
+ */
+export interface ConformanceRequirementFact {
+  readonly _tag: 'ConformanceRequirement'
+  readonly parameter: Type.Parameter
+  readonly spelling: string
+  readonly capability: DeclaredTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
+/** Whether one conformance head is free of possible ambiguity with every other head. */
+export type ConformanceCoherence =
+  | { readonly _tag: 'Coherent' }
+  | {
+      readonly _tag: 'Overlapping'
+      readonly module: string
+      readonly ordinal: number
+    }
+
+/** Whether following one conformance's requirements can only descend toward a base witness. */
+export type ConformanceTermination =
+  | { readonly _tag: 'Terminating' }
+  | {
+      readonly _tag: 'NonTerminating'
+      readonly failures: ReadonlyArray<ConformanceHead.TerminationFailure>
+    }
+  | { readonly _tag: 'UnavailableTermination' }
+
+export type ConformanceValidity =
+  | { readonly _tag: 'UncheckedConformance' }
+  | { readonly _tag: 'ValidConformance' }
+  | { readonly _tag: 'InvalidConformance' }
+
 /** One source-retained capability conformance witness. */
 export interface ConformanceFact {
   readonly _tag: 'ConformanceDeclaration'
   readonly module: string
   readonly ordinal: number
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
+  readonly requirements: ReadonlyArray<ConformanceRequirementFact>
   readonly capability: DeclaredTypeFact
   readonly provider: DeclaredTypeFact
+  /**
+   * Conformance coherence is a property of the whole program rather than of one module, so a
+   * conformance is visible wherever its provider and interface are. The field records that
+   * decision explicitly rather than leaving it implicit in the absence of a modifier.
+   */
+  readonly visibility: 'Public'
   readonly operations: ReadonlyArray<{
     readonly name: DeclaredName
     readonly target:
@@ -522,6 +571,12 @@ export interface ConformanceFact {
     readonly syntax: SyntaxTree.Node
   }>
   readonly hook?: DropHookFact
+  /** The alpha-normalized head, present once the capability and provider both resolve. */
+  readonly head?: ConformanceHead.ConformanceHead
+  readonly coherence: ConformanceCoherence
+  readonly termination: ConformanceTermination
+  /** Whether complete header/body validation admitted this declaration as a witness candidate. */
+  readonly validity: ConformanceValidity
   readonly syntax: SyntaxTree.Node
 }
 
@@ -562,6 +617,14 @@ export type ConformanceWitness =
         readonly name: string
         readonly implementation: CanonicalId
       }>
+      /**
+       * The header's binders as this specialization bound them, in declaration order.
+       *
+       * This is the whole of what a conditional witness carries. The goals it was proved from are
+       * reached through their own instances, so nothing about a requirement travels with the
+       * witness that selected it.
+       */
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
     }
 
 /** Any declaration kind occupying the shared module-level namespace. */
@@ -2104,6 +2167,24 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         providerSyntax === undefined
           ? Object.freeze({ _tag: 'Unavailable' as const, syntax: node })
           : analyzeDeclaredType(source, providerSyntax, environment).fact
+      // A binder's bound is re-analyzed here rather than reused from the parameter collection,
+      // because a conditional requirement may name any binder the header declares — including the
+      // one it bounds — and only the completed environment can resolve those occurrences.
+      const requirements = collected.facts.flatMap(
+        (parameter): ReadonlyArray<ConformanceRequirementFact> => {
+          const bound = parameter.bound
+          if (bound === undefined || parameter.duplicateOf !== undefined) return []
+          return Object.freeze([
+            Object.freeze({
+              _tag: 'ConformanceRequirement' as const,
+              parameter: parameter.type,
+              spelling: bound.spelling,
+              capability: analyzeDeclaredType(source, bound.path.syntax, environment).fact,
+              syntax: bound.path.syntax,
+            }),
+          ])
+        },
+      )
       const operations = SyntaxTree.directNodes(node, 'ImplOperation').map((operation) => {
         const name = presentName(source, operation)
         const targetSyntax = SyntaxTree.directNode(operation, 'TypePath')
@@ -2204,10 +2285,17 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         module: source.id,
         ordinal,
         typeParameters: collected.facts,
+        requirements: Object.freeze(requirements),
         capability,
         provider,
+        visibility: 'Public',
         operations: Object.freeze(operations),
         ...(hook === undefined ? {} : { hook }),
+        // Coherence and termination are program-wide questions, so both stay unanswered until
+        // every module's headers have resolved.
+        coherence: Object.freeze({ _tag: 'Coherent' as const }),
+        termination: Object.freeze({ _tag: 'UnavailableTermination' as const }),
+        validity: Object.freeze({ _tag: 'UncheckedConformance' as const }),
         syntax: node,
       })
     })
@@ -3410,6 +3498,75 @@ const resolveBounds = (
   )
 }
 
+/**
+ * Reads one conformance's requirements as the interface applications proof search will follow.
+ *
+ * A requirement that resolved to something other than an applied interface, or that never stated
+ * its provider, contributes nothing here: header validation reports it, and admitting it as a
+ * descent step would let a damaged fact stand in for a proof obligation.
+ */
+const declaredRequirements = (
+  modules: ReadonlyArray<ModuleHeaders>,
+  conformance: ConformanceFact,
+): ReadonlyArray<ConformanceHead.Requirement> =>
+  Object.freeze(
+    conformance.requirements.flatMap((requirement): ReadonlyArray<ConformanceHead.Requirement> => {
+      if (requirement.capability._tag !== 'Resolved') return []
+      const capability = requirement.capability.type
+      if (!Type.isNominal(capability)) return []
+      if (memberByNominal(modules, capability)?._tag !== 'InterfaceDeclaration') return []
+      const provider = capability.arguments.at(ConformanceHead.providerOrdinal)
+      if (provider === undefined || !Type.isTypeArgument(provider)) return []
+      return Object.freeze([Object.freeze({ capability, provider })])
+    }),
+  )
+
+/** Positional specialization shared by interface and service witness validation. */
+const witnessBinding = (
+  implementation: DeclarationFact,
+  declaredParameters: ReadonlyArray<Type.Parameter>,
+): {
+  readonly binders: ReadonlyArray<TypeParameterFact>
+  readonly parameters: ReadonlyArray<Type.Parameter>
+  readonly substitution: Type.Substitution | undefined
+} => {
+  const binders = implementation.typeParameters.filter(
+    (parameter) => parameter.duplicateOf === undefined,
+  )
+  const parameters = binders.map((parameter) => parameter.type)
+  return Object.freeze({
+    binders,
+    parameters,
+    substitution:
+      parameters.length === 0
+        ? new Map<string, Type.GenericArgument>()
+        : Type.substitution(parameters, declaredParameters.map(Type.parameterArgument)),
+  })
+}
+
+/** Finds the first implementation bound the conformance header never promises. */
+const unpromisedWitnessBound = (
+  binding: ReturnType<typeof witnessBinding>,
+  declaredParameters: ReadonlyArray<Type.Parameter>,
+  conformance: ConformanceFact,
+): TypeParameterFact | undefined =>
+  binding.binders.find((binder, position) => {
+    const bound = binder.bound
+    if (bound?._tag !== 'ResolvedBound') return bound !== undefined
+    const header = declaredParameters.at(position)
+    return (
+      header === undefined ||
+      !conformance.requirements.some(
+        (requirement) =>
+          requirement.capability._tag === 'Resolved' &&
+          Type.isNominal(requirement.capability.type) &&
+          requirement.capability.type.module === bound.capability.module &&
+          requirement.capability.type.name === bound.capability.name &&
+          Type.equals(requirement.parameter, header),
+      )
+    )
+  })
+
 /** Resolves one retained type fact through a supplied module resolver and complete index. */
 export const resolveTypeFact = (
   index: Index,
@@ -4053,8 +4210,19 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
                 requirementRow: requirementRow.fact,
               })
             })()
+      const requirements = conformance.requirements.map((requirement) => {
+        const resolved = resolveDeclaredType(
+          module.module,
+          requirement.capability,
+          resolvers,
+          self.modules,
+        )
+        diagnostics.push(...resolved.diagnostics)
+        return Object.freeze({ ...requirement, capability: resolved.fact })
+      })
       return Object.freeze({
         ...conformance,
+        requirements: Object.freeze(requirements),
         capability: capability.fact,
         provider: provider.fact,
         ...(hook === undefined ? {} : { hook }),
@@ -4084,7 +4252,113 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
     })
   })
 
-  const conformanceKeys = new Map<string, SourceSpan.SourceSpan>()
+  // Coherence and termination are program-wide questions, so both are answered once every module's
+  // headers have resolved and before any conformance body is validated. Overlap is decided on head
+  // shapes alone: no bound is consulted, because whether a bound is satisfiable depends on the whole
+  // program and would let one specialization silently change which witness it selects.
+  const acceptedHeads: Array<{
+    readonly module: string
+    readonly ordinal: number
+    readonly head: ConformanceHead.ConformanceHead
+    readonly span: SourceSpan.SourceSpan
+  }> = []
+  modules = modules.map((module) =>
+    Object.freeze({
+      ...module,
+      conformances: Object.freeze(
+        module.conformances.map((conformance): ConformanceFact => {
+          if (
+            conformance.capability._tag !== 'Resolved' ||
+            !Type.isNominal(conformance.capability.type) ||
+            conformance.provider._tag !== 'Resolved'
+          )
+            return conformance
+          const requirements = declaredRequirements(modules, conformance)
+          const head = ConformanceHead.make(
+            conformance.capability.type,
+            conformance.provider.type,
+            requirements,
+          )
+          // A damaged requirement is retained on the conformance fact for diagnostics, but cannot
+          // be shortened into a zero-obligation head. Header validation below reports the source
+          // error; leaving termination unavailable keeps the fact out of coherence and proof search.
+          if (requirements.length !== conformance.requirements.length)
+            return Object.freeze({ ...conformance, head })
+          const failures = ConformanceHead.terminationFailures(head)
+          if (failures.length > 0)
+            diagnostics.push(
+              Diagnostic.nonTerminatingConformance(
+                ConformanceHead.encode(head),
+                failures.map(ConformanceHead.describeTermination),
+                conformance.syntax.span,
+              ),
+            )
+          // This is the one authority on whether two conformances may cover one provider. Two
+          // unbounded headers with one identical shape are the case a reader recognizes as a
+          // duplicate and are named that way; two headers a bound is the only difference between
+          // are reported as the overlap they are, because calling them duplicates would suggest the
+          // bounds were compared. Comparing the alpha-normalized heads is what makes the two tests
+          // agree — keying the duplicate check on unnormalized capabilities, as an earlier version
+          // did, let exactly the bound-distinguished pair match neither and survive.
+          const headKey = ConformanceHead.key(head)
+          const overlapping = acceptedHeads.find((candidate) =>
+            ConformanceHead.mayOverlap(candidate.head, head),
+          )
+          if (overlapping === undefined)
+            acceptedHeads.push(
+              Object.freeze({
+                module: module.module,
+                ordinal: conformance.ordinal,
+                head,
+                span: conformance.syntax.span,
+              }),
+            )
+          else if (
+            ConformanceHead.key(overlapping.head) === headKey &&
+            head.requirements.length === 0 &&
+            overlapping.head.requirements.length === 0
+          )
+            diagnostics.push(
+              Object.freeze({
+                ...Diagnostic.invalidConformance(
+                  `duplicate ${conformance.capability.type.name} implementation for ${Type.encode(conformance.provider.type)}`,
+                  conformance.syntax.span,
+                ),
+                relatedSpans: Object.freeze([
+                  Object.freeze({ label: 'first implementation', span: overlapping.span }),
+                ]),
+              }),
+            )
+          else
+            diagnostics.push(
+              Diagnostic.overlappingConformance(
+                ConformanceHead.encode(head),
+                ConformanceHead.encode(overlapping.head),
+                conformance.syntax.span,
+                overlapping.span,
+              ),
+            )
+          return Object.freeze({
+            ...conformance,
+            head,
+            coherence:
+              overlapping === undefined
+                ? Object.freeze({ _tag: 'Coherent' as const })
+                : Object.freeze({
+                    _tag: 'Overlapping' as const,
+                    module: overlapping.module,
+                    ordinal: overlapping.ordinal,
+                  }),
+            termination:
+              failures.length === 0
+                ? Object.freeze({ _tag: 'Terminating' as const })
+                : Object.freeze({ _tag: 'NonTerminating' as const, failures }),
+          })
+        }),
+      ),
+    }),
+  )
+
   const copyMemo = new Map<string, boolean>()
   const containsPositionRestrictedBorrow = Type.containsPositionRestrictedBorrow
   const isCopyType = (type: Type.Type, visiting = new Set<string>()): boolean => {
@@ -4116,15 +4390,28 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
     return result
   }
 
+  const invalidConformances = new Set<ConformanceFact>()
   for (const module of modules) {
     for (const conformance of module.conformances) {
+      const markInvalid = (): void => {
+        invalidConformances.add(conformance)
+      }
+      const rejectConformance = <A extends Diagnostic.Diagnostic>(diagnostic: A): A => {
+        markInvalid()
+        return diagnostic
+      }
+      const invalidDiagnostic = (
+        ...args: Parameters<typeof Diagnostic.invalidConformance>
+      ): ReturnType<typeof Diagnostic.invalidConformance> => {
+        return rejectConformance(Diagnostic.invalidConformance(...args))
+      }
       if (
         conformance.capability._tag !== 'Resolved' ||
         !Type.isNominal(conformance.capability.type) ||
         conformance.provider._tag !== 'Resolved'
       ) {
         diagnostics.push(
-          Diagnostic.invalidConformance(
+          invalidDiagnostic(
             'the capability must resolve to a nominal type and the provider must resolve to a type',
             conformance.syntax.span,
           ),
@@ -4140,19 +4427,16 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             interface_.canonical._tag === 'Canonical' &&
             interface_.canonical.id.name === capability.name,
         )
+      const sourceService = modules
+        .find((candidate) => candidate.module === capability.module)
+        ?.services.find(
+          (service) =>
+            service.canonical._tag === 'Canonical' && service.canonical.id.name === capability.name,
+        )
       if (sourceInterface === undefined && !Type.isNominal(provider)) {
         diagnostics.push(
-          Diagnostic.invalidConformance(
+          invalidDiagnostic(
             'service and compiler-sealed capability providers must be nominal types',
-            conformance.syntax.span,
-          ),
-        )
-        continue
-      }
-      if (!Type.isConcrete(capability)) {
-        diagnostics.push(
-          Diagnostic.invalidConformance(
-            'the capability must be concrete; impl type parameters may only bind the provider',
             conformance.syntax.span,
           ),
         )
@@ -4161,6 +4445,62 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
       const declaredParameters = conformance.typeParameters
         .filter((parameter) => parameter.duplicateOf === undefined)
         .map((parameter) => parameter.type)
+      // Source interface and service arguments may mention the header's binders, because one
+      // parametric provider may implement one equally parametric source capability. Compiler-sealed
+      // capabilities remain concrete.
+      if (
+        !Type.isConcrete(capability) &&
+        ((sourceInterface === undefined && sourceService === undefined) ||
+          declaredParameters.length === 0)
+      ) {
+        diagnostics.push(
+          invalidDiagnostic(
+            'the capability must be concrete; impl type parameters may only bind the provider',
+            conformance.syntax.span,
+          ),
+        )
+        continue
+      }
+      // Every interface application states its provider explicitly rather than through an implicit
+      // `Self`, so the head's own first argument has to be the type it is declared `for`.
+      if (sourceInterface !== undefined) {
+        const declaredProvider = capability.arguments.at(ConformanceHead.providerOrdinal)
+        if (
+          declaredProvider === undefined ||
+          !Type.isTypeArgument(declaredProvider) ||
+          !Type.equals(declaredProvider, provider)
+        ) {
+          diagnostics.push(
+            invalidDiagnostic(
+              `${capability.name} must be applied to its own provider ${Type.encode(provider)}`,
+              conformance.syntax.span,
+            ),
+          )
+          continue
+        }
+      }
+      // This predicate is the exact complement of what `declaredRequirements` admits. They have to
+      // agree: a requirement the reader accepts but the reader of obligations drops would be a
+      // bound nothing ever proves.
+      const unstatedRequirement = conformance.requirements.find((requirement) => {
+        if (requirement.capability._tag !== 'Resolved') return true
+        const applied = requirement.capability.type
+        if (!Type.isNominal(applied)) return true
+        if (memberByNominal(modules, applied)?._tag !== 'InterfaceDeclaration') return true
+        const stated = applied.arguments.at(ConformanceHead.providerOrdinal)
+        return stated === undefined || !Type.isTypeArgument(stated)
+      })
+      if (unstatedRequirement !== undefined) {
+        diagnostics.push(
+          invalidDiagnostic(
+            `requirement ${unstatedRequirement.spelling} must be an interface applied to its own provider`,
+            unstatedRequirement.syntax.span,
+          ),
+        )
+        continue
+      }
+      if (conformance.termination._tag === 'NonTerminating') continue
+      if (conformance.coherence._tag === 'Overlapping') continue
       const usedParameterKeys = new Set(
         Type.parameters(provider).map((parameter) => Type.key(parameter)),
       )
@@ -4169,44 +4509,17 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
       )
       if (unused.length > 0) {
         diagnostics.push(
-          Diagnostic.invalidConformance(
+          invalidDiagnostic(
             `impl type parameter ${unused.map((parameter) => parameter.name).join(', ')} is not used by the provider type`,
             conformance.syntax.span,
           ),
         )
         continue
       }
-      // Parametric impls collide when they cover the same provider shape, so the dedup key
-      // normalizes parameter identities positionally.
-      const normalization = new Map<string, Type.Type>(
-        declaredParameters.map((parameter, position) => [
-          Type.key(parameter),
-          Type.parameter({ module: '', name: 'impl' }, position, `%${position}`),
-        ]),
-      )
-      const normalizedProvider = Type.substitute(provider, normalization)
-      const key = `${Type.key(capability)}\0${Type.key(normalizedProvider)}`
-      const original = conformanceKeys.get(key)
-      if (original !== undefined) {
-        diagnostics.push(
-          Object.freeze({
-            ...Diagnostic.invalidConformance(
-              `duplicate ${capability.name} implementation for ${Type.encode(provider)}`,
-              conformance.syntax.span,
-            ),
-            relatedSpans: Object.freeze([
-              Object.freeze({ label: 'first implementation', span: original }),
-            ]),
-          }),
-        )
-        continue
-      }
-      conformanceKeys.set(key, conformance.syntax.span)
-
       if (sourceInterface !== undefined) {
         if (conformance.hook !== undefined) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               `${capability.name} implementations use operation mappings, not a hook body`,
               conformance.hook.syntax.span,
             ),
@@ -4217,12 +4530,13 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         let invalid = false
         for (const mapping of conformance.operations) {
           if (mapping.name._tag !== 'Present') {
+            markInvalid()
             invalid = true
             continue
           }
           if (mapped.has(mapping.name.spelling)) {
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `duplicate ${capability.name}.${mapping.name.spelling} operation mapping`,
                 mapping.syntax.span,
               ),
@@ -4239,7 +4553,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         const extra = [...mapped.keys()].filter((name) => !operationNames.has(name))
         if (missing.length > 0 || extra.length > 0) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               [
                 ...(missing.length === 0 ? [] : [`missing ${missing.join(', ')}`]),
                 ...(extra.length === 0 ? [] : [`unknown ${extra.join(', ')}`]),
@@ -4255,7 +4569,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         )
         if (substitution === undefined) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               `${capability.name} implementation has the wrong interface type-argument arity`,
               conformance.syntax.span,
             ),
@@ -4276,9 +4590,9 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             contract.functionKind === 'Ordinary' &&
             contract.failureRow.failures.length === 0 &&
             contract.requirementRow.requirements.length === 0
-          const reject = (): void => {
+          const rejectIncompatibleMapping = (): void => {
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `${target._tag === 'TypePath' ? target.spelling : '_'} is incompatible with ${capability.name}.${contractName}`,
                 mapping.syntax.span,
               ),
@@ -4304,14 +4618,38 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             )
             if (implementation === undefined) {
               diagnostics.push(
-                Diagnostic.invalidConformance(
+                invalidDiagnostic(
                   `mapped operation ${provider.name}.${targetName ?? '_'} does not exist`,
                   mapping.syntax.span,
                 ),
               )
               continue
             }
+            // A conditional conformance's witness is generic in the same binders its header
+            // declares, so the witness function's own parameters are bound to the header's
+            // positionally. That correspondence is what lets one witness serve every
+            // specialization the header covers, and it is the same shape the hidden Drop hook
+            // already uses. A conformance that declares no binders still admits no generic witness.
+            const binding = witnessBinding(implementation, declaredParameters)
+            // A witness may only ask for what the header already promises. Its own bounds are the
+            // obligations its body will discharge, so a bound the header never requires would be
+            // proved nowhere and would surface as a call with no lowering rather than a diagnostic.
+            const unpromisedBound = unpromisedWitnessBound(binding, declaredParameters, conformance)
+            if (unpromisedBound !== undefined) {
+              diagnostics.push(
+                invalidDiagnostic(
+                  `${target.spelling} requires ${unpromisedBound.bound?.spelling ?? 'a bound'} for ${unpromisedBound.type.name}, which ${capability.name} for ${Type.encode(provider)} does not require`,
+                  mapping.syntax.span,
+                ),
+              )
+              continue
+            }
+            const specialize = (type: Type.Type): Type.Type =>
+              binding.substitution === undefined
+                ? type
+                : Type.substitute(type, binding.substitution)
             const validParameters =
+              binding.substitution !== undefined &&
               implementation.parameters.length === contract.parameters.length &&
               contract.parameters.every((parameter, ordinal) => {
                 const actual = implementation.parameters.at(ordinal)?.declaredType
@@ -4322,7 +4660,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
                   actual.type.access === 'Shared' &&
                   Type.equals(
                     Type.substitute(parameter.declaredType.type, substitution),
-                    actual.type.target,
+                    specialize(actual.type.target),
                   )
                 )
               })
@@ -4331,18 +4669,18 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
               contract.returnType._tag === 'Resolved' &&
               Type.equals(
                 Type.substitute(contract.returnType.type, substitution),
-                implementation.returnType.type,
+                specialize(implementation.returnType.type),
               )
             if (
               !contractShape ||
               !validParameters ||
               !validResult ||
               implementation.functionKind !== 'Ordinary' ||
-              implementation.typeParameters.length > 0 ||
+              binding.parameters.length !== declaredParameters.length ||
               implementation.failureRow.failures.length > 0 ||
               implementation.requirementRow.requirements.length > 0
             )
-              reject()
+              rejectIncompatibleMapping()
             continue
           }
           const operation =
@@ -4376,23 +4714,17 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             !validParameters ||
             !validResult
           )
-            reject()
+            rejectIncompatibleMapping()
         }
         continue
       }
 
       if (!Type.isNominal(provider)) continue
 
-      const sourceService = modules
-        .find((candidate) => candidate.module === capability.module)
-        ?.services.find(
-          (service) =>
-            service.canonical._tag === 'Canonical' && service.canonical.id.name === capability.name,
-        )
       if (sourceService !== undefined) {
         if (conformance.hook !== undefined) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               `${capability.name} implementations use operation mappings, not a hook body`,
               conformance.hook.syntax.span,
             ),
@@ -4403,12 +4735,13 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         let invalidMappingSet = false
         for (const mapping of conformance.operations) {
           if (mapping.name._tag !== 'Present') {
+            markInvalid()
             invalidMappingSet = true
             continue
           }
           if (mapped.has(mapping.name.spelling)) {
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `duplicate ${capability.name}.${mapping.name.spelling} operation mapping`,
                 mapping.syntax.span,
               ),
@@ -4425,7 +4758,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         const extra = [...mapped.keys()].filter((operation) => !serviceNames.has(operation))
         if (missing.length > 0 || extra.length > 0) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               [
                 ...(missing.length === 0 ? [] : [`missing ${missing.join(', ')}`]),
                 ...(extra.length === 0 ? [] : [`unknown ${extra.join(', ')}`]),
@@ -4442,7 +4775,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         )
         if (serviceSubstitution === undefined) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               `${capability.name} implementation has the wrong service type-argument arity`,
               conformance.syntax.span,
             ),
@@ -4461,7 +4794,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             target.segments.at(0)?.spelling !== provider.name
           ) {
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `${contract.name.spelling} must map to an operation in the ${provider.name} actor`,
                 mapping.syntax.span,
               ),
@@ -4477,18 +4810,32 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           )
           if (implementation === undefined) {
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `mapped operation ${provider.name}.${targetName ?? '_'} does not exist`,
                 mapping.syntax.span,
               ),
             )
             continue
           }
+          const binding = witnessBinding(implementation, declaredParameters)
+          const unpromisedBound = unpromisedWitnessBound(binding, declaredParameters, conformance)
+          if (unpromisedBound !== undefined) {
+            diagnostics.push(
+              invalidDiagnostic(
+                `${target.spelling} requires ${unpromisedBound.bound?.spelling ?? 'a bound'} for ${unpromisedBound.type.name}, which ${capability.name} for ${Type.encode(provider)} does not require`,
+                mapping.syntax.span,
+              ),
+            )
+            continue
+          }
+          const specialize = (type: Type.Type): Type.Type =>
+            binding.substitution === undefined ? type : Type.substitute(type, binding.substitution)
           const self = implementation.parameters.at(0)?.declaredType
           const validSelf =
+            binding.substitution !== undefined &&
             self?._tag === 'Resolved' &&
             Type.isReference(self.type) &&
-            Type.equals(self.type.target, provider)
+            Type.equals(specialize(self.type.target), provider)
           const implementationParameters = implementation.parameters.slice(1)
           const validParameters =
             implementationParameters.length === contract.parameters.length &&
@@ -4500,7 +4847,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
                 TypeCompatibility.isCompatible(
                   TypeCompatibility.check(
                     Type.substitute(expected.type, serviceSubstitution),
-                    parameter.declaredType.type,
+                    specialize(parameter.declaredType.type),
                   ),
                 )
               )
@@ -4510,37 +4857,64 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             contract.returnType._tag === 'Resolved' &&
             TypeCompatibility.isCompatible(
               TypeCompatibility.check(
-                implementation.returnType.type,
+                specialize(implementation.returnType.type),
                 Type.substitute(contract.returnType.type, serviceSubstitution),
               ),
             )
-          const validFailures = implementation.failureRow.failures.every((failure) =>
-            contract.failureRow.failures.some((allowed) =>
-              Type.equals(failure, Type.substitute(allowed, serviceSubstitution)),
+          const implementationRows = specialize(
+            Type.effect(
+              Type.unit,
+              implementation.failureRow.failures,
+              'Shared',
+              implementation.requirementRow.requirements,
+              implementation.failureRow.parameters,
+              implementation.requirementRow.parameters,
             ),
           )
-          const contractRequirements = contract.requirementRow.requirements.filter(
-            (requirement) =>
-              !Type.equals(
-                Type.substitute(requirement.capability, serviceSubstitution),
-                capability,
-              ),
+          const contractRows = Type.substitute(
+            Type.effect(
+              Type.unit,
+              contract.failureRow.failures,
+              'Shared',
+              contract.requirementRow.requirements,
+              contract.failureRow.parameters,
+              contract.requirementRow.parameters,
+            ),
+            serviceSubstitution,
           )
-          const validRequirements = implementation.requirementRow.requirements.every(
-            (requirement) =>
+          const validFailures =
+            Type.isEffect(implementationRows) &&
+            Type.isEffect(contractRows) &&
+            implementationRows.failures.every((failure) =>
+              contractRows.failures.some((allowed) => Type.equals(failure, allowed)),
+            ) &&
+            implementationRows.failureParameters.every((parameter) =>
+              contractRows.failureParameters.some((allowed) => Type.equals(parameter, allowed)),
+            )
+          const contractRequirements = !Type.isEffect(contractRows)
+            ? []
+            : contractRows.requirements.filter(
+                (requirement) => !Type.equals(requirement.capability, capability),
+              )
+          const validRequirements =
+            Type.isEffect(implementationRows) &&
+            Type.isEffect(contractRows) &&
+            implementationRows.requirements.every((requirement) =>
               contractRequirements.some(
                 (allowed) =>
-                  Type.equals(
-                    requirement.capability,
-                    Type.substitute(allowed.capability, serviceSubstitution),
-                  ) &&
+                  Type.equals(requirement.capability, allowed.capability) &&
                   requirement.role === allowed.role &&
                   (requirement.access === 'Shared' || allowed.access === 'Exclusive'),
               ),
-          )
-          const contractSelf = contract.requirementRow.requirements.find((requirement) =>
-            Type.equals(Type.substitute(requirement.capability, serviceSubstitution), capability),
-          )
+            ) &&
+            implementationRows.requirementParameters.every((parameter) =>
+              contractRows.requirementParameters.some((allowed) => Type.equals(parameter, allowed)),
+            )
+          const contractSelf = !Type.isEffect(contractRows)
+            ? undefined
+            : contractRows.requirements.find((requirement) =>
+                Type.equals(requirement.capability, capability),
+              )
           const validSelfAccess =
             validSelf &&
             self._tag === 'Resolved' &&
@@ -4548,16 +4922,17 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             (self.type.access === 'Shared' || contractSelf?.access === 'Exclusive')
           if (
             implementation.functionKind !== contract.functionKind ||
+            binding.parameters.length !== declaredParameters.length ||
             !validSelfAccess ||
             !validParameters ||
             !validResult ||
             !validFailures ||
             !validRequirements ||
-            implementation.failureRow.parameters.length > 0 ||
-            implementation.requirementRow.parameters.length > 0
+            !Type.isEffect(implementationRows) ||
+            !Type.isEffect(contractRows)
           )
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `${provider.name}.${targetName ?? '_'} is incompatible with ${capability.name}.${contract.name.spelling}`,
                 mapping.syntax.span,
               ),
@@ -4570,9 +4945,11 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         const hook = conformance.hook
         if (conformance.operations.length !== 0 || hook === undefined) {
           diagnostics.push(
-            Diagnostic.invalidDropHook(
-              'Drop requires one inline fn drop hook and no operation mappings',
-              conformance.syntax.span,
+            rejectConformance(
+              Diagnostic.invalidDropHook(
+                'Drop requires one inline fn drop hook and no operation mappings',
+                conformance.syntax.span,
+              ),
             ),
           )
           continue
@@ -4598,18 +4975,22 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           hook.requirementRow.requirements.length !== 0
         ) {
           diagnostics.push(
-            Diagnostic.invalidDropHook(
-              'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
-              hook.syntax.span,
+            rejectConformance(
+              Diagnostic.invalidDropHook(
+                'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
+                hook.syntax.span,
+              ),
             ),
           )
         } else if (Type.isConcrete(provider) && isCopyType(provider)) {
           // A parametric provider's Copy-ness depends on its arguments, so the prohibition is
           // enforced per instantiation during monomorphization instead of at the header.
           diagnostics.push(
-            Diagnostic.invalidDropHook(
-              `Copy type ${Type.encode(provider)} cannot implement Drop`,
-              conformance.syntax.span,
+            rejectConformance(
+              Diagnostic.invalidDropHook(
+                `Copy type ${Type.encode(provider)} cannot implement Drop`,
+                conformance.syntax.span,
+              ),
             ),
           )
         }
@@ -4619,7 +5000,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
       if (Type.equals(capability, Type.reportCapability)) {
         if (conformance.operations.length !== 0 || conformance.hook !== undefined) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               'Report is an operation-free marker capability',
               conformance.syntax.span,
             ),
@@ -4629,13 +5010,32 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
       }
 
       diagnostics.push(
-        Diagnostic.invalidConformance(
+        invalidDiagnostic(
           `unsupported compiler-sealed capability ${Type.encode(capability)}`,
           conformance.syntax.span,
         ),
       )
     }
   }
+
+  modules = modules.map((module) =>
+    Object.freeze({
+      ...module,
+      conformances: Object.freeze(
+        module.conformances.map((conformance) =>
+          Object.freeze({
+            ...conformance,
+            validity:
+              invalidConformances.has(conformance) ||
+              conformance.coherence._tag !== 'Coherent' ||
+              conformance.termination._tag !== 'Terminating'
+                ? Object.freeze({ _tag: 'InvalidConformance' as const })
+                : Object.freeze({ _tag: 'ValidConformance' as const }),
+          }),
+        ),
+      ),
+    }),
+  )
 
   for (const module of modules) {
     for (const member of module.members) {
@@ -4922,35 +5322,200 @@ const interfaceByCapability = (self: Index, capability: Type.Nominal): Interface
         candidate.canonical._tag === 'Canonical' && candidate.canonical.id.name === capability.name,
     )
 
+/**
+ * Completed proofs, per index.
+ *
+ * Only proved goals are remembered. A failure carries the chain of goals that reached it, and that
+ * chain belongs to the path rather than to the goal, so caching one would make a later diagnostic
+ * describe whichever specialization happened to ask first.
+ */
+const proofMemos = new WeakMap<Index, Map<string, ConformanceGoal.Proof>>()
+
+const noGenericArguments: ReadonlyArray<Type.GenericArgument> = Object.freeze([])
+
+/** One conformance whose head covers a concrete goal, with the arguments matching it bound. */
+interface ConformanceCandidate {
+  readonly module: string
+  readonly conformance: ConformanceFact
+  readonly substitution: Type.Substitution
+}
+
+/**
+ * Returns every conformance whose head covers one concrete goal.
+ *
+ * A head that was rejected for overlap or for declaring a requirement that does not descend is not
+ * a candidate: admitting it would make the selected witness depend on which of two ambiguous
+ * declarations was reached first, or would let proof search follow a step it cannot bound.
+ */
+const conformanceCandidates = (
+  self: Index,
+  goal: ConformanceGoal.ConformanceGoal,
+  admission: 'Selectable' | 'Declared' = 'Selectable',
+): ReadonlyArray<ConformanceCandidate> =>
+  Object.freeze(
+    self.modules.flatMap((module) =>
+      module.conformances.flatMap((conformance): ReadonlyArray<ConformanceCandidate> => {
+        if (
+          conformance.capability._tag !== 'Resolved' ||
+          !Type.isNominal(conformance.capability.type) ||
+          conformance.provider._tag !== 'Resolved' ||
+          (admission === 'Selectable' && conformance.validity._tag !== 'ValidConformance') ||
+          conformance.coherence._tag !== 'Coherent' ||
+          conformance.termination._tag !== 'Terminating'
+        )
+          return []
+        const inferred = new Map<string, Type.GenericArgument>()
+        if (!Type.infer(conformance.provider.type, goal.provider, inferred)) return []
+        if (!Type.infer(conformance.capability.type, goal.capability, inferred)) return []
+        return Object.freeze([
+          Object.freeze({ module: module.module, conformance, substitution: inferred }),
+        ])
+      }),
+    ),
+  )
+
+const provedGoal = (
+  goal: ConformanceGoal.ConformanceGoal,
+  selection: ConformanceGoal.Selection,
+  typeArguments: ReadonlyArray<Type.GenericArgument>,
+  requirements: ReadonlyArray<ConformanceGoal.Proof>,
+): ConformanceGoal.Proof =>
+  Object.freeze({
+    _tag: 'Proved' as const,
+    goal,
+    selection,
+    typeArguments: Object.freeze([...typeArguments]),
+    requirements: Object.freeze([...requirements]),
+  })
+
+const unprovedGoal = (
+  goal: ConformanceGoal.ConformanceGoal,
+  failure: ConformanceGoal.Failure,
+  trace: ReadonlyArray<ConformanceGoal.ConformanceGoal>,
+): ConformanceGoal.Proof =>
+  Object.freeze({
+    _tag: 'Unproved' as const,
+    goal,
+    failure,
+    trace: Object.freeze([...trace]),
+  })
+
+const proveGoal = (
+  self: Index,
+  goal: ConformanceGoal.ConformanceGoal,
+  memo: Map<string, ConformanceGoal.Proof>,
+  active: ReadonlyArray<ConformanceGoal.ConformanceGoal>,
+): ConformanceGoal.Proof => {
+  const goalKey = ConformanceGoal.key(goal)
+  const completed = memo.get(goalKey)
+  if (completed !== undefined) return completed
+  // An in-progress goal cannot satisfy itself. Declaration-time descent already proves the search
+  // finite, so reaching this means a fact was damaged; the answer recovers the path rather than
+  // admitting a coinductive proof, and is deliberately not remembered.
+  if (active.some((entry) => ConformanceGoal.key(entry) === goalKey))
+    return unprovedGoal(goal, Object.freeze({ _tag: 'ActiveCycle' as const }), active)
+  const proof = ((): ConformanceGoal.Proof => {
+    if (Type.isNominal(goal.provider)) {
+      if (Type.equals(goal.provider, goal.capability))
+        return provedGoal(goal, Object.freeze({ _tag: 'IdentitySelection' as const }), [], [])
+      if (Type.intrinsicallyConforms(goal.provider, goal.capability))
+        return provedGoal(goal, Object.freeze({ _tag: 'IntrinsicSelection' as const }), [], [])
+    }
+    const matching = conformanceCandidates(self, goal)
+    const selected = matching.at(0)
+    if (matching.length === 0 || selected === undefined)
+      return unprovedGoal(goal, Object.freeze({ _tag: 'MissingWitness' as const }), active)
+    if (matching.length > 1)
+      return unprovedGoal(
+        goal,
+        Object.freeze({ _tag: 'AmbiguousWitness' as const, candidates: matching.length }),
+        active,
+      )
+    const nested = Object.freeze([...active, goal])
+    const requirements: Array<ConformanceGoal.Proof> = []
+    for (const requirement of declaredRequirements(self.modules, selected.conformance)) {
+      const capability = Type.substitute(requirement.capability, selected.substitution)
+      const provider = Type.substitute(requirement.provider, selected.substitution)
+      if (!Type.isNominal(capability))
+        return unprovedGoal(
+          goal,
+          Object.freeze({
+            _tag: 'UnavailableWitness' as const,
+            reason: 'a declared requirement did not resolve to an interface',
+          }),
+          active,
+        )
+      const proved = proveGoal(self, ConformanceGoal.make(capability, provider), memo, nested)
+      // A failed requirement is reported as itself: the goal that has no witness is the useful
+      // one, and the chain that asked for it travels with it.
+      if (proved._tag === 'Unproved') return proved
+      requirements.push(proved)
+    }
+    return provedGoal(
+      goal,
+      Object.freeze({
+        _tag: 'SourceSelection' as const,
+        module: selected.module,
+        ordinal: selected.conformance.ordinal,
+      }),
+      selected.conformance.typeParameters
+        .filter((parameter) => parameter.duplicateOf === undefined)
+        .map((parameter) => selected.substitution.get(Type.key(parameter.type)) ?? parameter.type),
+      requirements,
+    )
+  })()
+  if (proof._tag === 'Proved') memo.set(goalKey, proof)
+  return proof
+}
+
+/**
+ * Proves one concrete conformance goal, following every declared requirement to a base witness.
+ *
+ * The search is finite without a fuel budget or a depth limit. Declaration-time validation proved
+ * that each requirement names a strictly smaller provider, so the chain of goals reachable from one
+ * concrete provider is bounded by that provider's own term size.
+ */
+export const prove = (
+  self: Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+): ConformanceGoal.Proof => {
+  const remembered = proofMemos.get(self)
+  const memo = remembered ?? new Map<string, ConformanceGoal.Proof>()
+  if (remembered === undefined) proofMemos.set(self, memo)
+  return proveGoal(self, ConformanceGoal.make(capability, provider), memo, Object.freeze([]))
+}
+
 const interfaceConformance = (
   self: Index,
   provider: Type.Type,
   capability: Type.Nominal,
 ): ConformanceFact | undefined => {
-  const matches = self.modules.flatMap((module) =>
-    module.conformances.filter(
-      (conformance) =>
-        conformance.capability._tag === 'Resolved' &&
-        Type.equals(conformance.capability.type, capability) &&
-        conformance.provider._tag === 'Resolved' &&
-        Type.equals(conformance.provider.type, provider),
-    ),
-  )
-  return matches.length === 1 ? matches.at(0) : undefined
+  const proof = prove(self, provider, capability)
+  if (proof._tag !== 'Proved' || proof.selection._tag !== 'SourceSelection') return undefined
+  return selectedConformance(self, proof.selection)
 }
+
+const selectedConformance = (
+  self: Index,
+  selection: Extract<ConformanceGoal.Selection, { readonly _tag: 'SourceSelection' }>,
+): ConformanceFact | undefined =>
+  self.modules
+    .find((module) => module.module === selection.module)
+    ?.conformances.find((conformance) => conformance.ordinal === selection.ordinal)
 
 /** Tests whether one nominal provider has a compiler-shipped or source-declared witness. */
 export const conforms = (self: Index, provider: Type.Type, capability: Type.Nominal): boolean =>
   interfaceByCapability(self, capability) !== undefined
-    ? interfaceConformance(self, provider, capability) !== undefined
+    ? prove(self, provider, capability)._tag === 'Proved'
     : witness(self, provider, capability) !== undefined
 
 /**
  * Returns, in declaration order, the operations one interface declares that the provider's selected
- * conformance leaves unmapped. An empty result means the witness covers the whole contract — which
- * is the only state under which specialization may substitute the provider for a bounded parameter.
- * A capability that is not an interface, or a provider with no single conformance, has no partial
- * witness to report and returns nothing.
+ * declared conformance leaves unmapped. Rejected declarations remain visible here only to preserve
+ * the most specific diagnostic after selection excludes them. An empty result means the declaration
+ * covers the whole contract. A capability that is not an interface, or a provider with no single
+ * coherent, terminating declaration, has no partial witness to report and returns nothing.
  */
 export const unmappedInterfaceOperations = (
   self: Index,
@@ -4958,7 +5523,12 @@ export const unmappedInterfaceOperations = (
   capability: Type.Nominal,
 ): ReadonlyArray<string> => {
   const interface_ = interfaceByCapability(self, capability)
-  const conformance = interfaceConformance(self, provider, capability)
+  const declared = conformanceCandidates(
+    self,
+    ConformanceGoal.make(capability, provider),
+    'Declared',
+  )
+  const conformance = declared.length === 1 ? declared.at(0)?.conformance : undefined
   if (interface_ === undefined || conformance === undefined) return Object.freeze([])
   const mapped = new Set(
     conformance.operations.flatMap((mapping) =>
@@ -5016,8 +5586,20 @@ export const interfaceWitnessImplementation = (
   capability: Type.Nominal,
   operation: string,
 ): CanonicalId | undefined => {
+  const conformance = interfaceConformance(self, provider, capability)
+  return conformance === undefined
+    ? undefined
+    : witnessImplementation(self, provider, conformance, operation)
+}
+
+const witnessImplementation = (
+  self: Index,
+  provider: Type.Type,
+  conformance: ConformanceFact,
+  operation: string,
+): CanonicalId | undefined => {
   if (!Type.isNominal(provider)) return undefined
-  const mapping = interfaceConformance(self, provider, capability)?.operations.find(
+  const mapping = conformance.operations.find(
     (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === operation,
   )
   const target = mapping?.target
@@ -5039,6 +5621,90 @@ export const interfaceWitnessImplementation = (
   return declaration?.canonical._tag === 'Canonical' ? declaration.canonical.id : undefined
 }
 
+/** One source witness together with the arguments its own specialization needs. */
+export interface InterfaceWitnessTarget {
+  readonly implementation: CanonicalId
+  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  /** The concrete provider whose terminating conditional proof selected this target. */
+  readonly structuralProvider?: Type.Type
+}
+
+/**
+ * Selects the provider's own function one interface operation maps to, with its type arguments.
+ *
+ * A conditional conformance's witness is generic in the header's binders, so naming the function is
+ * not enough to reach code: the call needs the arguments this specialization bound. They come from
+ * the proof rather than from the call site, because the proof is what decided which header covers
+ * this provider.
+ */
+export const interfaceWitnessTarget = (
+  self: Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+  operation: string,
+): InterfaceWitnessTarget | undefined => {
+  const implementation = interfaceWitnessImplementation(self, provider, capability, operation)
+  if (implementation === undefined) return undefined
+  const proof = prove(self, provider, capability)
+  return Object.freeze({
+    implementation,
+    typeArguments: proof._tag === 'Proved' ? proof.typeArguments : noGenericArguments,
+    ...(proof._tag === 'Proved' && proof.requirements.length > 0
+      ? { structuralProvider: provider }
+      : {}),
+  })
+}
+
+/**
+ * Selects every source witness implementation a proved conditional witness rests on.
+ *
+ * The result is innermost first, deduplicated by concrete implementation specialization, and does
+ * not include the root witness. Discovery consumes it independently of the selected operation's
+ * body: a declared requirement is part of admitting the witness even when that operation never
+ * invokes the required interface itself.
+ */
+export const witnessDependencyTargets = (
+  self: Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+): ReadonlyArray<InterfaceWitnessTarget> => {
+  const proof = prove(self, provider, capability)
+  if (proof._tag !== 'Proved') return Object.freeze([])
+  const found = new Map<string, InterfaceWitnessTarget>()
+  const visit = (dependency: ConformanceGoal.Proof): void => {
+    if (dependency._tag !== 'Proved') return
+    for (const requirement of dependency.requirements) visit(requirement)
+    if (dependency.selection._tag !== 'SourceSelection') return
+    const conformance = selectedConformance(self, dependency.selection)
+    if (conformance === undefined) return
+    for (const mapping of conformance.operations) {
+      if (mapping.name._tag !== 'Present') continue
+      const implementation = witnessImplementation(
+        self,
+        dependency.goal.provider,
+        conformance,
+        mapping.name.spelling,
+      )
+      if (implementation === undefined) continue
+      const identity = Specialization.key({
+        declaration: implementation,
+        typeArguments: dependency.typeArguments,
+      })
+      if (!found.has(identity))
+        found.set(
+          identity,
+          Object.freeze({
+            implementation,
+            typeArguments: dependency.typeArguments,
+            structuralProvider: dependency.goal.provider,
+          }),
+        )
+    }
+  }
+  for (const requirement of proof.requirements) visit(requirement)
+  return Object.freeze([...found.values()])
+}
+
 /** Selects the unique compiler-shipped or source-declared witness for one provider. */
 export const witness = (
   self: Index,
@@ -5056,29 +5722,13 @@ export const witness = (
       provider,
     })
   }
-  const matches = self.modules.flatMap((module) =>
-    module.conformances.flatMap((conformance) => {
-      if (
-        conformance.capability._tag !== 'Resolved' ||
-        !Type.equals(conformance.capability.type, capability) ||
-        conformance.provider._tag !== 'Resolved'
-      )
-        return []
-      if (conformance.typeParameters.length === 0) {
-        return Type.equals(conformance.provider.type, provider)
-          ? [Object.freeze({ module, conformance })]
-          : []
-      }
-      // A parametric conformance matches any provider its pattern infers against.
-      return Type.infer(conformance.provider.type, provider, new Map())
-        ? [Object.freeze({ module, conformance })]
-        : []
-    }),
-  )
-  if (matches.length !== 1) return undefined
-  const selected = matches.at(0)
-  if (selected === undefined) return undefined
-  const conformance = selected.conformance
+  // Proof selection is the single authority for matching both the provider and capability heads.
+  // Repeating only provider inference here would lose capability binders and could select a header
+  // whose requirements failed.
+  const proof = prove(self, provider, capability)
+  if (proof._tag !== 'Proved' || proof.selection._tag !== 'SourceSelection') return undefined
+  const conformance = selectedConformance(self, proof.selection)
+  if (conformance === undefined) return undefined
   const service = self.modules
     .find((module) => module.module === capability.module)
     ?.services.find(
@@ -5144,6 +5794,7 @@ export const witness = (
         capability,
         provider,
         operations,
+        typeArguments: proof.typeArguments,
       })
     : undefined
 }

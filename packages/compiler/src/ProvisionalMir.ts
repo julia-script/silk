@@ -448,9 +448,10 @@ const runnerOf = (expression: Hir.Expression, context: BuildContext): Runner => 
       if (selected?.witness?._tag !== 'SourceConformanceWitness') return 'Unknown'
       const implementation = DeclarationIndex.witnessOperation(selected.witness, service.operation)
       if (implementation === undefined) return 'Unknown'
-      const candidates = context.discovery.instances.filter((candidate) =>
-        sameDeclaration(candidate.key.declaration, implementation),
-      )
+      const candidates = Instances.matchingSpecialization(context.discovery, {
+        declaration: implementation,
+        typeArguments: selected.witness.typeArguments,
+      })
       if (candidates.length === 0) return 'Unknown'
       if (candidates.some((candidate) => Instances.isSuspendable(context.discovery, candidate.key)))
         return 'Suspendable'

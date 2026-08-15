@@ -20,8 +20,14 @@ const functions = (syntax: SyntaxFile.SyntaxFile): ReadonlyArray<SyntaxTree.Node
 const functionAt = (syntax: SyntaxFile.SyntaxFile, index: number): SyntaxTree.Node =>
   functions(syntax).at(index) ?? raise(`expected function ${index}`)
 
+const implementations = (syntax: SyntaxFile.SyntaxFile): ReadonlyArray<SyntaxTree.Node> =>
+  SyntaxTree.directNodes(syntax.root, 'ImplDeclaration')
+
 const source = (name: string, value: number): string =>
   `pub fn ${name}() -> i32 { return ${value} }`
+
+const boundedImpl =
+  'impl<S: Decoder<S>> Decoder<MappedSchema<S>> for MappedSchema<S> { decode: MappedSchema.mappedDecode }'
 
 it('relates distinct shifted and reordered declarations through canonical identity pairs', () => {
   const previous = parse('app/Main', `${source('first', 1)}\n${source('second', 2)}`)
@@ -98,6 +104,39 @@ it('handles exact recovery subtrees conservatively and rejects foreign sources',
     Option.isNone(
       SyntaxCorrespondence.between(previous, parse('app/Other', SyntaxFile.encode(current))),
     ),
+  )
+})
+
+it('relates a shifted bounded conformance like any other top-level declaration', () => {
+  const previous = parse('app/Main', `${source('first', 1)}\n${boundedImpl}`)
+  const inserted = parse('app/Main', `${source('first', 1)}\n${source('zero', 0)}\n${boundedImpl}`)
+  const insertion = Option.getOrThrow(SyntaxCorrespondence.between(previous, inserted))
+  const previousImpl = implementations(previous).at(0) ?? assert.fail('expected an impl')
+  const insertedImpl = implementations(inserted).at(0) ?? assert.fail('expected an impl')
+  assert.strictEqual(
+    Option.getOrThrow(SyntaxCorrespondence.currentOf(insertion, previousImpl)),
+    insertedImpl,
+  )
+  assert.strictEqual(
+    Option.getOrThrow(SyntaxCorrespondence.previousOf(insertion, insertedImpl)),
+    previousImpl,
+  )
+  const previousId = Option.getOrThrow(SyntaxFile.idOf(previous, previousImpl))
+  const currentId = Option.getOrThrow(SyntaxFile.idOf(inserted, insertedImpl))
+  assert.notStrictEqual(previousId.ordinal, currentId.ordinal)
+  assert.deepInclude(insertion.identities, { previous: previousId, current: currentId })
+
+  // Editing the bound leaves the conformance unmatched while its neighbour still corresponds,
+  // which is the same conservatism every other declaration kind gets.
+  const edited = parse(
+    'app/Main',
+    `${source('first', 1)}\n${boundedImpl.replace('S: Decoder<S>', 'S: Encoder<S>')}`,
+  )
+  const edit = Option.getOrThrow(SyntaxCorrespondence.between(previous, edited))
+  assert.isTrue(Option.isNone(SyntaxCorrespondence.currentOf(edit, previousImpl)))
+  assert.strictEqual(
+    Option.getOrThrow(SyntaxCorrespondence.currentOf(edit, functionAt(previous, 0))),
+    functionAt(edited, 0),
   )
 })
 

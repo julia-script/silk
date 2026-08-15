@@ -7,6 +7,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as Ownership from './Ownership.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as SourceSpan from './SourceSpan.js'
+import * as Specialization from './Specialization.js'
 import * as Type from './Type.js'
 
 /**
@@ -756,6 +757,15 @@ export const keyText = (key: InstanceKey): string =>
     .map(Type.genericArgumentKey)
     .join('\u0000')}\u0002${key.contractRow.join('\u0000')}`
 
+/** Returns every discovered instance with the exact declaration and kinded arguments. */
+export const matchingSpecialization = (
+  self: Discovery,
+  specialization: Specialization.Specialization,
+): ReadonlyArray<Instance> => {
+  const identity = Specialization.key(specialization)
+  return self.instances.filter((candidate) => Specialization.key(candidate.key) === identity)
+}
+
 export const effectIdentity = (owner: InstanceKey, site: Hir.EffectSiteId): string =>
   `${keyText(owner)}\u0004${Hir.executableSiteKey(site)}`
 
@@ -825,38 +835,65 @@ const resolveEntry = (root: Elaboration.Result, index: DeclarationIndex.Index): 
 interface CallTarget {
   readonly declaration: DeclarationIndex.CanonicalId
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  readonly structuralProvider?: Type.Type
 }
+
+/** Converts proved strict-subterm obligations into the only structurally descending call edges. */
+const witnessDependencyCallTargets = (
+  index: DeclarationIndex.Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+): ReadonlyArray<CallTarget> =>
+  DeclarationIndex.witnessDependencyTargets(index, provider, capability).map((dependency) =>
+    Object.freeze({
+      declaration: dependency.implementation,
+      typeArguments: dependency.typeArguments,
+      ...(dependency.structuralProvider === undefined
+        ? {}
+        : { structuralProvider: dependency.structuralProvider }),
+    }),
+  )
 
 const witnessCallTargets = (
   witness: DeclarationIndex.ConformanceWitness | undefined,
+  index: DeclarationIndex.Index,
 ): ReadonlyArray<CallTarget> =>
   witness?._tag === 'SourceConformanceWitness'
-    ? witness.operations.map((operation) =>
-        Object.freeze({
-          declaration: operation.implementation,
-          typeArguments: Object.freeze([]),
-        }),
-      )
+    ? [
+        ...witnessDependencyCallTargets(index, witness.provider, witness.capability),
+        ...witness.operations.map((operation) =>
+          Object.freeze({
+            declaration: operation.implementation,
+            typeArguments: witness.typeArguments,
+          }),
+        ),
+      ]
     : []
 
 /** Collects every Drop hook a cleanup plan will invoke, so cleanup reaches hook instances. */
-const hookCalls = (cleanup: Ownership.CleanupPlan): ReadonlyArray<CallTarget> => {
+const hookCalls = (
+  cleanup: Ownership.CleanupPlan,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<CallTarget> => {
   switch (cleanup._tag) {
     case 'HookCleanup':
       return [
+        ...witnessDependencyCallTargets(index, cleanup.type, Type.dropCapability),
         Object.freeze({ declaration: cleanup.hook, typeArguments: cleanup.typeArguments }),
-        ...hookCalls(cleanup.inner),
+        ...hookCalls(cleanup.inner, index),
       ]
     case 'StructCleanup':
-      return cleanup.fields.flatMap((field) => hookCalls(field.cleanup))
+      return cleanup.fields.flatMap((field) => hookCalls(field.cleanup, index))
     case 'ArrayCleanup':
-      return hookCalls(cleanup.element)
+      return hookCalls(cleanup.element, index)
     case 'UnionCleanup':
-      return cleanup.cases.flatMap((entry) => hookCalls(entry.cleanup))
+      return cleanup.cases.flatMap((entry) => hookCalls(entry.cleanup, index))
     case 'RawBufferCleanup':
-      return hookCalls(cleanup.allocation)
+      return hookCalls(cleanup.allocation, index)
     case 'CallableCleanup':
-      return cleanup.slots.flatMap((slot) => hookCalls(slot.cleanup))
+      return cleanup.slots.flatMap((slot) => hookCalls(slot.cleanup, index))
+    case 'EffectCleanup':
+      return cleanup.slots.flatMap((slot) => hookCalls(slot.cleanup, index))
     default:
       return []
   }
@@ -880,63 +917,69 @@ const carriesHiddenIdentity = (
       (Type.isEffect(argument.type) || Type.isCallable(argument.type)),
   )
 
-const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
-  if (expression._tag === 'Run') return callTargets(expression.subject)
-  if (expression._tag === 'EffectResult') return callTargets(expression.protected)
+const callTargets = (
+  expression: Hir.Expression,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<CallTarget> => {
+  if (expression._tag === 'Run') return callTargets(expression.subject, index)
+  if (expression._tag === 'EffectResult') return callTargets(expression.protected, index)
   if (expression._tag === 'EffectCatch')
-    return [...callTargets(expression.protected), ...callTargets(expression.handler)]
+    return [...callTargets(expression.protected, index), ...callTargets(expression.handler, index)]
   if (expression._tag === 'EffectBindRequirement') {
     // A source-declared witness makes provision dispatch to its qualified operation, so the
     // operation is reachable even though no ordinary call names it.
     const witness = expression.provider.witness
-    return [...callTargets(expression.protected), ...witnessCallTargets(witness)]
+    return [...callTargets(expression.protected, index), ...witnessCallTargets(witness, index)]
   }
-  if (expression._tag === 'Move') return callTargets(expression.subject)
-  if (expression._tag === 'RuntimeStringView') return callTargets(expression.source)
+  if (expression._tag === 'Move') return callTargets(expression.subject, index)
+  if (expression._tag === 'RuntimeStringView') return callTargets(expression.source, index)
   if (expression._tag === 'StringEquality' || expression._tag === 'ShortCircuit') {
-    return [...callTargets(expression.left), ...callTargets(expression.right)]
+    return [...callTargets(expression.left, index), ...callTargets(expression.right, index)]
   }
-  if (expression._tag === 'UnionConvert') return callTargets(expression.source)
-  if (expression._tag === 'Project') return callTargets(expression.subject)
+  if (expression._tag === 'UnionConvert') return callTargets(expression.source, index)
+  if (expression._tag === 'Project') return callTargets(expression.subject, index)
   if (expression._tag === 'IndexPlace') {
-    return [...callTargets(expression.subject), ...callTargets(expression.index)]
+    return [...callTargets(expression.subject, index), ...callTargets(expression.index, index)]
   }
-  if (expression._tag === 'SliceLength') return callTargets(expression.slice)
+  if (expression._tag === 'SliceLength') return callTargets(expression.slice, index)
   if (expression._tag === 'SliceIndexPlace') {
-    return [...callTargets(expression.slice), ...callTargets(expression.index)]
+    return [...callTargets(expression.slice, index), ...callTargets(expression.index, index)]
   }
   if (expression._tag === 'Construct') {
-    return expression.fields.flatMap((field) => callTargets(field.value))
+    return expression.fields.flatMap((field) => callTargets(field.value, index))
   }
   if (expression._tag === 'ArrayConstruct') {
-    return expression.elements.flatMap((element) => callTargets(element))
+    return expression.elements.flatMap((element) => callTargets(element, index))
   }
   if (expression._tag === 'BuiltinCall' || expression._tag === 'BoundOperationCall') {
-    return expression.arguments.flatMap((argument) => callTargets(argument))
+    return expression.arguments.flatMap((argument) => callTargets(argument, index))
   }
   if (expression._tag === 'FunctionItem') return []
   if (expression._tag === 'CallableSection') {
-    return expression.captures.flatMap((capture) => callTargets(capture.value))
+    return expression.captures.flatMap((capture) => callTargets(capture.value, index))
   }
   if (expression._tag === 'CallableApply') {
     return [
-      ...callTargets(expression.callee),
-      ...expression.arguments.flatMap((argument) => callTargets(argument)),
+      ...callTargets(expression.callee, index),
+      ...expression.arguments.flatMap((argument) => callTargets(argument, index)),
     ]
   }
   if (expression._tag === 'Match') {
     return [
-      ...callTargets(expression.scrutinee),
+      ...callTargets(expression.scrutinee, index),
       ...expression.arms.flatMap((arm) =>
         arm.reachable
-          ? [...(arm.guard === undefined ? [] : callTargets(arm.guard)), ...callTargets(arm.result)]
+          ? [
+              ...(arm.guard === undefined ? [] : callTargets(arm.guard, index)),
+              ...callTargets(arm.result, index),
+            ]
           : [],
       ),
     ]
   }
   if (expression._tag === 'EffectBlock') {
     return expression.statements.flatMap((statement) =>
-      Hir.statementExpressions(statement).flatMap(callTargets),
+      Hir.statementExpressions(statement).flatMap((child) => callTargets(child, index)),
     )
   }
   if (
@@ -945,7 +988,7 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
     expression._tag !== 'ServiceEffectConstruct'
   )
     return []
-  const nested = expression.arguments.flatMap((argument) => callTargets(argument))
+  const nested = expression.arguments.flatMap((argument) => callTargets(argument, index))
   if (expression._tag === 'ServiceEffectConstruct') return nested
   return carriesHiddenIdentity(expression)
     ? nested
@@ -955,8 +998,13 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
       ]
 }
 
-const bodyCallTargets = (fn: Hir.HirFunction): ReadonlyArray<CallTarget> =>
-  fn.statements.flatMap((statement) => Hir.statementExpressions(statement).flatMap(callTargets))
+const bodyCallTargets = (
+  fn: Hir.HirFunction,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<CallTarget> =>
+  fn.statements.flatMap((statement) =>
+    Hir.statementExpressions(statement).flatMap((expression) => callTargets(expression, index)),
+  )
 
 const requirementBindingCallTargets = (
   fn: Hir.HirFunction,
@@ -966,7 +1014,7 @@ const requirementBindingCallTargets = (
   (forwardedRequirementBinding(fn) === undefined ? requirementBindings(fn) : []).flatMap(
     (binding) => {
       const witness = requirementBindingWitness(binding, substitution, index)
-      return witnessCallTargets(witness)
+      return witnessCallTargets(witness, index)
     },
   )
 
@@ -982,7 +1030,7 @@ const forwardedRequirementCallTargets = (
     const substitution = instanceSubstitution(target, call.target)
     if (substitution === undefined) return []
     const witness = requirementBindingWitness(binding, substitution, index)
-    return witnessCallTargets(witness)
+    return witnessCallTargets(witness, index)
   })
 
 const slotDropHookTargets = (
@@ -994,7 +1042,7 @@ const slotDropHookTargets = (
     const own =
       expression._tag === 'BuiltinCall' && expression.operation === 'SlotDrop'
         ? expression.typeArguments.flatMap((argument) =>
-            hookCalls(Ownership.cleanupPlan(index, Type.substitute(argument, substitution))),
+            hookCalls(Ownership.cleanupPlan(index, Type.substitute(argument, substitution)), index),
           )
         : []
     if (expression._tag === 'Match') {
@@ -1036,19 +1084,37 @@ const interfaceWitnessTargets = (
           : undefined
     const capability =
       bound === undefined ? undefined : Type.substitute(bound.capability, substitution)
+    const provider = bound === undefined ? undefined : Type.substitute(bound.provider, substitution)
     const target =
-      bound === undefined || capability === undefined || !Type.isNominal(capability)
+      bound === undefined ||
+      provider === undefined ||
+      capability === undefined ||
+      !Type.isNominal(capability)
         ? undefined
-        : DeclarationIndex.interfaceWitnessImplementation(
-            index,
-            Type.substitute(bound.provider, substitution),
-            capability,
-            bound.operation,
-          )
-    const own =
-      target === undefined
+        : DeclarationIndex.interfaceWitnessTarget(index, provider, capability, bound.operation)
+    const dependencies =
+      provider === undefined || capability === undefined || !Type.isNominal(capability)
         ? []
-        : [Object.freeze({ declaration: target, typeArguments: Object.freeze([]) })]
+        : witnessDependencyCallTargets(index, provider, capability)
+    // A conditional witness is generic in its header's binders, so the target carries the arguments
+    // this specialization proved rather than reaching code through an unsubstituted declaration.
+    const own =
+      target === undefined && dependencies.length === 0
+        ? []
+        : [
+            ...dependencies,
+            ...(target === undefined
+              ? []
+              : [
+                  Object.freeze({
+                    declaration: target.implementation,
+                    typeArguments: target.typeArguments,
+                    ...(target.structuralProvider === undefined
+                      ? {}
+                      : { structuralProvider: target.structuralProvider }),
+                  }),
+                ]),
+          ]
     if (expression._tag === 'Match') {
       return [
         ...own,
@@ -1412,9 +1478,8 @@ const effectOriginOf = (
         ? DeclarationIndex.witnessOperation(witness, expression.operation)
         : undefined
     const target = operation === undefined ? undefined : targetFunction(context.results, operation)
-    const typeArguments = expression.typeArguments.map((argument) =>
-      Type.substituteGenericArgument(argument, context.substitution),
-    )
+    const typeArguments =
+      witness?._tag === 'SourceConformanceWitness' ? witness.typeArguments : Object.freeze([])
     const targetKey =
       operation === undefined || target === undefined
         ? undefined
@@ -1640,7 +1705,7 @@ const forwardedRequirementTargets = (
     )
     if (substitution === undefined) return []
     const witness = requirementBindingWitness(binding, substitution, index)
-    return witnessCallTargets(witness)
+    return witnessCallTargets(witness, index)
   })
 
 export const callableIdentity = (self: CallableInstance): string =>
@@ -1863,9 +1928,8 @@ const suspensionGraph = (
             ? undefined
             : DeclarationIndex.witnessOperation(witness, expression.operation)
         const target = operation === undefined ? undefined : targetFunction(results, operation)
-        const typeArguments = expression.typeArguments.map((argument) =>
-          Type.substituteGenericArgument(argument, instance.substitution),
-        )
+        const typeArguments =
+          witness?._tag === 'SourceConformanceWitness' ? witness.typeArguments : Object.freeze([])
         const targetKey =
           operation === undefined || target === undefined
             ? undefined
@@ -1971,11 +2035,6 @@ export const isEffectSuspendable = (self: Discovery, identity: string): boolean 
 const sameInstanceKey = (left: InstanceKey, right: InstanceKey): boolean =>
   keyText(left) === keyText(right)
 
-const sameDeclaration = (
-  left: DeclarationIndex.CanonicalId,
-  right: DeclarationIndex.CanonicalId,
-): boolean => left.module === right.module && left.name === right.name
-
 /**
  * Rejects a concrete allocator selected for a suspendable Effect when its allocation operation can
  * itself suspend. Such a provider would need continuation storage in order to allocate that same
@@ -2011,9 +2070,10 @@ export const continuationAllocatorViolations = (
       if (witness?._tag !== 'SourceConformanceWitness') continue
       const implementation = DeclarationIndex.witnessOperation(witness, 'allocate')
       if (implementation === undefined) continue
-      const implementationInstances = self.instances.filter((candidate) =>
-        sameDeclaration(candidate.key.declaration, implementation),
-      )
+      const implementationInstances = matchingSpecialization(self, {
+        declaration: implementation,
+        typeArguments: witness.typeArguments,
+      })
       const implementationSuspends = implementationInstances.some(
         (candidate) =>
           isSuspendable(self, candidate.key) ||
@@ -2087,9 +2147,13 @@ export const discover = (
   const recordedCallables = new Map<string, CallableInstance>()
   const recordedCalls = new Map<string, CallInstance>()
   const scannedContexts = new Set<string>()
+  interface Ancestor {
+    readonly key: InstanceKey
+    readonly structuralProvider?: Type.Type
+  }
   interface WorkItem {
     readonly key: InstanceKey
-    readonly ancestors: ReadonlyMap<string, InstanceKey>
+    readonly ancestors: ReadonlyMap<string, Ancestor>
     readonly cleanupReachable: boolean
   }
   const declarationText = (key: InstanceKey): string =>
@@ -2106,7 +2170,7 @@ export const discover = (
   const pending: Array<WorkItem> = [
     Object.freeze({
       key: entry.key,
-      ancestors: new Map([[declarationText(entry.key), entry.key]]),
+      ancestors: new Map([[declarationText(entry.key), Object.freeze({ key: entry.key })]]),
       cleanupReachable: false,
     }),
   ]
@@ -2116,7 +2180,10 @@ export const discover = (
       ...item.ancestors.entries(),
     ]
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([declaration, key]) => `${declaration}\u0002${keyText(key)}`)
+      .map(
+        ([declaration, ancestor]) =>
+          `${declaration}\u0002${keyText(ancestor.key)}\u0002${ancestor.structuralProvider === undefined ? '' : Type.key(ancestor.structuralProvider)}`,
+      )
       .join('\u0003')}`
   while (pending.length > 0) {
     const item = pending.shift()
@@ -2168,7 +2235,7 @@ export const discover = (
           Ownership.cleanupPlan(index, type),
         ),
       )
-      .flatMap(hookCalls)
+      .flatMap((cleanup) => hookCalls(cleanup, index))
     const calls = new Map<string, CallTarget>()
     const directCalls = directCallInstances(fn, key, substitution, results, index)
     const callableTargets = callableCallTargets(fn, results)
@@ -2182,14 +2249,15 @@ export const discover = (
       ...slotDropHookTargets(fn, index, substitution),
       ...cleanupHooks,
       ...(entry.kind === 'Effect' && keyText(key) === keyText(entry.key)
-        ? entry.failures.flatMap((failure) => hookCalls(Ownership.cleanupPlan(index, failure.type)))
+        ? entry.failures.flatMap((failure) =>
+            hookCalls(Ownership.cleanupPlan(index, failure.type), index),
+          )
         : []),
     ]
-    const identityOfCall = (call: CallTarget): string =>
-      `${call.declaration.module}\u0000${call.declaration.name}\u0000${call.typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
+    const identityOfCall = Specialization.key
     const cleanupIdentities = new Set(cleanupTargets.map(identityOfCall))
-    for (const call of [
-      ...bodyCallTargets(fn),
+    const reachableCalls: ReadonlyArray<CallTarget> = [
+      ...bodyCallTargets(fn, index),
       ...interfaceWitnessTargets(fn, index, substitution),
       ...requirementBindingCallTargets(fn, substitution, index),
       ...directCalls.map((call) => ({
@@ -2200,9 +2268,36 @@ export const discover = (
       ...callableTargets,
       ...forwardedRequirementTargets(callableTargets, results, index),
       ...cleanupTargets,
-    ]) {
+    ]
+    for (const call of reachableCalls) {
       const identity = identityOfCall(call)
-      if (!calls.has(identity)) calls.set(identity, call)
+      const existing = calls.get(identity)
+      // An ordinary edge must keep the recursion guard even when the same target is also reached
+      // through a proved dependency or conditional witness root. Conflicting provider evidence is
+      // equally unsafe: descent is granted only where this path has one unambiguous measure.
+      if (existing === undefined) {
+        calls.set(identity, call)
+        continue
+      }
+      const existingOrdinary = existing.structuralProvider === undefined
+      const callOrdinary = call.structuralProvider === undefined
+      if (existingOrdinary) continue
+      if (callOrdinary) {
+        calls.set(
+          identity,
+          Object.freeze({ declaration: call.declaration, typeArguments: call.typeArguments }),
+        )
+        continue
+      }
+      if (
+        existing.structuralProvider !== undefined &&
+        call.structuralProvider !== undefined &&
+        !Type.equals(existing.structuralProvider, call.structuralProvider)
+      )
+        calls.set(
+          identity,
+          Object.freeze({ declaration: call.declaration, typeArguments: call.typeArguments }),
+        )
     }
     for (const call of calls.values()) {
       const target = call.declaration
@@ -2224,9 +2319,14 @@ export const discover = (
         targetArguments,
       )
       const ancestor = item.ancestors.get(declarationText(targetKey))
+      const structurallyDescending =
+        call.structuralProvider !== undefined &&
+        ancestor?.structuralProvider !== undefined &&
+        Type.isStrictStructuralSubterm(call.structuralProvider, ancestor.structuralProvider)
       if (
         ancestor !== undefined &&
-        !sameArguments(ancestor, targetKey) &&
+        !sameArguments(ancestor.key, targetKey) &&
+        !structurallyDescending &&
         !(
           recorded.has(keyText(targetKey)) &&
           (item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)))
@@ -2240,7 +2340,15 @@ export const discover = (
       pending.push(
         Object.freeze({
           key: targetKey,
-          ancestors: new Map(item.ancestors).set(declarationText(targetKey), targetKey),
+          ancestors: new Map(item.ancestors).set(
+            declarationText(targetKey),
+            Object.freeze({
+              key: targetKey,
+              ...(call.structuralProvider === undefined
+                ? {}
+                : { structuralProvider: call.structuralProvider }),
+            }),
+          ),
           cleanupReachable: item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)),
         }),
       )

@@ -9,6 +9,7 @@ import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as Specialization from './Specialization.js'
 import * as TargetConstant from './TargetConstant.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
@@ -357,8 +358,7 @@ interface GeneratedEffectRunner {
 const instanceText = (
   declaration: { readonly module: string; readonly name: string },
   typeArguments: ReadonlyArray<Type.GenericArgument>,
-): string =>
-  `${declaration.module}\u0000${declaration.name}\u0000${typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
+): string => Specialization.key({ declaration, typeArguments })
 
 const effectEntryAdapterId = (module: string): DeclarationIndex.CanonicalId =>
   Object.freeze({
@@ -375,7 +375,7 @@ const witnessKey = (witness: DeclarationIndex.ConformanceWitness): string =>
     ? `${witness._tag}:${witness.operations
         .map(
           (operation) =>
-            `${operation.name}=${operation.implementation.module}.${operation.implementation.name}`,
+            `${operation.name}=${instanceText(operation.implementation, witness.typeArguments)}`,
         )
         .join(',')}`
     : `${witness._tag}:${Type.key(witness.provider)}`
@@ -988,7 +988,7 @@ const lowerServiceEffectValue = (
   if (target === undefined) return undefined
   const loweredArguments = subject.arguments.map((argument) => lowerExpression(fn, argument))
   if (loweredArguments.some((argument) => argument === undefined)) return undefined
-  const typeArguments = Object.freeze<ReadonlyArray<Type.GenericArgument>>([])
+  const typeArguments = provided.witness.typeArguments
   const effectResult = fn.effectResults.get(instanceText(target, typeArguments))
   if (effectResult === undefined) return undefined
   const effect = fn.alloc(effectResult)
@@ -1189,7 +1189,7 @@ const lowerEffectExecution = (
  */
 const emitWitnessDispatch = (
   fn: FunctionLowering,
-  target: DeclarationIndex.CanonicalId,
+  target: DeclarationIndex.InterfaceWitnessTarget,
   argumentLocals: ReadonlyArray<Mir.LocalId>,
   operandTypes: ReadonlyArray<{ readonly source: Mir.Type; readonly reference: Mir.Type }>,
   resultType: Mir.Type,
@@ -1228,8 +1228,11 @@ const emitWitnessDispatch = (
     Object.freeze({
       _tag: 'Call',
       destination,
-      target,
-      typeArguments: Object.freeze([]),
+      target: target.implementation,
+      // A conditional witness is one generic function per header, so the direct target carries the
+      // arguments this specialization proved. Nothing else travels: a requirement's own witness is
+      // reached through its own instance, never through a value handed to this call.
+      typeArguments: target.typeArguments,
       arguments: Object.freeze(borrows.map((entry) => entry.local)),
       type: resultType,
       provenance: generated(span),
@@ -1257,7 +1260,7 @@ const lowerInterfaceWitnessCall = (
   const provider = fn.semantic(bound.provider)
   const capability = fn.semantic(bound.capability)
   if (!Type.isNominal(capability)) return undefined
-  const target = DeclarationIndex.interfaceWitnessImplementation(
+  const target = DeclarationIndex.interfaceWitnessTarget(
     fn.index,
     provider,
     capability,
@@ -1299,7 +1302,7 @@ const lowerBoundWitnessCall = (
   capability: Type.Nominal,
   argumentLocals: ReadonlyArray<Mir.LocalId>,
 ): Mir.LocalId | undefined => {
-  const target = DeclarationIndex.interfaceWitnessImplementation(
+  const target = DeclarationIndex.interfaceWitnessTarget(
     fn.index,
     provider,
     capability,

@@ -122,6 +122,14 @@
       "types": "./dist/Token.d.ts",
       "import": "./dist/Token.js"
     },
+    "./ConformanceGoal": {
+      "types": "./dist/ConformanceGoal.d.ts",
+      "import": "./dist/ConformanceGoal.js"
+    },
+    "./ConformanceHead": {
+      "types": "./dist/ConformanceHead.d.ts",
+      "import": "./dist/ConformanceHead.js"
+    },
     "./DeclarationIndex": {
       "types": "./dist/DeclarationIndex.d.ts",
       "import": "./dist/DeclarationIndex.js"

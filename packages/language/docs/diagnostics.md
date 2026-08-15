@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 117 |
+| `SEM` | Semantic | 120 |
 | `OWN` | Ownership | 14 |
 | `LAY` | Layout | 1 |
 
-There are 147 codes in total.
+There are 150 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -173,6 +173,9 @@ There are 147 codes in total.
 | `SEM0116` | Stable code for an opaque result binder whose bound is not callable or Effect representation. | `Opaque result binder <binder> must have a callable or Effect representation bound, but its kind is <actual>` |
 | `SEM0117` | Stable code for an opaque producer whose reachable returns establish no representation. | `Opaque result <family> has no reachable callable or Effect representation construction` |
 | `SEM0118` | Stable code for an opaque result declared where no producer body can establish its identity. | `Opaque result <declaration> is not permitted on a <context> operation because no producer body can establish one static representation` |
+| `SEM0119` | Stable code for two conformance heads that may name one provider under one interface. | `<head> may overlap <other>` |
+| `SEM0120` | Stable code for a conformance requirement that does not descend toward a base witness. | `<head> declares a requirement that does not descend` |
+| `SEM0121` | Stable code for a concrete specialization whose conditional requirements cannot be proved. | `<goal> cannot be proved: <detail>` |
 
 ## Ownership (`OWN`)
 

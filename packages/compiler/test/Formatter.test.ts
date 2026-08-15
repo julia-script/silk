@@ -413,6 +413,24 @@ it.effect('formats parametric conformances canonically and idempotently', () =>
   }),
 )
 
+it.effect('formats bounded conditional conformances canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source =
+      'impl < S : Decoder<S> >Decoder<MappedSchema<S>>for MappedSchema<S>{decode:MappedSchema.mappedDecode}'
+    const first = yield* Formatter.format(parse('memory://conditional-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `impl<S: Decoder<S>> Decoder<MappedSchema<S>> for MappedSchema<S> {
+  decode: MappedSchema.mappedDecode
+}
+`,
+    )
+    const second = yield* Formatter.format(parse('memory://conditional-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+  }),
+)
+
 it.effect('formats explicit Effect and declaration requirement rows', () =>
   Effect.gen(function* () {
     const source = `fn later()->Effect<i32!Problem?&FileSystem|&mut Allocator@Scratch>{return effect{return 1}}
