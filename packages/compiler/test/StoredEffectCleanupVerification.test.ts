@@ -21,13 +21,14 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
   const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
   const layout = Layout.plan(catalog, snapshot.instances)
   const ownership = Analysis.ownershipOf(snapshot, name) ?? unreachable('expected module ownership')
-  return Lower.lowerProgram(
+  const module = Lower.lowerProgram(
     snapshot.instances,
     new Map<string, Ownership.ModuleOwnership>([[name, ownership]]),
     layout,
     snapshot.index,
     OpaqueRealization.catalogOf(snapshot),
   )
+  return Object.freeze({ catalog, module })
 })
 
 const replaceDrop = (
@@ -71,7 +72,7 @@ const replaceDrop = (
 
 it.effect('rejects incomplete cleanup inside nested Effect and callable captures', () =>
   Effect.gen(function* () {
-    const module = yield* lowerStored(
+    const { catalog, module } = yield* lowerStored(
       'stored-effect-cleanup-verification/nested-executables',
       `struct Token<F: once fn(i32) -> i32> { value: i32 marker: F }
 struct Deferred<F: once Effect<i32>> { operation: F }
@@ -182,6 +183,38 @@ pub fn main() -> i32 {
       effectSlot.cleanup.slots.at(0) ?? unreachable('expected nested Effect cleanup slot')
     assert.strictEqual(nestedEffectSlot.cleanup._tag, 'HookCleanup')
     if (nestedEffectSlot.cleanup._tag !== 'HookCleanup') return
+    const hookedEntry = module.layout.entries.find(
+      (entry): entry is Layout.Entry =>
+        entry._tag === 'LayoutEntry' &&
+        entry.representation._tag === 'Aggregate' &&
+        entry.representation.cleanupHook !== undefined &&
+        Layout.catalogEntry(catalog, entry.type)?._tag === 'LayoutEntry',
+    )
+    assert.isDefined(hookedEntry)
+    if (hookedEntry === undefined || hookedEntry.representation._tag !== 'Aggregate') return
+    const hookedRepresentation = hookedEntry.representation
+    assert.include(Layout.encode(module.layout), 'cleanup-hook=')
+    const forgedLayout: Layout.Plan = Object.freeze({
+      ...module.layout,
+      entries: Object.freeze(
+        module.layout.entries.map((entry) =>
+          entry === hookedEntry
+            ? Object.freeze({
+                ...entry,
+                representation: Object.freeze({
+                  _tag: 'Aggregate' as const,
+                  fields: hookedRepresentation.fields,
+                  tailPadding: hookedRepresentation.tailPadding,
+                }),
+              })
+            : entry,
+        ),
+      ),
+    })
+    assert.include(
+      Layout.verifyAgainstCatalog(forgedLayout, catalog).map((violation) => violation.rule),
+      'CatalogMismatch',
+    )
     const strippedHook: Ownership.CleanupPlan = Object.freeze({
       ...effectSlot.cleanup,
       slots: Object.freeze([

@@ -2818,8 +2818,23 @@ const representationEquals = (left: Representation, right: Representation): bool
       })
     )
   }
+  const cleanupHooksEqual = (
+    leftHook: Extract<Representation, { readonly _tag: 'Aggregate' }>['cleanupHook'],
+    rightHook: Extract<Representation, { readonly _tag: 'Aggregate' }>['cleanupHook'],
+  ): boolean =>
+    leftHook === undefined
+      ? rightHook === undefined
+      : rightHook !== undefined &&
+        leftHook.hook.module === rightHook.hook.module &&
+        leftHook.hook.name === rightHook.hook.name &&
+        leftHook.typeArguments.length === rightHook.typeArguments.length &&
+        leftHook.typeArguments.every((argument, ordinal) => {
+          const other = rightHook.typeArguments.at(ordinal)
+          return other !== undefined && Type.equalsGenericArgument(argument, other)
+        })
   return (
     right._tag === 'Aggregate' &&
+    cleanupHooksEqual(left.cleanupHook, right.cleanupHook) &&
     left.tailPadding === right.tailPadding &&
     left.fields.length === right.fields.length &&
     left.fields.every((field, index) => {
@@ -3141,6 +3156,21 @@ const verifyEntry = (
     ])
   }
   const violations: Array<Violation> = []
+  const cleanupHook = candidate.representation.cleanupHook
+  if (
+    cleanupHook !== undefined &&
+    (cleanupHook.hook.module.length === 0 ||
+      cleanupHook.hook.name.length === 0 ||
+      cleanupHook.typeArguments.some((argument) => !Type.isConcreteGenericArgument(argument)))
+  ) {
+    violations.push(
+      invalid(
+        'InvalidAggregate',
+        candidate.type,
+        `${Type.encode(candidate.type)} has a non-canonical cleanup hook`,
+      ),
+    )
+  }
   let cursor = 0
   let alignment = 1
   let previousOrdinal = -1
@@ -3579,7 +3609,11 @@ const representationText = (representation: Representation): string =>
                       ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
                       : representation._tag === 'Union'
                         ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
-                        : `aggregate tail-padding=${representation.tailPadding}`
+                        : `aggregate cleanup-hook=${
+                            representation.cleanupHook === undefined
+                              ? 'none'
+                              : `${representation.cleanupHook.hook.module}.${representation.cleanupHook.hook.name}<${representation.cleanupHook.typeArguments.map(Type.encodeGenericArgument).join(',')}>`
+                          } tail-padding=${representation.tailPadding}`
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
   `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
