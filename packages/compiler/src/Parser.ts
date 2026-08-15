@@ -813,6 +813,15 @@ const hasContextualSpelling = (state: State, spelling: string): boolean => {
 const isExactRepresentationStart = (state: State): boolean =>
   hasContextualSpelling(state, 'typeof') && significantKindAfter(state, 1) === 'LeftParenthesis'
 
+/**
+ * True only for `some<` at the start of a result.
+ *
+ * The binder is contextual and scoped to result position alone, so an ordinary applied type keeps
+ * the `some<...>` spelling everywhere else in the grammar.
+ */
+const isOpaqueResultStart = (state: State): boolean =>
+  hasContextualSpelling(state, 'some') && significantKindAfter(state, 1) === 'Less'
+
 const isNominalPatternStart = (state: State): boolean => {
   if (nextSignificantKind(state) !== 'Identifier') return false
   if (hasCompleteAppliedPostfix(state, 'LeftBrace')) return true
@@ -2022,6 +2031,22 @@ function parseType(
 const parseReturnType = (initial: State): NodeResult => {
   const following: ReadonlyArray<Token.TokenKind> = Object.freeze(['Bang', 'Question', 'LeftBrace'])
   const arrow = expect(initial, 'Arrow', [...typeStarts, ...following])
+  if (isOpaqueResultStart(arrow.state)) {
+    const keyword = expect(arrow.state, 'Identifier', ['Less', ...following])
+    // The binder list is followed by a type, so its recovery set must exclude every type start:
+    // `parseTypeParameterList` stops at any token it is told follows the list.
+    const binders = parseTypeParameterList(keyword.state, following)
+    const result = parseType(binders.state, following)
+    const opaque = syntaxNode(result.state, 'OpaqueResultType', [
+      ...keyword.elements,
+      binders.node,
+      result.node,
+    ])
+    return Object.freeze({
+      state: result.state,
+      node: syntaxNode(result.state, 'ReturnType', [...arrow.elements, opaque]),
+    })
+  }
   const type = parseType(arrow.state, following)
   return Object.freeze({
     state: type.state,

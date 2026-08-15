@@ -30,6 +30,7 @@ export type NodeKind =
   | 'ReferenceType'
   | 'CallableType'
   | 'ExactRepresentationType'
+  | 'OpaqueResultType'
   | 'UnitType'
   | 'ParenthesizedType'
   | 'UnionType'

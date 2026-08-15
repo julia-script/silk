@@ -636,6 +636,7 @@ const isDeclaredTypeNode = (element: SyntaxTree.Element): element is SyntaxTree.
     element.kind === 'UnitType' ||
     element.kind === 'ParenthesizedType' ||
     element.kind === 'ExactRepresentationType' ||
+    element.kind === 'OpaqueResultType' ||
     element.kind === 'UnionType')
 
 const declaredTypeNode = (parent: SyntaxTree.Node): SyntaxTree.Node => {
@@ -1083,6 +1084,16 @@ export const analyzeDeclaredType = (
         syntax,
       }),
       diagnostics: Object.freeze(diagnostics),
+    })
+  }
+  if (syntax.kind === 'OpaqueResultType') {
+    // The binder is owned by the declaration that carries it, so its representation parameters and
+    // family key can only be minted where that canonical identity is known. Until the declaration
+    // site supplies it, the result stays deterministically unavailable rather than resolving to a
+    // parameter with a fabricated owner.
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+      diagnostics: Object.freeze([]),
     })
   }
   if (syntax.kind === 'ExactRepresentationType') {
