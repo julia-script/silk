@@ -128,7 +128,7 @@ export type CleanupPlan =
       /** The hidden hook function synthesized from the owning Drop conformance. */
       readonly hook: DeclarationIndex.CanonicalId
       /** Concrete arguments for the impl's type parameters at this instantiation. */
-      readonly typeArguments: ReadonlyArray<Type.Type>
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       /** Field cleanup runs after the hook returns. */
       readonly inner: CleanupPlan
     }
@@ -189,6 +189,31 @@ export type CleanupPlan =
         readonly cleanup: CleanupPlan
       }>
     }
+
+/** Tests whether one cleanup plan invokes a Drop hook at any nesting depth. */
+export const cleanupHasHook = (self: CleanupPlan): boolean =>
+  self._tag === 'HookCleanup' ||
+  (self._tag === 'StructCleanup' && self.fields.some((field) => cleanupHasHook(field.cleanup))) ||
+  (self._tag === 'ArrayCleanup' && cleanupHasHook(self.element)) ||
+  (self._tag === 'UnionCleanup' && self.cases.some((entry) => cleanupHasHook(entry.cleanup))) ||
+  ((self._tag === 'CallableCleanup' || self._tag === 'EffectCleanup') &&
+    self.slots.some((slot) => cleanupHasHook(slot.cleanup))) ||
+  (self._tag === 'RawBufferCleanup' && cleanupHasHook(self.allocation))
+
+/** Tests whether one cleanup plan consumes a reclaim ticket at any nesting depth. */
+export const cleanupReclaims = (self: CleanupPlan): boolean =>
+  self._tag === 'AllocationCleanup' ||
+  self._tag === 'RawBufferCleanup' ||
+  (self._tag === 'HookCleanup' && cleanupReclaims(self.inner)) ||
+  (self._tag === 'StructCleanup' && self.fields.some((field) => cleanupReclaims(field.cleanup))) ||
+  (self._tag === 'ArrayCleanup' && cleanupReclaims(self.element)) ||
+  (self._tag === 'UnionCleanup' && self.cases.some((entry) => cleanupReclaims(entry.cleanup))) ||
+  ((self._tag === 'CallableCleanup' || self._tag === 'EffectCleanup') &&
+    self.slots.some((slot) => cleanupReclaims(slot.cleanup)))
+
+/** Tests whether one cleanup plan has any observable runtime effect. */
+export const cleanupHasEffect = (self: CleanupPlan): boolean =>
+  cleanupHasHook(self) || cleanupReclaims(self)
 
 /** One structured exit path with its ordered (last-acquired, first-released) releases. */
 export interface ExitPlan {
@@ -2044,7 +2069,9 @@ export const specializeCleanup = (
         type,
         hook: cleanup.hook,
         typeArguments: Object.freeze(
-          cleanup.typeArguments.map((argument) => Type.substitute(argument, substitution)),
+          cleanup.typeArguments.map((argument) =>
+            Type.substituteGenericArgument(argument, substitution),
+          ),
         ),
         inner: specializeCleanup(cleanup.inner, substitution, resolveConcrete),
       })
@@ -2791,7 +2818,7 @@ const cleanupText = (cleanup: CleanupPlan): string => {
     return `hook:${Type.encode(cleanup.type)} target=${cleanup.hook.module}.${cleanup.hook.name}${
       cleanup.typeArguments.length === 0
         ? ''
-        : `<${cleanup.typeArguments.map(Type.encode).join(',')}>`
+        : `<${cleanup.typeArguments.map(Type.encodeGenericArgument).join(',')}>`
     } inner=(${cleanupText(cleanup.inner)})`
   }
   return `struct:${Type.encode(cleanup.type)} fields=${cleanup.fields

@@ -96,6 +96,15 @@ The structural callable contract remains unlayoutable. A concrete resolved field
 capture slots to the enclosing build-internal nominal ABI. MIR carries aggregate paths plus one
 static target and cleanup plan. Evaluator, LLVM, and direct Wasm consume the same MIR decision.
 
+`Hir` owns conversion and complete equality for callable targets, including builtin intrinsic
+identity, so discovery, realization, lowering, and MIR verification cannot compare different
+subsets of the target. `Ownership` likewise owns the recursive distinction between a cleanup that
+invokes a hook and one that reclaims storage. Engine emission gates on either observable effect,
+while allocation planning remains reclaim-only. Hook specialization substitutes complete generic
+arguments, including representation arguments, before the plan reaches an engine. The native
+regression matrix includes allocation-free `StructCleanup -> CallableCleanup -> HookCleanup`
+plans so allocator cleanup cannot mask a skipped hook.
+
 ### Retire diagnostics case by case
 
 Remove `SEM0103` only when analysis, ownership, layout, MIR, evaluator, LLVM, and Wasm support the

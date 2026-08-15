@@ -8,6 +8,8 @@ import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as Driver from '../src/Driver.js'
+import * as Mir from '../src/Mir.js'
+import * as Ownership from '../src/Ownership.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Target from '../src/Target.js'
@@ -182,6 +184,38 @@ effect fn build() -> i32 ! OutOfMemory {
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: 2, storage: move allocation }
+  let holder = Holder { step: consume(move guard) }
+  ${
+    exit === 'consuming'
+      ? 'return holder.step(40)'
+      : exit === 'moved'
+        ? 'return keep(move holder)'
+        : exit === 'typed-failure'
+          ? 'fail OutOfMemory {}'
+          : 'return 42'
+  }
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+
+const hookOnlyCleanupProgram = (exit: CleanupExit) => `struct Guard<F: once fn(i32) -> i32> {
+  tag: i32
+  marker: F
+}
+impl<F: once fn(i32) -> i32> Drop for Guard<F> {
+  fn drop(self: &mut Guard<F>) -> () {
+    let observable = self.tag / 0
+    return ()
+  }
+}
+fn marker(value: i32) -> i32 { return value }
+struct Holder<F: once fn(i32) -> i32> { step: F }
+fn consume<F: once fn(i32) -> i32>(value: i32, guard: Guard<F>) -> i32 {
+  return value + guard.tag
+}
+fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
+effect fn build() -> i32 ! OutOfMemory {
+  let guard = Guard { tag: 2, marker: marker }
   let holder = Holder { step: consume(move guard) }
   ${
     exit === 'consuming'
@@ -460,6 +494,38 @@ it.effect(
           ),
         )
         assert.strictEqual(nativeExit._tag, 'Failure', `${exit} trapping native`)
+
+        const hookOnlyDrop = hookOnlyCleanupProgram(exit)
+        const hookOnlyNative = yield* Analysis.ofSourceRealized(
+          `stored-callable-runtime/hook-only-${exit}-native`,
+          ascii(hookOnlyDrop),
+          host.id,
+        )
+        assert.deepEqual(Analysis.diagnostics(hookOnlyNative), [], `${exit} hook-only native`)
+        const hookOnlyMir = Analysis.loweredMir(hookOnlyNative)
+        const hookOnlyOperations = hookOnlyMir.functions.flatMap(Mir.operations)
+        assert.isFalse(
+          hookOnlyOperations.some(
+            (operation) => operation._tag === 'Allocate' || operation._tag.startsWith('RawBuffer'),
+          ),
+          `${exit} hook-only MIR has no allocation operations`,
+        )
+        const hookOnlyCleanups = hookOnlyOperations.flatMap((operation) =>
+          operation._tag === 'Drop' || operation._tag === 'SlotDrop' ? [operation.cleanup] : [],
+        )
+        assert.isTrue(
+          hookOnlyCleanups.some(
+            (cleanup) => Ownership.cleanupHasHook(cleanup) && !Ownership.cleanupReclaims(cleanup),
+          ),
+          `${exit} MIR retains a hook-only cleanup plan`,
+        )
+        const hookOnlyArtifact = yield* Analysis.codegen(hookOnlyNative, { mode: 'release' })
+        assert.match(hookOnlyArtifact.ir, /call void @silk_[^(\n]*drop_impl_0/)
+        assert.notInclude(hookOnlyArtifact.ir, 'call void @free')
+        const hookOnlyExit = yield* Effect.exit(
+          runNative(`stored-callable-runtime/hook-only-${exit}-native-process`, hookOnlyDrop),
+        )
+        assert.strictEqual(hookOnlyExit._tag, 'Failure', `${exit} hook-only native Drop hook`)
       }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   300_000,

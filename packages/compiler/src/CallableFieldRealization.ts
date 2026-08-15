@@ -212,17 +212,6 @@ const sameArguments = (
     return candidate !== undefined && Type.equalsGenericArgument(argument, candidate)
   })
 
-const sameTarget = (left: StaticTarget, right: Instances.CallableInstance['target']): boolean =>
-  left._tag === 'Declaration'
-    ? right._tag === 'DeclarationCallableTarget' &&
-      left.module === right.declaration.module &&
-      left.name === right.declaration.name
-    : right._tag === 'BuiltinCallableTarget' &&
-      left.actor === right.actor &&
-      left.operation === right.operation &&
-      left.intrinsic.actor === right.intrinsic.actor &&
-      left.intrinsic.name === right.intrinsic.name
-
 export const matchesIdentity = (
   identity: Type.CallableIdentityArgument,
   candidate: Instances.CallableInstance,
@@ -232,7 +221,7 @@ export const matchesIdentity = (
     identity.environment,
     Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
   ) &&
-  sameTarget(identity.target, candidate.target) &&
+  Hir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
   sameArguments(identity.typeArguments, candidate.typeArguments)
 
 /** One capture shape signature, used only to detect indistinguishable environments. */
@@ -419,7 +408,7 @@ export const matchesCallable = (
 ): boolean =>
   self.site !== undefined &&
   Hir.sameExecutableSite(self.site, candidate.site) &&
-  sameTarget(self.target, candidate.target) &&
+  Hir.matchesCallableTargetIdentity(candidate.target, self.target) &&
   sameArguments(self.targetArguments, candidate.typeArguments) &&
   self.environment !== undefined &&
   Type.equalsCallableEnvironmentIdentity(
@@ -431,15 +420,10 @@ export const matchesCallable = (
 export const equals = (left: Realization, right: Realization): boolean =>
   key(left.instance, left.field) === key(right.instance, right.field) &&
   Type.equals(left.contract, right.contract) &&
-  left.target._tag === right.target._tag &&
-  (left.target._tag === 'Declaration' && right.target._tag === 'Declaration'
-    ? left.target.module === right.target.module && left.target.name === right.target.name
-    : left.target._tag === 'Builtin' && right.target._tag === 'Builtin'
-      ? left.target.actor === right.target.actor &&
-        left.target.operation === right.target.operation &&
-        left.target.intrinsic.actor === right.target.intrinsic.actor &&
-        left.target.intrinsic.name === right.target.intrinsic.name
-      : false) &&
+  Hir.sameCallableTarget(
+    Hir.callableTargetFromIdentity(left.target),
+    Hir.callableTargetFromIdentity(right.target),
+  ) &&
   sameArguments(left.targetArguments, right.targetArguments) &&
   ((left.environment === undefined && right.environment === undefined) ||
     (left.environment !== undefined &&

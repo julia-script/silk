@@ -25,7 +25,7 @@ import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
-import type * as Ownership from './Ownership.js'
+import * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Target from './Target.js'
@@ -40,10 +40,9 @@ const reclaimContextPaths = (
   plan: Ownership.CleanupPlan,
   prefix: ReadonlyArray<DeclarationIndex.FieldId> = [],
 ): ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>> | undefined => {
-  // Nested structural cases without a reclaim ticket contribute no conditional free path. They
-  // are common in failure payloads beside an owned success value and must not make the enclosing
-  // union look unsupported merely because their shape is itself a union or hook.
-  if (!planReclaims(plan)) return []
+  // A hook without a reclaim ticket still needs the guarded full-plan branch. Inert structural
+  // cases contribute no conditional free path and can be skipped.
+  if (!Ownership.cleanupReclaims(plan)) return Ownership.cleanupHasHook(plan) ? undefined : []
   switch (plan._tag) {
     case 'NoCleanup':
     case 'ParameterCleanup':
@@ -64,17 +63,6 @@ const reclaimContextPaths = (
       return undefined
   }
 }
-
-/** Tests whether one cleanup plan consumes a reclaim ticket at any nesting depth. */
-const planReclaims = (plan: Ownership.CleanupPlan): boolean =>
-  plan._tag === 'AllocationCleanup' ||
-  plan._tag === 'RawBufferCleanup' ||
-  (plan._tag === 'HookCleanup' && planReclaims(plan.inner)) ||
-  (plan._tag === 'StructCleanup' && plan.fields.some((field) => planReclaims(field.cleanup))) ||
-  (plan._tag === 'ArrayCleanup' && planReclaims(plan.element)) ||
-  (plan._tag === 'UnionCleanup' && plan.cases.some((entry) => planReclaims(entry.cleanup))) ||
-  ((plan._tag === 'CallableCleanup' || plan._tag === 'EffectCleanup') &&
-    plan.slots.some((slot) => planReclaims(slot.cleanup)))
 
 /**
  * Code generation as a nominal `Backend` service: one operation consuming the whole
@@ -1138,10 +1126,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             operation._tag === 'SlotCopy' ||
             operation._tag === 'SlotDrop' ||
             (operation._tag === 'CloseEffectEntry' &&
-              operation.failures.some((failure) => planReclaims(failure.cleanup))) ||
+              operation.failures.some((failure) => Ownership.cleanupReclaims(failure.cleanup))) ||
             // A witness-dispatched allocation can arrive without any local Allocate operation,
             // and its cleanup still calls the release shim — at any nesting depth of the plan.
-            (operation._tag === 'Drop' && planReclaims(operation.cleanup)),
+            (operation._tag === 'Drop' && Ownership.cleanupReclaims(operation.cleanup)),
         ),
       )
     const malloc =
@@ -3026,7 +3014,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               }
               case 'EffectCleanup':
                 for (const slot of plan.slots) {
-                  if (!planReclaims(slot.cleanup) && slot.cleanup._tag !== 'HookCleanup') continue
+                  if (!Ownership.cleanupHasEffect(slot.cleanup)) continue
                   yield* dropThroughPlan(
                     slot.cleanup,
                     Object.freeze(values.slice(slot.laneOffset, slot.laneOffset + slot.laneCount)),
@@ -3051,8 +3039,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 if (target === undefined)
                   throw new RangeError('LLVM cleanup cannot resolve its Drop hook instance')
                 const layoutEntry = Layout.entry(program.layout, plan.type)
-                if (layoutEntry === undefined || usizeType === undefined)
-                  throw new RangeError('LLVM hook cleanup lost its layout')
+                if (layoutEntry === undefined)
+                  throw new RangeError(
+                    `LLVM hook cleanup lost the layout for ${SilkType.encode(plan.type)}`,
+                  )
                 const base = yield* FunctionBody.alloca(body, i8, `${tag}_hook_storage`, {
                   count: yield* Constant.integerUnsigned(builder, i32, BigInt(layoutEntry.size)),
                   alignment: yield* Alignment.fromByteUnits(layoutEntry.alignment),
@@ -3090,7 +3080,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               case 'StructCleanup': {
                 const lanes = semanticLanesOf(plan.type)
                 for (const [fieldOrdinal, field] of plan.fields.entries()) {
-                  if (!planReclaims(field.cleanup) && field.cleanup._tag !== 'HookCleanup') continue
+                  if (!Ownership.cleanupHasEffect(field.cleanup)) continue
                   const fieldValues = lanes.flatMap((lane, index) => {
                     const first = lane.path.at(0)
                     const value = values.at(index)
@@ -3112,7 +3102,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 return
               }
               case 'ArrayCleanup': {
-                if (!planReclaims(plan.element) && plan.element._tag !== 'HookCleanup') return
+                if (!Ownership.cleanupHasEffect(plan.element)) return
                 const lanes = semanticLanesOf(plan.type)
                 for (let index = 0; index < plan.length; index += 1) {
                   const elementValues = lanes.flatMap((lane, ordinal) => {
@@ -3134,20 +3124,15 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 return
               }
               case 'UnionCleanup': {
-                if (plan.cases.every((entry) => !planReclaims(entry.cleanup))) return
-                // Conditional release without new blocks: every reclaim context selects to null
-                // unless the live tag matches its member, and libc free ignores null.
+                if (plan.cases.every((entry) => !Ownership.cleanupHasEffect(entry.cleanup))) return
+                // Hook-bearing or structurally unsupported cases branch on the live tag and lower
+                // the complete plan. Plain reclaim paths select a null context for inactive cases,
+                // which libc free ignores.
                 const shape = Layout.callingShape(program.layout, plan.type)
                 const tagValue = values.at(0)
-                if (
-                  shape === undefined ||
-                  tagValue === undefined ||
-                  free === undefined ||
-                  usizeType === undefined
-                ) {
+                if (shape === undefined || tagValue === undefined) {
                   throw new RangeError('LLVM union cleanup lost its shape')
                 }
-                const zero = yield* Constant.integerUnsigned(builder, usizeType, 0n)
                 for (const caseEntry of plan.cases) {
                   const paths = reclaimContextPaths(caseEntry.cleanup)
                   if (paths === undefined) {
@@ -3213,6 +3198,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     yield* reloadMutableRoots(`${tag}_u${caseEntry.ordinal}_next`)
                     continue
                   }
+                  if (paths.length === 0) continue
+                  if (free === undefined || usizeType === undefined) {
+                    throw new RangeError('LLVM union reclaim cleanup lost its release helper')
+                  }
+                  const zero = yield* Constant.integerUnsigned(builder, usizeType, 0n)
                   for (const [pathOrdinal, path] of paths.entries()) {
                     const slots = Layout.memberFieldSlots(shape, caseEntry.member, path)
                     const contextSlot = slots?.at(4)
@@ -6765,7 +6755,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   break
                 }
                 case 'Drop': {
-                  if (planReclaims(operation.cleanup) || operation.cleanup._tag === 'HookCleanup') {
+                  if (Ownership.cleanupHasEffect(operation.cleanup)) {
                     yield* dropThroughPlan(
                       operation.cleanup,
                       readLocal(operation.local),
@@ -6957,8 +6947,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   // Owners still live at this site release before the failure leaves the function
                   // through their complete cleanup plans, matching the Drop lowering.
                   for (const release of operation.releases ?? []) {
-                    if (!planReclaims(release.cleanup) && release.cleanup._tag !== 'HookCleanup')
-                      continue
+                    if (!Ownership.cleanupHasEffect(release.cleanup)) continue
                     yield* dropThroughPlan(
                       release.cleanup,
                       readLocal(release.local),
@@ -7157,8 +7146,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   // Owners still live at this site release before the failure leaves the function
                   // through their complete cleanup plans, matching the Drop lowering.
                   for (const release of operation.releases ?? []) {
-                    if (!planReclaims(release.cleanup) && release.cleanup._tag !== 'HookCleanup')
-                      continue
+                    if (!Ownership.cleanupHasEffect(release.cleanup)) continue
                     yield* dropThroughPlan(
                       release.cleanup,
                       readLocal(release.local),
@@ -7432,7 +7420,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       throw new RangeError('Effect entry failure lost its typed payload lanes')
                     }
                     locals.set(failure.payload.ordinal, Object.freeze(payload))
-                    if (planReclaims(failure.cleanup) || failure.cleanup._tag === 'HookCleanup') {
+                    if (Ownership.cleanupHasEffect(failure.cleanup)) {
                       yield* dropThroughPlan(
                         failure.cleanup,
                         Object.freeze(payload),

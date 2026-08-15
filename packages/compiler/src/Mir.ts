@@ -1,6 +1,6 @@
 import * as Option from 'effect/Option'
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import type * as Hir from './Hir.js'
+import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
@@ -2167,30 +2167,7 @@ const callableTargetText = (target: Hir.CallableTarget): string =>
     : `${target.actor}.${target.operation}`
 
 const storedCallableTargetText = (target: SilkType.CallableIdentityArgument['target']): string =>
-  target._tag === 'Declaration'
-    ? `${target.module}.${target.name}`
-    : `${target.actor}.${target.operation}`
-
-const sameCallableTarget = (left: Hir.CallableTarget, right: Hir.CallableTarget): boolean =>
-  left._tag === right._tag &&
-  (left._tag === 'DeclarationCallableTarget' && right._tag === 'DeclarationCallableTarget'
-    ? left.declaration.module === right.declaration.module &&
-      left.declaration.name === right.declaration.name
-    : left._tag === 'BuiltinCallableTarget' && right._tag === 'BuiltinCallableTarget'
-      ? left.actor === right.actor && left.operation === right.operation
-      : false)
-
-const matchesStoredTarget = (
-  target: Hir.CallableTarget,
-  stored: SilkType.CallableIdentityArgument['target'],
-): boolean =>
-  stored._tag === 'Declaration'
-    ? target._tag === 'DeclarationCallableTarget' &&
-      target.declaration.module === stored.module &&
-      target.declaration.name === stored.name
-    : target._tag === 'BuiltinCallableTarget' &&
-      target.actor === stored.actor &&
-      target.operation === stored.operation
+  callableTargetText(Hir.callableTargetFromIdentity(target))
 
 const borrowKey = (borrow: Hir.BorrowId): string =>
   `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
@@ -4308,7 +4285,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 TypeCompatibility.isCompatible(
                   TypeCompatibility.check(valueType.type, field.stored.realization.contract),
                 ) &&
-                matchesStoredTarget(valueType.target, field.stored.realization.target) &&
+                Hir.matchesCallableTargetIdentity(
+                  valueType.target,
+                  field.stored.realization.target,
+                ) &&
                 field.stored.realization.field.ordinal === field.field.ordinal &&
                 field.stored.realization.instance.module === operation.type.type.module &&
                 field.stored.realization.instance.name === operation.type.type.name
@@ -4553,13 +4533,13 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const valid =
             destination?._tag === 'CallableValue' &&
             SilkType.equals(destination.type, operation.type.type) &&
-            sameCallableTarget(destination.target, operation.target) &&
-            sameCallableTarget(operation.type.target, operation.target) &&
+            Hir.sameCallableTarget(destination.target, operation.target) &&
+            Hir.sameCallableTarget(operation.type.target, operation.target) &&
             operation.typeArguments.every(SilkType.isConcreteGenericArgument) &&
             (environment === undefined
               ? operation.captures.length === 0
               : capturesValid &&
-                sameCallableTarget(environment.callable.target, operation.target) &&
+                Hir.sameCallableTarget(environment.callable.target, operation.target) &&
                 environment.callable.mode === operation.type.type.mode)
           if (!valid) {
             violations.push(

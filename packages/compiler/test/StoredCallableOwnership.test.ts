@@ -19,8 +19,9 @@ import { unreachable } from './support/raise.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const realized = (name: string, source: string) =>
-  Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
+const realized = Effect.fnUntraced(function* (name: string, source: string) {
+  return yield* Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
+})
 
 const codesOf = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)

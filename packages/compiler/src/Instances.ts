@@ -1150,28 +1150,12 @@ export const parameterCallableIdentity = (
   return key.typeArguments.filter(Type.isCallableIdentityArgument).at(position)
 }
 
-const callableTargetIdentity = (
-  target: Hir.CallableTarget,
-): Type.CallableIdentityArgument['target'] =>
-  target._tag === 'DeclarationCallableTarget'
-    ? Object.freeze({
-        _tag: 'Declaration' as const,
-        module: target.declaration.module,
-        name: target.declaration.name,
-      })
-    : Object.freeze({
-        _tag: 'Builtin' as const,
-        actor: target.actor,
-        operation: target.operation,
-        intrinsic: target.intrinsic,
-      })
-
 const callableOriginOf = (
   expression: Hir.Expression,
   context: EffectOriginContext,
 ): Type.CallableIdentityArgument | undefined => {
   if (expression._tag === 'FunctionItem') {
-    const target = callableTargetIdentity(expression.target)
+    const target = Hir.callableTargetIdentity(expression.target)
     const identity =
       target._tag === 'Declaration'
         ? `declaration:${target.module}:${target.name}`
@@ -1189,7 +1173,7 @@ const callableOriginOf = (
       }),
       typeArguments: context.owner.typeArguments,
     })
-    const target = callableTargetIdentity(expression.target)
+    const target = Hir.callableTargetIdentity(expression.target)
     const identity =
       target._tag === 'Declaration'
         ? `declaration:${target.module}:${target.name}`

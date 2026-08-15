@@ -427,33 +427,12 @@ const effectValueByIdentity = (
       })
 }
 
-const callableTarget = (target: Type.CallableIdentityArgument['target']): Hir.CallableTarget =>
-  target._tag === 'Declaration'
-    ? Object.freeze({
-        _tag: 'DeclarationCallableTarget',
-        declaration: Object.freeze({
-          _tag: 'CanonicalDeclarationId',
-          module: target.module,
-          name: target.name,
-        }),
-      })
-    : Object.freeze({
-        _tag: 'BuiltinCallableTarget',
-        actor: target.actor,
-        operation: target.operation,
-        intrinsic: Object.freeze({
-          _tag: 'IntrinsicOperationId',
-          actor: target.intrinsic.actor,
-          name: target.intrinsic.name,
-        }),
-      })
-
 const callableValueByIdentity = (
   layout: Layout.Plan,
   identity: Type.CallableIdentityArgument,
   type: Type.Callable,
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
-  const target = callableTarget(identity.target)
+  const target = Hir.callableTargetFromIdentity(identity.target)
   const environment =
     identity.environment === undefined
       ? undefined
@@ -505,7 +484,7 @@ const storedCallableValueType = (
   return Object.freeze({
     _tag: 'CallableValue',
     type: realization.contract,
-    target: callableTarget(realization.target),
+    target: Hir.callableTargetFromIdentity(realization.target),
     ...(realization.site === undefined ? {} : { site: realization.site }),
     ...(environment === undefined ? {} : { environment }),
     storage: Object.freeze({

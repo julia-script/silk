@@ -22,8 +22,9 @@ import { unreachable } from './support/raise.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const realized = (name: string, source: string) =>
-  Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
+const realized = Effect.fnUntraced(function* (name: string, source: string) {
+  return yield* Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
+})
 
 const bindingCleanup = (
   snapshot: Analysis.Snapshot,
@@ -43,6 +44,18 @@ const soleRealization = (snapshot: Analysis.Snapshot): CallableFieldRealization.
       entry.support._tag === 'Supported' ? [entry.support.realization] : [],
     )
     .at(0) ?? unreachable('expected one supported callable field realization')
+
+const realizationOf = (
+  snapshot: Analysis.Snapshot,
+  owner: string,
+): CallableFieldRealization.Realization =>
+  Instances.callableFieldRealizations(snapshot.instances, snapshot.index)
+    .entries.flatMap((entry) =>
+      entry.support._tag === 'Supported' && entry.support.realization.instance.name === owner
+        ? [entry.support.realization]
+        : [],
+    )
+    .at(0) ?? unreachable(`expected a supported callable field realization for ${owner}`)
 
 const fieldCleanup = (plan: Ownership.CleanupPlan, ordinal: number): Ownership.CleanupPlan => {
   assert.strictEqual(plan._tag, 'StructCleanup')
@@ -155,6 +168,45 @@ pub fn main() -> i32 {
     // A Copy lane is neither loaned nor cleaned, so the aggregate carries no drop obligation.
     assert.deepEqual(realization.cleanup.lanes, [])
     assert.strictEqual(resolved._tag, 'NoCleanup')
+  }),
+)
+
+it.effect('classifies a captured Drop hook as effective without a reclaim ticket', () =>
+  Effect.gen(function* () {
+    const module = 'stored-callable-cleanup/hook-only'
+    const snapshot = yield* realized(
+      module,
+      `struct Guard<F: once fn(i32) -> i32> {
+  tag: i32
+  marker: F
+}
+impl<F: once fn(i32) -> i32> Drop for Guard<F> {
+  fn drop(self: &mut Guard<F>) -> () { return () }
+}
+fn marker(value: i32) -> i32 { return value }
+struct Holder<F: once fn(i32) -> i32> { step: F }
+fn consume<F: once fn(i32) -> i32>(value: i32, guard: Guard<F>) -> i32 {
+  return value + guard.tag
+}
+pub fn main() -> i32 {
+  let guard = Guard { tag: 2, marker: marker }
+  let holder = Holder { step: consume(move guard) }
+  return 42
+}`,
+    )
+    const resolved = Ownership.realizedCallableCleanup(
+      snapshot.index,
+      realizationOf(snapshot, 'Holder'),
+    )
+
+    assert.strictEqual(resolved._tag, 'CallableCleanup')
+    assert.isTrue(Ownership.cleanupHasHook(resolved))
+    assert.isFalse(Ownership.cleanupReclaims(resolved))
+    assert.isTrue(Ownership.cleanupHasEffect(resolved))
+    assert.strictEqual(
+      resolved._tag === 'CallableCleanup' ? resolved.slots.at(0)?.cleanup._tag : undefined,
+      'HookCleanup',
+    )
   }),
 )
 
