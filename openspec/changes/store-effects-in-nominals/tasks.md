@@ -19,10 +19,7 @@
 ## 4. Engine Parity and Invalidation
 
 - [x] 4.1 Execute shared, exclusive, consuming, unrun, failing, and suspending stored Effects in the evaluator.
-- [x] 4.2 Add native LLVM and direct-Wasm parity for results, failures, runner identity, and cleanup traces.
-  - Direct Wasm executes each shape end to end; native parity is proven at emitted LLVM IR because
-    `SEM0107` still fences these programs out of `Analysis.realize`, so `Driver.compile` cannot
-    reach a native executable until task 4.4 narrows the fence.
+- [ ] 4.2 Add native LLVM and direct-Wasm parity for results, failures, runner identity, and cleanup traces.
 - [ ] 4.3 Add capture-shape, target, access, cleanup, and suspendability invalidation fixtures.
 - [ ] 4.4 Narrow the unavailable-Effect-layout fence only for shapes proven by all engines.
 
