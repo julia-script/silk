@@ -41,6 +41,12 @@ export type Representation =
       readonly tailPadding: number
     }
   | {
+      readonly _tag: 'StoredEffectEnvironment'
+      readonly realization: CallableFieldRealization.EffectRealization
+      readonly fields: ReadonlyArray<StoredEffectEnvironmentField>
+      readonly tailPadding: number
+    }
+  | {
       readonly _tag: 'Repeated'
       readonly element: DeclarationIndex.SemanticType
       readonly length: number
@@ -208,6 +214,11 @@ export interface EffectEnvironmentField {
   readonly callableIdentity?: Type.CallableIdentityArgument
 }
 
+/** One realized Effect slot after target placement inside its enclosing nominal field. */
+export interface StoredEffectEnvironmentField extends EffectEnvironmentField {
+  readonly capture: number
+}
+
 /** Target-owned storage and call-scoped view for one concrete callable section identity. */
 export type CallableEnvironment =
   | {
@@ -282,6 +293,7 @@ export type Selector =
   | DeclarationIndex.FieldId
   | { readonly _tag: 'ElementSelector'; readonly index: number }
   | { readonly _tag: 'CallableCaptureSelector'; readonly ordinal: number }
+  | { readonly _tag: 'EffectCaptureSelector'; readonly ordinal: number }
   | { readonly _tag: 'UnionTagSelector' }
   | { readonly _tag: 'UnionPayloadSelector'; readonly slot: number }
   | { readonly _tag: 'SliceAddressSelector' }
@@ -337,6 +349,15 @@ export type CallingShapeNode =
     }
   | {
       readonly _tag: 'CallableEnvironmentShape'
+      readonly type: Type.Represented
+      readonly fields: ReadonlyArray<{
+        readonly capture: number
+        readonly shape: CallingShapeNode
+      }>
+      readonly laneCount: number
+    }
+  | {
+      readonly _tag: 'EffectEnvironmentShape'
       readonly type: Type.Represented
       readonly fields: ReadonlyArray<{
         readonly capture: number
@@ -633,6 +654,105 @@ export const catalog = (
   const callableRealizations =
     discovery === undefined ? undefined : Instances.callableFieldRealizations(discovery, index)
 
+  interface InlineEnvironmentLayout {
+    readonly fields: ReadonlyArray<StoredEffectEnvironmentField>
+    readonly size: number
+    readonly alignment: number
+    readonly tailPadding: number
+  }
+
+  const layoutEffectSlots = (
+    slots: ReadonlyArray<CallableFieldRealization.EffectEnvironmentSlot>,
+    active: ReadonlySet<string>,
+  ): InlineEnvironmentLayout | undefined => {
+    let cursor = 0
+    let environmentAlignment = 1
+    const fields: Array<StoredEffectEnvironmentField> = []
+    for (const slot of slots) {
+      const nestedEffect =
+        slot.effectIdentity === undefined
+          ? undefined
+          : discovery?.effects.find(
+              (candidate) =>
+                candidate.identity === slot.effectIdentity ||
+                candidate.representationIdentity === slot.effectIdentity,
+            )
+      const callableIdentity = slot.callableIdentity
+      const nestedCallable =
+        callableIdentity === undefined
+          ? undefined
+          : discovery?.callables.find((candidate) =>
+              CallableFieldRealization.matchesIdentity(callableIdentity, candidate),
+            )
+      const stableDescriptor = Type.isSlice(slot.type) || Type.isReference(slot.type)
+      const borrowed =
+        (slot.access === 'Shared' || slot.access === 'Exclusive') &&
+        nestedEffect === undefined &&
+        nestedCallable === undefined &&
+        !stableDescriptor
+      let nestedLayout: { readonly size: number; readonly alignment: number } | undefined
+      if (nestedEffect !== undefined) {
+        if (active.has(nestedEffect.identity)) return undefined
+        nestedLayout = layoutEffectSlots(
+          CallableFieldRealization.effectEnvironmentOf(nestedEffect),
+          new Set([...active, nestedEffect.identity]),
+        )
+      } else if (nestedCallable !== undefined) {
+        let callableCursor = 0
+        let callableAlignment = 1
+        for (const capture of nestedCallable.captures) {
+          const captureBorrowed = capture.access === 'Shared' || capture.access === 'Exclusive'
+          const captureLayout = captureBorrowed ? undefined : layoutType(capture.type)
+          if (captureLayout?._tag === 'UnavailableLayoutEntry') return undefined
+          const size = captureBorrowed ? target.pointerSize : (captureLayout?.size ?? 0)
+          const alignment = captureBorrowed
+            ? target.pointerAlignment
+            : (captureLayout?.alignment ?? 1)
+          callableCursor = alignUp(callableCursor, alignment) + size
+          callableAlignment = Math.max(callableAlignment, alignment)
+        }
+        nestedLayout = Object.freeze({
+          size: alignUp(callableCursor, callableAlignment),
+          alignment: callableAlignment,
+        })
+      } else if (!borrowed) {
+        const candidate = layoutType(slot.type)
+        if (candidate._tag === 'UnavailableLayoutEntry') return undefined
+        nestedLayout = candidate
+      }
+      const size = borrowed ? target.pointerSize : (nestedLayout?.size ?? 0)
+      const alignment = borrowed ? target.pointerAlignment : (nestedLayout?.alignment ?? 1)
+      const offset = alignUp(cursor, alignment)
+      fields.push(
+        Object.freeze({
+          capture: slot.ordinal,
+          source: slot.source,
+          ordinal: slot.sourceOrdinal,
+          access: slot.access,
+          type: nestedEffect?.type ?? slot.type,
+          offset,
+          size,
+          alignment,
+          padding: offset - cursor,
+          representation: borrowed ? 'Borrow' : nestedCallable === undefined ? 'Value' : 'Callable',
+          ...(slot.effectIdentity === undefined ? {} : { effectIdentity: slot.effectIdentity }),
+          ...(slot.callableIdentity === undefined
+            ? {}
+            : { callableIdentity: slot.callableIdentity }),
+        }),
+      )
+      cursor = offset + size
+      environmentAlignment = Math.max(environmentAlignment, alignment)
+    }
+    const size = alignUp(cursor, environmentAlignment)
+    return Object.freeze({
+      fields: Object.freeze(fields),
+      size,
+      alignment: environmentAlignment,
+      tailPadding: size - cursor,
+    })
+  }
+
   const layoutRepresentedCallable = (
     type: Type.Represented,
     realization: CallableFieldRealization.CallableRealization,
@@ -686,6 +806,41 @@ export const catalog = (
         realization,
         fields: Object.freeze(fields),
         tailPadding: size - cursor,
+      }),
+    })
+    completed.set(key, result)
+    return result
+  }
+
+  const layoutRepresentedEffect = (
+    type: Type.Represented,
+    realization: CallableFieldRealization.EffectRealization,
+  ): CatalogEntry => {
+    const key = Type.key(type)
+    const existing = completed.get(key)
+    if (existing !== undefined) return existing
+    const environment = layoutEffectSlots(
+      realization.environment,
+      new Set([realization.runnerIdentity]),
+    )
+    if (environment === undefined) {
+      const result = unavailable(type, Object.freeze(Type.nominals(type)), {
+        _tag: 'InvalidDeclaration',
+        detail: 'stored Effect environment has an unavailable or recursive capture layout',
+      })
+      completed.set(key, result)
+      return result
+    }
+    const result: Entry = Object.freeze({
+      _tag: 'LayoutEntry',
+      type,
+      size: environment.size,
+      alignment: environment.alignment,
+      representation: Object.freeze({
+        _tag: 'StoredEffectEnvironment',
+        realization,
+        fields: environment.fields,
+        tailPadding: environment.tailPadding,
       }),
     })
     completed.set(key, result)
@@ -871,14 +1026,16 @@ export const catalog = (
           const realization =
             plan === undefined || callableRealizations === undefined
               ? undefined
-              : CallableFieldRealization.callableRealizationOf(callableRealizations, type, plan.id)
+              : CallableFieldRealization.realizationOf(callableRealizations, type, plan.id)
           if (realization === undefined) {
             return unavailable(candidate, Object.freeze(Type.nominals(candidate)), {
               _tag: 'InvalidDeclaration',
               detail: 'represented executable values remain unavailable to layout',
             })
           }
-          return layoutRepresentedCallable(candidate, realization)
+          return CallableFieldRealization.isCallableRealization(realization)
+            ? layoutRepresentedCallable(candidate, realization)
+            : layoutRepresentedEffect(candidate, realization)
         }
         if (Type.isFixedArray(candidate)) {
           const element = layoutFieldType(candidate.element)
@@ -1731,7 +1888,10 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     entries.set(key, candidate)
     if (candidate.representation._tag === 'Aggregate') {
       for (const field of candidate.representation.fields) add(field.type)
-    } else if (candidate.representation._tag === 'CallableEnvironment') {
+    } else if (
+      candidate.representation._tag === 'CallableEnvironment' ||
+      candidate.representation._tag === 'StoredEffectEnvironment'
+    ) {
       for (const field of candidate.representation.fields) add(field.type)
     } else if (candidate.representation._tag === 'Repeated') {
       add(candidate.representation.element)
@@ -1893,14 +2053,21 @@ const shapeNode = (
   }
   if (Type.isRepresented(type)) {
     const representation = entries.get(Type.key(type))?.representation
-    if (representation?._tag !== 'CallableEnvironment') {
+    if (
+      representation?._tag !== 'CallableEnvironment' &&
+      representation?._tag !== 'StoredEffectEnvironment'
+    ) {
       throw new RangeError(
         `represented executable ${Type.encode(type)} is unavailable to calling-shape planning`,
       )
     }
-    const fields = representation.fields.map((field) =>
+    const environmentFields =
+      representation._tag === 'CallableEnvironment'
+        ? representation.fields.map((field) => Object.freeze({ capture: field.ordinal, field }))
+        : representation.fields.map((field) => Object.freeze({ capture: field.capture, field }))
+    const fields = environmentFields.map(({ capture, field }) =>
       Object.freeze({
-        capture: field.ordinal,
+        capture,
         shape:
           field.representation === 'Borrow'
             ? Object.freeze({
@@ -1920,7 +2087,10 @@ const shapeNode = (
       }),
     )
     return Object.freeze({
-      _tag: 'CallableEnvironmentShape',
+      _tag:
+        representation._tag === 'CallableEnvironment'
+          ? ('CallableEnvironmentShape' as const)
+          : ('EffectEnvironmentShape' as const),
       type,
       fields: Object.freeze(fields),
       laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
@@ -2100,15 +2270,16 @@ const materializeLanes = (
       ),
     )
   }
-  if (node._tag === 'CallableEnvironmentShape') {
+  if (node._tag === 'CallableEnvironmentShape' || node._tag === 'EffectEnvironmentShape') {
+    const selectorTag =
+      node._tag === 'CallableEnvironmentShape'
+        ? ('CallableCaptureSelector' as const)
+        : ('EffectCaptureSelector' as const)
     return Object.freeze(
       node.fields.flatMap((field) =>
         materializeLanes(
           field.shape,
-          Object.freeze([
-            ...path,
-            Object.freeze({ _tag: 'CallableCaptureSelector' as const, ordinal: field.capture }),
-          ]),
+          Object.freeze([...path, Object.freeze({ _tag: selectorTag, ordinal: field.capture })]),
         ),
       ),
     )
@@ -2403,6 +2574,35 @@ const representationEquals = (left: Representation, right: Representation): bool
       })
     )
   }
+  if (left._tag === 'StoredEffectEnvironment') {
+    return (
+      right._tag === 'StoredEffectEnvironment' &&
+      CallableFieldRealization.equals(left.realization, right.realization) &&
+      left.tailPadding === right.tailPadding &&
+      left.fields.length === right.fields.length &&
+      left.fields.every((field, ordinal) => {
+        const other = right.fields.at(ordinal)
+        return (
+          other !== undefined &&
+          field.capture === other.capture &&
+          field.source === other.source &&
+          field.ordinal === other.ordinal &&
+          field.access === other.access &&
+          Type.equals(field.type, other.type) &&
+          field.offset === other.offset &&
+          field.size === other.size &&
+          field.alignment === other.alignment &&
+          field.padding === other.padding &&
+          field.representation === other.representation &&
+          field.effectIdentity === other.effectIdentity &&
+          ((field.callableIdentity === undefined && other.callableIdentity === undefined) ||
+            (field.callableIdentity !== undefined &&
+              other.callableIdentity !== undefined &&
+              Type.equalsGenericArgument(field.callableIdentity, other.callableIdentity)))
+        )
+      })
+    )
+  }
   if (left._tag === 'Repeated') {
     return (
       right._tag === 'Repeated' &&
@@ -2641,6 +2841,83 @@ const verifyEntry = (
         ])
   }
   if (Type.isRepresented(candidate.type)) {
+    if (candidate.representation._tag === 'StoredEffectEnvironment') {
+      const violations: Array<Violation> = []
+      let cursor = 0
+      let alignment = 1
+      for (const [ordinal, field] of candidate.representation.fields.entries()) {
+        const slot = candidate.representation.realization.environment.at(ordinal)
+        const borrowed = field.representation === 'Borrow'
+        const executable =
+          field.effectIdentity !== undefined || field.callableIdentity !== undefined
+        const fieldLayout =
+          borrowed || executable
+            ? undefined
+            : Type.isBuiltin(field.type)
+              ? scalarEntry(target, field.type)
+              : available.get(Type.key(field.type))
+        const expectedSize = borrowed
+          ? target.pointerSize
+          : executable
+            ? field.size
+            : fieldLayout?.size
+        const expectedAlignment = borrowed
+          ? target.pointerAlignment
+          : executable
+            ? field.alignment
+            : fieldLayout?.alignment
+        const offset =
+          expectedAlignment === undefined ? undefined : alignUp(cursor, expectedAlignment)
+        if (
+          slot === undefined ||
+          slot.ordinal !== field.capture ||
+          slot.source !== field.source ||
+          slot.sourceOrdinal !== field.ordinal ||
+          slot.access !== field.access ||
+          !Type.equals(slot.type, field.type) ||
+          slot.effectIdentity !== field.effectIdentity ||
+          (slot.callableIdentity === undefined && field.callableIdentity !== undefined) ||
+          (slot.callableIdentity !== undefined &&
+            (field.callableIdentity === undefined ||
+              !Type.equalsGenericArgument(slot.callableIdentity, field.callableIdentity))) ||
+          expectedSize === undefined ||
+          expectedAlignment === undefined ||
+          offset === undefined ||
+          expectedAlignment < 1 ||
+          expectedSize < 0 ||
+          field.offset !== offset ||
+          field.size !== expectedSize ||
+          field.alignment !== expectedAlignment ||
+          field.padding !== offset - cursor
+        ) {
+          violations.push(
+            invalid(
+              'InvalidAggregate',
+              candidate.type,
+              `Effect capture ${field.capture} has non-canonical physical facts`,
+            ),
+          )
+          continue
+        }
+        cursor = offset + expectedSize
+        alignment = Math.max(alignment, expectedAlignment)
+      }
+      const size = alignUp(cursor, alignment)
+      if (
+        candidate.size !== size ||
+        candidate.alignment !== alignment ||
+        candidate.representation.tailPadding !== size - cursor
+      ) {
+        violations.push(
+          invalid(
+            'InvalidAggregate',
+            candidate.type,
+            `${Type.encode(candidate.type)} has non-canonical stored Effect environment size or alignment`,
+          ),
+        )
+      }
+      return Object.freeze(violations)
+    }
     if (candidate.representation._tag !== 'CallableEnvironment') {
       return Object.freeze([
         invalid(
@@ -2841,21 +3118,23 @@ export const selectorEquals = (left: Selector, right: Selector): boolean =>
     ? right._tag === 'ElementSelector' && left.index === right.index
     : left._tag === 'CallableCaptureSelector'
       ? right._tag === 'CallableCaptureSelector' && left.ordinal === right.ordinal
-      : left._tag === 'UnionTagSelector'
-        ? right._tag === 'UnionTagSelector'
-        : left._tag === 'UnionPayloadSelector'
-          ? right._tag === 'UnionPayloadSelector' && left.slot === right.slot
-          : left._tag === 'SliceAddressSelector'
-            ? right._tag === 'SliceAddressSelector'
-            : left._tag === 'SliceLengthSelector'
-              ? right._tag === 'SliceLengthSelector'
-              : left._tag === 'StringStorageSelector'
-                ? right._tag === 'StringStorageSelector'
-                : left._tag === 'StringByteLengthSelector'
-                  ? right._tag === 'StringByteLengthSelector'
-                  : left._tag === 'ReferenceAddressSelector'
-                    ? right._tag === 'ReferenceAddressSelector'
-                    : right._tag === 'FieldId' && fieldIdEquals(left, right)
+      : left._tag === 'EffectCaptureSelector'
+        ? right._tag === 'EffectCaptureSelector' && left.ordinal === right.ordinal
+        : left._tag === 'UnionTagSelector'
+          ? right._tag === 'UnionTagSelector'
+          : left._tag === 'UnionPayloadSelector'
+            ? right._tag === 'UnionPayloadSelector' && left.slot === right.slot
+            : left._tag === 'SliceAddressSelector'
+              ? right._tag === 'SliceAddressSelector'
+              : left._tag === 'SliceLengthSelector'
+                ? right._tag === 'SliceLengthSelector'
+                : left._tag === 'StringStorageSelector'
+                  ? right._tag === 'StringStorageSelector'
+                  : left._tag === 'StringByteLengthSelector'
+                    ? right._tag === 'StringByteLengthSelector'
+                    : left._tag === 'ReferenceAddressSelector'
+                      ? right._tag === 'ReferenceAddressSelector'
+                      : right._tag === 'FieldId' && fieldIdEquals(left, right)
 
 /** Resolves one compiler-planned scalar lane to its byte offset within a logical value. */
 export const laneOffset = (
@@ -2887,6 +3166,16 @@ export const laneOffset = (
       if (candidate.representation._tag !== 'CallableEnvironment') return undefined
       const field = candidate.representation.fields.find(
         (capture) => capture.ordinal === selector.ordinal,
+      )
+      if (field === undefined) return undefined
+      offset += field.offset
+      current = field.type
+      continue
+    }
+    if (selector._tag === 'EffectCaptureSelector') {
+      if (candidate.representation._tag !== 'StoredEffectEnvironment') return undefined
+      const field = candidate.representation.fields.find(
+        (capture) => capture.capture === selector.ordinal,
       )
       if (field === undefined) return undefined
       offset += field.offset
@@ -3125,17 +3414,19 @@ const representationText = (representation: Representation): string =>
                   ? `${representation.realization.target.module}.${representation.realization.target.name}`
                   : `${representation.realization.target.actor}.${representation.realization.target.operation}`
               } environment=${representation.realization.environment === undefined ? 'none' : Type.callableEnvironmentKey(representation.realization.environment)} tail-padding=${representation.tailPadding}`
-            : representation._tag === 'Repeated'
-              ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
-              : representation._tag === 'Slice'
-                ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=usize@${representation.length.offset}/${representation.length.size} address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
-                : representation._tag === 'String'
-                  ? `string storage=${representation.storage.provenance}:i${representation.storage.bits}@${representation.storage.offset}/${representation.storage.size}/${representation.storage.alignment} byte-length=usize@${representation.byteLength.offset}/${representation.byteLength.size} storage-padding=${representation.storagePadding} tail-padding=${representation.tailPadding}`
-                  : representation._tag === 'Reference'
-                    ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
-                    : representation._tag === 'Union'
-                      ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
-                      : `aggregate tail-padding=${representation.tailPadding}`
+            : representation._tag === 'StoredEffectEnvironment'
+              ? `stored-effect-environment runner=${representation.realization.runner.module}.${representation.realization.runner.name} identity=${representation.realization.runnerIdentity} access=${representation.realization.access.toLowerCase()} suspendable=${representation.realization.suspendable ? 'yes' : 'no'} tail-padding=${representation.tailPadding}`
+              : representation._tag === 'Repeated'
+                ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
+                : representation._tag === 'Slice'
+                  ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=usize@${representation.length.offset}/${representation.length.size} address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
+                  : representation._tag === 'String'
+                    ? `string storage=${representation.storage.provenance}:i${representation.storage.bits}@${representation.storage.offset}/${representation.storage.size}/${representation.storage.alignment} byte-length=usize@${representation.byteLength.offset}/${representation.byteLength.size} storage-padding=${representation.storagePadding} tail-padding=${representation.tailPadding}`
+                    : representation._tag === 'Reference'
+                      ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
+                      : representation._tag === 'Union'
+                        ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
+                        : `aggregate tail-padding=${representation.tailPadding}`
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
   `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
@@ -3149,30 +3440,35 @@ const entryLines = (candidate: Entry): ReadonlyArray<string> => [
           (field) =>
             `  capture ${field.ordinal}->p${field.parameterOrdinal}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
         )
-      : candidate.representation._tag === 'Repeated'
-        ? [
-            `  elements ${Type.encode(candidate.representation.element)} count=${candidate.representation.length} stride=${candidate.representation.stride}`,
-          ]
-        : candidate.representation._tag === 'Slice'
+      : candidate.representation._tag === 'StoredEffectEnvironment'
+        ? candidate.representation.fields.map(
+            (field) =>
+              `  effect-capture ${field.capture} ${field.source.toLowerCase()}${field.ordinal}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
+          )
+        : candidate.representation._tag === 'Repeated'
           ? [
-              `  address Address<${Type.encode(candidate.representation.element)}> bits=${candidate.representation.address.bits} offset=${candidate.representation.address.offset} size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
-              `  length usize offset=${candidate.representation.length.offset} size=${candidate.representation.length.size} stride=${candidate.representation.stride}`,
+              `  elements ${Type.encode(candidate.representation.element)} count=${candidate.representation.length} stride=${candidate.representation.stride}`,
             ]
-          : candidate.representation._tag === 'String'
+          : candidate.representation._tag === 'Slice'
             ? [
-                `  storage StringUtf8 bits=${candidate.representation.storage.bits} offset=${candidate.representation.storage.offset} size=${candidate.representation.storage.size} align=${candidate.representation.storage.alignment}`,
-                `  byte-length usize offset=${candidate.representation.byteLength.offset} size=${candidate.representation.byteLength.size}`,
+                `  address Address<${Type.encode(candidate.representation.element)}> bits=${candidate.representation.address.bits} offset=${candidate.representation.address.offset} size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+                `  length usize offset=${candidate.representation.length.offset} size=${candidate.representation.length.size} stride=${candidate.representation.stride}`,
               ]
-            : candidate.representation._tag === 'Reference'
+            : candidate.representation._tag === 'String'
               ? [
-                  `  address Address<${Type.encode(candidate.representation.target)}> bits=${candidate.representation.address.bits} offset=0 size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+                  `  storage StringUtf8 bits=${candidate.representation.storage.bits} offset=${candidate.representation.storage.offset} size=${candidate.representation.storage.size} align=${candidate.representation.storage.alignment}`,
+                  `  byte-length usize offset=${candidate.representation.byteLength.offset} size=${candidate.representation.byteLength.size}`,
                 ]
-              : candidate.representation._tag === 'Union'
-                ? candidate.representation.members.map(
-                    (member) =>
-                      `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
-                  )
-                : []),
+              : candidate.representation._tag === 'Reference'
+                ? [
+                    `  address Address<${Type.encode(candidate.representation.target)}> bits=${candidate.representation.address.bits} offset=0 size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+                  ]
+                : candidate.representation._tag === 'Union'
+                  ? candidate.representation.members.map(
+                      (member) =>
+                        `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
+                    )
+                  : []),
 ]
 
 /** Deterministic textual encoding of a complete runtime layout plan. */
@@ -3209,21 +3505,23 @@ export const encode = (self: Plan): string =>
                           ? `[${selector.index}]`
                           : selector._tag === 'CallableCaptureSelector'
                             ? `capture[${selector.ordinal}]`
-                            : selector._tag === 'UnionTagSelector'
-                              ? 'tag'
-                              : selector._tag === 'UnionPayloadSelector'
-                                ? `payload[${selector.slot}]`
-                                : selector._tag === 'SliceAddressSelector'
-                                  ? 'address'
-                                  : selector._tag === 'SliceLengthSelector'
-                                    ? 'length'
-                                    : selector._tag === 'StringStorageSelector'
-                                      ? 'storage'
-                                      : selector._tag === 'StringByteLengthSelector'
-                                        ? 'byte-length'
-                                        : selector._tag === 'ReferenceAddressSelector'
-                                          ? 'address'
-                                          : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
+                            : selector._tag === 'EffectCaptureSelector'
+                              ? `effect-capture[${selector.ordinal}]`
+                              : selector._tag === 'UnionTagSelector'
+                                ? 'tag'
+                                : selector._tag === 'UnionPayloadSelector'
+                                  ? `payload[${selector.slot}]`
+                                  : selector._tag === 'SliceAddressSelector'
+                                    ? 'address'
+                                    : selector._tag === 'SliceLengthSelector'
+                                      ? 'length'
+                                      : selector._tag === 'StringStorageSelector'
+                                        ? 'storage'
+                                        : selector._tag === 'StringByteLengthSelector'
+                                          ? 'byte-length'
+                                          : selector._tag === 'ReferenceAddressSelector'
+                                            ? 'address'
+                                            : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
                       )
                       .join('.')}]`,
                 )
