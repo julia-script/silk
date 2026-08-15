@@ -3695,7 +3695,9 @@ const concreteCleanup = (
       storedEffectValueType(fn.layout, concrete) ??
       representedValueType(fn.layout, fn.opaqueRealizations, concrete, new Map())
     return value?._tag === 'CallableValue'
-      ? callableLocalCleanup(fn, value)
+      ? value.storage?._tag === 'StoredCallableField'
+        ? Ownership.realizedCallableCleanup(fn.index, value.storage.realization)
+        : callableLocalCleanup(fn, value)
       : value?._tag === 'EffectValue'
         ? effectLocalCleanup(fn, value, new Set())
         : undefined
