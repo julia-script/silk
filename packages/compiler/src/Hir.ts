@@ -97,6 +97,23 @@ export const compareExecutableSites = (
 export const executableSiteLabel = (self: EffectSiteId | CallableSiteId): string =>
   executableSiteKey(self).replaceAll('\u0000', ':')
 
+/** Projects a HIR callable site into the semantic identity retained across specialization. */
+export const callableEnvironmentSite = (self: CallableSiteId): Type.CallableEnvironmentSite =>
+  Type.callableEnvironmentSite(
+    self.owner === undefined
+      ? undefined
+      : Object.freeze({ module: self.owner.module, name: self.owner.name }),
+    self.function.ordinal,
+    self.ordinal,
+  )
+
+/** Retains one callable site's complete enclosing executable specialization. */
+export const callableEnvironmentIdentity = (
+  self: CallableSiteId,
+  owner: Type.CallableEnvironmentIdentity['owner'],
+): Type.CallableEnvironmentIdentity =>
+  Type.callableEnvironmentIdentity(callableEnvironmentSite(self), owner)
+
 /** Derives the canonical hidden runner declaration owned by one effect construction site. */
 export const effectRunnerId = (
   owner: DeclarationIndex.CanonicalId,

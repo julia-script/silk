@@ -1419,8 +1419,10 @@ const effectEnvironments = (
                     { readonly _tag: 'CallableEnvironment' }
                   > =>
                     candidate._tag === 'CallableEnvironment' &&
-                    Instances.callableIdentity(candidate.callable) ===
-                      capturedCallableIdentity.environment,
+                    CallableFieldRealization.matchesIdentity(
+                      capturedCallableIdentity,
+                      candidate.callable,
+                    ),
                 )
           const fieldType =
             capturedEffectEnvironment?.effect ??
@@ -2196,6 +2198,22 @@ export const callingShape = (
 ): CallingShape | undefined =>
   self.callingShapes.find((candidate) => Type.equals(candidate.type, type))
 
+/** Resolves one canonical callable-environment identity in this target's runtime plan. */
+export const callableEnvironmentByIdentity = (
+  self: Plan,
+  identity: Type.CallableEnvironmentIdentity,
+): Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> | undefined =>
+  self.callableEnvironments.find(
+    (
+      candidate,
+    ): candidate is Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
+      candidate._tag === 'CallableEnvironment' &&
+      Type.equalsCallableEnvironmentIdentity(
+        Instances.callableEnvironmentIdentity(candidate.callable),
+        identity,
+      ),
+  )
+
 /** Materializes the ABI lanes of one hidden Effect environment separately from its outcome. */
 export const effectEnvironmentLanes = (
   self: Plan,
@@ -2217,11 +2235,10 @@ export const effectEnvironmentLanes = (
         ]
       }
       if (field.callableIdentity !== undefined) {
-        const captured = self.callableEnvironments.find(
-          (candidate) =>
-            candidate._tag === 'CallableEnvironment' &&
-            Instances.callableIdentity(candidate.callable) === field.callableIdentity?.environment,
-        )
+        const captured =
+          field.callableIdentity.environment === undefined
+            ? undefined
+            : callableEnvironmentByIdentity(self, field.callableIdentity.environment)
         return captured?._tag === 'CallableEnvironment'
           ? callableEnvironmentLanes(self, captured)
           : Object.freeze([])
@@ -2263,6 +2280,32 @@ export const callableEnvironmentLanes = (
       return callingShape(self, field.type)?.lanes ?? Object.freeze([])
     }),
   )
+
+/** The logical lane and byte range occupied by one capture in a specialized environment. */
+export interface CallableCaptureRange {
+  readonly laneOffset: number
+  readonly laneCount: number
+  readonly byteOffset: number
+}
+
+/** Resolves one owned capture's runtime range from its canonical environment identity. */
+export const callableCaptureRange = (
+  self: Plan,
+  identity: Type.CallableEnvironmentIdentity,
+  capture: number,
+): CallableCaptureRange | undefined => {
+  const environment = callableEnvironmentByIdentity(self, identity)
+  if (environment === undefined) return undefined
+  let laneOffset = 0
+  for (const field of environment.fields) {
+    const laneCount =
+      field.representation === 'Borrow' ? 1 : (callingShape(self, field.type)?.laneCount ?? 0)
+    if (field.ordinal === capture)
+      return Object.freeze({ laneOffset, laneCount, byteOffset: field.offset })
+    laneOffset += laneCount
+  }
+  return undefined
+}
 
 const fieldSlice = (
   node: CallingShapeNode,
@@ -3081,7 +3124,7 @@ const representationText = (representation: Representation): string =>
                 representation.realization.target._tag === 'Declaration'
                   ? `${representation.realization.target.module}.${representation.realization.target.name}`
                   : `${representation.realization.target.actor}.${representation.realization.target.operation}`
-              } environment=${representation.realization.environment ?? 'none'} tail-padding=${representation.tailPadding}`
+              } environment=${representation.realization.environment === undefined ? 'none' : Type.callableEnvironmentKey(representation.realization.environment)} tail-padding=${representation.tailPadding}`
             : representation._tag === 'Repeated'
               ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
               : representation._tag === 'Slice'

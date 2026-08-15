@@ -622,7 +622,7 @@ export interface CallableSectionExpressionFact {
   readonly captures: ReadonlyArray<CallableCaptureFact>
   readonly retainedDependencies: ReadonlyArray<number>
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
-  readonly environmentOwner?: Type.CallableIdentityArgument['environmentOwner']
+  readonly environmentOwner?: Type.CallableEnvironmentIdentity['owner']
   readonly substitution: Type.Substitution
   readonly mode: Type.CallableMode
   readonly type: ExpressionTypeFact
@@ -2679,18 +2679,16 @@ const exactCallableRepresentation = (
   reference: CallReferenceFact,
   contract: Type.Callable,
   typeArguments: ReadonlyArray<Type.GenericArgument> = Object.freeze([]),
-  environment?: string,
-  environmentOwner?: Type.CallableIdentityArgument['environmentOwner'],
+  environment?: Type.CallableEnvironmentIdentity,
 ): Type.ExactRepresentationArgument | undefined => {
   const target = callableRepresentationTarget(reference)
   if (target === undefined) return undefined
   const identity =
-    environment ??
-    (target._tag === 'Declaration'
+    target._tag === 'Declaration'
       ? `declaration:${target.module}:${target.name}`
-      : `builtin:${target.actor}:${target.operation}`)
+      : `builtin:${target.actor}:${target.operation}`
   return Type.exactRepresentationArgument(
-    Type.callableIdentityArgument(identity, target, typeArguments, environment, environmentOwner),
+    Type.callableIdentityArgument(identity, target, typeArguments, environment),
     contract,
   )
 }
@@ -2713,14 +2711,16 @@ const representationOfExpression = (
   if (expression._tag === 'CallableSection' && expression.type._tag === 'Available') {
     const contract = expression.type.type
     if (!Type.isCallable(contract)) return undefined
-    const site = expression.site
-    const environment = `callable:${Hir.executableSiteKey(site)}`
+    if (expression.environmentOwner === undefined) return undefined
+    const environment = Hir.callableEnvironmentIdentity(
+      expression.site,
+      expression.environmentOwner,
+    )
     return exactCallableRepresentation(
       expression.reference,
       contract,
       expression.typeArguments,
       environment,
-      expression.environmentOwner,
     )
   }
   if (expression._tag === 'EffectBlock' && expression.type._tag === 'Available') {
@@ -4970,14 +4970,7 @@ const finishCallableSection = (
   const environmentOwner = (() => {
     const owner = resolution.executableOwner
     if (owner === undefined) return undefined
-    const declaration = resolution.index.modules
-      .flatMap((module) => module.declarations)
-      .find(
-        (candidate) =>
-          candidate.canonical._tag === 'Canonical' &&
-          candidate.canonical.id.module === owner.module &&
-          candidate.canonical.id.name === owner.name,
-      )
+    const declaration = DeclarationIndex.byCanonical(resolution.index, owner)
     return declaration === undefined
       ? undefined
       : Object.freeze({

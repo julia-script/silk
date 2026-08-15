@@ -120,7 +120,16 @@ it.effect('resolves the obligation into ordered owned lanes from the shared real
     assert.strictEqual(realization.cleanup.consumedByInvocation, true)
     assert.strictEqual(resolved._tag, 'CallableCleanup')
     if (resolved._tag !== 'CallableCleanup') return
-    assert.deepEqual(resolved.site, realization.site)
+    assert.strictEqual(resolved.environment._tag, 'CallableEnvironmentIdentity')
+    assert.strictEqual(
+      resolved.environment._tag === 'CallableEnvironmentIdentity' &&
+        realization.environment !== undefined &&
+        Type.equalsCallableEnvironmentIdentity(
+          resolved.environment.identity,
+          realization.environment,
+        ),
+      true,
+    )
     assert.deepEqual(
       resolved.slots.map((slot) => slot.ordinal),
       [0],

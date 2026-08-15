@@ -1182,20 +1182,19 @@ const callableOriginOf = (
     const typeArguments = expression.typeArguments.map((argument) =>
       Type.substituteGenericArgument(argument, context.substitution),
     )
-    const identity = `${keyText(context.owner)}\u0001${Hir.executableSiteKey(expression.site)}\u0001${typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
-    return Type.callableIdentityArgument(
-      identity,
-      callableTargetIdentity(expression.target),
-      typeArguments,
-      identity,
-      Object.freeze({
-        declaration: Object.freeze({
-          module: context.owner.declaration.module,
-          name: context.owner.declaration.name,
-        }),
-        typeArguments: context.owner.typeArguments,
+    const environment = Hir.callableEnvironmentIdentity(expression.site, {
+      declaration: Object.freeze({
+        module: context.owner.declaration.module,
+        name: context.owner.declaration.name,
       }),
-    )
+      typeArguments: context.owner.typeArguments,
+    })
+    const target = callableTargetIdentity(expression.target)
+    const identity =
+      target._tag === 'Declaration'
+        ? `declaration:${target.module}:${target.name}`
+        : `builtin:${target.actor}:${target.operation}`
+    return Type.callableIdentityArgument(identity, target, typeArguments, environment)
   }
   if (expression._tag === 'ParameterReference')
     return parameterCallableIdentity(context.fn, context.owner, expression.parameter.ordinal)
@@ -1257,7 +1256,6 @@ const appliedCallableOriginOf = (
     callable.target,
     inferred.filter((argument): argument is Type.GenericArgument => argument !== undefined),
     callable.environment,
-    callable.environmentOwner,
   )
 }
 
@@ -1663,6 +1661,18 @@ const forwardedRequirementTargets = (
 
 export const callableIdentity = (self: CallableInstance): string =>
   `${keyText(self.owner)}\u0001${Hir.executableSiteKey(self.site)}\u0001${self.typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
+
+/** Returns the canonical specialized identity of one discovered callable environment. */
+export const callableEnvironmentIdentity = (
+  self: CallableInstance,
+): Type.CallableEnvironmentIdentity =>
+  Hir.callableEnvironmentIdentity(self.site, {
+    declaration: Object.freeze({
+      module: self.owner.declaration.module,
+      name: self.owner.declaration.name,
+    }),
+    typeArguments: self.owner.typeArguments,
+  })
 
 const concreteCallables = (
   fn: Hir.HirFunction,

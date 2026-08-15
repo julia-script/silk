@@ -51,6 +51,13 @@ the realization. No phase after elaboration may recover callable identity from i
 the realization's target and captures come from the retained representation argument and the
 specialized callable instance it names.
 
+Callable environments retain one structural identity: the construction site plus the enclosing
+executable specialization and its type arguments. `Type` owns its canonical equality and key;
+`Hir` owns the projection from executable sites. No phase parses or accepts alternate string
+encodings. Cleanup always carries a required discriminated locator, which lowering resolves to that
+canonical identity before an engine sees it. `Layout` alone maps the identity and capture ordinal to
+the target's lane and byte range, so LLVM and Wasm cannot drift in environment selection.
+
 #### Ownership decides before the realization exists
 
 Ownership runs once per module over generic HIR, before instance discovery, and the realization index

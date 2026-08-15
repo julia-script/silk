@@ -99,6 +99,14 @@ export interface CallableEnvironmentFact {
   readonly span: SourceSpan.SourceSpan
 }
 
+/** How a callable cleanup names the one capture environment whose lanes it owns. */
+export type CallableEnvironmentLocator =
+  | { readonly _tag: 'CallableEnvironmentSite'; readonly site: Hir.CallableSiteId }
+  | {
+      readonly _tag: 'CallableEnvironmentIdentity'
+      readonly identity: Type.CallableEnvironmentIdentity
+    }
+
 /** The symbolic recursive cleanup of one complete logical owner. */
 export type CleanupPlan =
   | { readonly _tag: 'NoCleanup'; readonly type: DeclarationIndex.SemanticType }
@@ -150,9 +158,7 @@ export type CleanupPlan =
   | {
       readonly _tag: 'CallableCleanup'
       readonly type: Type.Callable
-      readonly site: Hir.CallableSiteId
-      readonly realization?: CallableFieldRealization.Realization
-      readonly environmentIdentity?: string
+      readonly environment: CallableEnvironmentLocator
       /** Moved environment slots in deterministic last-captured, first-released order. */
       readonly slots: ReadonlyArray<{
         readonly ordinal: number
@@ -523,7 +529,7 @@ const callableCleanup = (environment: CallableEnvironmentFact, type: Type.Callab
   Object.freeze({
     _tag: 'CallableCleanup',
     type,
-    site: environment.site,
+    environment: Object.freeze({ _tag: 'CallableEnvironmentSite', site: environment.site }),
     slots: Object.freeze(
       [...environment.slots]
         .reverse()
@@ -2085,11 +2091,7 @@ export const specializeCleanup = (
       return Object.freeze({
         _tag: 'CallableCleanup',
         type,
-        site: cleanup.site,
-        ...(cleanup.realization === undefined ? {} : { realization: cleanup.realization }),
-        ...(cleanup.environmentIdentity === undefined
-          ? {}
-          : { environmentIdentity: cleanup.environmentIdentity }),
+        environment: cleanup.environment,
         slots: Object.freeze(
           cleanup.slots.map((slot) =>
             Object.freeze({
@@ -2147,13 +2149,17 @@ export const realizedCallableCleanup = (
 ): CleanupPlan => {
   const type = realization.contract
   const site = realization.site
+  const environment = realization.environment
   const owned = realization.captures.filter((capture) => capture.owned)
-  if (site === undefined || owned.length === 0) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (site === undefined || environment === undefined || owned.length === 0)
+    return Object.freeze({ _tag: 'NoCleanup', type })
   return Object.freeze({
     _tag: 'CallableCleanup',
     type,
-    site,
-    realization,
+    environment: Object.freeze({
+      _tag: 'CallableEnvironmentIdentity',
+      identity: environment,
+    }),
     slots: Object.freeze(
       [...owned].reverse().map((capture) =>
         Object.freeze({
@@ -2769,7 +2775,11 @@ const cleanupText = (cleanup: CleanupPlan): string => {
       .join(',')}`
   }
   if (cleanup._tag === 'CallableCleanup') {
-    return `callable:${Type.encode(cleanup.type)} site=${Hir.executableSiteLabel(cleanup.site)} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
+    const environment =
+      cleanup.environment._tag === 'CallableEnvironmentSite'
+        ? Hir.executableSiteLabel(cleanup.environment.site)
+        : Type.callableEnvironmentKey(cleanup.environment.identity)
+    return `callable:${Type.encode(cleanup.type)} environment=${environment} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
   }
   if (cleanup._tag === 'EffectCleanup') {
     return `effect:${Type.encode(cleanup.type)} site=${Hir.executableSiteLabel(cleanup.site)} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`

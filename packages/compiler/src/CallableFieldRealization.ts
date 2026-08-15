@@ -74,8 +74,7 @@ export interface Realization {
   readonly target: StaticTarget
   readonly targetArguments: ReadonlyArray<Type.GenericArgument>
   /** Present when the target is reached through a capturing section rather than a named function. */
-  readonly environment?: string
-  readonly environmentOwner?: Type.CallableIdentityArgument['environmentOwner']
+  readonly environment?: Type.CallableEnvironmentIdentity
   /** The specialized environment's own site, which names its lanes to layout, MIR, and cleanup. */
   readonly site?: Hir.CallableSiteId
   readonly captures: ReadonlyArray<CaptureSlot>
@@ -188,12 +187,6 @@ const hasUnsupportedCaptureLayout = (type: Type.Type): boolean =>
   Type.isRepresented(type) ||
   (Type.isFixedArray(type) && hasUnsupportedCaptureLayout(type.element))
 
-/** The environment identity the frontend records on a section's retained representation argument. */
-const environmentSiteKey = (environment: string): string =>
-  environment.startsWith('callable:')
-    ? (environment.slice('callable:'.length).split('\u0001').at(0) ?? environment)
-    : (environment.split('\u0001').at(1) ?? environment)
-
 const unsupported = (
   field: RepresentationField.Id,
   instance: Type.Nominal,
@@ -230,24 +223,17 @@ const sameTarget = (left: StaticTarget, right: Instances.CallableInstance['targe
       left.intrinsic.actor === right.intrinsic.actor &&
       left.intrinsic.name === right.intrinsic.name
 
-const sameOwner = (
-  owner: Type.CallableIdentityArgument['environmentOwner'],
-  candidate: Instances.CallableInstance['owner'],
-): boolean =>
-  owner === undefined ||
-  (owner.declaration.module === candidate.declaration.module &&
-    owner.declaration.name === candidate.declaration.name &&
-    sameArguments(owner.typeArguments, candidate.typeArguments))
-
-const matchesIdentity = (
+export const matchesIdentity = (
   identity: Type.CallableIdentityArgument,
   candidate: Instances.CallableInstance,
 ): boolean =>
   identity.environment !== undefined &&
-  Hir.executableSiteKey(candidate.site) === environmentSiteKey(identity.environment) &&
+  Type.equalsCallableEnvironmentIdentity(
+    identity.environment,
+    Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
+  ) &&
   sameTarget(identity.target, candidate.target) &&
-  sameArguments(identity.typeArguments, candidate.typeArguments) &&
-  sameOwner(identity.environmentOwner, candidate.owner)
+  sameArguments(identity.typeArguments, candidate.typeArguments)
 
 /** One capture shape signature, used only to detect indistinguishable environments. */
 const captureShape = (callable: Instances.CallableInstance): string =>
@@ -274,12 +260,18 @@ const environmentCaptures = (
   if (selected === undefined)
     return Object.freeze({
       _tag: 'UnresolvedEnvironment',
-      reason: Object.freeze({ _tag: 'MissingCallableEnvironment', environment }),
+      reason: Object.freeze({
+        _tag: 'MissingCallableEnvironment',
+        environment: Type.callableEnvironmentKey(environment),
+      }),
     })
   if (new Set(candidates.map(captureShape)).size > 1)
     return Object.freeze({
       _tag: 'UnresolvedEnvironment',
-      reason: Object.freeze({ _tag: 'AmbiguousCallableEnvironment', environment }),
+      reason: Object.freeze({
+        _tag: 'AmbiguousCallableEnvironment',
+        environment: Type.callableEnvironmentKey(environment),
+      }),
     })
   return Object.freeze({
     _tag: 'ResolvedEnvironment',
@@ -349,9 +341,6 @@ export const realizeField = (
       target: identity.target,
       targetArguments: Object.freeze([...identity.typeArguments]),
       ...(environment === undefined ? {} : { environment }),
-      ...(identity.environmentOwner === undefined
-        ? {}
-        : { environmentOwner: identity.environmentOwner }),
       ...(captures.site === undefined ? {} : { site: captures.site }),
       captures: slots,
       invocation,
@@ -432,7 +421,11 @@ export const matchesCallable = (
   Hir.sameExecutableSite(self.site, candidate.site) &&
   sameTarget(self.target, candidate.target) &&
   sameArguments(self.targetArguments, candidate.typeArguments) &&
-  sameOwner(self.environmentOwner, candidate.owner)
+  self.environment !== undefined &&
+  Type.equalsCallableEnvironmentIdentity(
+    self.environment,
+    Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
+  )
 
 /** Structural equality for the runtime fact owned by this actor. */
 export const equals = (left: Realization, right: Realization): boolean =>
@@ -448,13 +441,10 @@ export const equals = (left: Realization, right: Realization): boolean =>
         left.target.intrinsic.name === right.target.intrinsic.name
       : false) &&
   sameArguments(left.targetArguments, right.targetArguments) &&
-  left.environment === right.environment &&
-  ((left.environmentOwner === undefined && right.environmentOwner === undefined) ||
-    (left.environmentOwner !== undefined &&
-      right.environmentOwner !== undefined &&
-      left.environmentOwner.declaration.module === right.environmentOwner.declaration.module &&
-      left.environmentOwner.declaration.name === right.environmentOwner.declaration.name &&
-      sameArguments(left.environmentOwner.typeArguments, right.environmentOwner.typeArguments))) &&
+  ((left.environment === undefined && right.environment === undefined) ||
+    (left.environment !== undefined &&
+      right.environment !== undefined &&
+      Type.equalsCallableEnvironmentIdentity(left.environment, right.environment))) &&
   ((left.site === undefined && right.site === undefined) ||
     (left.site !== undefined &&
       right.site !== undefined &&

@@ -102,6 +102,29 @@ export interface EffectIdentityArgument {
   readonly identity: string
 }
 
+/** The path- and span-independent construction site of one callable capture environment. */
+export type CallableEnvironmentSite =
+  | {
+      readonly _tag: 'DeclaredCallableEnvironmentSite'
+      readonly declaration: { readonly module: string; readonly name: string }
+      readonly ordinal: number
+    }
+  | {
+      readonly _tag: 'RecoveredCallableEnvironmentSite'
+      readonly functionOrdinal: number
+      readonly ordinal: number
+    }
+
+/** The complete specialized identity of one callable capture environment. */
+export interface CallableEnvironmentIdentity {
+  readonly _tag: 'CallableEnvironmentIdentity'
+  readonly site: CallableEnvironmentSite
+  readonly owner: {
+    readonly declaration: { readonly module: string; readonly name: string }
+    readonly typeArguments: ReadonlyArray<GenericArgument>
+  }
+}
+
 /** One compiler-only hidden callable identity used for monomorphic higher-order lowering. */
 export interface CallableIdentityArgument {
   readonly _tag: 'CallableIdentityArgument'
@@ -115,12 +138,7 @@ export interface CallableIdentityArgument {
         readonly intrinsic: { readonly actor: string; readonly name: string }
       }
   readonly typeArguments: ReadonlyArray<GenericArgument>
-  readonly environment?: string
-  /** The enclosing executable specialization that owns a captured environment. */
-  readonly environmentOwner?: {
-    readonly declaration: { readonly module: string; readonly name: string }
-    readonly typeArguments: ReadonlyArray<GenericArgument>
-  }
+  readonly environment?: CallableEnvironmentIdentity
 }
 
 /** The closed operation vocabulary shared by semantic callable identities and HIR targets. */
@@ -543,27 +561,50 @@ export const requirementRowArgument = (
 export const effectIdentityArgument = (identity: string): EffectIdentityArgument =>
   Object.freeze({ _tag: 'EffectIdentityArgument', identity })
 
+/** Constructs the stable structural site of one callable capture environment. */
+export const callableEnvironmentSite = (
+  declaration: { readonly module: string; readonly name: string } | undefined,
+  functionOrdinal: number,
+  ordinal: number,
+): CallableEnvironmentSite =>
+  declaration === undefined
+    ? Object.freeze({
+        _tag: 'RecoveredCallableEnvironmentSite',
+        functionOrdinal,
+        ordinal,
+      })
+    : Object.freeze({
+        _tag: 'DeclaredCallableEnvironmentSite',
+        declaration: Object.freeze({ ...declaration }),
+        ordinal,
+      })
+
+/** Constructs the complete specialization identity of one callable capture environment. */
+export const callableEnvironmentIdentity = (
+  site: CallableEnvironmentSite,
+  owner: CallableEnvironmentIdentity['owner'],
+): CallableEnvironmentIdentity =>
+  Object.freeze({
+    _tag: 'CallableEnvironmentIdentity',
+    site,
+    owner: Object.freeze({
+      declaration: Object.freeze({ ...owner.declaration }),
+      typeArguments: Object.freeze(Array.from(owner.typeArguments)),
+    }),
+  })
+
 export const callableIdentityArgument = (
   identity: string,
   target: CallableIdentityArgument['target'],
   typeArguments: ReadonlyArray<GenericArgument> = [],
-  environment?: string,
-  environmentOwner?: CallableIdentityArgument['environmentOwner'],
+  environment?: CallableEnvironmentIdentity,
 ): CallableIdentityArgument =>
   Object.freeze({
     _tag: 'CallableIdentityArgument',
-    identity,
+    identity: environment === undefined ? identity : callableEnvironmentKey(environment),
     target: Object.freeze(target),
     typeArguments: Object.freeze(Array.from(typeArguments)),
     ...(environment === undefined ? {} : { environment }),
-    ...(environmentOwner === undefined
-      ? {}
-      : {
-          environmentOwner: Object.freeze({
-            declaration: Object.freeze({ ...environmentOwner.declaration }),
-            typeArguments: Object.freeze(Array.from(environmentOwner.typeArguments)),
-          }),
-        }),
   })
 
 /** Constructs an open representation argument owned by one representation parameter. */
@@ -768,6 +809,21 @@ export const typeArgumentAt = (self: Nominal, ordinal: number): Type | undefined
 }
 
 /** Returns the canonical deterministic identity of any erased generic argument. */
+const callableEnvironmentSiteKey = (self: CallableEnvironmentSite): string =>
+  self._tag === 'DeclaredCallableEnvironmentSite'
+    ? `declaration:${self.declaration.module}.${self.declaration.name}:site:${self.ordinal}`
+    : `recovered:${self.functionOrdinal}:site:${self.ordinal}`
+
+/** Returns the deterministic identity of one specialized callable capture environment. */
+export const callableEnvironmentKey = (self: CallableEnvironmentIdentity): string =>
+  `${callableEnvironmentSiteKey(self.site)}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>`
+
+/** Tests complete callable-environment specialization identity. */
+export const equalsCallableEnvironmentIdentity = (
+  left: CallableEnvironmentIdentity,
+  right: CallableEnvironmentIdentity,
+): boolean => callableEnvironmentKey(left) === callableEnvironmentKey(right)
+
 const callableIdentityKey = (self: CallableIdentityArgument): string =>
   [
     'callable-identity:',
@@ -779,11 +835,7 @@ const callableIdentityKey = (self: CallableIdentityArgument): string =>
     ':arguments=<',
     self.typeArguments.map(genericArgumentKey).join(','),
     '>:environment=',
-    self.environment ?? '',
-    ':environment-owner=',
-    self.environmentOwner === undefined
-      ? ''
-      : `${self.environmentOwner.declaration.module}.${self.environmentOwner.declaration.name}<${self.environmentOwner.typeArguments.map(genericArgumentKey).join(',')}>`,
+    self.environment === undefined ? '' : callableEnvironmentKey(self.environment),
   ].join('')
 
 export const genericArgumentKey = (self: GenericArgument): string =>
@@ -846,11 +898,7 @@ const encodeRepresentationOrigin = (
         self.target._tag === 'Declaration'
           ? `${self.target.module}.${self.target.name}`
           : `${self.target.actor}.${self.target.operation}`
-      }${
-        self.environment === undefined
-          ? ''
-          : `@${self.environment.split('\u0001').at(0) ?? self.environment}`
-      }`
+      }${self.environment === undefined ? '' : `@${callableEnvironmentKey(self.environment)}`}`
 
 const compareText = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0
@@ -1243,7 +1291,7 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
       visitArgument(argument.identity)
     } else if (isCallableIdentityArgument(argument)) {
       for (const typeArgument of argument.typeArguments) visitArgument(typeArgument)
-      for (const typeArgument of argument.environmentOwner?.typeArguments ?? [])
+      for (const typeArgument of argument.environment?.owner.typeArguments ?? [])
         visitArgument(typeArgument)
     } else if (isFailureRowArgument(argument)) {
       for (const failure of argument.failures) visit(failure)
@@ -1299,7 +1347,7 @@ export const isConcreteGenericArgument = (self: GenericArgument): boolean =>
           ? true
           : isCallableIdentityArgument(self)
             ? self.typeArguments.every(isConcreteGenericArgument) &&
-              (self.environmentOwner?.typeArguments.every(isConcreteGenericArgument) ?? true)
+              (self.environment?.owner.typeArguments.every(isConcreteGenericArgument) ?? true)
             : isFailureRowArgument(self)
               ? self.parameters.length === 0 && self.failures.every(isConcrete)
               : isRequirementRowArgument(self)
@@ -1509,12 +1557,11 @@ export const substituteGenericArgument = (
                 self.typeArguments.map((argument) =>
                   substituteGenericArgument(argument, substitution),
                 ),
-                self.environment,
-                self.environmentOwner === undefined
+                self.environment === undefined
                   ? undefined
-                  : Object.freeze({
-                      declaration: self.environmentOwner.declaration,
-                      typeArguments: self.environmentOwner.typeArguments.map((argument) =>
+                  : callableEnvironmentIdentity(self.environment.site, {
+                      declaration: self.environment.owner.declaration,
+                      typeArguments: self.environment.owner.typeArguments.map((argument) =>
                         substituteGenericArgument(argument, substitution),
                       ),
                     }),

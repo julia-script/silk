@@ -14,7 +14,6 @@ import * as WatText from '@silk-effect/wasm/WatText'
 import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
-import * as CallableFieldRealization from './CallableFieldRealization.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Hir from './Hir.js'
@@ -1697,36 +1696,14 @@ const emitOperation = (
    */
   const reloadEscapingRoots = (): ReadonlyArray<Instr.Instr> =>
     [...(memory?.frame.escaping ?? [])].sort((left, right) => left - right).flatMap(reloadRoot)
-  const callableEnvironment = (
-    cleanup: Extract<Ownership.CleanupPlan, { readonly _tag: 'CallableCleanup' }>,
-  ): Extract<LayoutPlan.CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> => {
-    const environment = plan.callableEnvironments.find(
-      (candidate) =>
-        candidate._tag === 'CallableEnvironment' &&
-        (cleanup.environmentIdentity !== undefined
-          ? Instances.callableIdentity(candidate.callable) === cleanup.environmentIdentity
-          : cleanup.realization !== undefined
-            ? CallableFieldRealization.matchesCallable(cleanup.realization, candidate.callable)
-            : false),
-    )
-    if (environment?._tag !== 'CallableEnvironment')
-      throw new RangeError('Wasm callable cleanup lost its specialized environment')
-    return environment
-  }
   const callableCaptureRange = (
     cleanup: Extract<Ownership.CleanupPlan, { readonly _tag: 'CallableCleanup' }>,
     capture: number,
-  ): { readonly offset: number; readonly count: number; readonly byteOffset: number } => {
-    const environment = callableEnvironment(cleanup)
-    let offset = 0
-    for (const field of environment.fields) {
-      const count =
-        field.representation === 'Borrow'
-          ? 1
-          : (LayoutPlan.callingShape(plan, field.type)?.laneCount ?? 0)
-      if (field.ordinal === capture) return { offset, count, byteOffset: field.offset }
-      offset += count
-    }
+  ): LayoutPlan.CallableCaptureRange => {
+    if (cleanup.environment._tag !== 'CallableEnvironmentIdentity')
+      throw new RangeError('Wasm callable cleanup lost its specialized environment')
+    const range = LayoutPlan.callableCaptureRange(plan, cleanup.environment.identity, capture)
+    if (range !== undefined) return range
     throw new RangeError('Wasm callable cleanup lost an owned capture lane')
   }
   /**
@@ -1972,7 +1949,7 @@ const emitOperation = (
           const range = callableCaptureRange(cleanup, slot.ordinal)
           return reclaimReleaseInstructions(
             slot.cleanup,
-            values.slice(range.offset, range.offset + range.count),
+            values.slice(range.laneOffset, range.laneOffset + range.laneCount),
           )
         })
       case 'EffectCleanup':

@@ -1,7 +1,7 @@
 import * as Option from 'effect/Option'
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import * as Hir from './Hir.js'
-import type * as Instances from './Instances.js'
+import type * as Hir from './Hir.js'
+import * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as Match from './Match.js'
@@ -4252,7 +4252,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             (dropped?._tag === 'CallableValue' &&
               dropped.environment !== undefined &&
               dropped.site !== undefined &&
-              Hir.sameExecutableSite(dropped.site, cleanup.site) &&
+              cleanup.environment._tag === 'CallableEnvironmentIdentity' &&
+              SilkType.equalsCallableEnvironmentIdentity(
+                cleanup.environment.identity,
+                Instances.callableEnvironmentIdentity(dropped.environment.callable),
+              ) &&
               (() => {
                 const expected = dropped.environment.fields
                   .filter((field) => field.access === 'Take' && !isCopyType(field.type))

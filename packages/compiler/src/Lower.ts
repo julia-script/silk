@@ -465,7 +465,7 @@ const callableValueByIdentity = (
             { readonly _tag: 'CallableEnvironment' }
           > =>
             candidate._tag === 'CallableEnvironment' &&
-            Instances.callableIdentity(candidate.callable) === identity.environment,
+            CallableFieldRealization.matchesIdentity(identity, candidate.callable),
         )
   if (identity.environment !== undefined && environment === undefined) return undefined
   const specializedType =
@@ -3593,11 +3593,13 @@ const cleanupForLocal = (
   return Object.freeze({
     _tag: 'CallableCleanup',
     type: localType.type,
-    site: specialized.site,
-    ...(specialized.realization === undefined ? {} : { realization: specialized.realization }),
-    ...(localType.environment === undefined
-      ? {}
-      : { environmentIdentity: Instances.callableIdentity(localType.environment.callable) }),
+    environment:
+      localType.environment === undefined
+        ? specialized.environment
+        : Object.freeze({
+            _tag: 'CallableEnvironmentIdentity',
+            identity: Instances.callableEnvironmentIdentity(localType.environment.callable),
+          }),
     slots: Object.freeze(
       specialized.slots.flatMap((slot) => {
         const field = fields.find((candidate) => candidate.ordinal === slot.ordinal)
@@ -3659,8 +3661,10 @@ const callableLocalCleanup = (
   return Object.freeze({
     _tag: 'CallableCleanup',
     type: localType.type,
-    site: localType.site,
-    environmentIdentity: Instances.callableIdentity(environment.callable),
+    environment: Object.freeze({
+      _tag: 'CallableEnvironmentIdentity',
+      identity: Instances.callableEnvironmentIdentity(environment.callable),
+    }),
     slots: Object.freeze(
       [...environment.fields]
         .reverse()

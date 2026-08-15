@@ -83,7 +83,7 @@ it.effect('realizes a capturing section field with one ordered inline capture la
       realization.target._tag === 'Declaration' ? realization.target.name : undefined,
       'add',
     )
-    assert.strictEqual(realization.environment?.startsWith('callable:'), true)
+    assert.strictEqual(realization.environment?._tag, 'CallableEnvironmentIdentity')
     assert.strictEqual(realization.captures.length, 1)
     const capture = realization.captures.at(0) ?? unreachable('expected one capture lane')
     assert.strictEqual(capture.ordinal, 0)
@@ -217,14 +217,24 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
         instance,
         argument: Type.exactRepresentationArgument(
           Type.callableIdentityArgument(
-            'callable:absent',
+            'absent',
             Object.freeze({
               _tag: 'Declaration',
               module: 'callable-field/unsupported',
               name: 'decode',
             }),
             [],
-            'callable:absent',
+            Type.callableEnvironmentIdentity(
+              Type.callableEnvironmentSite(
+                { module: 'callable-field/unsupported', name: 'main' },
+                0,
+                999,
+              ),
+              {
+                declaration: { module: 'callable-field/unsupported', name: 'main' },
+                typeArguments: [],
+              },
+            ),
           ),
           bound,
         ),
@@ -280,7 +290,12 @@ ${capturingSection}`
     // Identity is the precomputed executable site, never a source path or offset, so shifting the
     // whole module leaves the target, environment, captures, and cleanup byte-identical.
     assert.deepEqual(moved.target, baseline.target)
-    assert.strictEqual(moved.environment, baseline.environment)
+    assert.strictEqual(
+      moved.environment !== undefined &&
+        baseline.environment !== undefined &&
+        Type.equalsCallableEnvironmentIdentity(moved.environment, baseline.environment),
+      true,
+    )
     assert.deepEqual(moved.captures, baseline.captures)
     assert.deepEqual(moved.cleanup, baseline.cleanup)
     assert.deepEqual(moved.liveness, baseline.liveness)
@@ -320,7 +335,7 @@ pub fn main() -> i32 {
     assert.deepEqual(
       realizations
         .map((realization) =>
-          realization.environmentOwner?.typeArguments.map(Type.encodeGenericArgument).join(','),
+          realization.environment?.owner.typeArguments.map(Type.encodeGenericArgument).join(','),
         )
         .sort(),
       ['bool', 'i32'],
@@ -346,7 +361,7 @@ pub fn main() -> i32 { return apply<i32>(0, 20) + apply<bool>(true, 20) }`
     assert.deepEqual(
       realizations
         .map((realization) =>
-          realization.environmentOwner?.typeArguments.map(Type.encodeGenericArgument).join(','),
+          realization.environment?.owner.typeArguments.map(Type.encodeGenericArgument).join(','),
         )
         .sort(),
       ['bool', 'i32'],
@@ -371,13 +386,12 @@ it.effect('mints the callable environment identity in exactly one frontend modul
     const minting: Array<string> = []
     for (const name of sources) {
       const source = yield* fileSystem.readFileString(path.join(sourceRoot, name))
-      if (source.includes('`callable:${Hir.executableSiteKey(')) minting.push(name)
+      if (source.includes('Type.callableEnvironmentIdentity(')) minting.push(name)
     }
 
-    // Elaboration is the only phase allowed to derive a callable identity from an expression.
-    // Every later phase must reach the same fact through `CallableFieldRealization`, so a new
-    // minting site here means some phase started rediscovering identity from syntax.
-    assert.deepEqual(minting, ['Elaboration.ts'])
+    // HIR is the only actor allowed to project an executable site into a semantic environment
+    // identity. Every later phase delegates to that projection rather than parsing an encoding.
+    assert.deepEqual(minting, ['Hir.ts'])
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
