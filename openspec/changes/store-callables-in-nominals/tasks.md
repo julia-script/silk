@@ -27,6 +27,6 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Run `pnpm typecheck` and `pnpm exec biome check .`.
-- [ ] 5.2 Run `pnpm test`, `pnpm check`, and `pnpm release:candidate`; report exact failures.
-- [ ] 5.3 Repeat cross-engine callable acceptance in fresh processes and compare deterministic facts and artifacts.
+- [x] 5.1 Run `pnpm typecheck` and `pnpm exec biome check .`.
+- [x] 5.2 Run `pnpm test`, `pnpm check`, and `pnpm release:candidate`; report exact failures.
+- [x] 5.3 Repeat cross-engine callable acceptance in fresh processes and compare deterministic facts and artifacts.

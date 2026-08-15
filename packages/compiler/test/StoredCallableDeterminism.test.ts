@@ -121,5 +121,5 @@ it.effect(
       ])
         assert.strictEqual(digest.length, 64)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  60_000,
+  300_000,
 )

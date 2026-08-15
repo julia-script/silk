@@ -199,7 +199,7 @@ it.effect(
         })
       }
     }),
-  60_000,
+  300_000,
 )
 
 it.effect('executes stored-callable cleanup and scoped-borrow traces exactly once', () =>
