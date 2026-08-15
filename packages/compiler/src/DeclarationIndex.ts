@@ -764,8 +764,15 @@ const applyInterfaceOperation = (
 const interfaceOperationAvailable = (operation: InterfaceOperationApplicationFact): boolean =>
   operation.operands.every((operand) => operand.type._tag === 'Resolved') &&
   operation.success._tag === 'Resolved' &&
-  operation.failureRow.available &&
-  operation.requirementRow.available &&
+  operation.failureRow.members.every(
+    (member) => member._tag === 'Resolved' && Type.isNominal(member.type),
+  ) &&
+  operation.requirementRow.entries.every(
+    (entry) =>
+      entry.capability._tag === 'Resolved' &&
+      (Type.isNominal(entry.capability.type) ||
+        (Type.isParameter(entry.capability.type) && entry.capability.type.kind === 'Value')),
+  ) &&
   operation.receiverAccess !== 'Unavailable'
 
 const interfaceApplication = (

@@ -101,6 +101,25 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
         contract?.requirementRow.parameters.map((parameter) => parameter.name),
         ['R'],
       )
+      const bound = namedDeclaration(
+        Analysis.declarationIndex(snapshot),
+        'generic',
+      )?.typeParameters.at(5)?.bound
+      assert.strictEqual(bound?._tag, 'ResolvedBound')
+      if (bound?._tag !== 'ResolvedBound') return
+      assert.strictEqual(bound.application.available, true)
+      assert.deepEqual(
+        bound.application.operations
+          .at(0)
+          ?.failureRow.parameters.map((parameter) => parameter.name),
+        ['E'],
+      )
+      assert.deepEqual(
+        bound.application.operations
+          .at(0)
+          ?.requirementRow.parameters.map((parameter) => parameter.name),
+        ['R'],
+      )
     }),
   )
 
