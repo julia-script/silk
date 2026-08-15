@@ -3422,7 +3422,7 @@ export const resolveTypeFact = (
   resolveDeclaredType(
     module,
     fact,
-    Object.freeze({ type: resolver, item: () => Object.freeze({ _tag: 'Missing' }) }),
+    ResolutionSeams.make(resolver, () => Object.freeze({ _tag: 'Missing' })),
     index.modules,
   )
 

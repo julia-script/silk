@@ -6,6 +6,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SyntaxCorrespondence from '../src/SyntaxCorrespondence.js'
 import * as SyntaxFile from '../src/SyntaxFile.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
+import { raise } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -17,7 +18,7 @@ const functions = (syntax: SyntaxFile.SyntaxFile): ReadonlyArray<SyntaxTree.Node
   SyntaxTree.directNodes(syntax.root, 'FunctionDeclaration')
 
 const functionAt = (syntax: SyntaxFile.SyntaxFile, index: number): SyntaxTree.Node =>
-  functions(syntax).at(index) ?? assert.fail(`expected function ${index}`)
+  functions(syntax).at(index) ?? raise(`expected function ${index}`)
 
 const source = (name: string, value: number): string =>
   `pub fn ${name}() -> i32 { return ${value} }`
@@ -119,11 +120,11 @@ it('corresponds an unchanged opaque result subtree after a preceding declaration
   const current = parse('app/Main', `${source('before', 0)}${opaque}`)
   const correspondence = Option.getOrThrow(SyntaxCorrespondence.between(previous, current))
   const previousOpaque = SyntaxTree.directNode(
-    SyntaxTree.directNode(functionAt(previous, 0), 'ReturnType') ?? assert.fail('return type'),
+    SyntaxTree.directNode(functionAt(previous, 0), 'ReturnType') ?? raise('expected return type'),
     'OpaqueResultType',
   )
   const currentOpaque = SyntaxTree.directNode(
-    SyntaxTree.directNode(functionAt(current, 1), 'ReturnType') ?? assert.fail('return type'),
+    SyntaxTree.directNode(functionAt(current, 1), 'ReturnType') ?? raise('expected return type'),
     'OpaqueResultType',
   )
   assert.isDefined(previousOpaque)
@@ -131,7 +132,7 @@ it('corresponds an unchanged opaque result subtree after a preceding declaration
     Option.getOrThrow(
       SyntaxCorrespondence.currentOf(
         correspondence,
-        previousOpaque ?? assert.fail('previous opaque result'),
+        previousOpaque ?? raise('expected previous opaque result'),
       ),
     ),
     currentOpaque,

@@ -509,26 +509,96 @@ pub fn make() -> some<F: fn(i64) -> i64> F { return identity }`,
   }),
 )
 
-it.effect('isolates an enclosing binder edit while preserving the realized target and layout', () =>
-  Effect.gen(function* () {
-    const importer =
-      'import opaque.Binder { make } pub fn main() -> i32 { let parser = make(0) return parser(42) }'
-    const beforeSources = sources({
-      'opaque/BinderImporter': importer,
-      'opaque/Binder': `fn identity(value: i32) -> i32 { return value }
+it.effect(
+  'isolates an enclosing binder addition while preserving the realized target and layout',
+  () =>
+    Effect.gen(function* () {
+      const importer =
+        'import opaque.Binder { make } pub fn main() -> i32 { let parser = make(0) return parser(42) }'
+      const beforeSources = sources({
+        'opaque/BinderImporter': importer,
+        'opaque/Binder': `fn identity(value: i32) -> i32 { return value }
 pub fn make(value: i32) -> some<F: fn(i32) -> i32> F { return identity }`,
+      })
+      const afterSources = sources({
+        'opaque/BinderImporter': importer,
+        'opaque/Binder': `fn identity(value: i32) -> i32 { return value }
+pub fn make<T>(value: T) -> some<F: fn(i32) -> i32> F { drop value return identity }`,
+      })
+      const before = yield* analyze(beforeSources, ['opaque/BinderImporter'])
+      const changed = yield* analyze(afterSources, ['opaque/BinderImporter'], before)
+      const importerObservation = observation(changed, 'opaque/BinderImporter')
+      assert.strictEqual(importerObservation._tag, 'Recomputed')
+      if (importerObservation._tag === 'Recomputed')
+        assert.include(importerObservation.reasons, 'DependencySurfaceChange')
+      const beforeDefinition = [...OpaqueRealization.catalogOf(before).definitions.values()].at(0)
+      const afterDefinition = [...OpaqueRealization.catalogOf(changed).definitions.values()].at(0)
+      assert.strictEqual(
+        beforeDefinition === undefined ? undefined : OpaqueRealization.key(beforeDefinition),
+        afterDefinition === undefined ? undefined : OpaqueRealization.key(afterDefinition),
+      )
+      assert.notStrictEqual(
+        beforeDefinition === undefined
+          ? undefined
+          : Type.genericArgumentKey(beforeDefinition.instance),
+        afterDefinition === undefined
+          ? undefined
+          : Type.genericArgumentKey(afterDefinition.instance),
+      )
+      assert.strictEqual(beforeDefinition?.targetFingerprint, afterDefinition?.targetFingerprint)
+      assert.strictEqual(beforeDefinition?.layoutFingerprint, afterDefinition?.layoutFingerprint)
+      assert.notStrictEqual(
+        before.surfaces.get('opaque/Binder')?.canonical,
+        changed.surfaces.get('opaque/Binder')?.canonical,
+      )
+
+      const beforeRuntime = yield* realize(beforeSources, 'opaque/BinderImporter')
+      const afterRuntime = yield* realize(afterSources, 'opaque/BinderImporter')
+      assert.strictEqual(beforeRuntime.layout._tag, 'Available')
+      assert.strictEqual(afterRuntime.layout._tag, 'Available')
+      assert.strictEqual(beforeRuntime.mir._tag, 'Available')
+      assert.strictEqual(afterRuntime.mir._tag, 'Available')
+      if (
+        beforeRuntime.layout._tag !== 'Available' ||
+        afterRuntime.layout._tag !== 'Available' ||
+        beforeRuntime.mir._tag !== 'Available' ||
+        afterRuntime.mir._tag !== 'Available'
+      )
+        return
+      assert.strictEqual(
+        Layout.encode(beforeRuntime.layout.value),
+        Layout.encode(afterRuntime.layout.value),
+      )
+      assert.notStrictEqual(Mir.encode(beforeRuntime.mir.value), Mir.encode(afterRuntime.mir.value))
+      const beforeArtifact = yield* Analysis.codegenWasm(beforeRuntime, { mode: 'release' })
+      const afterArtifact = yield* Analysis.codegenWasm(afterRuntime, { mode: 'release' })
+      assert.notStrictEqual(beforeArtifact.wat, afterArtifact.wat)
+    }),
+)
+
+it.effect('isolates a same-kind enclosing binder reorder from concrete runtime artifacts', () =>
+  Effect.gen(function* () {
+    const importer = `import opaque.BinderOrder { make }
+pub fn main() -> i32 { let select = make<i32, i32>(42) return select(0) }`
+    const beforeSources = sources({
+      'opaque/BinderOrderImporter': importer,
+      'opaque/BinderOrder': `fn select<T>(captured: T, value: T) -> T { drop value return move captured }
+pub fn make<A, B>(captured: A) -> some<F: once fn(A) -> A> F { return select<A>(move captured) }`,
     })
     const afterSources = sources({
-      'opaque/BinderImporter': importer,
-      'opaque/Binder': `fn identity(value: i32) -> i32 { return value }
-pub fn make<T>(value: T) -> some<F: fn(i32) -> i32> F { drop value return identity }`,
+      'opaque/BinderOrderImporter': importer,
+      'opaque/BinderOrder': `fn select<T>(captured: T, value: T) -> T { drop value return move captured }
+pub fn make<B, A>(captured: A) -> some<F: once fn(A) -> A> F { return select<A>(move captured) }`,
     })
-    const before = yield* analyze(beforeSources, ['opaque/BinderImporter'])
-    const changed = yield* analyze(afterSources, ['opaque/BinderImporter'], before)
-    const importerObservation = observation(changed, 'opaque/BinderImporter')
+    const before = yield* analyze(beforeSources, ['opaque/BinderOrderImporter'])
+    const changed = yield* analyze(afterSources, ['opaque/BinderOrderImporter'], before)
+    assert.deepEqual(ProjectAnalysis.view(before, 'opaque/BinderOrderImporter')?.diagnostics, [])
+    assert.deepEqual(ProjectAnalysis.view(changed, 'opaque/BinderOrderImporter')?.diagnostics, [])
+    const importerObservation = observation(changed, 'opaque/BinderOrderImporter')
     assert.strictEqual(importerObservation._tag, 'Recomputed')
     if (importerObservation._tag === 'Recomputed')
       assert.include(importerObservation.reasons, 'DependencySurfaceChange')
+
     const beforeDefinition = [...OpaqueRealization.catalogOf(before).definitions.values()].at(0)
     const afterDefinition = [...OpaqueRealization.catalogOf(changed).definitions.values()].at(0)
     assert.strictEqual(
@@ -541,15 +611,15 @@ pub fn make<T>(value: T) -> some<F: fn(i32) -> i32> F { drop value return identi
         : Type.genericArgumentKey(beforeDefinition.instance),
       afterDefinition === undefined ? undefined : Type.genericArgumentKey(afterDefinition.instance),
     )
-    assert.strictEqual(beforeDefinition?.targetFingerprint, afterDefinition?.targetFingerprint)
-    assert.strictEqual(beforeDefinition?.layoutFingerprint, afterDefinition?.layoutFingerprint)
+    assert.notStrictEqual(beforeDefinition?.targetFingerprint, afterDefinition?.targetFingerprint)
+    assert.notStrictEqual(beforeDefinition?.layoutFingerprint, afterDefinition?.layoutFingerprint)
     assert.notStrictEqual(
-      before.surfaces.get('opaque/Binder')?.canonical,
-      changed.surfaces.get('opaque/Binder')?.canonical,
+      before.surfaces.get('opaque/BinderOrder')?.canonical,
+      changed.surfaces.get('opaque/BinderOrder')?.canonical,
     )
 
-    const beforeRuntime = yield* realize(beforeSources, 'opaque/BinderImporter')
-    const afterRuntime = yield* realize(afterSources, 'opaque/BinderImporter')
+    const beforeRuntime = yield* realize(beforeSources, 'opaque/BinderOrderImporter')
+    const afterRuntime = yield* realize(afterSources, 'opaque/BinderOrderImporter')
     assert.strictEqual(beforeRuntime.layout._tag, 'Available')
     assert.strictEqual(afterRuntime.layout._tag, 'Available')
     assert.strictEqual(beforeRuntime.mir._tag, 'Available')
@@ -565,9 +635,9 @@ pub fn make<T>(value: T) -> some<F: fn(i32) -> i32> F { drop value return identi
       Layout.encode(beforeRuntime.layout.value),
       Layout.encode(afterRuntime.layout.value),
     )
-    assert.notStrictEqual(Mir.encode(beforeRuntime.mir.value), Mir.encode(afterRuntime.mir.value))
+    assert.strictEqual(Mir.encode(beforeRuntime.mir.value), Mir.encode(afterRuntime.mir.value))
     const beforeArtifact = yield* Analysis.codegenWasm(beforeRuntime, { mode: 'release' })
     const afterArtifact = yield* Analysis.codegenWasm(afterRuntime, { mode: 'release' })
-    assert.notStrictEqual(beforeArtifact.wat, afterArtifact.wat)
+    assert.strictEqual(beforeArtifact.wat, afterArtifact.wat)
   }),
 )
