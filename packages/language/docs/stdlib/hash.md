@@ -89,7 +89,7 @@ collection can neither detect the breakage nor recover from it.
 ### Operation `equals`
 
 ```silk
-fn equals(left: T, right: T) -> bool
+fn equals(left: &T, right: &T) -> bool
 ```
 
 Reports whether two keys name the same collection entry.
@@ -99,7 +99,7 @@ Reports whether two keys name the same collection entry.
 ### Operation `hash`
 
 ```silk
-fn hash(value: T, seed: HashSeed) -> u64
+fn hash(value: &T, seed: &silk/hash.HashSeed) -> u64
 ```
 
 Computes the key's deterministic 64-bit hash under the collection seed.

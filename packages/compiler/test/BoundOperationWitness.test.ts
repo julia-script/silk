@@ -151,6 +151,30 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('forwards value operands to a source witness without inserting hidden borrows', () =>
+  Effect.gen(function* () {
+    // Literal ownership works in both directions: this interface transfers its operands, so its
+    // ordinary witness receives values and the generic call site consumes them exactly once.
+    const value = yield* evaluatedValue(
+      'bound-operation-witness/value-operands',
+      `interface Combined<T> {
+  fn combine(left: T, right: T) -> i32
+}
+
+struct Cell { weight: i32 }
+
+fn cellCombine(left: Cell, right: Cell) -> i32 { return left.weight + right.weight }
+
+impl Combined<Cell> for Cell { combine: Cell.cellCombine }
+
+fn combineOf<T: Combined>(left: T, right: T) -> i32 { return Combined.combine(left, right) }
+
+pub fn main() -> i32 { return combineOf<Cell>(Cell { weight: 20 }, Cell { weight: 22 }) }`,
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
 it.effect('lets one bound operation select an intrinsic witness and a source witness', () =>
   Effect.gen(function* () {
     // The intrinsic half of the same call site keeps selecting its sealed operation: the fallback
