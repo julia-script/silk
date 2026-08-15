@@ -97,10 +97,18 @@ export interface RequirementRowArgument {
   readonly parameters: ReadonlyArray<Parameter>
 }
 
+/** The complete enclosing executable specialization retained by a source construction identity. */
+export interface ExecutableSpecializationOwner {
+  readonly declaration: { readonly module: string; readonly name: string }
+  readonly typeArguments: ReadonlyArray<GenericArgument>
+}
+
 /** One compiler-only hidden Effect construction identity used for monomorphic specialization. */
 export interface EffectIdentityArgument {
   readonly _tag: 'EffectIdentityArgument'
   readonly identity: string
+  /** Present for a source site whose runner depends on its enclosing generic specialization. */
+  readonly owner?: ExecutableSpecializationOwner
 }
 
 /** The path- and span-independent construction site of one callable capture environment. */
@@ -120,10 +128,7 @@ export type CallableEnvironmentSite =
 export interface CallableEnvironmentIdentity {
   readonly _tag: 'CallableEnvironmentIdentity'
   readonly site: CallableEnvironmentSite
-  readonly owner: {
-    readonly declaration: { readonly module: string; readonly name: string }
-    readonly typeArguments: ReadonlyArray<GenericArgument>
-  }
+  readonly owner: ExecutableSpecializationOwner
 }
 
 /** One compiler-only hidden callable identity used for monomorphic higher-order lowering. */
@@ -577,8 +582,22 @@ export const requirementRowArgument = (
     parameters: effect('never', [], 'Shared', requirements, [], parameters).requirementParameters,
   })
 
-export const effectIdentityArgument = (identity: string): EffectIdentityArgument =>
-  Object.freeze({ _tag: 'EffectIdentityArgument', identity })
+export const effectIdentityArgument = (
+  identity: string,
+  owner?: ExecutableSpecializationOwner,
+): EffectIdentityArgument =>
+  Object.freeze({
+    _tag: 'EffectIdentityArgument',
+    identity,
+    ...(owner === undefined
+      ? {}
+      : {
+          owner: Object.freeze({
+            declaration: Object.freeze({ ...owner.declaration }),
+            typeArguments: Object.freeze(Array.from(owner.typeArguments)),
+          }),
+        }),
+  })
 
 /** Constructs the stable structural site of one callable capture environment. */
 export const callableEnvironmentSite = (
@@ -923,7 +942,9 @@ export const genericArgumentKey = (self: GenericArgument): string =>
         : isExactRepresentationArgument(self)
           ? `exact-representation:${genericArgumentKey(self.identity)}:${key(self.contract)}`
           : isEffectIdentityArgument(self)
-            ? `effect-identity:${self.identity}`
+            ? self.owner === undefined
+              ? `effect-identity:${self.identity}`
+              : `effect-identity:${self.identity}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>`
             : isCallableIdentityArgument(self)
               ? callableIdentityKey(self)
               : isFailureRowArgument(self)
@@ -1564,6 +1585,8 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
     } else if (isExactRepresentationArgument(argument)) {
       visitArgument(argument.identity)
       visitType(argument.contract)
+    } else if (isEffectIdentityArgument(argument)) {
+      for (const typeArgument of argument.owner?.typeArguments ?? []) visitArgument(typeArgument)
     } else if (isCallableIdentityArgument(argument)) {
       for (const typeArgument of argument.typeArguments) visitArgument(typeArgument)
       for (const typeArgument of argument.environment?.owner.typeArguments ?? [])
@@ -1748,7 +1771,7 @@ export const isConcreteGenericArgument = (self: GenericArgument): boolean =>
         : isExactRepresentationArgument(self)
           ? isConcrete(self.contract) && isConcreteGenericArgument(self.identity)
           : isEffectIdentityArgument(self)
-            ? true
+            ? (self.owner?.typeArguments.every(isConcreteGenericArgument) ?? true)
             : isCallableIdentityArgument(self)
               ? self.typeArguments.every(isConcreteGenericArgument) &&
                 (self.environment?.owner.typeArguments.every(isConcreteGenericArgument) ?? true)
@@ -1955,15 +1978,23 @@ export const substituteGenericArgument = (
           ? (() => {
               const contract = substitute(self.contract, substitution)
               if (!isCallable(contract) && !isEffect(contract)) return self
-              const identity = isCallableIdentityArgument(self.identity)
-                ? substituteGenericArgument(self.identity, substitution)
-                : self.identity
+              const identity = substituteGenericArgument(self.identity, substitution)
               return isCallableIdentityArgument(identity) || isEffectIdentityArgument(identity)
                 ? exactRepresentationArgument(identity, contract)
                 : self
             })()
           : isEffectIdentityArgument(self)
-            ? self
+            ? effectIdentityArgument(
+                self.identity,
+                self.owner === undefined
+                  ? undefined
+                  : {
+                      declaration: self.owner.declaration,
+                      typeArguments: self.owner.typeArguments.map((argument) =>
+                        substituteGenericArgument(argument, substitution),
+                      ),
+                    },
+              )
             : isCallableIdentityArgument(self)
               ? callableIdentityArgument(
                   self.identity,
@@ -2025,6 +2056,141 @@ export const substituteGenericArgument = (
                       }),
                     )
                   : substitute(self, substitution)
+
+const sameExecutableOwnerDeclaration = (
+  left: ExecutableSpecializationOwner,
+  right: ExecutableSpecializationOwner,
+): boolean =>
+  left.declaration.module === right.declaration.module &&
+  left.declaration.name === right.declaration.name
+
+/**
+ * Replaces a source executable owner's open specialization with one complete discovered instance.
+ * This stays a semantic type transformation: it neither inspects construction syntax nor creates a
+ * second representation identity.
+ */
+export const specializeExecutableOwner = (
+  self: Type,
+  owner: ExecutableSpecializationOwner,
+): Type => {
+  const specializeOwner = (
+    current: ExecutableSpecializationOwner,
+  ): ExecutableSpecializationOwner =>
+    sameExecutableOwnerDeclaration(current, owner)
+      ? owner
+      : Object.freeze({
+          declaration: current.declaration,
+          typeArguments: Object.freeze(current.typeArguments.map(specializeArgument)),
+        })
+  const specializeArgument = (argument: GenericArgument): GenericArgument => {
+    if (isUnavailableGenericArgument(argument) || isRepresentationParameterArgument(argument))
+      return argument
+    if (isOpaqueRepresentationArgument(argument)) {
+      const contract = specializeType(argument.contract)
+      return isCallable(contract) || isEffect(contract)
+        ? opaqueRepresentationArgument(
+            argument.family,
+            contract,
+            argument.arguments.map(specializeArgument),
+          )
+        : argument
+    }
+    if (isExactRepresentationArgument(argument)) {
+      const contract = specializeType(argument.contract)
+      const identity = specializeArgument(argument.identity)
+      return (isCallableIdentityArgument(identity) || isEffectIdentityArgument(identity)) &&
+        (isCallable(contract) || isEffect(contract))
+        ? exactRepresentationArgument(identity, contract)
+        : argument
+    }
+    if (isEffectIdentityArgument(argument))
+      return effectIdentityArgument(
+        argument.identity,
+        argument.owner === undefined ? undefined : specializeOwner(argument.owner),
+      )
+    if (isCallableIdentityArgument(argument))
+      return callableIdentityArgument(
+        argument.identity,
+        argument.target,
+        argument.typeArguments.map(specializeArgument),
+        argument.environment === undefined
+          ? undefined
+          : callableEnvironmentIdentity(
+              argument.environment.site,
+              specializeOwner(argument.environment.owner),
+            ),
+      )
+    if (isFailureRowArgument(argument))
+      return failureRowArgument(
+        argument.failures.map((failure) => {
+          const specialized = specializeType(failure)
+          return isNominal(specialized) ? specialized : failure
+        }),
+        argument.parameters,
+      )
+    if (isRequirementRowArgument(argument))
+      return requirementRowArgument(
+        argument.requirements.map((requirement) => {
+          const capability = specializeType(requirement.capability)
+          return Object.freeze({
+            ...requirement,
+            capability:
+              isNominal(capability) || isParameter(capability)
+                ? capability
+                : requirement.capability,
+          })
+        }),
+        argument.parameters,
+      )
+    return specializeType(argument)
+  }
+  const specializeType = (type: Type): Type => {
+    if (isNominal(type))
+      return nominal(type.module, type.name, type.arguments.map(specializeArgument))
+    if (isFixedArray(type)) return fixedArray(specializeType(type.element), type.length)
+    if (isSlice(type)) return slice(type.access, specializeType(type.element))
+    if (isReference(type)) return reference(type.access, specializeType(type.target))
+    if (isCallable(type))
+      return callable(type.parameters.map(specializeType), specializeType(type.result), type.mode)
+    if (isEffect(type))
+      return effect(
+        specializeType(type.success),
+        type.failures.map((failure) => {
+          const specialized = specializeType(failure)
+          return isNominal(specialized) ? specialized : failure
+        }),
+        type.access,
+        type.requirements.map((requirement) => {
+          const capability = specializeType(requirement.capability)
+          return Object.freeze({
+            ...requirement,
+            capability:
+              isNominal(capability) || isParameter(capability)
+                ? capability
+                : requirement.capability,
+          })
+        }),
+        type.failureParameters,
+        type.requirementParameters,
+      )
+    if (isRepresented(type)) {
+      const contract = specializeType(type.contract)
+      const requiredBound = specializeType(type.representation.requiredBound)
+      const argument = specializeArgument(type.representation.argument)
+      return (isCallable(contract) || isEffect(contract)) &&
+        (isCallable(requiredBound) || isEffect(requiredBound)) &&
+        isRepresentationArgument(argument)
+        ? represented(contract, requiredBound, argument)
+        : type
+    }
+    if (isUnion(type)) {
+      const normalized = union(type.members.map(specializeType))
+      return normalized._tag === 'Normalized' ? normalized.type : type
+    }
+    return type
+  }
+  return specializeType(self)
+}
 
 /** Adds structural constraints from one declared type pattern to one supplied concrete type. */
 const bindGenericArgument = (

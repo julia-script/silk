@@ -97,6 +97,10 @@ export const compareExecutableSites = (
 export const executableSiteLabel = (self: EffectSiteId | CallableSiteId): string =>
   executableSiteKey(self).replaceAll('\u0000', ':')
 
+/** Projects one Effect site into the semantic origin retained by exact representations. */
+export const effectRepresentationIdentity = (self: EffectSiteId): string =>
+  `effect:${executableSiteKey(self)}`
+
 /** Projects a HIR callable site into the semantic identity retained across specialization. */
 export const callableEnvironmentSite = (self: CallableSiteId): Type.CallableEnvironmentSite =>
   Type.callableEnvironmentSite(

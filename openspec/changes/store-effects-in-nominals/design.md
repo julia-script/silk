@@ -34,6 +34,31 @@ arguments, ordered environment slots, run access, rows, cleanup, and suspendabil
 layout, MIR, and engines consume the same fact. Work stops if a backend requires a separate Effect
 field model or reconstructs runner behavior.
 
+#### Publish one construction fact and extend the shared field index
+
+Instance discovery publishes one `EffectInstance` for each concrete source Effect construction. It
+contains the canonical runner identity and target, the enclosing concrete arguments, ordered typed
+captures, and suspendability. HIR owns the single projection from an Effect site to the semantic
+origin retained by exact representations; realization and lowering delegate to that projection
+rather than rebuilding its encoding. The retained origin also carries the enclosing executable's
+specialization, so two concrete instantiations of the same generic source site select different
+runner facts. Discovery completes that owner with the entire `InstanceKey`, including hidden Effect
+and callable parameter identities rather than only declared source arguments. Captured local Effect
+and callable bindings publish their already-resolved nested identities with the ordered environment;
+later phases never recover them from binding initializers.
+
+`CallableFieldRealization` remains the one resolved-field index and now carries a tagged union. Its
+Effect tag enriches the existing `RepresentationField` identity with the discovered runner, exact
+contract rows, actual run access, ordered environment, unrun cleanup lanes, and suspendability. It
+contains no sizes, offsets, row dictionaries, or dispatch ABI. Callable consumers explicitly narrow
+to the callable tag, and no Effect consumer is enabled in this slice, so `SEM0107` still stops every
+stored Effect before layout and MIR.
+
+The task-2 cleanup and suspension cases are realization proofs, not runtime claims. The unrun case
+records the owned lanes that later ownership and cleanup phases must release; the suspension case
+records the exact runner's transitive suspendability. Executing either case remains work for the
+ownership/layout/MIR and engine slices below.
+
 ### Keep Effects lazy and inline
 
 Construction transfers or borrows captures into the nominal but never enters the runner. The
