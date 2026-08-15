@@ -1284,6 +1284,11 @@ const layoutOf = (
       if (shape === undefined) throw new RangeError('Wasm backend lost a borrowed calling shape')
       return shape.lanes
     }
+    if (type._tag === 'EffectValue' && type.storage !== undefined) {
+      const shape = LayoutPlan.callingShape(plan, type.storage.type)
+      if (shape === undefined) throw new RangeError('Wasm backend lost a stored Effect shape')
+      return shape.lanes
+    }
     if (type._tag === 'EffectValue')
       return LayoutPlan.effectEnvironmentLanes(plan, type.environment)
     if (type._tag === 'CallableValue' && type.storage !== undefined) {

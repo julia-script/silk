@@ -983,6 +983,12 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             }),
           }),
         ])
+      if (type._tag === 'EffectValue' && type.storage !== undefined) {
+        const shape = Layout.callingShape(program.layout, type.storage.type)
+        if (shape === undefined)
+          throw new RangeError('LLVM backend lost a stored Effect calling shape')
+        return shape.lanes
+      }
       if (type._tag === 'EffectValue')
         return Layout.effectEnvironmentLanes(program.layout, type.environment)
       if (type._tag === 'CallableValue' && type.storage !== undefined) {
