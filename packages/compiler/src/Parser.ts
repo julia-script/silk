@@ -2620,6 +2620,7 @@ const parseInterfaceDeclaration = (initial: State): NodeResult => {
       : undefined
   const left = expect(typeParameters?.state ?? name.state, 'LeftBrace', [
     'FnKeyword',
+    'EffectKeyword',
     'RightBrace',
     ...topLevelFollowing,
   ])
@@ -2643,7 +2644,7 @@ const parseInterfaceDeclaration = (initial: State): NodeResult => {
     nextSignificantKind(state) !== 'ImplKeyword'
   ) {
     const operation =
-      nextSignificantKind(state) === 'FnKeyword'
+      nextSignificantKind(state) === 'FnKeyword' || nextSignificantKind(state) === 'EffectKeyword'
         ? parseServiceOperation(state)
         : parseServiceInvalidMember(state)
     children = Object.freeze([...children, operation.node])

@@ -183,6 +183,7 @@ export type CallReferenceFact =
       readonly provider: Type.Parameter
       readonly operation: string
       readonly declaration: DeclarationIndex.ServiceOperationFact
+      readonly interfaceContract: DeclarationIndex.InterfaceOperationApplicationFact
       readonly parameters: ReadonlyArray<SemanticType>
       readonly result: SemanticType
     }
@@ -593,6 +594,7 @@ export interface InterfaceOperationFact {
   readonly capability: Type.Nominal
   readonly provider: Type.Parameter
   readonly operation: string
+  readonly contract: DeclarationIndex.InterfaceOperationApplicationFact
 }
 
 /** One declaration or builtin named as a callable value without invocation. */
@@ -4359,7 +4361,28 @@ const interfaceConstraintDiagnostics = (
             parameter.syntax.span,
           ),
         ]
-      const capability = Type.nominal(bound.capability.module, bound.capability.name, [provider])
+      const substitutedCapability = Type.substitute(bound.application.capability, substitution)
+      if (!Type.isNominal(substitutedCapability))
+        return [
+          Diagnostic.invalidConformance(
+            `unknown interface constraint ${bound.spelling}`,
+            parameter.syntax.span,
+          ),
+        ]
+      const capability = substitutedCapability
+      const declaredProvider = capability.arguments.at(0)
+      if (
+        !bound.application.providerMatches ||
+        declaredProvider === undefined ||
+        !Type.isTypeArgument(declaredProvider) ||
+        !Type.equals(declaredProvider, provider)
+      )
+        return [
+          Diagnostic.invalidConformance(
+            `${bound.spelling} must be applied to its own provider ${Type.encode(provider)}`,
+            parameter.syntax.span,
+          ),
+        ]
       // Selection excludes rejected declarations, but a partial declaration still carries the most
       // useful source error: name the exact operation it failed to map before reporting the broader
       // missing-witness result.
@@ -4475,41 +4498,37 @@ const serviceOperation = (
  * canonical parameter, before any concrete argument exists.
  */
 const interfaceOperationContract = (
-  interface_: DeclarationIndex.InterfaceFact,
-  member: string,
-  parameter: Type.Parameter,
+  operation: DeclarationIndex.InterfaceOperationApplicationFact,
 ):
   | {
       readonly declaration: DeclarationIndex.ServiceOperationFact
+      readonly contract: DeclarationIndex.InterfaceOperationApplicationFact
       readonly parameters: ReadonlyArray<SemanticType>
       readonly result: SemanticType
     }
   | undefined => {
-  const operation = interface_.operations.find(
-    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === member,
-  )
-  if (
-    operation === undefined ||
-    operation.functionKind !== 'Ordinary' ||
-    operation.typeParameters.length > 0 ||
-    operation.returnType._tag !== 'Resolved'
-  )
+  if (operation.declaration.typeParameters.length > 0 || operation.success._tag !== 'Resolved')
     return undefined
-  const substitution = Type.substitution(
-    interface_.typeParameters.map((declared) => declared.type),
-    Object.freeze([parameter]),
+  const parameters = operation.operands.flatMap((operand) =>
+    operand.type._tag === 'Resolved' ? [operand.type.type] : [],
   )
-  if (substitution === undefined) return undefined
-  const parameters = operation.parameters.flatMap((declared) =>
-    declared.declaredType._tag === 'Resolved'
-      ? [Type.substitute(declared.declaredType.type, substitution)]
-      : [],
-  )
-  if (parameters.length !== operation.parameters.length) return undefined
+  if (parameters.length !== operation.operands.length) return undefined
+  const result =
+    operation.functionKind === 'Ordinary'
+      ? operation.success.type
+      : Type.effect(
+          operation.success.type,
+          operation.failureRow.failures,
+          'Shared',
+          operation.requirementRow.requirements,
+          operation.failureRow.parameters,
+          operation.requirementRow.parameters,
+        )
   return Object.freeze({
-    declaration: operation,
+    declaration: operation.declaration,
+    contract: operation,
     parameters: Object.freeze(parameters),
-    result: Type.substitute(operation.returnType.type, substitution),
+    result,
   })
 }
 
@@ -4545,9 +4564,13 @@ const boundOperationReference = (
     const bound = parameter.bound
     return (
       bound?._tag === 'ResolvedBound' &&
-      bound.capability.module === capability.module &&
-      bound.capability.name === capability.name &&
-      bound.operations.includes(member)
+      bound.application.declaration.module === capability.module &&
+      bound.application.declaration.name === capability.name &&
+      bound.application.operations.some(
+        (operation) =>
+          operation.declaration.name._tag === 'Present' &&
+          operation.declaration.name.spelling === member,
+      )
     )
   })
   if (bounded.length === 0) return undefined
@@ -4562,7 +4585,15 @@ const boundOperationReference = (
     })
   const parameter = bounded.at(0)
   if (parameter === undefined) return undefined
-  const contract = interfaceOperationContract(interface_, member, parameter.type)
+  const bound = parameter.bound
+  if (bound?._tag !== 'ResolvedBound') return undefined
+  const operation = bound.application.operations.find(
+    (candidate) =>
+      candidate.declaration.name._tag === 'Present' &&
+      candidate.declaration.name.spelling === member,
+  )
+  if (operation === undefined) return undefined
+  const contract = interfaceOperationContract(operation)
   if (contract === undefined) return undefined
   return Object.freeze({
     _tag: 'BoundOperation',
@@ -4570,10 +4601,11 @@ const boundOperationReference = (
       _tag: 'ResolvedBoundOperation' as const,
       spelling: `${qualifier}.${member}`,
       token: memberToken,
-      capability: Type.nominal(capability.module, capability.name, [parameter.type]),
+      capability: bound.application.capability,
       provider: parameter.type,
       operation: member,
       declaration: contract.declaration,
+      interfaceContract: contract.contract,
       parameters: contract.parameters,
       result: contract.result,
     }),
@@ -5747,17 +5779,21 @@ const analyzeOperatorExpression = (
           if (!Type.equals(parameter.type, boundOperand) || bound?._tag !== 'ResolvedBound')
             return []
           const operationName = `${operator.slice(0, 1).toLowerCase()}${operator.slice(1)}`
-          return bound.operations.includes(operationName)
-            ? [
+          const contract = bound.application.operations.find(
+            (operation) =>
+              operation.declaration.name._tag === 'Present' &&
+              operation.declaration.name.spelling === operationName,
+          )
+          return contract === undefined
+            ? []
+            : [
                 Object.freeze({
-                  capability: Type.nominal(bound.capability.module, bound.capability.name, [
-                    boundOperand,
-                  ]),
+                  capability: bound.application.capability,
                   provider: boundOperand,
                   operation: operationName,
+                  contract,
                 }),
               ]
-            : []
         })[0]
   const genericInterface = interfaceOperation !== undefined
   const selectedActor: Operator.Actor =
@@ -9174,6 +9210,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       capability: fact.reference.capability,
       provider: fact.reference.provider,
       operation: fact.reference.operation,
+      contract: fact.reference.interfaceContract,
       arguments: Object.freeze(
         fact.arguments.map((argument, ordinal) =>
           hirExpression(

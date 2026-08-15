@@ -641,6 +641,7 @@ export type Expression =
         readonly capability: Type.Nominal
         readonly provider: Type.Parameter
         readonly operation: string
+        readonly contract: DeclarationIndex.InterfaceOperationApplicationFact
       }
       readonly typeArguments: ReadonlyArray<Type.Type>
       readonly arguments: ReadonlyArray<Expression>
@@ -662,6 +663,7 @@ export type Expression =
       readonly capability: Type.Nominal
       readonly provider: Type.Type
       readonly operation: string
+      readonly contract: DeclarationIndex.InterfaceOperationApplicationFact
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: DeclarationIndex.SemanticType

@@ -299,11 +299,18 @@ it.effect('records the resolved bound contract on the declaration it belongs to'
     assert.strictEqual(bound?._tag, 'ResolvedBound')
     if (bound?._tag !== 'ResolvedBound') return
     assert.strictEqual(bound.spelling, 'Arith')
-    assert.deepEqual(bound.capability, {
+    assert.deepEqual(bound.application.declaration, {
       _tag: 'CanonicalDeclarationId',
       module: 'interface-bounds/main',
       name: 'Arith',
     })
-    assert.deepEqual(bound.operations, ['add', 'subtract'])
+    assert.deepEqual(
+      bound.application.operations.map((operation) =>
+        operation.declaration.name._tag === 'Present'
+          ? operation.declaration.name.spelling
+          : 'Unavailable',
+      ),
+      ['add', 'subtract'],
+    )
   }),
 )

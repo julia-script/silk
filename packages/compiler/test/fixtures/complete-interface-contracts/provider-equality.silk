@@ -1,0 +1,20 @@
+struct DecodeError {}
+service Clock {}
+struct Schema {}
+struct Other {}
+
+interface Decoder<S, Arguments, A, !E, ?R> {
+  effect fn decode(self: &S, encoded: Arguments) -> A ! E ? R
+}
+
+fn matching<T: Decoder<T, i32, bool ! DecodeError ? &Clock>>(value: T) -> T {
+  return move value
+}
+
+fn mismatched<T: Decoder<Other, i32, bool ! DecodeError ? &Clock>>(value: T) -> T {
+  return move value
+}
+
+fn main() -> Other {
+  return mismatched<Other>(Other {})
+}

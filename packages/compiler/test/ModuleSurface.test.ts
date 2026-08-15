@@ -87,6 +87,17 @@ it.effect('keeps malformed and unavailable header states deterministic without s
   }),
 )
 
+it.effect('distinguishes damaged applied row arguments in module surfaces', () =>
+  Effect.gen(function* () {
+    const withFailure = (failure: string) => `pub struct Envelope<T, !E> {}
+pub fn inspect(value: Envelope<i32 ! ${failure}>) -> i32 { return 0 }`
+    const left = yield* surface(withFailure('MissingA'))
+    const right = yield* surface(withFailure('MissingB'))
+
+    assert.strictEqual(ModuleSurface.equals(left, right), false)
+  }),
+)
+
 it.effect('excludes conformance hook bodies from the exported semantic surface', () =>
   Effect.gen(function* () {
     const first = yield* surface(`struct Guard {}

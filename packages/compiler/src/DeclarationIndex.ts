@@ -62,13 +62,13 @@ export type BoundFact =
       readonly _tag: 'ResolvedBound'
       readonly spelling: string
       readonly path: TypePathFact
-      readonly capability: CanonicalId
-      readonly operations: ReadonlyArray<string>
+      readonly application: InterfaceApplicationFact
     }
   | {
       readonly _tag: 'UnresolvedBound'
       readonly spelling: string
       readonly path: TypePathFact
+      readonly application: DeclaredTypeFact
     }
 
 /** One ordered, declaration-owned generic type parameter with exact source provenance. */
@@ -205,6 +205,21 @@ export type DeclaredTypeFact =
       readonly _tag: 'Applied'
       readonly target: DeclaredTypeFact
       readonly arguments: ReadonlyArray<DeclaredTypeFact>
+      readonly failureRow?: {
+        readonly failures: ReadonlyArray<DeclaredTypeFact>
+        readonly parameters: ReadonlyArray<Type.Parameter>
+        readonly syntax: SyntaxTree.Node
+      }
+      readonly requirementRow?: {
+        readonly requirements: ReadonlyArray<{
+          readonly capability: DeclaredTypeFact
+          readonly role: string
+          readonly access: Type.Requirement['access']
+          readonly syntax: SyntaxTree.Node
+        }>
+        readonly parameters: ReadonlyArray<Type.Parameter>
+        readonly syntax: SyntaxTree.Node
+      }
       readonly spelling: string
       readonly token: Token.Token
       readonly syntax: SyntaxTree.Node
@@ -485,6 +500,63 @@ export interface ServiceOperationFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** The literal ownership promised by one source interface operand. */
+export type InterfaceOperandAccess = 'Shared' | 'Exclusive' | 'Take' | 'Unavailable'
+
+/** One source interface operand with its authored type shape and ownership retained together. */
+export interface InterfaceOperandFact {
+  readonly _tag: 'InterfaceOperand'
+  readonly parameter: ParameterFact
+  readonly type: DeclaredTypeFact
+  readonly access: InterfaceOperandAccess
+}
+
+/**
+ * One complete operation contract owned by a source interface declaration.
+ *
+ * Interface operations reuse service-operation syntax, but this fact gives the static interface
+ * path its own vocabulary: literal operands, flow kind, success, exact rows, and the access of the
+ * operand that denotes the provider. It remains compile-time data and creates no service slot.
+ */
+export interface InterfaceOperationContractFact {
+  readonly _tag: 'InterfaceOperationContract'
+  readonly declaration: ServiceOperationFact
+  readonly provider?: Type.Type
+  readonly functionKind: ServiceOperationFact['functionKind']
+  readonly operands: ReadonlyArray<InterfaceOperandFact>
+  readonly success: ReturnTypeFact
+  readonly failureRow: FailureRowFact
+  readonly requirementRow: RequirementRowFact
+  readonly receiverAccess: InterfaceOperandAccess
+}
+
+/** One complete interface operation after substituting a particular interface application. */
+export interface InterfaceOperationApplicationFact
+  extends Omit<InterfaceOperationContractFact, '_tag'> {
+  readonly _tag: 'InterfaceOperationApplication'
+  readonly capability: Type.Nominal
+  readonly provider: Type.Type
+  readonly source: InterfaceOperationContractFact
+}
+
+/**
+ * One interface application retained on a bound.
+ *
+ * `providerMatches` is an explicit fact rather than an assumption: complete contracts may only be
+ * consumed when the interface's first argument is the bounded provider. Damaged applications stay
+ * visible with `available: false` and never collapse into an operation-free interface.
+ */
+export interface InterfaceApplicationFact {
+  readonly _tag: 'InterfaceApplication'
+  readonly declaration: CanonicalId
+  readonly capability: Type.Nominal
+  readonly provider: Type.Type
+  readonly providerMatches: boolean
+  readonly visibility: InterfaceFact['visibility']
+  readonly operations: ReadonlyArray<InterfaceOperationApplicationFact>
+  readonly available: boolean
+}
+
 /** One nominal runtime-service contract declared in ordinary Silk source. */
 export interface ServiceFact {
   readonly _tag: 'ServiceDeclaration'
@@ -506,7 +578,239 @@ export interface InterfaceFact {
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly name: DeclaredName
   readonly operations: ReadonlyArray<ServiceOperationFact>
+  readonly operationContracts: ReadonlyArray<InterfaceOperationContractFact>
   readonly syntax: SyntaxTree.Node
+}
+
+const interfaceOperandAccess = (type: DeclaredTypeFact): InterfaceOperandAccess => {
+  if (type._tag === 'Reference' || type._tag === 'Slice') return type.access
+  if (type._tag !== 'Resolved') return 'Unavailable'
+  if (Type.isReference(type.type) || Type.isSlice(type.type)) return type.type.access
+  return 'Take'
+}
+
+const interfaceReceiverAccess = (
+  operands: ReadonlyArray<InterfaceOperandFact>,
+  provider: Type.Type | undefined,
+): InterfaceOperandAccess => {
+  if (provider === undefined) return 'Unavailable'
+  return (
+    operands.find((operand) => {
+      if (operand.type._tag !== 'Resolved') return false
+      const type = operand.type.type
+      return Type.equals(Type.isReference(type) ? type.target : type, provider)
+    })?.access ?? 'Unavailable'
+  )
+}
+
+const interfaceOperationContract = (
+  operation: ServiceOperationFact,
+  provider: Type.Type | undefined,
+): InterfaceOperationContractFact => {
+  const operands = Object.freeze(
+    operation.parameters.map(
+      (parameter): InterfaceOperandFact =>
+        Object.freeze({
+          _tag: 'InterfaceOperand',
+          parameter,
+          type: parameter.declaredType,
+          access: interfaceOperandAccess(parameter.declaredType),
+        }),
+    ),
+  )
+  return Object.freeze({
+    _tag: 'InterfaceOperationContract',
+    declaration: operation,
+    ...(provider === undefined ? {} : { provider }),
+    functionKind: operation.functionKind,
+    operands,
+    success: operation.returnType,
+    failureRow: operation.failureRow,
+    requirementRow: operation.requirementRow,
+    receiverAccess: interfaceReceiverAccess(operands, provider),
+  })
+}
+
+const interfaceOperationContracts = (
+  parameters: ReadonlyArray<TypeParameterFact>,
+  operations: ReadonlyArray<ServiceOperationFact>,
+): ReadonlyArray<InterfaceOperationContractFact> => {
+  const provider = parameters.at(0)?.type
+  return Object.freeze(
+    operations.map((operation) => interfaceOperationContract(operation, provider)),
+  )
+}
+
+const substituteDeclaredTypeFact = (
+  fact: DeclaredTypeFact,
+  substitution: Type.Substitution,
+): DeclaredTypeFact => {
+  if (fact._tag !== 'Resolved') return fact
+  const type = Type.substitute(fact.type, substitution)
+  return Object.freeze({ ...fact, type, spelling: Type.encode(type) })
+}
+
+const substituteFailureRowFact = (
+  fact: FailureRowFact,
+  substitution: Type.Substitution,
+  rows: Type.Effect,
+): FailureRowFact => {
+  const members = Object.freeze(
+    fact.members.map((member) => substituteDeclaredTypeFact(member, substitution)),
+  )
+  return Object.freeze({
+    ...fact,
+    members,
+    parameters: rows.failureParameters,
+    failures: rows.failures,
+    available:
+      rows.failureParameters.length === 0 &&
+      members.every(
+        (member) =>
+          member._tag === 'Resolved' && Type.isNominal(member.type) && Type.isConcrete(member.type),
+      ),
+  })
+}
+
+const substituteRequirementRowFact = (
+  fact: RequirementRowFact,
+  substitution: Type.Substitution,
+  rows: Type.Effect,
+): RequirementRowFact => {
+  const entries = Object.freeze(
+    fact.entries.map((entry) =>
+      Object.freeze({
+        ...entry,
+        capability: substituteDeclaredTypeFact(entry.capability, substitution),
+      }),
+    ),
+  )
+  return Object.freeze({
+    ...fact,
+    entries,
+    parameters: rows.requirementParameters,
+    requirements: rows.requirements,
+    available:
+      rows.requirementParameters.length === 0 &&
+      entries.every(
+        (entry) =>
+          entry.capability._tag === 'Resolved' &&
+          (Type.isNominal(entry.capability.type) ||
+            (Type.isParameter(entry.capability.type) && entry.capability.type.kind === 'Value')),
+      ),
+  })
+}
+
+const applyInterfaceOperation = (
+  source: InterfaceOperationContractFact,
+  capability: Type.Nominal,
+  provider: Type.Type,
+  substitution: Type.Substitution | undefined,
+): InterfaceOperationApplicationFact => {
+  if (substitution === undefined)
+    return Object.freeze({
+      _tag: 'InterfaceOperationApplication',
+      declaration: source.declaration,
+      capability,
+      provider,
+      source,
+      functionKind: source.functionKind,
+      operands: source.operands,
+      success: source.success,
+      failureRow: source.failureRow,
+      requirementRow: source.requirementRow,
+      receiverAccess: source.receiverAccess,
+    })
+  const operands = Object.freeze(
+    source.operands.map((operand): InterfaceOperandFact => {
+      const type = substituteDeclaredTypeFact(operand.type, substitution)
+      return Object.freeze({
+        ...operand,
+        parameter: Object.freeze({ ...operand.parameter, declaredType: type }),
+        type,
+        access: interfaceOperandAccess(type),
+      })
+    }),
+  )
+  const substitutedRows = Type.substitute(
+    Type.effect(
+      Type.unit,
+      source.failureRow.failures,
+      'Shared',
+      source.requirementRow.requirements,
+      source.failureRow.parameters,
+      source.requirementRow.parameters,
+    ),
+    substitution,
+  )
+  const rows = Type.isEffect(substitutedRows)
+    ? substitutedRows
+    : Type.effect(Type.unit, [], 'Shared')
+  return Object.freeze({
+    _tag: 'InterfaceOperationApplication',
+    declaration: source.declaration,
+    capability,
+    provider,
+    source,
+    functionKind: source.functionKind,
+    operands,
+    success: substituteDeclaredTypeFact(source.success, substitution),
+    failureRow: substituteFailureRowFact(source.failureRow, substitution, rows),
+    requirementRow: substituteRequirementRowFact(source.requirementRow, substitution, rows),
+    receiverAccess: interfaceReceiverAccess(operands, provider),
+  })
+}
+
+const interfaceOperationAvailable = (operation: InterfaceOperationApplicationFact): boolean =>
+  operation.operands.every((operand) => operand.type._tag === 'Resolved') &&
+  operation.success._tag === 'Resolved' &&
+  operation.failureRow.members.every(
+    (member) => member._tag === 'Resolved' && Type.isNominal(member.type),
+  ) &&
+  operation.requirementRow.entries.every(
+    (entry) =>
+      entry.capability._tag === 'Resolved' &&
+      (Type.isNominal(entry.capability.type) ||
+        (Type.isParameter(entry.capability.type) && entry.capability.type.kind === 'Value')),
+  ) &&
+  operation.receiverAccess !== 'Unavailable'
+
+const interfaceApplication = (
+  declaration: InterfaceFact,
+  capability: Type.Nominal,
+  provider: Type.Type,
+): InterfaceApplicationFact | undefined => {
+  if (declaration.canonical._tag !== 'Canonical') return undefined
+  const declaredProvider = capability.arguments.at(0)
+  const providerMatches =
+    declaredProvider !== undefined &&
+    Type.isTypeArgument(declaredProvider) &&
+    Type.equals(declaredProvider, provider)
+  const substitution = Type.substitution(
+    declaration.typeParameters.map((parameter) => parameter.type),
+    capability.arguments,
+  )
+  const sourceContracts =
+    declaration.operationContracts.length === declaration.operations.length
+      ? declaration.operationContracts
+      : interfaceOperationContracts(declaration.typeParameters, declaration.operations)
+  const operations = Object.freeze(
+    sourceContracts.map((operation) =>
+      applyInterfaceOperation(operation, capability, provider, substitution),
+    ),
+  )
+  const available =
+    providerMatches && substitution !== undefined && operations.every(interfaceOperationAvailable)
+  return Object.freeze({
+    _tag: 'InterfaceApplication',
+    declaration: declaration.canonical.id,
+    capability,
+    provider,
+    providerMatches,
+    visibility: declaration.visibility,
+    operations,
+    available,
+  })
 }
 
 /**
@@ -568,6 +872,7 @@ export interface ConformanceFact {
     readonly target:
       | TypePathFact
       | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
+    readonly contract?: InterfaceOperationApplicationFact
     readonly syntax: SyntaxTree.Node
   }>
   readonly hook?: DropHookFact
@@ -1498,11 +1803,119 @@ export const analyzeDeclaredType = (
         diagnostics: Object.freeze(diagnostics),
       })
     }
+    const failureRowSyntax = SyntaxTree.directNode(list, 'FailureRow')
+    const failureType = failureRowSyntax?.children.find(isDeclaredTypeNode)
+    const failureNodes =
+      failureType?.kind === 'UnionType'
+        ? failureType.children.filter(isDeclaredTypeNode)
+        : failureType === undefined
+          ? []
+          : [failureType]
+    const failureParameters: Array<Type.Parameter> = []
+    const rowDiagnostics: Array<Diagnostic.Diagnostic> = []
+    const failures = failureNodes.flatMap((member): ReadonlyArray<TypeResolution> => {
+      const parameter = parameterAtTypePath(source, member, typeParameters)
+      if (parameter?.kind === 'FailureRow') {
+        failureParameters.push(parameter)
+        return []
+      }
+      if (parameter?.kind === 'RequirementRow') {
+        const token = SyntaxTree.directToken(member, 'Identifier')
+        if (token !== undefined)
+          rowDiagnostics.push(
+            Diagnostic.genericParameterKindMismatch(
+              spelling(source, token),
+              'FailureRow',
+              parameter.kind,
+              token.span,
+            ),
+          )
+        return []
+      }
+      return [analyzeDeclaredType(source, member, typeParameters)]
+    })
+    const requirementRowSyntax = SyntaxTree.directNode(list, 'RequirementRow')
+    const requirements =
+      requirementRowSyntax?.children
+        .filter(
+          (element): element is SyntaxTree.Node =>
+            SyntaxTree.isNode(element) && element.kind === 'Requirement',
+        )
+        .map((requirement) => {
+          const capability = requirement.children.find(isDeclaredTypeNode)
+          const analyzed =
+            capability === undefined
+              ? Object.freeze({
+                  fact: Object.freeze({ _tag: 'Unavailable' as const, syntax: requirement }),
+                  diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
+                })
+              : analyzeDeclaredType(source, capability, typeParameters)
+          const role = SyntaxTree.directToken(requirement, 'Identifier')
+          return Object.freeze({
+            capability: analyzed,
+            role: role === undefined ? 'DefaultRole' : spelling(source, role),
+            access:
+              SyntaxTree.directToken(requirement, 'MutKeyword') === undefined
+                ? ('Shared' as const)
+                : ('Exclusive' as const),
+            syntax: requirement,
+          })
+        }) ?? []
+    const requirementParameters =
+      requirementRowSyntax?.children
+        .filter(
+          (element): element is SyntaxTree.Node =>
+            SyntaxTree.isNode(element) && element.kind === 'TypePath',
+        )
+        .flatMap((path): ReadonlyArray<Type.Parameter> => {
+          const token = SyntaxTree.directToken(path, 'Identifier')
+          const parameter = parameterAtTypePath(source, path, typeParameters)
+          if (parameter?.kind === 'RequirementRow') return [parameter]
+          if (token !== undefined) {
+            if (parameter === undefined)
+              rowDiagnostics.push(Diagnostic.unknownType(spelling(source, token), token.span))
+            else
+              rowDiagnostics.push(
+                Diagnostic.genericParameterKindMismatch(
+                  spelling(source, token),
+                  'RequirementRow',
+                  parameter.kind,
+                  token.span,
+                ),
+              )
+          }
+          return []
+        }) ?? []
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Applied',
         target: target.fact,
         arguments: Object.freeze(arguments_.map((argument) => argument.fact)),
+        ...(failureRowSyntax === undefined
+          ? {}
+          : {
+              failureRow: Object.freeze({
+                failures: Object.freeze(failures.map((failure) => failure.fact)),
+                parameters: Object.freeze(failureParameters),
+                syntax: failureRowSyntax,
+              }),
+            }),
+        ...(requirementRowSyntax === undefined
+          ? {}
+          : {
+              requirementRow: Object.freeze({
+                requirements: Object.freeze(
+                  requirements.map((requirement) =>
+                    Object.freeze({
+                      ...requirement,
+                      capability: requirement.capability.fact,
+                    }),
+                  ),
+                ),
+                parameters: Object.freeze(requirementParameters),
+                syntax: requirementRowSyntax,
+              }),
+            }),
         spelling: SyntaxTree.tokens(syntax)
           .filter(
             (token) =>
@@ -1516,6 +1929,9 @@ export const analyzeDeclaredType = (
       diagnostics: Diagnostic.merge(
         target.diagnostics,
         ...arguments_.map((argument) => argument.diagnostics),
+        ...failures.map((failure) => failure.diagnostics),
+        ...requirements.map((requirement) => requirement.capability.diagnostics),
+        rowDiagnostics,
       ),
     })
   }
@@ -1859,6 +2275,9 @@ const collectTypeParameters = (
               ]),
               syntax: boundNode,
             }),
+            application:
+              boundResolution?.fact ??
+              Object.freeze({ _tag: 'Unavailable' as const, syntax: boundNode }),
           })
     const duplicateOf = name._tag === 'Present' ? environment.get(name.spelling) : undefined
     const type =
@@ -2329,7 +2748,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         })
       }
     }
-    const visibility =
+    const visibility: 'Private' | 'Public' =
       SyntaxTree.directToken(node, 'PubKeyword') === undefined ? 'Private' : 'Public'
     const typeParameters = collectTypeParameters(
       source,
@@ -2511,11 +2930,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
           })
         },
       )
-      return Object.freeze({
-        _tag:
-          node.kind === 'ServiceDeclaration'
-            ? ('ServiceDeclaration' as const)
-            : ('InterfaceDeclaration' as const),
+      const shared = {
         id,
         canonical,
         visibility,
@@ -2523,7 +2938,14 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         name,
         operations: Object.freeze(operations),
         syntax: node,
-      })
+      }
+      return node.kind === 'InterfaceDeclaration'
+        ? Object.freeze({
+            _tag: 'InterfaceDeclaration',
+            ...shared,
+            operationContracts: interfaceOperationContracts(typeParameters.facts, operations),
+          })
+        : Object.freeze({ _tag: 'ServiceDeclaration', ...shared })
     }
     const parameterList = childNode(node, 'ParameterList')
     const parameters = SyntaxTree.directNodes(parameterList, 'ParameterDeclaration').map(
@@ -3015,20 +3437,80 @@ const resolveDeclaredType = (
     const arguments_ = fact.arguments.map((argument) =>
       resolveDeclaredType(module, argument, resolvers, modules),
     )
+    const failures =
+      fact.failureRow?.failures.map((failure) =>
+        resolveDeclaredType(module, failure, resolvers, modules),
+      ) ?? []
+    const requirements =
+      fact.requirementRow?.requirements.map((requirement) =>
+        Object.freeze({
+          ...requirement,
+          capability: resolveDeclaredType(module, requirement.capability, resolvers, modules),
+        }),
+      ) ?? []
     const diagnostics = [
       ...target.diagnostics,
       ...arguments_.flatMap((argument) => argument.diagnostics),
+      ...failures.flatMap((failure) => failure.diagnostics),
+      ...requirements.flatMap((requirement) => requirement.capability.diagnostics),
     ]
     if (target.fact._tag === 'Resolved' && Type.isNominal(target.fact.type)) {
       const declaration = memberByNominal(modules, target.fact.type)
       const expected =
         declaration?.typeParameters.length ?? Type.intrinsicNominalArity(target.fact.type)
       const declaredParameters = declaration?.typeParameters.map((parameter) => parameter.type)
-      const available = arguments_.map((argument, ordinal): Type.GenericArgument | undefined => {
-        if (argument.fact._tag !== 'Resolved') return undefined
-        return genericArgumentForParameter(declaredParameters?.at(ordinal), argument.fact.type)
-      })
-      if (expected === arguments_.length && available.every((argument) => argument !== undefined)) {
+      const valueArguments = arguments_.map(
+        (argument, ordinal): Type.GenericArgument | undefined => {
+          if (argument.fact._tag !== 'Resolved') return undefined
+          return genericArgumentForParameter(declaredParameters?.at(ordinal), argument.fact.type)
+        },
+      )
+      const failureTypes = failures.flatMap(
+        (failure): ReadonlyArray<Type.Nominal> =>
+          failure.fact._tag === 'Resolved' && Type.isNominal(failure.fact.type)
+            ? [failure.fact.type]
+            : [],
+      )
+      const failuresAvailable = failures.every(
+        (failure) =>
+          failure.fact._tag === 'Resolved' &&
+          (Type.isNominal(failure.fact.type) || Type.isNever(failure.fact.type)),
+      )
+      const requirementTypes = requirements.flatMap(
+        (requirement): ReadonlyArray<Type.Requirement> =>
+          requirement.capability.fact._tag === 'Resolved' &&
+          (Type.isNominal(requirement.capability.fact.type) ||
+            (Type.isParameter(requirement.capability.fact.type) &&
+              requirement.capability.fact.type.kind === 'Value'))
+            ? [
+                Object.freeze({
+                  capability: requirement.capability.fact.type,
+                  role: requirement.role,
+                  access: requirement.access,
+                }),
+              ]
+            : [],
+      )
+      const requirementsAvailable = requirementTypes.length === requirements.length
+      const rowArguments: ReadonlyArray<Type.GenericArgument | undefined> = Object.freeze([
+        ...(fact.failureRow === undefined
+          ? []
+          : [
+              failuresAvailable
+                ? Type.failureRowArgument(failureTypes, fact.failureRow.parameters)
+                : undefined,
+            ]),
+        ...(fact.requirementRow === undefined
+          ? []
+          : [
+              requirementsAvailable
+                ? Type.requirementRowArgument(requirementTypes, fact.requirementRow.parameters)
+                : undefined,
+            ]),
+      ])
+      const available = Object.freeze([...valueArguments, ...rowArguments])
+      const suppliedCount = available.length
+      if (expected === suppliedCount && available.every((argument) => argument !== undefined)) {
         const concrete = available.filter(
           (argument): argument is Type.GenericArgument => argument !== undefined,
         )
@@ -3183,13 +3665,19 @@ const resolveDeclaredType = (
             components: Object.freeze([
               target.fact,
               ...arguments_.map((argument) => argument.fact),
+              ...failures.map((failure) => failure.fact),
+              ...requirements.map((requirement) => requirement.capability.fact),
             ]),
           }),
           diagnostics: Object.freeze(diagnostics),
         })
       }
-      if (expected === arguments_.length) {
-        const unavailable = arguments_.find((argument) => argument.fact._tag !== 'Resolved')
+      if (expected === suppliedCount) {
+        const unavailable = [
+          ...arguments_,
+          ...failures,
+          ...requirements.map((requirement) => requirement.capability),
+        ].find((argument) => argument.fact._tag !== 'Resolved')
         const cause =
           unavailable !== undefined && 'cause' in unavailable.fact
             ? unavailable.fact.cause
@@ -3202,7 +3690,7 @@ const resolveDeclaredType = (
       const diagnostic = Diagnostic.typeArgumentArity(
         fact.spelling,
         expected,
-        arguments_.length,
+        suppliedCount,
         fact.token.span,
       )
       diagnostics.push(diagnostic)
@@ -3469,34 +3957,98 @@ const resolveBounds = (
       }
       const bound = parameter.bound
       if (bound === undefined) return parameter
-      const resolved = resolvers.type(module, bound.path).fact
-      const capability =
-        resolved._tag === 'Resolved' && Type.isNominal(resolved.type) ? resolved.type : undefined
+      const parameterName = parameter.name._tag === 'Present' ? parameter.name : undefined
+      const boundResolvers: ResolutionSeams.ResolutionSeams =
+        parameterName === undefined
+          ? resolvers
+          : Object.freeze({
+              ...resolvers,
+              type: (candidateModule: string, path: TypePathFact): TypeResolution =>
+                path.segments.length === 1 && path.spelling === parameterName.spelling
+                  ? Object.freeze({
+                      fact: Object.freeze({
+                        _tag: 'Resolved' as const,
+                        type: parameter.type,
+                        spelling: parameterName.spelling,
+                        token: parameterName.token,
+                        syntax: path.syntax,
+                        components: Object.freeze([]),
+                      }),
+                      diagnostics: Object.freeze([]),
+                    })
+                  : resolvers.type(candidateModule, path),
+            })
+      const unresolvedCapability =
+        bound._tag === 'ResolvedBound'
+          ? bound.application.capability
+          : (() => {
+              const resolved = resolveDeclaredType(
+                module,
+                bound.application,
+                boundResolvers,
+                modules,
+              ).fact
+              if (resolved._tag === 'Resolved' && Type.isNominal(resolved.type))
+                return resolved.type
+              return resolved._tag === 'Unresolved' &&
+                resolved.candidate !== undefined &&
+                Type.isNominal(resolved.candidate)
+                ? resolved.candidate
+                : undefined
+            })()
       const declaration =
-        capability === undefined ? undefined : memberByNominal(modules, capability)
+        unresolvedCapability === undefined
+          ? undefined
+          : memberByNominal(modules, unresolvedCapability)
       if (
-        capability === undefined ||
+        unresolvedCapability === undefined ||
         declaration?._tag !== 'InterfaceDeclaration' ||
         declaration.canonical._tag !== 'Canonical'
       )
         return Object.freeze({ ...parameter, bound })
+      const capability =
+        unresolvedCapability.arguments.length === 0 && declaration.typeParameters.length === 1
+          ? Type.nominal(unresolvedCapability.module, unresolvedCapability.name, [parameter.type])
+          : unresolvedCapability
+      const application = interfaceApplication(declaration, capability, parameter.type)
+      if (application === undefined) return Object.freeze({ ...parameter, bound })
       return Object.freeze({
         ...parameter,
         bound: Object.freeze({
           _tag: 'ResolvedBound' as const,
           spelling: bound.spelling,
           path: bound.path,
-          capability: declaration.canonical.id,
-          operations: Object.freeze(
-            declaration.operations.flatMap((operation) =>
-              operation.name._tag === 'Present' ? [operation.name.spelling] : [],
-            ),
-          ),
+          application,
         }),
       })
     }),
   )
 }
+
+/** Refreshes resolved bound applications once every interface header has its completed contracts. */
+const refreshInterfaceApplications = (
+  typeParameters: ReadonlyArray<TypeParameterFact>,
+  modules: ReadonlyArray<ModuleHeaders>,
+): ReadonlyArray<TypeParameterFact> =>
+  Object.freeze(
+    typeParameters.map((parameter): TypeParameterFact => {
+      const bound = parameter.bound
+      if (bound?._tag !== 'ResolvedBound') return parameter
+      const declaration = memberByNominal(modules, bound.application.capability)
+      if (declaration?._tag !== 'InterfaceDeclaration') return parameter
+      const application = interfaceApplication(
+        declaration,
+        bound.application.capability,
+        parameter.type,
+      )
+      return application === undefined
+        ? parameter
+        : Object.freeze({
+            ...parameter,
+            bound: Object.freeze({ ...bound, application }),
+          })
+    }),
+  )
 
 /**
  * Reads one conformance's requirements as the interface applications proof search will follow.
@@ -3560,8 +4112,8 @@ const unpromisedWitnessBound = (
         (requirement) =>
           requirement.capability._tag === 'Resolved' &&
           Type.isNominal(requirement.capability.type) &&
-          requirement.capability.type.module === bound.capability.module &&
-          requirement.capability.type.name === bound.capability.name &&
+          requirement.capability.type.module === bound.application.capability.module &&
+          requirement.capability.type.name === bound.application.capability.name &&
           Type.equals(requirement.parameter, header),
       )
     )
@@ -4126,11 +4678,20 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             requirementRow: requirementRow.fact,
           })
         })
-        return Object.freeze({
+        const completed = Object.freeze({
           ...member,
           typeParameters: resolvedMemberTypeParameters,
           operations: Object.freeze(operations),
         })
+        return completed._tag === 'InterfaceDeclaration'
+          ? Object.freeze({
+              ...completed,
+              operationContracts: interfaceOperationContracts(
+                resolvedMemberTypeParameters,
+                operations,
+              ),
+            })
+          : completed
       }
       const fields = member.fields.map((field) => {
         const resolved = resolveDeclaredType(
@@ -4249,6 +4810,91 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         members.filter((member): member is ConstantFact => member._tag === 'ConstantDeclaration'),
       ),
       conformances: Object.freeze(conformances),
+    })
+  })
+
+  // Bounds may precede the interface they name, and the first completion pass intentionally reads
+  // the old immutable module graph. Refresh only their applications now that every interface owns
+  // resolved operation contracts; no witness selection or executable behavior is decided here.
+  modules = modules.map((module): ModuleHeaders => {
+    const members = module.members.map((member): MemberFact => {
+      const typeParameters = refreshInterfaceApplications(member.typeParameters, modules)
+      if (member._tag !== 'ServiceDeclaration' && member._tag !== 'InterfaceDeclaration')
+        return Object.freeze({ ...member, typeParameters })
+      const operations = Object.freeze(
+        member.operations.map((operation) =>
+          Object.freeze({
+            ...operation,
+            typeParameters: refreshInterfaceApplications(operation.typeParameters, modules),
+          }),
+        ),
+      )
+      return member._tag === 'InterfaceDeclaration'
+        ? Object.freeze({
+            ...member,
+            typeParameters,
+            operations,
+            operationContracts: interfaceOperationContracts(typeParameters, operations),
+          })
+        : Object.freeze({ ...member, typeParameters, operations })
+    })
+    const conformances = Object.freeze(
+      module.conformances.map((conformance) => {
+        const capability =
+          conformance.capability._tag === 'Resolved' && Type.isNominal(conformance.capability.type)
+            ? conformance.capability.type
+            : undefined
+        const provider =
+          conformance.provider._tag === 'Resolved' ? conformance.provider.type : undefined
+        const declaration =
+          capability === undefined ? undefined : memberByNominal(modules, capability)
+        const application =
+          capability !== undefined &&
+          provider !== undefined &&
+          declaration?._tag === 'InterfaceDeclaration'
+            ? interfaceApplication(declaration, capability, provider)
+            : undefined
+        return Object.freeze({
+          ...conformance,
+          typeParameters: refreshInterfaceApplications(conformance.typeParameters, modules),
+          operations: Object.freeze(
+            conformance.operations.map((operation) => {
+              const contract = application?.operations.find(
+                (candidate) =>
+                  operation.name._tag === 'Present' &&
+                  candidate.declaration.name._tag === 'Present' &&
+                  candidate.declaration.name.spelling === operation.name.spelling,
+              )
+              return Object.freeze({
+                ...operation,
+                ...(contract === undefined ? {} : { contract }),
+              })
+            }),
+          ),
+        })
+      }),
+    )
+    return Object.freeze({
+      ...module,
+      members: Object.freeze(members),
+      declarations: Object.freeze(
+        members.filter(
+          (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
+        ),
+      ),
+      structs: Object.freeze(
+        members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      ),
+      services: Object.freeze(
+        members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),
+      ),
+      interfaces: Object.freeze(
+        members.filter((member): member is InterfaceFact => member._tag === 'InterfaceDeclaration'),
+      ),
+      constants: Object.freeze(
+        members.filter((member): member is ConstantFact => member._tag === 'ConstantDeclaration'),
+      ),
+      conformances,
     })
   })
 
@@ -5181,7 +5827,13 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             }),
           }),
         )
-        return Object.freeze({ ...member, operations: Object.freeze(operations) })
+        const exposed = Object.freeze({ ...member, operations: Object.freeze(operations) })
+        return exposed._tag === 'InterfaceDeclaration'
+          ? Object.freeze({
+              ...exposed,
+              operationContracts: interfaceOperationContracts(exposed.typeParameters, operations),
+            })
+          : exposed
       }
       const fields = member.fields.map((field) =>
         field.visibility === 'Public'
