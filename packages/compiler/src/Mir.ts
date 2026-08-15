@@ -4301,7 +4301,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 declared !== undefined &&
                 valueType?._tag === 'CallableValue' &&
                 SilkType.equals(field.stored.type, declared.type) &&
-                SilkType.equals(valueType.type, field.stored.realization.contract) &&
+                TypeCompatibility.isCompatible(
+                  TypeCompatibility.check(valueType.type, field.stored.realization.contract),
+                ) &&
                 matchesStoredTarget(valueType.target, field.stored.realization.target) &&
                 field.stored.realization.field.ordinal === field.field.ordinal &&
                 field.stored.realization.instance.module === operation.type.type.module &&

@@ -4589,6 +4589,19 @@ const lowerInstance = (
             return effectValue === undefined ? [] : [effectValue]
           }
           const specialized = Type.substitute(type, instance.substitution)
+          if (
+            Type.isRepresented(specialized) &&
+            Type.isCallable(specialized.contract) &&
+            Type.isExactRepresentationArgument(specialized.representation.argument) &&
+            Type.isCallableIdentityArgument(specialized.representation.argument.identity)
+          ) {
+            const callable = callableValueByIdentity(
+              layout,
+              specialized.representation.argument.identity,
+              specialized.contract,
+            )
+            return callable === undefined ? [] : [callable]
+          }
           if (Type.isCallable(specialized)) {
             const identity = Instances.parameterCallableIdentity(fn, instance.key, ordinal)
             const callable =
