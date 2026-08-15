@@ -15,8 +15,8 @@
 ## 3. Layout and MIR
 
 - [x] 3.1 Plan concrete callable capture fields inline from the resolved representation while keeping structural callable contracts unlayoutable.
-- [ ] 3.2 Extend HIR/MIR aggregate construction, borrow, projection, invocation, movement, and cleanup with static callable facts.
-- [ ] 3.3 Add deterministic layouts, instance keys, symbols, and MIR text for nested callable storage.
+- [x] 3.2 Extend HIR/MIR aggregate construction, borrow, projection, invocation, movement, and cleanup with static callable facts.
+- [x] 3.3 Add deterministic layouts, instance keys, symbols, and MIR text for nested callable storage.
 
 ## 4. Engine Parity and Fences
 
