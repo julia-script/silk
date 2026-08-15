@@ -1522,14 +1522,24 @@ const effectEnvironments = (
       for (const block of blocks) {
         const structuralEffect = Type.substitute(block.type, instance.substitution)
         if (!Type.isEffect(structuralEffect)) continue
+        const effectInstance = discovery.effects.find(
+          (candidate) => candidate.identity === Instances.effectIdentity(instance.key, block.site),
+        )
+        const realizedSlots =
+          effectInstance === undefined
+            ? Object.freeze([])
+            : CallableFieldRealization.effectEnvironmentOf(effectInstance)
         let effect = structuralEffect
         let cursor = 0
         let environmentAlignment = 1
         let unavailable: string | undefined
         const fields: Array<EffectEnvironmentField> = []
-        for (const capture of block.captures) {
-          const source = capture.binding === undefined ? 'Parameter' : 'Binding'
-          const ordinal = capture.binding?.ordinal ?? capture.parameter?.ordinal
+        for (const [captureOrdinal, capture] of block.captures.entries()) {
+          const realized = realizedSlots.find((slot) => slot.ordinal === captureOrdinal)
+          const source =
+            realized?.source ?? (capture.binding === undefined ? 'Parameter' : 'Binding')
+          const ordinal =
+            realized?.sourceOrdinal ?? capture.binding?.ordinal ?? capture.parameter?.ordinal
           const type =
             capture.binding === undefined
               ? instance.function.contract._tag === 'Contract' && ordinal !== undefined
@@ -1542,11 +1552,20 @@ const effectEnvironments = (
             unavailable = `capture ${source.toLowerCase()} has no concrete type`
             break
           }
-          const specialized = Type.substitute(type, instance.substitution)
+          const specialized = realized?.type ?? Type.substitute(type, instance.substitution)
           const capturedEffectIdentity =
-            Type.isEffect(specialized) && source === 'Parameter'
+            realized?.effectIdentity ??
+            (Type.isEffect(specialized) && source === 'Parameter'
               ? Instances.parameterEffectIdentity(instance.function, instance.key, ordinal)
-              : undefined
+              : undefined)
+          const capturedEffectInstance =
+            capturedEffectIdentity === undefined
+              ? undefined
+              : discovery.effects.find(
+                  (candidate) =>
+                    candidate.identity === capturedEffectIdentity ||
+                    candidate.representationIdentity === capturedEffectIdentity,
+                )
           const capturedEffectEnvironment =
             capturedEffectIdentity === undefined
               ? undefined
@@ -1558,13 +1577,18 @@ const effectEnvironments = (
                     { readonly _tag: 'EffectEnvironment' }
                   > =>
                     candidate._tag === 'EffectEnvironment' &&
-                    Instances.effectIdentity(candidate.instance, candidate.site) ===
-                      capturedEffectIdentity,
+                    (Instances.effectIdentity(candidate.instance, candidate.site) ===
+                      capturedEffectIdentity ||
+                      candidate.successEffectIdentity === capturedEffectIdentity ||
+                      (capturedEffectInstance !== undefined &&
+                        Instances.effectIdentity(candidate.instance, candidate.site) ===
+                          capturedEffectInstance.identity)),
                 )
           const capturedCallableIdentity =
-            Type.isCallable(specialized) && source === 'Parameter'
+            realized?.callableIdentity ??
+            (Type.isCallable(specialized) && source === 'Parameter'
               ? Instances.parameterCallableIdentity(instance.function, instance.key, ordinal)
-              : undefined
+              : undefined)
           const capturedCallableEnvironment =
             capturedCallableIdentity?.environment === undefined
               ? undefined

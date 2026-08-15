@@ -708,6 +708,7 @@ const providerBindings = (
       Object.freeze({
         capability: requirement.capability,
         providerType: requirement.providerType,
+        witness: requirement.witness,
         role: requirement.role,
         access: requirement.access,
         ...(requirement.witness._tag === 'SourceConformanceWitness' &&
@@ -5019,6 +5020,23 @@ const lowerEffectRunner = (
     regions: Object.freeze(
       lowering.regions.flatMap((region) => (region === undefined ? [] : [region])),
     ),
+    effectRunner: Object.freeze({
+      base: Object.freeze({
+        declaration: Hir.effectRunnerId(type.environment.instance.declaration, type.site),
+        typeArguments: type.environment.instance.typeArguments,
+      }),
+      providers: Object.freeze(
+        spec.providedRequirements.map((requirement) =>
+          Object.freeze({
+            capability: requirement.capability,
+            providerType: requirement.providerType,
+            witness: requirement.witness,
+            role: requirement.role,
+            access: requirement.access,
+          }),
+        ),
+      ),
+    }),
   })
 }
 

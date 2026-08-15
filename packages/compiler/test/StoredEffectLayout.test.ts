@@ -178,3 +178,36 @@ pub fn main() -> i32 {
     assert.deepEqual(Layout.verify(plan), [])
   }),
 )
+
+it.effect('preserves local executable identities through recursively nested Effects', () =>
+  Effect.gen(function* () {
+    const { plan } = yield* storedLayout(
+      'stored-effect-layout/deep-nested-executables',
+      `struct Deferred<F: once Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let deepest = effect { return 1 }
+  let transform = i32.add(1)
+  let middle = effect {
+    let base = run move deepest
+    return transform(base)
+  }
+  let deferred = Deferred { operation: effect { return run move middle } }
+  return 0
+}`,
+      Target.wasm32UnknownUnknown,
+    )
+    const represented = representedEntry(plan)
+    const shape = Layout.callingShape(plan, represented.type)
+
+    assert.strictEqual(shape?.tree._tag, 'EffectEnvironmentShape')
+    if (shape?.tree._tag !== 'EffectEnvironmentShape') return
+    const middle = shape.tree.fields.at(0)?.shape
+    assert.strictEqual(middle?._tag, 'EffectEnvironmentShape')
+    if (middle?._tag !== 'EffectEnvironmentShape') return
+    assert.deepEqual(
+      middle.fields.map((field) => field.shape._tag),
+      ['EffectEnvironmentShape', 'CallableEnvironmentShape'],
+    )
+    assert.deepEqual(Layout.verify(plan), [])
+  }),
+)

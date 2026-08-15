@@ -187,6 +187,72 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('binds provider-specialized runs to their exact generated runner and witness', () =>
+  Effect.gen(function* () {
+    const { module } = yield* lowerStored(
+      'stored-effect-mir/provided-runner',
+      `service Counter { effect fn get() -> i32 ? &Counter }
+service Meter { effect fn read() -> i32 ? &Meter }
+struct Fixed { value: i32 }
+effect fn get(self: &Fixed) -> i32 { return self.value }
+effect fn read(self: &Fixed) -> i32 { return self.value }
+impl Counter for Fixed { get: Fixed.get }
+impl Meter for Fixed { read: Fixed.read }
+effect fn count() -> i32 ? &Counter { return run Counter.get() }
+effect fn measure() -> i32 ? &Meter { return run Meter.read() }
+pub fn main() -> i32 {
+  let fixed = Fixed { value: 42 }
+  let ignored = run (count() |> Effect.provide(&fixed))
+  let alsoIgnored = run (measure() |> Effect.provide(&fixed))
+  return run (count() |> Effect.provide(&fixed))
+}`,
+    )
+    const providedRuns = module.functions.flatMap((fn) =>
+      Mir.operations(fn).flatMap((operation) => {
+        if (operation._tag !== 'RunEffectValue' || operation.providers.length !== 1) return []
+        return [operation]
+      }),
+    )
+    const counter = providedRuns.find(
+      (operation) => operation.providers.at(0)?.capability.name === 'Counter',
+    )
+    const meter = providedRuns.find(
+      (operation) => operation.providers.at(0)?.capability.name === 'Meter',
+    )
+
+    assert.strictEqual(counter?._tag, 'RunEffectValue')
+    assert.strictEqual(meter?._tag, 'RunEffectValue')
+    assert.deepEqual(Mir.verify(module), [])
+    if (counter?._tag !== 'RunEffectValue' || meter?._tag !== 'RunEffectValue') return
+    const wrongWrapper = Object.freeze({
+      ...counter,
+      runner: meter.runner,
+      runnerTypeArguments: meter.runnerTypeArguments,
+    })
+    assert.include(
+      Mir.verify(replaceOperation(module, counter, wrongWrapper)).map(
+        (violation) => violation.rule,
+      ),
+      'InvalidEffectOperation',
+    )
+    const counterProvider = counter.providers.at(0)
+    const meterProvider = meter.providers.at(0)
+    if (counterProvider === undefined || meterProvider === undefined) return
+    const wrongWitness = Object.freeze({
+      ...counter,
+      providers: Object.freeze([
+        Object.freeze({ ...counterProvider, witness: meterProvider.witness }),
+      ]),
+    })
+    assert.include(
+      Mir.verify(replaceOperation(module, counter, wrongWitness)).map(
+        (violation) => violation.rule,
+      ),
+      'InvalidEffectOperation',
+    )
+  }),
+)
+
 it.effect('resolves unrun stored Effect cleanup before MIR', () =>
   Effect.gen(function* () {
     const { module } = yield* lowerStored(
