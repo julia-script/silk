@@ -289,3 +289,64 @@ it('mints the callable environment identity in exactly one frontend module', () 
   // minting site here means some phase started rediscovering identity from syntax.
   assert.deepEqual(minting, ['Elaboration.ts'])
 })
+
+it.effect('rejects extracting an owned callable field with its own diagnostic', () =>
+  Effect.gen(function* () {
+    const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
+fn decode(value: i32) -> i32 { return value }
+pub fn main() -> i32 {
+  let parser = Parser { parse: decode }
+  let taken = move parser.parse
+  return 0
+}`
+    const snapshot = yield* realized('callable-field/extraction', source)
+    const diagnostic = Analysis.diagnostics(snapshot).find(
+      (candidate) => candidate.code === 'OWN0013',
+    )
+
+    // The representation-bearing field names its own rejection instead of the general partial-move
+    // rule, so the reason records the aggregate, the field, and the callable contract.
+    assert.strictEqual(diagnostic?.reason._tag, 'RepresentationFieldExtraction')
+    assert.include(diagnostic?.message ?? '', 'cleaned with the whole aggregate')
+    assert.notInclude(
+      Analysis.diagnostics(snapshot).map((candidate) => candidate.code),
+      'OWN0002',
+    )
+  }),
+)
+
+it.effect('keeps an ordinary struct field on the general partial-move rejection', () =>
+  Effect.gen(function* () {
+    const source = `struct Token { value: i32 }
+struct Holder { token: Token }
+pub fn main() -> i32 {
+  let holder = Holder { token: Token { value: 1 } }
+  let taken = move holder.token
+  return 0
+}`
+    const snapshot = yield* realized('callable-field/ordinary-extraction', source)
+    const codes = Analysis.diagnostics(snapshot).map((candidate) => candidate.code)
+
+    assert.include(codes, 'OWN0002')
+    assert.notInclude(codes, 'OWN0013')
+  }),
+)
+
+it.effect('keeps a representation-bearing nominal move-only', () =>
+  Effect.gen(function* () {
+    const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
+fn decode(value: i32) -> i32 { return value }
+fn consume<F: fn(i32) -> i32>(parser: Parser<F>) -> i32 { return 0 }
+pub fn main() -> i32 {
+  let parser = Parser { parse: decode }
+  let first = consume(move parser)
+  let second = consume(parser)
+  return first + second
+}`
+    const snapshot = yield* realized('callable-field/move-only', source)
+    const codes = Analysis.diagnostics(snapshot).map((candidate) => candidate.code)
+
+    // A whole-value move transfers the environment; the aggregate is not implicitly copyable.
+    assert.include(codes, 'OWN0001')
+  }),
+)

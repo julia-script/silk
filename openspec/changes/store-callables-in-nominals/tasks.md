@@ -9,7 +9,7 @@
 
 - [ ] 2.1 Derive shared, exclusive, and consuming invocation access from aggregate receivers.
 - [ ] 2.2 Carry capture loans, liveness, whole-value moves, and cleanup through nested representation-bearing nominals.
-- [ ] 2.3 Keep representation-bearing nominals move-only and reject direct owned field extraction with a dedicated diagnostic.
+- [x] 2.3 Keep representation-bearing nominals move-only and reject direct owned field extraction with a dedicated diagnostic.
 - [ ] 2.4 Add uncalled, called, consuming, moved, typed-failure, and scoped-borrow cleanup traces.
 
 ## 3. Layout and MIR

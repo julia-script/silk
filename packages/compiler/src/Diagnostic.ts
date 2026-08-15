@@ -231,6 +231,9 @@ export const conflictingSliceLoanCode = 'OWN0010' as const
 export const ownerAccessDuringLoanCode = 'OWN0011' as const
 export const borrowedMoveCode = 'OWN0012' as const
 
+/** Stable code for extracting one owned representation-bearing field out of its aggregate. */
+export const representationFieldExtractionCode = 'OWN0013' as const
+
 /** Stable code for an exact `usize` magnitude outside the selected target word. */
 export const usizeTargetOutOfRangeCode = 'LAY0001' as const
 
@@ -369,6 +372,7 @@ export type Code =
   | typeof conflictingSliceLoanCode
   | typeof ownerAccessDuringLoanCode
   | typeof borrowedMoveCode
+  | typeof representationFieldExtractionCode
   | typeof usizeTargetOutOfRangeCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
@@ -748,6 +752,12 @@ export type Reason =
       readonly moveSpan: SourceSpan.SourceSpan
     }
   | { readonly _tag: 'PartialMove' }
+  | {
+      readonly _tag: 'RepresentationFieldExtraction'
+      readonly aggregate: string
+      readonly field: string
+      readonly contract: string
+    }
   | { readonly _tag: 'ExplicitMoveRequired'; readonly spelling: string }
   | { readonly _tag: 'OverlappingAssignment'; readonly spelling: string }
   | { readonly _tag: 'IncompatibleLoopHeader'; readonly loop: number }
@@ -2858,6 +2868,27 @@ export const partialMove = (span: SourceSpan.SourceSpan): Diagnostic =>
     severity: 'error',
     message: 'Struct fields cannot be moved independently',
     reason: Object.freeze({ _tag: 'PartialMove' }),
+    span,
+  })
+
+/**
+ * Extracting an owned representation-bearing field would leave the aggregate holding a partially
+ * released callable environment, so its captures could be cleaned twice. Consuming invocation takes
+ * the whole aggregate instead.
+ */
+export const representationFieldExtraction = (
+  aggregate: string,
+  field: string,
+  contract: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: representationFieldExtractionCode,
+    severity: 'error',
+    message: `Cannot move field ${field} out of ${aggregate}: it stores the callable representation ${contract}, whose captures are cleaned with the whole aggregate`,
+    reason: Object.freeze({ _tag: 'RepresentationFieldExtraction', aggregate, field, contract }),
     span,
   })
 

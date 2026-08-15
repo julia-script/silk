@@ -353,6 +353,27 @@ const placeSite = (expression: Hir.Expression): BindingSite | undefined => {
   return useSite(expression)
 }
 
+/**
+ * Names the dedicated extraction rejection when a place resolves to a field holding a concrete
+ * callable representation. Extracting one would leave the aggregate owning a partially released
+ * environment, so its captures could be cleaned twice; consuming invocation takes the whole
+ * aggregate instead. Every other partial move keeps the general struct-field rejection.
+ */
+const representationFieldExtraction = (
+  place: Hir.Expression,
+  span: SourceSpan.SourceSpan,
+): Diagnostic.Diagnostic | undefined => {
+  if (place._tag !== 'Project') return undefined
+  const type = place.type
+  if (!Type.isRepresented(type) || !Type.isCallable(type.contract)) return undefined
+  return Diagnostic.representationFieldExtraction(
+    Type.encode(place.nominal),
+    `#${place.field.ordinal}`,
+    Type.encode(type.contract),
+    span,
+  )
+}
+
 const checkUse = (
   state: CheckState,
   live: Set<string>,
@@ -493,7 +514,10 @@ const checkExpression = (
     case 'Move': {
       if (expression.subject._tag === 'Project' || expression.subject._tag === 'IndexPlace') {
         checkExpression(state, live, expression.subject, false, guard, escaping)
-        state.diagnostics.push(Diagnostic.partialMove(expression.span))
+        state.diagnostics.push(
+          representationFieldExtraction(expression.subject, expression.span) ??
+            Diagnostic.partialMove(expression.span),
+        )
         return
       }
       const site = useSite(expression.subject)
@@ -537,7 +561,10 @@ const checkExpression = (
     case 'Project': {
       checkExpression(state, live, expression.subject, false, guard, escaping)
       if (consuming && categoryOf(expression.type)._tag === 'MoveOnly') {
-        state.diagnostics.push(Diagnostic.partialMove(expression.span))
+        state.diagnostics.push(
+          representationFieldExtraction(expression, expression.span) ??
+            Diagnostic.partialMove(expression.span),
+        )
       }
       return
     }
