@@ -359,6 +359,8 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
       return `${typeText(cleanup.type)} captures ${cleanup.slots
         .map(({ ordinal, cleanup: slot }) => `#${ordinal}:${cleanupText(slot)}`)
         .join(' → ')}`
+    case 'RepresentedEffectCleanup':
+      return `${typeText(cleanup.type)} stored ${typeText(cleanup.contract)} · lanes resolved at the complete instance`
     case 'EffectCleanup':
       return `${typeText(cleanup.type)} captures ${cleanup.slots
         .map(({ ordinal, cleanup: slot }) => `#${ordinal}:${cleanupText(slot)}`)
@@ -629,17 +631,19 @@ export const layoutRows = (
             ? 'aggregate'
             : entry.representation._tag === 'CallableEnvironment'
               ? `stored callable · ${entry.representation.fields.length} capture${entry.representation.fields.length === 1 ? '' : 's'}`
-            : entry.representation._tag === 'Repeated'
-              ? `${entry.representation.length} × ${typeText(entry.representation.element)} · stride ${entry.representation.stride}`
-              : entry.representation._tag === 'Slice'
-                ? `address i${entry.representation.address.bits} + length i32 · stride ${entry.representation.stride}`
-              : entry.representation._tag === 'String'
-                ? `UTF-8 address i${entry.representation.storage.bits} + byte length i${entry.representation.byteLength.size * 8}`
-              : entry.representation._tag === 'Union'
-                ? `sum · tag i${entry.representation.tag.bits} · payload +${entry.representation.payloadOffset}/${entry.representation.payloadSize}`
-              : entry.representation._tag === 'Reference'
-                ? `reference · address i${entry.representation.address.bits}`
-                : `i${entry.representation.bits}`
+              : entry.representation._tag === 'StoredEffectEnvironment'
+                ? `stored Effect · ${entry.representation.fields.length} capture${entry.representation.fields.length === 1 ? '' : 's'}`
+                : entry.representation._tag === 'Repeated'
+                  ? `${entry.representation.length} × ${typeText(entry.representation.element)} · stride ${entry.representation.stride}`
+                  : entry.representation._tag === 'Slice'
+                    ? `address i${entry.representation.address.bits} + length i32 · stride ${entry.representation.stride}`
+                    : entry.representation._tag === 'String'
+                      ? `UTF-8 address i${entry.representation.storage.bits} + byte length i${entry.representation.byteLength.size * 8}`
+                      : entry.representation._tag === 'Union'
+                        ? `sum · tag i${entry.representation.tag.bits} · payload +${entry.representation.payloadOffset}/${entry.representation.payloadSize}`
+                        : entry.representation._tag === 'Reference'
+                          ? `reference · address i${entry.representation.address.bits}`
+                          : `i${entry.representation.bits}`
         }`,
       })
     }

@@ -1,4 +1,5 @@
 import * as Option from 'effect/Option'
+import * as CallableFieldRealization from './CallableFieldRealization.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -46,6 +47,14 @@ export type Type =
         Layout.EffectEnvironment,
         { readonly _tag: 'EffectEnvironment' }
       >
+      readonly storage?: {
+        readonly _tag: 'StoredEffectField'
+        readonly type: SilkType.Represented
+        readonly realization: Extract<
+          Layout.Representation,
+          { readonly _tag: 'StoredEffectEnvironment' }
+        >['realization']
+      }
     }
   | {
       readonly _tag: 'CallableValue'
@@ -68,7 +77,8 @@ export type Type =
   | { readonly _tag: 'EffectOutcome'; readonly type: SilkType.Effect }
 
 export const semanticType = (self: Type): DeclarationIndex.SemanticType => {
-  if (self._tag === 'CallableValue') return self.storage?.type ?? self.type
+  if (self._tag === 'CallableValue' || self._tag === 'EffectValue')
+    return self.storage?.type ?? self.type
   return self._tag === 'Nominal' ||
     self._tag === 'Bottom' ||
     self._tag === 'FixedArray' ||
@@ -77,7 +87,6 @@ export const semanticType = (self: Type): DeclarationIndex.SemanticType => {
     self._tag === 'Reference' ||
     self._tag === 'Union' ||
     self._tag === 'EffectBorrow' ||
-    self._tag === 'EffectValue' ||
     self._tag === 'EffectOutcome'
     ? self.type
     : self._tag
@@ -714,6 +723,20 @@ export type Operation =
       readonly effect: LocalId
       readonly runner: DeclarationIndex.CanonicalId
       readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+      /** Exact unsupplied runner retained when `runner` is a statically provided specialization. */
+      readonly runnerBase?: {
+        readonly declaration: DeclarationIndex.CanonicalId
+        readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
+      }
+      /** Ordered compile-time provider selections proving the exact requirement row. */
+      readonly providers: ReadonlyArray<{
+        readonly capability: SilkType.Nominal
+        readonly providerType: SilkType.Nominal
+        readonly witness: DeclarationIndex.ConformanceWitness
+        readonly role: string
+        readonly access: 'Shared' | 'Exclusive' | 'Take'
+        readonly argument?: LocalId
+      }>
       /** Statically selected service-provider references appended after the Effect captures. */
       readonly arguments: ReadonlyArray<LocalId>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
@@ -802,7 +825,9 @@ export type Operation =
       readonly fields: ReadonlyArray<{
         readonly field: DeclarationIndex.FieldId
         readonly value: LocalId
-        readonly stored?: Extract<Type, { readonly _tag: 'CallableValue' }>['storage']
+        readonly stored?:
+          | Extract<Type, { readonly _tag: 'CallableValue' }>['storage']
+          | Extract<Type, { readonly _tag: 'EffectValue' }>['storage']
       }>
       readonly provenance: Provenance
     }
@@ -1245,6 +1270,20 @@ export interface MirFunction {
   readonly result: Type
   readonly entry: RegionId
   readonly regions: ReadonlyArray<Region>
+  /** Static origin of a generated Effect runner, including every selected provider witness. */
+  readonly effectRunner?: {
+    readonly base: {
+      readonly declaration: DeclarationIndex.CanonicalId
+      readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
+    }
+    readonly providers: ReadonlyArray<{
+      readonly capability: SilkType.Nominal
+      readonly providerType: SilkType.Nominal
+      readonly witness: DeclarationIndex.ConformanceWitness
+      readonly role: string
+      readonly access: 'Shared' | 'Exclusive' | 'Take'
+    }>
+  }
   readonly suspension?: {
     readonly classification: SuspensionClassification
     readonly regions: ReadonlyArray<SuspensionRegion>
@@ -1313,6 +1352,39 @@ export const matchesInstance = (
 /** Tests exact concrete instance identity, including the resolved contract row. */
 export const matchesInstanceKey = (fn: MirFunction, key: Instances.InstanceKey): boolean =>
   instanceText(fn.instance) === instanceText(key)
+
+const conformanceWitnessMatches = (
+  left: DeclarationIndex.ConformanceWitness,
+  right: DeclarationIndex.ConformanceWitness,
+): boolean => {
+  if (
+    left._tag !== right._tag ||
+    !SilkType.equals(left.capability, right.capability) ||
+    !SilkType.equals(left.provider, right.provider)
+  )
+    return false
+  if (left._tag !== 'SourceConformanceWitness') return true
+  if (right._tag !== 'SourceConformanceWitness') return false
+  return (
+    left.module === right.module &&
+    left.ordinal === right.ordinal &&
+    left.typeArguments.length === right.typeArguments.length &&
+    left.typeArguments.every((argument, ordinal) => {
+      const expected = right.typeArguments.at(ordinal)
+      return expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
+    }) &&
+    left.operations.length === right.operations.length &&
+    left.operations.every((operation, ordinal) => {
+      const expected = right.operations.at(ordinal)
+      return (
+        expected !== undefined &&
+        operation.name === expected.name &&
+        operation.implementation.module === expected.implementation.module &&
+        operation.implementation.name === expected.implementation.name
+      )
+    })
+  )
+}
 
 export interface ControlEdge {
   readonly _tag: 'ControlEdge'
@@ -2174,6 +2246,15 @@ const callableTargetText = (target: Hir.CallableTarget): string =>
 const storedCallableTargetText = (target: SilkType.CallableIdentityArgument['target']): string =>
   callableTargetText(Hir.callableTargetFromIdentity(target))
 
+const storedExecutableText = (
+  stored: NonNullable<
+    Extract<Operation, { readonly _tag: 'Construct' }>['fields'][number]['stored']
+  >,
+): string =>
+  stored._tag === 'StoredCallableField'
+    ? storedCallableTargetText(stored.realization.target)
+    : targetText(stored.realization.runner)
+
 const borrowKey = (borrow: Hir.BorrowId): string =>
   `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
 
@@ -2202,8 +2283,303 @@ const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Ty
     case 'EffectCleanup':
       return [cleanup.type, ...cleanup.slots.flatMap((slot) => cleanupTypes(slot.cleanup))]
     case 'RepresentedCallableCleanup':
+    case 'RepresentedEffectCleanup':
       return [cleanup.type, cleanup.contract]
   }
+}
+
+type EffectEnvironment = Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>
+
+type CallableEnvironment = Extract<
+  Layout.CallableEnvironment,
+  { readonly _tag: 'CallableEnvironment' }
+>
+
+const effectEnvironmentByIdentity = (
+  layout: Layout.Plan,
+  identity: string,
+): EffectEnvironment | undefined =>
+  layout.effectEnvironments.find(
+    (candidate): candidate is EffectEnvironment =>
+      candidate._tag === 'EffectEnvironment' &&
+      (Instances.effectIdentity(candidate.instance, candidate.site) === identity ||
+        candidate.successEffectIdentity === identity),
+  )
+
+const callableEnvironmentByIdentity = (
+  layout: Layout.Plan,
+  identity: SilkType.CallableIdentityArgument,
+): CallableEnvironment | undefined =>
+  layout.callableEnvironments.find(
+    (candidate): candidate is CallableEnvironment =>
+      candidate._tag === 'CallableEnvironment' &&
+      CallableFieldRealization.matchesIdentity(identity, candidate.callable),
+  )
+
+const effectFieldLaneCount = (
+  layout: Layout.Plan,
+  field: Layout.EffectEnvironmentField,
+): number | undefined => {
+  if (field.representation === 'Borrow') return 1
+  if (field.effectIdentity !== undefined) {
+    const environment = effectEnvironmentByIdentity(layout, field.effectIdentity)
+    return environment === undefined
+      ? undefined
+      : Layout.effectEnvironmentLanes(layout, environment).length
+  }
+  if (field.callableIdentity !== undefined) {
+    const environment = callableEnvironmentByIdentity(layout, field.callableIdentity)
+    return environment === undefined
+      ? undefined
+      : Layout.callableEnvironmentLanes(layout, environment).length
+  }
+  return Layout.callingShape(layout, field.type)?.laneCount
+}
+
+const callableEnvironmentCleanupValid = (
+  layout: Layout.Plan,
+  identity: SilkType.CallableIdentityArgument,
+  expectedType: SilkType.Callable,
+  cleanup: Ownership.CleanupPlan,
+  active: ReadonlySet<string>,
+): boolean => {
+  const environment = callableEnvironmentByIdentity(layout, identity)
+  if (environment === undefined || cleanup._tag !== 'CallableCleanup') return false
+  const environmentIdentity = Instances.callableEnvironmentIdentity(environment.callable)
+  const key = `callable:${SilkType.callableEnvironmentKey(environmentIdentity)}`
+  if (active.has(key)) return false
+  const expected = [...environment.fields]
+    .reverse()
+    .filter((field) => field.access === 'Take' && !isCopyType(field.type))
+  const next = new Set(active).add(key)
+  return (
+    SilkType.equals(cleanup.type, expectedType) &&
+    cleanup.environment._tag === 'CallableEnvironmentIdentity' &&
+    SilkType.equalsCallableEnvironmentIdentity(cleanup.environment.identity, environmentIdentity) &&
+    cleanup.slots.length === expected.length &&
+    cleanup.slots.every((slot, ordinal) => {
+      const field = expected.at(ordinal)
+      return (
+        field !== undefined &&
+        slot.ordinal === field.ordinal &&
+        cleanupMatchesSemanticType(layout, slot.cleanup, field.type, next)
+      )
+    })
+  )
+}
+
+const executableFieldCleanupValid = (
+  layout: Layout.Plan,
+  field: Layout.EffectEnvironmentField,
+  cleanup: Ownership.CleanupPlan,
+  active: ReadonlySet<string>,
+): boolean => {
+  if (field.effectIdentity !== undefined) {
+    const environment = effectEnvironmentByIdentity(layout, field.effectIdentity)
+    return (
+      environment !== undefined &&
+      effectEnvironmentCleanupValid(layout, field.effectIdentity, environment, cleanup, active)
+    )
+  }
+  if (field.callableIdentity !== undefined && SilkType.isCallable(field.type))
+    return callableEnvironmentCleanupValid(
+      layout,
+      field.callableIdentity,
+      field.type,
+      cleanup,
+      active,
+    )
+  return cleanupMatchesSemanticType(layout, cleanup, field.type, active)
+}
+
+const effectEnvironmentCleanupValid = (
+  layout: Layout.Plan,
+  identity: string,
+  environment: EffectEnvironment,
+  cleanup: Ownership.CleanupPlan,
+  active: ReadonlySet<string>,
+): boolean => {
+  const key = `effect:${identity}`
+  if (active.has(key))
+    return cleanup._tag === 'NoCleanup' && SilkType.equals(cleanup.type, environment.effect)
+  const next = new Set(active).add(key)
+  let laneOffset = 0
+  const expected = environment.fields.flatMap((field, ordinal) => {
+    const laneCount = effectFieldLaneCount(layout, field)
+    const currentOffset = laneOffset
+    if (laneCount !== undefined) laneOffset += laneCount
+    const noCleanup: Ownership.CleanupPlan = Object.freeze({
+      _tag: 'NoCleanup',
+      type: field.type,
+    })
+    return field.representation === 'Borrow' ||
+      executableFieldCleanupValid(layout, field, noCleanup, next)
+      ? []
+      : [Object.freeze({ field, ordinal, laneOffset: currentOffset, laneCount })]
+  })
+  if (expected.length === 0)
+    return cleanup._tag === 'NoCleanup' && SilkType.equals(cleanup.type, environment.effect)
+  return (
+    cleanup._tag === 'EffectCleanup' &&
+    SilkType.equals(cleanup.type, environment.effect) &&
+    Hir.sameExecutableSite(cleanup.site, environment.site) &&
+    cleanup.slots.length === expected.length &&
+    cleanup.slots.every((slot, ordinal) => {
+      const candidate = [...expected].reverse().at(ordinal)
+      return (
+        candidate !== undefined &&
+        candidate.laneCount !== undefined &&
+        slot.ordinal === candidate.ordinal &&
+        slot.laneOffset === candidate.laneOffset &&
+        slot.laneCount === candidate.laneCount &&
+        executableFieldCleanupValid(layout, candidate.field, slot.cleanup, next)
+      )
+    })
+  )
+}
+
+const cleanupMatchesSemanticType = (
+  layout: Layout.Plan,
+  cleanup: Ownership.CleanupPlan,
+  type: DeclarationIndex.SemanticType,
+  seen: ReadonlySet<string> = new Set(),
+): boolean => {
+  if (SilkType.isRepresented(type)) {
+    const representation = Layout.entry(layout, type)?.representation
+    const contractValid = TypeCompatibility.isCompatible(
+      TypeCompatibility.check(type.contract, cleanup.type),
+    )
+    if (representation?._tag === 'CallableEnvironment')
+      return (cleanup._tag === 'CallableCleanup' || cleanup._tag === 'NoCleanup') && contractValid
+    if (representation?._tag === 'StoredEffectEnvironment')
+      return (
+        contractValid &&
+        (cleanup._tag === 'EffectCleanup'
+          ? storedEffectCleanupPlanValid(layout, type, representation, cleanup)
+          : cleanup._tag === 'NoCleanup' &&
+            representation.realization.cleanup.unrunLanes.length === 0)
+      )
+    return false
+  }
+  if (!SilkType.equals(cleanup.type, type)) return false
+  if (
+    SilkType.isBuiltin(type) ||
+    SilkType.isString(type) ||
+    SilkType.isNever(type) ||
+    SilkType.isSlice(type) ||
+    SilkType.isReference(type) ||
+    SilkType.isEffect(type) ||
+    SilkType.isCallable(type)
+  )
+    return cleanup._tag === 'NoCleanup'
+  if (SilkType.equals(type, SilkType.allocation)) return cleanup._tag === 'AllocationCleanup'
+  if (SilkType.isRawBuffer(type)) return cleanup._tag === 'RawBufferCleanup'
+  if (SilkType.isFixedArray(type))
+    return (
+      cleanup._tag === 'ArrayCleanup' &&
+      cleanup.length === type.length &&
+      cleanupMatchesSemanticType(layout, cleanup.element, type.element, seen)
+    )
+  if (SilkType.isUnion(type))
+    return (
+      cleanup._tag === 'UnionCleanup' &&
+      cleanup.cases.length === type.members.length &&
+      cleanup.cases.every((entry, ordinal) => {
+        const member = type.members.at(ordinal)
+        return (
+          member !== undefined &&
+          entry.ordinal === ordinal &&
+          SilkType.equals(entry.member, member) &&
+          cleanupMatchesSemanticType(layout, entry.cleanup, member, seen)
+        )
+      })
+    )
+  if (!SilkType.isNominal(type)) return cleanup._tag === 'NoCleanup'
+  const key = SilkType.key(type)
+  if (seen.has(key)) return cleanup._tag === 'NoCleanup'
+  const representation = Layout.entry(layout, type)?.representation
+  if (representation?._tag !== 'Aggregate') return cleanup._tag === 'NoCleanup'
+  const requiredHook = representation.cleanupHook
+  if (requiredHook !== undefined) {
+    if (
+      cleanup._tag !== 'HookCleanup' ||
+      cleanup.hook.module !== requiredHook.hook.module ||
+      cleanup.hook.name !== requiredHook.hook.name ||
+      cleanup.typeArguments.length !== requiredHook.typeArguments.length ||
+      !cleanup.typeArguments.every((argument, ordinal) => {
+        const expected = requiredHook.typeArguments.at(ordinal)
+        return expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
+      })
+    )
+      return false
+  } else if (cleanup._tag === 'HookCleanup') return false
+  const concrete = cleanup._tag === 'HookCleanup' ? cleanup.inner : cleanup
+  if (concrete._tag !== 'StructCleanup' || concrete.fields.length !== representation.fields.length)
+    return false
+  const next = new Set(seen).add(key)
+  return concrete.fields.every((field, ordinal) => {
+    const expected = representation.fields.at(ordinal)
+    return (
+      expected !== undefined &&
+      field.field.ordinal === expected.id.ordinal &&
+      field.field.struct.sourceId === expected.id.struct.sourceId &&
+      field.field.struct.ordinal === expected.id.struct.ordinal &&
+      cleanupMatchesSemanticType(layout, field.cleanup, expected.type, next)
+    )
+  })
+}
+
+const storedEffectCleanupPlanValid = (
+  layout: Layout.Plan,
+  type: SilkType.Represented,
+  representation: Extract<Layout.Representation, { readonly _tag: 'StoredEffectEnvironment' }>,
+  cleanup: Extract<Ownership.CleanupPlan, { readonly _tag: 'EffectCleanup' }>,
+): boolean => {
+  if (!Hir.sameExecutableSite(cleanup.site, representation.realization.site)) return false
+  const shape = Layout.callingShape(layout, type)?.tree
+  if (shape?._tag !== 'EffectEnvironmentShape') return false
+  const ranges = representation.fields.map((field, ordinal) => {
+    const fieldShape = shape.fields.at(ordinal)
+    const laneOffset = shape.fields
+      .slice(0, ordinal)
+      .reduce((total, candidate) => total + candidate.shape.laneCount, 0)
+    return Object.freeze({ field, fieldShape, laneOffset })
+  })
+  const expected = [...representation.realization.cleanup.unrunLanes].reverse().flatMap((owned) => {
+    const range = ranges.find((candidate) => candidate.field.capture === owned)
+    return range === undefined ? [] : [Object.freeze({ owned, ...range })]
+  })
+  const active = new Set([`effect:${representation.realization.runnerIdentity}`])
+  return (
+    expected.length === representation.realization.cleanup.unrunLanes.length &&
+    cleanup.slots.length === expected.length &&
+    cleanup.slots.every((slot, ordinal) => {
+      const candidate = expected.at(ordinal)
+      return (
+        candidate !== undefined &&
+        candidate.fieldShape !== undefined &&
+        slot.ordinal === candidate.owned &&
+        slot.laneOffset === candidate.laneOffset &&
+        slot.laneCount === candidate.fieldShape.shape.laneCount &&
+        executableFieldCleanupValid(layout, candidate.field, slot.cleanup, active)
+      )
+    })
+  )
+}
+
+const storedEffectCleanupValid = (
+  layout: Layout.Plan,
+  dropped: Extract<Type, { readonly _tag: 'EffectValue' }> | undefined,
+  cleanup: Extract<Ownership.CleanupPlan, { readonly _tag: 'EffectCleanup' }>,
+): boolean => {
+  const storage = dropped?.storage
+  const representation =
+    storage === undefined ? undefined : Layout.entry(layout, storage.type)?.representation
+  return (
+    storage !== undefined &&
+    representation?._tag === 'StoredEffectEnvironment' &&
+    storedEffectCleanupPlanValid(layout, storage.type, representation, cleanup)
+  )
 }
 
 const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.SemanticType> => {
@@ -2305,6 +2681,8 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
           : [semanticType(operation.propagationType)]),
         semanticType(operation.type),
         ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
+        ...(operation.runnerBase?.typeArguments.filter(SilkType.isTypeArgument) ?? []),
+        ...operation.providers.flatMap((provider) => [provider.capability, provider.providerType]),
       ]
     case 'RunStaticEffect':
       return [
@@ -4210,6 +4588,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               (dropped?._tag === 'CallableValue' &&
                 dropped.storage !== undefined &&
                 SilkType.equals(dropped.storage.realization.contract, cleanup.type)) ||
+              (dropped?._tag === 'EffectValue' &&
+                dropped.storage !== undefined &&
+                SilkType.equals(dropped.storage.realization.contract, cleanup.type)) ||
               (SilkType.isEffect(droppedSemantic) &&
                 SilkType.isEffect(cleanup.type) &&
                 (() => {
@@ -4261,11 +4642,23 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   endedLoans >= borrowed
                 )
               })())
+          const effectCleanupValid =
+            cleanup._tag !== 'EffectCleanup' ||
+            (dropped?._tag === 'EffectValue' &&
+              (dropped.storage === undefined
+                ? Hir.sameExecutableSite(cleanup.site, dropped.site)
+                : storedEffectCleanupValid(self.layout, dropped, cleanup)))
+          const storedAggregateCleanupValid =
+            droppedSemantic !== undefined &&
+            (!SilkType.containsEffectRepresentation(droppedSemantic) ||
+              cleanupMatchesSemanticType(self.layout, cleanup, droppedSemantic))
           if (
             dropped === undefined ||
             !cleanupTypeMatches ||
             !unionCasesValid ||
-            !callableCleanupValid
+            !callableCleanupValid ||
+            !effectCleanupValid ||
+            !storedAggregateCleanupValid
           ) {
             violations.push(
               Object.freeze({
@@ -4287,8 +4680,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             operation.fields.every((field, ordinal) => {
               const declared = expected.at(ordinal)
               const valueType = fn.localTypes.at(field.value.ordinal)
-              const storedValid =
-                field.stored !== undefined &&
+              const storedCallableValid =
+                field.stored?._tag === 'StoredCallableField' &&
                 declared !== undefined &&
                 valueType?._tag === 'CallableValue' &&
                 SilkType.equals(field.stored.type, declared.type) &&
@@ -4302,11 +4695,30 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 field.stored.realization.field.ordinal === field.field.ordinal &&
                 field.stored.realization.instance.module === operation.type.type.module &&
                 field.stored.realization.instance.name === operation.type.type.name
+              const storedEffectValid =
+                field.stored?._tag === 'StoredEffectField' &&
+                declared !== undefined &&
+                valueType?._tag === 'EffectValue' &&
+                SilkType.equals(field.stored.type, declared.type) &&
+                TypeCompatibility.isCompatible(
+                  TypeCompatibility.check(valueType.type, field.stored.realization.contract),
+                ) &&
+                Hir.sameExecutableSite(valueType.site, field.stored.realization.site) &&
+                Hir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
+                  .module === field.stored.realization.runner.module &&
+                Hir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
+                  .name === field.stored.realization.runner.name &&
+                field.stored.realization.field.ordinal === field.field.ordinal &&
+                field.stored.realization.instance.module === operation.type.type.module &&
+                field.stored.realization.instance.name === operation.type.type.name
               return (
                 declared !== undefined &&
                 declared.id.ordinal === field.field.ordinal &&
                 valueType !== undefined &&
-                (SilkType.equals(semanticType(valueType), declared.type) || storedValid)
+                ((field.stored === undefined &&
+                  SilkType.equals(semanticType(valueType), declared.type)) ||
+                  storedCallableValid ||
+                  storedEffectValid)
               )
             })
           if (!valid) {
@@ -4429,6 +4841,23 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 candidate.callable?.ordinal === operation.destination.ordinal &&
                 (candidate.access === 'Shared' || candidate.access === 'Exclusive'),
             )
+          const effectViewProjection =
+            operation._tag === 'ReadPlace' &&
+            operation.consume !== true &&
+            operation.type._tag === 'EffectValue' &&
+            operation.type.storage !== undefined &&
+            (operation.type.type.access === 'Shared' ||
+              operation.type.type.access === 'Exclusive') &&
+            operations.filter((candidate) =>
+              accessedOwnerLocals(candidate).some(
+                (local) => local.ordinal === operation.destination.ordinal,
+              ),
+            ).length === 1 &&
+            operations.some(
+              (candidate) =>
+                candidate._tag === 'RunEffectValue' &&
+                candidate.effect.ordinal === operation.destination.ordinal,
+            )
           if (
             selected === undefined ||
             !SilkType.equals(selected, semanticType(operation.type)) ||
@@ -4437,7 +4866,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               operation.consume !== true &&
               !sharedMatchProjection &&
               !sharedBorrowProjection &&
-              !callableViewProjection)
+              !callableViewProjection &&
+              !effectViewProjection)
           ) {
             violations.push(
               Object.freeze({
@@ -4754,6 +5184,190 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail: 'run propagation does not preserve canonical outcome contracts',
+              }),
+            )
+        }
+        if (operation._tag === 'RunEffectValue') {
+          const effect = fn.localTypes.at(operation.effect.ordinal)
+          const outcome = fn.localTypes.at(operation.outcome.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const runner = self.functions.find((candidate) =>
+            matchesInstance(candidate, operation.runner, operation.runnerTypeArguments),
+          )
+          const suspensionRegion = fn.suspension?.regions.find(
+            (candidate) =>
+              candidate.operation._tag === 'RunEffectValue' &&
+              (candidate._tag === 'RunSuspendableEffectRegion'
+                ? candidate.runner.declaration?.module === operation.runner.module &&
+                  candidate.runner.declaration.name === operation.runner.name
+                : candidate.deferred.declaration?.module === operation.runner.module &&
+                  candidate.deferred.declaration.name === operation.runner.name),
+          )
+          const suspensionRunner =
+            suspensionRegion?._tag === 'RunSuspendableEffectRegion'
+              ? suspensionRegion.runner
+              : suspensionRegion?.deferred
+          const mappingsValid =
+            operation.propagationType === undefined
+              ? operation.tagMappings.length === 0
+              : operation.tagMappings.length === operation.outcomeType.type.failures.length &&
+                operation.tagMappings.every((mapping) => {
+                  const source = operation.outcomeType.type.failures.at(mapping.source - 1)
+                  const targetFailure = operation.propagationType?.type.failures.at(
+                    mapping.target - 1,
+                  )
+                  return (
+                    source !== undefined &&
+                    targetFailure !== undefined &&
+                    SilkType.equals(source, targetFailure)
+                  )
+                })
+          const effectValue = effect?._tag === 'EffectValue' ? effect : undefined
+          const stored = effectValue?.storage
+          const storedContractValid =
+            stored === undefined ||
+            (effectValue !== undefined &&
+              SilkType.equals(effectValue.type, stored.realization.contract) &&
+              effectValue.type.access === stored.realization.access &&
+              effectValue.type.failures.length === stored.realization.rows.failures.length &&
+              effectValue.type.failures.every((failure, ordinal) => {
+                const expected = stored.realization.rows.failures.at(ordinal)
+                return expected !== undefined && SilkType.equals(failure, expected)
+              }) &&
+              effectValue.type.requirements.length ===
+                stored.realization.rows.requirements.length &&
+              effectValue.type.requirements.every((requirement, ordinal) => {
+                const expected = stored.realization.rows.requirements.at(ordinal)
+                return (
+                  expected !== undefined &&
+                  requirement.access === expected.access &&
+                  requirement.role === expected.role &&
+                  SilkType.equals(requirement.capability, expected.capability)
+                )
+              }))
+          const staticRunnerValid =
+            stored === undefined && operation.runnerBase === undefined
+              ? true
+              : (() => {
+                  if (effectValue === undefined) return false
+                  const base = operation.runnerBase
+                  const selectedBase = base?.declaration ?? operation.runner
+                  const selectedArguments = base?.typeArguments ?? operation.runnerTypeArguments
+                  const expectedBase =
+                    stored?.realization.runner ??
+                    Hir.effectRunnerId(
+                      effectValue.environment.instance.declaration,
+                      effectValue.site,
+                    )
+                  const expectedBaseArguments =
+                    stored?.realization.runnerArguments ??
+                    effectValue.environment.instance.typeArguments
+                  const baseMatches =
+                    selectedBase.module === expectedBase.module &&
+                    selectedBase.name === expectedBase.name &&
+                    selectedArguments.length === expectedBaseArguments.length &&
+                    selectedArguments.every((argument, ordinal) => {
+                      const expected = expectedBaseArguments.at(ordinal)
+                      return (
+                        expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
+                      )
+                    })
+                  const expectedRequirements =
+                    stored?.realization.rows.requirements ?? effectValue.type.requirements
+                  const requirementsMatch =
+                    operation.providers.length === expectedRequirements.length &&
+                    operation.providers.every((provider, ordinal) => {
+                      const requirement = expectedRequirements.at(ordinal)
+                      const argumentType =
+                        provider.argument === undefined
+                          ? undefined
+                          : fn.localTypes.at(provider.argument.ordinal)
+                      const semanticArgument =
+                        argumentType === undefined ? undefined : semanticType(argumentType)
+                      return (
+                        requirement !== undefined &&
+                        provider.role === requirement.role &&
+                        SilkType.equals(provider.capability, requirement.capability) &&
+                        SilkType.equals(provider.witness.capability, provider.capability) &&
+                        SilkType.equals(provider.witness.provider, provider.providerType) &&
+                        (requirement.access === 'Shared' || provider.access === 'Exclusive') &&
+                        (provider.argument === undefined ||
+                          (semanticArgument !== undefined &&
+                            SilkType.isReference(semanticArgument) &&
+                            semanticArgument.access === provider.access &&
+                            SilkType.equals(semanticArgument.target, provider.providerType)))
+                      )
+                    })
+                  const runtimeArguments = operation.providers.flatMap((provider) =>
+                    provider.argument === undefined ? [] : [provider.argument],
+                  )
+                  const argumentsMatch =
+                    runtimeArguments.length === operation.arguments.length &&
+                    runtimeArguments.every(
+                      (argument, ordinal) =>
+                        argument.ordinal === operation.arguments.at(ordinal)?.ordinal,
+                    )
+                  const wrapperShapeMatches =
+                    runner !== undefined &&
+                    runner.parameterCount ===
+                      effectValue.environment.fields.length + operation.arguments.length
+                  const runnerBinding = runner?.effectRunner
+                  const wrapperBindingMatches =
+                    runnerBinding !== undefined &&
+                    runnerBinding.base.declaration.module === selectedBase.module &&
+                    runnerBinding.base.declaration.name === selectedBase.name &&
+                    runnerBinding.base.typeArguments.length === selectedArguments.length &&
+                    runnerBinding.base.typeArguments.every((argument, ordinal) => {
+                      const expected = selectedArguments.at(ordinal)
+                      return (
+                        expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
+                      )
+                    }) &&
+                    runnerBinding.providers.length === operation.providers.length &&
+                    runnerBinding.providers.every((bound, ordinal) => {
+                      const claimed = operation.providers.at(ordinal)
+                      return (
+                        claimed !== undefined &&
+                        bound.role === claimed.role &&
+                        bound.access === claimed.access &&
+                        SilkType.equals(bound.capability, claimed.capability) &&
+                        SilkType.equals(bound.providerType, claimed.providerType) &&
+                        conformanceWitnessMatches(bound.witness, claimed.witness)
+                      )
+                    })
+                  return (
+                    baseMatches &&
+                    requirementsMatch &&
+                    argumentsMatch &&
+                    wrapperShapeMatches &&
+                    wrapperBindingMatches &&
+                    (operation.providers.length === 0
+                      ? operation.runnerBase === undefined
+                      : operation.runnerBase !== undefined)
+                  )
+                })()
+          const valid =
+            effectValue !== undefined &&
+            outcome?._tag === 'EffectOutcome' &&
+            destination !== undefined &&
+            SilkType.equals(effectValue.type, operation.outcomeType.type) &&
+            SilkType.equals(outcome.type, operation.outcomeType.type) &&
+            SilkType.equals(semanticType(destination), semanticType(operation.type)) &&
+            ((runner?.result._tag === 'EffectOutcome' &&
+              SilkType.equals(runner.result.type, operation.outcomeType.type)) ||
+              (suspensionRunner !== undefined &&
+                SilkType.equals(suspensionRunner.outcome, operation.outcomeType.type))) &&
+            storedContractValid &&
+            staticRunnerValid &&
+            mappingsValid
+          if ((stored !== undefined || operation.runnerBase !== undefined) && !valid)
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidEffectOperation',
+                function: fn.id,
+                region: region.id,
+                detail: `Effect value run disagrees with its static runner, exact rows, access, outcome, or propagation contract (target=${targetText(operation.runner)}, effect=${effectValue !== undefined}, runner=${runner !== undefined}, suspension-runner=${suspensionRunner !== undefined}, stored-contract=${storedContractValid}, static-runner=${staticRunnerValid}, mappings=${mappingsValid})`,
               }),
             )
         }
@@ -5094,7 +5708,7 @@ const operationText = (operation: Operation): string => {
     case 'RunEffect':
       return `${localText(operation.destination)} = run-effect ${targetText(operation.target)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'RunEffectValue':
-      return `${localText(operation.destination)} = run-effect-value ${localText(operation.effect)} runner=${targetText(operation.runner)} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = run-effect-value ${localText(operation.effect)} runner=${targetText(operation.runner)}${operation.runnerBase === undefined ? '' : ` base=${targetText(operation.runnerBase.declaration)}`} providers=${operation.providers.map((provider) => `${SilkType.encode(provider.capability)}@${provider.role}:${provider.access.toLowerCase()}`).join(',') || 'none'} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'RunStaticEffect':
       return `${localText(operation.destination)} = run-static-effect runner=${targetText(operation.runner)} captures=${operation.captures.map((capture) => `${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'ReifyEffect':
@@ -5102,7 +5716,7 @@ const operationText = (operation: Operation): string => {
     case 'CloseEffectEntry':
       return `${localText(operation.destination)} = close-effect-entry ${targetText(operation.target)} effect=${localText(operation.effect)} runner=${targetText(operation.runner)} outcome=${localText(operation.outcome)} failures=${operation.failures.map((failure) => `${failure.tag}:${SilkType.encode(failure.type)}->${localText(failure.payload)}:${failure.cleanup._tag}`).join(',') || 'none'} : i32 ${provenanceText(operation.provenance)}`
     case 'Construct':
-      return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value, stored }) => `#${field.ordinal}: ${localText(value)}${stored === undefined ? '' : ` stored=${storedCallableTargetText(stored.realization.target)}`}`).join(', ')} } ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value, stored }) => `#${field.ordinal}: ${localText(value)}${stored === undefined ? '' : ` stored=${storedExecutableText(stored)}`}`).join(', ')} } ${provenanceText(operation.provenance)}`
     case 'ConstructArray':
       return `${localText(operation.destination)} = construct-array ${typeText(operation.type)} [${operation.elements.map(localText).join(', ')}] ${provenanceText(operation.provenance)}`
     case 'Project':

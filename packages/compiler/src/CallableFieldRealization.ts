@@ -269,6 +269,16 @@ const compareEffectEnvironmentSlots = (
   right: EffectEnvironmentSlot,
 ): number => left.ordinal - right.ordinal || left.sourceOrdinal - right.sourceOrdinal
 
+/**
+ * Returns the canonical target-independent environment seam for any discovered Effect instance.
+ * Stored-field realization and recursive layout both consume this function, so nested Effects do
+ * not grow a second capture model or rediscover captures from source syntax.
+ */
+export const effectEnvironmentOf = (
+  effect: Instances.EffectInstance,
+): ReadonlyArray<EffectEnvironmentSlot> =>
+  Object.freeze([...effect.captures.map(effectEnvironmentSlot)].sort(compareEffectEnvironmentSlots))
+
 const effectRows = (contract: Type.Effect): EffectRows =>
   Object.freeze({
     _tag: 'EffectFieldRows',
@@ -513,9 +523,7 @@ const realizeEffectField = (
         actual: selected.type,
       }),
     )
-  const environment = Object.freeze(
-    [...selected.captures.map(effectEnvironmentSlot)].sort(compareEffectEnvironmentSlots),
-  )
+  const environment = effectEnvironmentOf(selected)
   return Object.freeze({
     _tag: 'Supported',
     realization: Object.freeze({
