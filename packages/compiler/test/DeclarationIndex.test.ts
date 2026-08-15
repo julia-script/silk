@@ -840,6 +840,10 @@ impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
       ],
     ])
     assert.deepEqual(valid.diagnostics, [])
+    assert.deepEqual(
+      valid.modules.at(0)?.conformances.map((conformance) => conformance.validity._tag),
+      ['ValidConformance'],
+    )
     assert.isTrue(
       DeclarationIndex.conforms(
         valid,
@@ -862,6 +866,10 @@ impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
       invalid.diagnostics
         .filter((diagnostic) => diagnostic.code === 'SEM0083')
         .map((diagnostic) => diagnostic.reason._tag),
+      ['InvalidConformance', 'InvalidConformance'],
+    )
+    assert.deepEqual(
+      invalid.modules.at(0)?.conformances.map((conformance) => conformance.validity._tag),
       ['InvalidConformance', 'InvalidConformance'],
     )
     assert.isFalse(

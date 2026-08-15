@@ -505,6 +505,11 @@ export type ConformanceTermination =
     }
   | { readonly _tag: 'UnavailableTermination' }
 
+export type ConformanceValidity =
+  | { readonly _tag: 'UncheckedConformance' }
+  | { readonly _tag: 'ValidConformance' }
+  | { readonly _tag: 'InvalidConformance' }
+
 /** One source-retained capability conformance witness. */
 export interface ConformanceFact {
   readonly _tag: 'ConformanceDeclaration'
@@ -532,6 +537,8 @@ export interface ConformanceFact {
   readonly head?: ConformanceHead.ConformanceHead
   readonly coherence: ConformanceCoherence
   readonly termination: ConformanceTermination
+  /** Whether complete header/body validation admitted this declaration as a witness candidate. */
+  readonly validity: ConformanceValidity
   readonly syntax: SyntaxTree.Node
 }
 
@@ -2089,6 +2096,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         // every module's headers have resolved.
         coherence: Object.freeze({ _tag: 'Coherent' as const }),
         termination: Object.freeze({ _tag: 'UnavailableTermination' as const }),
+        validity: Object.freeze({ _tag: 'UncheckedConformance' as const }),
         syntax: node,
       })
     })
@@ -3847,15 +3855,25 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
     return result
   }
 
+  const invalidConformances = new Set<ConformanceFact>()
   for (const module of modules) {
     for (const conformance of module.conformances) {
+      const markInvalid = (): void => {
+        invalidConformances.add(conformance)
+      }
+      const invalidDiagnostic = (
+        ...args: Parameters<typeof Diagnostic.invalidConformance>
+      ): ReturnType<typeof Diagnostic.invalidConformance> => {
+        markInvalid()
+        return Diagnostic.invalidConformance(...args)
+      }
       if (
         conformance.capability._tag !== 'Resolved' ||
         !Type.isNominal(conformance.capability.type) ||
         conformance.provider._tag !== 'Resolved'
       ) {
         diagnostics.push(
-          Diagnostic.invalidConformance(
+          invalidDiagnostic(
             'the capability must resolve to a nominal type and the provider must resolve to a type',
             conformance.syntax.span,
           ),
@@ -3879,7 +3897,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         )
       if (sourceInterface === undefined && !Type.isNominal(provider)) {
         diagnostics.push(
-          Diagnostic.invalidConformance(
+          invalidDiagnostic(
             'service and compiler-sealed capability providers must be nominal types',
             conformance.syntax.span,
           ),
@@ -3898,7 +3916,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           declaredParameters.length === 0)
       ) {
         diagnostics.push(
-          Diagnostic.invalidConformance(
+          invalidDiagnostic(
             'the capability must be concrete; impl type parameters may only bind the provider',
             conformance.syntax.span,
           ),
@@ -3915,7 +3933,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           !Type.equals(declaredProvider, provider)
         ) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               `${capability.name} must be applied to its own provider ${Type.encode(provider)}`,
               conformance.syntax.span,
             ),
@@ -3935,7 +3953,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       })
       if (unstatedRequirement !== undefined) {
         diagnostics.push(
-          Diagnostic.invalidConformance(
+          invalidDiagnostic(
             `requirement ${unstatedRequirement.spelling} must be an interface applied to its own provider`,
             unstatedRequirement.syntax.span,
           ),
@@ -3952,7 +3970,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       )
       if (unused.length > 0) {
         diagnostics.push(
-          Diagnostic.invalidConformance(
+          invalidDiagnostic(
             `impl type parameter ${unused.map((parameter) => parameter.name).join(', ')} is not used by the provider type`,
             conformance.syntax.span,
           ),
@@ -3962,7 +3980,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       if (sourceInterface !== undefined) {
         if (conformance.hook !== undefined) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               `${capability.name} implementations use operation mappings, not a hook body`,
               conformance.hook.syntax.span,
             ),
@@ -3973,12 +3991,13 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         let invalid = false
         for (const mapping of conformance.operations) {
           if (mapping.name._tag !== 'Present') {
+            markInvalid()
             invalid = true
             continue
           }
           if (mapped.has(mapping.name.spelling)) {
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `duplicate ${capability.name}.${mapping.name.spelling} operation mapping`,
                 mapping.syntax.span,
               ),
@@ -3995,7 +4014,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         const extra = [...mapped.keys()].filter((name) => !operationNames.has(name))
         if (missing.length > 0 || extra.length > 0) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               [
                 ...(missing.length === 0 ? [] : [`missing ${missing.join(', ')}`]),
                 ...(extra.length === 0 ? [] : [`unknown ${extra.join(', ')}`]),
@@ -4011,7 +4030,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         )
         if (substitution === undefined) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               `${capability.name} implementation has the wrong interface type-argument arity`,
               conformance.syntax.span,
             ),
@@ -4034,7 +4053,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             contract.requirementRow.requirements.length === 0
           const reject = (): void => {
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `${target._tag === 'TypePath' ? target.spelling : '_'} is incompatible with ${capability.name}.${contractName}`,
                 mapping.syntax.span,
               ),
@@ -4060,7 +4079,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             )
             if (implementation === undefined) {
               diagnostics.push(
-                Diagnostic.invalidConformance(
+                invalidDiagnostic(
                   `mapped operation ${provider.name}.${targetName ?? '_'} does not exist`,
                   mapping.syntax.span,
                 ),
@@ -4079,7 +4098,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             const unpromisedBound = unpromisedWitnessBound(binding, declaredParameters, conformance)
             if (unpromisedBound !== undefined) {
               diagnostics.push(
-                Diagnostic.invalidConformance(
+                invalidDiagnostic(
                   `${target.spelling} requires ${unpromisedBound.bound?.spelling ?? 'a bound'} for ${unpromisedBound.type.name}, which ${capability.name} for ${Type.encode(provider)} does not require`,
                   mapping.syntax.span,
                 ),
@@ -4166,7 +4185,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       if (sourceService !== undefined) {
         if (conformance.hook !== undefined) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               `${capability.name} implementations use operation mappings, not a hook body`,
               conformance.hook.syntax.span,
             ),
@@ -4177,12 +4196,13 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         let invalidMappingSet = false
         for (const mapping of conformance.operations) {
           if (mapping.name._tag !== 'Present') {
+            markInvalid()
             invalidMappingSet = true
             continue
           }
           if (mapped.has(mapping.name.spelling)) {
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `duplicate ${capability.name}.${mapping.name.spelling} operation mapping`,
                 mapping.syntax.span,
               ),
@@ -4199,7 +4219,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         const extra = [...mapped.keys()].filter((operation) => !serviceNames.has(operation))
         if (missing.length > 0 || extra.length > 0) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               [
                 ...(missing.length === 0 ? [] : [`missing ${missing.join(', ')}`]),
                 ...(extra.length === 0 ? [] : [`unknown ${extra.join(', ')}`]),
@@ -4216,7 +4236,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         )
         if (serviceSubstitution === undefined) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               `${capability.name} implementation has the wrong service type-argument arity`,
               conformance.syntax.span,
             ),
@@ -4235,7 +4255,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             target.segments.at(0)?.spelling !== provider.name
           ) {
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `${contract.name.spelling} must map to an operation in the ${provider.name} actor`,
                 mapping.syntax.span,
               ),
@@ -4251,7 +4271,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           )
           if (implementation === undefined) {
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `mapped operation ${provider.name}.${targetName ?? '_'} does not exist`,
                 mapping.syntax.span,
               ),
@@ -4262,7 +4282,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           const unpromisedBound = unpromisedWitnessBound(binding, declaredParameters, conformance)
           if (unpromisedBound !== undefined) {
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `${target.spelling} requires ${unpromisedBound.bound?.spelling ?? 'a bound'} for ${unpromisedBound.type.name}, which ${capability.name} for ${Type.encode(provider)} does not require`,
                 mapping.syntax.span,
               ),
@@ -4373,7 +4393,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             !Type.isEffect(contractRows)
           )
             diagnostics.push(
-              Diagnostic.invalidConformance(
+              invalidDiagnostic(
                 `${provider.name}.${targetName ?? '_'} is incompatible with ${capability.name}.${contract.name.spelling}`,
                 mapping.syntax.span,
               ),
@@ -4435,7 +4455,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       if (Type.equals(capability, Type.reportCapability)) {
         if (conformance.operations.length !== 0 || conformance.hook !== undefined) {
           diagnostics.push(
-            Diagnostic.invalidConformance(
+            invalidDiagnostic(
               'Report is an operation-free marker capability',
               conformance.syntax.span,
             ),
@@ -4445,13 +4465,32 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       }
 
       diagnostics.push(
-        Diagnostic.invalidConformance(
+        invalidDiagnostic(
           `unsupported compiler-sealed capability ${Type.encode(capability)}`,
           conformance.syntax.span,
         ),
       )
     }
   }
+
+  modules = modules.map((module) =>
+    Object.freeze({
+      ...module,
+      conformances: Object.freeze(
+        module.conformances.map((conformance) =>
+          Object.freeze({
+            ...conformance,
+            validity:
+              invalidConformances.has(conformance) ||
+              conformance.coherence._tag !== 'Coherent' ||
+              conformance.termination._tag !== 'Terminating'
+                ? Object.freeze({ _tag: 'InvalidConformance' as const })
+                : Object.freeze({ _tag: 'ValidConformance' as const }),
+          }),
+        ),
+      ),
+    }),
+  )
 
   for (const module of modules) {
     for (const member of module.members) {
@@ -4774,6 +4813,7 @@ const conformanceCandidates = (
           conformance.capability._tag !== 'Resolved' ||
           !Type.isNominal(conformance.capability.type) ||
           conformance.provider._tag !== 'Resolved' ||
+          conformance.validity._tag !== 'ValidConformance' ||
           conformance.coherence._tag !== 'Coherent' ||
           conformance.termination._tag !== 'Terminating'
         )

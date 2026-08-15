@@ -365,8 +365,8 @@ const conformance = (value: DeclarationIndex.ConformanceFact): string =>
       ),
     ),
     optional(value.hook === undefined ? undefined : dropHook(value.hook)),
-    // Coherence and termination are header facts a later edit can change without touching any
-    // spelling, so the surface has to carry them or an invalidation would be missed.
+    // Coherence, termination, and completed validation are facts a later edit can change without
+    // touching header spelling, so the surface has to carry them or invalidation would be missed.
     record('ConformanceCoherence', [
       value.coherence._tag,
       ...(value.coherence._tag === 'Overlapping'
@@ -379,6 +379,7 @@ const conformance = (value: DeclarationIndex.ConformanceFact): string =>
         ? [array(value.termination.failures.map(ConformanceHead.describeTermination))]
         : []),
     ]),
+    record('ConformanceValidity', [value.validity._tag]),
   ])
 
 /** Construct the exact surface for one module's completed headers. */
