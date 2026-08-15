@@ -115,6 +115,41 @@ const i64 = ValType.i64
 const f32 = ValType.f32
 const f64 = ValType.f64
 
+/**
+ * The lanes one MIR type occupies, for locals, signatures, and suspension transfer slots alike.
+ *
+ * A stored executable must resolve through its storage type's calling shape: that is the only
+ * producer that prefixes each lane path with the owning `EffectCaptureSelector` or
+ * `CallableCaptureSelector`. `effectEnvironmentLanes`/`callableEnvironmentLanes` emit the same
+ * lane count and value types but prefix-less paths, so a caller that reads `lane.path` — such as
+ * place-read realization — cannot match them against a destination lane. Every lane computation
+ * shares this function so the two can never disagree.
+ */
+const laneKindsOf = (
+  plan: LayoutPlan.Plan,
+  type: Mir.Type,
+): ReadonlyArray<LayoutPlan.CallingLane> => {
+  if (type._tag === 'EffectValue' && type.storage !== undefined) {
+    const shape = LayoutPlan.callingShape(plan, type.storage.type)
+    if (shape === undefined) throw new RangeError('Wasm backend lost a stored Effect calling shape')
+    return shape.lanes
+  }
+  if (type._tag === 'EffectValue') return LayoutPlan.effectEnvironmentLanes(plan, type.environment)
+  if (type._tag === 'CallableValue' && type.storage !== undefined) {
+    const shape = LayoutPlan.callingShape(plan, type.storage.type)
+    if (shape === undefined)
+      throw new RangeError('Wasm backend lost a stored callable calling shape')
+    return shape.lanes
+  }
+  if (type._tag === 'CallableValue')
+    return type.environment === undefined
+      ? Object.freeze([])
+      : LayoutPlan.callableEnvironmentLanes(plan, type.environment)
+  const shape = LayoutPlan.callingShape(plan, Mir.semanticType(type))
+  if (shape === undefined) throw new RangeError('Wasm backend lost a calling shape')
+  return shape.lanes
+}
+
 const laneValueType = (plan: LayoutPlan.Plan, lane: LayoutPlan.CallingLane): ValType.ValType => {
   if (typeof lane.type !== 'string') return i32
   const scalar = Scalar.find(lane.type)
@@ -1284,25 +1319,7 @@ const layoutOf = (
       if (shape === undefined) throw new RangeError('Wasm backend lost a borrowed calling shape')
       return shape.lanes
     }
-    if (type._tag === 'EffectValue' && type.storage !== undefined) {
-      const shape = LayoutPlan.callingShape(plan, type.storage.type)
-      if (shape === undefined) throw new RangeError('Wasm backend lost a stored Effect shape')
-      return shape.lanes
-    }
-    if (type._tag === 'EffectValue')
-      return LayoutPlan.effectEnvironmentLanes(plan, type.environment)
-    if (type._tag === 'CallableValue' && type.storage !== undefined) {
-      const shape = LayoutPlan.callingShape(plan, type.storage.type)
-      if (shape === undefined) throw new RangeError('Wasm backend lost a stored callable shape')
-      return shape.lanes
-    }
-    if (type._tag === 'CallableValue')
-      return type.environment === undefined
-        ? Object.freeze([])
-        : LayoutPlan.callableEnvironmentLanes(plan, type.environment)
-    const shape = LayoutPlan.callingShape(plan, Mir.semanticType(type))
-    if (shape === undefined) throw new RangeError('Wasm backend lost a logical calling shape')
-    return shape.lanes
+    return laneKindsOf(plan, type)
   }
   const lanes = fn.localTypes.map(logicalLanes)
   const signatureLaneCount = (type: Mir.Type): number =>
@@ -4773,13 +4790,7 @@ const emitBody = (
       const shape = LayoutPlan.callingShape(plan, fn.result.type)
       return shape?.lanes ?? Object.freeze([])
     }
-    if (fn.result._tag === 'EffectValue')
-      return LayoutPlan.effectEnvironmentLanes(plan, fn.result.environment)
-    if (fn.result._tag === 'CallableValue')
-      return fn.result.environment === undefined
-        ? Object.freeze([])
-        : LayoutPlan.callableEnvironmentLanes(plan, fn.result.environment)
-    return LayoutPlan.callingShape(plan, Mir.semanticType(fn.result))?.lanes ?? Object.freeze([])
+    return laneKindsOf(plan, fn.result)
   })()
   const zeroOf = (type: ValType.ValType): Instr.Instr =>
     type === i64
@@ -5316,15 +5327,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
             }),
           }),
         ])
-      if (type._tag === 'EffectValue')
-        return LayoutPlan.effectEnvironmentLanes(program.layout, type.environment)
-      if (type._tag === 'CallableValue')
-        return type.environment === undefined
-          ? Object.freeze([])
-          : LayoutPlan.callableEnvironmentLanes(program.layout, type.environment)
-      const shape = LayoutPlan.callingShape(program.layout, Mir.semanticType(type))
-      if (shape === undefined) throw new RangeError('Wasm declaration lost a calling shape')
-      return shape.lanes
+      return laneKindsOf(program.layout, type)
     }
     const originRecords = program.functions
       .flatMap((fn) =>
