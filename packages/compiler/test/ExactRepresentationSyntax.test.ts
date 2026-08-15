@@ -108,7 +108,7 @@ it.effect('records the exact named-item representation of a specialized public f
       `pub fn identity<T>(value: T) -> T { return value }
 pub fn selected() -> typeof(identity<i32>) { return 0 }`,
     )
-    assert.notInclude(codes(self), 'SEM0108')
+    assert.notInclude(codes(self), 'SEM0112')
     const found = declaration(self, 'exact-representation/positive', 'selected')
     const returnType = found?.returnType
     assert.strictEqual(returnType?._tag, 'Resolved')
@@ -173,14 +173,9 @@ it.effect('rejects a private exact identity leak through a public result', () =>
       `fn hidden(value: i32) -> i32 { return value }
 pub fn leaked() -> typeof(hidden) { return hidden }`,
     )
-    assert.include(codes(self), 'SEM0108')
-    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0108')
-    assert.strictEqual(
-      diagnostic?.reason._tag === 'InvalidExactRepresentationItem'
-        ? diagnostic.reason.detail
-        : undefined,
-      'PrivateExposure',
-    )
+    assert.include(codes(self), 'SEM0112')
+    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0112')
+    assert.strictEqual(diagnostic?.reason._tag, 'PrivateExactRepresentationLeak')
     assert.include(
       diagnostic?.notes?.join(' ') ?? '',
       'Return an opaque representation result instead',
@@ -195,7 +190,7 @@ it.effect('admits a private exact identity inside a private contract', () =>
       `fn hidden(value: i32) -> i32 { return value }
 fn kept() -> typeof(hidden) { return hidden }`,
     )
-    assert.notInclude(codes(self), 'SEM0108')
+    assert.notInclude(codes(self), 'SEM0112')
   }),
 )
 
@@ -206,13 +201,8 @@ it.effect('rejects a partially specialized generic item', () =>
       `pub fn identity<T>(value: T) -> T { return value }
 pub fn selected() -> typeof(identity) { return 0 }`,
     )
-    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0108')
-    assert.strictEqual(
-      diagnostic?.reason._tag === 'InvalidExactRepresentationItem'
-        ? diagnostic.reason.detail
-        : undefined,
-      'PartiallySpecialized',
-    )
+    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0111')
+    assert.strictEqual(diagnostic?.reason._tag, 'OpenExactRepresentationItem')
   }),
 )
 
@@ -223,13 +213,8 @@ it.effect('rejects an item that is still generic in an enclosing parameter', () 
       `pub fn identity<T>(value: T) -> T { return value }
 pub fn selected<T>() -> typeof(identity<T>) { return 0 }`,
     )
-    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0108')
-    assert.strictEqual(
-      diagnostic?.reason._tag === 'InvalidExactRepresentationItem'
-        ? diagnostic.reason.detail
-        : undefined,
-      'PartiallySpecialized',
-    )
+    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0111')
+    assert.strictEqual(diagnostic?.reason._tag, 'OpenExactRepresentationItem')
   }),
 )
 
@@ -240,12 +225,7 @@ it.effect('rejects an unresolved exact representation item', () =>
       'pub fn selected() -> typeof(absent) { return absent }',
     )
     const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0108')
-    assert.strictEqual(
-      diagnostic?.reason._tag === 'InvalidExactRepresentationItem'
-        ? diagnostic.reason.detail
-        : undefined,
-      'Unresolved',
-    )
+    assert.strictEqual(diagnostic?.reason._tag, 'UnresolvedExactRepresentationItem')
   }),
 )
 
@@ -256,13 +236,8 @@ it.effect('rejects an Effect construction site named through typeof', () =>
       `effect fn produce() -> i32 { return 1 }
 pub fn selected() -> typeof(produce) { return produce }`,
     )
-    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0108')
-    assert.strictEqual(
-      diagnostic?.reason._tag === 'InvalidExactRepresentationItem'
-        ? diagnostic.reason.detail
-        : undefined,
-      'NotCallable',
-    )
+    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0110')
+    assert.strictEqual(diagnostic?.reason._tag, 'UncallableExactRepresentationItem')
   }),
 )
 

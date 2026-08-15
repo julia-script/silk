@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 107 |
+| `SEM` | Semantic | 111 |
 | `OWN` | Ownership | 12 |
 | `LAY` | Layout | 1 |
 
-There are 135 codes in total.
+There are 139 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -162,7 +162,11 @@ There are 135 codes in total.
 | `SEM0105` | Stable code for the first exact representation that diverges at a static value join. | `Cannot join <expected> with <actual>; consume each represented value inside its branch before joining` |
 | `SEM0106` | Stable code for a representation argument whose contract cannot satisfy its required bound. | `Representation <parameter> requires <required>, but the supplied bound <actual> is not admissible` |
 | `SEM0107` | Stable code for storing a represented Effect before its runtime layout is supported. | `Cannot construct <aggregate>: <site> retains the static identity of <effect>, but represented Effect storage has no supported runtime layout` |
-| `SEM0108` | Stable code for a `typeof` item that names no sufficiently visible fully specialized callable. | `Cannot name the exact representation of <item>: <exactRepresentationExplanationdetail>` |
+| `SEM0108` | Stable code for a `typeof` item that resolves to no declaration in scope. | `Cannot name the exact representation of <item>: no declaration of that name is in scope` |
+| `SEM0109` | Stable code for a `typeof` item whose name belongs to more than one declaration. | `Cannot name the exact representation of <item>: <count> declarations carry that name, so no single item is resolved` |
+| `SEM0110` | Stable code for a `typeof` item that names something other than an ordinary callable. | `Cannot name the exact representation of <item>: it names <kind>, which has no source-nameable exact identity` |
+| `SEM0111` | Stable code for a `typeof` item whose generic parameters are not all supplied. | `Cannot name the exact representation of <item>: an exact representation names one construction, but <expected> generic parameters were declared and <actual> concrete arguments were supplied` |
+| `SEM0112` | Stable code for a public contract exposing the exact identity of a private item. | `Public contract exposes the exact representation of private <item>` |
 
 ## Ownership (`OWN`)
 

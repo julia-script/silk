@@ -216,8 +216,16 @@ export const divergentRepresentationJoinCode = 'SEM0105' as const
 export const incompatibleRepresentationBoundCode = 'SEM0106' as const
 /** Stable code for storing a represented Effect before its runtime layout is supported. */
 export const storedRepresentedEffectConstructionCode = 'SEM0107' as const
-/** Stable code for a `typeof` item that names no sufficiently visible fully specialized callable. */
-export const invalidExactRepresentationItemCode = 'SEM0108' as const
+/** Stable code for a `typeof` item that resolves to no declaration in scope. */
+export const unresolvedExactRepresentationItemCode = 'SEM0108' as const
+/** Stable code for a `typeof` item whose name belongs to more than one declaration. */
+export const ambiguousExactRepresentationItemCode = 'SEM0109' as const
+/** Stable code for a `typeof` item that names something other than an ordinary callable. */
+export const uncallableExactRepresentationItemCode = 'SEM0110' as const
+/** Stable code for a `typeof` item whose generic parameters are not all supplied. */
+export const openExactRepresentationItemCode = 'SEM0111' as const
+/** Stable code for a public contract exposing the exact identity of a private item. */
+export const privateExactRepresentationLeakCode = 'SEM0112' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -359,7 +367,11 @@ export type Code =
   | typeof divergentRepresentationJoinCode
   | typeof incompatibleRepresentationBoundCode
   | typeof storedRepresentedEffectConstructionCode
-  | typeof invalidExactRepresentationItemCode
+  | typeof unresolvedExactRepresentationItemCode
+  | typeof ambiguousExactRepresentationItemCode
+  | typeof uncallableExactRepresentationItemCode
+  | typeof openExactRepresentationItemCode
+  | typeof privateExactRepresentationLeakCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -503,11 +515,24 @@ export type Reason =
       readonly field?: string
       readonly effect: string
     }
+  | { readonly _tag: 'UnresolvedExactRepresentationItem'; readonly item: string }
   | {
-      readonly _tag: 'InvalidExactRepresentationItem'
+      readonly _tag: 'AmbiguousExactRepresentationItem'
       readonly item: string
-      readonly detail: InvalidExactRepresentationDetail
+      readonly count: number
     }
+  | {
+      readonly _tag: 'UncallableExactRepresentationItem'
+      readonly item: string
+      readonly kind: string
+    }
+  | {
+      readonly _tag: 'OpenExactRepresentationItem'
+      readonly item: string
+      readonly expected: number
+      readonly actual: number
+    }
+  | { readonly _tag: 'PrivateExactRepresentationLeak'; readonly item: string }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
@@ -1808,54 +1833,97 @@ export const storedCallableConstruction = (
   })
 }
 
-/** Why one `typeof` item cannot name an exact representation. */
-export type InvalidExactRepresentationDetail =
-  | 'Unresolved'
-  | 'NotCallable'
-  | 'Ambiguous'
-  | 'PartiallySpecialized'
-  | 'PrivateExposure'
+const opaqueResultNote =
+  'Return an opaque representation result instead when the concrete identity must stay private.'
 
-const exactRepresentationExplanation = (detail: InvalidExactRepresentationDetail): string => {
-  switch (detail) {
-    case 'Unresolved':
-      return 'no declaration of that name is in scope'
-    case 'NotCallable':
-      return 'it names a declaration that is not a callable item; local bindings, sections, and Effect construction sites have no source-nameable exact identity'
-    case 'Ambiguous':
-      return 'more than one declaration carries that name, so no single item is resolved'
-    case 'PartiallySpecialized':
-      return 'its generic parameters are not fully specialized'
-    case 'PrivateExposure':
-      return 'it is less visible than the contract exposing it'
-  }
-}
-
-/**
- * Rejects one `typeof` item that names no sufficiently visible, fully specialized callable.
- *
- * An exact representation makes a construction-site identity part of a nominal contract, so the
- * item must resolve to exactly one named callable declaration that is at least as visible as the
- * contract carrying it and has no remaining generic parameters. Everything else — locals,
- * sections, Effect construction sites, private leaks, and partial specializations — has either no
- * durable identity or no admissible one, and belongs behind an opaque representation result.
- */
-export const invalidExactRepresentationItem = (
+/** Rejects one `typeof` item that names no declaration in the enclosing scope. */
+export const unresolvedExactRepresentationItem = (
   item: string,
-  detail: InvalidExactRepresentationDetail,
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: invalidExactRepresentationItemCode,
+    code: unresolvedExactRepresentationItemCode,
     severity: 'error',
-    message: `Cannot name the exact representation of ${item}: ${exactRepresentationExplanation(detail)}`,
-    reason: Object.freeze({ _tag: 'InvalidExactRepresentationItem', item, detail }),
+    message: `Cannot name the exact representation of ${item}: no declaration of that name is in scope`,
+    reason: Object.freeze({ _tag: 'UnresolvedExactRepresentationItem', item }),
     span,
-    notes: Object.freeze([
-      'Return an opaque representation result instead when the concrete identity must stay private.',
-    ]),
+    notes: Object.freeze([opaqueResultNote]),
+  })
+
+/** Rejects one `typeof` item whose name belongs to more than one declaration. */
+export const ambiguousExactRepresentationItem = (
+  item: string,
+  count: number,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: ambiguousExactRepresentationItemCode,
+    severity: 'error',
+    message: `Cannot name the exact representation of ${item}: ${count} declarations carry that name, so no single item is resolved`,
+    reason: Object.freeze({ _tag: 'AmbiguousExactRepresentationItem', item, count }),
+    span,
+    notes: Object.freeze([opaqueResultNote]),
+  })
+
+/**
+ * Rejects one `typeof` item that names something other than an ordinary callable declaration.
+ *
+ * Local bindings, callable sections, and Effect construction sites are values created where they
+ * are written. They have no declaration-owned identity a contract can name, so their
+ * representation can only cross a boundary behind an opaque result.
+ */
+export const uncallableExactRepresentationItem = (
+  item: string,
+  kind: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: uncallableExactRepresentationItemCode,
+    severity: 'error',
+    message: `Cannot name the exact representation of ${item}: it names ${kind}, which has no source-nameable exact identity`,
+    reason: Object.freeze({ _tag: 'UncallableExactRepresentationItem', item, kind }),
+    span,
+    notes: Object.freeze([opaqueResultNote]),
+  })
+
+/** Rejects one `typeof` item whose generic parameters are not all supplied. */
+export const openExactRepresentationItem = (
+  item: string,
+  expected: number,
+  actual: number,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: openExactRepresentationItemCode,
+    severity: 'error',
+    message: `Cannot name the exact representation of ${item}: an exact representation names one construction, but ${expected} generic parameters were declared and ${actual} concrete arguments were supplied`,
+    reason: Object.freeze({ _tag: 'OpenExactRepresentationItem', item, expected, actual }),
+    span,
+    notes: Object.freeze([opaqueResultNote]),
+  })
+
+/** Rejects a public contract that exposes the exact identity of a less visible item. */
+export const privateExactRepresentationLeak = (
+  item: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: privateExactRepresentationLeakCode,
+    severity: 'error',
+    message: `Public contract exposes the exact representation of private ${item}`,
+    reason: Object.freeze({ _tag: 'PrivateExactRepresentationLeak', item }),
+    span,
+    notes: Object.freeze([opaqueResultNote]),
   })
 
 /** Rejects represented Effect storage until a downstream runtime layout has been proven. */

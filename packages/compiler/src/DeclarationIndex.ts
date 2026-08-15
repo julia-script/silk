@@ -2464,48 +2464,67 @@ const resolveExactRepresentation = (
     resolveDeclaredType(module, argument, resolver, modules),
   )
   const argumentDiagnostics = arguments_.flatMap((argument) => argument.diagnostics)
-  const reject = (detail: Diagnostic.InvalidExactRepresentationDetail): TypeResolution => {
-    const diagnostic = Diagnostic.invalidExactRepresentationItem(
-      fact.item.spelling,
-      detail,
-      fact.token.span,
-    )
+  const reject = (diagnostic: Diagnostic.Diagnostic): TypeResolution => {
     return Object.freeze({
       fact: Object.freeze({ ...fact, cause: Diagnostic.identity(diagnostic) }),
       diagnostics: Object.freeze([...argumentDiagnostics, diagnostic]),
     })
   }
-  if (fact.item.segments.length !== 1) return reject('Unresolved')
+  const unresolved = () =>
+    Diagnostic.unresolvedExactRepresentationItem(fact.item.spelling, fact.token.span)
+  const open = (expected: number) =>
+    Diagnostic.openExactRepresentationItem(
+      fact.item.spelling,
+      expected,
+      arguments_.length,
+      fact.token.span,
+    )
+  if (fact.item.segments.length !== 1) return reject(unresolved())
   const owner = modules.find((candidate) => candidate.module === module)
   const lookup = lookupDeclaration(owner?.declarations ?? [], fact.item.spelling)
-  if (lookup._tag === 'Ambiguous') return reject('Ambiguous')
-  if (lookup._tag !== 'Resolved') return reject('Unresolved')
+  if (lookup._tag === 'Ambiguous')
+    return reject(
+      Diagnostic.ambiguousExactRepresentationItem(
+        fact.item.spelling,
+        lookup.declarations.length,
+        fact.token.span,
+      ),
+    )
+  if (lookup._tag !== 'Resolved') return reject(unresolved())
   const declaration = lookup.declaration
-  if (declaration.functionKind !== 'Ordinary') return reject('NotCallable')
-  if (declaration.typeParameters.length !== arguments_.length) return reject('PartiallySpecialized')
+  if (declaration.functionKind !== 'Ordinary')
+    return reject(
+      Diagnostic.uncallableExactRepresentationItem(
+        fact.item.spelling,
+        'an Effect construction site rather than an ordinary callable',
+        fact.token.span,
+      ),
+    )
+  if (declaration.typeParameters.length !== arguments_.length)
+    return reject(open(declaration.typeParameters.length))
   const supplied = arguments_.flatMap((argument) =>
     argument.fact._tag === 'Resolved' ? [argument.fact.type] : [],
   )
-  if (supplied.length !== arguments_.length) return reject('PartiallySpecialized')
+  if (supplied.length !== arguments_.length) return reject(open(declaration.typeParameters.length))
   const substitution = Type.substitution(
     declaration.typeParameters.map((parameter) => parameter.type),
     supplied,
   )
-  if (substitution === undefined) return reject('PartiallySpecialized')
-  if (declaration.returnType._tag !== 'Resolved') return reject('Unresolved')
+  if (substitution === undefined) return reject(open(declaration.typeParameters.length))
+  if (declaration.returnType._tag !== 'Resolved') return reject(unresolved())
   const declaredParameters = declaration.parameters.map((parameter) => parameter.declaredType)
   if (declaredParameters.some((parameter) => parameter._tag !== 'Resolved'))
-    return reject('Unresolved')
+    return reject(unresolved())
   const structural = Type.callable(
     declaredParameters.flatMap((parameter) =>
       parameter._tag === 'Resolved' ? [Type.substitute(parameter.type, substitution)] : [],
     ),
     Type.substitute(declaration.returnType.type, substitution),
   )
-  if (Type.parameters(structural).length > 0) return reject('PartiallySpecialized')
+  if (Type.parameters(structural).length > 0) return reject(open(declaration.typeParameters.length))
   const canonical =
     declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : undefined
-  if (canonical === undefined) return reject('Unresolved')
+  if (canonical === undefined) return reject(unresolved())
   const identityArguments = supplied.map((argument) => argument)
   const identity = Type.callableIdentityArgument(
     `declaration:${canonical.module}:${canonical.name}`,
@@ -3339,11 +3358,7 @@ const attachExposure = (
     return found._tag === 'Resolved' && found.declaration.visibility === 'Private'
   })
   if (leaked !== undefined) {
-    const diagnostic = Diagnostic.invalidExactRepresentationItem(
-      leaked.name,
-      'PrivateExposure',
-      fact.token.span,
-    )
+    const diagnostic = Diagnostic.privateExactRepresentationLeak(leaked.name, fact.token.span)
     diagnostics.push(diagnostic)
     return Object.freeze({ ...fact, exposureCause: Diagnostic.identity(diagnostic) })
   }
