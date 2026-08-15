@@ -128,46 +128,7 @@ export interface LoopId {
 }
 
 /** The closed built-in operation vocabulary of the compiler-known actors. */
-export type BuiltinOperation =
-  | Scalar.OperationCode
-  | 'LayoutOf'
-  | 'EffectSuspend'
-  | 'StorageAcquire'
-  | 'HostWrite'
-  | 'RawBufferFrom'
-  | 'RawBufferSlot'
-  | 'RawBufferCount'
-  | 'RawBufferRead'
-  | 'RawBufferView'
-  | 'RawBufferViewMut'
-  | 'RawBufferCopy'
-  | 'RawBufferFill'
-  | 'SlotWrite'
-  | 'SlotTake'
-  | 'SlotCopy'
-  | 'SlotDrop'
-  | 'StringFromUtf8Unchecked'
-  | 'StringUtf8Bytes'
-  | 'StringByteLength'
-  | 'StringEqualsExact'
-  | 'OsFileOpen'
-  | 'OsFileRead'
-  | 'OsFileWrite'
-  | 'OsDirectoryOpen'
-  | 'OsDirectoryNext'
-  | 'OsPathInspect'
-  | 'OsDirectoryCreate'
-  | 'OsDirectoryCreateUnique'
-  | 'OsFileRemove'
-  | 'OsDirectoryRemove'
-  | 'OsHandleClose'
-  | 'OsStandardInputRead'
-  | 'OsProcessExecute'
-  | 'OsProcessCapture'
-  | 'OsHostArgumentCount'
-  | 'OsHostArgument'
-  | 'OsHostVariable'
-  | 'OsHostWorkingDirectory'
+export type BuiltinOperation = Type.BuiltinOperation
 
 export type BoundsMode =
   | { readonly _tag: 'Proven'; readonly index: number; readonly length: number }

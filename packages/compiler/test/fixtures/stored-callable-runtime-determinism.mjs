@@ -1,13 +1,18 @@
-import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { NodeServices } from '@effect/platform-node'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Path from 'effect/Path'
+import * as Stream from 'effect/Stream'
+import { ChildProcess } from 'effect/unstable/process'
 import * as Analysis from '../../dist/Analysis.js'
+import * as Driver from '../../dist/Driver.js'
 import * as Instances from '../../dist/Instances.js'
 import * as Layout from '../../dist/Layout.js'
 import * as Mir from '../../dist/Mir.js'
-import * as NativeToolchain from '../../dist/NativeToolchain.js'
+import * as SourceFile from '../../dist/SourceFile.js'
+import * as SourceResolver from '../../dist/SourceResolver.js'
 import * as Target from '../../dist/Target.js'
 
 const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
@@ -22,71 +27,98 @@ pub fn main() -> i32 {
 }`
 const bytes = new TextEncoder().encode(source)
 const moduleName = 'fixture/stored-callable-runtime-determinism'
-const host = await Effect.runPromise(Target.host())
-const native = await Effect.runPromise(Analysis.ofSourceRealized(moduleName, bytes, host.id))
-const wasm = await Effect.runPromise(
-  Analysis.ofSourceRealized(moduleName, bytes, Target.wasm32UnknownUnknown.id),
-)
-const nativeArtifact = await Effect.runPromise(Analysis.codegen(native, { mode: 'release' }))
-const wasmArtifact = await Effect.runPromise(Analysis.codegenWasm(wasm, { mode: 'release' }))
-const evaluated = Analysis.evaluate(native)
-const wasmInstance = new WebAssembly.Instance(
-  new WebAssembly.Module(wasmArtifact.bytes.slice()),
-  {},
-)
-const wasmMain = wasmInstance.exports.silk_main
 
-const clang =
-  process.env.SILK_TEST_CLANG ??
-  (existsSync('/opt/homebrew/opt/llvm/bin/clang')
-    ? '/opt/homebrew/opt/llvm/bin/clang'
-    : existsSync('/usr/local/opt/llvm/bin/clang')
-      ? '/usr/local/opt/llvm/bin/clang'
-      : 'clang')
-const toolchain = Object.freeze({
-  _tag: 'Toolchain',
-  clang,
-  shimCache: NativeToolchain.makeShimCache(),
-})
-const nativeResult = NativeToolchain.withBuildScope('stored-callable-fresh-process', (scope) => {
-  const object = NativeToolchain.emitObject(toolchain, scope, nativeArtifact, host, 'release')
-  const shim = NativeToolchain.compileShim(toolchain, scope, host, nativeArtifact.termination)
-  if (object._tag !== 'ObjectArtifact' || shim._tag !== 'ObjectArtifact') return -1
-  const executable = NativeToolchain.ClangLinker.link(
-    toolchain,
-    host,
-    [object.artifact, shim.artifact],
-    [],
-    join(scope.root, 'program'),
+const collectText = Stream.runFold(
+  () => '',
+  (text, chunk) => text + chunk,
+)
+
+const runProcess = Effect.fnUntraced(function* (command, args) {
+  const process = yield* ChildProcess.make(command, args, { stdin: 'ignore' })
+  const [exitCode, stdout, stderr] = yield* Effect.all(
+    [
+      process.exitCode,
+      process.stdout.pipe(Stream.decodeText(), collectText),
+      process.stderr.pipe(Stream.decodeText(), collectText),
+    ],
+    { concurrency: 'unbounded' },
   )
-  if (executable._tag !== 'Executable') return -2
-  return spawnSync(executable.path, [], { encoding: 'utf8' }).status ?? -3
+  return Object.freeze({ exitCode, stdout, stderr })
 })
 
-const hash = (value) => createHash('sha256').update(value).digest('hex')
-const layoutHash = (snapshot) => {
-  const layout = Analysis.layoutOf(snapshot)
-  return layout._tag === 'Available' ? hash(Layout.encode(layout.value)) : layout.error.message
-}
+const clang = Effect.fnUntraced(function* () {
+  const configured = yield* Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(''))
+  if (configured.length > 0) return configured
+  const fileSystem = yield* FileSystem.FileSystem
+  for (const candidate of ['/opt/homebrew/opt/llvm/bin/clang', '/usr/local/opt/llvm/bin/clang'])
+    if (yield* fileSystem.exists(candidate)) return candidate
+  return 'clang'
+})
 
-process.stdout.write(
-  JSON.stringify({
+const hash = Effect.fnUntraced(function* (value) {
+  return yield* Effect.try(() => createHash('sha256').update(value).digest('hex'))
+})
+
+const layoutHash = Effect.fnUntraced(function* (snapshot) {
+  const layout = Analysis.layoutOf(snapshot)
+  return layout._tag === 'Available'
+    ? yield* hash(Layout.encode(layout.value))
+    : layout.error.message
+})
+
+const runWasm = Effect.fnUntraced(function* (artifact) {
+  return yield* Effect.try(() => {
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    const main = instance.exports.silk_main
+    if (typeof main !== 'function') return 'missing'
+    const result = main()
+    return typeof result === 'number' ? result : 'invalid'
+  })
+})
+
+const program = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const destinationRoot = yield* fileSystem.makeTempDirectoryScoped()
+  const host = yield* Target.host()
+  const native = yield* Analysis.ofSourceRealized(moduleName, bytes, host.id)
+  const wasm = yield* Analysis.ofSourceRealized(moduleName, bytes, Target.wasm32UnknownUnknown.id)
+  const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
+  const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+  const evaluated = Analysis.evaluate(native)
+  const wasmResult = yield* runWasm(wasmArtifact)
+  const compiler = yield* clang()
+  const compiled = yield* Driver.compile({
+    compilation: { root: SourceFile.make(moduleName, bytes) },
+    toolchain: Object.freeze({ _tag: 'Toolchain', clang: compiler }),
+    profile: 'release',
+    destination: path.join(destinationRoot, 'program'),
+  }).pipe(Effect.provide(SourceResolver.empty))
+  const nativeRun =
+    compiled._tag === 'Compiled'
+      ? yield* runProcess(compiled.path, [])
+      : { exitCode: -1, stdout: '', stderr: compiled._tag }
+
+  const report = {
     diagnostics: Analysis.diagnostics(native).map((diagnostic) => diagnostic.code),
     evaluator: evaluated._tag === 'Completed' ? evaluated.result.value : evaluated._tag,
-    wasm: typeof wasmMain === 'function' ? wasmMain() : 'missing',
-    native: nativeResult,
+    wasm: wasmResult,
+    native: nativeRun.exitCode,
     instanceKeys: Analysis.instancesOf(native).instances.map((instance) =>
       Instances.keyText(instance.key),
     ),
-    nativeLayout: layoutHash(native),
-    wasmLayout: layoutHash(wasm),
-    nativeMir: hash(Mir.encode(Analysis.loweredMir(native))),
-    wasmMir: hash(Mir.encode(Analysis.loweredMir(wasm))),
+    nativeLayout: yield* layoutHash(native),
+    wasmLayout: yield* layoutHash(wasm),
+    nativeMir: yield* hash(Mir.encode(Analysis.loweredMir(native))),
+    wasmMir: yield* hash(Mir.encode(Analysis.loweredMir(wasm))),
     nativeSymbols: nativeArtifact.symbols.map((entry) => entry.symbol),
     wasmSymbols: wasmArtifact.symbols.map((entry) => entry.symbol),
-    nativeArtifact: hash(nativeArtifact.bitcode),
-    wasmArtifact: hash(wasmArtifact.bytes),
+    nativeArtifact: yield* hash(nativeArtifact.bitcode),
+    wasmArtifact: yield* hash(wasmArtifact.bytes),
     directWasm:
       !wasmArtifact.wat.includes('call_indirect') && !wasmArtifact.wat.includes('(table '),
-  }),
-)
+  }
+  yield* Effect.try(() => process.stdout.write(JSON.stringify(report)))
+}).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+
+await Effect.runPromise(program)

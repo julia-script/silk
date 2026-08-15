@@ -1,41 +1,60 @@
-import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as NativeToolchain from '../src/NativeToolchain.js'
+import * as Driver from '../src/Driver.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as Target from '../src/Target.js'
 import * as WasmBackend from '../src/WasmBackend.js'
+import * as Process from './support/Process.js'
 import { unreachable } from './support/raise.js'
-
-const clang =
-  process.env.SILK_TEST_CLANG ??
-  (existsSync('/opt/homebrew/opt/llvm/bin/clang')
-    ? '/opt/homebrew/opt/llvm/bin/clang'
-    : existsSync('/usr/local/opt/llvm/bin/clang')
-      ? '/usr/local/opt/llvm/bin/clang'
-      : 'clang')
-const toolchain: NativeToolchain.Toolchain = Object.freeze({
-  _tag: 'Toolchain',
-  clang,
-  shimCache: NativeToolchain.makeShimCache(),
-})
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const lowerStored = (name: string, source: string, target: Target.Target) =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), target.id)
-    assert.notInclude(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      'SEM0103',
-    )
-    return { snapshot, module: Analysis.loweredMir(snapshot) }
-  })
+const lowerStored = Effect.fnUntraced(function* (
+  name: string,
+  source: string,
+  target: Target.Target,
+) {
+  const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), target.id)
+  assert.notInclude(
+    Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+    'SEM0103',
+  )
+  return { snapshot, module: Analysis.loweredMir(snapshot) }
+})
+
+const clang = Effect.fnUntraced(function* () {
+  const configured = yield* Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(''))
+  if (configured.length > 0) return configured
+  const fileSystem = yield* FileSystem.FileSystem
+  for (const candidate of ['/opt/homebrew/opt/llvm/bin/clang', '/usr/local/opt/llvm/bin/clang'])
+    if (yield* fileSystem.exists(candidate)) return candidate
+  return 'clang'
+})
+
+const runNative = Effect.fnUntraced(function* (name: string, source: string) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const destinationRoot = yield* fileSystem.makeTempDirectoryScoped()
+  const compiler = yield* clang()
+  const compiled = yield* Driver.compile({
+    compilation: { root: SourceFile.make(name, ascii(source)) },
+    toolchain: Object.freeze({ _tag: 'Toolchain', clang: compiler }),
+    profile: 'release',
+    destination: path.join(destinationRoot, 'program'),
+  }).pipe(Effect.provide(SourceResolver.empty))
+  assert.strictEqual(compiled._tag, 'Compiled')
+  if (compiled._tag !== 'Compiled') return unreachable('expected a native executable')
+  return yield* Process.run(compiled.path, [])
+})
 
 const completedValue = (outcome: BootstrapEvaluation.Outcome): number => {
   assert.strictEqual(outcome._tag, 'Completed')
@@ -45,12 +64,16 @@ const completedValue = (outcome: BootstrapEvaluation.Outcome): number => {
   return outcome.result.value
 }
 
-const runWasm = (bytes: Uint8Array): number => {
-  const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice()), {})
-  const main = instance.exports.silk_main
-  assert.isFunction(main)
-  return typeof main === 'function' ? (main() as number) : unreachable('expected Wasm main')
-}
+const runWasm = Effect.fnUntraced(function* (bytes: Uint8Array) {
+  const result = yield* Effect.try(() => {
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice()), {})
+    const main = instance.exports.silk_main
+    if (typeof main !== 'function') return unreachable('expected Wasm main')
+    return main()
+  })
+  assert.strictEqual(typeof result, 'number')
+  return typeof result === 'number' ? result : unreachable('expected numeric Wasm result')
+})
 
 const named = `struct Parser<F: fn(i32) -> i32> { parse: F }
 fn decode(value: i32) -> i32 { return value + 2 }
@@ -121,6 +144,60 @@ pub fn main() -> i32 {
   return values[0] + result - 42
 }`
 
+const specializedCapture = `struct Token<T> { value: T }
+struct Holder<F: once fn(i32) -> i32> { step: F }
+fn consume<T>(value: i32, token: Token<T>) -> i32 { return value }
+fn apply<T>(token: Token<T>, value: i32) -> i32 {
+  let holder = Holder { step: consume<T>(move token) }
+  return holder.step(value)
+}
+pub fn main() -> i32 {
+  return apply<i32>(Token<i32> { value: 1 }, 20) + apply<bool>(Token<bool> { value: true }, 22)
+}`
+
+const equalShapeSpecializations = `struct Holder<F: fn(i32) -> i32> { step: F }
+fn apply<T>(marker: T, value: i32) -> i32 {
+  let holder = Holder { step: i32.add(1) }
+  return holder.step(value)
+}
+pub fn main() -> i32 { return apply<i32>(0, 20) + apply<bool>(true, 20) }`
+
+type CleanupExit = 'uncalled' | 'consuming' | 'moved' | 'typed-failure'
+
+const cleanupProgram = (dropBody: string, exit: CleanupExit) => `struct Guard {
+  tag: i32
+  storage: Allocation
+}
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    ${dropBody}
+  }
+}
+struct Holder<F: once fn(i32) -> i32> { step: F }
+fn consume(value: i32, guard: Guard) -> i32 { return value + guard.tag }
+fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[i32; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let allocation = run recipe
+  let guard = Guard { tag: 2, storage: move allocation }
+  let holder = Holder { step: consume(move guard) }
+  ${
+    exit === 'consuming'
+      ? 'return holder.step(40)'
+      : exit === 'moved'
+        ? 'return keep(move holder)'
+        : exit === 'typed-failure'
+          ? 'fail OutOfMemory {}'
+          : 'return 42'
+  }
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+
+const cleanupExits = ['uncalled', 'consuming', 'moved', 'typed-failure'] as const
+
 const typedFailure = `${takeDeclarations}effect fn build() -> i32 ! OutOfMemory {
   let token = Token { value: 2 }
   let holder = Holder { step: consume(move token) }
@@ -138,6 +215,8 @@ const runtimeMatrix = [
   { source: called, target: 'consume' },
   { source: moved, target: 'consume' },
   { source: scopedBorrow, target: 'write' },
+  { source: specializedCapture, target: 'consume' },
+  { source: equalShapeSpecializations, target: 'silk_i32_add' },
 ] as const
 
 it.effect('executes the stored-callable matrix in evaluator and direct Wasm', () =>
@@ -154,7 +233,7 @@ it.effect('executes the stored-callable matrix in evaluator and direct Wasm', ()
       const artifact = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'release' })
       assert.strictEqual(artifact._tag, 'WebAssemblyModuleArtifact')
       if (artifact._tag !== 'WebAssemblyModuleArtifact') return
-      assert.strictEqual(runWasm(artifact.bytes), 42, `runtime matrix case ${ordinal}`)
+      assert.strictEqual(yield* runWasm(artifact.bytes), 42, `runtime matrix case ${ordinal}`)
       assert.notInclude(artifact.wat, 'call_indirect')
       assert.notInclude(artifact.wat, '(table ')
     }
@@ -177,28 +256,14 @@ it.effect(
         if (artifact._tag !== 'LlvmBitcodeArtifact') return
         assert.include(artifact.ir, 'define i32 @silk_main')
         assert.include(artifact.ir, testCase.target)
-        NativeToolchain.withBuildScope(`stored-callable-${ordinal}`, (scope) => {
-          const object = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
-          const shim = NativeToolchain.compileShim(toolchain, scope, target, artifact.termination)
-          assert.strictEqual(object._tag, 'ObjectArtifact')
-          assert.strictEqual(shim._tag, 'ObjectArtifact')
-          if (object._tag !== 'ObjectArtifact' || shim._tag !== 'ObjectArtifact') return
-          const executable = NativeToolchain.ClangLinker.link(
-            toolchain,
-            target,
-            [object.artifact, shim.artifact],
-            [],
-            join(scope.root, 'program'),
-          )
-          assert.strictEqual(executable._tag, 'Executable')
-          if (executable._tag !== 'Executable') return
-          const run = spawnSync(executable.path, [], { encoding: 'utf8' })
-          assert.strictEqual(run.signal, null)
-          assert.strictEqual(run.stderr, '')
-          assert.strictEqual(run.status, 42)
-        })
+        const run = yield* runNative(
+          `stored-callable-runtime/native-process-${ordinal}`,
+          testCase.source,
+        )
+        assert.strictEqual(run.stderr, '')
+        assert.strictEqual(run.exitCode, 42)
       }
-    }),
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   300_000,
 )
 
@@ -284,7 +349,7 @@ it.effect(
       const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'release' })
       assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact')
       if (wasm._tag !== 'WebAssemblyModuleArtifact') return
-      assert.strictEqual(runWasm(wasm.bytes), 42)
+      assert.strictEqual(yield* runWasm(wasm.bytes), 42)
       assert.notInclude(wasm.wat, 'call_indirect')
 
       const host = yield* Target.host()
@@ -297,26 +362,105 @@ it.effect(
       assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact')
       if (llvm._tag !== 'LlvmBitcodeArtifact') return
       assert.include(llvm.ir, 'consume')
-      NativeToolchain.withBuildScope('stored-callable-typed-failure', (scope) => {
-        const object = NativeToolchain.emitObject(toolchain, scope, llvm, host, 'release')
-        const shim = NativeToolchain.compileShim(toolchain, scope, host, llvm.termination)
-        assert.strictEqual(object._tag, 'ObjectArtifact')
-        assert.strictEqual(shim._tag, 'ObjectArtifact')
-        if (object._tag !== 'ObjectArtifact' || shim._tag !== 'ObjectArtifact') return
-        const executable = NativeToolchain.ClangLinker.link(
-          toolchain,
-          host,
-          [object.artifact, shim.artifact],
-          [],
-          join(scope.root, 'program'),
+      const run = yield* runNative(
+        'stored-callable-runtime/typed-failure-native-process',
+        typedFailure,
+      )
+      assert.strictEqual(run.stderr, '')
+      assert.strictEqual(run.exitCode, 42)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  300_000,
+)
+
+it.effect(
+  'executes owned callable capture hooks and resource cleanup through every engine',
+  () =>
+    Effect.gen(function* () {
+      const host = yield* Target.host()
+      for (const exit of cleanupExits) {
+        const resourceCleanup = cleanupProgram('return ()', exit)
+        const wasm = yield* Analysis.ofSourceRealized(
+          `stored-callable-runtime/resource-cleanup-${exit}-wasm`,
+          ascii(resourceCleanup),
+          Target.wasm32UnknownUnknown.id,
         )
-        assert.strictEqual(executable._tag, 'Executable')
-        if (executable._tag !== 'Executable') return
-        const run = spawnSync(executable.path, [], { encoding: 'utf8' })
-        assert.strictEqual(run.signal, null)
-        assert.strictEqual(run.stderr, '')
-        assert.strictEqual(run.status, 42)
-      })
-    }),
-  60_000,
+        assert.deepEqual(Analysis.diagnostics(wasm), [], exit)
+        const evaluated = Analysis.evaluate(wasm)
+        assert.strictEqual(completedValue(evaluated), 42, exit)
+        assert.strictEqual(
+          evaluated.trace.filter(
+            (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl'),
+          ).length,
+          1,
+          `${exit} evaluator Drop hook`,
+        )
+        assert.strictEqual(
+          evaluated.trace.filter((event) => event._tag === 'AllocationAcquire').length,
+          1,
+          `${exit} evaluator allocation acquire`,
+        )
+        assert.strictEqual(
+          evaluated.trace.filter((event) => event._tag === 'AllocationRelease').length,
+          1,
+          `${exit} evaluator allocation release`,
+        )
+
+        const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+        assert.strictEqual(yield* runWasm(wasmArtifact.bytes), 42, `${exit} Wasm`)
+        assert.include(wasmArtifact.wat, 'drop_impl')
+        assert.notInclude(wasmArtifact.wat, 'call_indirect')
+        assert.notInclude(wasmArtifact.wat, '(table ')
+
+        const native = yield* Analysis.ofSourceRealized(
+          `stored-callable-runtime/resource-cleanup-${exit}-native`,
+          ascii(resourceCleanup),
+          host.id,
+        )
+        assert.deepEqual(Analysis.diagnostics(native), [], exit)
+        const llvm = yield* Analysis.codegen(native, { mode: 'release' })
+        assert.include(llvm.ir, 'drop_impl_0')
+        assert.include(llvm.ir, 'call void @free')
+        const nativeRun = yield* runNative(
+          `stored-callable-runtime/resource-cleanup-${exit}-native-process`,
+          resourceCleanup,
+        )
+        assert.strictEqual(nativeRun.exitCode, 42, `${exit} native`)
+        assert.strictEqual(nativeRun.stderr, '')
+
+        const observableDrop = cleanupProgram('let boom = self.tag / 0 return ()', exit)
+        const trappingWasm = yield* Analysis.ofSourceRealized(
+          `stored-callable-runtime/observable-drop-${exit}-wasm`,
+          ascii(observableDrop),
+          Target.wasm32UnknownUnknown.id,
+        )
+        assert.deepEqual(Analysis.diagnostics(trappingWasm), [], exit)
+        const trappingEvaluation = Analysis.evaluate(trappingWasm)
+        assert.strictEqual(trappingEvaluation._tag, 'Blocked', exit)
+        assert.strictEqual(
+          trappingEvaluation._tag === 'Blocked' ? trappingEvaluation.reason._tag : undefined,
+          'Trap',
+          exit,
+        )
+        assert.strictEqual(
+          trappingEvaluation.trace.filter(
+            (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl'),
+          ).length,
+          1,
+          `${exit} trapping evaluator Drop hook`,
+        )
+        const trappingWasmArtifact = yield* Analysis.codegenWasm(trappingWasm, {
+          mode: 'release',
+        })
+        const wasmExit = yield* Effect.exit(runWasm(trappingWasmArtifact.bytes))
+        assert.strictEqual(wasmExit._tag, 'Failure', `${exit} trapping Wasm`)
+        const nativeExit = yield* Effect.exit(
+          runNative(
+            `stored-callable-runtime/observable-drop-${exit}-native-process`,
+            observableDrop,
+          ),
+        )
+        assert.strictEqual(nativeExit._tag, 'Failure', `${exit} trapping native`)
+      }
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  300_000,
 )

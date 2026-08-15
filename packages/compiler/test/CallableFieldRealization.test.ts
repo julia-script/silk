@@ -1,6 +1,8 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
 import * as CallableFieldRealization from '../src/CallableFieldRealization.js'
 import * as Instances from '../src/Instances.js'
@@ -137,9 +139,9 @@ it.effect('derives invocation admissibility from the aggregate receiver access',
       ['Shared', 'Exclusive', 'Take'],
     )
     // A shared `fn` field is reachable through every receiver access.
-    assert.strictEqual(CallableFieldRealization.admitsInvocation('Shared', realization), true)
-    assert.strictEqual(CallableFieldRealization.admitsInvocation('Exclusive', realization), true)
-    assert.strictEqual(CallableFieldRealization.admitsInvocation('Take', realization), true)
+    assert.strictEqual(CallableFieldRealization.admitsInvocation(realization, 'Shared'), true)
+    assert.strictEqual(CallableFieldRealization.admitsInvocation(realization, 'Exclusive'), true)
+    assert.strictEqual(CallableFieldRealization.admitsInvocation(realization, 'Take'), true)
 
     // Ownership rejects before specialization and the engines invoke after it; both decide through
     // these three functions, so the fence and the runtime cannot disagree about a receiver.
@@ -147,7 +149,6 @@ it.effect('derives invocation admissibility from the aggregate receiver access',
     assert.strictEqual(CallableFieldRealization.admitsMode('Shared', 'Exclusive'), false)
     assert.strictEqual(CallableFieldRealization.admitsMode('Exclusive', 'Take'), false)
     assert.strictEqual(CallableFieldRealization.admitsMode('Take', 'Take'), true)
-    assert.strictEqual(CallableFieldRealization.requiredAccess('Take'), 'Take')
     // A borrow anywhere in a place weakens the whole place to that borrow's access.
     assert.strictEqual(CallableFieldRealization.weakerAccess('Take', 'Shared'), 'Shared')
     assert.strictEqual(CallableFieldRealization.weakerAccess('Shared', 'Take'), 'Shared')
@@ -287,21 +288,98 @@ ${capturingSection}`
   }),
 )
 
-it('mints the callable environment identity in exactly one frontend module', () => {
-  const sources = readdirSync(new URL('../src/', import.meta.url)).filter((name) =>
-    name.endsWith('.ts'),
-  )
-  const minting = sources.filter((name) =>
-    readFileSync(new URL(`../src/${name}`, import.meta.url), 'utf8').includes(
-      '`callable:${Hir.executableSiteKey(',
-    ),
-  )
+it.effect('selects same-site capture environments by their complete specialization', () =>
+  Effect.gen(function* () {
+    const source = `struct Token<T> { value: T }
+struct Holder<F: once fn(i32) -> i32> { step: F }
+fn consume<T>(value: i32, token: Token<T>) -> i32 { return value }
+fn apply<T>(token: Token<T>, value: i32) -> i32 {
+  let holder = Holder { step: consume<T>(move token) }
+  return holder.step(value)
+}
+pub fn main() -> i32 {
+  return apply<i32>(Token<i32> { value: 1 }, 20) + apply<bool>(Token<bool> { value: true }, 22)
+}`
+    const snapshot = yield* realized('callable-field/specializations', source)
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const realizations = realizationsOf(snapshot).entries.flatMap((entry) =>
+      entry.support._tag === 'Supported' &&
+      entry.support.realization.target._tag === 'Declaration' &&
+      entry.support.realization.target.name === 'consume'
+        ? [entry.support.realization]
+        : [],
+    )
 
-  // Elaboration is the only phase allowed to derive a callable identity from an expression.
-  // Every later phase must reach the same fact through `CallableFieldRealization`, so a new
-  // minting site here means some phase started rediscovering identity from syntax.
-  assert.deepEqual(minting, ['Elaboration.ts'])
-})
+    assert.strictEqual(realizations.length, 2)
+    assert.deepEqual(
+      realizations
+        .map((realization) => Type.encode(realization.captures.at(0)?.type ?? Type.unit))
+        .sort(),
+      ['callable-field/specializations.Token<bool>', 'callable-field/specializations.Token<i32>'],
+    )
+    assert.deepEqual(
+      realizations
+        .map((realization) =>
+          realization.environmentOwner?.typeArguments.map(Type.encodeGenericArgument).join(','),
+        )
+        .sort(),
+      ['bool', 'i32'],
+    )
+  }),
+)
+
+it.effect('keeps equal same-site capture shapes distinct by owner specialization', () =>
+  Effect.gen(function* () {
+    const source = `struct Holder<F: fn(i32) -> i32> { step: F }
+fn apply<T>(marker: T, value: i32) -> i32 {
+  let holder = Holder { step: i32.add(1) }
+  return holder.step(value)
+}
+pub fn main() -> i32 { return apply<i32>(0, 20) + apply<bool>(true, 20) }`
+    const snapshot = yield* realized('callable-field/equal-specializations', source)
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const realizations = realizationsOf(snapshot).entries.flatMap((entry) =>
+      entry.support._tag === 'Supported' ? [entry.support.realization] : [],
+    )
+
+    assert.strictEqual(realizations.length, 2)
+    assert.deepEqual(
+      realizations
+        .map((realization) =>
+          realization.environmentOwner?.typeArguments.map(Type.encodeGenericArgument).join(','),
+        )
+        .sort(),
+      ['bool', 'i32'],
+    )
+    assert.strictEqual(
+      realizations.every(
+        (realization) => Type.encode(realization.captures.at(0)?.type ?? Type.unit) === 'i32',
+      ),
+      true,
+    )
+  }),
+)
+
+it.effect('mints the callable environment identity in exactly one frontend module', () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const sourceRoot = yield* path.fromFileUrl(new URL('../src/', import.meta.url))
+    const sources = (yield* fileSystem.readDirectory(sourceRoot)).filter((name) =>
+      name.endsWith('.ts'),
+    )
+    const minting: Array<string> = []
+    for (const name of sources) {
+      const source = yield* fileSystem.readFileString(path.join(sourceRoot, name))
+      if (source.includes('`callable:${Hir.executableSiteKey(')) minting.push(name)
+    }
+
+    // Elaboration is the only phase allowed to derive a callable identity from an expression.
+    // Every later phase must reach the same fact through `CallableFieldRealization`, so a new
+    // minting site here means some phase started rediscovering identity from syntax.
+    assert.deepEqual(minting, ['Elaboration.ts'])
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)
 
 it.effect('rejects extracting an owned callable field with its own diagnostic', () =>
   Effect.gen(function* () {

@@ -296,6 +296,36 @@ it.effect('releases a stored capture loan when the aggregate is dropped', () =>
   }),
 )
 
+it.effect('retargets a stored capture loan through a nested whole-value move', () =>
+  Effect.gen(function* () {
+    const module = 'stored-callable-cleanup/nested-loan-transfer'
+    const source = `${borrowCapture}struct Boxed<F: mut fn(i32) -> i32> { inner: Holder<F> }
+pub fn main() -> i32 {
+  let mut values = [1]
+  let holder = Holder { step: read(&mut values) }
+  let boxed = Boxed { inner: move holder }
+  drop boxed
+  values[0] = 2
+  return values[0]
+}`
+    const snapshot = yield* realized(module, source)
+
+    assert.notInclude(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      'OWN0011',
+    )
+    const loan = snapshot.ownership
+      .get(module)
+      ?.functions.flatMap((fn) => [...fn.loans])
+      .find((candidate) => candidate.origin === 'CallableCapture')
+    const retained = loan ?? unreachable('expected the transferred callable capture loan')
+    assert.strictEqual(
+      source.slice(retained.endSpan.start, retained.endSpan.end).trim(),
+      'drop boxed',
+    )
+  }),
+)
+
 it.effect('leaves a stored Effect representation without a callable obligation', () =>
   Effect.gen(function* () {
     const module = 'stored-callable-cleanup/effect'

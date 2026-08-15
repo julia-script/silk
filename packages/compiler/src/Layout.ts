@@ -2340,18 +2340,7 @@ const representationEquals = (left: Representation, right: Representation): bool
   if (left._tag === 'CallableEnvironment') {
     return (
       right._tag === 'CallableEnvironment' &&
-      CallableFieldRealization.key(left.realization.instance, left.realization.field) ===
-        CallableFieldRealization.key(right.realization.instance, right.realization.field) &&
-      JSON.stringify(left.realization.target) === JSON.stringify(right.realization.target) &&
-      left.realization.targetArguments.length === right.realization.targetArguments.length &&
-      left.realization.targetArguments.every((argument, ordinal) => {
-        const other = right.realization.targetArguments.at(ordinal)
-        return (
-          other !== undefined &&
-          Type.genericArgumentKey(argument) === Type.genericArgumentKey(other)
-        )
-      }) &&
-      left.realization.environment === right.realization.environment &&
+      CallableFieldRealization.equals(left.realization, right.realization) &&
       left.tailPadding === right.tailPadding &&
       left.fields.length === right.fields.length &&
       left.fields.every((field, ordinal) => {

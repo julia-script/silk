@@ -151,6 +151,8 @@ export type CleanupPlan =
       readonly _tag: 'CallableCleanup'
       readonly type: Type.Callable
       readonly site: Hir.CallableSiteId
+      readonly realization?: CallableFieldRealization.Realization
+      readonly environmentIdentity?: string
       /** Moved environment slots in deterministic last-captured, first-released order. */
       readonly slots: ReadonlyArray<{
         readonly ordinal: number
@@ -411,15 +413,23 @@ const placeRoot = (place: Hir.Expression): Hir.Expression =>
  * A whole owner offers take access; any borrow the place travels through weakens the whole place to
  * that borrow's access, because the stored environment is only ever reached through it.
  */
-const receiverAccess = (place: Hir.Expression): CallableFieldRealization.ReceiverAccess => {
-  if (place._tag !== 'Project' && place._tag !== 'IndexPlace') return 'Take'
+const receiverAccess = (
+  state: CheckState,
+  place: Hir.Expression,
+): CallableFieldRealization.ReceiverAccess => {
+  if (place._tag !== 'Project' && place._tag !== 'IndexPlace') {
+    const site = useSite(place)
+    const matchAccess =
+      site === undefined ? undefined : state.bindings.get(siteKey(site))?.matchAccess
+    return matchAccess === 'Shared' || matchAccess === 'Exclusive' ? matchAccess : 'Take'
+  }
   const subject = place.subject
   const subjectType = subject._tag === 'Unavailable' ? undefined : subject.type
   const through: CallableFieldRealization.ReceiverAccess =
     subjectType !== undefined && (Type.isReference(subjectType) || Type.isSlice(subjectType))
       ? subjectType.access
       : 'Take'
-  return CallableFieldRealization.weakerAccess(receiverAccess(place.subject), through)
+  return CallableFieldRealization.weakerAccess(receiverAccess(state, place.subject), through)
 }
 
 /**
@@ -428,6 +438,7 @@ const receiverAccess = (place: Hir.Expression): CallableFieldRealization.Receive
  * invocation it protects can never disagree about which receiver admits which mode.
  */
 const storedCallableInvocationAccess = (
+  state: CheckState,
   callee: Hir.Expression,
   access: Type.CallableMode,
   span: SourceSpan.SourceSpan,
@@ -435,14 +446,14 @@ const storedCallableInvocationAccess = (
   if (callee._tag !== 'Project') return undefined
   const contract = storedCallableContract(callee)
   if (contract === undefined) return undefined
-  const receiver = receiverAccess(callee)
+  const receiver = receiverAccess(state, callee)
   if (CallableFieldRealization.admitsMode(receiver, access)) return undefined
   return Diagnostic.storedCallableInvocationAccess(
     Type.encode(callee.nominal),
     `#${callee.field.ordinal}`,
     Type.encode(contract),
     receiver,
-    CallableFieldRealization.requiredAccess(access),
+    access,
     span,
   )
 }
@@ -714,17 +725,13 @@ const checkExpression = (
     }
     case 'CallableApply': {
       const stored = storedCallableInvocationAccess(
+        state,
         expression.callee,
         expression.access,
         expression.span,
       )
       if (stored !== undefined) state.diagnostics.push(stored)
       const checkCallee = (): void => {
-        const site = useSite(expression.callee)
-        if (site !== undefined && expression.access === 'Take') {
-          checkUse(state, live, site, expression.callee.span, true)
-          return
-        }
         if (storedCallableContract(expression.callee) !== undefined) {
           // A stored callable is invoked through its aggregate, never extracted from it. A
           // consuming invocation takes the whole owner in one use of its root, exactly as invoking
@@ -738,6 +745,11 @@ const checkExpression = (
           }
           checkPlaceInterior(state, live, expression.callee, guard, escaping)
           checkUse(state, live, rootSite, placeRoot(expression.callee).span, true)
+          return
+        }
+        const site = useSite(expression.callee)
+        if (site !== undefined && expression.access === 'Take') {
+          checkUse(state, live, site, expression.callee.span, true)
           return
         }
         checkExpression(
@@ -1250,6 +1262,45 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
   }
   scanStatementRunEnds(fn.statements)
 
+  const movedCallableBindings = (expression: Elaboration.ExpressionFact): ReadonlyArray<number> => {
+    if (expression._tag === 'Grouped') return movedCallableBindings(expression.expression)
+    if (expression._tag === 'Move') {
+      const site = directSite(expression.subject)?.site
+      return site?._tag === 'Let' &&
+        expression.subject.type._tag === 'Available' &&
+        Type.containsCallableRepresentation(expression.subject.type.type)
+        ? Object.freeze([site.binding.ordinal])
+        : movedCallableBindings(expression.subject)
+    }
+    if (expression._tag === 'StructLiteral')
+      return Object.freeze(
+        expression.initializers.flatMap((initializer) =>
+          movedCallableBindings(initializer.expression),
+        ),
+      )
+    if (expression._tag === 'ArrayLiteral')
+      return Object.freeze(
+        expression.elements.flatMap((element) => movedCallableBindings(element.expression)),
+      )
+    return Object.freeze([])
+  }
+  const callableAliases = new Map<number, number>()
+  for (const binding of fn.bindings) {
+    for (const source of movedCallableBindings(binding.initializer)) {
+      callableAliases.set(source, binding.id.ordinal)
+    }
+  }
+  let propagatedCallableEnd = true
+  while (propagatedCallableEnd) {
+    propagatedCallableEnd = false
+    for (const [source, destination] of callableAliases) {
+      const ending = callableEnds.get(destination)
+      if (ending === undefined || callableEnds.get(source) === ending) continue
+      callableEnds.set(source, ending)
+      propagatedCallableEnd = true
+    }
+  }
+
   const returnedArgumentOrdinal = (expression: Elaboration.ExpressionFact): number | undefined => {
     return Elaboration.returnedBorrowArgument(expression)?.id.ordinal
   }
@@ -1420,10 +1471,14 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
             inspect(candidate, region, captureActive, naturalAccess(candidate))
             continue
           }
-          const root =
+          const directRoot =
             candidate._tag === 'Borrow' && candidate.formation._tag !== 'Unavailable'
               ? borrowSite(candidate.formation.root)
               : directSite(candidate)?.site
+          const root =
+            directRoot?._tag === 'Let'
+              ? (viewRoots.get(directRoot.binding.ordinal) ?? directRoot)
+              : directRoot
           if (root === undefined) {
             inspect(candidate, region, captureActive, 'Read')
             continue
@@ -2031,6 +2086,10 @@ export const specializeCleanup = (
         _tag: 'CallableCleanup',
         type,
         site: cleanup.site,
+        ...(cleanup.realization === undefined ? {} : { realization: cleanup.realization }),
+        ...(cleanup.environmentIdentity === undefined
+          ? {}
+          : { environmentIdentity: cleanup.environmentIdentity }),
         slots: Object.freeze(
           cleanup.slots.map((slot) =>
             Object.freeze({
@@ -2094,6 +2153,7 @@ export const realizedCallableCleanup = (
     _tag: 'CallableCleanup',
     type,
     site,
+    realization,
     slots: Object.freeze(
       [...owned].reverse().map((capture) =>
         Object.freeze({

@@ -1,6 +1,6 @@
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
-import type * as RepresentationField from './RepresentationField.js'
+import * as RepresentationField from './RepresentationField.js'
 import * as Type from './Type.js'
 
 /**
@@ -75,6 +75,7 @@ export interface Realization {
   readonly targetArguments: ReadonlyArray<Type.GenericArgument>
   /** Present when the target is reached through a capturing section rather than a named function. */
   readonly environment?: string
+  readonly environmentOwner?: Type.CallableIdentityArgument['environmentOwner']
   /** The specialized environment's own site, which names its lanes to layout, MIR, and cleanup. */
   readonly site?: Hir.CallableSiteId
   readonly captures: ReadonlyArray<CaptureSlot>
@@ -91,6 +92,11 @@ export type UnsupportedReason =
   | { readonly _tag: 'NonCallableBound' }
   | { readonly _tag: 'MissingCallableEnvironment'; readonly environment: string }
   | { readonly _tag: 'AmbiguousCallableEnvironment'; readonly environment: string }
+  | {
+      readonly _tag: 'UnsupportedCaptureLayout'
+      readonly capture: number
+      readonly type: Type.Type
+    }
 
 /** The complete support proof one storage fence consults before admitting a stored callable. */
 export type Support =
@@ -117,7 +123,7 @@ export interface Index {
 
 /** Canonical realization key; identical to the field resolution key it enriches. */
 export const key = (instance: Type.Nominal, id: RepresentationField.Id): string =>
-  `${Type.key(instance)}:${id.nominal.module}.${id.nominal.name}:field:${id.ordinal}:representation:${id.useOrdinal}`
+  RepresentationField.key(instance, id)
 
 const ownedAccess = (access: CaptureAccess): boolean => access === 'Take'
 
@@ -175,9 +181,18 @@ const cleanupOf = (captures: ReadonlyArray<CaptureSlot>, invocation: ReceiverAcc
     consumedByInvocation: invocation === 'Take',
   })
 
+/** Structural executable values need their own hidden identity and cannot be an inline lane yet. */
+const hasUnsupportedCaptureLayout = (type: Type.Type): boolean =>
+  Type.isCallable(type) ||
+  Type.isEffect(type) ||
+  Type.isRepresented(type) ||
+  (Type.isFixedArray(type) && hasUnsupportedCaptureLayout(type.element))
+
 /** The environment identity the frontend records on a section's retained representation argument. */
 const environmentSiteKey = (environment: string): string =>
-  environment.startsWith('callable:') ? environment.slice('callable:'.length) : environment
+  environment.startsWith('callable:')
+    ? (environment.slice('callable:'.length).split('\u0001').at(0) ?? environment)
+    : (environment.split('\u0001').at(1) ?? environment)
 
 const unsupported = (
   field: RepresentationField.Id,
@@ -194,7 +209,47 @@ type EnvironmentCaptures =
     }
   | { readonly _tag: 'UnresolvedEnvironment'; readonly reason: UnsupportedReason }
 
-/** One capture shape signature, used only to detect environments that specialize inconsistently. */
+const sameArguments = (
+  left: ReadonlyArray<Type.GenericArgument>,
+  right: ReadonlyArray<Type.GenericArgument>,
+): boolean =>
+  left.length === right.length &&
+  left.every((argument, ordinal) => {
+    const candidate = right.at(ordinal)
+    return candidate !== undefined && Type.equalsGenericArgument(argument, candidate)
+  })
+
+const sameTarget = (left: StaticTarget, right: Instances.CallableInstance['target']): boolean =>
+  left._tag === 'Declaration'
+    ? right._tag === 'DeclarationCallableTarget' &&
+      left.module === right.declaration.module &&
+      left.name === right.declaration.name
+    : right._tag === 'BuiltinCallableTarget' &&
+      left.actor === right.actor &&
+      left.operation === right.operation &&
+      left.intrinsic.actor === right.intrinsic.actor &&
+      left.intrinsic.name === right.intrinsic.name
+
+const sameOwner = (
+  owner: Type.CallableIdentityArgument['environmentOwner'],
+  candidate: Instances.CallableInstance['owner'],
+): boolean =>
+  owner === undefined ||
+  (owner.declaration.module === candidate.declaration.module &&
+    owner.declaration.name === candidate.declaration.name &&
+    sameArguments(owner.typeArguments, candidate.typeArguments))
+
+const matchesIdentity = (
+  identity: Type.CallableIdentityArgument,
+  candidate: Instances.CallableInstance,
+): boolean =>
+  identity.environment !== undefined &&
+  Hir.executableSiteKey(candidate.site) === environmentSiteKey(identity.environment) &&
+  sameTarget(identity.target, candidate.target) &&
+  sameArguments(identity.typeArguments, candidate.typeArguments) &&
+  sameOwner(identity.environmentOwner, candidate.owner)
+
+/** One capture shape signature, used only to detect indistinguishable environments. */
 const captureShape = (callable: Instances.CallableInstance): string =>
   callable.captures
     .map(
@@ -208,13 +263,13 @@ const captureShape = (callable: Instances.CallableInstance): string =>
  * carries no environment identity and therefore contributes no capture lanes at all.
  */
 const environmentCaptures = (
-  environment: string | undefined,
+  identity: Type.CallableIdentityArgument,
   callables: ReadonlyArray<Instances.CallableInstance>,
 ): EnvironmentCaptures => {
+  const environment = identity.environment
   if (environment === undefined)
     return Object.freeze({ _tag: 'ResolvedEnvironment', slots: Object.freeze([]) })
-  const site = environmentSiteKey(environment)
-  const candidates = callables.filter((callable) => Hir.executableSiteKey(callable.site) === site)
+  const candidates = callables.filter((callable) => matchesIdentity(identity, callable))
   const selected = candidates.at(0)
   if (selected === undefined)
     return Object.freeze({
@@ -266,10 +321,23 @@ export const realizeField = (
       Object.freeze({ _tag: 'NonCallableBound' }),
     )
   const environment = identity.environment
-  const captures = environmentCaptures(environment, callables)
+  const captures = environmentCaptures(identity, callables)
   if (captures._tag === 'UnresolvedEnvironment')
     return unsupported(resolution.id, resolution.instance, captures.reason)
   const slots = captures.slots
+  const unsupportedCapture = slots.find(
+    (capture) => !capture.borrowed && hasUnsupportedCaptureLayout(capture.type),
+  )
+  if (unsupportedCapture !== undefined)
+    return unsupported(
+      resolution.id,
+      resolution.instance,
+      Object.freeze({
+        _tag: 'UnsupportedCaptureLayout',
+        capture: unsupportedCapture.ordinal,
+        type: unsupportedCapture.type,
+      }),
+    )
   const invocation = contract.mode
   return Object.freeze({
     _tag: 'Supported',
@@ -281,6 +349,9 @@ export const realizeField = (
       target: identity.target,
       targetArguments: Object.freeze([...identity.typeArguments]),
       ...(environment === undefined ? {} : { environment }),
+      ...(identity.environmentOwner === undefined
+        ? {}
+        : { environmentOwner: identity.environmentOwner }),
       ...(captures.site === undefined ? {} : { site: captures.site }),
       captures: slots,
       invocation,
@@ -341,10 +412,70 @@ export const realizationOf = (
 
 /** True when every realized field of one complete instance has a runtime realization. */
 export const supportsInstance = (self: Index, instance: Type.Nominal): boolean => {
-  const prefix = `${Type.key(instance)}:`
-  const entries = self.entries.filter((entry) => entry.key.startsWith(prefix))
+  const entries = self.entries.filter((entry) =>
+    Type.equals(
+      entry.support._tag === 'Supported'
+        ? entry.support.realization.instance
+        : entry.support.instance,
+      instance,
+    ),
+  )
   return entries.length > 0 && entries.every((entry) => entry.support._tag === 'Supported')
 }
+
+/** True when a discovered callable is the complete specialization this realization names. */
+export const matchesCallable = (
+  self: Realization,
+  candidate: Instances.CallableInstance,
+): boolean =>
+  self.site !== undefined &&
+  Hir.sameExecutableSite(self.site, candidate.site) &&
+  sameTarget(self.target, candidate.target) &&
+  sameArguments(self.targetArguments, candidate.typeArguments) &&
+  sameOwner(self.environmentOwner, candidate.owner)
+
+/** Structural equality for the runtime fact owned by this actor. */
+export const equals = (left: Realization, right: Realization): boolean =>
+  key(left.instance, left.field) === key(right.instance, right.field) &&
+  Type.equals(left.contract, right.contract) &&
+  left.target._tag === right.target._tag &&
+  (left.target._tag === 'Declaration' && right.target._tag === 'Declaration'
+    ? left.target.module === right.target.module && left.target.name === right.target.name
+    : left.target._tag === 'Builtin' && right.target._tag === 'Builtin'
+      ? left.target.actor === right.target.actor &&
+        left.target.operation === right.target.operation &&
+        left.target.intrinsic.actor === right.target.intrinsic.actor &&
+        left.target.intrinsic.name === right.target.intrinsic.name
+      : false) &&
+  sameArguments(left.targetArguments, right.targetArguments) &&
+  left.environment === right.environment &&
+  ((left.environmentOwner === undefined && right.environmentOwner === undefined) ||
+    (left.environmentOwner !== undefined &&
+      right.environmentOwner !== undefined &&
+      left.environmentOwner.declaration.module === right.environmentOwner.declaration.module &&
+      left.environmentOwner.declaration.name === right.environmentOwner.declaration.name &&
+      sameArguments(left.environmentOwner.typeArguments, right.environmentOwner.typeArguments))) &&
+  ((left.site === undefined && right.site === undefined) ||
+    (left.site !== undefined &&
+      right.site !== undefined &&
+      Hir.sameExecutableSite(left.site, right.site))) &&
+  left.captures.length === right.captures.length &&
+  left.captures.every((capture, ordinal) => {
+    const candidate = right.captures.at(ordinal)
+    return (
+      candidate !== undefined &&
+      capture.ordinal === candidate.ordinal &&
+      capture.parameterOrdinal === candidate.parameterOrdinal &&
+      capture.access === candidate.access &&
+      Type.equals(capture.type, candidate.type) &&
+      capture.owned === candidate.owned &&
+      capture.borrowed === candidate.borrowed
+    )
+  }) &&
+  left.invocation === right.invocation &&
+  left.cleanup.consumedByInvocation === right.cleanup.consumedByInvocation &&
+  left.cleanup.lanes.length === right.cleanup.lanes.length &&
+  left.cleanup.lanes.every((lane, ordinal) => lane === right.cleanup.lanes.at(ordinal))
 
 /** Every invocation mode one receiver access admits, weakest receiver first. */
 export const admittedModes = (receiver: ReceiverAccess): ReadonlyArray<Type.CallableMode> =>
@@ -364,13 +495,10 @@ export const admittedModes = (receiver: ReceiverAccess): ReadonlyArray<Type.Call
 export const admitsMode = (receiver: ReceiverAccess, mode: Type.CallableMode): boolean =>
   admittedModes(receiver).includes(mode)
 
-/** The weakest receiver access that admits one callable mode. */
-export const requiredAccess = (mode: Type.CallableMode): ReceiverAccess => mode
-
 /** The weaker of two receiver accesses; a borrow anywhere in a place weakens the whole place. */
 export const weakerAccess = (left: ReceiverAccess, right: ReceiverAccess): ReceiverAccess =>
   admittedModes(left).length <= admittedModes(right).length ? left : right
 
 /** True when one aggregate receiver access may invoke a realization's callable mode. */
-export const admitsInvocation = (receiver: ReceiverAccess, self: Realization): boolean =>
+export const admitsInvocation = (self: Realization, receiver: ReceiverAccess): boolean =>
   admitsMode(receiver, self.invocation)

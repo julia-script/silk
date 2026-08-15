@@ -622,6 +622,7 @@ export interface CallableSectionExpressionFact {
   readonly captures: ReadonlyArray<CallableCaptureFact>
   readonly retainedDependencies: ReadonlyArray<number>
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  readonly environmentOwner?: Type.CallableIdentityArgument['environmentOwner']
   readonly substitution: Type.Substitution
   readonly mode: Type.CallableMode
   readonly type: ExpressionTypeFact
@@ -2679,6 +2680,7 @@ const exactCallableRepresentation = (
   contract: Type.Callable,
   typeArguments: ReadonlyArray<Type.GenericArgument> = Object.freeze([]),
   environment?: string,
+  environmentOwner?: Type.CallableIdentityArgument['environmentOwner'],
 ): Type.ExactRepresentationArgument | undefined => {
   const target = callableRepresentationTarget(reference)
   if (target === undefined) return undefined
@@ -2688,7 +2690,7 @@ const exactCallableRepresentation = (
       ? `declaration:${target.module}:${target.name}`
       : `builtin:${target.actor}:${target.operation}`)
   return Type.exactRepresentationArgument(
-    Type.callableIdentityArgument(identity, target, typeArguments, environment),
+    Type.callableIdentityArgument(identity, target, typeArguments, environment, environmentOwner),
     contract,
   )
 }
@@ -2718,6 +2720,7 @@ const representationOfExpression = (
       contract,
       expression.typeArguments,
       environment,
+      expression.environmentOwner,
     )
   }
   if (expression._tag === 'EffectBlock' && expression.type._tag === 'Available') {
@@ -4964,6 +4967,26 @@ const finishCallableSection = (
     contract.valid && callable !== undefined
       ? availableExpressionType(callable)
       : unavailableExpressionType
+  const environmentOwner = (() => {
+    const owner = resolution.executableOwner
+    if (owner === undefined) return undefined
+    const declaration = resolution.index.modules
+      .flatMap((module) => module.declarations)
+      .find(
+        (candidate) =>
+          candidate.canonical._tag === 'Canonical' &&
+          candidate.canonical.id.module === owner.module &&
+          candidate.canonical.id.name === owner.name,
+      )
+    return declaration === undefined
+      ? undefined
+      : Object.freeze({
+          declaration: Object.freeze({ module: owner.module, name: owner.name }),
+          typeArguments: Object.freeze(
+            declaration.typeParameters.map((parameter) => parameter.type),
+          ),
+        })
+  })()
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'CallableSection',
@@ -4980,6 +5003,7 @@ const finishCallableSection = (
         ),
       ),
       typeArguments: contract.typeArguments,
+      ...(environmentOwner === undefined ? {} : { environmentOwner }),
       substitution: contract.substitution,
       mode,
       type,

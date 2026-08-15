@@ -111,12 +111,59 @@ export interface CallableIdentityArgument {
     | {
         readonly _tag: 'Builtin'
         readonly actor: string
-        readonly operation: string
+        readonly operation: BuiltinOperation
         readonly intrinsic: { readonly actor: string; readonly name: string }
       }
   readonly typeArguments: ReadonlyArray<GenericArgument>
   readonly environment?: string
+  /** The enclosing executable specialization that owns a captured environment. */
+  readonly environmentOwner?: {
+    readonly declaration: { readonly module: string; readonly name: string }
+    readonly typeArguments: ReadonlyArray<GenericArgument>
+  }
 }
+
+/** The closed operation vocabulary shared by semantic callable identities and HIR targets. */
+export type BuiltinOperation =
+  | Scalar.OperationCode
+  | 'LayoutOf'
+  | 'EffectSuspend'
+  | 'StorageAcquire'
+  | 'HostWrite'
+  | 'RawBufferFrom'
+  | 'RawBufferSlot'
+  | 'RawBufferCount'
+  | 'RawBufferRead'
+  | 'RawBufferView'
+  | 'RawBufferViewMut'
+  | 'RawBufferCopy'
+  | 'RawBufferFill'
+  | 'SlotWrite'
+  | 'SlotTake'
+  | 'SlotCopy'
+  | 'SlotDrop'
+  | 'StringFromUtf8Unchecked'
+  | 'StringUtf8Bytes'
+  | 'StringByteLength'
+  | 'StringEqualsExact'
+  | 'OsFileOpen'
+  | 'OsFileRead'
+  | 'OsFileWrite'
+  | 'OsDirectoryOpen'
+  | 'OsDirectoryNext'
+  | 'OsPathInspect'
+  | 'OsDirectoryCreate'
+  | 'OsDirectoryCreateUnique'
+  | 'OsFileRemove'
+  | 'OsDirectoryRemove'
+  | 'OsHandleClose'
+  | 'OsStandardInputRead'
+  | 'OsProcessExecute'
+  | 'OsProcessCapture'
+  | 'OsHostArgumentCount'
+  | 'OsHostArgument'
+  | 'OsHostVariable'
+  | 'OsHostWorkingDirectory'
 
 /** A structural contract that may bound one statically known executable representation. */
 export type RepresentationBound = Callable | Effect
@@ -501,6 +548,7 @@ export const callableIdentityArgument = (
   target: CallableIdentityArgument['target'],
   typeArguments: ReadonlyArray<GenericArgument> = [],
   environment?: string,
+  environmentOwner?: CallableIdentityArgument['environmentOwner'],
 ): CallableIdentityArgument =>
   Object.freeze({
     _tag: 'CallableIdentityArgument',
@@ -508,6 +556,14 @@ export const callableIdentityArgument = (
     target: Object.freeze(target),
     typeArguments: Object.freeze(Array.from(typeArguments)),
     ...(environment === undefined ? {} : { environment }),
+    ...(environmentOwner === undefined
+      ? {}
+      : {
+          environmentOwner: Object.freeze({
+            declaration: Object.freeze({ ...environmentOwner.declaration }),
+            typeArguments: Object.freeze(Array.from(environmentOwner.typeArguments)),
+          }),
+        }),
   })
 
 /** Constructs an open representation argument owned by one representation parameter. */
@@ -724,6 +780,10 @@ const callableIdentityKey = (self: CallableIdentityArgument): string =>
     self.typeArguments.map(genericArgumentKey).join(','),
     '>:environment=',
     self.environment ?? '',
+    ':environment-owner=',
+    self.environmentOwner === undefined
+      ? ''
+      : `${self.environmentOwner.declaration.module}.${self.environmentOwner.declaration.name}<${self.environmentOwner.typeArguments.map(genericArgumentKey).join(',')}>`,
   ].join('')
 
 export const genericArgumentKey = (self: GenericArgument): string =>
@@ -1181,9 +1241,11 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
     else if (isExactRepresentationArgument(argument)) {
       visit(argument.contract)
       visitArgument(argument.identity)
-    } else if (isCallableIdentityArgument(argument))
+    } else if (isCallableIdentityArgument(argument)) {
       for (const typeArgument of argument.typeArguments) visitArgument(typeArgument)
-    else if (isFailureRowArgument(argument)) {
+      for (const typeArgument of argument.environmentOwner?.typeArguments ?? [])
+        visitArgument(typeArgument)
+    } else if (isFailureRowArgument(argument)) {
       for (const failure of argument.failures) visit(failure)
       for (const parameter_ of argument.parameters) found.set(key(parameter_), parameter_)
     } else if (isRequirementRowArgument(argument)) {
@@ -1236,7 +1298,8 @@ export const isConcreteGenericArgument = (self: GenericArgument): boolean =>
         : isEffectIdentityArgument(self)
           ? true
           : isCallableIdentityArgument(self)
-            ? self.typeArguments.every(isConcreteGenericArgument)
+            ? self.typeArguments.every(isConcreteGenericArgument) &&
+              (self.environmentOwner?.typeArguments.every(isConcreteGenericArgument) ?? true)
             : isFailureRowArgument(self)
               ? self.parameters.length === 0 && self.failures.every(isConcrete)
               : isRequirementRowArgument(self)
@@ -1447,6 +1510,14 @@ export const substituteGenericArgument = (
                   substituteGenericArgument(argument, substitution),
                 ),
                 self.environment,
+                self.environmentOwner === undefined
+                  ? undefined
+                  : Object.freeze({
+                      declaration: self.environmentOwner.declaration,
+                      typeArguments: self.environmentOwner.typeArguments.map((argument) =>
+                        substituteGenericArgument(argument, substitution),
+                      ),
+                    }),
               )
             : isFailureRowArgument(self)
               ? failureRowArgument(

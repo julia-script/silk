@@ -14,6 +14,7 @@ import * as WatText from '@silk-effect/wasm/WatText'
 import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
+import * as CallableFieldRealization from './CallableFieldRealization.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Hir from './Hir.js'
@@ -1696,6 +1697,38 @@ const emitOperation = (
    */
   const reloadEscapingRoots = (): ReadonlyArray<Instr.Instr> =>
     [...(memory?.frame.escaping ?? [])].sort((left, right) => left - right).flatMap(reloadRoot)
+  const callableEnvironment = (
+    cleanup: Extract<Ownership.CleanupPlan, { readonly _tag: 'CallableCleanup' }>,
+  ): Extract<LayoutPlan.CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> => {
+    const environment = plan.callableEnvironments.find(
+      (candidate) =>
+        candidate._tag === 'CallableEnvironment' &&
+        (cleanup.environmentIdentity !== undefined
+          ? Instances.callableIdentity(candidate.callable) === cleanup.environmentIdentity
+          : cleanup.realization !== undefined
+            ? CallableFieldRealization.matchesCallable(cleanup.realization, candidate.callable)
+            : false),
+    )
+    if (environment?._tag !== 'CallableEnvironment')
+      throw new RangeError('Wasm callable cleanup lost its specialized environment')
+    return environment
+  }
+  const callableCaptureRange = (
+    cleanup: Extract<Ownership.CleanupPlan, { readonly _tag: 'CallableCleanup' }>,
+    capture: number,
+  ): { readonly offset: number; readonly count: number; readonly byteOffset: number } => {
+    const environment = callableEnvironment(cleanup)
+    let offset = 0
+    for (const field of environment.fields) {
+      const count =
+        field.representation === 'Borrow'
+          ? 1
+          : (LayoutPlan.callingShape(plan, field.type)?.laneCount ?? 0)
+      if (field.ordinal === capture) return { offset, count, byteOffset: field.offset }
+      offset += count
+    }
+    throw new RangeError('Wasm callable cleanup lost an owned capture lane')
+  }
   /**
    * Runs every Drop hook one cleanup plan invokes: the owner materializes to its frame root,
    * each hook receives the address of its (possibly nested) value, and the owner's slots
@@ -1717,6 +1750,10 @@ const emitOperation = (
             Instr.call(resolve(plan_.hook, plan_.typeArguments)),
             ...walk(plan_.inner, byteOffset),
           ]
+        case 'CallableCleanup':
+          return plan_.slots.flatMap((slot) =>
+            walk(slot.cleanup, byteOffset + callableCaptureRange(plan_, slot.ordinal).byteOffset),
+          )
         case 'StructCleanup': {
           const entry = LayoutPlan.entry(memory.plan, plan_.type)
           const representation = entry?.representation
@@ -1837,6 +1874,10 @@ const emitOperation = (
             Instr.call(resolve(plan_.hook, plan_.typeArguments)),
             ...walk(plan_.inner, byteOffset),
           ]
+        case 'CallableCleanup':
+          return plan_.slots.flatMap((slot) =>
+            walk(slot.cleanup, byteOffset + callableCaptureRange(plan_, slot.ordinal).byteOffset),
+          )
         case 'StructCleanup': {
           const entry = LayoutPlan.entry(memory.plan, plan_.type)
           const representation = entry?.representation
@@ -1926,6 +1967,14 @@ const emitOperation = (
       }
       case 'HookCleanup':
         return reclaimReleaseInstructions(cleanup.inner, values)
+      case 'CallableCleanup':
+        return cleanup.slots.flatMap((slot) => {
+          const range = callableCaptureRange(cleanup, slot.ordinal)
+          return reclaimReleaseInstructions(
+            slot.cleanup,
+            values.slice(range.offset, range.offset + range.count),
+          )
+        })
       case 'EffectCleanup':
         return cleanup.slots.flatMap((slot) =>
           reclaimReleaseInstructions(
@@ -2035,6 +2084,14 @@ const emitOperation = (
       }
       case 'HookCleanup':
         return reclaimReleaseAtAddress(cleanup.inner, address, byteOffset)
+      case 'CallableCleanup':
+        return cleanup.slots.flatMap((slot) =>
+          reclaimReleaseAtAddress(
+            slot.cleanup,
+            address,
+            byteOffset + callableCaptureRange(cleanup, slot.ordinal).byteOffset,
+          ),
+        )
       case 'StructCleanup': {
         const representation = LayoutPlan.entry(memory.plan, cleanup.type)?.representation
         if (representation?._tag !== 'Aggregate') return []

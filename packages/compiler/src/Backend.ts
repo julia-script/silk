@@ -16,6 +16,7 @@ import * as Variable from '@silk-effect/llvm/Variable'
 import * as Verify from '@silk-effect/llvm/Verify'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
+import * as CallableFieldRealization from './CallableFieldRealization.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
@@ -3002,8 +3003,48 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             switch (plan._tag) {
               case 'NoCleanup':
               case 'ParameterCleanup':
-              case 'CallableCleanup':
                 return
+              case 'CallableCleanup': {
+                const environment = program.layout.callableEnvironments.find(
+                  (candidate) =>
+                    candidate._tag === 'CallableEnvironment' &&
+                    (plan.environmentIdentity !== undefined
+                      ? Instances.callableIdentity(candidate.callable) === plan.environmentIdentity
+                      : plan.realization !== undefined
+                        ? CallableFieldRealization.matchesCallable(
+                            plan.realization,
+                            candidate.callable,
+                          )
+                        : false),
+                )
+                if (environment?._tag !== 'CallableEnvironment')
+                  throw new RangeError('LLVM callable cleanup lost its specialized environment')
+                const rangeOf = (
+                  capture: number,
+                ): { offset: number; count: number } | undefined => {
+                  let offset = 0
+                  for (const field of environment.fields) {
+                    const count =
+                      field.representation === 'Borrow'
+                        ? 1
+                        : (Layout.callingShape(program.layout, field.type)?.laneCount ?? 0)
+                    if (field.ordinal === capture) return { offset, count }
+                    offset += count
+                  }
+                  return undefined
+                }
+                for (const slot of plan.slots) {
+                  const range = rangeOf(slot.ordinal)
+                  if (range === undefined)
+                    throw new RangeError('LLVM callable cleanup lost an owned capture lane')
+                  yield* dropThroughPlan(
+                    slot.cleanup,
+                    Object.freeze(values.slice(range.offset, range.offset + range.count)),
+                    `${tag}_callable${slot.ordinal}`,
+                  )
+                }
+                return
+              }
               case 'EffectCleanup':
                 for (const slot of plan.slots) {
                   if (!planReclaims(slot.cleanup) && slot.cleanup._tag !== 'HookCleanup') continue

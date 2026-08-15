@@ -167,6 +167,50 @@ pub fn main() -> i32 { return 0 }`,
   }),
 )
 
+it.effect('respects shared, exclusive, and moved match-pattern roots', () =>
+  Effect.gen(function* () {
+    const shared = yield* realized(
+      'stored-callable-ownership/match-shared',
+      `${declarations}fn consume<F: once fn(i32) -> i32>(value: Boxed<F>) -> i32 {
+  return match &value { Boxed<F> { inner } => inner.step(1) }
+}
+pub fn main() -> i32 { return 0 }`,
+    )
+    const exclusive = yield* realized(
+      'stored-callable-ownership/match-exclusive',
+      `${declarations}fn consume<F: once fn(i32) -> i32>(value: Boxed<F>) -> i32 {
+  let mut local = move value
+  return match &mut local { Boxed<F> { inner } => inner.step(1) }
+}
+pub fn main() -> i32 { return 0 }`,
+    )
+    const moved = yield* realized(
+      'stored-callable-ownership/match-moved',
+      `${declarations}fn consume<F: once fn(i32) -> i32>(value: Boxed<F>) -> i32 {
+  return match move value { Boxed<F> { inner } => inner.step(1) }
+}
+pub fn main() -> i32 { return 0 }`,
+    )
+
+    assert.include(
+      codesOf(shared),
+      'OWN0014',
+      Analysis.diagnostics(shared)
+        .map((diagnostic) => diagnostic.message)
+        .join('\n'),
+    )
+    assert.include(
+      codesOf(exclusive),
+      'OWN0014',
+      Analysis.diagnostics(exclusive)
+        .map((diagnostic) => diagnostic.message)
+        .join('\n'),
+    )
+    assert.notInclude(codesOf(moved), 'OWN0014')
+    assert.notInclude(codesOf(moved), 'OWN0001')
+  }),
+)
+
 it.effect('bounds a bare stored callable field by the same receiver rule', () =>
   Effect.gen(function* () {
     const snapshot = yield* realized(

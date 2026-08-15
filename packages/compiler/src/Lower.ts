@@ -1,3 +1,4 @@
+import * as CallableFieldRealization from './CallableFieldRealization.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -439,7 +440,7 @@ const callableTarget = (target: Type.CallableIdentityArgument['target']): Hir.Ca
     : Object.freeze({
         _tag: 'BuiltinCallableTarget',
         actor: target.actor,
-        operation: target.operation as Hir.BuiltinOperation,
+        operation: target.operation,
         intrinsic: Object.freeze({
           _tag: 'IntrinsicOperationId',
           actor: target.intrinsic.actor,
@@ -498,8 +499,7 @@ const storedCallableValueType = (
             { readonly _tag: 'CallableEnvironment' }
           > =>
             candidate._tag === 'CallableEnvironment' &&
-            realization.site !== undefined &&
-            Hir.sameExecutableSite(candidate.callable.site, realization.site),
+            CallableFieldRealization.matchesCallable(realization, candidate.callable),
         )
   if (realization.site !== undefined && environment === undefined) return undefined
   return Object.freeze({
@@ -3594,6 +3594,10 @@ const cleanupForLocal = (
     _tag: 'CallableCleanup',
     type: localType.type,
     site: specialized.site,
+    ...(specialized.realization === undefined ? {} : { realization: specialized.realization }),
+    ...(localType.environment === undefined
+      ? {}
+      : { environmentIdentity: Instances.callableIdentity(localType.environment.callable) }),
     slots: Object.freeze(
       specialized.slots.flatMap((slot) => {
         const field = fields.find((candidate) => candidate.ordinal === slot.ordinal)
@@ -3656,6 +3660,7 @@ const callableLocalCleanup = (
     _tag: 'CallableCleanup',
     type: localType.type,
     site: localType.site,
+    environmentIdentity: Instances.callableIdentity(environment.callable),
     slots: Object.freeze(
       [...environment.fields]
         .reverse()

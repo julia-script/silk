@@ -13,25 +13,23 @@ import { unreachable } from './support/raise.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const lowerStored = (name: string, source: string) =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      name,
-      ascii(source),
-      Target.wasm32UnknownUnknown.id,
-    )
-    const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
-    const layout = Layout.plan(catalog, snapshot.instances)
-    const ownership =
-      Analysis.ownershipOf(snapshot, name) ?? unreachable('expected module ownership')
-    const module = Lower.lowerProgram(
-      snapshot.instances,
-      new Map<string, Ownership.ModuleOwnership>([[name, ownership]]),
-      layout,
-      snapshot.index,
-    )
-    return { module, layout }
-  })
+const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
+  const snapshot = yield* Analysis.ofSourceRealized(
+    name,
+    ascii(source),
+    Target.wasm32UnknownUnknown.id,
+  )
+  const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
+  const layout = Layout.plan(catalog, snapshot.instances)
+  const ownership = Analysis.ownershipOf(snapshot, name) ?? unreachable('expected module ownership')
+  const module = Lower.lowerProgram(
+    snapshot.instances,
+    new Map<string, Ownership.ModuleOwnership>([[name, ownership]]),
+    layout,
+    snapshot.index,
+  )
+  return { module, layout }
+})
 
 it.effect(
   'carries one stored callable fact from construction through projection and invocation',

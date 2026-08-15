@@ -1188,6 +1188,13 @@ const callableOriginOf = (
       callableTargetIdentity(expression.target),
       typeArguments,
       identity,
+      Object.freeze({
+        declaration: Object.freeze({
+          module: context.owner.declaration.module,
+          name: context.owner.declaration.name,
+        }),
+        typeArguments: context.owner.typeArguments,
+      }),
     )
   }
   if (expression._tag === 'ParameterReference')
@@ -1250,6 +1257,7 @@ const appliedCallableOriginOf = (
     callable.target,
     inferred.filter((argument): argument is Type.GenericArgument => argument !== undefined),
     callable.environment,
+    callable.environmentOwner,
   )
 }
 

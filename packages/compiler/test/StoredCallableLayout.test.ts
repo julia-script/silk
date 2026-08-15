@@ -9,12 +9,15 @@ import { unreachable } from './support/raise.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const storedLayout = (name: string, source: string, target: Target.Target) =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), target.id)
-    const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
-    return Layout.plan(catalog, snapshot.instances)
-  })
+const storedLayout = Effect.fnUntraced(function* (
+  name: string,
+  source: string,
+  target: Target.Target,
+) {
+  const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), target.id)
+  const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
+  return Layout.plan(catalog, snapshot.instances)
+})
 
 const representedEntry = (plan: Layout.Plan): Layout.Entry =>
   plan.entries.find((entry) => Type.isRepresented(entry.type)) ??
