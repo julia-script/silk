@@ -1181,31 +1181,36 @@ const lowerEffectExecution = (
  * Redirects one bound operator to the provider's own function when specialization lands on a type
  * whose conformance maps the operation to source rather than to a sealed intrinsic.
  *
- * An interface operation never consumes its operands — a builtin operator does not, and a generic
- * body is checked with the element type non-`Copy` — so the witness observes each operand through a
- * shared borrow of the local the operand already lowered to. The borrow lives only across the call,
- * and its identity cannot collide with an argument borrow at the same span because a bound operand
- * has the bound's own type and is therefore never itself a borrow expression.
+ * Operator syntax lowers values through the compiler-known scalar shape, while the bound records
+ * the ordinary interface contract the operator spells. A source witness therefore receives each
+ * operand exactly as that contract declares it: borrowed operands create call-scoped loans, while
+ * value operands remain values. This is contract-directed lowering, not a witness-side adapter.
  */
 const emitWitnessDispatch = (
   fn: FunctionLowering,
   target: DeclarationIndex.InterfaceWitnessTarget,
   argumentLocals: ReadonlyArray<Mir.LocalId>,
-  operandTypes: ReadonlyArray<{ readonly source: Mir.Type; readonly reference: Mir.Type }>,
+  operandTypes: ReadonlyArray<Mir.Type>,
   resultType: Mir.Type,
   span: SourceSpan.SourceSpan,
 ): Mir.LocalId | undefined => {
   const borrows: Array<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }> = []
+  const arguments_: Array<Mir.LocalId> = []
   for (const [ordinal, argument] of argumentLocals.entries()) {
     const operand = operandTypes.at(ordinal)
-    if (operand === undefined || operand.reference._tag !== 'Reference') return undefined
+    const source = fn.localTypes.at(argument.ordinal)
+    if (operand === undefined || source === undefined) return undefined
+    if (operand._tag !== 'Reference') {
+      arguments_.push(argument)
+      continue
+    }
     const borrow = Object.freeze({
       _tag: 'BorrowId' as const,
       function: fn.owner.function.declaration.id,
       callSpan: span,
       ordinal,
     })
-    const destination = fn.alloc(operand.reference)
+    const destination = fn.alloc(operand)
     fn.emit(
       Object.freeze({
         _tag: 'BeginLoan',
@@ -1213,15 +1218,16 @@ const emitWitnessDispatch = (
         destination,
         root: argument,
         selectors: Object.freeze([]),
-        sourceType: operand.source,
-        type: operand.reference,
-        access: 'Shared',
+        sourceType: source,
+        type: operand,
+        access: operand.type.access,
         reborrow: false,
         suspendsParent: false,
         provenance: generated(span),
       }),
     )
     borrows.push(Object.freeze({ borrow, local: destination }))
+    arguments_.push(destination)
   }
   const destination = fn.alloc(resultType)
   fn.emit(
@@ -1233,7 +1239,7 @@ const emitWitnessDispatch = (
       // arguments this specialization proved. Nothing else travels: a requirement's own witness is
       // reached through its own instance, never through a value handed to this call.
       typeArguments: target.typeArguments,
-      arguments: Object.freeze(borrows.map((entry) => entry.local)),
+      arguments: Object.freeze(arguments_),
       type: resultType,
       provenance: generated(span),
     }),
@@ -1266,34 +1272,28 @@ const lowerInterfaceWitnessCall = (
     capability,
     bound.operation,
   )
-  const providerType = fn.type(provider)
   const resultType = fn.type(expression.type)
-  const referenceType = fn.type(Type.reference('Shared', provider))
+  const operandTypes = bound.contract.operands.flatMap((operand) => {
+    if (operand.type._tag !== 'Resolved') return []
+    const type = fn.type(fn.semantic(operand.type.type))
+    return type === undefined ? [] : [type]
+  })
   if (
     target === undefined ||
-    providerType === undefined ||
     resultType === undefined ||
-    referenceType?._tag !== 'Reference'
+    operandTypes.length !== bound.contract.operands.length
   )
     return undefined
-  return emitWitnessDispatch(
-    fn,
-    target,
-    argumentLocals,
-    argumentLocals.map(() => Object.freeze({ source: providerType, reference: referenceType })),
-    resultType,
-    expression.span,
-  )
+  return emitWitnessDispatch(fn, target, argumentLocals, operandTypes, resultType, expression.span)
 }
 
 /**
  * Redirects one bound operation call to the provider's own function, the fallback the operator path
  * reaches through `lowerInterfaceWitnessCall`.
  *
- * An operation no operator spells is reached only by naming the bound, and the witness it selects is
- * a source function exactly as often as an operator's is. Its operands are not all the bound's own
- * type — a contract may declare an operand of a fixed type the interface never parameterizes — so
- * each operand is borrowed at the type it lowered to rather than at the provider's.
+ * Named bound calls already elaborated and ownership-checked their arguments against the literal
+ * applied contract. Lowering therefore forwards those locals unchanged; introducing any borrow or
+ * move here would restore a second hidden user-interface calling convention.
  */
 const lowerBoundWitnessCall = (
   fn: FunctionLowering,
@@ -1310,16 +1310,73 @@ const lowerBoundWitnessCall = (
   )
   const resultType = fn.type(expression.type)
   if (target === undefined || resultType === undefined) return undefined
-  const operandTypes = argumentLocals.flatMap((argument) => {
-    const source = fn.localTypes.at(argument.ordinal)
-    const reference =
-      source === undefined ? undefined : fn.type(Type.reference('Shared', Mir.semanticType(source)))
-    return source === undefined || reference === undefined
-      ? []
-      : [Object.freeze({ source, reference })]
-  })
-  if (operandTypes.length !== argumentLocals.length) return undefined
-  return emitWitnessDispatch(fn, target, argumentLocals, operandTypes, resultType, expression.span)
+  const destination = fn.alloc(resultType)
+  fn.emit(
+    Object.freeze({
+      _tag: 'Call',
+      destination,
+      target: target.implementation,
+      typeArguments: target.typeArguments,
+      arguments: Object.freeze(argumentLocals),
+      type: resultType,
+      provenance: generated(expression.span),
+    }),
+  )
+  return destination
+}
+
+/**
+ * Reads through one explicit shared borrow only for the legacy value-shaped builtin selected by
+ * an intrinsic conformance. The interface contract remains literal everywhere else: source
+ * witnesses lower through `lowerBoundWitnessCall`, which forwards their reference locals.
+ */
+const lowerIntrinsicWitnessOperand = (
+  fn: FunctionLowering,
+  argument: Hir.Expression,
+  operand: DeclarationIndex.InterfaceOperandFact | undefined,
+): LoweredExpression | undefined => {
+  if (
+    argument._tag !== 'ValueBorrow' ||
+    argument.access !== 'Shared' ||
+    operand?.type._tag !== 'Resolved'
+  )
+    return lowerExpression(fn, argument)
+  const contractType = fn.semantic(operand.type.type)
+  const sourceType = fn.semantic(argument.source)
+  if (
+    !Type.isReference(contractType) ||
+    contractType.access !== 'Shared' ||
+    Type.key(contractType.target) !== Type.key(sourceType)
+  )
+    return lowerExpression(fn, argument)
+  const root =
+    argument.root._tag === 'BindingSliceRoot'
+      ? fn.bindingLocals.get(argument.root.binding.ordinal)
+      : argument.root._tag === 'ParameterSliceRoot'
+        ? fn.parameterLocals.get(argument.root.parameter.ordinal)
+        : fn.patternLocals.get(patternKey(argument.root.binding))
+  const type = fn.type(sourceType)
+  if (root === undefined || type === undefined) return undefined
+  const destination = fn.alloc(type)
+  fn.emit(
+    Object.freeze({
+      _tag: 'ReadPlace',
+      destination,
+      root,
+      selectors: Object.freeze(
+        argument.path.map((field) =>
+          Object.freeze({
+            _tag: 'FieldSelector' as const,
+            field,
+            provenance: authored(argument.span),
+          }),
+        ),
+      ),
+      type,
+      provenance: generated(argument.span),
+    }),
+  )
+  return Object.freeze({ result: destination })
 }
 
 function lowerExpression(
@@ -2878,6 +2935,7 @@ function lowerExpressionInner(
           intrinsic: selected.id,
           typeArguments: Object.freeze([]),
           arguments: expression.arguments,
+          intrinsicWitnessOperands: expression.contract.operands,
           loanEnds: expression.loanEnds,
           heldLoans: Object.freeze([]),
           type: expression.type,
@@ -2887,8 +2945,15 @@ function lowerExpressionInner(
     }
     case 'BuiltinCall': {
       const argumentLocals: Array<Mir.LocalId> = []
-      for (const argument of expression.arguments) {
-        const lowered = lowerExpression(fn, argument)
+      for (const [ordinal, argument] of expression.arguments.entries()) {
+        const lowered =
+          expression.intrinsicWitnessOperands === undefined
+            ? lowerExpression(fn, argument)
+            : lowerIntrinsicWitnessOperand(
+                fn,
+                argument,
+                expression.intrinsicWitnessOperands.at(ordinal),
+              )
         if (lowered === undefined) return undefined
         argumentLocals.push(lowered.result)
       }

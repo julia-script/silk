@@ -647,6 +647,12 @@ export type Expression =
         readonly operation: string
         readonly contract: DeclarationIndex.InterfaceOperationApplicationFact
       }
+      /**
+       * The literal interface operands whose borrows lowering may unwrap only when this call is
+       * the sealed intrinsic selected by a conformance. Ordinary source witnesses never set this
+       * bridge and therefore always receive their elaborated operands unchanged.
+       */
+      readonly intrinsicWitnessOperands?: ReadonlyArray<DeclarationIndex.InterfaceOperandFact>
       readonly typeArguments: ReadonlyArray<Type.Type>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>

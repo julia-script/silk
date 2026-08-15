@@ -93,8 +93,8 @@ pub fn main() -> i32 {
  * is the half an operator spells; the digest is declared and mapped so the conformance is complete.
  */
 const userKey = `interface HashKey<T> {
-  fn equals(left: T, right: T) -> bool
-  fn digest(left: T, right: T) -> u64
+  fn equals(left: &T, right: &T) -> bool
+  fn digest(left: &T, right: &T) -> u64
 }
 
 struct Cell { weight: i32 }
@@ -127,7 +127,7 @@ it.effect('refuses a source witness for a scalar provider', () =>
     const snapshot = yield* analyzed(
       'hash-key-bound/scalar-source-witness',
       `interface HashKey<T> {
-  fn digest(left: T, right: T) -> u64
+  fn digest(left: &T, right: &T) -> u64
 }
 fn u64Digest(left: &u64, right: &u64) -> u64 { return 7 }
 impl HashKey<u64> for u64 { digest: u64.u64Digest }
@@ -147,8 +147,8 @@ pub fn main() -> i32 { return 0 }`,
 const seededKey = `struct HashSeed { value: u64 }
 
 interface HashKey<T> {
-  fn equals(left: T, right: T) -> bool
-  fn hash(value: T, seed: HashSeed) -> u64
+  fn equals(left: &T, right: &T) -> bool
+  fn hash(value: &T, seed: &HashSeed) -> u64
 }
 
 struct Cell { weight: i32 }
@@ -168,10 +168,9 @@ pub fn main() -> i32 { return 0 }`,
   }),
 )
 
-it.effect('forces every witness operand to be observed through a shared borrow', () =>
+it.effect('rejects a value witness when the interface explicitly promises a shared borrow', () =>
   Effect.gen(function* () {
-    // The seed is `Copy`, so taking it by value would be harmless — and is still refused. The rule
-    // is uniform over operands rather than conditional on the operand's type.
+    // The seed is `Copy`, but its authored borrow remains literal rather than type-dependent.
     const snapshot = yield* analyzed(
       'hash-key-bound/by-value-operand',
       `${seededKey}
@@ -180,7 +179,7 @@ impl HashKey<Cell> for Cell { equals: Cell.cellEquals hash: Cell.cellHashByValue
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(messages(snapshot), [
-      'Invalid conformance: Cell.cellHashByValue is incompatible with HashKey.hash',
+      'Invalid conformance: Cell.cellHashByValue is incompatible with HashKey.hash: parameter seed requires take access but the interface promises shared access',
     ])
   }),
 )
@@ -201,7 +200,7 @@ it.effect('reaches a source witness through the bound-operation call', () =>
     const value = yield* evaluatedValue(
       'hash-key-bound/user-digest',
       `${userKey}
-fn digestOf<T: HashKey>(left: T, right: T) -> u64 { return HashKey.digest(left, right) }
+fn digestOf<T: HashKey>(left: T, right: T) -> u64 { return HashKey.digest(&left, &right) }
 pub fn main() -> i32 {
   let out = digestOf<Cell>(Cell { weight: 1 }, Cell { weight: 2 })
   if out == 7 { return 42 }

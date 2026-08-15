@@ -80,8 +80,8 @@ const threeEngineValue = (name: string, source: string, artifact: string) =>
  * bound and can only be answered by the provider's own function.
  */
 const userKey = `interface Keyed<T> {
-  fn equals(left: T, right: T) -> bool
-  fn digest(left: T, right: T) -> u64
+  fn equals(left: &T, right: &T) -> bool
+  fn digest(left: &T, right: &T) -> u64
 }
 
 struct Cell { weight: i32 }
@@ -93,7 +93,7 @@ fn cellDigest(left: &Cell, right: &Cell) -> u64 {
 
 impl Keyed<Cell> for Cell { equals: Cell.cellEquals digest: Cell.cellDigest }
 
-fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(left, right) }`
+fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(&left, &right) }`
 
 it.effect(
   'returns the source witness result from a non-operator bound call on all three engines',
@@ -125,7 +125,7 @@ it.effect('reaches each provider’s own witness from one bound-operation call s
     const value = yield* evaluatedValue(
       'bound-operation-witness/per-specialization',
       `interface Keyed<T> {
-  fn digest(left: T, right: T) -> u64
+  fn digest(left: &T, right: &T) -> u64
 }
 
 struct Cell { weight: i32 }
@@ -137,7 +137,7 @@ fn tagDigest(left: &Tag, right: &Tag) -> u64 { return u64.wrappingAdd(left.code,
 impl Keyed<Cell> for Cell { digest: Cell.cellDigest }
 impl Keyed<Tag> for Tag { digest: Tag.tagDigest }
 
-fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(left, right) }
+fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(&left, &right) }
 
 pub fn main() -> i32 {
   let cell = digestOf<Cell>(Cell { weight: 1 }, Cell { weight: 2 })
@@ -158,7 +158,7 @@ it.effect('lets one bound operation select an intrinsic witness and a source wit
     const value = yield* evaluatedValue(
       'bound-operation-witness/mixed-witnesses',
       `interface Keyed<T> {
-  fn digest(left: T, right: T) -> T
+  fn digest(left: &T, right: &T) -> T
 }
 
 struct Cell { weight: i32 }
@@ -170,7 +170,7 @@ fn cellDigest(left: &Cell, right: &Cell) -> Cell {
 impl Keyed<Cell> for Cell { digest: Cell.cellDigest }
 impl Keyed<i32> for i32 { digest: Intrinsic.i32WrappingAdd }
 
-fn digestOf<T: Keyed>(left: T, right: T) -> T { return Keyed.digest(left, right) }
+fn digestOf<T: Keyed>(left: T, right: T) -> T { return Keyed.digest(&left, &right) }
 
 pub fn main() -> i32 {
   let cell = digestOf<Cell>(Cell { weight: 20 }, Cell { weight: 1 })
@@ -193,7 +193,7 @@ it.effect('borrows a bound operand whose type the interface never parameterizes'
       `struct Seed { value: u64 }
 
 interface Keyed<T> {
-  fn hash(value: T, seed: Seed) -> u64
+  fn hash(value: &T, seed: &Seed) -> u64
 }
 
 struct Cell { weight: i32 }
@@ -204,7 +204,7 @@ fn cellHash(value: &Cell, seed: &Seed) -> u64 {
 
 impl Keyed<Cell> for Cell { hash: Cell.cellHash }
 
-fn hashOf<T: Keyed>(value: T, seed: Seed) -> u64 { return Keyed.hash(value, seed) }
+fn hashOf<T: Keyed>(value: T, seed: Seed) -> u64 { return Keyed.hash(&value, &seed) }
 
 pub fn main() -> i32 {
   let hashed = hashOf<Cell>(Cell { weight: 20 }, Seed { value: 22 })
@@ -224,7 +224,7 @@ it.effect('keeps the operator-spelled half of the same conformance unchanged', (
       `${userKey}
 fn probe<T: Keyed>(left: T, right: T) -> u64 {
   if left == right { return 0 }
-  return Keyed.digest(left, right)
+  return Keyed.digest(&left, &right)
 }
 
 pub fn main() -> i32 {
@@ -252,7 +252,7 @@ pub fn main() -> i32 {
 const module = 'bound-operation-witness/unlowerable'
 
 const witnessed = `interface Keyed<T> {
-  fn digest(left: T, right: T) -> u64
+  fn digest(left: &T, right: &T) -> u64
 }
 
 struct Cell { weight: i32 }
@@ -261,7 +261,7 @@ fn cellDigest(left: &Cell, right: &Cell) -> u64 { return 7 }
 
 impl Keyed<Cell> for Cell { digest: Cell.cellDigest }
 
-fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(left, right) }
+fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(&left, &right) }
 
 pub fn main() -> i32 {
   let out = digestOf<Cell>(Cell { weight: 1 }, Cell { weight: 2 })
@@ -289,7 +289,7 @@ it.effect('reports a bound operation whose selected witness cannot be lowered', 
       violations.map((violation) =>
         witnessed.slice(violation.span.start, violation.span.end).trim(),
       ),
-      ['Keyed.digest(left, right)'],
+      ['Keyed.digest(&left, &right)'],
     )
   }),
 )

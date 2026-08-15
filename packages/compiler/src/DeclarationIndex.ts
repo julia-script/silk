@@ -2,6 +2,7 @@ import * as Option from 'effect/Option'
 import * as ConformanceGoal from './ConformanceGoal.js'
 import * as ConformanceHead from './ConformanceHead.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.js'
 import * as InterfaceWitnessInference from './InterfaceWitnessInference.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
@@ -4110,6 +4111,15 @@ const inferInterfaceWitnessTarget = (
     implementation.returnType._tag !== 'Resolved'
   )
     return undefined
+  const binders = implementation.typeParameters
+    .filter((parameter) => parameter.duplicateOf === undefined)
+    .map((parameter) => parameter.type)
+  if (binders.length === 0)
+    return Object.freeze({
+      _tag: 'Inferred',
+      arguments: Object.freeze([]),
+      substitution: new Map<string, Type.GenericArgument>(),
+    })
   const constraints: Array<InterfaceWitnessInference.Constraint> = []
   for (const [ordinal, operand] of contract.operands.entries()) {
     const pattern = implementation.parameters.at(ordinal)?.declaredType
@@ -4127,9 +4137,7 @@ const inferInterfaceWitnessTarget = (
           ? `receiver ${name}`
           : `parameter ${name}`,
         pattern: pattern.type,
-        // PR3 infers through the existing witness ABI. PR4 replaces this one adapter together with
-        // the atomic Order/HashKey literal-ownership migration.
-        actual: Type.reference('Shared', operand.type.type),
+        actual: operand.type.type,
       }),
     )
   }
@@ -4147,7 +4155,9 @@ const inferInterfaceWitnessTarget = (
         Type.unit,
         implementation.failureRow.failures,
         'Shared',
-        implementation.requirementRow.requirements,
+        implementation.requirementRow.requirements.map((requirement) =>
+          Object.freeze({ ...requirement, access: 'Shared' as const }),
+        ),
         implementation.failureRow.parameters,
         implementation.requirementRow.parameters,
       ),
@@ -4155,17 +4165,136 @@ const inferInterfaceWitnessTarget = (
         Type.unit,
         contract.failureRow.failures,
         'Shared',
-        contract.requirementRow.requirements,
+        contract.requirementRow.requirements.map((requirement) =>
+          Object.freeze({ ...requirement, access: 'Shared' as const }),
+        ),
         contract.failureRow.parameters,
         contract.requirementRow.parameters,
       ),
     }),
   )
-  return InterfaceWitnessInference.infer(
-    implementation.typeParameters
-      .filter((parameter) => parameter.duplicateOf === undefined)
-      .map((parameter) => parameter.type),
-    constraints,
+  return InterfaceWitnessInference.infer(binders, constraints)
+}
+
+const compatibilityOperand = (
+  parameter: ParameterFact,
+  type: Type.Type,
+  provider: Type.Type,
+): InterfaceWitnessCompatibility.Operand =>
+  Object.freeze({
+    name: parameter.name._tag === 'Present' ? parameter.name.spelling : '_',
+    type,
+    receiver: Type.equals(Type.isReference(type) ? type.target : type, provider),
+  })
+
+/** Checks one source witness against the complete applied interface contract it will implement. */
+const interfaceWitnessCompatibility = (
+  contract: InterfaceOperationApplicationFact | undefined,
+  implementation: DeclarationFact,
+  substitution: Type.Substitution,
+): InterfaceWitnessCompatibility.Compatibility | undefined => {
+  if (contract === undefined || contract.success._tag !== 'Resolved') return undefined
+  const contractOperands = contract.operands.flatMap((operand) =>
+    operand.type._tag === 'Resolved'
+      ? [compatibilityOperand(operand.parameter, operand.type.type, contract.provider)]
+      : [],
+  )
+  const witnessOperands = implementation.parameters.flatMap((parameter) =>
+    parameter.declaredType._tag === 'Resolved'
+      ? [
+          compatibilityOperand(
+            parameter,
+            Type.substitute(parameter.declaredType.type, substitution),
+            contract.provider,
+          ),
+        ]
+      : [],
+  )
+  if (
+    contractOperands.length !== contract.operands.length ||
+    witnessOperands.length !== implementation.parameters.length ||
+    implementation.returnType._tag !== 'Resolved'
+  )
+    return undefined
+  const witnessRows = Type.substitute(
+    Type.effect(
+      Type.unit,
+      implementation.failureRow.failures,
+      'Shared',
+      implementation.requirementRow.requirements,
+      implementation.failureRow.parameters,
+      implementation.requirementRow.parameters,
+    ),
+    substitution,
+  )
+  if (!Type.isEffect(witnessRows)) return undefined
+  return InterfaceWitnessCompatibility.check(
+    Object.freeze({
+      functionKind: contract.functionKind,
+      operands: Object.freeze(contractOperands),
+      success: contract.success.type,
+      failures: contract.failureRow.failures,
+      failureParameters: contract.failureRow.parameters,
+      requirements: contract.requirementRow.requirements,
+      requirementParameters: contract.requirementRow.parameters,
+    }),
+    Object.freeze({
+      functionKind: implementation.functionKind,
+      operands: Object.freeze(witnessOperands),
+      success: Type.substitute(implementation.returnType.type, substitution),
+      failures: witnessRows.failures,
+      failureParameters: witnessRows.failureParameters,
+      requirements: witnessRows.requirements,
+      requirementParameters: witnessRows.requirementParameters,
+    }),
+  )
+}
+
+/** The one legacy bridge: sealed scalar intrinsics consume what ordinary interfaces now borrow. */
+const intrinsicWitnessOperand = (type: Type.Type): Type.Type =>
+  Type.isReference(type) && type.access === 'Shared' ? type.target : type
+
+const intrinsicWitnessCompatibility = (
+  contract: InterfaceOperationApplicationFact | undefined,
+  parameters: ReadonlyArray<Type.Type>,
+  result: Type.Type,
+): InterfaceWitnessCompatibility.Compatibility | undefined => {
+  if (contract === undefined || contract.success._tag !== 'Resolved') return undefined
+  const operands = contract.operands.flatMap((operand) =>
+    operand.type._tag === 'Resolved'
+      ? [
+          compatibilityOperand(
+            operand.parameter,
+            intrinsicWitnessOperand(operand.type.type),
+            contract.provider,
+          ),
+        ]
+      : [],
+  )
+  if (operands.length !== contract.operands.length) return undefined
+  return InterfaceWitnessCompatibility.check(
+    Object.freeze({
+      functionKind: contract.functionKind,
+      operands: Object.freeze(operands),
+      success: contract.success.type,
+      failures: contract.failureRow.failures,
+      failureParameters: contract.failureRow.parameters,
+      requirements: contract.requirementRow.requirements,
+      requirementParameters: contract.requirementRow.parameters,
+    }),
+    Object.freeze({
+      functionKind: 'Ordinary',
+      operands: Object.freeze(
+        parameters.map((type, ordinal) =>
+          Object.freeze({ name: operands.at(ordinal)?.name ?? '_', type, receiver: false }),
+        ),
+      ),
+      success: result,
+      failures: Object.freeze([]),
+      failureParameters: Object.freeze([]),
+      requirements: Object.freeze([]),
+      requirementParameters: Object.freeze([]),
+    }),
   )
 }
 
@@ -5314,22 +5443,16 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           if (mapping === undefined) continue
           const target = mapping.target
           const contractName = contract.name.spelling
-          const contractShape =
-            contract.functionKind === 'Ordinary' &&
-            contract.failureRow.failures.length === 0 &&
-            contract.requirementRow.requirements.length === 0
-          const rejectIncompatibleMapping = (): void => {
+          const rejectIncompatibleMapping = (detail?: string): void => {
             diagnostics.push(
               invalidDiagnostic(
-                `${target._tag === 'TypePath' ? target.spelling : '_'} is incompatible with ${capability.name}.${contractName}`,
+                `${target._tag === 'TypePath' ? target.spelling : '_'} is incompatible with ${capability.name}.${contractName}${detail === undefined ? '' : `: ${detail}`}`,
                 mapping.syntax.span,
               ),
             )
           }
-          // A witness names either one sealed intrinsic or one function of the provider's own
-          // actor. The two targets are checked against the same substituted contract; only the
-          // operand form differs, because a source witness observes each operand through a shared
-          // borrow while an intrinsic consumes the scalar the operand denotes.
+          // A source witness uses the applied contract's literal operands. Only a sealed intrinsic
+          // crosses the narrowly scoped scalar value/shared-borrow bridge below.
           if (
             Type.isNominal(provider) &&
             target._tag === 'TypePath' &&
@@ -5391,40 +5514,18 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
               )
               continue
             }
-            const specialize = (type: Type.Type): Type.Type =>
-              Type.substitute(type, inference.substitution)
-            const validParameters =
-              implementation.parameters.length === contract.parameters.length &&
-              contract.parameters.every((parameter, ordinal) => {
-                const actual = implementation.parameters.at(ordinal)?.declaredType
-                return (
-                  parameter.declaredType._tag === 'Resolved' &&
-                  actual?._tag === 'Resolved' &&
-                  Type.isReference(actual.type) &&
-                  actual.type.access === 'Shared' &&
-                  Type.equals(
-                    Type.substitute(parameter.declaredType.type, substitution),
-                    specialize(actual.type.target),
-                  )
-                )
-              })
-            const validResult =
-              implementation.returnType._tag === 'Resolved' &&
-              contract.returnType._tag === 'Resolved' &&
-              Type.equals(
-                Type.substitute(contract.returnType.type, substitution),
-                specialize(implementation.returnType.type),
+            const compatibility = interfaceWitnessCompatibility(
+              mapping.contract,
+              implementation,
+              inference.substitution,
+            )
+            if (compatibility === undefined || compatibility._tag === 'Incompatible')
+              rejectIncompatibleMapping(
+                compatibility === undefined
+                  ? undefined
+                  : InterfaceWitnessCompatibility.describe(compatibility),
               )
-            if (
-              !contractShape ||
-              !validParameters ||
-              !validResult ||
-              implementation.functionKind !== 'Ordinary' ||
-              implementation.failureRow.failures.length > 0 ||
-              implementation.requirementRow.requirements.length > 0
-            ) {
-              rejectIncompatibleMapping()
-            } else inferredWitnessArguments.set(mapping, inference.arguments)
+            else inferredWitnessArguments.set(mapping, inference.arguments)
             continue
           }
           const operation =
@@ -5436,29 +5537,21 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           const rule = operation?.rule
           const parameters = rule?._tag === 'BuiltinRule' ? rule.parameters : undefined
           const result = rule?._tag === 'BuiltinRule' ? rule.result : undefined
-          const validParameters =
-            parameters !== undefined &&
-            parameters.length === contract.parameters.length &&
-            contract.parameters.every(
-              (parameter, ordinal) =>
-                parameter.declaredType._tag === 'Resolved' &&
-                Type.equals(
-                  Type.substitute(parameter.declaredType.type, substitution),
-                  parameters.at(ordinal) ?? 'never',
-                ),
-            )
-          const validResult =
-            result !== undefined &&
-            contract.returnType._tag === 'Resolved' &&
-            Type.equals(Type.substitute(contract.returnType.type, substitution), result)
+          const compatibility =
+            parameters === undefined || result === undefined
+              ? undefined
+              : intrinsicWitnessCompatibility(mapping.contract, parameters, result)
           if (
             operation === undefined ||
             operation.unsafe ||
-            !contractShape ||
-            !validParameters ||
-            !validResult
+            compatibility === undefined ||
+            compatibility._tag === 'Incompatible'
           )
-            rejectIncompatibleMapping()
+            rejectIncompatibleMapping(
+              compatibility === undefined
+                ? undefined
+                : InterfaceWitnessCompatibility.describe(compatibility),
+            )
         }
         continue
       }

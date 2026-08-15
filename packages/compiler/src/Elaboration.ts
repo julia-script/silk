@@ -3523,6 +3523,7 @@ function analyzeArguments(
   let target: SourceCallable | undefined
   let builtinParameters: ReadonlyArray<SemanticType> = Object.freeze([])
   let builtinTypeParameters: ReadonlyArray<Type.Parameter> = Object.freeze([])
+  let boundParameters: ReadonlyArray<SemanticType> = Object.freeze([])
   if (first !== undefined && second === undefined) {
     const name = spelling(source, first)
     const resolved = NameResolution.lookup(resolution.scope, resolution.index, name)
@@ -3566,6 +3567,32 @@ function analyzeArguments(
       target = serviceOperation(qualifier.declaration, memberSpelling)
     } else if (
       qualifier._tag === 'Resolved' &&
+      qualifier.declaration._tag === 'InterfaceDeclaration'
+    ) {
+      const memberToken = second
+      const bound = boundOperationReference(
+        declaration,
+        qualifier.declaration,
+        qualifierSpelling,
+        memberSpelling,
+        memberToken,
+      )
+      if (bound?._tag === 'BoundOperation') boundParameters = bound.reference.parameters
+      else if (qualifier.declaration.canonical._tag === 'Canonical') {
+        const member = DeclarationIndex.lookup(
+          resolution.index,
+          qualifier.declaration.canonical.id.module,
+          memberSpelling,
+        )
+        target =
+          member._tag === 'Resolved' &&
+          member.declaration._tag === 'FunctionDeclaration' &&
+          member.declaration.visibility === 'Public'
+            ? member.declaration
+            : undefined
+      }
+    } else if (
+      qualifier._tag === 'Resolved' &&
       (qualifier.declaration._tag === 'StructDeclaration' ||
         qualifier.declaration._tag === 'InterfaceDeclaration') &&
       qualifier.declaration.canonical._tag === 'Canonical'
@@ -3604,27 +3631,29 @@ function analyzeArguments(
       ? Type.prefixSubstitution(declaredTypeParameters, explicitTypes)
       : undefined
   const expectedTypes = Object.freeze(
-    builtinParameters.length > 0
-      ? builtinParameters
-          .slice(
-            builtinParameters.length >= 2 && argumentNodes.length === builtinParameters.length - 1
-              ? 1
-              : 0,
-          )
-          .map((parameter) => Type.substitute(parameter, builtinSubstitution ?? new Map()))
-      : (target?.parameters ?? [])
-          .slice(
-            target !== undefined &&
-              target.parameters.length >= 2 &&
-              argumentNodes.length === target.parameters.length - 1
-              ? 1
-              : 0,
-          )
-          .map((parameter) =>
-            parameter.declaredType._tag === 'Resolved'
-              ? Type.substitute(parameter.declaredType.type, substitution ?? new Map())
-              : undefined,
-          ),
+    boundParameters.length > 0
+      ? boundParameters
+      : builtinParameters.length > 0
+        ? builtinParameters
+            .slice(
+              builtinParameters.length >= 2 && argumentNodes.length === builtinParameters.length - 1
+                ? 1
+                : 0,
+            )
+            .map((parameter) => Type.substitute(parameter, builtinSubstitution ?? new Map()))
+        : (target?.parameters ?? [])
+            .slice(
+              target !== undefined &&
+                target.parameters.length >= 2 &&
+                argumentNodes.length === target.parameters.length - 1
+                ? 1
+                : 0,
+            )
+            .map((parameter) =>
+              parameter.declaredType._tag === 'Resolved'
+                ? Type.substitute(parameter.declaredType.type, substitution ?? new Map())
+                : undefined,
+            ),
   )
   return analyzeArgumentNodes(
     source,

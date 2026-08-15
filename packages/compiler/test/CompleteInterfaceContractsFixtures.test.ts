@@ -250,12 +250,12 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
         )?.type.kind,
         'CallableRepresentation',
       )
-      assert.strictEqual(conformance?.operations.at(0)?.contract?.receiverAccess, 'Take')
+      assert.strictEqual(conformance?.operations.at(0)?.contract?.receiverAccess, 'Shared')
       assert.strictEqual(conformance?.validity._tag, 'ValidConformance')
     }),
   )
 
-  it.effect('attaches the complete applied contract before legacy witness compatibility', () =>
+  it.effect('admits a complete effect witness through the applied compatibility contract', () =>
     Effect.gen(function* () {
       const snapshot = yield* analyze('mapped-effect')
       const conformance = Analysis.declarationIndex(snapshot)
@@ -277,9 +277,7 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
         ),
         ['complete-interface-contracts/mapped-effect.Clock'],
       )
-      // The pure compatibility actor is intentionally not wired into conformance admission until
-      // literal operand lowering and pure/effect boundary widening can migrate atomically.
-      assert.strictEqual(conformance?.validity._tag, 'InvalidConformance')
+      assert.strictEqual(conformance?.validity._tag, 'ValidConformance')
     }),
   )
 })

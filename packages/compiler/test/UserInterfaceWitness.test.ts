@@ -26,11 +26,11 @@ const evaluatedValue = (name: string, source: string) =>
 /**
  * One user-declared interface with two operator-spelled operations, one user struct witnessing
  * both, and one generic body bounded by the interface. A witness observes each operand through a
- * shared borrow, because an interface operation never consumes what it compares or combines.
+ * shared borrow, because the interface declares that ownership explicitly.
  */
 const twoOperations = `interface Blend<T> {
-  fn add(left: T, right: T) -> T
-  fn lessThan(left: T, right: T) -> bool
+  fn add(left: &T, right: &T) -> T
+  fn lessThan(left: &T, right: &T) -> bool
 }
 
 struct Cell {
@@ -80,8 +80,8 @@ it.effect('rejects a conformance that leaves one operation unmapped, naming it',
     const snapshot = yield* analyzed(
       'user-witness/missing-operation',
       `interface Blend<T> {
-  fn add(left: T, right: T) -> T
-  fn lessThan(left: T, right: T) -> bool
+  fn add(left: &T, right: &T) -> T
+  fn lessThan(left: &T, right: &T) -> bool
 }
 
 struct Cell {
@@ -108,8 +108,8 @@ it.effect('rejects a bounded specialization at a type whose conformance is incom
     const snapshot = yield* analyzed(
       'user-witness/incomplete-specialization',
       `interface Blend<T> {
-  fn add(left: T, right: T) -> T
-  fn lessThan(left: T, right: T) -> bool
+  fn add(left: &T, right: &T) -> T
+  fn lessThan(left: &T, right: &T) -> bool
 }
 
 struct Cell {
@@ -140,9 +140,9 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('rejects a witness whose operand is taken by value rather than by shared borrow', () =>
+it.effect('admits a value witness only when the interface literally transfers ownership', () =>
   Effect.gen(function* () {
-    // A by-value operand would consume what the operator only reads, so it cannot witness.
+    // There is no blanket adaptation: authored value ownership matches an authored value witness.
     const snapshot = yield* analyzed(
       'user-witness/by-value-operand',
       `interface Ordered<T> {
@@ -163,9 +163,7 @@ impl Ordered<Cell> for Cell {
 
 pub fn main() -> i32 { return 0 }`,
     )
-    assert.deepEqual(messages(snapshot), [
-      'Invalid conformance: Cell.cellLess is incompatible with Ordered.lessThan',
-    ])
+    assert.deepEqual(messages(snapshot), [])
   }),
 )
 
@@ -174,7 +172,7 @@ it.effect('rejects a witness whose result disagrees with the contract', () =>
     const snapshot = yield* analyzed(
       'user-witness/wrong-result',
       `interface Ordered<T> {
-  fn lessThan(left: T, right: T) -> bool
+  fn lessThan(left: &T, right: &T) -> bool
 }
 
 struct Cell {
@@ -192,7 +190,7 @@ impl Ordered<Cell> for Cell {
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(messages(snapshot), [
-      'Invalid conformance: Cell.cellLess is incompatible with Ordered.lessThan',
+      'Invalid conformance: Cell.cellLess is incompatible with Ordered.lessThan: witness returns i32 but the interface promises bool',
     ])
   }),
 )
@@ -202,7 +200,7 @@ it.effect('rejects a mapping that names a function the provider actor does not d
     const snapshot = yield* analyzed(
       'user-witness/absent-function',
       `interface Ordered<T> {
-  fn lessThan(left: T, right: T) -> bool
+  fn lessThan(left: &T, right: &T) -> bool
 }
 
 struct Cell {

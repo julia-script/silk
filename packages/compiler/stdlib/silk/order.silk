@@ -43,7 +43,7 @@ pub struct Ordering {
 /// rather than declared, so a witness can never disagree with itself about which values are equal.
 pub interface Order<T> {
   /// Reports whether `left` orders strictly before `right`.
-  fn lessThan(left: T, right: T) -> bool
+  fn lessThan(left: &T, right: &T) -> bool
 }
 
 impl Order<u8> for u8 { lessThan: Intrinsic.u8LessThan }
