@@ -434,6 +434,17 @@ const storedCallableContract = (place: Hir.Expression): Type.Callable | undefine
   return Type.isCallable(type) ? type : undefined
 }
 
+/** The Effect contract one place stores, when the place is a represented nominal field. */
+const storedEffectContract = (place: Hir.Expression): Type.Effect | undefined => {
+  if (place._tag !== 'Project') return undefined
+  const type = place.type
+  if (Type.isRepresented(type))
+    return Type.isEffect(type.representation.requiredBound)
+      ? type.representation.requiredBound
+      : undefined
+  return undefined
+}
+
 /** The root expression one place projects from, which owns or borrows the whole aggregate. */
 const placeRoot = (place: Hir.Expression): Hir.Expression =>
   place._tag === 'Project' || place._tag === 'IndexPlace' ? placeRoot(place.subject) : place
@@ -485,6 +496,27 @@ const storedCallableInvocationAccess = (
     Type.encode(contract),
     receiver,
     access,
+    span,
+  )
+}
+
+/** Rejects running a stored Effect through aggregate access weaker than its representation bound. */
+const storedEffectRunAccess = (
+  state: CheckState,
+  subject: Hir.Expression,
+  span: SourceSpan.SourceSpan,
+): Diagnostic.Diagnostic | undefined => {
+  if (subject._tag !== 'Project') return undefined
+  const contract = storedEffectContract(subject)
+  if (contract === undefined) return undefined
+  const receiver = receiverAccess(state, subject)
+  if (CallableFieldRealization.admitsMode(receiver, contract.access)) return undefined
+  return Diagnostic.storedEffectRunAccess(
+    Type.encode(subject.nominal),
+    `#${subject.field.ordinal}`,
+    Type.encode(contract),
+    receiver,
+    contract.access,
     span,
   )
 }
@@ -852,6 +884,21 @@ const checkExpression = (
       return
     }
     case 'Run': {
+      const stored = storedEffectRunAccess(state, expression.subject, expression.span)
+      if (stored !== undefined) state.diagnostics.push(stored)
+      const contract = storedEffectContract(expression.subject)
+      if (contract !== undefined) {
+        // Like a stored callable invocation, a consuming run takes the whole aggregate instead of
+        // extracting its representation-bearing field. Weaker runs only read through the place.
+        const rootSite = placeSite(expression.subject)
+        if (contract.access !== 'Take' || stored !== undefined || rootSite === undefined) {
+          checkExpression(state, live, expression.subject, false, guard, escaping)
+          return
+        }
+        checkPlaceInterior(state, live, expression.subject, guard, escaping)
+        checkUse(state, live, rootSite, placeRoot(expression.subject).span, true)
+        return
+      }
       const site = useSite(expression.subject)
       if (
         site !== undefined &&

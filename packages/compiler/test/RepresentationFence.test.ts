@@ -79,6 +79,29 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('keeps represented Effect storage fenced for every declared run mode', () =>
+  Effect.gen(function* () {
+    const modes = [
+      ['shared', 'Effect<i32>'],
+      ['exclusive', 'mut Effect<i32>'],
+      ['consuming', 'once Effect<i32>'],
+    ] as const
+
+    for (const [name, bound] of modes) {
+      const snapshot = yield* realized(
+        `representation-fence/effect-${name}`,
+        `struct Deferred<F: ${bound}> { operation: F }
+pub fn main() -> i32 {
+  let deferred = Deferred { operation: effect { return 1 } }
+  return 0
+}`,
+      )
+
+      assertFenced(snapshot, 'SEM0107')
+    }
+  }),
+)
+
 it.effect('fences an open Effect field after reachable exact specialization', () =>
   Effect.gen(function* () {
     const source = `struct Deferred<F: Effect<i32>> { operation: F }

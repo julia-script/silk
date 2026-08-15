@@ -265,6 +265,9 @@ export const representationFieldExtractionCode = 'OWN0013' as const
 /** Stable code for invoking a stored callable through too weak an aggregate receiver access. */
 export const storedCallableInvocationAccessCode = 'OWN0014' as const
 
+/** Stable code for running a stored Effect through too weak an aggregate receiver access. */
+export const storedEffectRunAccessCode = 'OWN0015' as const
+
 /** Stable code for an exact `usize` magnitude outside the selected target word. */
 export const usizeTargetOutOfRangeCode = 'LAY0001' as const
 
@@ -419,6 +422,7 @@ export type Code =
   | typeof borrowedMoveCode
   | typeof representationFieldExtractionCode
   | typeof storedCallableInvocationAccessCode
+  | typeof storedEffectRunAccessCode
   | typeof usizeTargetOutOfRangeCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
@@ -858,6 +862,14 @@ export type Reason =
     }
   | {
       readonly _tag: 'StoredCallableInvocationAccess'
+      readonly aggregate: string
+      readonly field: string
+      readonly contract: string
+      readonly receiver: 'Shared' | 'Exclusive' | 'Take'
+      readonly required: 'Shared' | 'Exclusive' | 'Take'
+    }
+  | {
+      readonly _tag: 'StoredEffectRunAccess'
       readonly aggregate: string
       readonly field: string
       readonly contract: string
@@ -3344,6 +3356,36 @@ export const storedCallableInvocationAccess = (
     message: `Cannot invoke field ${field} of ${aggregate} through ${receiver.toLowerCase()} aggregate access: ${contract} requires ${required.toLowerCase()} access to the whole aggregate`,
     reason: Object.freeze({
       _tag: 'StoredCallableInvocationAccess',
+      aggregate,
+      field,
+      contract,
+      receiver,
+      required,
+    }),
+    span,
+  })
+
+/**
+ * A stored Effect is reached through its enclosing aggregate, so the aggregate's own access bounds
+ * its run mode: a shared receiver runs only `Effect`, an exclusive receiver also runs `mut Effect`,
+ * and only a whole-owner receiver may consume a `once Effect`.
+ */
+export const storedEffectRunAccess = (
+  aggregate: string,
+  field: string,
+  contract: string,
+  receiver: 'Shared' | 'Exclusive' | 'Take',
+  required: 'Shared' | 'Exclusive' | 'Take',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: storedEffectRunAccessCode,
+    severity: 'error',
+    message: `Cannot run field ${field} of ${aggregate} through ${receiver.toLowerCase()} aggregate access: ${contract} requires ${required.toLowerCase()} access to the whole aggregate`,
+    reason: Object.freeze({
+      _tag: 'StoredEffectRunAccess',
       aggregate,
       field,
       contract,

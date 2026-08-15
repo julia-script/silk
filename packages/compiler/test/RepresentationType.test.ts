@@ -46,6 +46,24 @@ it('intersects compatible public bounds at their most restrictive access', () =>
   assert.strictEqual(Type.intersectRepresentationBounds(shared, sharedEffect), undefined)
 })
 
+it('admits every Effect representation contract only at equal or weaker-use bounds', () => {
+  const shared = Type.effect('i32', [])
+  const exclusive = Type.effect('i32', [], 'Exclusive')
+  const take = Type.effect('i32', [], 'Take')
+  const contracts = [shared, exclusive, take] as const
+
+  assert.deepEqual(
+    contracts.map((contract) =>
+      contracts.map((required) => Type.representationAdmissibility(contract, required)._tag),
+    ),
+    [
+      ['Admitted', 'Admitted', 'Admitted'],
+      ['Unavailable', 'Admitted', 'Admitted'],
+      ['Unavailable', 'Unavailable', 'Admitted'],
+    ],
+  )
+})
+
 it('keeps one ordered kinded argument vector on nominal applications', () => {
   const failure = Type.parameter(owner, 2, 'E', 'FailureRow')
   const requirements = Type.parameter(owner, 3, 'R', 'RequirementRow')
