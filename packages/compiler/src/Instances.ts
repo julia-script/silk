@@ -38,6 +38,23 @@ export interface Instance {
   }>
 }
 
+/** Completes every source executable identity with the full discovered owner specialization. */
+const specializeInstanceType = (
+  type: Type.Type,
+  owner: InstanceKey,
+  substitutions: ReadonlyArray<Type.Substitution>,
+): Type.Type =>
+  Type.specializeExecutableOwner(
+    substitutions.reduce(
+      (specialized, substitution) => Type.substitute(specialized, substitution),
+      type,
+    ),
+    Object.freeze({
+      declaration: owner.declaration,
+      typeArguments: owner.typeArguments,
+    }),
+  )
+
 /** One concrete hidden callable-section construction reachable from an instance. */
 export interface CallableInstance {
   readonly _tag: 'CallableInstance'
@@ -55,6 +72,28 @@ export interface CallableInstance {
   }>
   readonly type: Type.Callable
   readonly mode: Type.CallableMode
+}
+
+/** One specialized source Effect construction before any target layout is selected. */
+export interface EffectInstance {
+  readonly _tag: 'EffectInstance'
+  readonly representationIdentity: string
+  readonly identity: string
+  readonly owner: InstanceKey
+  readonly site: Hir.EffectSiteId
+  readonly runner: DeclarationIndex.CanonicalId
+  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  readonly captures: ReadonlyArray<{
+    readonly ordinal: number
+    readonly source: 'Parameter' | 'Binding'
+    readonly sourceOrdinal: number
+    readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+    readonly type: Type.Type
+    readonly effectIdentity?: string
+    readonly callableIdentity?: Type.CallableIdentityArgument
+  }>
+  readonly type: Type.Effect
+  readonly suspendable: boolean
 }
 
 /** One monomorphic ordinary/effect constructor call with hidden Effect identities resolved. */
@@ -111,6 +150,7 @@ export interface Discovery {
   readonly entry: Entry
   readonly instances: ReadonlyArray<Instance>
   readonly callables: ReadonlyArray<CallableInstance>
+  readonly effects: ReadonlyArray<EffectInstance>
   readonly calls: ReadonlyArray<CallInstance>
   readonly intrinsics: ReadonlyArray<IntrinsicCall>
   /** Exact concrete function executions that can suspend, excluding lazy result runners. */
@@ -473,7 +513,9 @@ const storedExecutableViolations = (
         .flatMap(Hir.expressionTree)
         .flatMap((expression) => {
           if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') return []
-          const aggregate = Type.substitute(expression.type, instance.substitution)
+          const aggregate = specializeInstanceType(expression.type, instance.key, [
+            instance.substitution,
+          ])
           const found = storedExecutable(index, aggregate, kind)
           if (found === undefined) return []
           if (
@@ -585,7 +627,7 @@ export const representedNominals = (
       if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') continue
       collectNominals(
         index,
-        Type.substitute(expression.type, instance.substitution),
+        specializeInstanceType(expression.type, instance.key, [instance.substitution]),
         found,
         new Set(),
       )
@@ -599,8 +641,9 @@ export const representedNominals = (
 }
 
 /**
- * The runtime realization index for every reachable represented callable field. Ownership, layout,
- * MIR, and every engine read realizations from here rather than re-deriving callable identity.
+ * The shared realization index for every reachable represented executable field. Effect entries
+ * remain semantic specialization facts until later phases explicitly consume them; the SEM0107
+ * construction fence therefore stays active.
  */
 export const callableFieldRealizations = (
   self: Discovery,
@@ -609,6 +652,7 @@ export const callableFieldRealizations = (
   CallableFieldRealization.realize(
     RepresentationField.resolveFields(index, representedNominals(self, index)),
     self.callables,
+    self.effects,
   )
 
 /** Rejects reachable constructions that retain bare or represented callable values. */
@@ -655,6 +699,7 @@ export const invalid = (rootModule: string): Discovery =>
     entry: Object.freeze({ _tag: 'Unavailable', reason: 'InvalidSource' }),
     instances: Object.freeze([]),
     callables: Object.freeze([]),
+    effects: Object.freeze([]),
     calls: Object.freeze([]),
     intrinsics: Object.freeze([]),
     suspendableExecutions: Object.freeze([]),
@@ -1757,12 +1802,12 @@ const concreteCallables = (
           Type.substituteGenericArgument(argument, ownerSubstitution),
         ]),
       )
-      const type = Type.substitute(Type.substitute(section.type, ownerSubstitution), substitution)
+      const type = specializeInstanceType(section.type, owner, [ownerSubstitution, substitution])
       const arguments_ = targetArguments(section.target, substitution, results)
       const captureTypes = section.captures.flatMap((capture) =>
         capture.value._tag === 'Unavailable'
           ? []
-          : [Type.substitute(Type.substitute(capture.value.type, ownerSubstitution), substitution)],
+          : [specializeInstanceType(capture.value.type, owner, [ownerSubstitution, substitution])],
       )
       if (
         !Type.isCallable(type) ||
@@ -1805,6 +1850,109 @@ const concreteCallables = (
     }
   }
   return Object.freeze(instances)
+}
+
+/**
+ * Collects specialized semantic facts for every source Effect construction. Represented fields
+ * consume these published facts instead of recovering a runner from construction syntax.
+ */
+const concreteEffects = (
+  instances: ReadonlyArray<Instance>,
+  suspendableEffects: ReadonlySet<string>,
+  results: ReadonlyMap<string, Elaboration.Result>,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<EffectInstance> => {
+  const effects = new Map<string, EffectInstance>()
+  for (const instance of instances) {
+    const bindings = callableBindings(instance.function)
+    const context: EffectOriginContext = Object.freeze({
+      fn: instance.function,
+      owner: instance.key,
+      substitution: instance.substitution,
+      results,
+      index,
+      resolving: new Set<string>(),
+    })
+    const blocks = callableExpressions(instance.function).flatMap((expression) =>
+      expression._tag === 'EffectBlock' ? [expression] : [],
+    )
+    for (const block of blocks) {
+      const type = specializeInstanceType(block.type, instance.key, [instance.substitution])
+      if (!Type.isEffect(type) || !Type.isConcrete(type)) continue
+      const captures = block.captures.flatMap((capture, ordinal) => {
+        const source = capture.binding === undefined ? 'Parameter' : 'Binding'
+        const sourceOrdinal = capture.binding?.ordinal ?? capture.parameter?.ordinal
+        const initializer =
+          sourceOrdinal === undefined || source === 'Parameter'
+            ? undefined
+            : bindings.get(sourceOrdinal)
+        const sourceType =
+          sourceOrdinal === undefined
+            ? undefined
+            : source === 'Parameter'
+              ? instance.function.contract._tag === 'Contract'
+                ? instance.function.contract.parameters.at(sourceOrdinal)
+                : undefined
+              : initializer === undefined || initializer._tag === 'Unavailable'
+                ? undefined
+                : initializer.type
+        if (sourceOrdinal === undefined || sourceType === undefined) return []
+        const specialized = specializeInstanceType(sourceType, instance.key, [
+          instance.substitution,
+        ])
+        if (!Type.isConcrete(specialized)) return []
+        const capturedEffectIdentity = Type.isEffect(specialized)
+          ? source === 'Parameter'
+            ? parameterEffectIdentity(instance.function, instance.key, sourceOrdinal)
+            : initializer === undefined
+              ? undefined
+              : effectOriginOf(initializer, context)
+          : undefined
+        const capturedCallableIdentity = Type.isCallable(specialized)
+          ? source === 'Parameter'
+            ? parameterCallableIdentity(instance.function, instance.key, sourceOrdinal)
+            : initializer === undefined
+              ? undefined
+              : callableOriginOf(initializer, context)
+          : undefined
+        return [
+          Object.freeze({
+            ordinal,
+            source,
+            sourceOrdinal,
+            access: capture.access,
+            type: specialized,
+            ...(capturedEffectIdentity === undefined
+              ? {}
+              : { effectIdentity: capturedEffectIdentity }),
+            ...(capturedCallableIdentity === undefined
+              ? {}
+              : { callableIdentity: capturedCallableIdentity }),
+          }),
+        ]
+      })
+      if (captures.length !== block.captures.length) continue
+      const identity = effectIdentity(instance.key, block.site)
+      effects.set(
+        identity,
+        Object.freeze({
+          _tag: 'EffectInstance',
+          representationIdentity: Hir.effectRepresentationIdentity(block.site),
+          identity,
+          owner: instance.key,
+          site: block.site,
+          runner: Hir.effectRunnerId(instance.key.declaration, block.site),
+          typeArguments: Object.freeze([...instance.key.typeArguments]),
+          captures: Object.freeze(captures),
+          type,
+          suspendable: suspendableEffects.has(identity),
+        }),
+      )
+    }
+  }
+  return Object.freeze(
+    [...effects.values()].sort((left, right) => left.identity.localeCompare(right.identity)),
+  )
 }
 
 const functionByKey = (
@@ -2134,6 +2282,7 @@ export const discover = (
       entry,
       instances: Object.freeze([]),
       callables: Object.freeze([]),
+      effects: Object.freeze([]),
       calls: Object.freeze([]),
       intrinsics: Object.freeze([]),
       suspendableExecutions: Object.freeze([]),
@@ -2358,12 +2507,16 @@ export const discover = (
   const instances = Object.freeze([...recorded.values()])
   const graph = suspensionGraph(instances, results, index)
   const suspendable = suspendableNodes(graph)
+  const suspendableEffectIdentities = Object.freeze(
+    [...graph.effectIdentities].filter((identity) => suspendable.has(effectNode(identity))).sort(),
+  )
   return Object.freeze({
     _tag: 'InstanceDiscovery',
     rootModule,
     entry,
     instances,
     callables: Object.freeze([...recordedCallables.values()]),
+    effects: concreteEffects(instances, new Set(suspendableEffectIdentities), results, index),
     calls: Object.freeze([...recordedCalls.values()]),
     intrinsics: reachableIntrinsics(instances, index),
     suspendableExecutions: Object.freeze(
@@ -2384,11 +2537,7 @@ export const discover = (
         })
         .sort(compareInstanceKeys),
     ),
-    suspendableEffects: Object.freeze(
-      [...graph.effectIdentities]
-        .filter((identity) => suspendable.has(effectNode(identity)))
-        .sort(),
-    ),
+    suspendableEffects: suspendableEffectIdentities,
     violations: Object.freeze(violations),
   })
 }

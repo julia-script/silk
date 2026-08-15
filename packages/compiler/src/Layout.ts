@@ -36,7 +36,7 @@ export type Representation =
     }
   | {
       readonly _tag: 'CallableEnvironment'
-      readonly realization: CallableFieldRealization.Realization
+      readonly realization: CallableFieldRealization.CallableRealization
       readonly fields: ReadonlyArray<CallableEnvironmentField>
       readonly tailPadding: number
     }
@@ -635,7 +635,7 @@ export const catalog = (
 
   const layoutRepresentedCallable = (
     type: Type.Represented,
-    realization: CallableFieldRealization.Realization,
+    realization: CallableFieldRealization.CallableRealization,
   ): CatalogEntry => {
     const key = Type.key(type)
     const existing = completed.get(key)
@@ -871,7 +871,7 @@ export const catalog = (
           const realization =
             plan === undefined || callableRealizations === undefined
               ? undefined
-              : CallableFieldRealization.realizationOf(callableRealizations, type, plan.id)
+              : CallableFieldRealization.callableRealizationOf(callableRealizations, type, plan.id)
           if (realization === undefined) {
             return unavailable(candidate, Object.freeze(Type.nominals(candidate)), {
               _tag: 'InvalidDeclaration',

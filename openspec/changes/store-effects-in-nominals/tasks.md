@@ -6,9 +6,9 @@
 
 ## 2. Stored-Effect Vertical Slice
 
-- [ ] 2.1 Extend resolved field representations with runner, concrete arguments, rows, access, environment, cleanup, and suspendability.
-- [ ] 2.2 Implement one unrun cleanup case and one suspending run case without a standalone structural Effect ABI.
-- [ ] 2.3 Stop and revise the design if any backend reconstructs runner semantics or requires a parallel field model.
+- [x] 2.1 Extend resolved field representations with runner, concrete arguments, rows, access, environment, cleanup, and suspendability.
+- [x] 2.2 Implement one unrun cleanup case and one suspending run case without a standalone structural Effect ABI.
+- [x] 2.3 Stop and revise the design if any backend reconstructs runner semantics or requires a parallel field model.
 
 ## 3. Ownership, Layout, and MIR
 

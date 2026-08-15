@@ -556,7 +556,7 @@ const representedValueType = (
           ),
           definition.construction.arguments,
         ) &&
-        definition.construction.site === `effect:${Hir.executableSiteKey(candidate.site)}`,
+        definition.construction.site === Hir.effectRepresentationIdentity(candidate.site),
     )
     return environment === undefined
       ? undefined
