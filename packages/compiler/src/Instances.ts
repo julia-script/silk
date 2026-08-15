@@ -38,6 +38,23 @@ export interface Instance {
   }>
 }
 
+/** Completes every source executable identity with the full discovered owner specialization. */
+const specializeInstanceType = (
+  type: Type.Type,
+  owner: InstanceKey,
+  substitutions: ReadonlyArray<Type.Substitution>,
+): Type.Type =>
+  Type.specializeExecutableOwner(
+    substitutions.reduce(
+      (specialized, substitution) => Type.substitute(specialized, substitution),
+      type,
+    ),
+    Object.freeze({
+      declaration: owner.declaration,
+      typeArguments: owner.typeArguments,
+    }),
+  )
+
 /** One concrete hidden callable-section construction reachable from an instance. */
 export interface CallableInstance {
   readonly _tag: 'CallableInstance'
@@ -496,7 +513,9 @@ const storedExecutableViolations = (
         .flatMap(Hir.expressionTree)
         .flatMap((expression) => {
           if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') return []
-          const aggregate = Type.substitute(expression.type, instance.substitution)
+          const aggregate = specializeInstanceType(expression.type, instance.key, [
+            instance.substitution,
+          ])
           const found = storedExecutable(index, aggregate, kind)
           if (found === undefined) return []
           if (
@@ -608,7 +627,7 @@ export const representedNominals = (
       if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') continue
       collectNominals(
         index,
-        Type.substitute(expression.type, instance.substitution),
+        specializeInstanceType(expression.type, instance.key, [instance.substitution]),
         found,
         new Set(),
       )
@@ -1783,12 +1802,12 @@ const concreteCallables = (
           Type.substituteGenericArgument(argument, ownerSubstitution),
         ]),
       )
-      const type = Type.substitute(Type.substitute(section.type, ownerSubstitution), substitution)
+      const type = specializeInstanceType(section.type, owner, [ownerSubstitution, substitution])
       const arguments_ = targetArguments(section.target, substitution, results)
       const captureTypes = section.captures.flatMap((capture) =>
         capture.value._tag === 'Unavailable'
           ? []
-          : [Type.substitute(Type.substitute(capture.value.type, ownerSubstitution), substitution)],
+          : [specializeInstanceType(capture.value.type, owner, [ownerSubstitution, substitution])],
       )
       if (
         !Type.isCallable(type) ||
@@ -1858,7 +1877,7 @@ const concreteEffects = (
       expression._tag === 'EffectBlock' ? [expression] : [],
     )
     for (const block of blocks) {
-      const type = Type.substitute(block.type, instance.substitution)
+      const type = specializeInstanceType(block.type, instance.key, [instance.substitution])
       if (!Type.isEffect(type) || !Type.isConcrete(type)) continue
       const captures = block.captures.flatMap((capture, ordinal) => {
         const source = capture.binding === undefined ? 'Parameter' : 'Binding'
@@ -1878,7 +1897,9 @@ const concreteEffects = (
                 ? undefined
                 : initializer.type
         if (sourceOrdinal === undefined || sourceType === undefined) return []
-        const specialized = Type.substitute(sourceType, instance.substitution)
+        const specialized = specializeInstanceType(sourceType, instance.key, [
+          instance.substitution,
+        ])
         if (!Type.isConcrete(specialized)) return []
         const capturedEffectIdentity = Type.isEffect(specialized)
           ? source === 'Parameter'

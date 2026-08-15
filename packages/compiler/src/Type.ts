@@ -1585,6 +1585,8 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
     } else if (isExactRepresentationArgument(argument)) {
       visitArgument(argument.identity)
       visitType(argument.contract)
+    } else if (isEffectIdentityArgument(argument)) {
+      for (const typeArgument of argument.owner?.typeArguments ?? []) visitArgument(typeArgument)
     } else if (isCallableIdentityArgument(argument)) {
       for (const typeArgument of argument.typeArguments) visitArgument(typeArgument)
       for (const typeArgument of argument.environment?.owner.typeArguments ?? [])
@@ -2054,6 +2056,141 @@ export const substituteGenericArgument = (
                       }),
                     )
                   : substitute(self, substitution)
+
+const sameExecutableOwnerDeclaration = (
+  left: ExecutableSpecializationOwner,
+  right: ExecutableSpecializationOwner,
+): boolean =>
+  left.declaration.module === right.declaration.module &&
+  left.declaration.name === right.declaration.name
+
+/**
+ * Replaces a source executable owner's open specialization with one complete discovered instance.
+ * This stays a semantic type transformation: it neither inspects construction syntax nor creates a
+ * second representation identity.
+ */
+export const specializeExecutableOwner = (
+  self: Type,
+  owner: ExecutableSpecializationOwner,
+): Type => {
+  const specializeOwner = (
+    current: ExecutableSpecializationOwner,
+  ): ExecutableSpecializationOwner =>
+    sameExecutableOwnerDeclaration(current, owner)
+      ? owner
+      : Object.freeze({
+          declaration: current.declaration,
+          typeArguments: Object.freeze(current.typeArguments.map(specializeArgument)),
+        })
+  const specializeArgument = (argument: GenericArgument): GenericArgument => {
+    if (isUnavailableGenericArgument(argument) || isRepresentationParameterArgument(argument))
+      return argument
+    if (isOpaqueRepresentationArgument(argument)) {
+      const contract = specializeType(argument.contract)
+      return isCallable(contract) || isEffect(contract)
+        ? opaqueRepresentationArgument(
+            argument.family,
+            contract,
+            argument.arguments.map(specializeArgument),
+          )
+        : argument
+    }
+    if (isExactRepresentationArgument(argument)) {
+      const contract = specializeType(argument.contract)
+      const identity = specializeArgument(argument.identity)
+      return (isCallableIdentityArgument(identity) || isEffectIdentityArgument(identity)) &&
+        (isCallable(contract) || isEffect(contract))
+        ? exactRepresentationArgument(identity, contract)
+        : argument
+    }
+    if (isEffectIdentityArgument(argument))
+      return effectIdentityArgument(
+        argument.identity,
+        argument.owner === undefined ? undefined : specializeOwner(argument.owner),
+      )
+    if (isCallableIdentityArgument(argument))
+      return callableIdentityArgument(
+        argument.identity,
+        argument.target,
+        argument.typeArguments.map(specializeArgument),
+        argument.environment === undefined
+          ? undefined
+          : callableEnvironmentIdentity(
+              argument.environment.site,
+              specializeOwner(argument.environment.owner),
+            ),
+      )
+    if (isFailureRowArgument(argument))
+      return failureRowArgument(
+        argument.failures.map((failure) => {
+          const specialized = specializeType(failure)
+          return isNominal(specialized) ? specialized : failure
+        }),
+        argument.parameters,
+      )
+    if (isRequirementRowArgument(argument))
+      return requirementRowArgument(
+        argument.requirements.map((requirement) => {
+          const capability = specializeType(requirement.capability)
+          return Object.freeze({
+            ...requirement,
+            capability:
+              isNominal(capability) || isParameter(capability)
+                ? capability
+                : requirement.capability,
+          })
+        }),
+        argument.parameters,
+      )
+    return specializeType(argument)
+  }
+  const specializeType = (type: Type): Type => {
+    if (isNominal(type))
+      return nominal(type.module, type.name, type.arguments.map(specializeArgument))
+    if (isFixedArray(type)) return fixedArray(specializeType(type.element), type.length)
+    if (isSlice(type)) return slice(type.access, specializeType(type.element))
+    if (isReference(type)) return reference(type.access, specializeType(type.target))
+    if (isCallable(type))
+      return callable(type.parameters.map(specializeType), specializeType(type.result), type.mode)
+    if (isEffect(type))
+      return effect(
+        specializeType(type.success),
+        type.failures.map((failure) => {
+          const specialized = specializeType(failure)
+          return isNominal(specialized) ? specialized : failure
+        }),
+        type.access,
+        type.requirements.map((requirement) => {
+          const capability = specializeType(requirement.capability)
+          return Object.freeze({
+            ...requirement,
+            capability:
+              isNominal(capability) || isParameter(capability)
+                ? capability
+                : requirement.capability,
+          })
+        }),
+        type.failureParameters,
+        type.requirementParameters,
+      )
+    if (isRepresented(type)) {
+      const contract = specializeType(type.contract)
+      const requiredBound = specializeType(type.representation.requiredBound)
+      const argument = specializeArgument(type.representation.argument)
+      return (isCallable(contract) || isEffect(contract)) &&
+        (isCallable(requiredBound) || isEffect(requiredBound)) &&
+        isRepresentationArgument(argument)
+        ? represented(contract, requiredBound, argument)
+        : type
+    }
+    if (isUnion(type)) {
+      const normalized = union(type.members.map(specializeType))
+      return normalized._tag === 'Normalized' ? normalized.type : type
+    }
+    return type
+  }
+  return specializeType(self)
+}
 
 /** Adds structural constraints from one declared type pattern to one supplied concrete type. */
 const bindGenericArgument = (

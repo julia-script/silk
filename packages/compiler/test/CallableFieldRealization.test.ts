@@ -252,6 +252,82 @@ pub fn main() -> i32 {
     }),
 )
 
+it.effect('distinguishes same-site runners by hidden Effect parameter identities', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'effect-field/hidden-specializations',
+      `struct Deferred<F: once Effect<i32>> { operation: F }
+fn retain(input: Effect<i32>) -> i32 {
+  let deferred = Deferred { operation: effect { return run move input } }
+  return 0
+}
+pub fn main() -> i32 {
+  return retain(effect { return 20 }) + retain(effect { return 22 })
+}`,
+    )
+    const realizations = realizationsOf(snapshot).entries.flatMap((entry) =>
+      entry.support._tag === 'Supported' &&
+      CallableFieldRealization.isEffectRealization(entry.support.realization)
+        ? [entry.support.realization]
+        : [],
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0107', 'SEM0107'],
+    )
+    assert.strictEqual(realizations.length, 2)
+    assert.strictEqual(
+      realizations.every(
+        (realization) =>
+          realization.runnerArguments.length === 1 &&
+          Type.isEffectIdentityArgument(realization.runnerArguments[0] ?? Type.unit),
+      ),
+      true,
+    )
+    assert.strictEqual(
+      new Set(
+        realizations.map((realization) =>
+          Type.genericArgumentKey(realization.runnerArguments[0] ?? Type.unit),
+        ),
+      ).size,
+      2,
+    )
+  }),
+)
+
+it('walks Effect owner arguments as canonical semantic children', () => {
+  const declaration = Object.freeze({ module: 'effect-field/owner-walk', name: 'retain' })
+  const open = Type.parameter(declaration, 0, 'T')
+  const marker = Type.nominal('effect-field/owner-walk', 'Marker')
+  const contract = Type.effect('i32', [])
+  const holder = Type.nominal('effect-field/owner-walk', 'Holder', [
+    Type.exactRepresentationArgument(
+      Type.effectIdentityArgument('effect-field/owner-walk.effect', {
+        declaration,
+        typeArguments: [open, marker],
+      }),
+      contract,
+    ),
+  ])
+
+  assert.strictEqual(Type.isConcrete(holder), false)
+  assert.deepEqual(Type.parameters(holder), [open])
+  assert.strictEqual(
+    Type.nominals(holder).some((nominal) => Type.equals(nominal, marker)),
+    true,
+  )
+  assert.strictEqual(
+    Type.isConcrete(
+      Type.specializeExecutableOwner(holder, {
+        declaration,
+        typeArguments: ['bool', marker],
+      }),
+    ),
+    true,
+  )
+})
+
 it.effect('publishes nested Effect and callable identities for local binding captures', () =>
   Effect.gen(function* () {
     const snapshot = yield* realized(

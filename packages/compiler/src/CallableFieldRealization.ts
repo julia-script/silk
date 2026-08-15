@@ -461,10 +461,7 @@ const matchesEffectIdentity = (
   return (
     candidate.owner.declaration.module === owner.declaration.module &&
     candidate.owner.declaration.name === owner.declaration.name &&
-    sameArguments(
-      owner.typeArguments,
-      candidate.owner.typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument)),
-    )
+    sameArguments(owner.typeArguments, candidate.owner.typeArguments)
   )
 }
 
