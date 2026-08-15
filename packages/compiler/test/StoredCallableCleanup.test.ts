@@ -203,10 +203,10 @@ pub fn main() -> i32 {
     assert.isTrue(Ownership.cleanupHasHook(resolved))
     assert.isFalse(Ownership.cleanupReclaims(resolved))
     assert.isTrue(Ownership.cleanupHasEffect(resolved))
-    assert.strictEqual(
-      resolved._tag === 'CallableCleanup' ? resolved.slots.at(0)?.cleanup._tag : undefined,
-      'HookCleanup',
-    )
+    const captured = resolved._tag === 'CallableCleanup' ? resolved.slots.at(0)?.cleanup : undefined
+    assert.strictEqual(captured?._tag, 'HookCleanup')
+    const hookArgument = captured?._tag === 'HookCleanup' ? captured.typeArguments.at(0) : undefined
+    assert.isTrue(hookArgument !== undefined && Type.isExactRepresentationArgument(hookArgument))
   }),
 )
 

@@ -1981,7 +1981,7 @@ export const cleanupPlan = (
     .find((module) => module.module === witness.module)
     ?.conformances.find((candidate) => candidate.ordinal === witness.ordinal)
   if (conformance?.provider._tag !== 'Resolved') return structPlan
-  const inferred = new Map<string, Type.Type>()
+  const inferred = new Map<string, Type.GenericArgument>()
   if (!Type.infer(conformance.provider.type, type, inferred)) return structPlan
   return Object.freeze({
     _tag: 'HookCleanup',
