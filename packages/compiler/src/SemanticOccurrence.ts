@@ -220,6 +220,24 @@ const typeParameterFact = (
     for (const member of module.members) {
       const parameter = member.typeParameters.find((candidate) => Type.equals(candidate.type, type))
       if (parameter !== undefined) return parameter
+      if (
+        (member._tag === 'FunctionDeclaration' &&
+          member.opaqueResult !== undefined &&
+          Type.equals(member.opaqueResult.binder.type, type)) ||
+        ((member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') &&
+          member.operations.some(
+            (operation) =>
+              operation.opaqueResult !== undefined &&
+              Type.equals(operation.opaqueResult.binder.type, type),
+          ))
+      ) {
+        if (member._tag === 'FunctionDeclaration') return member.opaqueResult?.binder
+        return member.operations.find(
+          (operation) =>
+            operation.opaqueResult !== undefined &&
+            Type.equals(operation.opaqueResult.binder.type, type),
+        )?.opaqueResult?.binder
+      }
     }
   return undefined
 }
@@ -289,6 +307,23 @@ const collectResolvedType = (
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
+  if (fact.exactItem !== undefined) {
+    const qualifier =
+      fact.exactItem.path.segments.length > 1 ? fact.exactItem.path.segments.at(0) : undefined
+    if (qualifier !== undefined)
+      collectQualifier(qualifier.token, qualifier.spelling, scope, index, pending)
+    const selected = fact.exactItem.path.segments.at(-1)
+    const declaration = DeclarationIndex.byCanonical(index, fact.exactItem.declaration)
+    push(
+      pending,
+      selected?.token.span,
+      'Value',
+      declaration === undefined
+        ? Object.freeze({ _tag: 'Unavailable' })
+        : available(identityOfDeclaration(declaration)),
+      declaration === undefined ? undefined : locationOfDeclaration(index, declaration),
+    )
+  }
   if (fact.components !== undefined) {
     for (const component of fact.components) collectDeclaredType(component, index, scope, pending)
     return
@@ -309,6 +344,21 @@ const collectResolvedType = (
       index,
       pending,
     )
+  }
+  if (
+    Type.isRepresented(fact.type) &&
+    Type.isRepresentationParameterArgument(fact.type.representation.argument)
+  ) {
+    const parameter = fact.type.representation.argument.parameter
+    const declaration = typeParameterFact(index, parameter)
+    push(
+      pending,
+      token.span,
+      'Type',
+      available(Object.freeze({ _tag: 'TypeParameterIdentity', id: parameter })),
+      declaration === undefined ? undefined : locationOfTypeParameter(declaration),
+    )
+    return
   }
   if (Type.isParameter(fact.type)) {
     const declaration = typeParameterFact(index, fact.type)
@@ -412,6 +462,39 @@ const collectDeclaredType = (
     for (const failure of fact.failures) collectDeclaredType(failure, index, scope, pending)
     for (const requirement of fact.requirements)
       collectDeclaredType(requirement.capability, index, scope, pending)
+    return
+  }
+  if (fact._tag === 'ExactRepresentation') {
+    const qualifier = fact.item.segments.length > 1 ? fact.item.segments.at(0) : undefined
+    if (qualifier !== undefined)
+      collectQualifier(qualifier.token, qualifier.spelling, scope, index, pending)
+    const selected = fact.item.segments.at(-1)
+    const declaration =
+      fact.itemCandidate === undefined
+        ? undefined
+        : DeclarationIndex.byCanonical(index, fact.itemCandidate)
+    push(
+      pending,
+      selected?.token.span,
+      'Value',
+      Object.freeze({
+        _tag: 'Unavailable',
+        ...(fact.cause === undefined ? {} : { cause: fact.cause }),
+      }),
+      declaration === undefined ? undefined : locationOfDeclaration(index, declaration),
+    )
+    for (const argument of fact.arguments) collectDeclaredType(argument, index, scope, pending)
+    return
+  }
+  if (fact._tag === 'RepresentationParameter') {
+    const declaration = typeParameterFact(index, fact.parameter)
+    push(
+      pending,
+      fact.token.span,
+      'Type',
+      available(Object.freeze({ _tag: 'TypeParameterIdentity', id: fact.parameter })),
+      declaration === undefined ? undefined : locationOfTypeParameter(declaration),
+    )
     return
   }
   if (fact._tag === 'Union')
@@ -859,6 +942,15 @@ const collectMember = (
       )
   }
   if (member._tag === 'FunctionDeclaration') {
+    const opaqueBinder = member.opaqueResult?.binder
+    if (opaqueBinder?.name._tag === 'Present')
+      push(
+        pending,
+        opaqueBinder.name.token.span,
+        'Declaration',
+        available(Object.freeze({ _tag: 'TypeParameterIdentity', id: opaqueBinder.type })),
+        locationOfTypeParameter(opaqueBinder),
+      )
     for (const parameter of member.parameters) {
       if (parameter.name._tag === 'Present')
         push(
@@ -883,6 +975,15 @@ const collectMember = (
   }
   if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
     for (const operation of member.operations) {
+      const opaqueBinder = operation.opaqueResult?.binder
+      if (opaqueBinder?.name._tag === 'Present')
+        push(
+          pending,
+          opaqueBinder.name.token.span,
+          'Declaration',
+          available(Object.freeze({ _tag: 'TypeParameterIdentity', id: opaqueBinder.type })),
+          locationOfTypeParameter(opaqueBinder),
+        )
       for (const typeParameter of operation.typeParameters) {
         const parameterLocation = locationOfTypeParameter(typeParameter)
         if (typeParameter.name._tag === 'Present')
@@ -1074,10 +1175,11 @@ const withCurrentDeclaration = (
   self: Index,
   occurrence: SemanticOccurrence,
 ): SemanticOccurrence => {
-  const current =
-    occurrence.resolution._tag === 'Available'
-      ? self.declarationLocations.get(identityKey(occurrence.resolution.identity))
-      : undefined
+  // Unavailable occurrences can still retain an exact rejected candidate (for example an open
+  // `typeof` item). That location was built from the current declaration index and is the useful
+  // navigation answer even though no available semantic identity can be rebased through the map.
+  if (occurrence.resolution._tag !== 'Available') return occurrence
+  const current = self.declarationLocations.get(identityKey(occurrence.resolution.identity))
   if (current === occurrence.declaration) return occurrence
   const { declaration: _previous, ...withoutDeclaration } = occurrence
   return Object.freeze({

@@ -1,5 +1,6 @@
 import * as Fn from 'effect/Function'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as Canonical from './internal/Canonical.js'
 import * as Type from './Type.js'
 
 /**
@@ -14,12 +15,9 @@ export interface ModuleSurface {
   readonly canonical: string
 }
 
-const frame = (value: string): string => `${value.length}:${value}`
+const record = Canonical.record
 
-const record = (tag: string, fields: ReadonlyArray<string> = []): string =>
-  `${frame(tag)}${fields.map(frame).join('')}`
-
-const array = (values: ReadonlyArray<string>): string => record('Array', values)
+const array = Canonical.array
 
 const optional = (value: string | undefined): string =>
   value === undefined ? record('None') : record('Some', [value])
@@ -132,6 +130,14 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
         array(value.members.map(declaredType)),
         boolean(value.cause !== undefined),
       ])
+    case 'ExactRepresentation':
+      return record('ExactRepresentationType', [
+        typePath(value.item),
+        array(value.arguments.map(declaredType)),
+        boolean(value.cause !== undefined),
+      ])
+    case 'RepresentationParameter':
+      return record('RepresentationParameterType', [type(value.parameter)])
     case 'Unavailable':
       return record('UnavailableType', [boolean(value.cause !== undefined)])
     default:
@@ -145,6 +151,16 @@ const typeParameter = (value: DeclarationIndex.TypeParameterFact): string =>
     name(value.name),
     optional(value.duplicateOf === undefined ? undefined : type(value.duplicateOf)),
   ])
+
+const opaqueResult = (value: DeclarationIndex.OpaqueResultFact | undefined): string | undefined =>
+  value === undefined
+    ? undefined
+    : record('OpaqueResult', [
+        Type.opaqueFamilyKey(value.family),
+        value.publicSignature.bound,
+        value.publicSignature.result,
+        array(value.publicSignature.enclosingKinds),
+      ])
 
 const parameter = (value: DeclarationIndex.ParameterFact): string =>
   record('Parameter', [
@@ -192,6 +208,7 @@ const declaration = (value: DeclarationIndex.DeclarationFact): string =>
     array(value.parameters.map(parameter)),
     name(value.name),
     declaredType(value.returnType),
+    optional(opaqueResult(value.opaqueResult)),
     failureRow(value.failureRow),
     requirementRow(value.requirementRow),
   ])
@@ -257,6 +274,7 @@ const serviceOperation = (value: DeclarationIndex.ServiceOperationFact): string 
     array(value.parameters.map(parameter)),
     name(value.name),
     declaredType(value.returnType),
+    optional(opaqueResult(value.opaqueResult)),
     failureRow(value.failureRow),
     requirementRow(value.requirementRow),
   ])

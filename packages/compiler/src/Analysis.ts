@@ -24,6 +24,7 @@ import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as ModuleSurface from './ModuleSurface.js'
 import type * as ModuleTooling from './ModuleTooling.js'
 import * as NameResolution from './NameResolution.js'
+import * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
 import type * as PhaseReport from './PhaseReport.js'
 import * as Pipeline from './Pipeline.js'
@@ -127,12 +128,15 @@ export const make = Effect.fn('Analysis.make')(function* (
 ): Effect.fn.Return<SingleRootFrontendSnapshot, never, SourceResolver.SourceResolver> {
   const frontend = yield* Pipeline.frontend(request)
   const tooling = FrontendTooling.make(frontend)
-  return Object.freeze({
-    _tag: 'AnalysisSnapshot',
-    realization: 'SingleRoot',
-    ...frontend,
-    ...tooling,
-  })
+  return OpaqueRealization.withCatalog(
+    Object.freeze({
+      _tag: 'AnalysisSnapshot',
+      realization: 'SingleRoot',
+      ...frontend,
+      ...tooling,
+    }),
+    OpaqueRealization.catalogOf(frontend),
+  )
 })
 
 /** Explicitly derives one immutable runtime snapshot from completed frontend facts. */
@@ -142,12 +146,15 @@ export const realize = (
   options: Pipeline.Options = {},
 ): Snapshot => {
   const realization = Pipeline.realize(self, target, options)
-  return Object.freeze({
-    ...self,
-    ...realization,
-    _tag: 'AnalysisSnapshot',
-    realization: 'SingleRoot',
-  })
+  return OpaqueRealization.withCatalog(
+    Object.freeze({
+      ...self,
+      ...realization,
+      _tag: 'AnalysisSnapshot',
+      realization: 'SingleRoot',
+    }),
+    OpaqueRealization.catalogOf(self),
+  )
 }
 
 /** Builds and explicitly realizes one compilation request in a single effect. */

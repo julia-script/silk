@@ -761,6 +761,23 @@ const printNode = (
         printNode(context, result, FormatDocument.text(' ')),
       )
     }
+    case 'OpaqueResultType': {
+      const nodes = directNodes(node)
+      const binders = nodes.at(0) ?? nodeOf(node, 'TypeParameterList')
+      const result = nodes.at(-1) ?? nodeOf(node, 'TypePath')
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Identifier'), prefix, preserveBlank),
+        printNode(context, binders),
+        printNode(context, result, FormatDocument.text(' ')),
+      )
+    }
+    case 'ExactRepresentationType':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Identifier'), prefix, preserveBlank),
+        printToken(context, tokenOf(node, 'LeftParenthesis')),
+        printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
+        printToken(context, tokenOf(node, 'RightParenthesis')),
+      )
     case 'UnitType':
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
     case 'ParenthesizedType':

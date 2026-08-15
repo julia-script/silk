@@ -171,6 +171,7 @@ it.effect('keeps editor analysis on frontend phases only', () =>
         'module-surface',
         'elaboration',
         'ownership',
+        'opaque-realization',
         'semantic-occurrences',
         'anonymous-expressions',
       ],

@@ -16,9 +16,11 @@ import * as ModuleClosure from './ModuleClosure.js'
 import * as ModuleSemantics from './ModuleSemantics.js'
 import * as ModuleSurface from './ModuleSurface.js'
 import * as NameResolution from './NameResolution.js'
+import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Ownership from './Ownership.js'
 import * as PhaseReport from './PhaseReport.js'
 import * as ProvisionalMir from './ProvisionalMir.js'
+import * as ResolutionSeams from './ResolutionSeams.js'
 import * as SemanticInvalidation from './SemanticInvalidation.js'
 import type * as SourceResolver from './SourceResolver.js'
 import * as SuspensionMir from './SuspensionMir.js'
@@ -94,6 +96,7 @@ export interface ProjectReuseBasis {
   readonly closure: ModuleClosure.ProjectClosure
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
+  readonly opaqueRealizations: OpaqueRealization.Catalog
   readonly environment: string
 }
 
@@ -229,9 +232,13 @@ const analyzeHeaders = (
     collected.modules.length,
     () => {
       const preliminary = NameResolution.resolve(closure, collected)
-      return DeclarationIndex.complete(collected, (module, path) =>
-        NameResolution.resolveType(preliminary, collected, module, path),
+      const resolvers = ResolutionSeams.make(
+        (module: string, path: DeclarationIndex.TypePathFact) =>
+          NameResolution.resolveType(preliminary, collected, module, path),
+        (module: string, path: DeclarationIndex.TypePathFact) =>
+          NameResolution.resolveItem(preliminary, collected, module, path),
       )
+      return DeclarationIndex.complete(collected, resolvers)
     },
     (value) => value.modules.reduce((sum, module) => sum + module.members.length, 0),
     (value) => value.diagnostics.length,
@@ -258,6 +265,43 @@ const analyzeHeaders = (
   return Object.freeze({ index, resolution, surfaces })
 }
 
+interface ElaboratedModules {
+  readonly results: ReadonlyMap<string, Elaboration.Result>
+  readonly computed: ReadonlyMap<string, Elaboration.Result>
+}
+
+const elaborateModules = (
+  closure: ModuleClosure.Facts,
+  headers: HeaderFacts,
+  retained: ReadonlyMap<string, Elaboration.Result> = new Map(),
+  precomputed: ReadonlyMap<string, Elaboration.Result> = new Map(),
+): ElaboratedModules => {
+  const results = new Map<string, Elaboration.Result>()
+  const computed = new Map<string, Elaboration.Result>()
+  for (const module of closure.modules) {
+    const reused = retained.get(module.name) ?? precomputed.get(module.name)
+    if (reused !== undefined) {
+      results.set(module.name, reused)
+      continue
+    }
+    const moduleHeaders = headers.index.modules.find(
+      (candidate) => candidate.module === module.name,
+    )
+    const scope = NameResolution.scopeOf(headers.resolution, module.name)
+    if (moduleHeaders === undefined || scope === undefined)
+      throw new RangeError(`Pipeline lost module facts for ${module.name}`)
+    const result = Elaboration.elaborateModule({
+      syntax: module.syntax,
+      headers: moduleHeaders,
+      scope,
+      index: headers.index,
+    })
+    results.set(module.name, result)
+    computed.set(module.name, result)
+  }
+  return Object.freeze({ results, computed })
+}
+
 const analyzeSemantics = (
   closure: ModuleClosure.Facts,
   headers: HeaderFacts,
@@ -266,6 +310,10 @@ const analyzeSemantics = (
   reuse?: {
     readonly previous: ProjectReuseBasis
     readonly invalidation: SemanticInvalidation.SemanticInvalidation
+  },
+  precomputed?: {
+    readonly results: ReadonlyMap<string, Elaboration.Result>
+    readonly opaqueRealizations?: OpaqueRealization.Catalog
   },
 ): Omit<FrontendFacts, keyof HeaderFacts | 'report'> => {
   const reusable = new Set(
@@ -284,33 +332,15 @@ const analyzeSemantics = (
     )
       retained.set(module.name, artifact)
   }
+  const retainedElaborations = new Map(
+    [...retained].map(([module, semantics]) => [module, semantics.elaboration]),
+  )
   const results = measuredModuleWork(
     report,
     'elaboration',
     closure.modules.length,
     retained.size,
-    () =>
-      new Map(
-        closure.modules.map((module) => {
-          const reused = retained.get(module.name)
-          if (reused !== undefined) return [module.name, reused.elaboration]
-          const moduleHeaders = headers.index.modules.find(
-            (candidate) => candidate.module === module.name,
-          )
-          const scope = NameResolution.scopeOf(headers.resolution, module.name)
-          if (moduleHeaders === undefined || scope === undefined)
-            throw new RangeError(`Pipeline lost module facts for ${module.name}`)
-          return [
-            module.name,
-            Elaboration.elaborateModule({
-              syntax: module.syntax,
-              headers: moduleHeaders,
-              scope,
-              index: headers.index,
-            }),
-          ]
-        }),
-      ),
+    () => elaborateModules(closure, headers, retainedElaborations, precomputed?.results).results,
     (value) => [...value.values()].reduce((sum, module) => sum + module.functions.length, 0),
     (value) => [...value.values()].reduce((sum, module) => sum + module.diagnostics.length, 0),
     options,
@@ -331,6 +361,17 @@ const analyzeSemantics = (
     (value) => [...value.values()].reduce((sum, module) => sum + module.diagnostics.length, 0),
     options,
   )
+  const opaqueRealizations =
+    precomputed?.opaqueRealizations ??
+    measured(
+      report,
+      'opaque-realization',
+      results.size,
+      () => OpaqueRealization.analyze(results),
+      (value) => value.definitions.size,
+      (value) => value.diagnostics.length,
+      options,
+    )
   const semantics = new Map(
     [...results.entries()].map(([module, elaboration]) => {
       const reused = retained.get(module)
@@ -347,9 +388,18 @@ const analyzeSemantics = (
     closure.diagnostics,
     headers.resolution.diagnostics,
     ...[...results.values()].map((result) => result.diagnostics),
+    opaqueRealizations.diagnostics,
     ...[...ownership.values()].map((facts) => facts.diagnostics),
   )
-  return Object.freeze({ semantics, results, ownership, diagnostics })
+  return OpaqueRealization.withCatalog(
+    Object.freeze({
+      semantics,
+      results,
+      ownership,
+      diagnostics,
+    }),
+    opaqueRealizations,
+  )
 }
 
 const analyzeFrontend = (
@@ -359,7 +409,10 @@ const analyzeFrontend = (
 ): FrontendFacts => {
   const headers = analyzeHeaders(closure, report, options)
   const semantics = analyzeSemantics(closure, headers, report, options)
-  return Object.freeze({ ...headers, ...semantics, report: Object.freeze([...report]) })
+  return OpaqueRealization.withCatalog(
+    Object.freeze({ ...headers, ...semantics, report: Object.freeze([...report]) }),
+    OpaqueRealization.catalogOf(semantics),
+  )
 }
 
 /** Constructs the complete recoverable compiler frontend for one compilation request. */
@@ -382,11 +435,14 @@ export const frontend = Effect.fn('Pipeline.frontend')(function* (
     }),
   )
   const facts = analyzeFrontend(closure, report, options)
-  return Object.freeze({
-    closure,
-    ...facts,
-    ...(request.target === undefined ? {} : { requestedTarget: request.target }),
-  })
+  return OpaqueRealization.withCatalog(
+    Object.freeze({
+      closure,
+      ...facts,
+      ...(request.target === undefined ? {} : { requestedTarget: request.target }),
+    }),
+    OpaqueRealization.catalogOf(facts),
+  )
 })
 
 /** Constructs one complete compiler frontend for the union closure of project roots. */
@@ -410,6 +466,17 @@ export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
     }),
   )
   const headers = analyzeHeaders(closure, report, options)
+  const syntaxRetained = new Map(
+    closure.modules.flatMap((module) => {
+      const artifact = previous?.semantics.get(module.name)
+      return artifact?.elaboration.syntax === module.syntax
+        ? ([[module.name, artifact.elaboration]] as const)
+        : []
+    }),
+  )
+  const currentElaboration = elaborateModules(closure, headers, syntaxRetained)
+  const currentResults = currentElaboration.results
+  const currentOpaqueRealizations = OpaqueRealization.analyze(currentResults)
   const previousSyntax = new Map(
     previous?.closure.modules.map((module) => [module.name, module.syntax]),
   )
@@ -434,6 +501,7 @@ export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
         current: Object.freeze({
           closure,
           surfaces: headers.surfaces,
+          opaqueRealizations: currentOpaqueRealizations,
           environment: SemanticInvalidation.environment,
         }),
         revisions,
@@ -443,6 +511,7 @@ export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
               previous: Object.freeze({
                 closure: previous.closure,
                 surfaces: previous.surfaces,
+                opaqueRealizations: previous.opaqueRealizations,
                 environment: previous.environment,
               }),
             }),
@@ -459,6 +528,9 @@ export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
         recomputed: totals.recomputed,
         fresh: totals.reasons.Fresh,
         localChange: totals.reasons.LocalChange,
+        opaqueBodyChange: totals.reasons.OpaqueBodyChange,
+        opaqueTargetChange: totals.reasons.OpaqueTargetChange,
+        opaqueLayoutChange: totals.reasons.OpaqueLayoutChange,
         dependencySurfaceChange: totals.reasons.DependencySurfaceChange,
         cyclicPeerChange: totals.reasons.CyclicPeerChange,
         environmentChange: totals.reasons.EnvironmentChange,
@@ -472,14 +544,21 @@ export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
     report,
     options,
     previous === undefined ? undefined : { previous, invalidation: invalidation.value },
+    Object.freeze({
+      results: currentElaboration.computed,
+      ...(previous === undefined ? { opaqueRealizations: currentOpaqueRealizations } : {}),
+    }),
   )
-  return Object.freeze({
-    closure,
-    ...headers,
-    ...semantics,
-    semanticInvalidation: invalidation.value,
-    report: Object.freeze([...report]),
-  })
+  return OpaqueRealization.withCatalog(
+    Object.freeze({
+      closure,
+      ...headers,
+      ...semantics,
+      semanticInvalidation: invalidation.value,
+      report: Object.freeze([...report]),
+    }),
+    OpaqueRealization.catalogOf(semantics),
+  )
 })
 
 /**
@@ -594,7 +673,13 @@ export const realize = (
         instances.instances.length,
         () =>
           finalizeMir(
-            Lower.lowerProgram(instances, self.ownership, availableLayout, self.index),
+            Lower.lowerProgram(
+              instances,
+              self.ownership,
+              availableLayout,
+              self.index,
+              OpaqueRealization.catalogOf(self),
+            ),
             ProvisionalMir.build(instances, availableLayout, self.index),
             self.index,
             options,
@@ -726,7 +811,13 @@ export const prepare = (
     discovery.instances.length,
     () =>
       finalizeMir(
-        Lower.lowerProgram(discovery, self.ownership, targetAndLayout.layout, self.index),
+        Lower.lowerProgram(
+          discovery,
+          self.ownership,
+          targetAndLayout.layout,
+          self.index,
+          OpaqueRealization.catalogOf(self),
+        ),
         ProvisionalMir.build(discovery, targetAndLayout.layout, self.index),
         self.index,
         options,

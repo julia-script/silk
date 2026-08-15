@@ -29,6 +29,8 @@ export type NodeKind =
   | 'SliceType'
   | 'ReferenceType'
   | 'CallableType'
+  | 'ExactRepresentationType'
+  | 'OpaqueResultType'
   | 'UnitType'
   | 'ParenthesizedType'
   | 'UnionType'

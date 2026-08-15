@@ -6,6 +6,7 @@ import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceOrigin from '../src/SourceOrigin.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import { raise } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -42,6 +43,10 @@ it.effect('analyzes a shared dependency once and derives structurally shared roo
     const project = yield* make()
     const left = ProjectAnalysis.view(project, 'app/A')
     const right = ProjectAnalysis.view(project, 'app/B')
+    const predictableCatalogSymbol = Symbol.for('@silk-effect/compiler/OpaqueRealizationCatalog')
+    assert.strictEqual(predictableCatalogSymbol in project, false)
+    assert.notInclude(Object.getOwnPropertySymbols(project), predictableCatalogSymbol)
+    assert.strictEqual(left === undefined ? false : predictableCatalogSymbol in left, false)
 
     assert.isDefined(left)
     assert.isDefined(right)
@@ -140,8 +145,8 @@ it.effect('keeps project facts deterministic when root supply order changes', ()
         .map(({ phase, counters }) => ({ phase, counters })),
     )
     assert.deepEqual(
-      Analysis.diagnostics(ProjectAnalysis.view(first, 'app/A') ?? assert.fail('missing app/A')),
-      Analysis.diagnostics(ProjectAnalysis.view(second, 'app/A') ?? assert.fail('missing app/A')),
+      Analysis.diagnostics(ProjectAnalysis.view(first, 'app/A') ?? raise('missing app/A')),
+      Analysis.diagnostics(ProjectAnalysis.view(second, 'app/A') ?? raise('missing app/A')),
     )
   }),
 )
@@ -168,7 +173,7 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
           'import shared.Core\npub fn inserted() -> i32 { return 0 }\npub fn a() -> i32 { return Core.answer() }',
         ),
       ),
-      roots.at(1) ?? assert.fail('missing app/B root'),
+      roots.at(1) ?? raise('missing app/B root'),
     ])
     const current = yield* ProjectAnalysis.revise(previous, revisedRoots).pipe(
       Effect.provide(SourceResolver.memory(sources)),
@@ -223,6 +228,9 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
         recomputed: 1,
         fresh: 0,
         localChange: 1,
+        opaqueBodyChange: 0,
+        opaqueTargetChange: 0,
+        opaqueLayoutChange: 0,
         dependencySurfaceChange: 0,
         cyclicPeerChange: 0,
         environmentChange: 0,

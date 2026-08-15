@@ -216,6 +216,28 @@ export const divergentRepresentationJoinCode = 'SEM0105' as const
 export const incompatibleRepresentationBoundCode = 'SEM0106' as const
 /** Stable code for storing a represented Effect before its runtime layout is supported. */
 export const storedRepresentedEffectConstructionCode = 'SEM0107' as const
+/** Stable code for a `typeof` item that resolves to no declaration in scope. */
+export const unresolvedExactRepresentationItemCode = 'SEM0108' as const
+/** Stable code for a `typeof` item whose name belongs to more than one declaration. */
+export const ambiguousExactRepresentationItemCode = 'SEM0109' as const
+/** Stable code for a `typeof` item that names something other than an ordinary callable. */
+export const uncallableExactRepresentationItemCode = 'SEM0110' as const
+/** Stable code for a `typeof` item whose generic parameters are not all supplied. */
+export const openExactRepresentationItemCode = 'SEM0111' as const
+/** Stable code for a public contract exposing the exact identity of a private item. */
+export const privateExactRepresentationLeakCode = 'SEM0112' as const
+/** Stable code for one opaque producer specialization yielding multiple exact identities. */
+export const divergentOpaqueRealizationCode = 'SEM0113' as const
+/** Stable code for an opaque family whose representation evidence contains no local construction. */
+export const opaqueRealizationCycleCode = 'SEM0114' as const
+/** Stable code for an opaque realization whose inline captures contain that same family. */
+export const inlineOpaqueLayoutCycleCode = 'SEM0115' as const
+/** Stable code for an opaque result binder whose bound is not callable or Effect representation. */
+export const invalidOpaqueResultBinderCode = 'SEM0116' as const
+/** Stable code for an opaque producer whose reachable returns establish no representation. */
+export const missingOpaqueRealizationCode = 'SEM0117' as const
+/** Stable code for an opaque result declared where no producer body can establish its identity. */
+export const bodylessOpaqueResultCode = 'SEM0118' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -363,6 +385,17 @@ export type Code =
   | typeof divergentRepresentationJoinCode
   | typeof incompatibleRepresentationBoundCode
   | typeof storedRepresentedEffectConstructionCode
+  | typeof unresolvedExactRepresentationItemCode
+  | typeof ambiguousExactRepresentationItemCode
+  | typeof uncallableExactRepresentationItemCode
+  | typeof openExactRepresentationItemCode
+  | typeof privateExactRepresentationLeakCode
+  | typeof divergentOpaqueRealizationCode
+  | typeof opaqueRealizationCycleCode
+  | typeof inlineOpaqueLayoutCycleCode
+  | typeof invalidOpaqueResultBinderCode
+  | typeof missingOpaqueRealizationCode
+  | typeof bodylessOpaqueResultCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -507,6 +540,42 @@ export type Reason =
       readonly aggregate: string
       readonly field?: string
       readonly effect: string
+    }
+  | { readonly _tag: 'UnresolvedExactRepresentationItem'; readonly item: string }
+  | {
+      readonly _tag: 'AmbiguousExactRepresentationItem'
+      readonly item: string
+      readonly count: number
+    }
+  | {
+      readonly _tag: 'UncallableExactRepresentationItem'
+      readonly item: string
+      readonly subject: UncallableExactRepresentationSubject
+    }
+  | {
+      readonly _tag: 'OpenExactRepresentationItem'
+      readonly item: string
+      readonly expected: number
+      readonly actual: number
+    }
+  | { readonly _tag: 'PrivateExactRepresentationLeak'; readonly item: string }
+  | {
+      readonly _tag: 'DivergentOpaqueRealization'
+      readonly family: string
+      readonly realizations: ReadonlyArray<string>
+    }
+  | { readonly _tag: 'OpaqueRealizationCycle'; readonly families: ReadonlyArray<string> }
+  | { readonly _tag: 'InlineOpaqueLayoutCycle'; readonly families: ReadonlyArray<string> }
+  | {
+      readonly _tag: 'InvalidOpaqueResultBinder'
+      readonly binder: string
+      readonly actual: 'Value' | 'FailureRow' | 'RequirementRow'
+    }
+  | { readonly _tag: 'MissingOpaqueRealization'; readonly family: string }
+  | {
+      readonly _tag: 'BodylessOpaqueResult'
+      readonly declaration: string
+      readonly context: 'ServiceOperation' | 'InterfaceOperation'
     }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
@@ -1819,6 +1888,241 @@ export const storedCallableConstruction = (
             Object.freeze({ label: 'constructed here', span: constructedAt }),
           ]),
         }),
+  })
+}
+
+/** What one rejected `typeof` item names instead of an ordinary callable declaration. */
+export type UncallableExactRepresentationSubject =
+  | 'EffectDeclaration'
+  | 'LocalBinding'
+  | 'CallableSection'
+  | 'NonCallableDeclaration'
+
+const uncallableSubjectProse = (subject: UncallableExactRepresentationSubject): string => {
+  switch (subject) {
+    case 'EffectDeclaration':
+      return 'an Effect declaration rather than an ordinary callable'
+    case 'LocalBinding':
+      return 'a local binding, which exists only where it is written'
+    case 'CallableSection':
+      return 'a callable section, whose identity belongs to its construction site'
+    case 'NonCallableDeclaration':
+      return 'a declaration that is not callable'
+  }
+}
+
+const opaqueResultNote =
+  'Return an opaque representation result instead when the concrete identity must stay private.'
+
+/** Rejects one `typeof` item that names no declaration in the enclosing scope. */
+export const unresolvedExactRepresentationItem = (
+  item: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unresolvedExactRepresentationItemCode,
+    severity: 'error',
+    message: `Cannot name the exact representation of ${item}: no declaration of that name is in scope`,
+    reason: Object.freeze({ _tag: 'UnresolvedExactRepresentationItem', item }),
+    span,
+    notes: Object.freeze([opaqueResultNote]),
+  })
+
+/** Rejects one `typeof` item whose name belongs to more than one declaration. */
+export const ambiguousExactRepresentationItem = (
+  item: string,
+  count: number,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: ambiguousExactRepresentationItemCode,
+    severity: 'error',
+    message: `Cannot name the exact representation of ${item}: ${count} declarations carry that name, so no single item is resolved`,
+    reason: Object.freeze({ _tag: 'AmbiguousExactRepresentationItem', item, count }),
+    span,
+    notes: Object.freeze([opaqueResultNote]),
+  })
+
+/**
+ * Rejects one `typeof` item that names something other than an ordinary callable declaration.
+ *
+ * Local bindings, callable sections, and Effect construction sites are values created where they
+ * are written. They have no declaration-owned identity a contract can name, so their
+ * representation can only cross a boundary behind an opaque result.
+ */
+export const uncallableExactRepresentationItem = (
+  item: string,
+  subjectKind: UncallableExactRepresentationSubject,
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const subject = uncallableSubjectProse(subjectKind)
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: uncallableExactRepresentationItemCode,
+    severity: 'error',
+    message: `Cannot name the exact representation of ${item}: it names ${subject}, which has no source-nameable exact identity`,
+    reason: Object.freeze({
+      _tag: 'UncallableExactRepresentationItem',
+      item,
+      subject: subjectKind,
+    }),
+    span,
+    notes: Object.freeze([opaqueResultNote]),
+  })
+}
+
+/** Rejects one `typeof` item whose generic parameters are not all supplied. */
+export const openExactRepresentationItem = (
+  item: string,
+  expected: number,
+  actual: number,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: openExactRepresentationItemCode,
+    severity: 'error',
+    message: `Cannot name the exact representation of ${item}: an exact representation names one construction, but ${expected} generic parameters were declared and ${actual} concrete arguments were supplied`,
+    reason: Object.freeze({ _tag: 'OpenExactRepresentationItem', item, expected, actual }),
+    span,
+    notes: Object.freeze([opaqueResultNote]),
+  })
+
+/** Rejects a public contract that exposes the exact identity of a less visible item. */
+export const privateExactRepresentationLeak = (
+  item: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: privateExactRepresentationLeakCode,
+    severity: 'error',
+    message: `Public contract exposes the exact representation of private ${item}`,
+    reason: Object.freeze({ _tag: 'PrivateExactRepresentationLeak', item }),
+    span,
+    notes: Object.freeze([opaqueResultNote]),
+  })
+
+/** Rejects one opaque family whose reachable returns select more than one exact realization. */
+export const divergentOpaqueRealization = (
+  family: string,
+  realizations: ReadonlyArray<string>,
+  related: ReadonlyArray<SourceSpan.SourceSpan>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: divergentOpaqueRealizationCode,
+    severity: 'error',
+    message: `Opaque result ${family} has divergent reachable realizations: ${realizations.join(', ')}`,
+    reason: Object.freeze({
+      _tag: 'DivergentOpaqueRealization',
+      family,
+      realizations: Object.freeze([...realizations]),
+    }),
+    span,
+    ...(related.length === 0
+      ? {}
+      : {
+          relatedSpans: Object.freeze(
+            related.map((candidate) =>
+              Object.freeze({ label: 'conflicting realization returned here', span: candidate }),
+            ),
+          ),
+        }),
+  })
+
+/** Rejects opaque families whose only representation evidence is another unresolved family. */
+export const opaqueRealizationCycle = (
+  families: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: opaqueRealizationCycleCode,
+    severity: 'error',
+    message: `Opaque realization cycle has no local concrete construction: ${families.join(' -> ')}`,
+    reason: Object.freeze({
+      _tag: 'OpaqueRealizationCycle',
+      families: Object.freeze([...families]),
+    }),
+    span,
+  })
+
+/** Rejects a capture layout that would contain the opaque family it is defining inline. */
+export const inlineOpaqueLayoutCycle = (
+  families: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: inlineOpaqueLayoutCycleCode,
+    severity: 'error',
+    message: `Opaque results form an infinite inline layout cycle: ${families.join(' -> ')}`,
+    reason: Object.freeze({
+      _tag: 'InlineOpaqueLayoutCycle',
+      families: Object.freeze([...families]),
+    }),
+    span,
+  })
+
+/** Rejects an opaque result binder whose bound is not a callable or Effect representation. */
+export const invalidOpaqueResultBinder = (
+  binder: string,
+  actual: 'Value' | 'FailureRow' | 'RequirementRow',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidOpaqueResultBinderCode,
+    severity: 'error',
+    message: `Opaque result binder ${binder} must have a callable or Effect representation bound, but its kind is ${actual}`,
+    reason: Object.freeze({ _tag: 'InvalidOpaqueResultBinder', binder, actual }),
+    span,
+  })
+
+/** Rejects an opaque producer whose reachable returns select no representation construction. */
+export const missingOpaqueRealization = (family: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: missingOpaqueRealizationCode,
+    severity: 'error',
+    message: `Opaque result ${family} has no reachable callable or Effect representation construction`,
+    reason: Object.freeze({ _tag: 'MissingOpaqueRealization', family }),
+    span,
+  })
+
+/** Rejects an opaque result in a contract-only declaration that has no producer body. */
+export const bodylessOpaqueResult = (
+  declaration: string,
+  contextKind: 'ServiceOperation' | 'InterfaceOperation',
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const context = contextKind === 'ServiceOperation' ? 'service' : 'interface'
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: bodylessOpaqueResultCode,
+    severity: 'error',
+    message: `Opaque result ${declaration} is not permitted on a ${context} operation because no producer body can establish one static representation`,
+    reason: Object.freeze({
+      _tag: 'BodylessOpaqueResult',
+      declaration,
+      context: contextKind,
+    }),
+    span,
   })
 }
 

@@ -267,22 +267,24 @@ export const genericArgument = (
     ? Type.encodeGenericArgument(self)
     : Type.isRepresentationParameterArgument(self)
       ? self.parameter.name
-      : Type.isExactRepresentationArgument(self)
+      : Type.isOpaqueRepresentationArgument(self)
         ? Type.encodeGenericArgument(self)
-        : Type.isEffectIdentityArgument(self)
-          ? `effect@${self.identity}`
-          : Type.isCallableIdentityArgument(self)
-            ? `callable@${self.identity}`
-            : Type.isFailureRowArgument(self)
-              ? `! ${self.failures.map((failure) => type(failure, module, scope)).join(' | ') || 'never'}`
-              : Type.isRequirementRowArgument(self)
-                ? `? ${self.requirements
-                    .map(
-                      (requirement) =>
-                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
-                    )
-                    .join(' | ')}`
-                : type(self, module, scope)
+        : Type.isExactRepresentationArgument(self)
+          ? Type.encodeGenericArgument(self)
+          : Type.isEffectIdentityArgument(self)
+            ? `effect@${self.identity}`
+            : Type.isCallableIdentityArgument(self)
+              ? `callable@${self.identity}`
+              : Type.isFailureRowArgument(self)
+                ? `! ${self.failures.map((failure) => type(failure, module, scope)).join(' | ') || 'never'}`
+                : Type.isRequirementRowArgument(self)
+                  ? `? ${self.requirements
+                      .map(
+                        (requirement) =>
+                          `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+                      )
+                      .join(' | ')}`
+                  : type(self, module, scope)
 
 export const binding = (
   self: Elaboration.BindingDeclarationFact,

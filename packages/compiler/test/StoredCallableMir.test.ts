@@ -6,6 +6,7 @@ import * as Instances from '../src/Instances.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
+import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import type * as Ownership from '../src/Ownership.js'
 import * as Target from '../src/Target.js'
 import { unreachable } from './support/raise.js'
@@ -27,6 +28,7 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
     new Map<string, Ownership.ModuleOwnership>([[name, ownership]]),
     layout,
     snapshot.index,
+    OpaqueRealization.catalogOf(snapshot),
   )
   return { module, layout }
 })
