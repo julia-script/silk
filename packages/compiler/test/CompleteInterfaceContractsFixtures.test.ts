@@ -277,8 +277,8 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
         ),
         ['complete-interface-contracts/mapped-effect.Clock'],
       )
-      // Task 1 only publishes the fact. The existing pure/shared-borrow witness checker remains the
-      // compatibility seam until ownership and row subsumption land in the next slice.
+      // The pure compatibility actor is intentionally not wired into conformance admission until
+      // literal operand lowering and pure/effect boundary widening can migrate atomically.
       assert.strictEqual(conformance?.validity._tag, 'InvalidConformance')
     }),
   )
