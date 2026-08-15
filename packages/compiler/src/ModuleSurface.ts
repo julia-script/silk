@@ -1,4 +1,5 @@
 import * as Fn from 'effect/Function'
+import * as ConformanceHead from './ConformanceHead.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Type from './Type.js'
 
@@ -344,6 +345,15 @@ const conformance = (value: DeclarationIndex.ConformanceFact): string =>
     array(value.typeParameters.map(typeParameter)),
     declaredType(value.capability),
     declaredType(value.provider),
+    value.visibility,
+    array(
+      value.requirements.map((requirement) =>
+        record('ConformanceRequirement', [
+          requirement.spelling,
+          declaredType(requirement.capability),
+        ]),
+      ),
+    ),
     array(
       value.operations.map((operation) =>
         record('ConformanceOperation', [
@@ -355,6 +365,20 @@ const conformance = (value: DeclarationIndex.ConformanceFact): string =>
       ),
     ),
     optional(value.hook === undefined ? undefined : dropHook(value.hook)),
+    // Coherence and termination are header facts a later edit can change without touching any
+    // spelling, so the surface has to carry them or an invalidation would be missed.
+    record('ConformanceCoherence', [
+      value.coherence._tag,
+      ...(value.coherence._tag === 'Overlapping'
+        ? [value.coherence.module, number(value.coherence.ordinal)]
+        : []),
+    ]),
+    record('ConformanceTermination', [
+      value.termination._tag,
+      ...(value.termination._tag === 'NonTerminating'
+        ? [array(value.termination.failures.map(ConformanceHead.describeTermination))]
+        : []),
+    ]),
   ])
 
 /** Construct the exact surface for one module's completed headers. */

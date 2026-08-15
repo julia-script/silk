@@ -216,6 +216,12 @@ export const divergentRepresentationJoinCode = 'SEM0105' as const
 export const incompatibleRepresentationBoundCode = 'SEM0106' as const
 /** Stable code for storing a represented Effect before its runtime layout is supported. */
 export const storedRepresentedEffectConstructionCode = 'SEM0107' as const
+/** Stable code for two conformance heads that may name one provider under one interface. */
+export const overlappingConformanceCode = 'SEM0108' as const
+/** Stable code for a conformance requirement that does not descend toward a base witness. */
+export const nonTerminatingConformanceCode = 'SEM0109' as const
+/** Stable code for a concrete specialization whose conditional requirements cannot be proved. */
+export const unprovenConformanceCode = 'SEM0110' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -357,6 +363,9 @@ export type Code =
   | typeof divergentRepresentationJoinCode
   | typeof incompatibleRepresentationBoundCode
   | typeof storedRepresentedEffectConstructionCode
+  | typeof overlappingConformanceCode
+  | typeof nonTerminatingConformanceCode
+  | typeof unprovenConformanceCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -499,6 +508,22 @@ export type Reason =
       readonly aggregate: string
       readonly field?: string
       readonly effect: string
+    }
+  | {
+      readonly _tag: 'OverlappingConformance'
+      readonly head: string
+      readonly other: string
+    }
+  | {
+      readonly _tag: 'NonTerminatingConformance'
+      readonly head: string
+      readonly failures: ReadonlyArray<string>
+    }
+  | {
+      readonly _tag: 'UnprovenConformance'
+      readonly goal: string
+      readonly detail: string
+      readonly trace: ReadonlyArray<string>
     }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
@@ -2616,6 +2641,96 @@ export const invalidConformance = (detail: string, span: SourceSpan.SourceSpan):
     message: `Invalid conformance: ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidConformance', detail }),
     span,
+  })
+
+/**
+ * Creates the diagnostic for two conformance heads that may name one provider under one interface.
+ *
+ * Overlap is decided on shapes alone, so this fires even when the two declarations' requirements
+ * look mutually exclusive: whether a requirement is satisfiable depends on the whole program and
+ * changes as declarations are added, and a coherence answer that moved with the program would let
+ * one specialization silently change which witness it selects.
+ */
+export const overlappingConformance = (
+  head: string,
+  other: string,
+  span: SourceSpan.SourceSpan,
+  originalSpan?: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: overlappingConformanceCode,
+    severity: 'error',
+    message: `${head} may overlap ${other}`,
+    reason: Object.freeze({ _tag: 'OverlappingConformance', head, other }),
+    span,
+    ...(originalSpan === undefined
+      ? {}
+      : {
+          relatedSpans: Object.freeze([
+            Object.freeze({ label: 'overlapping implementation', span: originalSpan }),
+          ]),
+        }),
+    notes: Object.freeze([
+      'Conformance overlap is decided without consulting bounds, because whether a bound is satisfiable changes as a program grows.',
+    ]),
+  })
+
+/**
+ * Creates the diagnostic for a conformance requirement that does not descend toward a base witness.
+ *
+ * Each listed failure names one condition the header broke. Together the three conditions make the
+ * provider term a well-founded measure, which is why proof search needs no fuel: a requirement that
+ * satisfies them can only be followed finitely many times.
+ */
+export const nonTerminatingConformance = (
+  head: string,
+  failures: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: nonTerminatingConformanceCode,
+    severity: 'error',
+    message: `${head} declares a requirement that does not descend`,
+    reason: Object.freeze({
+      _tag: 'NonTerminatingConformance',
+      head,
+      failures: Object.freeze([...failures]),
+    }),
+    span,
+    notes: Object.freeze([...failures]),
+  })
+
+/**
+ * Creates the diagnostic for a specialization whose conditional requirements cannot be proved.
+ *
+ * The trace is the useful half: a missing base witness reported alone says only that some type
+ * lacks a conformance, while the chain says which wrapper asked for it and through which
+ * requirement, which is what tells the author where to declare the missing implementation.
+ */
+export const unprovenConformance = (
+  goal: string,
+  detail: string,
+  trace: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unprovenConformanceCode,
+    severity: 'error',
+    message: `${goal} cannot be proved: ${detail}`,
+    reason: Object.freeze({
+      _tag: 'UnprovenConformance',
+      goal,
+      detail,
+      trace: Object.freeze([...trace]),
+    }),
+    span,
+    ...(trace.length === 0 ? {} : { notes: Object.freeze([...trace]) }),
   })
 
 /**

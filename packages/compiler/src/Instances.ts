@@ -948,16 +948,23 @@ const interfaceWitnessTargets = (
     const target =
       bound === undefined || capability === undefined || !Type.isNominal(capability)
         ? undefined
-        : DeclarationIndex.interfaceWitnessImplementation(
+        : DeclarationIndex.interfaceWitnessTarget(
             index,
             Type.substitute(bound.provider, substitution),
             capability,
             bound.operation,
           )
+    // A conditional witness is generic in its header's binders, so the target carries the arguments
+    // this specialization proved rather than reaching code through an unsubstituted declaration.
     const own =
       target === undefined
         ? []
-        : [Object.freeze({ declaration: target, typeArguments: Object.freeze([]) })]
+        : [
+            Object.freeze({
+              declaration: target.implementation,
+              typeArguments: target.typeArguments,
+            }),
+          ]
     if (expression._tag === 'Match') {
       return [
         ...own,

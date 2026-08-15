@@ -1056,7 +1056,7 @@ const lowerEffectExecution = (
  */
 const emitWitnessDispatch = (
   fn: FunctionLowering,
-  target: DeclarationIndex.CanonicalId,
+  target: DeclarationIndex.InterfaceWitnessTarget,
   argumentLocals: ReadonlyArray<Mir.LocalId>,
   operandTypes: ReadonlyArray<{ readonly source: Mir.Type; readonly reference: Mir.Type }>,
   resultType: Mir.Type,
@@ -1095,8 +1095,11 @@ const emitWitnessDispatch = (
     Object.freeze({
       _tag: 'Call',
       destination,
-      target,
-      typeArguments: Object.freeze([]),
+      target: target.implementation,
+      // A conditional witness is one generic function per header, so the direct target carries the
+      // arguments this specialization proved. Nothing else travels: a requirement's own witness is
+      // reached through its own instance, never through a value handed to this call.
+      typeArguments: target.typeArguments,
       arguments: Object.freeze(borrows.map((entry) => entry.local)),
       type: resultType,
       provenance: generated(span),
@@ -1124,7 +1127,7 @@ const lowerInterfaceWitnessCall = (
   const provider = fn.semantic(bound.provider)
   const capability = fn.semantic(bound.capability)
   if (!Type.isNominal(capability)) return undefined
-  const target = DeclarationIndex.interfaceWitnessImplementation(
+  const target = DeclarationIndex.interfaceWitnessTarget(
     fn.index,
     provider,
     capability,
@@ -1166,7 +1169,7 @@ const lowerBoundWitnessCall = (
   capability: Type.Nominal,
   argumentLocals: ReadonlyArray<Mir.LocalId>,
 ): Mir.LocalId | undefined => {
-  const target = DeclarationIndex.interfaceWitnessImplementation(
+  const target = DeclarationIndex.interfaceWitnessTarget(
     fn.index,
     provider,
     capability,

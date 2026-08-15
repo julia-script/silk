@@ -1,5 +1,6 @@
 import { dual } from 'effect/Function'
 import * as Option from 'effect/Option'
+import * as ConformanceGoal from './ConformanceGoal.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
@@ -4347,13 +4348,30 @@ const interfaceConstraintDiagnostics = (
           ),
         ]
       const capability = Type.nominal(bound.capability.module, bound.capability.name, [provider])
-      if (!DeclarationIndex.conforms(index, provider, capability))
+      if (!DeclarationIndex.conforms(index, provider, capability)) {
+        // A conditional header that covers this provider but whose own requirements failed has a
+        // more useful answer than "does not implement": the chain says which requirement is
+        // missing and which wrapper asked for it.
+        const proof = DeclarationIndex.prove(index, provider, capability)
+        if (
+          proof._tag === 'Unproved' &&
+          ConformanceGoal.key(proof.goal) !== ConformanceGoal.key(ConformanceGoal.make(capability, provider))
+        )
+          return [
+            Diagnostic.unprovenConformance(
+              ConformanceGoal.encode(ConformanceGoal.make(capability, provider)),
+              ConformanceGoal.describe(proof.failure),
+              ConformanceGoal.traceLines(proof),
+              span,
+            ),
+          ]
         return [
           Diagnostic.invalidConformance(
             `${Type.encode(provider)} does not implement ${bound.spelling}`,
             span,
           ),
         ]
+      }
       // A witness that exists is not yet a witness that is complete: specialization admits the type
       // argument only when the conformance maps every operation the bound declares, so a bound with
       // more than one operation cannot be half-satisfied.
