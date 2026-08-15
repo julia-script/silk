@@ -7,10 +7,10 @@
 
 ## 2. Ownership and Cleanup
 
-- [ ] 2.1 Derive shared, exclusive, and consuming invocation access from aggregate receivers.
-- [ ] 2.2 Carry capture loans, liveness, whole-value moves, and cleanup through nested representation-bearing nominals.
+- [x] 2.1 Derive shared, exclusive, and consuming invocation access from aggregate receivers.
+- [x] 2.2 Carry capture loans, liveness, whole-value moves, and cleanup through nested representation-bearing nominals.
 - [x] 2.3 Keep representation-bearing nominals move-only and reject direct owned field extraction with a dedicated diagnostic.
-- [ ] 2.4 Add uncalled, called, consuming, moved, typed-failure, and scoped-borrow cleanup traces.
+- [ ] 2.4 Add uncalled, called, consuming, moved, typed-failure, and scoped-borrow cleanup traces. Plan-level proofs exist; the executed traces need the engines from section 4.
 
 ## 3. Layout and MIR
 

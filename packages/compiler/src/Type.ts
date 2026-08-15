@@ -1273,6 +1273,28 @@ export const containsViewBorrow = (self: Type): boolean => {
   return false
 }
 
+/**
+ * Tests whether a type stores one statically known callable environment anywhere inside it.
+ *
+ * A nominal that stores a callable names it in its own arguments, so the whole environment — and
+ * every borrow it captured — travels with any value of that type. Ownership uses this to keep a
+ * stored capture's loan alive for as long as the enclosing value holds the callable, exactly as it
+ * does for a callable bound directly.
+ */
+export const containsCallableRepresentation = (self: Type): boolean => {
+  if (isRepresented(self)) return isCallable(self.contract)
+  if (isNominal(self))
+    return self.arguments.some(
+      (argument) =>
+        (isExactRepresentationArgument(argument) &&
+          isCallableIdentityArgument(argument.identity)) ||
+        (isTypeArgument(argument) && containsCallableRepresentation(argument)),
+    )
+  if (isFixedArray(self)) return containsCallableRepresentation(self.element)
+  if (isUnion(self)) return self.members.some(containsCallableRepresentation)
+  return false
+}
+
 /** Tests for explicit borrow wrappers forbidden inside ordinary type positions. */
 export const containsPositionRestrictedBorrow = (self: Type): boolean => {
   if (isString(self)) return false

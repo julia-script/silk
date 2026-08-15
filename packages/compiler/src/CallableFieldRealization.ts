@@ -75,6 +75,8 @@ export interface Realization {
   readonly targetArguments: ReadonlyArray<Type.GenericArgument>
   /** Present when the target is reached through a capturing section rather than a named function. */
   readonly environment?: string
+  /** The specialized environment's own site, which names its lanes to layout, MIR, and cleanup. */
+  readonly site?: Hir.CallableSiteId
   readonly captures: ReadonlyArray<CaptureSlot>
   readonly invocation: ReceiverAccess
   readonly loans: ReadonlyArray<LoanDependency>
@@ -185,7 +187,11 @@ const unsupported = (
 
 /** The capture environment a retained representation argument names, or why it is unreachable. */
 type EnvironmentCaptures =
-  | { readonly _tag: 'ResolvedEnvironment'; readonly slots: ReadonlyArray<CaptureSlot> }
+  | {
+      readonly _tag: 'ResolvedEnvironment'
+      readonly slots: ReadonlyArray<CaptureSlot>
+      readonly site?: Hir.CallableSiteId
+    }
   | { readonly _tag: 'UnresolvedEnvironment'; readonly reason: UnsupportedReason }
 
 /** One capture shape signature, used only to detect environments that specialize inconsistently. */
@@ -223,6 +229,7 @@ const environmentCaptures = (
   return Object.freeze({
     _tag: 'ResolvedEnvironment',
     slots: Object.freeze([...selected.captures.map(captureSlot)].sort(compareCaptures)),
+    site: selected.site,
   })
 }
 
@@ -274,6 +281,7 @@ export const realizeField = (
       target: identity.target,
       targetArguments: Object.freeze([...identity.typeArguments]),
       ...(environment === undefined ? {} : { environment }),
+      ...(captures.site === undefined ? {} : { site: captures.site }),
       captures: slots,
       invocation,
       loans: loansOf(slots),

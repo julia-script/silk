@@ -1,0 +1,312 @@
+import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
+import type * as CallableFieldRealization from '../src/CallableFieldRealization.js'
+import * as Instances from '../src/Instances.js'
+import * as Ownership from '../src/Ownership.js'
+import * as Type from '../src/Type.js'
+import { unreachable } from './support/raise.js'
+
+/**
+ * Exactly-once cleanup for callables stored in nominal fields.
+ *
+ * An aggregate that stores a callable owes its owned capture lanes one release. Which lanes those
+ * are is a fact of the complete specialization, so ownership records the obligation symbolically
+ * and the shared runtime realization resolves it. Recording nothing — which is what a represented
+ * field used to contribute — would silently drop every owned capture the stored callable holds.
+ *
+ * `SEM0103` still fences these constructions, so the plans here are proofs, not executions; the
+ * runtime traces belong to the engine-parity milestone.
+ */
+
+const ascii = (value: string): Uint8Array =>
+  Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const realized = (name: string, source: string) =>
+  Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
+
+const bindingCleanup = (
+  snapshot: Analysis.Snapshot,
+  module: string,
+  name: string,
+): Ownership.CleanupPlan => {
+  const facts = snapshot.ownership.get(module) ?? unreachable(`expected ownership for ${module}`)
+  const binding = facts.functions
+    .flatMap((fn) => [...fn.bindings])
+    .find((candidate) => candidate.name === name)
+  return binding?.cleanup ?? unreachable(`expected a cleanup plan for ${name}`)
+}
+
+const soleRealization = (snapshot: Analysis.Snapshot): CallableFieldRealization.Realization =>
+  Instances.callableFieldRealizations(snapshot.instances, snapshot.index)
+    .entries.flatMap((entry) =>
+      entry.support._tag === 'Supported' ? [entry.support.realization] : [],
+    )
+    .at(0) ?? unreachable('expected one supported callable field realization')
+
+const fieldCleanup = (plan: Ownership.CleanupPlan, ordinal: number): Ownership.CleanupPlan => {
+  assert.strictEqual(plan._tag, 'StructCleanup')
+  if (plan._tag !== 'StructCleanup') return unreachable('expected a struct cleanup')
+  return (
+    plan.fields.find((field) => field.field.ordinal === ordinal)?.cleanup ??
+    unreachable(`expected a cleanup plan for field #${ordinal}`)
+  )
+}
+
+const takeCapture = `struct Token { value: i32 }
+struct Holder<F: once fn(i32) -> i32> { step: F }
+fn consume(value: i32, token: Token) -> i32 { return value }
+`
+
+it.effect('records the stored callable obligation on its enclosing aggregate', () =>
+  Effect.gen(function* () {
+    const module = 'stored-callable-cleanup/obligation'
+    const snapshot = yield* realized(
+      module,
+      `${takeCapture}pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  let holder = Holder { step: consume(move token) }
+  return 0
+}`,
+    )
+    const stored = fieldCleanup(bindingCleanup(snapshot, module, 'holder'), 0)
+
+    // The aggregate no longer plans "nothing to clean" for the callable it stores.
+    assert.strictEqual(stored._tag, 'RepresentedCallableCleanup')
+    if (stored._tag !== 'RepresentedCallableCleanup') return
+    assert.strictEqual(Type.encode(stored.contract), 'once fn(i32) -> i32')
+  }),
+)
+
+it.effect('carries the obligation through a nested representation-bearing nominal', () =>
+  Effect.gen(function* () {
+    const module = 'stored-callable-cleanup/nested'
+    const snapshot = yield* realized(
+      module,
+      `${takeCapture}struct Boxed<F: once fn(i32) -> i32> { inner: Holder<F> }
+fn nest<F: once fn(i32) -> i32>(inner: Holder<F>) -> Boxed<F> {
+  return Boxed<F> { inner: move inner }
+}
+pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  let holder = Holder { step: consume(move token) }
+  let boxed = nest(move holder)
+  return 0
+}`,
+    )
+    const inner = fieldCleanup(bindingCleanup(snapshot, module, 'boxed'), 0)
+
+    // Nesting does not lose the obligation: the outer aggregate still reaches the stored lanes.
+    assert.strictEqual(fieldCleanup(inner, 0)._tag, 'RepresentedCallableCleanup')
+  }),
+)
+
+it.effect('resolves the obligation into ordered owned lanes from the shared realization', () =>
+  Effect.gen(function* () {
+    const module = 'stored-callable-cleanup/resolved'
+    const snapshot = yield* realized(
+      module,
+      `${takeCapture}pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  let holder = Holder { step: consume(move token) }
+  return 0
+}`,
+    )
+    const realization = soleRealization(snapshot)
+    const resolved = Ownership.realizedCallableCleanup(snapshot.index, realization)
+
+    // Every fact comes from the realization: the specialized site and its owned capture lanes.
+    assert.deepEqual(realization.cleanup.lanes, [0])
+    assert.strictEqual(realization.cleanup.consumedByInvocation, true)
+    assert.strictEqual(resolved._tag, 'CallableCleanup')
+    if (resolved._tag !== 'CallableCleanup') return
+    assert.deepEqual(resolved.site, realization.site)
+    assert.deepEqual(
+      resolved.slots.map((slot) => slot.ordinal),
+      [0],
+    )
+    assert.strictEqual(resolved.slots.at(0)?.cleanup._tag, 'StructCleanup')
+  }),
+)
+
+it.effect('owes nothing for a stored callable whose captures are all Copy', () =>
+  Effect.gen(function* () {
+    const module = 'stored-callable-cleanup/copy'
+    const snapshot = yield* realized(
+      module,
+      `struct Adder<F: fn(i32) -> i32> { step: F }
+pub fn main() -> i32 {
+  let adder = Adder { step: i32.add(1) }
+  return adder.step(2)
+}`,
+    )
+    const realization = soleRealization(snapshot)
+    const resolved = Ownership.realizedCallableCleanup(snapshot.index, realization)
+
+    // A Copy lane is neither loaned nor cleaned, so the aggregate carries no drop obligation.
+    assert.deepEqual(realization.cleanup.lanes, [])
+    assert.strictEqual(resolved._tag, 'NoCleanup')
+  }),
+)
+
+it.effect('releases the stored obligation exactly once through a whole-value move', () =>
+  Effect.gen(function* () {
+    const module = 'stored-callable-cleanup/moved'
+    const snapshot = yield* realized(
+      module,
+      `${takeCapture}fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 0 }
+pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  let holder = Holder { step: consume(move token) }
+  return keep(move holder)
+}`,
+    )
+    const facts =
+      snapshot.ownership.get(module) ?? unreachable('expected ownership for the moved module')
+    const main =
+      facts.functions.find((fn) => fn.declaration.name.spelling === 'main') ??
+      unreachable('expected the entry function')
+    const holder =
+      main.bindings.find((binding) => binding.name === 'holder') ??
+      unreachable('expected the holder binding')
+
+    // The move transfers the whole environment, so no exit releases the moved aggregate again.
+    assert.notStrictEqual(holder.movedAt, undefined)
+    assert.deepEqual(
+      main.exits.flatMap((exit) =>
+        exit.releases.filter((release) => release.binding.name === 'holder'),
+      ),
+      [],
+    )
+  }),
+)
+
+it.effect('releases an uncalled stored callable once at scope exit', () =>
+  Effect.gen(function* () {
+    const module = 'stored-callable-cleanup/uncalled'
+    const snapshot = yield* realized(
+      module,
+      `${takeCapture}pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  let holder = Holder { step: consume(move token) }
+  return 0
+}`,
+    )
+    const facts = snapshot.ownership.get(module) ?? unreachable('expected ownership facts')
+    const main =
+      facts.functions.find((fn) => fn.declaration.name.spelling === 'main') ??
+      unreachable('expected the entry function')
+    const releases = main.exits.flatMap((exit) =>
+      exit.releases.filter((release) => release.binding.name === 'holder'),
+    )
+
+    // An uncalled stored callable is still owned, so exactly one exit releases the aggregate.
+    assert.strictEqual(releases.length, 1)
+    assert.strictEqual(
+      fieldCleanup(releases.at(0)?.cleanup ?? unreachable('expected a release plan'), 0)._tag,
+      'RepresentedCallableCleanup',
+    )
+  }),
+)
+
+it.effect('releases a stored callable on a typed-failure exit', () =>
+  Effect.gen(function* () {
+    const module = 'stored-callable-cleanup/typed-failure'
+    const snapshot = yield* realized(
+      module,
+      `${takeCapture}effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[i32; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let token = Token { value: 1 }
+  let holder = Holder { step: consume(move token) }
+  let allocation = run recipe
+  return 42
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+    )
+    const facts = snapshot.ownership.get(module) ?? unreachable('expected ownership facts')
+    const build =
+      facts.functions.find((fn) => fn.declaration.name.spelling === 'build') ??
+      unreachable('expected the fallible function')
+    const propagation = build.exits.filter((exit) => exit.kind === 'Propagation')
+
+    // The stranded aggregate is released on the failure path, not only on the success path.
+    assert.notStrictEqual(propagation.length, 0)
+    assert.include(
+      propagation.flatMap((exit) => exit.releases.map((release) => release.binding.name)),
+      'holder',
+    )
+  }),
+)
+
+const borrowCapture = `struct Holder<F: mut fn(i32) -> i32> { step: F }
+fn read(value: i32, values: &mut [i32]) -> i32 { return value }
+`
+
+it.effect('retains a stored capture loan for as long as the aggregate holds the callable', () =>
+  Effect.gen(function* () {
+    const module = 'stored-callable-cleanup/retained-loan'
+    const snapshot = yield* realized(
+      module,
+      `${borrowCapture}pub fn main() -> i32 {
+  let mut values = [1]
+  let holder = Holder { step: read(&mut values) }
+  values[0] = 2
+  return holder.step(42)
+}`,
+    )
+    const facts = snapshot.ownership.get(module) ?? unreachable('expected ownership facts')
+    const loan = facts.functions.flatMap((fn) => [...fn.loans]).at(0)
+
+    // The borrow is captured inside the aggregate, so writing through the owner while the
+    // aggregate still holds it conflicts exactly as it does for a callable bound directly.
+    assert.strictEqual(loan?.origin, 'CallableCapture')
+    assert.strictEqual(loan?.access, 'Exclusive')
+    assert.include(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      'OWN0011',
+    )
+  }),
+)
+
+it.effect('releases a stored capture loan when the aggregate is dropped', () =>
+  Effect.gen(function* () {
+    const module = 'stored-callable-cleanup/released-loan'
+    const snapshot = yield* realized(
+      module,
+      `${borrowCapture}pub fn main() -> i32 {
+  let mut values = [1]
+  let holder = Holder { step: read(&mut values) }
+  drop holder
+  values[0] = 2
+  return values[0]
+}`,
+    )
+
+    // Dropping the aggregate ends the environment it stored, so the owner is writable again.
+    assert.notInclude(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      'OWN0011',
+    )
+  }),
+)
+
+it.effect('leaves a stored Effect representation without a callable obligation', () =>
+  Effect.gen(function* () {
+    const module = 'stored-callable-cleanup/effect'
+    const snapshot = yield* realized(
+      module,
+      `struct Deferred<F: Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let deferred = Deferred { operation: effect { return 1 } }
+  return 0
+}`,
+    )
+    const stored = fieldCleanup(bindingCleanup(snapshot, module, 'deferred'), 0)
+
+    // Stored Effect storage is a separate change's obligation and stays exactly as it was.
+    assert.strictEqual(stored._tag, 'NoCleanup')
+  }),
+)

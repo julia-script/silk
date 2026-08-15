@@ -2192,6 +2192,8 @@ const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Ty
     case 'CallableCleanup':
     case 'EffectCleanup':
       return [cleanup.type, ...cleanup.slots.flatMap((slot) => cleanupTypes(slot.cleanup))]
+    case 'RepresentedCallableCleanup':
+      return [cleanup.type, cleanup.contract]
   }
 }
 

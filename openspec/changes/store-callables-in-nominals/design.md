@@ -51,6 +51,26 @@ the realization. No phase after elaboration may recover callable identity from i
 the realization's target and captures come from the retained representation argument and the
 specialized callable instance it names.
 
+#### Ownership decides before the realization exists
+
+Ownership runs once per module over generic HIR, before instance discovery, and the realization index
+is derived from that discovery. Ownership therefore cannot read a realization, and no ordering change
+would let it: the facts it needs are the ones that must hold for every specialization of a body.
+
+It consumes the two halves it can reach instead. The field's contract comes from the projected
+semantic type — the `Represented` field in a monomorphic body, the declaration-owned representation
+bound in a generic one — which is the prerequisite change's layer, never the construction that filled
+the field. The rules it applies are stated once on this change's actor and exported as functions:
+which receiver access admits which invocation mode, and how a stored callable's owned lanes become a
+concrete cleanup. A phase that runs after discovery calls the same functions with a realization in
+hand, so the pre-layout rejection and the runtime invocation it protects cannot disagree.
+
+Where a runtime fact is genuinely unavailable before specialization — which capture lanes an
+aggregate owns — ownership records the obligation symbolically as `RepresentedCallableCleanup` and
+`specializeCleanup` resolves it against the realization at the complete instance. Recording the
+obligation rather than nothing is what keeps an aggregate from silently dropping the owned captures
+of the callable it stores.
+
 ### Keep representation-bearing nominals move-only
 
 This milestone does not generalize nominal Copy. Shared and exclusive borrows preserve field access;

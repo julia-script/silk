@@ -158,6 +158,18 @@ export type CleanupPlan =
       }>
     }
   | {
+      /**
+       * One nominal field storing a callable representation. Which lanes the aggregate owns is a
+       * runtime fact of the complete specialization, so the symbolic plan records the obligation and
+       * `specializeCleanup` resolves it against the shared `CallableFieldRealization`. Recording the
+       * obligation — rather than nothing — keeps an aggregate from silently dropping the owned
+       * captures of the callable it stores.
+       */
+      readonly _tag: 'RepresentedCallableCleanup'
+      readonly type: Type.Represented
+      readonly contract: Type.Callable
+    }
+  | {
       readonly _tag: 'EffectCleanup'
       readonly type: Type.Effect
       readonly site: Hir.EffectSiteId
@@ -714,19 +726,18 @@ const checkExpression = (
           return
         }
         if (storedCallableContract(expression.callee) !== undefined) {
-          // A stored callable is invoked through its aggregate, never extracted from it: a
-          // consuming invocation takes the whole owner, and a weaker mode only reads the place.
-          // The extraction rejection stays for `move parser.decode`, which really does try to
-          // leave the aggregate holding a partially released environment.
-          const root = placeRoot(expression.callee)
+          // A stored callable is invoked through its aggregate, never extracted from it. A
+          // consuming invocation takes the whole owner in one use of its root, exactly as invoking
+          // a take-once callable binding does; every weaker mode only reads the place. The
+          // extraction rejection stays for `move parser.decode`, which really does try to leave the
+          // aggregate holding a partially released environment.
           const rootSite = placeSite(expression.callee)
-          checkPlaceInterior(state, live, expression.callee, guard, escaping)
-          const consumesAggregate = expression.access === 'Take' && stored === undefined
-          if (rootSite === undefined) {
-            checkExpression(state, live, root, consumesAggregate, guard, escaping)
+          if (expression.access !== 'Take' || stored !== undefined || rootSite === undefined) {
+            checkExpression(state, live, expression.callee, false, guard, escaping)
             return
           }
-          checkUse(state, live, rootSite, root.span, consumesAggregate)
+          checkPlaceInterior(state, live, expression.callee, guard, escaping)
+          checkUse(state, live, rootSite, placeRoot(expression.callee).span, true)
           return
         }
         checkExpression(
@@ -1364,14 +1375,23 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         inspect(expression.subject, region, active, access)
         inspect(expression.index, region, active, 'Read')
         return
+      // A value stored in an aggregate outlives the expression that built it, so a delayed end the
+      // enclosing binding carries reaches the captures stored inside it too. Without this, a
+      // borrow captured by a stored callable would be released while the aggregate still holds it.
       case 'StructLiteral':
         for (const initializer of expression.initializers) {
-          inspect(initializer.expression, region, active, naturalAccess(initializer.expression))
+          inspect(
+            initializer.expression,
+            region,
+            active,
+            naturalAccess(initializer.expression),
+            delayedEnd,
+          )
         }
         return
       case 'ArrayLiteral':
         for (const element of expression.elements) {
-          inspect(element.expression, region, active, naturalAccess(element.expression))
+          inspect(element.expression, region, active, naturalAccess(element.expression), delayedEnd)
         }
         return
       case 'Match':
@@ -1675,7 +1695,12 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
                   region: statement.region,
                   span: fn.declaration.syntax.span,
                 })
-              : initializerType._tag === 'Available' && Type.isCallable(initializerType.type)
+              : // A binding that stores a callable holds its captured borrows for as long as it
+                // holds the callable, whether the callable is the binding's own value or sits in a
+                // field of the aggregate it names.
+                initializerType._tag === 'Available' &&
+                  (Type.isCallable(initializerType.type) ||
+                    Type.containsCallableRepresentation(initializerType.type))
                 ? (callableEnds.get(statement.binding.id.ordinal) ?? {
                     region: statement.region,
                     span: fn.declaration.syntax.span,
@@ -1826,7 +1851,12 @@ export const cleanupPlan = (
     })
   }
   if (Type.isCallable(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.isRepresented(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  // A stored callable representation owes its enclosing aggregate an exactly-once release of every
+  // owned capture lane. A stored Effect representation is issue #190's obligation, not this one.
+  if (Type.isRepresented(type))
+    return Type.isCallable(type.contract)
+      ? Object.freeze({ _tag: 'RepresentedCallableCleanup', type, contract: type.contract })
+      : Object.freeze({ _tag: 'NoCleanup', type })
   const key = Type.key(type)
   if (seen.has(key)) return Object.freeze({ _tag: 'NoCleanup', type })
   const declaration = DeclarationIndex.byCanonical(index, {
@@ -2027,7 +2057,52 @@ export const specializeCleanup = (
           ),
         ),
       })
+    case 'RepresentedCallableCleanup': {
+      if (!Type.isRepresented(type) || !Type.isCallable(type.contract))
+        return Object.freeze({ _tag: 'NoCleanup', type })
+      // The caller resolves the complete instance's realization; without one the obligation stays
+      // symbolic rather than collapsing to "nothing to clean".
+      const resolved = resolveConcrete?.(type)
+      return resolved === undefined
+        ? Object.freeze({
+            _tag: 'RepresentedCallableCleanup',
+            type,
+            contract: type.contract,
+          })
+        : resolved
+    }
   }
+}
+
+/**
+ * The concrete cleanup one aggregate owes for the callable it stores in a field.
+ *
+ * Every fact comes from the shared runtime realization: the specialized environment's site, its
+ * ordered capture lanes, and which of those lanes the aggregate owns. Lanes are released
+ * last-captured first, exactly as a callable binding's own environment is, so a stored callable and
+ * a direct one clean in the same order.
+ */
+export const realizedCallableCleanup = (
+  index: DeclarationIndex.Index,
+  realization: CallableFieldRealization.Realization,
+): CleanupPlan => {
+  const type = realization.contract
+  const site = realization.site
+  const owned = realization.captures.filter((capture) => capture.owned)
+  if (site === undefined || owned.length === 0) return Object.freeze({ _tag: 'NoCleanup', type })
+  return Object.freeze({
+    _tag: 'CallableCleanup',
+    type,
+    site,
+    slots: Object.freeze(
+      [...owned].reverse().map((capture) =>
+        Object.freeze({
+          ordinal: capture.ordinal,
+          cleanup: cleanupPlan(index, capture.type),
+        }),
+      ),
+    ),
+  })
 }
 
 const borrowedReplacements = (
@@ -2638,6 +2713,9 @@ const cleanupText = (cleanup: CleanupPlan): string => {
   }
   if (cleanup._tag === 'EffectCleanup') {
     return `effect:${Type.encode(cleanup.type)} site=${Hir.executableSiteLabel(cleanup.site)} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
+  }
+  if (cleanup._tag === 'RepresentedCallableCleanup') {
+    return `represented-callable:${Type.encode(cleanup.contract)}`
   }
   if (cleanup._tag === 'HookCleanup') {
     return `hook:${Type.encode(cleanup.type)} target=${cleanup.hook.module}.${cleanup.hook.name}${
