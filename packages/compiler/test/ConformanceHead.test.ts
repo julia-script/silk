@@ -171,27 +171,63 @@ it('normalizes parameters inside representation bounds before comparing overlap'
   const rightBound = Type.callable([rightValue], rightValue)
   const rightRepresentation = binder('b', 0, 'Operation', 'CallableRepresentation', rightBound)
   const left = ConformanceHead.make(
-    Type.nominal('heads', 'Holder', [
-      leftValue,
-      Type.representationParameterArgument(leftRepresentation),
-    ]),
-    Type.nominal('heads', 'Holder', [
-      leftValue,
-      Type.representationParameterArgument(leftRepresentation),
-    ]),
+    Type.nominal('heads', 'Holder', [Type.representationParameterArgument(leftRepresentation)]),
+    Type.nominal('heads', 'Holder', [Type.representationParameterArgument(leftRepresentation)]),
   )
   const right = ConformanceHead.make(
-    Type.nominal('heads', 'Holder', [
-      rightValue,
-      Type.representationParameterArgument(rightRepresentation),
-    ]),
-    Type.nominal('heads', 'Holder', [
-      rightValue,
-      Type.representationParameterArgument(rightRepresentation),
-    ]),
+    Type.nominal('heads', 'Holder', [Type.representationParameterArgument(rightRepresentation)]),
+    Type.nominal('heads', 'Holder', [Type.representationParameterArgument(rightRepresentation)]),
+  )
+  const leftArgument = left.capability.arguments.at(0)
+  const rightArgument = right.capability.arguments.at(0)
+  assert.isDefined(leftArgument)
+  assert.isDefined(rightArgument)
+  if (leftArgument === undefined || rightArgument === undefined) return
+  assert.isTrue(Type.isRepresentationParameterArgument(leftArgument))
+  assert.isTrue(Type.isRepresentationParameterArgument(rightArgument))
+  assert.strictEqual(left.parameters.length, 2)
+  assert.strictEqual(right.parameters.length, 2)
+  assert.isDefined(left.parameters.at(0)?.representationBound)
+  assert.isDefined(right.parameters.at(0)?.representationBound)
+  assert.strictEqual(
+    Type.key(left.parameters.at(0)?.representationBound ?? 'never'),
+    Type.key(right.parameters.at(0)?.representationBound ?? 'never'),
   )
   assert.strictEqual(ConformanceHead.key(left), ConformanceHead.key(right))
   assert.isTrue(ConformanceHead.mayOverlap(left, right))
+})
+
+it('normalizes ordinary binders nested only inside Effect representation bounds', () => {
+  const leftValue = binder('a', 0, 'T')
+  const leftBound = Type.effect(leftValue, [])
+  const leftRepresentation = binder('a', 1, 'F', 'EffectRepresentation', leftBound)
+  const rightValue = binder('b', 1, 'Element')
+  const rightBound = Type.effect(rightValue, [])
+  const rightRepresentation = binder('b', 0, 'Operation', 'EffectRepresentation', rightBound)
+  const left = ConformanceHead.make(
+    Type.nominal('heads', 'Holder', [Type.representationParameterArgument(leftRepresentation)]),
+    Type.nominal('heads', 'Holder', [Type.representationParameterArgument(leftRepresentation)]),
+  )
+  const right = ConformanceHead.make(
+    Type.nominal('heads', 'Holder', [Type.representationParameterArgument(rightRepresentation)]),
+    Type.nominal('heads', 'Holder', [Type.representationParameterArgument(rightRepresentation)]),
+  )
+  const leftArgument = left.capability.arguments.at(0)
+  const rightArgument = right.capability.arguments.at(0)
+  assert.isDefined(leftArgument)
+  assert.isDefined(rightArgument)
+  if (leftArgument === undefined || rightArgument === undefined) return
+  assert.isTrue(Type.isRepresentationParameterArgument(leftArgument))
+  assert.isTrue(Type.isRepresentationParameterArgument(rightArgument))
+  assert.strictEqual(left.parameters.length, 2)
+  assert.strictEqual(right.parameters.length, 2)
+  assert.isDefined(left.parameters.at(0)?.representationBound)
+  assert.isDefined(right.parameters.at(0)?.representationBound)
+  assert.strictEqual(
+    Type.key(left.parameters.at(0)?.representationBound ?? 'never'),
+    Type.key(right.parameters.at(0)?.representationBound ?? 'never'),
+  )
+  assert.strictEqual(ConformanceHead.key(left), ConformanceHead.key(right))
 })
 
 it('accepts a requirement that names the immediate inner provider', () => {

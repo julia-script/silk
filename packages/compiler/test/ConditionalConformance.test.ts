@@ -222,6 +222,44 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('discovers proved base witnesses even when the wrapper operation never calls them', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance/unused-requirement',
+      `interface Decoder<T> { fn decode(value: T) -> i32 }
+
+struct Schema { tag: i32 }
+fn schemaDecode(value: &Schema) -> i32 { return value.tag }
+impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
+
+struct Wrapper<S> { source: S }
+fn wrapperDecode<S: Decoder>(value: &Wrapper<S>) -> i32 { return 7 }
+impl<S: Decoder<S>> Decoder<Wrapper<S>> for Wrapper<S> { decode: Wrapper.wrapperDecode }
+
+fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(value) }
+
+pub fn main() -> i32 {
+  return decodeOf<Wrapper<Schema>>(Wrapper<Schema> { source: Schema { tag: 41 } })
+}`,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map(
+        (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`,
+      ),
+      [],
+    )
+    const instances = Analysis.instancesOf(snapshot).instances
+    assert.strictEqual(
+      instances.filter((instance) => instance.key.declaration.name === 'wrapperDecode').length,
+      1,
+    )
+    assert.strictEqual(
+      instances.filter((instance) => instance.key.declaration.name === 'schemaDecode').length,
+      1,
+    )
+  }),
+)
+
 it.effect('lowers a conditional witness to one direct static call and no runtime dispatch', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyze(

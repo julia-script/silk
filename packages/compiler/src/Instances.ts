@@ -946,26 +946,40 @@ const interfaceWitnessTargets = (
           : undefined
     const capability =
       bound === undefined ? undefined : Type.substitute(bound.capability, substitution)
+    const provider = bound === undefined ? undefined : Type.substitute(bound.provider, substitution)
     const target =
-      bound === undefined || capability === undefined || !Type.isNominal(capability)
+      bound === undefined ||
+      provider === undefined ||
+      capability === undefined ||
+      !Type.isNominal(capability)
         ? undefined
-        : DeclarationIndex.interfaceWitnessTarget(
-            index,
-            Type.substitute(bound.provider, substitution),
-            capability,
-            bound.operation,
-          )
+        : DeclarationIndex.interfaceWitnessTarget(index, provider, capability, bound.operation)
+    const dependencies =
+      provider === undefined || capability === undefined || !Type.isNominal(capability)
+        ? []
+        : DeclarationIndex.interfaceWitnessDependencyTargets(index, provider, capability)
     // A conditional witness is generic in its header's binders, so the target carries the arguments
     // this specialization proved rather than reaching code through an unsubstituted declaration.
     const own =
-      target === undefined
+      target === undefined && dependencies.length === 0
         ? []
         : [
-            Object.freeze({
-              declaration: target.implementation,
-              typeArguments: target.typeArguments,
-              structurallyDescending: target.structurallyDescending,
-            }),
+            ...dependencies.map((dependency) =>
+              Object.freeze({
+                declaration: dependency.implementation,
+                typeArguments: dependency.typeArguments,
+                structurallyDescending: true,
+              }),
+            ),
+            ...(target === undefined
+              ? []
+              : [
+                  Object.freeze({
+                    declaration: target.implementation,
+                    typeArguments: target.typeArguments,
+                    structurallyDescending: target.structurallyDescending,
+                  }),
+                ]),
           ]
     if (expression._tag === 'Match') {
       return [

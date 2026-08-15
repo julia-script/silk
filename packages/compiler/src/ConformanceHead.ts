@@ -84,57 +84,34 @@ export type TerminationFailure =
  */
 const occurringParameters = (terms: ReadonlyArray<Type.Type>): ReadonlyArray<Type.Parameter> => {
   const found = new Map<string, Type.Parameter>()
-  const remember = (parameter: Type.Parameter): void => {
-    const key = Type.key(parameter)
-    if (!found.has(key)) found.set(key, parameter)
-  }
-  const visitArgument = (argument: Type.GenericArgument): void => {
-    if (Type.isTypeArgument(argument)) visit(argument)
-    else if (Type.isRepresentationParameterArgument(argument)) remember(argument.parameter)
-    else if (Type.isExactRepresentationArgument(argument)) {
-      visit(argument.contract)
-      visitArgument(argument.identity)
-    } else if (Type.isCallableIdentityArgument(argument))
-      for (const typeArgument of argument.typeArguments) visitArgument(typeArgument)
-    else if (Type.isFailureRowArgument(argument)) {
-      for (const failure of argument.failures) visit(failure)
-      for (const parameter of argument.parameters) remember(parameter)
-    } else if (Type.isRequirementRowArgument(argument)) {
-      for (const requirement of argument.requirements) visit(requirement.capability)
-      for (const parameter of argument.parameters) remember(parameter)
-    }
-  }
-  const visit = (type: Type.Type): void => {
-    if (Type.isParameter(type)) {
-      remember(type)
-      return
-    }
-    if (Type.isFailureProjection(type)) {
-      remember(type.parameter)
-      return
-    }
-    if (Type.isNominal(type)) {
-      for (const argument of type.arguments) visitArgument(argument)
-      return
-    }
-    if (Type.isFixedArray(type) || Type.isSlice(type)) visit(type.element)
-    else if (Type.isReference(type)) visit(type.target)
-    else if (Type.isCallable(type)) {
-      for (const parameter of type.parameters) visit(parameter)
-      visit(type.result)
-    } else if (Type.isEffect(type)) {
-      visit(type.success)
-      for (const failure of type.failures) visit(failure)
-      for (const parameter of type.failureParameters) visit(parameter)
-      for (const requirement of type.requirements) visit(requirement.capability)
-      for (const parameter of type.requirementParameters) visit(parameter)
-    } else if (Type.isRepresented(type)) {
-      visit(type.contract)
-      visitArgument(type.representation.argument)
-    } else if (Type.isUnion(type)) for (const member of type.members) visit(member)
+  const expandedBounds = new Set<string>()
+  const visit = (term: Type.Type): void => {
+    Type.visit(term, (type) => {
+      if (!Type.isParameter(type)) return
+      const parameterKey = Type.key(type)
+      if (!found.has(parameterKey)) found.set(parameterKey, type)
+      if (type.representationBound === undefined || expandedBounds.has(parameterKey)) return
+      expandedBounds.add(parameterKey)
+      visit(type.representationBound)
+    })
   }
   for (const term of terms) visit(term)
   return Object.freeze([...found.values()])
+}
+
+/** Reifies one canonical binder as an argument of its own kind. */
+const parameterArgument = (parameter: Type.Parameter): Type.GenericArgument => {
+  switch (parameter.kind) {
+    case 'Value':
+      return parameter
+    case 'FailureRow':
+      return Type.failureRowArgument([], [parameter])
+    case 'RequirementRow':
+      return Type.requirementRowArgument([], [parameter])
+    case 'CallableRepresentation':
+    case 'EffectRepresentation':
+      return Type.representationParameterArgument(parameter)
+  }
 }
 
 /** Builds the renumbering that maps each occurring parameter onto its canonical position. */
@@ -148,11 +125,11 @@ const normalization = (
   const placeholders = parameters.map((parameter, position) =>
     Type.parameter(owner, position, `%${position}`, parameter.kind),
   )
-  const placeholderSubstitution = new Map(
+  const placeholderSubstitution: Type.Substitution = new Map(
     parameters.map((parameter, position) => {
       const replacement = placeholders.at(position)
       if (replacement === undefined) throw new RangeError('Head normalization lost a parameter')
-      return [Type.key(parameter), replacement] as const
+      return [Type.key(parameter), parameterArgument(replacement)] as const
     }),
   )
   // Representation bounds are terms in the same binder vocabulary as the head. Renumbering only
@@ -177,7 +154,7 @@ const normalization = (
       parameters.map((parameter, position) => {
         const replacement = normalized.at(position)
         if (replacement === undefined) throw new RangeError('Head normalization lost a parameter')
-        return [Type.key(parameter), replacement] as const
+        return [Type.key(parameter), parameterArgument(replacement)] as const
       }),
     ),
     parameters: Object.freeze(normalized),
@@ -232,7 +209,7 @@ const makeUnder = (
 
 /** The canonical alpha-invariant identity of one head. */
 export const key = (self: ConformanceHead): string =>
-  `${Type.key(self.capability)}\u0000${Type.key(self.provider)}`
+  Type.conformanceKey(self.capability, self.provider)
 
 /** Renders one head the way a diagnostic spells it. */
 export const encode = (self: ConformanceHead): string =>
@@ -478,49 +455,11 @@ const occurrences = (
 
 const countIn = (parameter: Type.Parameter, term: Type.Type): number => {
   const target = Type.key(parameter)
-  const countArgument = (argument: Type.GenericArgument): number => {
-    if (Type.isTypeArgument(argument)) return count(argument)
-    if (Type.isRepresentationParameterArgument(argument))
-      return Type.key(argument.parameter) === target ? 1 : 0
-    if (Type.isExactRepresentationArgument(argument))
-      return count(argument.contract) + countArgument(argument.identity)
-    if (Type.isCallableIdentityArgument(argument))
-      return argument.typeArguments.reduce((total, entry) => total + countArgument(entry), 0)
-    if (Type.isFailureRowArgument(argument))
-      return (
-        argument.failures.reduce((total, failure) => total + count(failure), 0) +
-        argument.parameters.filter((entry) => Type.key(entry) === target).length
-      )
-    if (Type.isRequirementRowArgument(argument))
-      return (
-        argument.requirements.reduce((total, entry) => total + count(entry.capability), 0) +
-        argument.parameters.filter((entry) => Type.key(entry) === target).length
-      )
-    return 0
-  }
-  const count = (type: Type.Type): number => {
-    if (Type.isParameter(type)) return Type.key(type) === target ? 1 : 0
-    if (Type.isFailureProjection(type)) return Type.key(type.parameter) === target ? 1 : 0
-    if (Type.isNominal(type))
-      return type.arguments.reduce((total, argument) => total + countArgument(argument), 0)
-    if (Type.isFixedArray(type) || Type.isSlice(type)) return count(type.element)
-    if (Type.isReference(type)) return count(type.target)
-    if (Type.isCallable(type))
-      return type.parameters.reduce((total, entry) => total + count(entry), 0) + count(type.result)
-    if (Type.isEffect(type))
-      return (
-        count(type.success) +
-        type.failures.reduce((total, entry) => total + count(entry), 0) +
-        type.failureParameters.reduce((total, entry) => total + count(entry), 0) +
-        type.requirements.reduce((total, entry) => total + count(entry.capability), 0) +
-        type.requirementParameters.reduce((total, entry) => total + count(entry), 0)
-      )
-    if (Type.isRepresented(type))
-      return count(type.contract) + countArgument(type.representation.argument)
-    if (Type.isUnion(type)) return type.members.reduce((total, member) => total + count(member), 0)
-    return 0
-  }
-  return count(term)
+  let count = 0
+  Type.visit(term, (type) => {
+    if (Type.isParameter(type) && Type.key(type) === target) count += 1
+  })
+  return count
 }
 
 /** Reports whether one term occurs strictly inside another. */
@@ -530,35 +469,11 @@ const isStrictSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
 }
 
 const containsSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
-  if (Type.equals(candidate, whole)) return true
-  const inArgument = (argument: Type.GenericArgument): boolean =>
-    Type.isTypeArgument(argument)
-      ? containsSubterm(candidate, argument)
-      : Type.isExactRepresentationArgument(argument)
-        ? containsSubterm(candidate, argument.contract)
-        : Type.isFailureRowArgument(argument)
-          ? argument.failures.some((failure) => containsSubterm(candidate, failure))
-          : Type.isRequirementRowArgument(argument)
-            ? argument.requirements.some((entry) => containsSubterm(candidate, entry.capability))
-            : false
-  if (Type.isNominal(whole)) return whole.arguments.some(inArgument)
-  if (Type.isFixedArray(whole) || Type.isSlice(whole))
-    return containsSubterm(candidate, whole.element)
-  if (Type.isReference(whole)) return containsSubterm(candidate, whole.target)
-  if (Type.isCallable(whole))
-    return (
-      whole.parameters.some((parameter) => containsSubterm(candidate, parameter)) ||
-      containsSubterm(candidate, whole.result)
-    )
-  if (Type.isEffect(whole))
-    return (
-      containsSubterm(candidate, whole.success) ||
-      whole.failures.some((failure) => containsSubterm(candidate, failure)) ||
-      whole.requirements.some((entry) => containsSubterm(candidate, entry.capability))
-    )
-  if (Type.isRepresented(whole)) return containsSubterm(candidate, whole.contract)
-  if (Type.isUnion(whole)) return whole.members.some((member) => containsSubterm(candidate, member))
-  return false
+  let found = false
+  Type.visit(whole, (type) => {
+    if (Type.equals(candidate, type)) found = true
+  })
+  return found
 }
 
 /**

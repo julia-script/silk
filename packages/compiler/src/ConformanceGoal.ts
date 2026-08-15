@@ -59,7 +59,7 @@ export const make = (capability: Type.Nominal, provider: Type.Type): Conformance
 
 /** The canonical identity two occurrences of one question share. */
 export const key = (self: ConformanceGoal): string =>
-  `${Type.key(self.capability)}\u0000${Type.key(self.provider)}`
+  Type.conformanceKey(self.capability, self.provider)
 
 /** Renders one goal the way a diagnostic spells it. */
 export const encode = (self: ConformanceGoal): string =>
@@ -70,9 +70,8 @@ export const encode = (self: ConformanceGoal): string =>
  *
  * The order is the proof's own: a goal appears only after every goal it was proved from, so the
  * sequence reads as the chain of witnesses a specialization needed and is independent of the order
- * the goals happened to be asked in. Nothing in lowering consumes this — a requirement's witness is
- * reached through its own instance — but it is the shape a reader, a report, or a determinism
- * fixture needs to compare one proof against another.
+ * the goals happened to be asked in. Instance discovery consumes the corresponding proof nodes;
+ * this goal-only view is the stable shape a reader, report, or determinism fixture compares.
  */
 export const dependencies = (self: Proof): ReadonlyArray<ConformanceGoal> => {
   const found = new Map<string, ConformanceGoal>()

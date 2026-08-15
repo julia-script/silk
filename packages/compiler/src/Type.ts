@@ -909,6 +909,10 @@ export const key = (self: Type): string => {
   return cached
 }
 
+/** The canonical identity of one provider's application of an interface. */
+export const conformanceKey = (capability: Nominal, provider: Type): string =>
+  `${key(capability)}\u0000${key(provider)}`
+
 const computeKey = (self: Type): string => {
   if (isString(self)) return 'string'
   if (isBuiltin(self)) return `builtin:${self}`
@@ -1171,54 +1175,60 @@ export const nominals = (self: Type): ReadonlyArray<Nominal> =>
                   ? Object.freeze(self.members.flatMap(nominals))
                   : []
 
-/** Returns every declaration-owned parameter nested in a type, without duplicates. */
-export const parameters = (self: Type): ReadonlyArray<Parameter> => {
-  const found = new Map<string, Parameter>()
+/** Visits every structural type occurrence in deterministic pre-order. */
+export const visit = (self: Type, visitor: (type: Type) => void): void => {
   const visitArgument = (argument: GenericArgument): void => {
-    if (isTypeArgument(argument)) visit(argument)
-    else if (isRepresentationParameterArgument(argument))
-      found.set(key(argument.parameter), argument.parameter)
+    if (isTypeArgument(argument)) visitType(argument)
+    else if (isRepresentationParameterArgument(argument)) visitType(argument.parameter)
     else if (isExactRepresentationArgument(argument)) {
-      visit(argument.contract)
+      visitType(argument.contract)
       visitArgument(argument.identity)
     } else if (isCallableIdentityArgument(argument))
       for (const typeArgument of argument.typeArguments) visitArgument(typeArgument)
     else if (isFailureRowArgument(argument)) {
-      for (const failure of argument.failures) visit(failure)
-      for (const parameter_ of argument.parameters) found.set(key(parameter_), parameter_)
+      for (const failure of argument.failures) visitType(failure)
+      for (const parameter_ of argument.parameters) visitType(parameter_)
     } else if (isRequirementRowArgument(argument)) {
-      for (const requirement of argument.requirements) visit(requirement.capability)
-      for (const parameter_ of argument.parameters) found.set(key(parameter_), parameter_)
+      for (const requirement of argument.requirements) visitType(requirement.capability)
+      for (const parameter_ of argument.parameters) visitType(parameter_)
     }
   }
-  const visit = (type: Type): void => {
-    if (isParameter(type)) {
-      found.set(key(type), type)
-    } else if (isFailureProjection(type)) {
-      found.set(key(type.parameter), type.parameter)
+  const visitType = (type: Type): void => {
+    visitor(type)
+    if (isParameter(type)) return
+    if (isFailureProjection(type)) {
+      visitType(type.parameter)
       return
     }
     if (isNominal(type)) {
       for (const argument of type.arguments) visitArgument(argument)
       return
     }
-    if (isFixedArray(type) || isSlice(type)) visit(type.element)
-    else if (isReference(type)) visit(type.target)
+    if (isFixedArray(type) || isSlice(type)) visitType(type.element)
+    else if (isReference(type)) visitType(type.target)
     else if (isCallable(type)) {
-      for (const parameter_ of type.parameters) visit(parameter_)
-      visit(type.result)
+      for (const parameter_ of type.parameters) visitType(parameter_)
+      visitType(type.result)
     } else if (isEffect(type)) {
-      visit(type.success)
-      for (const failure of type.failures) visit(failure)
-      for (const parameter_ of type.failureParameters) visit(parameter_)
-      for (const requirement of type.requirements) visit(requirement.capability)
-      for (const parameter_ of type.requirementParameters) visit(parameter_)
+      visitType(type.success)
+      for (const failure of type.failures) visitType(failure)
+      for (const parameter_ of type.failureParameters) visitType(parameter_)
+      for (const requirement of type.requirements) visitType(requirement.capability)
+      for (const parameter_ of type.requirementParameters) visitType(parameter_)
     } else if (isRepresented(type)) {
-      visit(type.contract)
+      visitType(type.contract)
       visitArgument(type.representation.argument)
-    } else if (isUnion(type)) for (const member of type.members) visit(member)
+    } else if (isUnion(type)) for (const member of type.members) visitType(member)
   }
-  visit(self)
+  visitType(self)
+}
+
+/** Returns every distinct parameter occurring structurally within one type. */
+export const parameters = (self: Type): ReadonlyArray<Parameter> => {
+  const found = new Map<string, Parameter>()
+  visit(self, (type) => {
+    if (isParameter(type)) found.set(key(type), type)
+  })
   return Object.freeze([...found.values()].sort(compare))
 }
 

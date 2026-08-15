@@ -4858,11 +4858,16 @@ const interfaceConformance = (
 ): ConformanceFact | undefined => {
   const proof = prove(self, provider, capability)
   if (proof._tag !== 'Proved' || proof.selection._tag !== 'SourceSelection') return undefined
-  const selection = proof.selection
-  return self.modules
+  return selectedConformance(self, proof.selection)
+}
+
+const selectedConformance = (
+  self: Index,
+  selection: Extract<ConformanceGoal.Selection, { readonly _tag: 'SourceSelection' }>,
+): ConformanceFact | undefined =>
+  self.modules
     .find((module) => module.module === selection.module)
     ?.conformances.find((conformance) => conformance.ordinal === selection.ordinal)
-}
 
 /** Tests whether one nominal provider has a compiler-shipped or source-declared witness. */
 export const conforms = (self: Index, provider: Type.Type, capability: Type.Nominal): boolean =>
@@ -4941,8 +4946,20 @@ export const interfaceWitnessImplementation = (
   capability: Type.Nominal,
   operation: string,
 ): CanonicalId | undefined => {
+  const conformance = interfaceConformance(self, provider, capability)
+  return conformance === undefined
+    ? undefined
+    : witnessImplementation(self, provider, conformance, operation)
+}
+
+const witnessImplementation = (
+  self: Index,
+  provider: Type.Type,
+  conformance: ConformanceFact,
+  operation: string,
+): CanonicalId | undefined => {
   if (!Type.isNominal(provider)) return undefined
-  const mapping = interfaceConformance(self, provider, capability)?.operations.find(
+  const mapping = conformance.operations.find(
     (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === operation,
   )
   const target = mapping?.target
@@ -4994,6 +5011,55 @@ export const interfaceWitnessTarget = (
     typeArguments: proof._tag === 'Proved' ? proof.typeArguments : noGenericArguments,
     structurallyDescending: proof._tag === 'Proved' && proof.requirements.length > 0,
   })
+}
+
+/**
+ * Selects every source witness implementation a proved conditional witness rests on.
+ *
+ * The result is innermost first, deduplicated by concrete implementation specialization, and does
+ * not include the root witness. Discovery consumes it independently of the selected operation's
+ * body: a declared requirement is part of admitting the witness even when that operation never
+ * invokes the required interface itself.
+ */
+export const interfaceWitnessDependencyTargets = (
+  self: Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+): ReadonlyArray<InterfaceWitnessTarget> => {
+  const proof = prove(self, provider, capability)
+  if (proof._tag !== 'Proved') return Object.freeze([])
+  const found = new Map<string, InterfaceWitnessTarget>()
+  const visit = (dependency: ConformanceGoal.Proof): void => {
+    if (dependency._tag !== 'Proved') return
+    for (const requirement of dependency.requirements) visit(requirement)
+    if (dependency.selection._tag !== 'SourceSelection') return
+    const conformance = selectedConformance(self, dependency.selection)
+    if (conformance === undefined) return
+    for (const mapping of conformance.operations) {
+      if (mapping.name._tag !== 'Present') continue
+      const implementation = witnessImplementation(
+        self,
+        dependency.goal.provider,
+        conformance,
+        mapping.name.spelling,
+      )
+      if (implementation === undefined) continue
+      const identity = `${implementation.module}\u0000${implementation.name}\u0000${dependency.typeArguments
+        .map(Type.genericArgumentKey)
+        .join('\u0000')}`
+      if (!found.has(identity))
+        found.set(
+          identity,
+          Object.freeze({
+            implementation,
+            typeArguments: dependency.typeArguments,
+            structurallyDescending: true,
+          }),
+        )
+    }
+  }
+  for (const requirement of proof.requirements) visit(requirement)
+  return Object.freeze([...found.values()])
 }
 
 /** Selects the unique compiler-shipped or source-declared witness for one provider. */

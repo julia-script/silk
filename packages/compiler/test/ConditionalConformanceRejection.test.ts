@@ -112,7 +112,7 @@ pub fn main() -> i32 { return 0 }`,
     assert.deepEqual(
       reported(snapshot, 'SEM0108').map((diagnostic) => diagnostic.message),
       [
-        'conditional-conformance-rejection/open-row.Marker<Effect<i32 ! E>> for Effect<i32 ! E> may overlap conditional-conformance-rejection/open-row.Marker<Effect<i32 ! conditional-conformance-rejection/open-row.Problem>> for Effect<i32 ! conditional-conformance-rejection/open-row.Problem>',
+        'conditional-conformance-rejection/open-row.Marker<Effect<i32 ! %0>> for Effect<i32 ! %0> may overlap conditional-conformance-rejection/open-row.Marker<Effect<i32 ! conditional-conformance-rejection/open-row.Problem>> for Effect<i32 ! conditional-conformance-rejection/open-row.Problem>',
       ],
     )
   }),
