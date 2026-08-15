@@ -794,6 +794,25 @@ const isUniversalPatternStart = (state: State): boolean => {
   )
 }
 
+/**
+ * True for one contextual identifier spelling.
+ *
+ * Contextual spellings stay ordinary identifiers in the lexer so that source may still name a
+ * value `typeof` or `some`; only the parser recognizes them, and only where the surrounding
+ * grammar admits no other reading.
+ */
+const hasContextualSpelling = (state: State, spelling: string): boolean => {
+  const token = significantToken(state)
+  return (
+    token?.kind === 'Identifier' &&
+    Option.contains(SourceFile.spelling(state.lexical.source, token.span), spelling)
+  )
+}
+
+/** True only for `typeof(`; an ordinary type path is never followed by a parenthesis. */
+const isExactRepresentationStart = (state: State): boolean =>
+  hasContextualSpelling(state, 'typeof') && significantKindAfter(state, 1) === 'LeftParenthesis'
+
 const isNominalPatternStart = (state: State): boolean => {
   if (nextSignificantKind(state) !== 'Identifier') return false
   if (hasCompleteAppliedPostfix(state, 'LeftBrace')) return true
@@ -1788,11 +1807,45 @@ const parseTypeParameterList = (
   })
 }
 
+/** Parses one named type reference: a path with an optional applied type-argument list. */
+const parseNamedTypeReference = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+  preserveFieldStart = false,
+): NodeResult => {
+  const path = parseTypePath(initial, ['Less', ...following], preserveFieldStart)
+  if (nextSignificantKind(path.state) !== 'Less') return path
+  const arguments_ = parseTypeArgumentList(path.state, 'TypeArgumentList', following)
+  return Object.freeze({
+    state: arguments_.state,
+    node: syntaxNode(arguments_.state, 'AppliedType', [path.node, arguments_.node]),
+  })
+}
+
 const parseTypePrimary = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
   preserveFieldStart = false,
 ): NodeResult => {
+  if (isExactRepresentationStart(initial)) {
+    const keyword = expect(initial, 'Identifier', ['LeftParenthesis', ...following])
+    const left = expect(keyword.state, 'LeftParenthesis', [
+      'Identifier',
+      'RightParenthesis',
+      ...following,
+    ])
+    const item = parseNamedTypeReference(left.state, ['RightParenthesis', ...following])
+    const right = expect(item.state, 'RightParenthesis', following)
+    return Object.freeze({
+      state: right.state,
+      node: syntaxNode(right.state, 'ExactRepresentationType', [
+        ...keyword.elements,
+        ...left.elements,
+        item.node,
+        ...right.elements,
+      ]),
+    })
+  }
   const callableMode = nextSignificantKind(initial)
   if (
     (callableMode === 'MutKeyword' || callableMode === 'OnceKeyword') &&
@@ -1924,15 +1977,8 @@ const parseTypePrimary = (
       ]),
     })
   }
-  if (nextSignificantKind(initial) !== 'LeftBracket') {
-    const path = parseTypePath(initial, ['Less', ...following], preserveFieldStart)
-    if (nextSignificantKind(path.state) !== 'Less') return path
-    const arguments_ = parseTypeArgumentList(path.state, 'TypeArgumentList', following)
-    return Object.freeze({
-      state: arguments_.state,
-      node: syntaxNode(arguments_.state, 'AppliedType', [path.node, arguments_.node]),
-    })
-  }
+  if (nextSignificantKind(initial) !== 'LeftBracket')
+    return parseNamedTypeReference(initial, following, preserveFieldStart)
   const left = expect(initial, 'LeftBracket', [...typeStarts, ...following])
   const element = parseType(left.state, ['Semicolon', 'RightBracket', ...following])
   const semicolon = expect(element.state, 'Semicolon', [

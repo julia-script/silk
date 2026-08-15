@@ -761,6 +761,13 @@ const printNode = (
         printNode(context, result, FormatDocument.text(' ')),
       )
     }
+    case 'ExactRepresentationType':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Identifier'), prefix, preserveBlank),
+        printToken(context, tokenOf(node, 'LeftParenthesis')),
+        printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
+        printToken(context, tokenOf(node, 'RightParenthesis')),
+      )
     case 'UnitType':
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
     case 'ParenthesizedType':

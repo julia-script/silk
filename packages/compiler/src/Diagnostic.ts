@@ -216,6 +216,8 @@ export const divergentRepresentationJoinCode = 'SEM0105' as const
 export const incompatibleRepresentationBoundCode = 'SEM0106' as const
 /** Stable code for storing a represented Effect before its runtime layout is supported. */
 export const storedRepresentedEffectConstructionCode = 'SEM0107' as const
+/** Stable code for a `typeof` item that names no sufficiently visible fully specialized callable. */
+export const invalidExactRepresentationItemCode = 'SEM0108' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -357,6 +359,7 @@ export type Code =
   | typeof divergentRepresentationJoinCode
   | typeof incompatibleRepresentationBoundCode
   | typeof storedRepresentedEffectConstructionCode
+  | typeof invalidExactRepresentationItemCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -499,6 +502,11 @@ export type Reason =
       readonly aggregate: string
       readonly field?: string
       readonly effect: string
+    }
+  | {
+      readonly _tag: 'InvalidExactRepresentationItem'
+      readonly item: string
+      readonly detail: InvalidExactRepresentationDetail
     }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
@@ -1799,6 +1807,56 @@ export const storedCallableConstruction = (
         }),
   })
 }
+
+/** Why one `typeof` item cannot name an exact representation. */
+export type InvalidExactRepresentationDetail =
+  | 'Unresolved'
+  | 'NotCallable'
+  | 'Ambiguous'
+  | 'PartiallySpecialized'
+  | 'PrivateExposure'
+
+const exactRepresentationExplanation = (detail: InvalidExactRepresentationDetail): string => {
+  switch (detail) {
+    case 'Unresolved':
+      return 'no declaration of that name is in scope'
+    case 'NotCallable':
+      return 'it names a declaration that is not a callable item; local bindings, sections, and Effect construction sites have no source-nameable exact identity'
+    case 'Ambiguous':
+      return 'more than one declaration carries that name, so no single item is resolved'
+    case 'PartiallySpecialized':
+      return 'its generic parameters are not fully specialized'
+    case 'PrivateExposure':
+      return 'it is less visible than the contract exposing it'
+  }
+}
+
+/**
+ * Rejects one `typeof` item that names no sufficiently visible, fully specialized callable.
+ *
+ * An exact representation makes a construction-site identity part of a nominal contract, so the
+ * item must resolve to exactly one named callable declaration that is at least as visible as the
+ * contract carrying it and has no remaining generic parameters. Everything else — locals,
+ * sections, Effect construction sites, private leaks, and partial specializations — has either no
+ * durable identity or no admissible one, and belongs behind an opaque representation result.
+ */
+export const invalidExactRepresentationItem = (
+  item: string,
+  detail: InvalidExactRepresentationDetail,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidExactRepresentationItemCode,
+    severity: 'error',
+    message: `Cannot name the exact representation of ${item}: ${exactRepresentationExplanation(detail)}`,
+    reason: Object.freeze({ _tag: 'InvalidExactRepresentationItem', item, detail }),
+    span,
+    notes: Object.freeze([
+      'Return an opaque representation result instead when the concrete identity must stay private.',
+    ]),
+  })
 
 /** Rejects represented Effect storage until a downstream runtime layout has been proven. */
 export const storedRepresentedEffectConstruction = (

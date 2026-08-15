@@ -217,6 +217,15 @@ export type DeclaredTypeFact =
       readonly cause?: Diagnostic.Identity
     }
   | {
+      readonly _tag: 'ExactRepresentation'
+      readonly item: TypePathFact
+      readonly arguments: ReadonlyArray<DeclaredTypeFact>
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+      readonly cause?: Diagnostic.Identity
+    }
+  | {
       readonly _tag: 'Unavailable'
       readonly syntax: SyntaxTree.Element
       readonly cause?: Diagnostic.Identity
@@ -626,6 +635,7 @@ const isDeclaredTypeNode = (element: SyntaxTree.Element): element is SyntaxTree.
     element.kind === 'CallableType' ||
     element.kind === 'UnitType' ||
     element.kind === 'ParenthesizedType' ||
+    element.kind === 'ExactRepresentationType' ||
     element.kind === 'UnionType')
 
 const declaredTypeNode = (parent: SyntaxTree.Node): SyntaxTree.Node => {
@@ -1073,6 +1083,53 @@ export const analyzeDeclaredType = (
         syntax,
       }),
       diagnostics: Object.freeze(diagnostics),
+    })
+  }
+  if (syntax.kind === 'ExactRepresentationType') {
+    const item = syntax.children.find(isDeclaredTypeNode)
+    const pathSyntax =
+      item === undefined
+        ? undefined
+        : item.kind === 'TypePath'
+          ? item
+          : SyntaxTree.directNode(item, 'TypePath')
+    const keyword = SyntaxTree.directToken(syntax, 'Identifier')
+    if (item === undefined || pathSyntax === undefined || keyword === undefined)
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+        diagnostics: Object.freeze([]),
+      })
+    const segments = SyntaxTree.tokens(pathSyntax)
+      .filter((token) => token.kind === 'Identifier')
+      .map((token) => Object.freeze({ spelling: spelling(source, token), token }))
+    if (segments.length === 0 || !SyntaxTree.isAvailableSyntax(syntax))
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          syntax: SyntaxTree.unavailableChild(syntax, 'Identifier'),
+        }),
+        diagnostics: Object.freeze([]),
+      })
+    const list =
+      item.kind === 'AppliedType' ? SyntaxTree.directNode(item, 'TypeArgumentList') : undefined
+    const arguments_ = (list?.children.filter(isDeclaredTypeNode) ?? []).map((argument) =>
+      analyzeDeclaredType(source, argument, typeParameters, true),
+    )
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'ExactRepresentation',
+        item: Object.freeze({
+          _tag: 'TypePath',
+          spelling: segments.map((segment) => segment.spelling).join('.'),
+          segments: Object.freeze(segments),
+          syntax: pathSyntax,
+        }),
+        arguments: Object.freeze(arguments_.map((argument) => argument.fact)),
+        spelling: `typeof(${segments.map((segment) => segment.spelling).join('.')})`,
+        token: keyword,
+        syntax,
+      }),
+      diagnostics: Object.freeze(arguments_.flatMap((argument) => argument.diagnostics)),
     })
   }
   if (syntax.kind === 'AppliedType') {
@@ -2378,12 +2435,98 @@ export const collect = (closure: ModuleClosure.Facts): Index => {
   })
 }
 
+/**
+ * Resolves one `typeof` item to the exact representation of a named callable declaration.
+ *
+ * The item must resolve to exactly one callable declaration whose generic parameters are all
+ * supplied, because an exact representation names one construction, not a family. The resulting
+ * identity is built from the declaration's canonical module and name plus its canonical argument
+ * keys, so it never depends on spelling, span, or source path.
+ */
+const resolveExactRepresentation = (
+  module: string,
+  fact: Extract<DeclaredTypeFact, { readonly _tag: 'ExactRepresentation' }>,
+  resolver: TypeResolver,
+  modules: ReadonlyArray<ModuleHeaders>,
+): TypeResolution => {
+  const arguments_ = fact.arguments.map((argument) =>
+    resolveDeclaredType(module, argument, resolver, modules),
+  )
+  const argumentDiagnostics = arguments_.flatMap((argument) => argument.diagnostics)
+  const reject = (detail: Diagnostic.InvalidExactRepresentationDetail): TypeResolution => {
+    const diagnostic = Diagnostic.invalidExactRepresentationItem(
+      fact.item.spelling,
+      detail,
+      fact.token.span,
+    )
+    return Object.freeze({
+      fact: Object.freeze({ ...fact, cause: Diagnostic.identity(diagnostic) }),
+      diagnostics: Object.freeze([...argumentDiagnostics, diagnostic]),
+    })
+  }
+  if (fact.item.segments.length !== 1) return reject('Unresolved')
+  const owner = modules.find((candidate) => candidate.module === module)
+  const lookup = lookupDeclaration(owner?.declarations ?? [], fact.item.spelling)
+  if (lookup._tag === 'Ambiguous') return reject('Ambiguous')
+  if (lookup._tag !== 'Resolved') return reject('Unresolved')
+  const declaration = lookup.declaration
+  if (declaration.functionKind !== 'Ordinary') return reject('NotCallable')
+  if (declaration.typeParameters.length !== arguments_.length) return reject('PartiallySpecialized')
+  const supplied = arguments_.flatMap((argument) =>
+    argument.fact._tag === 'Resolved' ? [argument.fact.type] : [],
+  )
+  if (supplied.length !== arguments_.length) return reject('PartiallySpecialized')
+  const substitution = Type.substitution(
+    declaration.typeParameters.map((parameter) => parameter.type),
+    supplied,
+  )
+  if (substitution === undefined) return reject('PartiallySpecialized')
+  if (declaration.returnType._tag !== 'Resolved') return reject('Unresolved')
+  const declaredParameters = declaration.parameters.map((parameter) => parameter.declaredType)
+  if (declaredParameters.some((parameter) => parameter._tag !== 'Resolved'))
+    return reject('Unresolved')
+  const structural = Type.callable(
+    declaredParameters.flatMap((parameter) =>
+      parameter._tag === 'Resolved' ? [Type.substitute(parameter.type, substitution)] : [],
+    ),
+    Type.substitute(declaration.returnType.type, substitution),
+  )
+  if (Type.parameters(structural).length > 0) return reject('PartiallySpecialized')
+  const canonical =
+    declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : undefined
+  if (canonical === undefined) return reject('Unresolved')
+  const identityArguments = supplied.map((argument) => argument)
+  const identity = Type.callableIdentityArgument(
+    `declaration:${canonical.module}:${canonical.name}`,
+    Object.freeze({ _tag: 'Declaration', module: canonical.module, name: canonical.name }),
+    identityArguments,
+  )
+  const type = Type.represented(
+    structural,
+    structural,
+    Type.exactRepresentationArgument(identity, structural),
+  )
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Resolved',
+      type,
+      spelling: fact.spelling,
+      token: fact.token,
+      syntax: fact.syntax,
+      components: Object.freeze(arguments_.map((argument) => argument.fact)),
+    }),
+    diagnostics: Object.freeze(argumentDiagnostics),
+  })
+}
+
 const resolveDeclaredType = (
   module: string,
   fact: DeclaredTypeFact,
   resolver: TypeResolver,
   modules: ReadonlyArray<ModuleHeaders>,
 ): TypeResolution => {
+  if (fact._tag === 'ExactRepresentation')
+    return resolveExactRepresentation(module, fact, resolver, modules)
   if (fact._tag === 'Unresolved') {
     const resolved = resolver(module, fact.path)
     if (resolved.fact._tag !== 'Resolved' || !Type.isNominal(resolved.fact.type)) return resolved
@@ -3134,12 +3277,65 @@ const resolveRequirementRow = (
   })
 }
 
+/** Names every declaration whose exact representation one type carries, in encounter order. */
+const exactRepresentationTargets = (
+  self: Type.Type,
+): ReadonlyArray<{ readonly module: string; readonly name: string }> => {
+  const found: Array<{ readonly module: string; readonly name: string }> = []
+  const visit = (type: Type.Type): void => {
+    if (Type.isRepresented(type)) {
+      const argument = type.representation.argument
+      if (
+        Type.isExactRepresentationArgument(argument) &&
+        Type.isCallableIdentityArgument(argument.identity) &&
+        argument.identity.target._tag === 'Declaration'
+      )
+        found.push(
+          Object.freeze({
+            module: argument.identity.target.module,
+            name: argument.identity.target.name,
+          }),
+        )
+      visit(type.contract)
+      return
+    }
+    if (Type.isCallable(type)) {
+      for (const parameter of type.parameters) visit(parameter)
+      visit(type.result)
+      return
+    }
+    if (Type.isFixedArray(type) || Type.isSlice(type)) visit(type.element)
+    else if (Type.isReference(type)) visit(type.target)
+    else if (Type.isEffect(type)) visit(type.success)
+    else if (Type.isNominal(type))
+      for (const argument of type.arguments) if (Type.isTypeArgument(argument)) visit(argument)
+  }
+  visit(self)
+  return Object.freeze(found)
+}
+
 const attachExposure = (
   fact: DeclaredTypeFact,
   modules: ReadonlyArray<ModuleHeaders>,
   diagnostics: Array<Diagnostic.Diagnostic>,
 ): DeclaredTypeFact => {
   if (fact._tag !== 'Resolved') return fact
+  // An exact representation names a callable declaration rather than a nominal, so the private
+  // leak it can create is invisible to the nominal walk below and is reported on its own terms.
+  const leaked = exactRepresentationTargets(fact.type).find((target) => {
+    const owner = modules.find((candidate) => candidate.module === target.module)
+    const found = lookupDeclaration(owner?.declarations ?? [], target.name)
+    return found._tag === 'Resolved' && found.declaration.visibility === 'Private'
+  })
+  if (leaked !== undefined) {
+    const diagnostic = Diagnostic.invalidExactRepresentationItem(
+      leaked.name,
+      'PrivateExposure',
+      fact.token.span,
+    )
+    diagnostics.push(diagnostic)
+    return Object.freeze({ ...fact, exposureCause: Diagnostic.identity(diagnostic) })
+  }
   const nominal = Type.nominals(fact.type).find(
     (candidate) => memberByNominal(modules, candidate)?.visibility === 'Private',
   )

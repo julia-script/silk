@@ -414,6 +414,10 @@ const collectDeclaredType = (
       collectDeclaredType(requirement.capability, index, scope, pending)
     return
   }
+  if (fact._tag === 'ExactRepresentation') {
+    for (const argument of fact.arguments) collectDeclaredType(argument, index, scope, pending)
+    return
+  }
   if (fact._tag === 'Union')
     for (const member of fact.members) collectDeclaredType(member, index, scope, pending)
 }

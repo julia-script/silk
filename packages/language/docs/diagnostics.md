@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 106 |
+| `SEM` | Semantic | 107 |
 | `OWN` | Ownership | 12 |
 | `LAY` | Layout | 1 |
 
-There are 134 codes in total.
+There are 135 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -162,6 +162,7 @@ There are 134 codes in total.
 | `SEM0105` | Stable code for the first exact representation that diverges at a static value join. | `Cannot join <expected> with <actual>; consume each represented value inside its branch before joining` |
 | `SEM0106` | Stable code for a representation argument whose contract cannot satisfy its required bound. | `Representation <parameter> requires <required>, but the supplied bound <actual> is not admissible` |
 | `SEM0107` | Stable code for storing a represented Effect before its runtime layout is supported. | `Cannot construct <aggregate>: <site> retains the static identity of <effect>, but represented Effect storage has no supported runtime layout` |
+| `SEM0108` | Stable code for a `typeof` item that names no sufficiently visible fully specialized callable. | `Cannot name the exact representation of <item>: <exactRepresentationExplanationdetail>` |
 
 ## Ownership (`OWN`)
 

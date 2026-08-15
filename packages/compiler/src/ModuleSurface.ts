@@ -132,6 +132,12 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
         array(value.members.map(declaredType)),
         boolean(value.cause !== undefined),
       ])
+    case 'ExactRepresentation':
+      return record('ExactRepresentationType', [
+        typePath(value.item),
+        array(value.arguments.map(declaredType)),
+        boolean(value.cause !== undefined),
+      ])
     case 'Unavailable':
       return record('UnavailableType', [boolean(value.cause !== undefined)])
     default:

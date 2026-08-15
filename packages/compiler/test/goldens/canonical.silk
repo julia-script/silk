@@ -80,6 +80,10 @@ fn execute(problem: Token) -> i32 {
   return run pending
 }
 
+fn selected() -> typeof(helper) {
+  return helper
+}
+
 fn borrow(values: [i32; 2], output: [i32; 2]) -> i32 {
   let mut target = move output
   return scan(&values, &mut target)
