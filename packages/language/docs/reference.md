@@ -324,7 +324,7 @@ pub interface Mixer<T> {
 impl Mixer<i32> for i32 { mix: Intrinsic.i32WrappingAdd }
 impl Mixer<u8> for u8 { mix: Intrinsic.u8SaturatingAdd }
 
-pub fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.mix(left, right) }
+pub fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.mix(move left, move right) }
 ```
 
 One body, two specializations, two instructions: `blend<i32>` wraps and `blend<u8>` saturates,
