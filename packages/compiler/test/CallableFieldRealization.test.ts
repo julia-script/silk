@@ -11,13 +11,13 @@ import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
 
 /**
- * The runtime realization seam of nominal callable storage.
+ * The runtime realization seam of nominal executable storage.
  *
  * `RepresentationField` (issue #187) owns stable field identity, the retained representation
  * argument, and admissibility. These tests pin the enrichment this change adds on top: one static
- * target, its concrete arguments, the ordered capture environment, the receiver access an
- * invocation demands, capture loans, liveness, and the exactly-once cleanup plan — all reached
- * through one deterministic lookup rather than re-read from initializer syntax.
+ * target or Effect runner, its concrete arguments, the ordered capture environment, the receiver
+ * access an invocation demands, capture loans, rows, liveness, cleanup, and suspendability — all
+ * reached through one deterministic lookup rather than re-read from initializer syntax.
  */
 
 const ascii = (value: string): Uint8Array =>
@@ -40,6 +40,7 @@ const soleRealization = (
       ? [entry.support.realization]
       : [],
   )
+  assert.strictEqual(supported.length, 1)
   return supported.at(0) ?? unreachable('expected one supported callable field realization')
 }
 
@@ -52,6 +53,7 @@ const soleEffectRealization = (
       ? [entry.support.realization]
       : [],
   )
+  assert.strictEqual(supported.length, 1)
   return supported.at(0) ?? unreachable('expected one supported Effect field realization')
 }
 
@@ -192,6 +194,165 @@ pub fn main() -> i32 {
     assert.deepEqual(realization.rows.requirements, [])
     assert.deepEqual(realization.environment, [])
   }),
+)
+
+it.effect(
+  'selects same-site Effect runners by owner specialization with ordered concrete captures',
+  () =>
+    Effect.gen(function* () {
+      const module = 'effect-field/specializations'
+      const snapshot = yield* realized(
+        module,
+        `struct Token<T> { value: T }
+struct Deferred<F: once Effect<i32>> { operation: F }
+fn retain<T>(token: Token<T>, marker: T, condition: bool) -> i32 {
+  let deferred = Deferred { operation: effect {
+    if condition { return 0 }
+    let retainedToken = move token
+    let retainedMarker = move marker
+    return 1
+  } }
+  return 0
+}
+pub fn main() -> i32 {
+  return retain<i32>(Token<i32> { value: 1 }, 2, false) +
+    retain<bool>(Token<bool> { value: true }, false, false)
+}`,
+      )
+      const realizations = realizationsOf(snapshot).entries.flatMap((entry) =>
+        entry.support._tag === 'Supported' &&
+        CallableFieldRealization.isEffectRealization(entry.support.realization)
+          ? [entry.support.realization]
+          : [],
+      )
+
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        ['SEM0107', 'SEM0107'],
+      )
+      assert.strictEqual(realizations.length, 2)
+      assert.deepEqual(
+        realizations
+          .map((realization) =>
+            realization.runnerArguments.map(Type.encodeGenericArgument).join(','),
+          )
+          .sort(),
+        ['bool', 'i32'],
+      )
+      for (const realization of realizations) {
+        assert.deepEqual(
+          realization.environment.map((slot) => [slot.source, slot.sourceOrdinal]),
+          [
+            ['Parameter', 0],
+            ['Parameter', 1],
+            ['Parameter', 2],
+          ],
+        )
+      }
+    }),
+)
+
+it.effect('publishes nested Effect and callable identities for local binding captures', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'effect-field/nested-bindings',
+      `struct Deferred<F: once Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let nested = effect { return 1 }
+  let transform = i32.add(1)
+  let deferred = Deferred { operation: effect {
+    let base = run move nested
+    return transform(base)
+  } }
+  return 0
+}`,
+    )
+    const realization = soleEffectRealization(realizationsOf(snapshot))
+
+    assert.include(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      'SEM0107',
+    )
+    assert.deepEqual(
+      realization.environment.map((slot) => [slot.source, slot.sourceOrdinal]),
+      [
+        ['Binding', 0],
+        ['Binding', 1],
+      ],
+    )
+    const nestedEffect = realization.environment.at(0)
+    const nestedCallable = realization.environment.at(1)
+    assert.strictEqual(
+      snapshot.instances.effects.some(
+        (effect) => effect.identity === nestedEffect?.effectIdentity && effect.site.ordinal === 0,
+      ),
+      true,
+    )
+    const callableIdentity = nestedCallable?.callableIdentity
+    assert.strictEqual(
+      callableIdentity !== undefined &&
+        snapshot.instances.callables.some((callable) =>
+          CallableFieldRealization.matchesIdentity(callableIdentity, callable),
+        ),
+      true,
+    )
+  }),
+)
+
+it.effect(
+  'copies concrete runner arguments and both exact rows from the selected Effect fact',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* realized(
+        'effect-field/row-evidence',
+        `struct Deferred<F: Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let deferred = Deferred { operation: effect { return 1 } }
+  return 0
+}`,
+      )
+      const fields = RepresentationField.resolveFields(
+        snapshot.index,
+        Instances.representedNominals(snapshot.instances, snapshot.index),
+      )
+      const resolution = fields.resolutions.find(
+        (candidate) => candidate._tag === 'ResolvedRepresentationField',
+      )
+      const discovered = snapshot.instances.effects.at(0)
+      if (resolution?._tag !== 'ResolvedRepresentationField' || discovered === undefined)
+        return yield* Effect.die('expected one resolved Effect field and construction fact')
+      const failure = Type.nominal('effect-field/row-evidence', 'Problem')
+      const requirement = Object.freeze({
+        capability: Type.nominal('effect-field/row-evidence', 'Console'),
+        role: 'Audit',
+        access: 'Exclusive' as const,
+      })
+      const contract = Type.effect('i32', [failure], 'Take', [requirement])
+      const arguments_ = Object.freeze([
+        Type.nominal('effect-field/row-evidence', 'Marker'),
+        Type.failureRowArgument([failure]),
+        Type.requirementRowArgument([requirement]),
+      ])
+      const support = CallableFieldRealization.realizeField(
+        Object.freeze({
+          ...resolution,
+          argument: Type.exactRepresentationArgument(resolution.argument.identity, contract),
+          requiredBound: contract,
+        }),
+        [],
+        [Object.freeze({ ...discovered, typeArguments: arguments_, type: contract })],
+      )
+      if (support._tag !== 'Supported')
+        return yield* Effect.die(`expected supported Effect evidence, got ${support.reason._tag}`)
+      const realization = support.realization
+      if (!CallableFieldRealization.isEffectRealization(realization))
+        return yield* Effect.die('expected one Effect realization')
+
+      assert.deepEqual(realization.runnerArguments, arguments_)
+      assert.deepEqual(realization.rows.failures, [failure])
+      assert.deepEqual(realization.rows.requirements, [requirement])
+      assert.strictEqual(realization.access, 'Take')
+    }),
 )
 
 it.effect('keeps the realization keyed by the shared representation field identity', () =>

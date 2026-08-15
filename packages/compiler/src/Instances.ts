@@ -1840,10 +1840,20 @@ const concreteCallables = (
 const concreteEffects = (
   instances: ReadonlyArray<Instance>,
   suspendableEffects: ReadonlySet<string>,
+  results: ReadonlyMap<string, Elaboration.Result>,
+  index: DeclarationIndex.Index,
 ): ReadonlyArray<EffectInstance> => {
   const effects = new Map<string, EffectInstance>()
   for (const instance of instances) {
     const bindings = callableBindings(instance.function)
+    const context: EffectOriginContext = Object.freeze({
+      fn: instance.function,
+      owner: instance.key,
+      substitution: instance.substitution,
+      results,
+      index,
+      resolving: new Set<string>(),
+    })
     const blocks = callableExpressions(instance.function).flatMap((expression) =>
       expression._tag === 'EffectBlock' ? [expression] : [],
     )
@@ -1870,14 +1880,20 @@ const concreteEffects = (
         if (sourceOrdinal === undefined || sourceType === undefined) return []
         const specialized = Type.substitute(sourceType, instance.substitution)
         if (!Type.isConcrete(specialized)) return []
-        const capturedEffectIdentity =
-          source === 'Parameter' && Type.isEffect(specialized)
+        const capturedEffectIdentity = Type.isEffect(specialized)
+          ? source === 'Parameter'
             ? parameterEffectIdentity(instance.function, instance.key, sourceOrdinal)
-            : undefined
-        const capturedCallableIdentity =
-          source === 'Parameter' && Type.isCallable(specialized)
+            : initializer === undefined
+              ? undefined
+              : effectOriginOf(initializer, context)
+          : undefined
+        const capturedCallableIdentity = Type.isCallable(specialized)
+          ? source === 'Parameter'
             ? parameterCallableIdentity(instance.function, instance.key, sourceOrdinal)
-            : undefined
+            : initializer === undefined
+              ? undefined
+              : callableOriginOf(initializer, context)
+          : undefined
         return [
           Object.freeze({
             ordinal,
@@ -2479,7 +2495,7 @@ export const discover = (
     entry,
     instances,
     callables: Object.freeze([...recordedCallables.values()]),
-    effects: concreteEffects(instances, new Set(suspendableEffectIdentities)),
+    effects: concreteEffects(instances, new Set(suspendableEffectIdentities), results, index),
     calls: Object.freeze([...recordedCalls.values()]),
     intrinsics: reachableIntrinsics(instances, index),
     suspendableExecutions: Object.freeze(

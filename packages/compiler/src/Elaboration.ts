@@ -675,6 +675,7 @@ export interface EffectRequirementBindingFact {
 export interface EffectExpressionFact {
   readonly _tag: 'EffectBlock'
   readonly site: Hir.EffectSiteId
+  readonly representationOwner?: Type.ExecutableSpecializationOwner
   readonly statements: ReadonlyArray<StatementFact>
   readonly captures: ReadonlyArray<EffectCaptureFact>
   readonly bindings: ReadonlyArray<BindingDeclarationFact>
@@ -2738,7 +2739,10 @@ export const representationOfExpression = (
     if (!Type.isEffect(contract)) return undefined
     const site = expression.site
     return Type.exactRepresentationArgument(
-      Type.effectIdentityArgument(Hir.effectRepresentationIdentity(site)),
+      Type.effectIdentityArgument(
+        Hir.effectRepresentationIdentity(site),
+        expression.representationOwner,
+      ),
       contract,
     )
   }
@@ -4972,6 +4976,20 @@ const executableSites = (root: SyntaxTree.Node): ReadonlyMap<SyntaxTree.Node, nu
   return sites
 }
 
+const executableSpecializationOwner = (
+  resolution: ResolutionContext,
+): Type.ExecutableSpecializationOwner | undefined => {
+  const owner = resolution.executableOwner
+  if (owner === undefined) return undefined
+  const declaration = DeclarationIndex.byCanonical(resolution.index, owner)
+  return declaration === undefined
+    ? undefined
+    : Object.freeze({
+        declaration: Object.freeze({ module: owner.module, name: owner.name }),
+        typeArguments: Object.freeze(declaration.typeParameters.map((parameter) => parameter.type)),
+      })
+}
+
 const finishCallableSection = (
   node: SyntaxTree.Node,
   reference: Extract<CallReferenceFact, { readonly _tag: 'Resolved' | 'ResolvedBuiltin' }>,
@@ -4997,19 +5015,7 @@ const finishCallableSection = (
     contract.valid && callable !== undefined
       ? availableExpressionType(callable)
       : unavailableExpressionType
-  const environmentOwner = (() => {
-    const owner = resolution.executableOwner
-    if (owner === undefined) return undefined
-    const declaration = DeclarationIndex.byCanonical(resolution.index, owner)
-    return declaration === undefined
-      ? undefined
-      : Object.freeze({
-          declaration: Object.freeze({ module: owner.module, name: owner.name }),
-          typeArguments: Object.freeze(
-            declaration.typeParameters.map((parameter) => parameter.type),
-          ),
-        })
-  })()
+  const environmentOwner = executableSpecializationOwner(resolution)
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'CallableSection',
@@ -6640,12 +6646,14 @@ function analyzeExpression(
   borrowAllowed = false,
 ): ExpressionResult | undefined {
   if (node.kind === 'EffectExpression') {
+    const representationOwner = executableSpecializationOwner(resolution)
     const block = SyntaxTree.directNode(node, 'Block')
     if (block === undefined)
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'EffectBlock',
           site: executableSite('EffectSiteId', resolution, node),
+          ...(representationOwner === undefined ? {} : { representationOwner }),
           statements: Object.freeze([]),
           captures: Object.freeze([]),
           bindings: Object.freeze([]),
@@ -6704,6 +6712,7 @@ function analyzeExpression(
       fact: Object.freeze({
         _tag: 'EffectBlock',
         site: executableSite('EffectSiteId', resolution, node),
+        ...(representationOwner === undefined ? {} : { representationOwner }),
         statements,
         captures,
         bindings: Object.freeze(nested.bindings),

@@ -40,7 +40,10 @@ Instance discovery publishes one `EffectInstance` for each concrete source Effec
 contains the canonical runner identity and target, the enclosing concrete arguments, ordered typed
 captures, and suspendability. HIR owns the single projection from an Effect site to the semantic
 origin retained by exact representations; realization and lowering delegate to that projection
-rather than rebuilding its encoding.
+rather than rebuilding its encoding. The retained origin also carries the enclosing executable's
+specialization, so two concrete instantiations of the same generic source site select different
+runner facts. Captured local Effect and callable bindings publish their already-resolved nested
+identities with the ordered environment; later phases never recover them from binding initializers.
 
 `CallableFieldRealization` remains the one resolved-field index and now carries a tagged union. Its
 Effect tag enriches the existing `RepresentationField` identity with the discovered runner, exact

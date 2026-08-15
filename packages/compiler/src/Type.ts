@@ -97,10 +97,18 @@ export interface RequirementRowArgument {
   readonly parameters: ReadonlyArray<Parameter>
 }
 
+/** The complete enclosing executable specialization retained by a source construction identity. */
+export interface ExecutableSpecializationOwner {
+  readonly declaration: { readonly module: string; readonly name: string }
+  readonly typeArguments: ReadonlyArray<GenericArgument>
+}
+
 /** One compiler-only hidden Effect construction identity used for monomorphic specialization. */
 export interface EffectIdentityArgument {
   readonly _tag: 'EffectIdentityArgument'
   readonly identity: string
+  /** Present for a source site whose runner depends on its enclosing generic specialization. */
+  readonly owner?: ExecutableSpecializationOwner
 }
 
 /** The path- and span-independent construction site of one callable capture environment. */
@@ -120,10 +128,7 @@ export type CallableEnvironmentSite =
 export interface CallableEnvironmentIdentity {
   readonly _tag: 'CallableEnvironmentIdentity'
   readonly site: CallableEnvironmentSite
-  readonly owner: {
-    readonly declaration: { readonly module: string; readonly name: string }
-    readonly typeArguments: ReadonlyArray<GenericArgument>
-  }
+  readonly owner: ExecutableSpecializationOwner
 }
 
 /** One compiler-only hidden callable identity used for monomorphic higher-order lowering. */
@@ -577,8 +582,22 @@ export const requirementRowArgument = (
     parameters: effect('never', [], 'Shared', requirements, [], parameters).requirementParameters,
   })
 
-export const effectIdentityArgument = (identity: string): EffectIdentityArgument =>
-  Object.freeze({ _tag: 'EffectIdentityArgument', identity })
+export const effectIdentityArgument = (
+  identity: string,
+  owner?: ExecutableSpecializationOwner,
+): EffectIdentityArgument =>
+  Object.freeze({
+    _tag: 'EffectIdentityArgument',
+    identity,
+    ...(owner === undefined
+      ? {}
+      : {
+          owner: Object.freeze({
+            declaration: Object.freeze({ ...owner.declaration }),
+            typeArguments: Object.freeze(Array.from(owner.typeArguments)),
+          }),
+        }),
+  })
 
 /** Constructs the stable structural site of one callable capture environment. */
 export const callableEnvironmentSite = (
@@ -923,7 +942,9 @@ export const genericArgumentKey = (self: GenericArgument): string =>
         : isExactRepresentationArgument(self)
           ? `exact-representation:${genericArgumentKey(self.identity)}:${key(self.contract)}`
           : isEffectIdentityArgument(self)
-            ? `effect-identity:${self.identity}`
+            ? self.owner === undefined
+              ? `effect-identity:${self.identity}`
+              : `effect-identity:${self.identity}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>`
             : isCallableIdentityArgument(self)
               ? callableIdentityKey(self)
               : isFailureRowArgument(self)
@@ -1748,7 +1769,7 @@ export const isConcreteGenericArgument = (self: GenericArgument): boolean =>
         : isExactRepresentationArgument(self)
           ? isConcrete(self.contract) && isConcreteGenericArgument(self.identity)
           : isEffectIdentityArgument(self)
-            ? true
+            ? (self.owner?.typeArguments.every(isConcreteGenericArgument) ?? true)
             : isCallableIdentityArgument(self)
               ? self.typeArguments.every(isConcreteGenericArgument) &&
                 (self.environment?.owner.typeArguments.every(isConcreteGenericArgument) ?? true)
@@ -1955,15 +1976,23 @@ export const substituteGenericArgument = (
           ? (() => {
               const contract = substitute(self.contract, substitution)
               if (!isCallable(contract) && !isEffect(contract)) return self
-              const identity = isCallableIdentityArgument(self.identity)
-                ? substituteGenericArgument(self.identity, substitution)
-                : self.identity
+              const identity = substituteGenericArgument(self.identity, substitution)
               return isCallableIdentityArgument(identity) || isEffectIdentityArgument(identity)
                 ? exactRepresentationArgument(identity, contract)
                 : self
             })()
           : isEffectIdentityArgument(self)
-            ? self
+            ? effectIdentityArgument(
+                self.identity,
+                self.owner === undefined
+                  ? undefined
+                  : {
+                      declaration: self.owner.declaration,
+                      typeArguments: self.owner.typeArguments.map((argument) =>
+                        substituteGenericArgument(argument, substitution),
+                      ),
+                    },
+              )
             : isCallableIdentityArgument(self)
               ? callableIdentityArgument(
                   self.identity,

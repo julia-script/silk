@@ -163,7 +163,7 @@ export type UnsupportedReason =
       readonly type: Type.Type
     }
 
-/** The complete support proof one storage fence consults before admitting a stored callable. */
+/** The complete support proof one storage fence consults before admitting a stored executable. */
 export type Support =
   | { readonly _tag: 'Supported'; readonly realization: Realization }
   | {
@@ -180,7 +180,7 @@ export interface Entry {
   readonly support: Support
 }
 
-/** Complete-instance lookup table for realized and explicitly unsupported callable fields. */
+/** Complete-instance lookup table for realized and explicitly unsupported executable fields. */
 export interface Index {
   readonly _tag: 'CallableFieldRealizationIndex'
   readonly entries: ReadonlyArray<Entry>
@@ -445,9 +445,28 @@ const effectShape = (effect: Instances.EffectInstance): string =>
     effect.suspendable ? 'suspendable' : 'synchronous',
     ...effect.captures.map(
       (capture) =>
-        `${capture.ordinal}:${capture.source}:${capture.sourceOrdinal}:${capture.access}:${Type.key(capture.type)}`,
+        `${capture.ordinal}:${capture.source}:${capture.sourceOrdinal}:${capture.access}:${Type.key(capture.type)}:${capture.effectIdentity ?? ''}:${capture.callableIdentity === undefined ? '' : Type.genericArgumentKey(capture.callableIdentity)}`,
     ),
   ].join(' ')
+
+/** Matches one retained source origin to exactly one enclosing concrete specialization. */
+const matchesEffectIdentity = (
+  identity: Type.EffectIdentityArgument,
+  candidate: Instances.EffectInstance,
+): boolean => {
+  if (candidate.identity === identity.identity) return true
+  if (candidate.representationIdentity !== identity.identity) return false
+  const owner = identity.owner
+  if (owner === undefined) return true
+  return (
+    candidate.owner.declaration.module === owner.declaration.module &&
+    candidate.owner.declaration.name === owner.declaration.name &&
+    sameArguments(
+      owner.typeArguments,
+      candidate.owner.typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument)),
+    )
+  )
+}
 
 const realizeEffectField = (
   resolution: ResolvedField,
@@ -472,10 +491,7 @@ const realizeEffectField = (
       resolution.instance,
       Object.freeze({ _tag: 'OpenEffectContract', identity: identity.identity }),
     )
-  const candidates = effects.filter(
-    (effect) =>
-      effect.identity === identity.identity || effect.representationIdentity === identity.identity,
-  )
+  const candidates = effects.filter((effect) => matchesEffectIdentity(identity, effect))
   const selected = candidates.at(0)
   if (selected === undefined)
     return unsupported(
@@ -546,7 +562,7 @@ export const realizeField = (
     : realizeEffectField(resolution, identity, effects)
 }
 
-/** Realizes every callable field of one resolved field index in deterministic key order. */
+/** Realizes every executable field of one resolved field index in deterministic key order. */
 export const realize = (
   fields: RepresentationField.Index,
   callables: ReadonlyArray<Instances.CallableInstance>,
