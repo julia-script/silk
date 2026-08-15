@@ -35,6 +35,7 @@ const index = (id: string, source: string) =>
 it.effect('parses and formats callable and Effect representation parameter bounds', () =>
   Effect.gen(function* () {
     const source = `pub struct Mapper<A,B,F:fn(A)->B>{transform:F}
+pub struct Shared<A,F:Effect<A>>{operation:F}
 pub struct Deferred<A,!E,?R,F:once Effect<A!E?R>>{operation:F}
 pub struct Exclusive<A,F:mut Effect<A>>{operation:F}`
     const syntax = parse('representation-syntax/positive', source)
@@ -43,7 +44,7 @@ pub struct Exclusive<A,F:mut Effect<A>>{operation:F}`
         SyntaxTree.isNode(element) && element.kind === 'TypeParameter',
     )
 
-    assert.strictEqual(parameters.length, 9)
+    assert.strictEqual(parameters.length, 11)
     assert.strictEqual(
       parameters.filter(
         (parameter) => SyntaxTree.directNode(parameter, 'CallableType') !== undefined,
@@ -54,7 +55,7 @@ pub struct Exclusive<A,F:mut Effect<A>>{operation:F}`
       parameters.filter(
         (parameter) => SyntaxTree.directNode(parameter, 'AppliedType') !== undefined,
       ).length,
-      2,
+      3,
     )
     assert.deepEqual(syntax.parserDiagnostics, [])
 
@@ -63,6 +64,10 @@ pub struct Exclusive<A,F:mut Effect<A>>{operation:F}`
       decoder.decode(FormattedDocument.toUint8Array(formatted)),
       `pub struct Mapper<A, B, F: fn(A) -> B> {
   transform: F
+}
+
+pub struct Shared<A, F: Effect<A>> {
+  operation: F
 }
 
 pub struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> {

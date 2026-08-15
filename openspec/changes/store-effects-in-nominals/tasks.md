@@ -1,8 +1,8 @@
 ## 1. Access Contracts and Prerequisites
 
-- [ ] 1.1 Confirm representation parameters and callable field representation infrastructure are complete.
-- [ ] 1.2 Add shared `Effect`, exclusive `mut Effect`, and consuming `once Effect` bound syntax, formatting, and kind checking.
-- [ ] 1.3 Add admissibility and negative aggregate-access fixtures for every run mode.
+- [x] 1.1 Confirm representation parameters and callable field representation infrastructure are complete.
+- [x] 1.2 Add shared `Effect`, exclusive `mut Effect`, and consuming `once Effect` bound syntax, formatting, and kind checking.
+- [x] 1.3 Add admissibility and negative aggregate-access fixtures for every run mode.
 
 ## 2. Stored-Effect Vertical Slice
 
