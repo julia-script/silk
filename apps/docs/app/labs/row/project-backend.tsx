@@ -363,6 +363,8 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
       return `${typeText(cleanup.type)} captures ${cleanup.slots
         .map(({ ordinal, cleanup: slot }) => `#${ordinal}:${cleanupText(slot)}`)
         .join(' → ')}`
+    case 'RepresentedCallableCleanup':
+      return `${typeText(cleanup.type)} stored ${typeText(cleanup.contract)} · lanes resolved at the complete instance`
   }
 }
 
@@ -625,6 +627,8 @@ export const layoutRows = (
         detail: `${entry.size} bytes · align ${entry.alignment} · ${
           entry.representation._tag === 'Aggregate'
             ? 'aggregate'
+            : entry.representation._tag === 'CallableEnvironment'
+              ? `stored callable · ${entry.representation.fields.length} capture${entry.representation.fields.length === 1 ? '' : 's'}`
             : entry.representation._tag === 'Repeated'
               ? `${entry.representation.length} × ${typeText(entry.representation.element)} · stride ${entry.representation.stride}`
               : entry.representation._tag === 'Slice'

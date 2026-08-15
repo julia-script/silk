@@ -1,3 +1,4 @@
+import * as CallableFieldRealization from './CallableFieldRealization.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -167,9 +168,11 @@ class FunctionLowering {
   }
 
   type(type: Type.Type): Mir.Type | undefined {
+    const specialized = Type.substitute(type, this.substitution)
     return (
+      storedCallableValueType(this.layout, specialized) ??
       representedValueType(this.layout, this.opaqueRealizations, type, this.substitution) ??
-      mirType(type, this.substitution)
+      mirType(specialized)
     )
   }
 
@@ -435,26 +438,7 @@ const callableValueByIdentity = (
   identity: Type.CallableIdentityArgument,
   type: Type.Callable,
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
-  const target: Hir.CallableTarget =
-    identity.target._tag === 'Declaration'
-      ? Object.freeze({
-          _tag: 'DeclarationCallableTarget',
-          declaration: Object.freeze({
-            _tag: 'CanonicalDeclarationId',
-            module: identity.target.module,
-            name: identity.target.name,
-          }),
-        })
-      : Object.freeze({
-          _tag: 'BuiltinCallableTarget',
-          actor: identity.target.actor,
-          operation: identity.target.operation as Hir.BuiltinOperation,
-          intrinsic: Object.freeze({
-            _tag: 'IntrinsicOperationId',
-            actor: identity.target.intrinsic.actor,
-            name: identity.target.intrinsic.name,
-          }),
-        })
+  const target = Hir.callableTargetFromIdentity(identity.target)
   const environment =
     identity.environment === undefined
       ? undefined
@@ -466,7 +450,7 @@ const callableValueByIdentity = (
             { readonly _tag: 'CallableEnvironment' }
           > =>
             candidate._tag === 'CallableEnvironment' &&
-            Instances.callableIdentity(candidate.callable) === identity.environment,
+            CallableFieldRealization.matchesIdentity(identity, candidate.callable),
         )
   if (identity.environment !== undefined && environment === undefined) return undefined
   const specializedType =
@@ -543,7 +527,7 @@ const representedValueType = (
           definition.construction.arguments,
         ) &&
         definition.construction.site ===
-          `callable:${Hir.executableSiteKey(candidate.callable.site)}`,
+          Type.callableEnvironmentKey(Instances.callableEnvironmentIdentity(candidate.callable)),
     )
     return environment === undefined
       ? undefined
@@ -553,7 +537,7 @@ const representedValueType = (
             identity.identity,
             identity.target,
             identity.typeArguments,
-            Instances.callableIdentity(environment.callable),
+            Instances.callableEnvironmentIdentity(environment.callable),
           ),
           specialized.contract,
         )
@@ -584,6 +568,42 @@ const representedValueType = (
         })
   }
   return undefined
+}
+
+const storedCallableValueType = (
+  layout: Layout.Plan,
+  type: Type.Type,
+): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
+  if (!Type.isRepresented(type) || !Type.isCallable(type.contract)) return undefined
+  const representation = Layout.entry(layout, type)?.representation
+  if (representation?._tag !== 'CallableEnvironment') return undefined
+  const realization = representation.realization
+  const environment =
+    realization.site === undefined
+      ? undefined
+      : layout.callableEnvironments.find(
+          (
+            candidate,
+          ): candidate is Extract<
+            Layout.CallableEnvironment,
+            { readonly _tag: 'CallableEnvironment' }
+          > =>
+            candidate._tag === 'CallableEnvironment' &&
+            CallableFieldRealization.matchesCallable(realization, candidate.callable),
+        )
+  if (realization.site !== undefined && environment === undefined) return undefined
+  return Object.freeze({
+    _tag: 'CallableValue',
+    type: realization.contract,
+    target: Hir.callableTargetFromIdentity(realization.target),
+    ...(realization.site === undefined ? {} : { site: realization.site }),
+    ...(environment === undefined ? {} : { environment }),
+    storage: Object.freeze({
+      _tag: 'StoredCallableField',
+      type,
+      realization,
+    }),
+  })
 }
 
 const requirementsFor = (
@@ -869,6 +889,9 @@ const lowerPlace = (
       root: place.root,
       selectors: place.selectors,
       type,
+      ...(type._tag === 'CallableValue' && type.storage !== undefined && type.type.mode === 'Take'
+        ? { consume: true as const }
+        : {}),
       provenance: Object.freeze({ span: expression.span, generated: false }),
     }),
   )
@@ -2582,6 +2605,7 @@ function lowerExpressionInner(
     case 'Construct': {
       const type = fn.type(expression.type)
       if (type?._tag !== 'Nominal') return undefined
+      const representation = Layout.entry(fn.layout, type.type)?.representation
       const canonicalFields = new Map(
         expression.fields.map((field) => [field.field.ordinal, field] as const),
       )
@@ -2595,7 +2619,28 @@ function lowerExpressionInner(
       }
       const fields = expression.fields.flatMap((field) => {
         const value = loweredFields.get(field.field.ordinal)
-        return value === undefined ? [] : [Object.freeze({ field: field.field, value })]
+        const declared =
+          representation?._tag === 'Aggregate'
+            ? representation.fields.find(
+                (candidate) =>
+                  candidate.id.ordinal === field.field.ordinal &&
+                  candidate.id.struct.sourceId === field.field.struct.sourceId &&
+                  candidate.id.struct.ordinal === field.field.struct.ordinal,
+              )
+            : undefined
+        const stored =
+          declared === undefined
+            ? undefined
+            : storedCallableValueType(fn.layout, declared.type)?.storage
+        return value === undefined
+          ? []
+          : [
+              Object.freeze({
+                field: field.field,
+                value,
+                ...(stored === undefined ? {} : { stored }),
+              }),
+            ]
       })
       if (fields.length !== expression.fields.length) return undefined
       const destination = fn.alloc(type)
@@ -3548,7 +3593,15 @@ const concreteCleanup = (
   fn: FunctionLowering,
   type: Type.Type,
   seen = new Set<string>(),
-): Ownership.CleanupPlan => Ownership.cleanupPlan(fn.index, type, seen)
+): Ownership.CleanupPlan => {
+  const specialized = Type.substitute(type, fn.substitution)
+  if (Type.isRepresented(specialized)) {
+    const representation = Layout.entry(fn.layout, specialized)?.representation
+    if (representation?._tag === 'CallableEnvironment')
+      return Ownership.realizedCallableCleanup(fn.index, representation.realization)
+  }
+  return Ownership.cleanupPlan(fn.index, specialized, seen)
+}
 
 const specializedCleanup = (
   fn: FunctionLowering,
@@ -3623,8 +3676,31 @@ const cleanupForLocal = (
     }
     return cleanupForEnvironment(localType, new Set())
   }
-  if (localType._tag === 'CallableValue') return callableLocalCleanup(fn, localType)
-  return specialized
+  if (localType._tag !== 'CallableValue') {
+    return specialized
+  }
+  if (localType.storage === undefined) return callableLocalCleanup(fn, localType)
+  if (specialized._tag !== 'CallableCleanup') return specialized
+  const fields = localType.environment?.fields ?? []
+  return Object.freeze({
+    _tag: 'CallableCleanup',
+    type: localType.type,
+    environment:
+      localType.environment === undefined
+        ? specialized.environment
+        : Object.freeze({
+            _tag: 'CallableEnvironmentIdentity',
+            identity: Instances.callableEnvironmentIdentity(localType.environment.callable),
+          }),
+    slots: Object.freeze(
+      specialized.slots.flatMap((slot) => {
+        const field = fields.find((candidate) => candidate.ordinal === slot.ordinal)
+        return field === undefined
+          ? []
+          : [Object.freeze({ ordinal: slot.ordinal, cleanup: concreteCleanup(fn, field.type) })]
+      }),
+    ),
+  })
 }
 
 /**
@@ -3677,7 +3753,10 @@ const callableLocalCleanup = (
   return Object.freeze({
     _tag: 'CallableCleanup',
     type: localType.type,
-    site: localType.site,
+    environment: Object.freeze({
+      _tag: 'CallableEnvironmentIdentity',
+      identity: Instances.callableEnvironmentIdentity(environment.callable),
+    }),
     slots: Object.freeze(
       [...environment.fields]
         .reverse()
@@ -4612,6 +4691,19 @@ const lowerInstance = (
             return effectValue === undefined ? [] : [effectValue]
           }
           const specialized = Type.substitute(type, instance.substitution)
+          if (
+            Type.isRepresented(specialized) &&
+            Type.isCallable(specialized.contract) &&
+            Type.isExactRepresentationArgument(specialized.representation.argument) &&
+            Type.isCallableIdentityArgument(specialized.representation.argument.identity)
+          ) {
+            const callable = callableValueByIdentity(
+              layout,
+              specialized.representation.argument.identity,
+              specialized.contract,
+            )
+            return callable === undefined ? [] : [callable]
+          }
           if (Type.isCallable(specialized)) {
             const identity = Instances.parameterCallableIdentity(fn, instance.key, ordinal)
             const callable =

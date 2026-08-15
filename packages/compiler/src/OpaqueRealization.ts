@@ -270,7 +270,9 @@ const argumentsOf = (argument: Type.RepresentationArgument): ReadonlyArray<Type.
 const constructionSite = (argument: Type.RepresentationArgument): string | undefined => {
   if (argument._tag !== 'ExactRepresentationArgument') return undefined
   return Type.isCallableIdentityArgument(argument.identity)
-    ? argument.identity.environment
+    ? argument.identity.environment === undefined
+      ? undefined
+      : Type.callableEnvironmentKey(argument.identity.environment)
     : argument.identity.identity
 }
 
@@ -379,6 +381,7 @@ const specializeDefinition = (
       Type.substituteGenericArgument(argument, substitution),
     ),
   )
+  const site = constructionSite(realization)
   const access = accessOf(realization)
   const cleanup = captures.some((capture) => capture.access === 'Take') ? 'Required' : 'Trivial'
   return Object.freeze({
@@ -386,8 +389,10 @@ const specializeDefinition = (
     instance,
     realization,
     construction: Object.freeze({
-      ...found.construction,
+      _tag: 'OpaqueConstruction',
+      producer: found.construction.producer,
       arguments: constructionArguments,
+      ...(site === undefined ? {} : { site }),
     }),
     target: targetOf(realization),
     arguments: argumentsOf(realization),

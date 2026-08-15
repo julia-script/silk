@@ -1147,6 +1147,11 @@ function* executeFunction(
           ? undefined
           : yield* releaseThroughPlan(activeCase.cleanup, owner.payload, provenance, localOrdinal)
       }
+      case 'RepresentedCallableCleanup':
+        // Lowering resolves this obligation against the shared realization before MIR exists, so
+        // reaching it here would mean an aggregate is about to skip the owned captures of the
+        // callable it stores. Fail loudly rather than release nothing.
+        throw new RangeError('Stored callable cleanup reached evaluation unresolved')
     }
   }
 
@@ -1654,6 +1659,10 @@ function* executeFunction(
     }
     if (cleanup._tag === 'RawBufferCleanup') return Object.freeze([cleanup.type])
     if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
+    // An unresolved stored-callable obligation never reaches evaluation: `specializeCleanup`
+    // resolves it to the realization's `CallableCleanup` before lowering, and `SEM0103` fences
+    // every path that has no realization.
+    if (cleanup._tag === 'RepresentedCallableCleanup') return Object.freeze([])
     if (owner._tag !== 'AggregateValue') return Object.freeze([])
     return Object.freeze(
       cleanup.fields.flatMap((field) => {

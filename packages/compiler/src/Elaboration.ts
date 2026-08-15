@@ -622,6 +622,7 @@ export interface CallableSectionExpressionFact {
   readonly captures: ReadonlyArray<CallableCaptureFact>
   readonly retainedDependencies: ReadonlyArray<number>
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  readonly environmentOwner?: Type.CallableEnvironmentIdentity['owner']
   readonly substitution: Type.Substitution
   readonly mode: Type.CallableMode
   readonly type: ExpressionTypeFact
@@ -2687,15 +2688,14 @@ const exactCallableRepresentation = (
   reference: CallReferenceFact,
   contract: Type.Callable,
   typeArguments: ReadonlyArray<Type.GenericArgument> = Object.freeze([]),
-  environment?: string,
+  environment?: Type.CallableEnvironmentIdentity,
 ): Type.ExactRepresentationArgument | undefined => {
   const target = callableRepresentationTarget(reference)
   if (target === undefined) return undefined
   const identity =
-    environment ??
-    (target._tag === 'Declaration'
+    target._tag === 'Declaration'
       ? `declaration:${target.module}:${target.name}`
-      : `builtin:${target.actor}:${target.operation}`)
+      : `builtin:${target.actor}:${target.operation}`
   return Type.exactRepresentationArgument(
     Type.callableIdentityArgument(identity, target, typeArguments, environment),
     contract,
@@ -2720,8 +2720,11 @@ export const representationOfExpression = (
   if (expression._tag === 'CallableSection' && expression.type._tag === 'Available') {
     const contract = expression.type.type
     if (!Type.isCallable(contract)) return undefined
-    const site = expression.site
-    const environment = `callable:${Hir.executableSiteKey(site)}`
+    if (expression.environmentOwner === undefined) return undefined
+    const environment = Hir.callableEnvironmentIdentity(
+      expression.site,
+      expression.environmentOwner,
+    )
     return exactCallableRepresentation(
       expression.reference,
       contract,
@@ -4973,6 +4976,19 @@ const finishCallableSection = (
     contract.valid && callable !== undefined
       ? availableExpressionType(callable)
       : unavailableExpressionType
+  const environmentOwner = (() => {
+    const owner = resolution.executableOwner
+    if (owner === undefined) return undefined
+    const declaration = DeclarationIndex.byCanonical(resolution.index, owner)
+    return declaration === undefined
+      ? undefined
+      : Object.freeze({
+          declaration: Object.freeze({ module: owner.module, name: owner.name }),
+          typeArguments: Object.freeze(
+            declaration.typeParameters.map((parameter) => parameter.type),
+          ),
+        })
+  })()
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'CallableSection',
@@ -4989,6 +5005,7 @@ const finishCallableSection = (
         ),
       ),
       typeArguments: contract.typeArguments,
+      ...(environmentOwner === undefined ? {} : { environmentOwner }),
       substitution: contract.substitution,
       mode,
       type,
