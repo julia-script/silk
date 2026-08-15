@@ -66,6 +66,10 @@
       "types": "./dist/ProjectAnalysis.d.ts",
       "import": "./dist/ProjectAnalysis.js"
     },
+    "./RepresentationField": {
+      "types": "./dist/RepresentationField.d.ts",
+      "import": "./dist/RepresentationField.js"
+    },
     "./NativeToolchain": {
       "types": "./dist/NativeToolchain.d.ts",
       "import": "./dist/NativeToolchain.js"

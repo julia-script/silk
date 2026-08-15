@@ -492,10 +492,23 @@ it('retains effect blocks as lazy statement regions with canonical captures', ()
   if (binding?._tag !== 'Bind' || binding.initializer._tag !== 'EffectBlock') return
   assert.strictEqual(binding.initializer.type.access, 'Exclusive')
   assert.deepEqual(
+    binding.initializer.site.owner === undefined
+      ? undefined
+      : Hir.effectRunnerId(binding.initializer.site.owner, binding.initializer.site),
+    {
+      _tag: 'CanonicalDeclarationId',
+      module: 'hir://effect-block.silk',
+      name: 'main$effect$0',
+    },
+  )
+  assert.deepEqual(
     binding.initializer.captures.map((capture) => [capture.binding?.ordinal, capture.access]),
     [[0, 'Exclusive']],
   )
-  assert.include(Hir.encode(result.hir), 'effect-block site=fn0@')
+  assert.include(
+    Hir.encode(result.hir),
+    'effect-block site=effect:declaration:hir://effect-block.silk:main:site:',
+  )
   assert.include(Hir.encode(result.hir), 'access=exclusive')
 })
 

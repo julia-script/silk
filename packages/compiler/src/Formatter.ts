@@ -604,8 +604,26 @@ const printNode = (
         tokenOf(node, 'Greater'),
         prefix,
       )
-    case 'TypeParameter':
-      return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
+    case 'TypeParameter': {
+      const marker = directTokens(node).find(
+        (token) => token.kind === 'Bang' || token.kind === 'Question',
+      )
+      const colon = directTokens(node).find((token) => token.kind === 'Colon')
+      const bound = directNodes(node).at(0)
+      return FormatDocument.concat(
+        ...(marker === undefined ? [] : [printToken(context, marker, prefix, preserveBlank)]),
+        printToken(
+          context,
+          tokenOf(node, 'Identifier'),
+          marker === undefined ? prefix : FormatDocument.empty,
+          preserveBlank,
+        ),
+        ...(colon === undefined ? [] : [printToken(context, colon)]),
+        ...(bound === undefined
+          ? []
+          : [printNode(context, bound, FormatDocument.text(' '), preserveBlank)]),
+      )
+    }
     case 'AppliedType': {
       const nodes = directNodes(node)
       const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')

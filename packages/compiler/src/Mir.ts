@@ -1,6 +1,6 @@
 import * as Option from 'effect/Option'
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import type * as Hir from './Hir.js'
+import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
@@ -4220,10 +4220,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             (dropped?._tag === 'CallableValue' &&
               dropped.environment !== undefined &&
               dropped.site !== undefined &&
-              dropped.site.function.sourceId === cleanup.site.function.sourceId &&
-              dropped.site.function.ordinal === cleanup.site.function.ordinal &&
-              dropped.site.span.start === cleanup.site.span.start &&
-              dropped.site.span.end === cleanup.site.span.end &&
+              Hir.sameExecutableSite(dropped.site, cleanup.site) &&
               (() => {
                 const expected = dropped.environment.fields
                   .filter((field) => field.access === 'Take' && !isCopyType(field.type))

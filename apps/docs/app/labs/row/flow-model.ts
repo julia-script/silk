@@ -1,11 +1,14 @@
-import type { BootstrapEvaluation, Elaboration, SourceSpan, Type } from '@silk-effect/compiler'
+import type { BootstrapEvaluation, Elaboration, SourceSpan } from '@silk-effect/compiler'
+import * as Type from '@silk-effect/compiler/Type'
 
 const typeText = (type: Type.Type): string =>
   typeof type === 'string'
     ? type
     : type._tag === 'NominalType'
       ? `${type.module}.${type.name}${
-          type.arguments.length === 0 ? '' : `<${type.arguments.map(typeText).join(', ')}>`
+          type.arguments.length === 0
+            ? ''
+            : `<${type.arguments.map(Type.encodeGenericArgument).join(', ')}>`
         }`
       : type._tag === 'TypeParameter'
         ? type.name
@@ -25,7 +28,9 @@ const typeText = (type: Type.Type): string =>
               ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
               : type._tag === 'FailureProjectionType'
                 ? `Row<!${type.parameter.name}>`
-                : type.members.map(typeText).join(' | ')
+                : type._tag === 'RepresentedType'
+                  ? Type.encode(type)
+                  : type.members.map(typeText).join(' | ')
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'

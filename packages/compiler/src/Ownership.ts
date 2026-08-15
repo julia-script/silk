@@ -576,10 +576,8 @@ const checkExpression = (
     case 'CallableSection': {
       const environment = callableEnvironment(state, expression)
       if (
-        !state.callables.some(
-          (candidate) =>
-            candidate.site.function.ordinal === expression.site.function.ordinal &&
-            candidate.site.span.start === expression.site.span.start,
+        !state.callables.some((candidate) =>
+          Hir.sameExecutableSite(candidate.site, expression.site),
         )
       ) {
         state.callables.push(environment)
@@ -1693,6 +1691,7 @@ export const cleanupPlan = (
     })
   }
   if (Type.isCallable(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isRepresented(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   const key = Type.key(type)
   if (seen.has(key)) return Object.freeze({ _tag: 'NoCleanup', type })
   const declaration = DeclarationIndex.byCanonical(index, {
@@ -2500,10 +2499,10 @@ const cleanupText = (cleanup: CleanupPlan): string => {
       .join(',')}`
   }
   if (cleanup._tag === 'CallableCleanup') {
-    return `callable:${Type.encode(cleanup.type)} site=${cleanup.site.function.ordinal}@${cleanup.site.span.start} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
+    return `callable:${Type.encode(cleanup.type)} site=${Hir.executableSiteLabel(cleanup.site)} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
   }
   if (cleanup._tag === 'EffectCleanup') {
-    return `effect:${Type.encode(cleanup.type)} site=${cleanup.site.function.ordinal}@${cleanup.site.span.start} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
+    return `effect:${Type.encode(cleanup.type)} site=${Hir.executableSiteLabel(cleanup.site)} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
   }
   if (cleanup._tag === 'HookCleanup') {
     return `hook:${Type.encode(cleanup.type)} target=${cleanup.hook.module}.${cleanup.hook.name}${
@@ -2543,7 +2542,7 @@ export const encode = (self: ModuleOwnership): string =>
       ),
       ...fn.callables.map(
         (callable) =>
-          `  callable c${callable.site.function.ordinal}@${callable.site.span.start} ${callable.mode.toLowerCase()} slots=${callable.slots.map((slot) => `#${slot.ordinal}:p${slot.parameterOrdinal}:${slot.access.toLowerCase()}:${slot.type === undefined ? '?' : Type.encode(slot.type)}:${cleanupText(slot.cleanup)}`).join(',') || 'none'} retained=${callable.retainedDependencies.join(',') || 'none'} drop=${callable.dropOrder.map((ordinal) => `#${ordinal}`).join(',') || 'none'}`,
+          `  callable ${Hir.executableSiteLabel(callable.site)} ${callable.mode.toLowerCase()} slots=${callable.slots.map((slot) => `#${slot.ordinal}:p${slot.parameterOrdinal}:${slot.access.toLowerCase()}:${slot.type === undefined ? '?' : Type.encode(slot.type)}:${cleanupText(slot.cleanup)}`).join(',') || 'none'} retained=${callable.retainedDependencies.join(',') || 'none'} drop=${callable.dropOrder.map((ordinal) => `#${ordinal}`).join(',') || 'none'}`,
       ),
       ...fn.exits.map((exit) => {
         const label = (() => {

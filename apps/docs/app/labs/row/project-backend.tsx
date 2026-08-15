@@ -9,7 +9,7 @@
  * returning nothing, which is what keeps a broken pipeline readable.
  */
 
-import { Mir, Type } from '@silk-effect/compiler'
+import { Mir } from '@silk-effect/compiler'
 import type {
   BootstrapEvaluation,
   Backend,
@@ -21,6 +21,7 @@ import type {
   NameResolution,
   Ownership,
 } from '@silk-effect/compiler'
+import * as Type from '@silk-effect/compiler/Type'
 import type { RowModel, Span } from './row'
 
 const typeText = (type: Type.Type): string =>
@@ -28,7 +29,9 @@ const typeText = (type: Type.Type): string =>
     ? type
     : type._tag === 'NominalType'
       ? `${type.module}.${type.name}${
-          type.arguments.length === 0 ? '' : `<${type.arguments.map(typeText).join(', ')}>`
+          type.arguments.length === 0
+            ? ''
+            : `<${type.arguments.map(Type.encodeGenericArgument).join(', ')}>`
         }`
       : type._tag === 'TypeParameter'
         ? type.name
@@ -48,7 +51,9 @@ const typeText = (type: Type.Type): string =>
               ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
               : type._tag === 'FailureProjectionType'
                 ? `Row<!${type.parameter.name}>`
-                : type.members.map(typeText).join(' | ')
+                : type._tag === 'RepresentedType'
+                  ? Type.encode(type)
+                  : type.members.map(typeText).join(' | ')
 
 const asSpan = (span: { readonly start: number; readonly end: number }): Span => ({
   start: span.start,

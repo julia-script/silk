@@ -208,6 +208,14 @@ export const analysisOnlyConstructCode = 'SEM0098' as const
 export const suspendingContinuationAllocatorCode = 'SEM0102' as const
 /** Stable code for constructing an aggregate that stores a bare callable value. */
 export const storedCallableConstructionCode = 'SEM0103' as const
+/** Stable code for the first struct initializer that contradicts an inferred representation. */
+export const conflictingInitializerRepresentationCode = 'SEM0104' as const
+/** Stable code for the first exact representation that diverges at a static value join. */
+export const divergentRepresentationJoinCode = 'SEM0105' as const
+/** Stable code for a representation argument whose contract cannot satisfy its required bound. */
+export const incompatibleRepresentationBoundCode = 'SEM0106' as const
+/** Stable code for storing a represented Effect before its runtime layout is supported. */
+export const storedRepresentedEffectConstructionCode = 'SEM0107' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -345,6 +353,10 @@ export type Code =
   | typeof unlowerableBoundWitnessCode
   | typeof suspendingContinuationAllocatorCode
   | typeof storedCallableConstructionCode
+  | typeof conflictingInitializerRepresentationCode
+  | typeof divergentRepresentationJoinCode
+  | typeof incompatibleRepresentationBoundCode
+  | typeof storedRepresentedEffectConstructionCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -460,6 +472,33 @@ export type Reason =
       readonly aggregate: string
       readonly field?: string
       readonly callable: string
+    }
+  | {
+      readonly _tag: 'ConflictingInitializerRepresentation'
+      readonly parameter: string
+      readonly expected: string
+      readonly actual: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'DivergentRepresentationJoin'
+      readonly expected: string
+      readonly actual: string
+      readonly originSpans: readonly [SourceSpan.SourceSpan, SourceSpan.SourceSpan]
+    }
+  | {
+      readonly _tag: 'IncompatibleRepresentationBound'
+      readonly parameter: string
+      readonly required: string
+      readonly actual: string
+      readonly requiredDeclarationSpan?: SourceSpan.SourceSpan
+      readonly actualDeclarationSpan?: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'StoredRepresentedEffectConstruction'
+      readonly aggregate: string
+      readonly field?: string
+      readonly effect: string
     }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
@@ -642,8 +681,18 @@ export type Reason =
   | {
       readonly _tag: 'GenericParameterKindMismatch'
       readonly spelling: string
-      readonly expected: 'Value' | 'FailureRow' | 'RequirementRow'
-      readonly actual: 'Value' | 'FailureRow' | 'RequirementRow'
+      readonly expected:
+        | 'Value'
+        | 'FailureRow'
+        | 'RequirementRow'
+        | 'CallableRepresentation'
+        | 'EffectRepresentation'
+      readonly actual:
+        | 'Value'
+        | 'FailureRow'
+        | 'RequirementRow'
+        | 'CallableRepresentation'
+        | 'EffectRepresentation'
     }
   | {
       readonly _tag: 'ContractRowInference'
@@ -784,6 +833,7 @@ export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagno
       diagnostic.code === uninferredTypeParameterCode ||
       diagnostic.code === typeArgumentConflictCode ||
       diagnostic.code === genericParameterKindMismatchCode ||
+      diagnostic.code === incompatibleRepresentationBoundCode ||
       diagnostic.code === contractRowInferenceCode ||
       diagnostic.code === invalidEffectProvisionCode ||
       diagnostic.code === suspendingContinuationAllocatorCode ||
@@ -799,7 +849,11 @@ export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagno
  * is the only reported failure, instead of being followed by an `InvalidMir` echo of itself.
  */
 export const hasInstanceFenceErrors = (diagnostics: ReadonlyArray<Diagnostic>): boolean =>
-  diagnostics.some((diagnostic) => diagnostic.code === storedCallableConstructionCode)
+  diagnostics.some(
+    (diagnostic) =>
+      diagnostic.code === storedCallableConstructionCode ||
+      diagnostic.code === storedRepresentedEffectConstructionCode,
+  )
 
 /** Derives the identity of one diagnostic given its ordinal among equals. */
 export const identity = (self: Diagnostic, ordinal = 0): Identity =>
@@ -1369,6 +1423,32 @@ export const structFieldTypeMismatch = (
     span,
   })
 
+export const conflictingInitializerRepresentation = (
+  parameter: string,
+  expected: string,
+  actual: string,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: conflictingInitializerRepresentationCode,
+    severity: 'error',
+    message: `Representation ${parameter} was inferred as ${expected}, but this initializer uses ${actual}`,
+    reason: Object.freeze({
+      _tag: 'ConflictingInitializerRepresentation',
+      parameter,
+      expected,
+      actual,
+      originalSpan,
+    }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'representation first inferred here', span: originalSpan }),
+    ]),
+  })
+
 export const projectionOnNonStruct = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
@@ -1692,6 +1772,7 @@ export const storedCallableConstruction = (
   callable: string,
   span: SourceSpan.SourceSpan,
   constructedAt?: SourceSpan.SourceSpan,
+  represented = false,
 ): Diagnostic => {
   const site = field === undefined ? 'its element' : `field ${field}`
   return Object.freeze({
@@ -1699,12 +1780,46 @@ export const storedCallableConstruction = (
     phase: 'semantic',
     code: storedCallableConstructionCode,
     severity: 'error',
-    message: `Cannot construct ${aggregate}: ${site} would store the callable ${callable}, whose environment layout depends on a hidden concrete identity that ${aggregate} does not carry`,
+    message: represented
+      ? `Cannot construct ${aggregate}: ${site} retains the static identity of ${callable}, but represented callable storage has no supported runtime layout`
+      : `Cannot construct ${aggregate}: ${site} would store the callable ${callable}, whose environment layout depends on a hidden concrete identity that ${aggregate} does not carry`,
     reason: Object.freeze({
       _tag: 'StoredCallableConstruction',
       aggregate,
       ...(field === undefined ? {} : { field }),
       callable,
+    }),
+    span,
+    ...(constructedAt === undefined
+      ? {}
+      : {
+          relatedSpans: Object.freeze([
+            Object.freeze({ label: 'constructed here', span: constructedAt }),
+          ]),
+        }),
+  })
+}
+
+/** Rejects represented Effect storage until a downstream runtime layout has been proven. */
+export const storedRepresentedEffectConstruction = (
+  aggregate: string,
+  field: string | undefined,
+  effect: string,
+  span: SourceSpan.SourceSpan,
+  constructedAt?: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const site = field === undefined ? 'its element' : `field ${field}`
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: storedRepresentedEffectConstructionCode,
+    severity: 'error',
+    message: `Cannot construct ${aggregate}: ${site} retains the static identity of ${effect}, but represented Effect storage has no supported runtime layout`,
+    reason: Object.freeze({
+      _tag: 'StoredRepresentedEffectConstruction',
+      aggregate,
+      ...(field === undefined ? {} : { field }),
+      effect,
     }),
     span,
     ...(constructedAt === undefined
@@ -2141,6 +2256,31 @@ export const incompatibleMatchResults = (
     span,
   })
 
+export const divergentRepresentationJoin = (
+  expected: string,
+  actual: string,
+  originSpans: readonly [SourceSpan.SourceSpan, SourceSpan.SourceSpan],
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: divergentRepresentationJoinCode,
+    severity: 'error',
+    message: `Cannot join ${expected} with ${actual}; consume each represented value inside its branch before joining`,
+    reason: Object.freeze({
+      _tag: 'DivergentRepresentationJoin',
+      expected,
+      actual,
+      originSpans: Object.freeze(originSpans),
+    }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'first representation originates here', span: originSpans[0] }),
+      Object.freeze({ label: 'divergent representation originates here', span: originSpans[1] }),
+    ]),
+  })
+
 export const duplicateTypeParameter = (
   spelling: string,
   originalSpan: SourceSpan.SourceSpan,
@@ -2161,8 +2301,18 @@ export const duplicateTypeParameter = (
 
 export const genericParameterKindMismatch = (
   spelling: string,
-  expected: 'Value' | 'FailureRow' | 'RequirementRow',
-  actual: 'Value' | 'FailureRow' | 'RequirementRow',
+  expected:
+    | 'Value'
+    | 'FailureRow'
+    | 'RequirementRow'
+    | 'CallableRepresentation'
+    | 'EffectRepresentation',
+  actual:
+    | 'Value'
+    | 'FailureRow'
+    | 'RequirementRow'
+    | 'CallableRepresentation'
+    | 'EffectRepresentation',
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
@@ -2179,6 +2329,54 @@ export const genericParameterKindMismatch = (
     }),
     span,
   })
+
+export const incompatibleRepresentationBound = (
+  parameter: string,
+  required: string,
+  actual: string,
+  span: SourceSpan.SourceSpan,
+  provenance: {
+    readonly requiredDeclarationSpan?: SourceSpan.SourceSpan
+    readonly actualDeclarationSpan?: SourceSpan.SourceSpan
+  } = {},
+): Diagnostic => {
+  const relatedSpans: Array<RelatedSpan> = []
+  if (provenance.requiredDeclarationSpan !== undefined)
+    relatedSpans.push(
+      Object.freeze({
+        label: 'required representation bound declared here',
+        span: provenance.requiredDeclarationSpan,
+      }),
+    )
+  if (provenance.actualDeclarationSpan !== undefined)
+    relatedSpans.push(
+      Object.freeze({
+        label: 'supplied representation bound declared here',
+        span: provenance.actualDeclarationSpan,
+      }),
+    )
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: incompatibleRepresentationBoundCode,
+    severity: 'error',
+    message: `Representation ${parameter} requires ${required}, but the supplied bound ${actual} is not admissible`,
+    reason: Object.freeze({
+      _tag: 'IncompatibleRepresentationBound',
+      parameter,
+      required,
+      actual,
+      ...(provenance.requiredDeclarationSpan === undefined
+        ? {}
+        : { requiredDeclarationSpan: provenance.requiredDeclarationSpan }),
+      ...(provenance.actualDeclarationSpan === undefined
+        ? {}
+        : { actualDeclarationSpan: provenance.actualDeclarationSpan }),
+    }),
+    span,
+    ...(relatedSpans.length === 0 ? {} : { relatedSpans: Object.freeze(relatedSpans) }),
+  })
+}
 
 type ContractRowInferenceProblem = Extract<
   Reason,

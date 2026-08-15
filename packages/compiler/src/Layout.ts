@@ -904,6 +904,14 @@ export const catalog = (
       completed.set(key, result)
       return result
     }
+    if (Type.isRepresented(type)) {
+      const result = unavailable(type, Object.freeze(Type.nominals(type)), {
+        _tag: 'InvalidDeclaration',
+        detail: 'represented executable values remain unavailable to layout',
+      })
+      completed.set(key, result)
+      return result
+    }
     if (Type.isFailureProjection(type)) {
       const result = unavailable(type, Object.freeze([]), {
         _tag: 'InvalidDeclaration',
@@ -1384,12 +1392,8 @@ const effectEnvironments = (
           continue
         }
         const size = alignUp(cursor, environmentAlignment)
-        const successEffectIdentity = (instance.effectSuccesses ?? []).find(
-          (success) =>
-            success.site.function.sourceId === block.site.function.sourceId &&
-            success.site.function.ordinal === block.site.function.ordinal &&
-            success.site.span.start === block.site.span.start &&
-            success.site.span.end === block.site.span.end,
+        const successEffectIdentity = (instance.effectSuccesses ?? []).find((success) =>
+          Hir.sameExecutableSite(success.site, block.site),
         )?.identity
         environments.push(
           Object.freeze({
@@ -1428,7 +1432,7 @@ const effectEnvironments = (
       (left, right) =>
         left.instance.declaration.module.localeCompare(right.instance.declaration.module) ||
         left.instance.declaration.name.localeCompare(right.instance.declaration.name) ||
-        left.site.span.start - right.site.span.start,
+        Hir.compareExecutableSites(left.site, right.site),
     ),
   )
 }
@@ -1757,6 +1761,11 @@ const shapeNode = (
   if (Type.isCallable(type)) {
     throw new RangeError(
       `callable ${Type.encode(type)} needs a hidden concrete identity before calling-shape planning`,
+    )
+  }
+  if (Type.isRepresented(type)) {
+    throw new RangeError(
+      `represented executable ${Type.encode(type)} is unavailable to calling-shape planning`,
     )
   }
   const candidate = entries.get(Type.key(type))
@@ -2851,12 +2860,12 @@ export const encode = (self: Plan): string =>
     ...self.entries.flatMap(entryLines),
     ...self.effectEnvironments.map((environment) =>
       environment._tag === 'UnavailableEffectEnvironment'
-        ? `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${environment.site.span.start} unavailable=${environment.reason}`
-        : `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${environment.site.span.start} size=${environment.size} align=${environment.alignment} fields=${environment.fields.map((field) => `${field.source.toLowerCase()}${field.ordinal}:${field.access.toLowerCase()}:${field.representation.toLowerCase()}@${field.offset}`).join(',') || 'none'}`,
+        ? `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${Hir.executableSiteLabel(environment.site)} unavailable=${environment.reason}`
+        : `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${Hir.executableSiteLabel(environment.site)} size=${environment.size} align=${environment.alignment} fields=${environment.fields.map((field) => `${field.source.toLowerCase()}${field.ordinal}:${field.access.toLowerCase()}:${field.representation.toLowerCase()}@${field.offset}`).join(',') || 'none'}`,
     ),
     ...self.callableEnvironments.map((environment) => {
       const callable = environment.callable
-      const identity = `${callable.owner.declaration.module}.${callable.owner.declaration.name}@${callable.site.span.start}`
+      const identity = `${callable.owner.declaration.module}.${callable.owner.declaration.name}@${Hir.executableSiteLabel(callable.site)}`
       return environment._tag === 'UnavailableCallableEnvironment'
         ? `callable-environment ${identity} unavailable=${environment.reason} view=code@${environment.view.codeOffset},env@${environment.view.environmentOffset},size=${environment.view.size}`
         : `callable-environment ${identity} mode=${callable.mode.toLowerCase()} size=${environment.size} align=${environment.alignment} fields=${environment.fields.map((field) => `capture${field.ordinal}->p${field.parameterOrdinal}:${field.access.toLowerCase()}:${field.representation.toLowerCase()}@${field.offset}`).join(',') || 'none'} view=code@${environment.view.codeOffset},env@${environment.view.environmentOffset},size=${environment.view.size}`

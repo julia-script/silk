@@ -8,8 +8,9 @@
  * has to say. It also makes each phase testable without rendering anything.
  */
 
-import { Diagnostic, SyntaxTree, Type } from '@silk-effect/compiler'
+import { Diagnostic, SyntaxTree } from '@silk-effect/compiler'
 import type { Elaboration, Hir, SyntaxFile } from '@silk-effect/compiler'
+import * as Type from '@silk-effect/compiler/Type'
 import type { FlowModel } from './flow-model'
 import type { RowModel, RowTone, Span } from './row'
 
@@ -196,7 +197,7 @@ const hirTypeText = (type: Type.Type): string =>
       ? `${type.module}.${type.name}${
           type.arguments.length === 0
             ? ''
-            : `<${type.arguments.map(hirTypeText).join(', ')}>`
+            : `<${type.arguments.map(Type.encodeGenericArgument).join(', ')}>`
         }`
       : type._tag === 'TypeParameter'
         ? type.name
@@ -216,7 +217,9 @@ const hirTypeText = (type: Type.Type): string =>
               ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${hirTypeText(type.target)}`
               : type._tag === 'FailureProjectionType'
                 ? `Row<!${type.parameter.name}>`
-                : type.members.map(hirTypeText).join(' | ')
+                : type._tag === 'RepresentedType'
+                  ? Type.encode(type)
+                  : type.members.map(hirTypeText).join(' | ')
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {

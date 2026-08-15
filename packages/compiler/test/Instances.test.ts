@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Instances from '../src/Instances.js'
 import * as Mir from '../src/Mir.js'
 import * as Type from '../src/Type.js'
 
@@ -87,6 +88,43 @@ pub fn main() -> i32 { let whenEnabled = select(true) return whenEnabled(42) }`)
       'i32',
     ])
     assert.strictEqual(Type.encode(generic.callables.at(0)?.type ?? 'i32'), 'fn(i32) -> i32')
+  }),
+)
+
+it.effect('keeps executable sites distinct across generic owner specializations', () =>
+  Effect.gen(function* () {
+    const result = Analysis.instancesOf(
+      yield* snapshot(`fn section<T>(value: T) -> i32 {
+  let plusOne = i32.add(1)
+  return plusOne(41)
+}
+effect fn deferred<T>(value: T) -> T { return move value }
+pub fn main() -> i32 {
+  let left = section<i32>(1)
+  let right = section<bool>(true)
+  let number = run deferred<i32>(left + right)
+  let flag = run deferred<bool>(true)
+  if flag { return number }
+  return 0
+}`),
+    )
+    const sections = result.callables.filter(
+      (callable) => callable.owner.declaration.name === 'section',
+    )
+    const effects = result.instances
+      .filter((instance) => instance.key.declaration.name === 'deferred')
+      .flatMap((instance) => (instance.resultEffect === undefined ? [] : [instance.resultEffect]))
+
+    assert.strictEqual(sections.length, 2)
+    assert.strictEqual(new Set(sections.map(Instances.callableIdentity)).size, 2)
+    assert.strictEqual(effects.length, 2)
+    assert.strictEqual(new Set(effects).size, 2)
+    assert.strictEqual(
+      [...sections.map(Instances.callableIdentity), ...effects].some((identity) =>
+        /@\d/.test(identity),
+      ),
+      false,
+    )
   }),
 )
 

@@ -75,6 +75,12 @@ export interface TypeParameterFact {
   readonly syntax: SyntaxTree.Node
   readonly duplicateOf?: Type.Parameter
   readonly bound?: BoundFact
+  readonly representationBound?: {
+    readonly _tag: 'RepresentationBound'
+    readonly kind: 'Callable' | 'Effect'
+    readonly contract: DeclaredTypeFact
+    readonly syntax: SyntaxTree.Node
+  }
 }
 
 /** The canonical, duplicate, or unidentified canonical-identity state of one header. */
@@ -740,6 +746,7 @@ export const analyzeDeclaredType = (
   source: SourceFile.SourceFile,
   syntax: SyntaxTree.Node,
   typeParameters: ReadonlyMap<string, Type.Parameter> = new Map(),
+  genericArgumentPosition = false,
 ): TypeResolution => {
   if (syntax.kind === 'UnitType') {
     const token = SyntaxTree.directToken(syntax, 'LeftParenthesis')
@@ -828,7 +835,7 @@ export const analyzeDeclaredType = (
         fact: Object.freeze({ _tag: 'Unavailable', syntax }),
         diagnostics: Object.freeze([]),
       })
-    const analyzed = analyzeDeclaredType(source, inner, typeParameters)
+    const analyzed = analyzeDeclaredType(source, inner, typeParameters, genericArgumentPosition)
     return Object.freeze({
       fact: Object.freeze({ ...analyzed.fact, syntax }),
       diagnostics: analyzed.diagnostics,
@@ -1081,7 +1088,7 @@ export const analyzeDeclaredType = (
     const target = analyzeDeclaredType(source, pathSyntax, typeParameters)
     const arguments_ = list.children
       .filter(isDeclaredTypeNode)
-      .map((argument) => analyzeDeclaredType(source, argument, typeParameters))
+      .map((argument) => analyzeDeclaredType(source, argument, typeParameters, true))
     const pathSegments = SyntaxTree.tokens(pathSyntax)
       .filter((token) => token.kind === 'Identifier')
       .map((token) => spelling(source, token))
@@ -1391,7 +1398,35 @@ export const analyzeDeclaredType = (
   }
   const parameterType = segments.length === 1 ? typeParameters.get(first.spelling) : undefined
   if (parameterType !== undefined) {
-    if (parameterType.kind !== 'Value') {
+    if (
+      parameterType.kind === 'CallableRepresentation' ||
+      parameterType.kind === 'EffectRepresentation'
+    ) {
+      const bound = parameterType.representationBound
+      if (bound === undefined) {
+        return Object.freeze({
+          fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+          diagnostics: Object.freeze([]),
+        })
+      }
+      const type = Type.represented(
+        bound,
+        bound,
+        Type.representationParameterArgument(parameterType),
+      )
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: first.spelling,
+          token: first.token,
+          syntax,
+          path,
+        }),
+        diagnostics: Object.freeze([]),
+      })
+    }
+    if (parameterType.kind !== 'Value' && !genericArgumentPosition) {
       const diagnostic = Diagnostic.genericParameterKindMismatch(
         first.spelling,
         'Value',
@@ -1581,11 +1616,38 @@ const collectTypeParameters = (
     // than the parameter's own identifier keeps a damaged or applied bound from being read as a
     // bound on the parameter's own name.
     const boundNode = parameterNode.children.find(SyntaxTree.isNode)
+    const boundResolution =
+      boundNode === undefined ? undefined : analyzeDeclaredType(source, boundNode, environment)
+    const effectBoundTarget =
+      boundNode?.kind === 'AppliedType' ? SyntaxTree.directNode(boundNode, 'TypePath') : undefined
+    const effectBoundSegments =
+      effectBoundTarget === undefined
+        ? []
+        : SyntaxTree.tokens(effectBoundTarget).filter((token) => token.kind === 'Identifier')
+    const effectBoundSegment = effectBoundSegments.at(0)
+    const effectBound =
+      effectBoundSegments.length === 1 &&
+      effectBoundSegment !== undefined &&
+      spelling(source, effectBoundSegment) === 'Effect'
+    const representationKind: Type.ParameterKind | undefined =
+      boundNode?.kind === 'CallableType'
+        ? 'CallableRepresentation'
+        : effectBound
+          ? 'EffectRepresentation'
+          : undefined
+    const representationContract =
+      boundResolution?.fact._tag === 'Resolved' &&
+      (Type.isCallable(boundResolution.fact.type) || Type.isEffect(boundResolution.fact.type))
+        ? boundResolution.fact.type
+        : undefined
+    if (representationKind !== undefined && boundResolution !== undefined)
+      diagnostics.push(...boundResolution.diagnostics)
     const boundToken =
       boundNode === undefined
         ? undefined
         : SyntaxTree.tokens(boundNode).find((token) => token.kind === 'Identifier')
     const bound: BoundFact | undefined =
+      representationKind !== undefined ||
       SyntaxTree.directToken(parameterNode, 'Colon') === undefined ||
       boundNode === undefined ||
       boundToken === undefined
@@ -1613,7 +1675,8 @@ const collectTypeParameters = (
           ? 'FailureRow'
           : SyntaxTree.directToken(parameterNode, 'Question') !== undefined
             ? 'RequirementRow'
-            : 'Value',
+            : (representationKind ?? 'Value'),
+        representationContract,
       )
     if (name._tag === 'Present' && duplicateOf === undefined) {
       environment.set(name.spelling, type)
@@ -1633,6 +1696,21 @@ const collectTypeParameters = (
       syntax: parameterNode,
       ...(duplicateOf === undefined ? {} : { duplicateOf }),
       ...(bound === undefined ? {} : { bound }),
+      ...(representationKind === undefined ||
+      boundNode === undefined ||
+      boundResolution === undefined
+        ? {}
+        : {
+            representationBound: Object.freeze({
+              _tag: 'RepresentationBound' as const,
+              kind:
+                representationKind === 'CallableRepresentation'
+                  ? ('Callable' as const)
+                  : ('Effect' as const),
+              contract: boundResolution.fact,
+              syntax: boundNode,
+            }),
+          }),
     })
   })
   return Object.freeze({
@@ -2487,18 +2565,172 @@ const resolveDeclaredType = (
       const declaration = memberByNominal(modules, target.fact.type)
       const expected =
         declaration?.typeParameters.length ?? Type.intrinsicNominalArity(target.fact.type)
-      const available = arguments_.map((argument) =>
-        argument.fact._tag === 'Resolved' ? argument.fact.type : undefined,
-      )
+      const declaredParameters = declaration?.typeParameters.map((parameter) => parameter.type)
+      const available = arguments_.map((argument, ordinal): Type.GenericArgument | undefined => {
+        if (argument.fact._tag !== 'Resolved') return undefined
+        const parameter = declaredParameters?.at(ordinal)
+        if (
+          parameter !== undefined &&
+          (parameter.kind === 'CallableRepresentation' || parameter.kind === 'EffectRepresentation')
+        )
+          return Type.isRepresented(argument.fact.type)
+            ? argument.fact.type.representation.argument
+            : argument.fact.type
+        if (parameter?.kind === 'FailureRow')
+          return Type.isParameter(argument.fact.type) && argument.fact.type.kind === 'FailureRow'
+            ? Type.failureRowArgument([], [argument.fact.type])
+            : argument.fact.type
+        if (parameter?.kind === 'RequirementRow')
+          return Type.isParameter(argument.fact.type) &&
+            argument.fact.type.kind === 'RequirementRow'
+            ? Type.requirementRowArgument([], [argument.fact.type])
+            : argument.fact.type
+        return argument.fact.type
+      })
       if (expected === arguments_.length && available.every((argument) => argument !== undefined)) {
         const concrete = available.filter(
-          (argument): argument is Type.Type => argument !== undefined,
+          (argument): argument is Type.GenericArgument => argument !== undefined,
         )
+        const substitution =
+          declaredParameters === undefined
+            ? concrete.every(Type.isTypeArgument)
+              ? new Map<string, Type.GenericArgument>()
+              : undefined
+            : Type.substitution(declaredParameters, concrete)
+        if (substitution === undefined) {
+          const incompatibleBound = concrete.findIndex((argument, ordinal) => {
+            const parameter = declaredParameters?.at(ordinal)
+            if (
+              parameter === undefined ||
+              (parameter.kind !== 'CallableRepresentation' &&
+                parameter.kind !== 'EffectRepresentation') ||
+              !Type.isRepresentationArgument(argument) ||
+              Type.representationArgumentKind(argument) !== parameter.kind ||
+              parameter.representationBound === undefined
+            )
+              return false
+            const prior = Type.prefixSubstitution(
+              declaredParameters?.slice(0, ordinal) ?? [],
+              concrete.slice(0, ordinal),
+            )
+            if (prior === undefined) return false
+            const required = Type.substitute(parameter.representationBound, prior)
+            const actual =
+              argument._tag === 'ExactRepresentationArgument'
+                ? argument.contract
+                : argument.parameter.representationBound
+            return (
+              actual !== undefined &&
+              (Type.isCallable(required) || Type.isEffect(required)) &&
+              Type.representationAdmissibility(actual, required)._tag === 'Unavailable'
+            )
+          })
+          const incompatibleParameter =
+            incompatibleBound < 0 ? undefined : declaredParameters?.at(incompatibleBound)
+          const incompatibleArgument =
+            incompatibleBound < 0 ? undefined : concrete.at(incompatibleBound)
+          const incompatibleSupplied =
+            incompatibleBound < 0 ? undefined : arguments_.at(incompatibleBound)
+          if (
+            incompatibleParameter !== undefined &&
+            incompatibleParameter.representationBound !== undefined &&
+            incompatibleArgument !== undefined &&
+            Type.isRepresentationArgument(incompatibleArgument) &&
+            incompatibleSupplied !== undefined
+          ) {
+            const prior = Type.prefixSubstitution(
+              declaredParameters?.slice(0, incompatibleBound) ?? [],
+              concrete.slice(0, incompatibleBound),
+            )
+            const required =
+              prior === undefined
+                ? incompatibleParameter.representationBound
+                : Type.substitute(incompatibleParameter.representationBound, prior)
+            const actual =
+              incompatibleArgument._tag === 'ExactRepresentationArgument'
+                ? incompatibleArgument.contract
+                : incompatibleArgument.parameter.representationBound
+            const actualParameter =
+              incompatibleArgument._tag === 'RepresentationParameterArgument'
+                ? modules
+                    .flatMap((candidateModule) => candidateModule.members)
+                    .flatMap((member) => ('typeParameters' in member ? member.typeParameters : []))
+                    .find(
+                      (candidateParameter) =>
+                        Type.key(candidateParameter.type) ===
+                        Type.key(incompatibleArgument.parameter),
+                    )
+                : undefined
+            const requiredParameter = declaration?.typeParameters.at(incompatibleBound)
+            if ((Type.isCallable(required) || Type.isEffect(required)) && actual !== undefined)
+              diagnostics.push(
+                Diagnostic.incompatibleRepresentationBound(
+                  incompatibleParameter.name,
+                  Type.encode(required),
+                  Type.encode(actual),
+                  incompatibleSupplied.fact.syntax.span,
+                  {
+                    ...(requiredParameter === undefined
+                      ? {}
+                      : { requiredDeclarationSpan: requiredParameter.syntax.span }),
+                    ...(actualParameter === undefined
+                      ? {}
+                      : { actualDeclarationSpan: actualParameter.syntax.span }),
+                  },
+                ),
+              )
+          }
+          const mismatch = concrete.findIndex((argument, ordinal) => {
+            const parameter = declaredParameters?.at(ordinal)
+            if (parameter === undefined) return false
+            if (parameter.kind === 'Value') return !Type.isTypeArgument(argument)
+            if (parameter.kind === 'FailureRow') return !Type.isFailureRowArgument(argument)
+            if (parameter.kind === 'RequirementRow') return !Type.isRequirementRowArgument(argument)
+            return (
+              !Type.isRepresentationArgument(argument) ||
+              Type.representationArgumentKind(argument) !== parameter.kind
+            )
+          })
+          const parameter = declaredParameters?.at(mismatch)
+          const supplied = arguments_.at(mismatch)
+          if (incompatibleBound < 0 && parameter !== undefined && supplied !== undefined) {
+            diagnostics.push(
+              Diagnostic.genericParameterKindMismatch(
+                parameter.name,
+                parameter.kind,
+                supplied.fact._tag === 'Resolved' && Type.isRepresented(supplied.fact.type)
+                  ? supplied.fact.type.contract._tag === 'CallableType'
+                    ? 'CallableRepresentation'
+                    : 'EffectRepresentation'
+                  : supplied.fact._tag === 'Resolved' &&
+                      Type.isParameter(supplied.fact.type) &&
+                      (supplied.fact.type.kind === 'FailureRow' ||
+                        supplied.fact.type.kind === 'RequirementRow')
+                    ? supplied.fact.type.kind
+                    : 'Value',
+                supplied.fact.syntax.span,
+              ),
+            )
+          }
+          const causeDiagnostic = diagnostics.at(-1)
+          return Object.freeze({
+            fact: Object.freeze({
+              ...fact,
+              ...(causeDiagnostic === undefined
+                ? {}
+                : { cause: Diagnostic.identity(causeDiagnostic) }),
+            }),
+            diagnostics: Object.freeze(diagnostics),
+          })
+        }
+        const firstConcrete = concrete.at(0)
         const type =
           target.fact.type.module === 'silk/option' &&
           target.fact.type.name === 'Option' &&
-          concrete.length === 1
-            ? Type.option(concrete.at(0) ?? 'never')
+          concrete.length === 1 &&
+          firstConcrete !== undefined &&
+          Type.isTypeArgument(firstConcrete)
+            ? Type.option(firstConcrete)
             : Type.nominal(target.fact.type.module, target.fact.type.name, concrete)
         return Object.freeze({
           fact: Object.freeze({
@@ -2731,10 +2963,43 @@ const resolveBounds = (
   typeParameters: ReadonlyArray<TypeParameterFact>,
   resolver: TypeResolver,
   modules: ReadonlyArray<ModuleHeaders>,
+  diagnostics: Array<Diagnostic.Diagnostic>,
 ): ReadonlyArray<TypeParameterFact> => {
-  if (typeParameters.every((parameter) => parameter.bound === undefined)) return typeParameters
+  if (
+    typeParameters.every(
+      (parameter) => parameter.bound === undefined && parameter.representationBound === undefined,
+    )
+  )
+    return typeParameters
   return Object.freeze(
     typeParameters.map((parameter): TypeParameterFact => {
+      const representation = parameter.representationBound
+      if (representation !== undefined) {
+        const resolved = resolveDeclaredType(module, representation.contract, resolver, modules)
+        diagnostics.push(...resolved.diagnostics)
+        const contract =
+          resolved.fact._tag === 'Resolved' &&
+          (Type.isCallable(resolved.fact.type) || Type.isEffect(resolved.fact.type))
+            ? resolved.fact.type
+            : undefined
+        return Object.freeze({
+          ...parameter,
+          type:
+            contract === undefined
+              ? parameter.type
+              : Type.parameter(
+                  parameter.type.owner,
+                  parameter.type.ordinal,
+                  parameter.type.name,
+                  parameter.type.kind,
+                  contract,
+                ),
+          representationBound: Object.freeze({
+            ...representation,
+            contract: resolved.fact,
+          }),
+        })
+      }
       const bound = parameter.bound
       if (bound === undefined) return parameter
       const resolved = resolver(module, bound.path).fact
@@ -2916,7 +3181,8 @@ const inlineReach = (
       if (Type.isRawBuffer(type) || Type.isSlot(type)) return
       const inline = inlineParameters.get(`${type.module}.${type.name}`)
       for (const [ordinal, argument] of type.arguments.entries())
-        if (inline === undefined || inline.has(ordinal)) descend(argument)
+        if ((inline === undefined || inline.has(ordinal)) && Type.isTypeArgument(argument))
+          descend(argument)
       return
     }
     if (Type.isParameter(type)) {
@@ -3123,6 +3389,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             member.typeParameters,
             resolver,
             self.modules,
+            diagnostics,
           ),
           parameters: Object.freeze(parameters),
           returnType: result.fact,
@@ -3187,7 +3454,13 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       })
       return Object.freeze({
         ...member,
-        typeParameters: resolveBounds(module.module, member.typeParameters, resolver, self.modules),
+        typeParameters: resolveBounds(
+          module.module,
+          member.typeParameters,
+          resolver,
+          self.modules,
+          diagnostics,
+        ),
         fields: Object.freeze(fields),
       })
     })
@@ -3849,7 +4122,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
                   ? parameter.declaredType.type.element
                   : Type.isReference(parameter.declaredType.type)
                     ? parameter.declaredType.type.target
-                    : (parameter.declaredType.type.arguments.at(0) ?? 'never'),
+                    : (Type.typeArgumentAt(parameter.declaredType.type, 0) ?? 'never'),
               ))
           ) {
             diagnostics.push(
@@ -3861,7 +4134,9 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           member.returnType._tag === 'Resolved' &&
           containsPositionRestrictedBorrow(member.returnType.type) &&
           (!Type.isSlot(member.returnType.type) ||
-            containsPositionRestrictedBorrow(member.returnType.type.arguments.at(0) ?? 'never')) &&
+            containsPositionRestrictedBorrow(
+              Type.typeArgumentAt(member.returnType.type, 0) ?? 'never',
+            )) &&
           (!Type.isSlice(member.returnType.type) || returnedBorrow(member) === undefined)
         ) {
           diagnostics.push(
@@ -3888,7 +4163,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
                     ? parameter.declaredType.type.element
                     : Type.isReference(parameter.declaredType.type)
                       ? parameter.declaredType.type.target
-                      : (parameter.declaredType.type.arguments.at(0) ?? 'never'),
+                      : (Type.typeArgumentAt(parameter.declaredType.type, 0) ?? 'never'),
                 ))
             )
               diagnostics.push(
@@ -3900,7 +4175,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             containsPositionRestrictedBorrow(operation.returnType.type) &&
             (!Type.isSlot(operation.returnType.type) ||
               containsPositionRestrictedBorrow(
-                operation.returnType.type.arguments.at(0) ?? 'never',
+                Type.typeArgumentAt(operation.returnType.type, 0) ?? 'never',
               ))
           )
             diagnostics.push(
@@ -4507,7 +4782,9 @@ export const containsLexicalBorrow = (
     name: type.name,
   })
   if (declaration?._tag !== 'StructDeclaration')
-    return type.arguments.some((argument) => containsLexicalBorrow(self, argument, seen))
+    return type.arguments
+      .filter(Type.isTypeArgument)
+      .some((argument) => containsLexicalBorrow(self, argument, seen))
   const substitution =
     Type.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),

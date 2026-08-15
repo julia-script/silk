@@ -352,13 +352,6 @@ const instanceText = (
 ): string =>
   `${declaration.module}\u0000${declaration.name}\u0000${typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
 
-const runnerId = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): typeof owner.declaration =>
-  Object.freeze({
-    _tag: 'CanonicalDeclarationId',
-    module: owner.declaration.module,
-    name: `${owner.declaration.name}$effect$${site.function.ordinal}$${site.span.start}`,
-  })
-
 const effectEntryAdapterId = (module: string): DeclarationIndex.CanonicalId =>
   Object.freeze({
     _tag: 'CanonicalDeclarationId',
@@ -367,7 +360,7 @@ const effectEntryAdapterId = (module: string): DeclarationIndex.CanonicalId =>
   })
 
 const baseRunnerKey = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): string =>
-  `${instanceText(owner.declaration, owner.typeArguments)}\u0000${site.function.sourceId}\u0000${site.function.ordinal}\u0000${site.span.start}`
+  `${instanceText(owner.declaration, owner.typeArguments)}\u0000${Hir.executableSiteKey(site)}`
 
 const witnessKey = (witness: DeclarationIndex.ConformanceWitness): string =>
   witness._tag === 'SourceConformanceWitness'
@@ -400,9 +393,7 @@ const effectValueType = (
       candidate._tag === 'EffectEnvironment' &&
       instanceText(candidate.instance.declaration, candidate.instance.typeArguments) ===
         instanceText(instance.declaration, instance.typeArguments) &&
-      candidate.site.function.sourceId === block.site.function.sourceId &&
-      candidate.site.function.ordinal === block.site.function.ordinal &&
-      candidate.site.span.start === block.site.span.start,
+      Hir.sameExecutableSite(candidate.site, block.site),
   )
   if (environment?._tag !== 'EffectEnvironment') return undefined
   return Object.freeze({
@@ -545,10 +536,7 @@ const runtimeRequirementArguments = (
   )
 
 const sameSite = (left: Hir.CallableSiteId, right: Hir.CallableSiteId): boolean =>
-  left.function.sourceId === right.function.sourceId &&
-  left.function.ordinal === right.function.ordinal &&
-  left.span.start === right.span.start &&
-  left.span.end === right.span.end
+  Hir.sameExecutableSite(left, right)
 
 const callableValueType = (
   fn: FunctionLowering,
@@ -664,7 +652,9 @@ const lowerRunEffectValue = (
       destination,
       outcome,
       effect,
-      runner: providedRunner ?? runnerId(effectType.environment.instance, effectType.site),
+      runner:
+        providedRunner ??
+        Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site),
       runnerTypeArguments: effectType.environment.instance.typeArguments,
       arguments: runtimeRequirementArguments(provided),
       outcomeType,
@@ -1714,7 +1704,7 @@ function lowerExpressionInner(
         captures.push(Object.freeze({ source, access }))
       }
       const destination = fn.alloc(type)
-      const runner = runnerId(fn.owner.key, expression.site)
+      const runner = Hir.effectRunnerId(fn.owner.key.declaration, expression.site)
       fn.emit(
         Object.freeze({
           _tag: 'MakeEffect',
@@ -1767,7 +1757,7 @@ function lowerExpressionInner(
         if (provided === undefined) return undefined
         const runner =
           provided.length === 0
-            ? runnerId(protectedType.environment.instance, protectedType.site)
+            ? Hir.effectRunnerId(protectedType.environment.instance.declaration, protectedType.site)
             : ensureProvidedRunner(fn, protectedType, provided)
         if (runner === undefined) return undefined
         const arguments_ = runtimeRequirementArguments(provided)
@@ -1929,7 +1919,10 @@ function lowerExpressionInner(
             effect: loweredSubject.result,
             runner:
               providedRunner ??
-              runnerId(effectValueType.environment.instance, effectValueType.site),
+              Hir.effectRunnerId(
+                effectValueType.environment.instance.declaration,
+                effectValueType.site,
+              ),
             runnerTypeArguments: effectValueType.environment.instance.typeArguments,
             arguments: runtimeRequirementArguments(provided),
             outcomeType,
@@ -2823,7 +2816,9 @@ function lowerExpressionInner(
       if (expression.operation === 'RawBufferFrom') {
         const [allocation, count] = argumentLocals
         const type = fn.type(expression.type)
-        const raw = Type.isRawBuffer(expression.type) ? expression.type.arguments.at(0) : undefined
+        const raw = Type.isRawBuffer(expression.type)
+          ? Type.typeArgumentAt(expression.type, 0)
+          : undefined
         const element = raw === undefined ? undefined : fn.semantic(raw)
         const elementLayout = element === undefined ? undefined : Layout.entry(fn.layout, element)
         if (
@@ -2923,7 +2918,9 @@ function lowerExpressionInner(
       if (expression.operation === 'RawBufferSlot') {
         const [buffer, index] = argumentLocals
         const type = fn.type(expression.type)
-        const element = Type.isSlot(expression.type) ? expression.type.arguments.at(0) : undefined
+        const element = Type.isSlot(expression.type)
+          ? Type.typeArgumentAt(expression.type, 0)
+          : undefined
         if (
           buffer === undefined ||
           index === undefined ||
@@ -3019,7 +3016,9 @@ function lowerExpressionInner(
         const slotArgument = expression.arguments.at(0)
         const slotType = slotArgument?._tag === 'Unavailable' ? undefined : slotArgument?.type
         const slotElement =
-          slotType !== undefined && Type.isSlot(slotType) ? slotType.arguments.at(0) : undefined
+          slotType !== undefined && Type.isSlot(slotType)
+            ? Type.typeArgumentAt(slotType, 0)
+            : undefined
         const type = fn.type(expression.type)
         if (
           slot === undefined ||
@@ -3082,7 +3081,9 @@ function lowerExpressionInner(
         const slotArgument = expression.arguments.at(0)
         const slotType = slotArgument?._tag === 'Unavailable' ? undefined : slotArgument?.type
         const element =
-          slotType !== undefined && Type.isSlot(slotType) ? slotType.arguments.at(0) : undefined
+          slotType !== undefined && Type.isSlot(slotType)
+            ? Type.typeArgumentAt(slotType, 0)
+            : undefined
         const type = fn.type(expression.type)
         if (
           slot === undefined ||
@@ -4616,7 +4617,7 @@ const lowerEffectRunner = (
     typeArguments: owner.key.typeArguments,
     contractRow: Object.freeze([
       ...owner.key.contractRow,
-      `effect-site:${block.site.function.sourceId}:${block.site.function.ordinal}:${block.site.span.start}`,
+      `effect-site:${Hir.executableSiteKey(block.site)}`,
     ]),
   })
   const captureParameterTypes = type.environment.fields.flatMap((field) => {
@@ -4746,7 +4747,7 @@ export const lowerProgram = (
       effectResults.set(instanceText(instance.key.declaration, instance.key.typeArguments), type)
       generatedRunners.push(
         Object.freeze({
-          id: runnerId(instance.key, block.site),
+          id: Hir.effectRunnerId(instance.key.declaration, block.site),
           owner: instance,
           block,
           type,
