@@ -1,9 +1,12 @@
 import { NodeServices } from '@effect/platform-node'
 import { assert, layer } from '@effect/vitest'
+import * as Cause from 'effect/Cause'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
+import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
+import * as PlatformError from 'effect/PlatformError'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
@@ -166,10 +169,7 @@ const assertLlvmDropCall = (ir: string, module: Mir.Module, label: string): void
   )
 }
 
-/**
- * A Drop that divides by zero on first entry. Completing with 42 means the hook never ran; a trap
- * or any other exit is the ≥1 signal. Pair with the poison program (exit 42) to pin exactly once.
- */
+/** Requires the explicit LLVM trap signal emitted by the witness Drop hook. */
 const assertNativeWitnessTraps = Effect.fnUntraced(function* (
   toolchain: NativeToolchain.Toolchain,
   module: Mir.Module,
@@ -177,10 +177,31 @@ const assertNativeWitnessTraps = Effect.fnUntraced(function* (
   label: string,
 ) {
   const llvm = yield* emitLlvm(module, `${label} witness`)
+  assertLlvmDropCall(llvm.ir, module, `${label} witness`)
   const outcome = yield* Effect.exit(runNative(toolchain, llvm, host))
-  assert.isFalse(
-    outcome._tag === 'Success' && Number(outcome.value.exitCode) === 42,
-    `${label} native witness must trap rather than return 42`,
+  assert.strictEqual(
+    outcome._tag,
+    'Failure',
+    `${label} native witness returned ${outcome._tag === 'Success' ? Number(outcome.value.exitCode) : 'a failure'}`,
+  )
+  if (outcome._tag !== 'Failure') return unreachable(`${label} native witness must trap`)
+
+  const failure = Cause.findErrorOption(outcome.cause)
+  assert.isTrue(Option.isSome(failure), Cause.pretty(outcome.cause))
+  if (Option.isNone(failure)) return unreachable(`${label} native witness must report a signal`)
+  assert.instanceOf(failure.value, PlatformError.PlatformError, Cause.pretty(outcome.cause))
+  if (!(failure.value instanceof PlatformError.PlatformError))
+    return unreachable(`${label} native witness must fail at the process boundary`)
+
+  assert.strictEqual(failure.value.reason.module, 'ChildProcess')
+  assert.strictEqual(failure.value.reason.method, 'exitCode')
+  const signal = 'cause' in failure.value.reason ? failure.value.reason.cause : undefined
+  assert.instanceOf(signal, Error, Cause.pretty(outcome.cause))
+  if (!(signal instanceof Error)) return unreachable(`${label} native witness signal is missing`)
+  assert.match(
+    signal.message,
+    /Process interrupted due to receipt of signal: 'SIG(?:ILL|TRAP)'/,
+    `${label} native witness must reach the LLVM trap instruction`,
   )
 })
 
@@ -485,7 +506,8 @@ layer(NodeServices.layer)('stored Effect engine parity', (it) => {
    * Shared stored-Effect cleanup surface.
    *
    * Poison: first Drop zeros `tag`, a second Drop traps, so a duplicate cannot return 42.
-   * Witness: the first Drop divides by zero, so a missing Drop returns 42 and a real Drop traps.
+   * Witness: the first Drop performs a checked out-of-bounds access, so a missing Drop returns 42
+   * and a real Drop reaches LLVM's explicit trap instruction.
    * Together those two native processes pass only for exactly one Drop. A mut-borrow ticket cannot
    * be read after a stored Effect is dropped (OWN0011 / InvalidLoan), so native cannot count in
    * process; Wasm still uses a non-zero class-0 free-list head at `wasmHeapTableBase` as the
@@ -497,7 +519,8 @@ impl Drop for Guard {
   fn drop(self: &mut Guard) -> () {
     ${
       kind === 'witness'
-        ? `let boom = self.tag / 0
+        ? `let values = [self.tag]
+    self.tag = values[i32.toUsize(self.tag)]
     return ()`
         : `if self.tag == 0 {
       let boom = 1 / 0
