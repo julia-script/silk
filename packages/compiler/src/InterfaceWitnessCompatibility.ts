@@ -1,5 +1,4 @@
 import * as Type from './Type.js'
-import * as TypeCompatibility from './TypeCompatibility.js'
 
 export type Access = 'Shared' | 'Exclusive' | 'Take'
 
@@ -20,13 +19,6 @@ export interface Contract {
 }
 
 export interface Witness extends Contract {}
-
-/**
- * The pre-migration convention adapts only value operands to shared borrows. Authored borrows still
- * retain their literal shape so access compatibility can be checked independently. The legacy
- * option can disappear atomically with the ordinary Order and HashKey source migration.
- */
-export type ValueOperandPolicy = 'Literal' | 'LegacySharedBorrow'
 
 export type Problem =
   | {
@@ -92,9 +84,6 @@ const operandShape = (type: Type.Type): OperandShape => {
 const accessRank = (access: Access): number =>
   access === 'Shared' ? 0 : access === 'Exclusive' ? 1 : 2
 
-const compatibleType = (source: Type.Type, target: Type.Type): boolean =>
-  TypeCompatibility.isCompatible(TypeCompatibility.check(source, target))
-
 const incompatible = (problem: Problem): Compatibility =>
   Object.freeze({ _tag: 'Incompatible', problem })
 
@@ -102,7 +91,6 @@ const operandProblem = (
   contract: Operand,
   witness: Operand,
   ordinal: number,
-  valueOperandPolicy: ValueOperandPolicy,
 ): Problem | undefined => {
   const promised = operandShape(contract.type)
   const required = operandShape(witness.type)
@@ -116,11 +104,7 @@ const operandProblem = (
         promised: promised.access,
         required: required.access,
       })
-    const typesMatch =
-      promised._tag === 'Value'
-        ? compatibleType(promised.type, required.type)
-        : Type.equals(promised.type, required.type)
-    if (!typesMatch)
+    if (!Type.equals(promised.type, required.type))
       return Object.freeze({
         _tag: 'OperandType',
         ordinal,
@@ -130,14 +114,6 @@ const operandProblem = (
       })
     return undefined
   }
-  if (
-    promised._tag === 'Value' &&
-    required._tag === 'Reference' &&
-    required.access === 'Shared' &&
-    valueOperandPolicy === 'LegacySharedBorrow' &&
-    Type.equals(promised.type, required.type)
-  )
-    return undefined
   if (accessRank(required.access) > accessRank(promised.access))
     return Object.freeze({
       _tag: 'StrongerOperandAccess',
@@ -157,11 +133,7 @@ const operandProblem = (
 }
 
 /** Checks one substituted interface contract without narrowing or rewriting that caller contract. */
-export const check = (
-  contract: Contract,
-  witness: Witness,
-  valueOperandPolicy: ValueOperandPolicy,
-): Compatibility => {
+export const check = (contract: Contract, witness: Witness): Compatibility => {
   if (contract.functionKind === 'Ordinary' && witness.functionKind === 'Effect')
     return incompatible(
       Object.freeze({
@@ -188,10 +160,10 @@ export const check = (
           required: witness.operands.length,
         }),
       )
-    const problem = operandProblem(operand, implementation, ordinal, valueOperandPolicy)
+    const problem = operandProblem(operand, implementation, ordinal)
     if (problem !== undefined) return incompatible(problem)
   }
-  if (!compatibleType(witness.success, contract.success))
+  if (!Type.equals(witness.success, contract.success))
     return incompatible(
       Object.freeze({ _tag: 'Success', promised: contract.success, actual: witness.success }),
     )
@@ -227,7 +199,7 @@ export const check = (
 
 const accessText = (access: Access): string => access.toLowerCase()
 
-/** Renders the stable, first-demand explanation used by conformance diagnostics. */
+/** Renders the stable first-demand explanation for a conformance diagnostic. */
 export const describe = (self: Compatibility): string | undefined => {
   if (self._tag === 'Compatible') return undefined
   const problem = self.problem

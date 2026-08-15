@@ -12,6 +12,9 @@
 - [x] 2.2 Implement receiver/parameter access compatibility and deterministic stronger-demand diagnostics.
 - [x] 2.3 Implement failure-row, requirement-row, and access subsumption while preserving exact generic caller contracts.
 - [x] 2.4 Add pure/smaller witness positives and stronger-row/access negatives.
+  - PR2 lands the pure compatibility actor and focused evidence only. Conformance admission remains
+    on the legacy checker until literal operand lowering and pure/effect boundary widening can land
+    atomically with the ownership migration.
 
 ## 3. Generic Witness Targets
 

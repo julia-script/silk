@@ -2,7 +2,6 @@ import * as Option from 'effect/Option'
 import * as ConformanceGoal from './ConformanceGoal.js'
 import * as ConformanceHead from './ConformanceHead.js'
 import * as Diagnostic from './Diagnostic.js'
-import * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
@@ -5237,10 +5236,10 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             contract.functionKind === 'Ordinary' &&
             contract.failureRow.failures.length === 0 &&
             contract.requirementRow.requirements.length === 0
-          const rejectIncompatibleMapping = (detail?: string): void => {
+          const rejectIncompatibleMapping = (): void => {
             diagnostics.push(
               invalidDiagnostic(
-                `${target._tag === 'TypePath' ? target.spelling : '_'} is incompatible with ${capability.name}.${contractName}${detail === undefined ? '' : `: ${detail}`}`,
+                `${target._tag === 'TypePath' ? target.spelling : '_'} is incompatible with ${capability.name}.${contractName}`,
                 mapping.syntax.span,
               ),
             )
@@ -5295,94 +5294,39 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
               binding.substitution === undefined
                 ? type
                 : Type.substitute(type, binding.substitution)
-            const applied = mapping.contract
-            const contractOperands =
-              applied?.operands.flatMap((operand, ordinal) =>
-                operand.type._tag === 'Resolved'
-                  ? [
-                      Object.freeze({
-                        name:
-                          operand.parameter.name._tag === 'Present'
-                            ? operand.parameter.name.spelling
-                            : `#${ordinal + 1}`,
-                        type: operand.type.type,
-                        receiver:
-                          ordinal ===
-                          applied.operands.findIndex(
-                            (candidate) =>
-                              candidate.type._tag === 'Resolved' &&
-                              Type.equals(
-                                Type.isReference(candidate.type.type)
-                                  ? candidate.type.type.target
-                                  : candidate.type.type,
-                                provider,
-                              ),
-                          ),
-                      }),
-                    ]
-                  : [],
-              ) ?? []
-            const witnessOperands = implementation.parameters.flatMap((parameter, ordinal) =>
-              parameter.declaredType._tag === 'Resolved'
-                ? [
-                    Object.freeze({
-                      name:
-                        parameter.name._tag === 'Present'
-                          ? parameter.name.spelling
-                          : `#${ordinal + 1}`,
-                      type: specialize(parameter.declaredType.type),
-                      receiver: contractOperands.at(ordinal)?.receiver ?? false,
-                    }),
-                  ]
-                : [],
-            )
-            const witnessRows = specialize(
-              Type.effect(
-                Type.unit,
-                implementation.failureRow.failures,
-                'Shared',
-                implementation.requirementRow.requirements,
-                implementation.failureRow.parameters,
-                implementation.requirementRow.parameters,
-              ),
-            )
-            const compatibility =
-              binding.substitution === undefined ||
-              binding.parameters.length !== declaredParameters.length ||
-              applied === undefined ||
-              contractOperands.length !== applied.operands.length ||
-              witnessOperands.length !== implementation.parameters.length ||
-              applied.success._tag !== 'Resolved' ||
-              implementation.returnType._tag !== 'Resolved' ||
-              !Type.isEffect(witnessRows)
-                ? undefined
-                : InterfaceWitnessCompatibility.check(
-                    Object.freeze({
-                      functionKind: applied.functionKind,
-                      operands: Object.freeze(contractOperands),
-                      success: applied.success.type,
-                      failures: applied.failureRow.failures,
-                      failureParameters: applied.failureRow.parameters,
-                      requirements: applied.requirementRow.requirements,
-                      requirementParameters: applied.requirementRow.parameters,
-                    }),
-                    Object.freeze({
-                      functionKind: implementation.functionKind,
-                      operands: Object.freeze(witnessOperands),
-                      success: specialize(implementation.returnType.type),
-                      failures: witnessRows.failures,
-                      failureParameters: witnessRows.failureParameters,
-                      requirements: witnessRows.requirements,
-                      requirementParameters: witnessRows.requirementParameters,
-                    }),
-                    contractShape ? 'LegacySharedBorrow' : 'Literal',
+            const validParameters =
+              binding.substitution !== undefined &&
+              implementation.parameters.length === contract.parameters.length &&
+              contract.parameters.every((parameter, ordinal) => {
+                const actual = implementation.parameters.at(ordinal)?.declaredType
+                return (
+                  parameter.declaredType._tag === 'Resolved' &&
+                  actual?._tag === 'Resolved' &&
+                  Type.isReference(actual.type) &&
+                  actual.type.access === 'Shared' &&
+                  Type.equals(
+                    Type.substitute(parameter.declaredType.type, substitution),
+                    specialize(actual.type.target),
                   )
-            if (compatibility === undefined || compatibility._tag === 'Incompatible')
-              rejectIncompatibleMapping(
-                compatibility === undefined
-                  ? undefined
-                  : InterfaceWitnessCompatibility.describe(compatibility),
+                )
+              })
+            const validResult =
+              implementation.returnType._tag === 'Resolved' &&
+              contract.returnType._tag === 'Resolved' &&
+              Type.equals(
+                Type.substitute(contract.returnType.type, substitution),
+                specialize(implementation.returnType.type),
               )
+            if (
+              !contractShape ||
+              !validParameters ||
+              !validResult ||
+              implementation.functionKind !== 'Ordinary' ||
+              binding.parameters.length !== declaredParameters.length ||
+              implementation.failureRow.failures.length > 0 ||
+              implementation.requirementRow.requirements.length > 0
+            )
+              rejectIncompatibleMapping()
             continue
           }
           const operation =
