@@ -153,20 +153,20 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
       unreachable('expected one representation field plan')
     const bound = Type.callable(['i32'], 'i32')
 
-    // An unavailable #187 resolution never becomes a realization; it keeps an explicit proof.
-    const open = CallableFieldRealization.realizeField(
-      Object.freeze({
-        _tag: 'UnavailableRepresentationField',
-        id: plan.id,
-        instance,
-        reason: Object.freeze({ _tag: 'OpenRepresentationArgument', requiredBound: bound }),
-        provenance: Object.freeze({
-          field: { sourceId: 'callable-field/unsupported', start: 0, end: 1 },
-          parameter: { sourceId: 'callable-field/unsupported', start: 0, end: 1 },
-        }),
-      }),
-      snapshot.instances.callables,
-    )
+    // An unavailable #187 resolution never becomes a realization; it keeps an explicit proof. The
+    // resolution comes from #187 itself rather than a fabricated record, so this pins the real
+    // shape an open representation argument produces.
+    const openInstance = Type.nominal(instance.module, instance.name, [
+      Type.representationParameterArgument(plan.parameter),
+    ])
+    const openResolution =
+      RepresentationField.lookup(
+        RepresentationField.resolveFields(snapshot.index, [openInstance]),
+        openInstance,
+        plan.id,
+      ) ?? unreachable('expected an unavailable representation field resolution')
+    assert.strictEqual(openResolution._tag, 'UnavailableRepresentationField')
+    const open = CallableFieldRealization.realizeField(openResolution, snapshot.instances.callables)
     assert.strictEqual(open._tag, 'Unsupported')
     assert.strictEqual(
       open._tag === 'Unsupported' ? open.reason._tag : undefined,
