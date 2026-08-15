@@ -12,7 +12,8 @@ import { unreachable } from './support/raise.js'
  * takes the whole aggregate rather than extracting the field out of it.
  *
  * The rule is stated once, on `CallableFieldRealization`, and these tests pin the ownership half of
- * it. `SEM0103` still fences every construction, so none of these programs reaches layout or MIR.
+ * it. Runtime acceptance for supported realized fields is covered separately; unsupported bare
+ * structural fields remain fenced by `SEM0103`.
  */
 
 const ascii = (value: string): Uint8Array =>

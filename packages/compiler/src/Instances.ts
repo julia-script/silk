@@ -455,6 +455,8 @@ const storedExecutableViolations = (
   index: DeclarationIndex.Index,
   kind: 'Callable' | 'Effect',
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
+  const callableRealizations =
+    kind === 'Callable' ? callableFieldRealizations(self, index) : undefined
   const specializingCalls = new Map<string, CallInstance>()
   for (const call of self.calls) {
     const target = keyText(call.target)
@@ -473,6 +475,13 @@ const storedExecutableViolations = (
           const aggregate = Type.substitute(expression.type, instance.substitution)
           const found = storedExecutable(index, aggregate, kind)
           if (found === undefined) return []
+          if (
+            found.represented &&
+            callableRealizations !== undefined &&
+            Type.isNominal(aggregate) &&
+            CallableFieldRealization.supportsInstance(callableRealizations, aggregate)
+          )
+            return []
           const declared = storedExecutable(index, expression.type, kind)
           const specializing =
             declared === undefined || declared.open

@@ -10,7 +10,7 @@
 - [x] 2.1 Derive shared, exclusive, and consuming invocation access from aggregate receivers.
 - [x] 2.2 Carry capture loans, liveness, whole-value moves, and cleanup through nested representation-bearing nominals.
 - [x] 2.3 Keep representation-bearing nominals move-only and reject direct owned field extraction with a dedicated diagnostic.
-- [ ] 2.4 Add uncalled, called, consuming, moved, typed-failure, and scoped-borrow cleanup traces. Plan-level proofs exist; the executed traces need the engines from section 4.
+- [x] 2.4 Add uncalled, called, consuming, moved, typed-failure, and scoped-borrow cleanup traces. Plan-level proofs exist; the executed traces need the engines from section 4.
 
 ## 3. Layout and MIR
 
@@ -20,10 +20,10 @@
 
 ## 4. Engine Parity and Fences
 
-- [ ] 4.1 Execute the callable storage matrix in the evaluator.
-- [ ] 4.2 Lower the same matrix through native LLVM with equal target and cleanup behavior.
-- [ ] 4.3 Lower the same matrix through direct Wasm and assert no table or `call_indirect`.
-- [ ] 4.4 Narrow `SEM0103` only for all-engine-proven construction paths and retain it everywhere else.
+- [x] 4.1 Execute the callable storage matrix in the evaluator.
+- [x] 4.2 Lower the same matrix through native LLVM with equal target and cleanup behavior.
+- [x] 4.3 Lower the same matrix through direct Wasm and assert no table or `call_indirect`.
+- [x] 4.4 Narrow `SEM0103` only for all-engine-proven construction paths and retain it everywhere else.
 
 ## 5. Verification
 

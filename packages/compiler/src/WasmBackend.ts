@@ -1311,6 +1311,11 @@ const layoutOf = (
     }
     if (type._tag === 'EffectValue')
       return LayoutPlan.effectEnvironmentLanes(plan, type.environment)
+    if (type._tag === 'CallableValue' && type.storage !== undefined) {
+      const shape = LayoutPlan.callingShape(plan, type.storage.type)
+      if (shape === undefined) throw new RangeError('Wasm backend lost a stored callable shape')
+      return shape.lanes
+    }
     if (type._tag === 'CallableValue')
       return type.environment === undefined
         ? Object.freeze([])
@@ -3940,6 +3945,7 @@ const emitOperation = (
         ...captureOperands,
         Instr.call(resolve(target.declaration, operation.typeArguments)),
         ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
+        ...reloadEscapingRoots(),
       ]
     }
     case 'ConvertInteger': {
