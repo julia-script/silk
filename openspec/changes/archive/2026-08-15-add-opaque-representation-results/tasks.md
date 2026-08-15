@@ -26,5 +26,5 @@
 ## 5. Verification
 
 - [x] 5.1 Run `pnpm typecheck` and `pnpm exec biome check .`.
-- [ ] 5.2 Run `pnpm test`, `pnpm check`, and `pnpm release:candidate`; report exact failures.
+- [x] 5.2 Run `pnpm test`, `pnpm check`, and `pnpm release:candidate`; report exact failures.
 - [x] 5.3 Verify opaque results introduce no runtime descriptor, allocation, indirect call, or existential join.
