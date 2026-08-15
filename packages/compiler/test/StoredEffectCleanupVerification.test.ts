@@ -1,0 +1,251 @@
+import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
+import * as Layout from '../src/Layout.js'
+import * as Lower from '../src/Lower.js'
+import * as Mir from '../src/Mir.js'
+import * as OpaqueRealization from '../src/OpaqueRealization.js'
+import type * as Ownership from '../src/Ownership.js'
+import * as Target from '../src/Target.js'
+import { unreachable } from './support/raise.js'
+
+const ascii = (value: string): Uint8Array =>
+  Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
+  const snapshot = yield* Analysis.ofSourceRealized(
+    name,
+    ascii(source),
+    Target.wasm32UnknownUnknown.id,
+  )
+  const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
+  const layout = Layout.plan(catalog, snapshot.instances)
+  const ownership = Analysis.ownershipOf(snapshot, name) ?? unreachable('expected module ownership')
+  const module = Lower.lowerProgram(
+    snapshot.instances,
+    new Map<string, Ownership.ModuleOwnership>([[name, ownership]]),
+    layout,
+    snapshot.index,
+    OpaqueRealization.catalogOf(snapshot),
+  )
+  return Object.freeze({ catalog, module })
+})
+
+const replaceDrop = (
+  module: Mir.Module,
+  target: Extract<Mir.Operation, { readonly _tag: 'Drop' }>,
+  replacement: Extract<Mir.Operation, { readonly _tag: 'Drop' }>,
+): Mir.Module =>
+  Object.freeze({
+    ...module,
+    functions: Object.freeze(
+      module.functions.map((fn) =>
+        Object.freeze({
+          ...fn,
+          regions: Object.freeze(
+            fn.regions.map((region) =>
+              region._tag === 'OperationRegion'
+                ? Object.freeze({
+                    ...region,
+                    operations: Object.freeze(
+                      region.operations.map((operation) =>
+                        operation === target ? replacement : operation,
+                      ),
+                    ),
+                  })
+                : region._tag === 'CleanupRegion'
+                  ? Object.freeze({
+                      ...region,
+                      releases: Object.freeze(
+                        region.releases.map((operation) =>
+                          operation === target ? replacement : operation,
+                        ),
+                      ),
+                    })
+                  : region,
+            ),
+          ),
+        }),
+      ),
+    ),
+  })
+
+it.effect('rejects incomplete cleanup inside nested Effect and callable captures', () =>
+  Effect.gen(function* () {
+    const { catalog, module } = yield* lowerStored(
+      'stored-effect-cleanup-verification/nested-executables',
+      `struct Token<F: once fn(i32) -> i32> { value: i32 marker: F }
+struct Deferred<F: once Effect<i32>> { operation: F }
+fn marker(value: i32) -> i32 { return value }
+fn consume<F: once fn(i32) -> i32>(value: i32, token: Token<F>) -> i32 {
+  return value + token.value
+}
+impl<F: once fn(i32) -> i32> Drop for Token<F> {
+  fn drop(self: &mut Token<F>) -> () { return () }
+}
+pub fn main() -> i32 {
+  let effectToken = Token { value: 1, marker: marker }
+  let nested = effect { return consume(1, move effectToken) }
+  let callableToken = Token { value: 2, marker: marker }
+  let transform = consume(move callableToken)
+  let deferred = Deferred { operation: effect {
+    let value = run move nested
+    let ownedTransform = move transform
+    return ownedTransform(value)
+  } }
+  return 0
+}`,
+    )
+    assert.deepEqual(Mir.verify(module), [])
+    const construct = module.functions
+      .flatMap(Mir.operations)
+      .find(
+        (operation) =>
+          operation._tag === 'Construct' &&
+          operation.fields.some((field) => field.stored?._tag === 'StoredEffectField'),
+      )
+    const stored =
+      construct?._tag === 'Construct'
+        ? construct.fields.find((field) => field.stored?._tag === 'StoredEffectField')?.stored
+        : undefined
+    assert.strictEqual(stored?._tag, 'StoredEffectField')
+    if (stored?._tag !== 'StoredEffectField') return
+    assert.deepEqual(
+      stored.realization.environment.map((field) => ({
+        access: field.access,
+        effect: field.effectIdentity !== undefined,
+        callable: field.callableIdentity !== undefined,
+      })),
+      [
+        { access: 'Take', effect: true, callable: false },
+        { access: 'Take', effect: false, callable: true },
+      ],
+    )
+
+    const drop = module.functions
+      .flatMap(Mir.operations)
+      .find(
+        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
+          operation._tag === 'Drop' &&
+          operation.cleanup._tag === 'StructCleanup' &&
+          operation.cleanup.fields.some((field) => field.cleanup._tag === 'EffectCleanup'),
+      )
+    assert.isDefined(drop)
+    if (drop === undefined || drop.cleanup._tag !== 'StructCleanup') return
+    const structCleanup = drop.cleanup
+    const outerField = structCleanup.fields.find((field) => field.cleanup._tag === 'EffectCleanup')
+    assert.strictEqual(outerField?.cleanup._tag, 'EffectCleanup')
+    if (outerField?.cleanup._tag !== 'EffectCleanup') return
+    const outer = outerField.cleanup
+    assert.deepEqual(
+      outer.slots.map((slot) => slot.cleanup._tag),
+      ['CallableCleanup', 'EffectCleanup'],
+    )
+    const effectSlot = outer.slots.find((slot) => slot.cleanup._tag === 'EffectCleanup')
+    const callableSlot = outer.slots.find((slot) => slot.cleanup._tag === 'CallableCleanup')
+    assert.strictEqual(effectSlot?.cleanup._tag, 'EffectCleanup')
+    assert.strictEqual(callableSlot?.cleanup._tag, 'CallableCleanup')
+    if (
+      effectSlot?.cleanup._tag !== 'EffectCleanup' ||
+      callableSlot?.cleanup._tag !== 'CallableCleanup'
+    )
+      return
+
+    const replaceOuter = (
+      cleanup: Ownership.CleanupPlan,
+      selected: Ownership.CleanupPlan,
+    ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
+      Object.freeze({
+        ...drop,
+        cleanup: Object.freeze({
+          ...structCleanup,
+          fields: Object.freeze(
+            structCleanup.fields.map((field) =>
+              field === outerField
+                ? Object.freeze({
+                    ...field,
+                    cleanup: Object.freeze({
+                      ...outer,
+                      slots: Object.freeze(
+                        outer.slots.map((slot) =>
+                          slot.cleanup === selected ? Object.freeze({ ...slot, cleanup }) : slot,
+                        ),
+                      ),
+                    }),
+                  })
+                : field,
+            ),
+          ),
+        }),
+      })
+
+    const nestedEffectSlot =
+      effectSlot.cleanup.slots.at(0) ?? unreachable('expected nested Effect cleanup slot')
+    assert.strictEqual(nestedEffectSlot.cleanup._tag, 'HookCleanup')
+    if (nestedEffectSlot.cleanup._tag !== 'HookCleanup') return
+    const hookedEntry = module.layout.entries.find(
+      (entry): entry is Layout.Entry =>
+        entry._tag === 'LayoutEntry' &&
+        entry.representation._tag === 'Aggregate' &&
+        entry.representation.cleanupHook !== undefined &&
+        Layout.catalogEntry(catalog, entry.type)?._tag === 'LayoutEntry',
+    )
+    assert.isDefined(hookedEntry)
+    if (hookedEntry === undefined || hookedEntry.representation._tag !== 'Aggregate') return
+    const hookedRepresentation = hookedEntry.representation
+    assert.include(Layout.encode(module.layout), 'cleanup-hook=')
+    const forgedLayout: Layout.Plan = Object.freeze({
+      ...module.layout,
+      entries: Object.freeze(
+        module.layout.entries.map((entry) =>
+          entry === hookedEntry
+            ? Object.freeze({
+                ...entry,
+                representation: Object.freeze({
+                  _tag: 'Aggregate' as const,
+                  fields: hookedRepresentation.fields,
+                  tailPadding: hookedRepresentation.tailPadding,
+                }),
+              })
+            : entry,
+        ),
+      ),
+    })
+    assert.include(
+      Layout.verifyAgainstCatalog(forgedLayout, catalog).map((violation) => violation.rule),
+      'CatalogMismatch',
+    )
+    const strippedHook: Ownership.CleanupPlan = Object.freeze({
+      ...effectSlot.cleanup,
+      slots: Object.freeze([
+        Object.freeze({ ...nestedEffectSlot, cleanup: nestedEffectSlot.cleanup.inner }),
+      ]),
+    })
+    const malformed: ReadonlyArray<readonly [Ownership.CleanupPlan, Ownership.CleanupPlan]> = [
+      [Object.freeze({ _tag: 'NoCleanup', type: effectSlot.cleanup.type }), effectSlot.cleanup],
+      [strippedHook, effectSlot.cleanup],
+      [
+        Object.freeze({
+          ...effectSlot.cleanup,
+          slots: Object.freeze([
+            Object.freeze({
+              ...nestedEffectSlot,
+              laneOffset: nestedEffectSlot.laneOffset + 1,
+            }),
+          ]),
+        }),
+        effectSlot.cleanup,
+      ],
+      [Object.freeze({ _tag: 'NoCleanup', type: callableSlot.cleanup.type }), callableSlot.cleanup],
+      [Object.freeze({ ...callableSlot.cleanup, slots: Object.freeze([]) }), callableSlot.cleanup],
+    ]
+    for (const [cleanup, selected] of malformed) {
+      assert.include(
+        Mir.verify(replaceDrop(module, drop, replaceOuter(cleanup, selected))).map(
+          (violation) => violation.rule,
+        ),
+        'InvalidAggregateOperation',
+      )
+    }
+  }),
+)

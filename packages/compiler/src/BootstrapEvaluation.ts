@@ -1659,10 +1659,13 @@ function* executeFunction(
     }
     if (cleanup._tag === 'RawBufferCleanup') return Object.freeze([cleanup.type])
     if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
-    // An unresolved stored-callable obligation never reaches evaluation: `specializeCleanup`
-    // resolves it to the realization's `CallableCleanup` before lowering, and `SEM0103` fences
-    // every path that has no realization.
-    if (cleanup._tag === 'RepresentedCallableCleanup') return Object.freeze([])
+    // Unresolved stored-executable obligations never reach evaluation: specialization resolves
+    // them before lowering, while the executable fences retain every incomplete engine path.
+    if (
+      cleanup._tag === 'RepresentedCallableCleanup' ||
+      cleanup._tag === 'RepresentedEffectCleanup'
+    )
+      return Object.freeze([])
     if (owner._tag !== 'AggregateValue') return Object.freeze([])
     return Object.freeze(
       cleanup.fields.flatMap((field) => {
