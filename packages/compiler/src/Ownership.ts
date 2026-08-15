@@ -886,19 +886,6 @@ const checkExpression = (
     case 'Run': {
       const stored = storedEffectRunAccess(state, expression.subject, expression.span)
       if (stored !== undefined) state.diagnostics.push(stored)
-      const contract = storedEffectContract(expression.subject)
-      if (contract !== undefined) {
-        // Like a stored callable invocation, a consuming run takes the whole aggregate instead of
-        // extracting its representation-bearing field. Weaker runs only read through the place.
-        const rootSite = placeSite(expression.subject)
-        if (contract.access !== 'Take' || stored !== undefined || rootSite === undefined) {
-          checkExpression(state, live, expression.subject, false, guard, escaping)
-          return
-        }
-        checkPlaceInterior(state, live, expression.subject, guard, escaping)
-        checkUse(state, live, rootSite, placeRoot(expression.subject).span, true)
-        return
-      }
       const site = useSite(expression.subject)
       if (
         site !== undefined &&

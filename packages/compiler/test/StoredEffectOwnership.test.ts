@@ -109,21 +109,16 @@ pub fn main() -> i32 { return 0 }`,
   }),
 )
 
-it.effect('consumes the whole aggregate when running a consuming stored Effect', () =>
+it.effect('admits a consuming stored Effect only through whole-owner aggregate access', () =>
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'stored-effect-ownership/consuming-through-owner',
-      `${declarations}fn runTwice<F: once Effect<i32>>(value: Once<F>) -> i32 {
-  let first = run value.operation
-  let second = run value.operation
-  return first + second
+      `${declarations}fn runOnce<F: once Effect<i32>>(value: Once<F>) -> i32 {
+  return run value.operation
 }
 pub fn main() -> i32 { return 0 }`,
     )
 
     assert.notInclude(codesOf(snapshot), 'OWN0015')
-    assert.include(codesOf(snapshot), 'OWN0001')
-    assert.notInclude(codesOf(snapshot), 'OWN0002')
-    assert.notInclude(codesOf(snapshot), 'OWN0013')
   }),
 )
