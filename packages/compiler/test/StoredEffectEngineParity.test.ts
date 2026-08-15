@@ -1,5 +1,9 @@
+import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
@@ -8,6 +12,7 @@ import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
 import * as MirNormalization from '../src/MirNormalization.js'
+import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import type * as Ownership from '../src/Ownership.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
@@ -16,10 +21,60 @@ import * as SuspensionMir from '../src/SuspensionMir.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
 import * as Target from '../src/Target.js'
 import * as WasmBackend from '../src/WasmBackend.js'
+import * as Process from './support/Process.js'
 import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const clangPath = Effect.fnUntraced(function* () {
+  const configured = yield* Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(''))
+  if (configured.length > 0) return configured
+  const fileSystem = yield* FileSystem.FileSystem
+  for (const candidate of ['/opt/homebrew/opt/llvm/bin/clang', '/usr/local/opt/llvm/bin/clang'])
+    if (yield* fileSystem.exists(candidate)) return candidate
+  return 'clang'
+})
+
+/**
+ * Takes one already-lowered LLVM artifact through object emission, shim compilation, linking, and
+ * execution. `SEM0107` still fences `Driver.compile`, so this is the native path task 4.2 can use.
+ */
+const runNative = Effect.fnUntraced(function* (
+  toolchain: NativeToolchain.Toolchain,
+  artifact: Backend.LlvmBitcodeArtifact,
+  target: Target.Target,
+) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const destination = path.join(yield* fileSystem.makeTempDirectoryScoped(), 'program')
+  const linked = NativeToolchain.withBuildScope('stored-effect-parity', (scope) => {
+    const object = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
+    if (object._tag !== 'ObjectArtifact') return object
+    const shim = NativeToolchain.compileShim(
+      toolchain,
+      scope,
+      target,
+      artifact.termination,
+      artifact.nativeRuntimeSymbols,
+    )
+    if (shim._tag !== 'ObjectArtifact') return shim
+    return NativeToolchain.ClangLinker.link(
+      toolchain,
+      target,
+      [object.artifact, shim.artifact],
+      [],
+      destination,
+    )
+  })
+  assert.strictEqual(
+    linked._tag,
+    'Executable',
+    linked._tag === 'ToolchainFailure' ? linked.output : linked._tag,
+  )
+  if (linked._tag !== 'Executable') return unreachable('expected a native executable')
+  return yield* Process.run(linked.path, [])
+})
 
 /**
  * Lowers one stored-Effect program to MIR for a chosen target.
@@ -147,15 +202,41 @@ const storedRealization = (module: Mir.Module, label: string) => {
  * Asserting the full mangled symbol — rather than a sanitized name fragment — pins the runner's
  * concrete instance key too, so a correct spelling paired with the wrong specialization fails.
  */
-const emittedSymbol = (module: Mir.Module, runner: { module: string; name: string }): string => {
+const emittedFunction = (module: Mir.Module, runner: { module: string; name: string }) => {
   const candidates = module.functions.filter((candidate) => candidate.id.module === runner.module)
   // Provider specialization renames a runner in place (`f$effect$-1` -> `f$effect$-1$provided$N`),
   // so accept the exact runner or its single specialization, and nothing else.
-  const fn =
+  return (
     candidates.find((candidate) => candidate.id.name === runner.name) ??
     candidates.find((candidate) => candidate.id.name.startsWith(`${runner.name}$provided$`)) ??
     unreachable(`expected an emitted function for ${runner.module}.${runner.name}`)
-  return Backend.symbolFor(fn, Mir.machineEntry(module))
+  )
+}
+
+const emittedSymbol = (module: Mir.Module, runner: { module: string; name: string }): string =>
+  Backend.symbolFor(emittedFunction(module, runner), Mir.machineEntry(module))
+
+/** The exact debug-WAT call target for one runner, including the suspend-step suffix when needed. */
+const emittedWasmCallTarget = (
+  module: Mir.Module,
+  runner: { module: string; name: string },
+): string => {
+  const fn = emittedFunction(module, runner)
+  const symbol = Backend.symbolFor(fn, Mir.machineEntry(module))
+  return (fn.suspension?.classification ?? 'Synchronous') !== 'Synchronous'
+    ? `${symbol}$suspend_step`
+    : symbol
+}
+
+const assertDirectWasmRunner = (
+  wat: string,
+  module: Mir.Module,
+  runner: { module: string; name: string },
+  label: string,
+): void => {
+  const target = emittedWasmCallTarget(module, runner)
+  assert.include(wat, `call $${target}`, `${label} direct call $${target}`)
+  assert.notInclude(wat, 'call_indirect', label)
 }
 
 const dropCalls = (outcome: BootstrapEvaluation.Outcome): number =>
@@ -165,7 +246,10 @@ const dropCalls = (outcome: BootstrapEvaluation.Outcome): number =>
       ).length
     : 0
 
-const traceCount = (outcome: BootstrapEvaluation.Outcome, tag: string): number =>
+const traceCount = (
+  outcome: BootstrapEvaluation.Outcome,
+  tag: BootstrapEvaluation.TraceEvent['_tag'],
+): number =>
   outcome._tag === 'Completed' ? outcome.trace.filter((event) => event._tag === tag).length : 0
 
 const shared = `struct Deferred<F: Effect<i32>> { operation: F }
@@ -225,6 +309,11 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const host = yield* Target.host()
+      const toolchain = Object.freeze({
+        _tag: 'Toolchain' as const,
+        clang: yield* clangPath(),
+        shimCache: NativeToolchain.makeShimCache(),
+      })
       for (const testCase of runtimeMatrix) {
         // One module name for both targets: the runner identity must not depend on the target.
         const moduleName = `stored-effect-parity/${testCase.name}`
@@ -243,14 +332,14 @@ it.effect(
         )
         assert.strictEqual(completedValue(evaluated), testCase.result, testCase.name)
 
+        // Debug WAT names the exact call target; release would only give a numeric index.
         const wasm = yield* Backend.emit(WasmBackend.WasmBackend, wasmLowering.module, {
-          mode: 'release',
+          mode: 'debug',
         })
         assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
         if (wasm._tag !== 'WebAssemblyModuleArtifact') return
         assert.strictEqual(yield* runWasm(wasm.bytes), testCase.result, `${testCase.name} Wasm`)
-        // Stored Effects stay statically dispatched: no runtime dictionary, no indirect call.
-        assert.notInclude(wasm.wat, 'call_indirect', testCase.name)
+        assertDirectWasmRunner(wasm.wat, wasmLowering.module, realization.runner, testCase.name)
 
         const nativeLowering = yield* lowerStored(moduleName, testCase.source, host)
         const nativeRunner = storedRunner(nativeLowering.module, testCase.name)
@@ -273,6 +362,12 @@ it.effect(
           realization.runner,
           `${testCase.name} runner identity across targets`,
         )
+        const nativeRun = yield* runNative(toolchain, llvm, host)
+        assert.strictEqual(
+          nativeRun.exitCode,
+          testCase.result,
+          `${testCase.name} native: ${nativeRun.stderr}`,
+        )
         if (testCase.name === 'provided') {
           // Service provision resolves statically: the specialized runner reaches the backend, and
           // the provider travels in the environment rather than a runtime dictionary.
@@ -292,9 +387,16 @@ it.effect(
             emittedSymbol(nativeLowering.module, specialized.runner),
             testCase.name,
           )
+          assertDirectWasmRunner(
+            wasm.wat,
+            wasmLowering.module,
+            specialized.runner,
+            `${testCase.name} specialized`,
+          )
         }
       }
-    }),
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  180_000,
 )
 
 /**
@@ -389,6 +491,11 @@ pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 it.effect('cleans unrun and failing stored Effect environments exactly once in every engine', () =>
   Effect.gen(function* () {
     const host = yield* Target.host()
+    const toolchain = Object.freeze({
+      _tag: 'Toolchain' as const,
+      clang: yield* clangPath(),
+      shimCache: NativeToolchain.makeShimCache(),
+    })
     for (const exit of ['unrun', 'failure'] as const) {
       const moduleName = `stored-effect-parity/cleanup-${exit}`
       const { snapshot, module } = yield* lowerStored(
@@ -403,11 +510,14 @@ it.effect('cleans unrun and failing stored Effect environments exactly once in e
       assert.strictEqual(traceCount(outcome, 'AllocationAcquire'), 1, `${exit} acquire`)
       assert.strictEqual(traceCount(outcome, 'AllocationRelease'), 1, `${exit} release`)
 
-      const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'release' })
+      const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'debug' })
       assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact', exit)
       if (wasm._tag !== 'WebAssemblyModuleArtifact') return
       assert.strictEqual(yield* runWasm(wasm.bytes), 42, `${exit} Wasm`)
       assert.notInclude(wasm.wat, 'call_indirect', exit)
+      if (exit === 'failure') {
+        assertDirectWasmRunner(wasm.wat, module, storedRunner(module, exit).realization.runner, exit)
+      }
 
       const native = yield* lowerStored(moduleName, cleanupProgram(exit), host)
       const llvm = yield* Backend.emit(Backend.LlvmBackend, native.module, { mode: 'release' })
@@ -418,6 +528,8 @@ it.effect('cleans unrun and failing stored Effect environments exactly once in e
         native.module.functions.find((candidate) => candidate.id.name.startsWith('drop@impl')) ??
         unreachable(`expected an emitted Drop hook for ${exit}`)
       assert.include(llvm.ir, Backend.symbolFor(dropFn, Mir.machineEntry(native.module)), exit)
+      const nativeRun = yield* runNative(toolchain, llvm, host)
+      assert.strictEqual(nativeRun.exitCode, 42, `${exit} native: ${nativeRun.stderr}`)
 
       // `unrun` never reaches a run operation, so the realization is the only runner fact.
       const runner = storedRealization(module, exit).runner
@@ -438,7 +550,8 @@ it.effect('cleans unrun and failing stored Effect environments exactly once in e
         assertExactRows(native.module, `${exit} native`)
       }
     }
-  }),
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  180_000,
 )
 
 const suspending = `struct Guard { tag: i32 storage: Allocation }
@@ -468,6 +581,11 @@ pub fn main() -> i32 {
 it.effect('resumes a suspending stored Effect with matching cleanup in every engine', () =>
   Effect.gen(function* () {
     const host = yield* Target.host()
+    const toolchain = Object.freeze({
+      _tag: 'Toolchain' as const,
+      clang: yield* clangPath(),
+      shimCache: NativeToolchain.makeShimCache(),
+    })
     const moduleName = 'stored-effect-parity/suspending'
     const { snapshot, module } = yield* lowerStored(
       moduleName,
@@ -480,11 +598,16 @@ it.effect('resumes a suspending stored Effect with matching cleanup in every eng
     assert.isAbove(traceCount(outcome, 'SuspensionOrigin'), 0)
     assertExactRows(module, 'suspending')
 
-    const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'release' })
+    const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'debug' })
     assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact')
     if (wasm._tag !== 'WebAssemblyModuleArtifact') return
     assert.strictEqual(yield* runWasm(wasm.bytes), 42)
-    assert.notInclude(wasm.wat, 'call_indirect')
+    assertDirectWasmRunner(
+      wasm.wat,
+      module,
+      storedRunner(module, 'suspending').realization.runner,
+      'suspending',
+    )
 
     const native = yield* lowerStored(moduleName, suspending, host)
     const llvm = yield* Backend.emit(Backend.LlvmBackend, native.module, { mode: 'release' })
@@ -495,7 +618,10 @@ it.effect('resumes a suspending stored Effect with matching cleanup in every eng
       llvm.ir,
       emittedSymbol(native.module, storedRunner(native.module, 'suspending').realization.runner),
     )
-  }),
+    const nativeRun = yield* runNative(toolchain, llvm, host)
+    assert.strictEqual(nativeRun.exitCode, 42, `suspending native: ${nativeRun.stderr}`)
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  180_000,
 )
 
 it.effect('keeps the Wasm heap flat across repeated stored Effect cleanup cycles', () =>
