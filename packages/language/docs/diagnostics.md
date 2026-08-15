@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 109 |
-| `OWN` | Ownership | 12 |
+| `SEM` | Semantic | 120 |
+| `OWN` | Ownership | 14 |
 | `LAY` | Layout | 1 |
 
-There are 137 codes in total.
+There are 150 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -162,9 +162,20 @@ There are 137 codes in total.
 | `SEM0105` | Stable code for the first exact representation that diverges at a static value join. | `Cannot join <expected> with <actual>; consume each represented value inside its branch before joining` |
 | `SEM0106` | Stable code for a representation argument whose contract cannot satisfy its required bound. | `Representation <parameter> requires <required>, but the supplied bound <actual> is not admissible` |
 | `SEM0107` | Stable code for storing a represented Effect before its runtime layout is supported. | `Cannot construct <aggregate>: <site> retains the static identity of <effect>, but represented Effect storage has no supported runtime layout` |
-| `SEM0108` | Stable code for two conformance heads that may name one provider under one interface. | `<head> may overlap <other>` |
-| `SEM0109` | Stable code for a conformance requirement that does not descend toward a base witness. | `<head> declares a requirement that does not descend` |
-| `SEM0110` | Stable code for a concrete specialization whose conditional requirements cannot be proved. | `<goal> cannot be proved: <detail>` |
+| `SEM0108` | Stable code for a `typeof` item that resolves to no declaration in scope. | `Cannot name the exact representation of <item>: no declaration of that name is in scope` |
+| `SEM0109` | Stable code for a `typeof` item whose name belongs to more than one declaration. | `Cannot name the exact representation of <item>: <count> declarations carry that name, so no single item is resolved` |
+| `SEM0110` | Stable code for a `typeof` item that names something other than an ordinary callable. | `Cannot name the exact representation of <item>: it names <subject>, which has no source-nameable exact identity` |
+| `SEM0111` | Stable code for a `typeof` item whose generic parameters are not all supplied. | `Cannot name the exact representation of <item>: an exact representation names one construction, but <expected> generic parameters were declared and <actual> concrete arguments were supplied` |
+| `SEM0112` | Stable code for a public contract exposing the exact identity of a private item. | `Public contract exposes the exact representation of private <item>` |
+| `SEM0113` | Stable code for one opaque producer specialization yielding multiple exact identities. | `Opaque result <family> has divergent reachable realizations: <join>` |
+| `SEM0114` | Stable code for an opaque family whose representation evidence contains no local construction. | `Opaque realization cycle has no local concrete construction: <join>` |
+| `SEM0115` | Stable code for an opaque realization whose inline captures contain that same family. | `Opaque results form an infinite inline layout cycle: <join>` |
+| `SEM0116` | Stable code for an opaque result binder whose bound is not callable or Effect representation. | `Opaque result binder <binder> must have a callable or Effect representation bound, but its kind is <actual>` |
+| `SEM0117` | Stable code for an opaque producer whose reachable returns establish no representation. | `Opaque result <family> has no reachable callable or Effect representation construction` |
+| `SEM0118` | Stable code for an opaque result declared where no producer body can establish its identity. | `Opaque result <declaration> is not permitted on a <context> operation because no producer body can establish one static representation` |
+| `SEM0119` | Stable code for two conformance heads that may name one provider under one interface. | `<head> may overlap <other>` |
+| `SEM0120` | Stable code for a conformance requirement that does not descend toward a base witness. | `<head> declares a requirement that does not descend` |
+| `SEM0121` | Stable code for a concrete specialization whose conditional requirements cannot be proved. | `<goal> cannot be proved: <detail>` |
 
 ## Ownership (`OWN`)
 
@@ -182,6 +193,8 @@ There are 137 codes in total.
 | `OWN0010` |  | `<requested> slice loan conflicts with an active <toLowerCase> loan` |
 | `OWN0011` |  | `<toLowerCase> access to <spelling> conflicts with an active slice loan` |
 | `OWN0012` |  | `A non-Copy value cannot be moved out through a borrowed slice place` |
+| `OWN0013` | Stable code for extracting one owned representation-bearing field out of its aggregate. | `Cannot move field <field> out of <aggregate>: it stores the callable representation <contract>, whose captures are cleaned with the whole aggregate` |
+| `OWN0014` | Stable code for invoking a stored callable through too weak an aggregate receiver access. | `Cannot invoke field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
 
 ## Layout (`LAY`)
 

@@ -510,6 +510,7 @@ it.effect('constructs a frontend snapshot without runtime realization', () =>
         'module-surface',
         'elaboration',
         'ownership',
+        'opaque-realization',
         'semantic-occurrences',
         'anonymous-expressions',
       ],

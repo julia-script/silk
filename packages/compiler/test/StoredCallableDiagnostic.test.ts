@@ -177,6 +177,22 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('keeps nested structural callable captures fenced before layout and MIR', () =>
+  Effect.gen(function* () {
+    const source = `struct Parser<F: fn(i32) -> i32> { decode: F }
+fn apply(value: i32, transform: fn(i32) -> i32) -> i32 { return transform(value) }
+pub fn main() -> i32 {
+  let parser = Parser { decode: apply(i32.add(1)) }
+  return parser.decode(41)
+}`
+    const snapshot = yield* analyzed('stored-callable/nested-callable-capture', source)
+    assert.deepEqual(codes(snapshot), ['SEM0103'], messages(snapshot).join('\n'))
+    assert.strictEqual(snapshot.layoutCatalog._tag, 'Unavailable')
+    assert.strictEqual(snapshot.layout._tag, 'Unavailable')
+    assert.strictEqual(snapshot.mir._tag, 'Unavailable')
+  }),
+)
+
 it.effect('reports the stored callable alongside ownership findings for a once field', () =>
   Effect.gen(function* () {
     const source = `struct Parser { decode: once fn(i32) -> i32 }

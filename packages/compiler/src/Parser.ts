@@ -794,6 +794,34 @@ const isUniversalPatternStart = (state: State): boolean => {
   )
 }
 
+/**
+ * True for one contextual identifier spelling.
+ *
+ * Contextual spellings stay ordinary identifiers in the lexer so that source may still name a
+ * value `typeof` or `some`; only the parser recognizes them, and only where the surrounding
+ * grammar admits no other reading.
+ */
+const hasContextualSpelling = (state: State, spelling: string): boolean => {
+  const token = significantToken(state)
+  return (
+    token?.kind === 'Identifier' &&
+    Option.contains(SourceFile.spelling(state.lexical.source, token.span), spelling)
+  )
+}
+
+/** True only for `typeof(`; an ordinary type path is never followed by a parenthesis. */
+const isExactRepresentationStart = (state: State): boolean =>
+  hasContextualSpelling(state, 'typeof') && significantKindAfter(state, 1) === 'LeftParenthesis'
+
+/**
+ * True only for `some<` at the start of a result.
+ *
+ * The binder is contextual and scoped to result position alone, so an ordinary applied type keeps
+ * the `some<...>` spelling everywhere else in the grammar.
+ */
+const isOpaqueResultStart = (state: State): boolean =>
+  hasContextualSpelling(state, 'some') && significantKindAfter(state, 1) === 'Less'
+
 const isNominalPatternStart = (state: State): boolean => {
   if (nextSignificantKind(state) !== 'Identifier') return false
   if (hasCompleteAppliedPostfix(state, 'LeftBrace')) return true
@@ -1788,11 +1816,71 @@ const parseTypeParameterList = (
   })
 }
 
+/** Parses the one callable or Effect representation binder admitted by an opaque result. */
+const parseOpaqueResultBinderList = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+): NodeResult => {
+  const left = expect(initial, 'Less', ['Identifier', 'Greater', ...following])
+  const name = expect(left.state, 'Identifier', ['Colon', 'Greater', ...following])
+  const colon = expect(name.state, 'Colon', [...typeStarts, 'Greater', ...following])
+  const bound = parseType(colon.state, ['Comma', 'Greater', ...following], true)
+  // A comma proves that source supplied more than the single binder this form admits. Consume the
+  // extra binder region through the real `>` so parsing resumes at the result. Otherwise, type
+  // starts synchronize a missing `>` without consuming the result type that follows it.
+  const right =
+    nextSignificantKind(bound.state) === 'Comma'
+      ? expect(bound.state, 'Greater', following)
+      : expect(bound.state, 'Greater', [...typeStarts, ...following])
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'TypeParameterList', [
+      ...left.elements,
+      syntaxNode(bound.state, 'TypeParameter', [...name.elements, ...colon.elements, bound.node]),
+      ...right.elements,
+    ]),
+  })
+}
+
+/** Parses one named type reference: a path with an optional applied type-argument list. */
+const parseNamedTypeReference = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+  preserveFieldStart = false,
+): NodeResult => {
+  const path = parseTypePath(initial, ['Less', ...following], preserveFieldStart)
+  if (nextSignificantKind(path.state) !== 'Less') return path
+  const arguments_ = parseTypeArgumentList(path.state, 'TypeArgumentList', following)
+  return Object.freeze({
+    state: arguments_.state,
+    node: syntaxNode(arguments_.state, 'AppliedType', [path.node, arguments_.node]),
+  })
+}
+
 const parseTypePrimary = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
   preserveFieldStart = false,
 ): NodeResult => {
+  if (isExactRepresentationStart(initial)) {
+    const keyword = expect(initial, 'Identifier', ['LeftParenthesis', ...following])
+    const left = expect(keyword.state, 'LeftParenthesis', [
+      'Identifier',
+      'RightParenthesis',
+      ...following,
+    ])
+    const item = parseNamedTypeReference(left.state, ['RightParenthesis', ...following])
+    const right = expect(item.state, 'RightParenthesis', following)
+    return Object.freeze({
+      state: right.state,
+      node: syntaxNode(right.state, 'ExactRepresentationType', [
+        ...keyword.elements,
+        ...left.elements,
+        item.node,
+        ...right.elements,
+      ]),
+    })
+  }
   const callableMode = nextSignificantKind(initial)
   if (
     (callableMode === 'MutKeyword' || callableMode === 'OnceKeyword') &&
@@ -1924,15 +2012,8 @@ const parseTypePrimary = (
       ]),
     })
   }
-  if (nextSignificantKind(initial) !== 'LeftBracket') {
-    const path = parseTypePath(initial, ['Less', ...following], preserveFieldStart)
-    if (nextSignificantKind(path.state) !== 'Less') return path
-    const arguments_ = parseTypeArgumentList(path.state, 'TypeArgumentList', following)
-    return Object.freeze({
-      state: arguments_.state,
-      node: syntaxNode(arguments_.state, 'AppliedType', [path.node, arguments_.node]),
-    })
-  }
+  if (nextSignificantKind(initial) !== 'LeftBracket')
+    return parseNamedTypeReference(initial, following, preserveFieldStart)
   const left = expect(initial, 'LeftBracket', [...typeStarts, ...following])
   const element = parseType(left.state, ['Semicolon', 'RightBracket', ...following])
   const semicolon = expect(element.state, 'Semicolon', [
@@ -1976,6 +2057,22 @@ function parseType(
 const parseReturnType = (initial: State): NodeResult => {
   const following: ReadonlyArray<Token.TokenKind> = Object.freeze(['Bang', 'Question', 'LeftBrace'])
   const arrow = expect(initial, 'Arrow', [...typeStarts, ...following])
+  if (isOpaqueResultStart(arrow.state)) {
+    const keyword = expect(arrow.state, 'Identifier', ['Less', ...following])
+    // The binder list is followed by a type, so its recovery set must exclude every type start:
+    // `parseTypeParameterList` stops at any token it is told follows the list.
+    const binders = parseOpaqueResultBinderList(keyword.state, following)
+    const result = parseType(binders.state, following)
+    const opaque = syntaxNode(result.state, 'OpaqueResultType', [
+      ...keyword.elements,
+      binders.node,
+      result.node,
+    ])
+    return Object.freeze({
+      state: result.state,
+      node: syntaxNode(result.state, 'ReturnType', [...arrow.elements, opaque]),
+    })
+  }
   const type = parseType(arrow.state, following)
   return Object.freeze({
     state: type.state,

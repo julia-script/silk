@@ -29,6 +29,35 @@ const elaborateWithStdlib = Effect.fnUntraced(function* (id: string, text: strin
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
+it('owns complete callable target conversion and intrinsic-aware equality', () => {
+  const declaration: Type.CallableIdentityArgument['target'] = Object.freeze({
+    _tag: 'Declaration',
+    module: 'targets',
+    name: 'decode',
+  })
+  const identity: Type.CallableIdentityArgument['target'] = Object.freeze({
+    _tag: 'Builtin',
+    actor: 'Intrinsic',
+    operation: 'Add',
+    intrinsic: Object.freeze({ actor: 'i32', name: 'add' }),
+  })
+  const target = Hir.callableTargetFromIdentity(identity)
+
+  assert.deepEqual(
+    Hir.callableTargetIdentity(Hir.callableTargetFromIdentity(declaration)),
+    declaration,
+  )
+  assert.deepEqual(Hir.callableTargetIdentity(target), identity)
+  assert.strictEqual(Hir.matchesCallableTargetIdentity(target, identity), true)
+  assert.strictEqual(
+    Hir.matchesCallableTargetIdentity(target, {
+      ...identity,
+      intrinsic: Object.freeze({ actor: 'u32', name: 'add' }),
+    }),
+    false,
+  )
+})
+
 it('constructs typed HIR with canonical call targets and normalized contracts', () => {
   const result = elaborate('golden://accepted.silk', acceptedSource)
   const main = result.hir.functions.at(1)

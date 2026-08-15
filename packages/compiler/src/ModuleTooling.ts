@@ -1,5 +1,5 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import type * as Elaboration from './Elaboration.js'
+import * as Elaboration from './Elaboration.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as NameResolution from './NameResolution.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
@@ -22,88 +22,15 @@ export interface ModuleTooling {
   readonly anonymousExpressions: ReadonlyArray<AnonymousExpression>
 }
 
-const nestedExpressions = (
-  expression: Elaboration.ExpressionFact,
-): ReadonlyArray<Elaboration.ExpressionFact> => {
-  const nested: ReadonlyArray<Elaboration.ExpressionFact> = (() => {
-    switch (expression._tag) {
-      case 'Move':
-      case 'Borrow':
-      case 'FieldProjection':
-        return [expression.subject]
-      case 'PlaceReplace':
-        return [expression.destination, expression.value]
-      case 'IndexProjection':
-        return [expression.subject, expression.index]
-      case 'ArrayLiteral':
-        return expression.elements.map((element) => element.expression)
-      case 'StructLiteral':
-        return expression.initializers.map((initializer) => initializer.expression)
-      case 'Grouped':
-        return [expression.expression]
-      case 'Run':
-        return [expression.subject]
-      case 'EffectBindRequirement':
-        return [expression.protected]
-      case 'CallableSection':
-        return expression.captures.map((capture) => capture.expression)
-      case 'CallableApply':
-        return [expression.callee, ...expression.arguments.map((argument) => argument.expression)]
-      case 'Operator':
-      case 'ShortCircuit':
-      case 'Call':
-        return expression.arguments.map((argument) => argument.expression)
-      case 'Match':
-        return [
-          expression.scrutinee,
-          ...expression.arms.flatMap((arm) => [
-            ...(arm.guard === undefined ? [] : [arm.guard]),
-            arm.result,
-          ]),
-        ]
-      default:
-        return []
-    }
-  })()
-  return Object.freeze([expression, ...nested.flatMap((candidate) => nestedExpressions(candidate))])
-}
-
 /** Returns every expression nested under one statement in deterministic source order. */
 export const statementExpressions = (
   statement: Elaboration.StatementFact,
 ): ReadonlyArray<Elaboration.ExpressionFact> => {
-  switch (statement._tag) {
-    case 'UnsafeStatement':
-      return Object.freeze(statement.statements.flatMap(statementExpressions))
-    case 'BindStatement':
-      return nestedExpressions(statement.binding.initializer)
-    case 'ExpressionStatement':
-      return nestedExpressions(statement.expression)
-    case 'ReturnStatement':
-      return nestedExpressions(statement.expression)
-    case 'FailStatement':
-    case 'DropStatement':
-      return nestedExpressions(statement.expression)
-    case 'IfStatement':
-      return Object.freeze([
-        ...nestedExpressions(statement.condition),
-        ...statement.taken.flatMap(statementExpressions),
-        ...statement.otherwise.flatMap(statementExpressions),
-      ])
-    case 'WriteStatement':
-      return Object.freeze([
-        ...nestedExpressions(statement.destination),
-        ...nestedExpressions(statement.value),
-      ])
-    case 'WhileStatement':
-      return Object.freeze([
-        ...nestedExpressions(statement.condition),
-        ...statement.body.flatMap(statementExpressions),
-      ])
-    case 'BreakStatement':
-    case 'ContinueStatement':
-      return Object.freeze([])
-  }
+  const expressions: Array<Elaboration.ExpressionFact> = []
+  Elaboration.visitStatementFacts([statement], {
+    expression: (expression) => expressions.push(expression),
+  })
+  return Object.freeze(expressions)
 }
 
 /** Builds one module's anonymous-expression entries. */

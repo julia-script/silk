@@ -3,6 +3,7 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as ModuleClosure from './ModuleClosure.js'
+import * as ResolutionSeams from './ResolutionSeams.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Stdlib from './Stdlib.js'
@@ -694,14 +695,65 @@ export const resolveType = (
   return unresolved(path, Diagnostic.unknownType(path.spelling, typeUseSpan(path)))
 }
 
+/** Resolves one retained item path through the same import scope and visibility gate as values. */
+export const resolveItem = (
+  resolution: Resolution,
+  index: DeclarationIndex.Index,
+  module: string,
+  path: DeclarationIndex.TypePathFact,
+): DeclarationIndex.ItemResolution => {
+  const scope = scopeOf(resolution, module)
+  const first = path.segments.at(0)
+  const second = path.segments.at(1)
+  if (scope === undefined || first === undefined || path.segments.length > 2)
+    return Object.freeze({ _tag: 'Missing' })
+  if (second === undefined) {
+    const local = DeclarationIndex.lookupDeclaration(
+      index.modules.find((candidate) => candidate.module === module)?.declarations ?? [],
+      first.spelling,
+    )
+    if (local._tag === 'Ambiguous')
+      return Object.freeze({ _tag: 'Ambiguous', count: local.declarations.length })
+  }
+  const result =
+    second === undefined
+      ? lookup(scope, index, first.spelling)
+      : lookupQualified(scope, index, first.spelling, second.spelling, second.token)
+  if (result._tag === 'Resolved')
+    return Object.freeze({ _tag: 'Resolved', declaration: result.declaration })
+  if (result._tag === 'Inaccessible')
+    return Object.freeze({
+      _tag: 'Inaccessible',
+      declaration: result.declaration,
+      cause: result.cause,
+    })
+  if (result._tag === 'Conflict')
+    return Object.freeze({
+      _tag: 'Ambiguous',
+      count: result.conflict.bindings.length,
+      cause: result.conflict.cause,
+    })
+  if (result._tag === 'Unavailable')
+    return Object.freeze({
+      _tag: 'Unavailable',
+      ...(result.declaration === undefined ? {} : { declaration: result.declaration }),
+      ...(result.cause === undefined ? {} : { cause: result.cause }),
+    })
+  return Object.freeze({ _tag: 'Missing' })
+}
+
 /** Runs identity collection, scope construction, and declared-type completion in phase order. */
 export const analyze = (
   closure: ModuleClosure.Facts,
 ): { readonly index: DeclarationIndex.Index; readonly resolution: Resolution } => {
   const collected = DeclarationIndex.collect(closure)
   const preliminary = resolve(closure, collected)
-  const index = DeclarationIndex.complete(collected, (module, path) =>
-    resolveType(preliminary, collected, module, path),
+  const resolvers = ResolutionSeams.make(
+    (module: string, path: DeclarationIndex.TypePathFact) =>
+      resolveType(preliminary, collected, module, path),
+    (module: string, path: DeclarationIndex.TypePathFact) =>
+      resolveItem(preliminary, collected, module, path),
   )
+  const index = DeclarationIndex.complete(collected, resolvers)
   return Object.freeze({ index, resolution: resolve(closure, index) })
 }

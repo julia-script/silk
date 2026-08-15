@@ -122,7 +122,7 @@ impl<S: Decoder<S>> Decoder<Wrapper<S>> for Wrapper<S> {
       for (const name of ['rejected-equal-provider', 'rejected-growing-provider']) {
         const snapshot = yield* analyze(name)
         const diagnostics = Analysis.diagnostics(snapshot).filter(
-          (diagnostic) => diagnostic.code === 'SEM0109',
+          (diagnostic) => diagnostic.code === 'SEM0120',
         )
         assert.strictEqual(diagnostics.length, 1, name)
         assert.include(diagnostics.at(0)?.message ?? '', 'does not descend')
@@ -134,7 +134,7 @@ impl<S: Decoder<S>> Decoder<Wrapper<S>> for Wrapper<S> {
     Effect.gen(function* () {
       const snapshot = yield* analyze('duplicate')
       assert.strictEqual(
-        Analysis.diagnostics(snapshot).filter((diagnostic) => diagnostic.code === 'SEM0108').length,
+        Analysis.diagnostics(snapshot).filter((diagnostic) => diagnostic.code === 'SEM0119').length,
         1,
       )
     }),

@@ -1,9 +1,11 @@
+import * as CallableFieldRealization from './CallableFieldRealization.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
+import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -121,6 +123,7 @@ class FunctionLowering {
       Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
     >,
     readonly generatedRunners: Array<GeneratedEffectRunner>,
+    readonly opaqueRealizations: OpaqueRealization.Catalog,
     readonly providedRequirements: ReadonlyArray<ProvidedRequirement> = Object.freeze([]),
   ) {
     this.localTypes.push(...parameterTypes)
@@ -166,7 +169,12 @@ class FunctionLowering {
   }
 
   type(type: Type.Type): Mir.Type | undefined {
-    return mirType(type, this.substitution)
+    const specialized = Type.substitute(type, this.substitution)
+    return (
+      storedCallableValueType(this.layout, specialized) ??
+      representedValueType(this.layout, this.opaqueRealizations, type, this.substitution) ??
+      mirType(specialized)
+    )
   }
 
   semantic(type: Type.Type): Type.Type {
@@ -430,26 +438,7 @@ const callableValueByIdentity = (
   identity: Type.CallableIdentityArgument,
   type: Type.Callable,
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
-  const target: Hir.CallableTarget =
-    identity.target._tag === 'Declaration'
-      ? Object.freeze({
-          _tag: 'DeclarationCallableTarget',
-          declaration: Object.freeze({
-            _tag: 'CanonicalDeclarationId',
-            module: identity.target.module,
-            name: identity.target.name,
-          }),
-        })
-      : Object.freeze({
-          _tag: 'BuiltinCallableTarget',
-          actor: identity.target.actor,
-          operation: identity.target.operation as Hir.BuiltinOperation,
-          intrinsic: Object.freeze({
-            _tag: 'IntrinsicOperationId',
-            actor: identity.target.intrinsic.actor,
-            name: identity.target.intrinsic.name,
-          }),
-        })
+  const target = Hir.callableTargetFromIdentity(identity.target)
   const environment =
     identity.environment === undefined
       ? undefined
@@ -461,7 +450,7 @@ const callableValueByIdentity = (
             { readonly _tag: 'CallableEnvironment' }
           > =>
             candidate._tag === 'CallableEnvironment' &&
-            Instances.callableIdentity(candidate.callable) === identity.environment,
+            CallableFieldRealization.matchesIdentity(identity, candidate.callable),
         )
   if (identity.environment !== undefined && environment === undefined) return undefined
   const specializedType =
@@ -473,6 +462,147 @@ const callableValueByIdentity = (
     type: specializedType,
     target,
     ...(environment === undefined ? {} : { site: environment.callable.site, environment }),
+  })
+}
+
+const sameArguments = (
+  left: ReadonlyArray<Type.GenericArgument>,
+  right: ReadonlyArray<Type.GenericArgument>,
+): boolean =>
+  left.length === right.length &&
+  left.every((argument, ordinal) => {
+    const candidate = right.at(ordinal)
+    return candidate !== undefined && Type.equalsGenericArgument(argument, candidate)
+  })
+
+const representedValueType = (
+  layout: Layout.Plan,
+  catalog: OpaqueRealization.Catalog,
+  type: Type.Type,
+  substitution: Type.Substitution,
+): Extract<Mir.Type, { readonly _tag: 'CallableValue' | 'EffectValue' }> | undefined => {
+  const specialized = Type.substitute(type, substitution)
+  if (!Type.isRepresented(specialized)) return undefined
+  const representation = specialized.representation.argument
+  if (Type.isExactRepresentationArgument(representation)) {
+    if (
+      Type.isCallable(specialized.contract) &&
+      Type.isCallableIdentityArgument(representation.identity)
+    )
+      return callableValueByIdentity(layout, representation.identity, specialized.contract)
+    if (
+      Type.isEffect(specialized.contract) &&
+      Type.isEffectIdentityArgument(representation.identity)
+    )
+      return effectValueByIdentity(layout, representation.identity.identity)
+    return undefined
+  }
+  const opaque = representation
+  if (!Type.isOpaqueRepresentationArgument(opaque)) return undefined
+  const definition = OpaqueRealization.definitionOf(catalog, opaque)
+  if (definition === undefined) return undefined
+  const realization = definition.realization
+  if (realization?._tag !== 'ExactRepresentationArgument') return undefined
+  if (
+    Type.isCallable(specialized.contract) &&
+    Type.isCallableIdentityArgument(realization.identity)
+  ) {
+    const identity = realization.identity
+    if (identity.environment === undefined)
+      return callableValueByIdentity(layout, identity, specialized.contract)
+    const environment = layout.callableEnvironments.find(
+      (
+        candidate,
+      ): candidate is Extract<
+        Layout.CallableEnvironment,
+        { readonly _tag: 'CallableEnvironment' }
+      > =>
+        candidate._tag === 'CallableEnvironment' &&
+        candidate.callable.owner.declaration.module === definition.construction.producer.module &&
+        candidate.callable.owner.declaration.name === definition.construction.producer.name &&
+        sameArguments(
+          candidate.callable.owner.typeArguments.filter(
+            (argument) => !Type.isHiddenIdentityArgument(argument),
+          ),
+          definition.construction.arguments,
+        ) &&
+        definition.construction.site ===
+          Type.callableEnvironmentKey(Instances.callableEnvironmentIdentity(candidate.callable)),
+    )
+    return environment === undefined
+      ? undefined
+      : callableValueByIdentity(
+          layout,
+          Type.callableIdentityArgument(
+            identity.identity,
+            identity.target,
+            identity.typeArguments,
+            Instances.callableEnvironmentIdentity(environment.callable),
+          ),
+          specialized.contract,
+        )
+  }
+  if (Type.isEffect(specialized.contract) && Type.isEffectIdentityArgument(realization.identity)) {
+    const environment = layout.effectEnvironments.find(
+      (
+        candidate,
+      ): candidate is Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
+        candidate._tag === 'EffectEnvironment' &&
+        candidate.instance.declaration.module === definition.construction.producer.module &&
+        candidate.instance.declaration.name === definition.construction.producer.name &&
+        sameArguments(
+          candidate.instance.typeArguments.filter(
+            (argument) => !Type.isHiddenIdentityArgument(argument),
+          ),
+          definition.construction.arguments,
+        ) &&
+        definition.construction.site === `effect:${Hir.executableSiteKey(candidate.site)}`,
+    )
+    return environment === undefined
+      ? undefined
+      : Object.freeze({
+          _tag: 'EffectValue',
+          type: environment.effect,
+          site: environment.site,
+          environment,
+        })
+  }
+  return undefined
+}
+
+const storedCallableValueType = (
+  layout: Layout.Plan,
+  type: Type.Type,
+): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
+  if (!Type.isRepresented(type) || !Type.isCallable(type.contract)) return undefined
+  const representation = Layout.entry(layout, type)?.representation
+  if (representation?._tag !== 'CallableEnvironment') return undefined
+  const realization = representation.realization
+  const environment =
+    realization.site === undefined
+      ? undefined
+      : layout.callableEnvironments.find(
+          (
+            candidate,
+          ): candidate is Extract<
+            Layout.CallableEnvironment,
+            { readonly _tag: 'CallableEnvironment' }
+          > =>
+            candidate._tag === 'CallableEnvironment' &&
+            CallableFieldRealization.matchesCallable(realization, candidate.callable),
+        )
+  if (realization.site !== undefined && environment === undefined) return undefined
+  return Object.freeze({
+    _tag: 'CallableValue',
+    type: realization.contract,
+    target: Hir.callableTargetFromIdentity(realization.target),
+    ...(realization.site === undefined ? {} : { site: realization.site }),
+    ...(environment === undefined ? {} : { environment }),
+    storage: Object.freeze({
+      _tag: 'StoredCallableField',
+      type,
+      realization,
+    }),
   })
 }
 
@@ -759,6 +889,9 @@ const lowerPlace = (
       root: place.root,
       selectors: place.selectors,
       type,
+      ...(type._tag === 'CallableValue' && type.storage !== undefined && type.type.mode === 'Take'
+        ? { consume: true as const }
+        : {}),
       provenance: Object.freeze({ span: expression.span, generated: false }),
     }),
   )
@@ -2475,6 +2608,7 @@ function lowerExpressionInner(
     case 'Construct': {
       const type = fn.type(expression.type)
       if (type?._tag !== 'Nominal') return undefined
+      const representation = Layout.entry(fn.layout, type.type)?.representation
       const canonicalFields = new Map(
         expression.fields.map((field) => [field.field.ordinal, field] as const),
       )
@@ -2488,7 +2622,28 @@ function lowerExpressionInner(
       }
       const fields = expression.fields.flatMap((field) => {
         const value = loweredFields.get(field.field.ordinal)
-        return value === undefined ? [] : [Object.freeze({ field: field.field, value })]
+        const declared =
+          representation?._tag === 'Aggregate'
+            ? representation.fields.find(
+                (candidate) =>
+                  candidate.id.ordinal === field.field.ordinal &&
+                  candidate.id.struct.sourceId === field.field.struct.sourceId &&
+                  candidate.id.struct.ordinal === field.field.struct.ordinal,
+              )
+            : undefined
+        const stored =
+          declared === undefined
+            ? undefined
+            : storedCallableValueType(fn.layout, declared.type)?.storage
+        return value === undefined
+          ? []
+          : [
+              Object.freeze({
+                field: field.field,
+                value,
+                ...(stored === undefined ? {} : { stored }),
+              }),
+            ]
       })
       if (fields.length !== expression.fields.length) return undefined
       const destination = fn.alloc(type)
@@ -3441,7 +3596,15 @@ const concreteCleanup = (
   fn: FunctionLowering,
   type: Type.Type,
   seen = new Set<string>(),
-): Ownership.CleanupPlan => Ownership.cleanupPlan(fn.index, type, seen)
+): Ownership.CleanupPlan => {
+  const specialized = Type.substitute(type, fn.substitution)
+  if (Type.isRepresented(specialized)) {
+    const representation = Layout.entry(fn.layout, specialized)?.representation
+    if (representation?._tag === 'CallableEnvironment')
+      return Ownership.realizedCallableCleanup(fn.index, representation.realization)
+  }
+  return Ownership.cleanupPlan(fn.index, specialized, seen)
+}
 
 const specializedCleanup = (
   fn: FunctionLowering,
@@ -3516,14 +3679,22 @@ const cleanupForLocal = (
     }
     return cleanupForEnvironment(localType, new Set())
   }
-  if (specialized._tag !== 'CallableCleanup' || localType._tag !== 'CallableValue') {
+  if (localType._tag !== 'CallableValue') {
     return specialized
   }
+  if (localType.storage === undefined) return callableLocalCleanup(fn, localType)
+  if (specialized._tag !== 'CallableCleanup') return specialized
   const fields = localType.environment?.fields ?? []
   return Object.freeze({
     _tag: 'CallableCleanup',
     type: localType.type,
-    site: specialized.site,
+    environment:
+      localType.environment === undefined
+        ? specialized.environment
+        : Object.freeze({
+            _tag: 'CallableEnvironmentIdentity',
+            identity: Instances.callableEnvironmentIdentity(localType.environment.callable),
+          }),
     slots: Object.freeze(
       specialized.slots.flatMap((slot) => {
         const field = fields.find((candidate) => candidate.ordinal === slot.ordinal)
@@ -3585,7 +3756,10 @@ const callableLocalCleanup = (
   return Object.freeze({
     _tag: 'CallableCleanup',
     type: localType.type,
-    site: localType.site,
+    environment: Object.freeze({
+      _tag: 'CallableEnvironmentIdentity',
+      identity: Instances.callableEnvironmentIdentity(environment.callable),
+    }),
     slots: Object.freeze(
       [...environment.fields]
         .reverse()
@@ -4500,6 +4674,7 @@ const lowerInstance = (
   calls: ReadonlyArray<Instances.CallInstance>,
   effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
   generatedRunners: Array<GeneratedEffectRunner>,
+  opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.MirFunction => {
   const fn = instance.function
   const plan = planFor(ownership, fn)
@@ -4519,6 +4694,19 @@ const lowerInstance = (
             return effectValue === undefined ? [] : [effectValue]
           }
           const specialized = Type.substitute(type, instance.substitution)
+          if (
+            Type.isRepresented(specialized) &&
+            Type.isCallable(specialized.contract) &&
+            Type.isExactRepresentationArgument(specialized.representation.argument) &&
+            Type.isCallableIdentityArgument(specialized.representation.argument.identity)
+          ) {
+            const callable = callableValueByIdentity(
+              layout,
+              specialized.representation.argument.identity,
+              specialized.contract,
+            )
+            return callable === undefined ? [] : [callable]
+          }
           if (Type.isCallable(specialized)) {
             const identity = Instances.parameterCallableIdentity(fn, instance.key, ordinal)
             const callable =
@@ -4527,7 +4715,9 @@ const lowerInstance = (
                 : callableValueByIdentity(layout, identity, specialized)
             return callable === undefined ? [] : [callable]
           }
-          const lowered = mirType(type, instance.substitution)
+          const lowered =
+            representedValueType(layout, opaqueRealizations, type, instance.substitution) ??
+            mirType(type, instance.substitution)
           return lowered === undefined ? [] : [lowered]
         })
       : Array.from({ length: fn.declaration.parameterCount }, () => i32)
@@ -4557,7 +4747,12 @@ const lowerInstance = (
     specializedEffectResult ??
     hiddenEffectResult ??
     (contract._tag === 'Contract'
-      ? mirType(effectOutcome ?? contract.result, instance.substitution)
+      ? (representedValueType(
+          layout,
+          opaqueRealizations,
+          effectOutcome ?? contract.result,
+          instance.substitution,
+        ) ?? mirType(effectOutcome ?? contract.result, instance.substitution))
       : i32)
   if (resultType === undefined) {
     return trapFunction(instance, 'unavailable contract type', bodySpan(fn))
@@ -4575,6 +4770,7 @@ const lowerInstance = (
     calls,
     effectResults,
     generatedRunners,
+    opaqueRealizations,
   )
   const terminal: Mir.Outcome = Object.freeze({
     _tag: 'Trap',
@@ -4611,6 +4807,7 @@ const lowerEffectRunner = (
   calls: ReadonlyArray<Instances.CallInstance>,
   effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
   generatedRunners: Array<GeneratedEffectRunner>,
+  opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.MirFunction | undefined => {
   const { owner, block, type } = spec
   const id = spec.id
@@ -4670,6 +4867,7 @@ const lowerEffectRunner = (
     calls,
     effectResults,
     generatedRunners,
+    opaqueRealizations,
     Object.freeze(
       spec.providedRequirements.map((requirement) => {
         const ordinal = parameterizedRequirements.indexOf(requirement)
@@ -4721,6 +4919,7 @@ export const lowerProgram = (
   ownership: ReadonlyMap<string, Ownership.ModuleOwnership>,
   layout: Layout.Plan,
   index: DeclarationIndex.Index,
+  opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.Module => {
   const staticDataById = new Map<
     string,
@@ -4770,6 +4969,7 @@ export const lowerProgram = (
       discovery.calls,
       effectResults,
       generatedRunners,
+      opaqueRealizations,
     ),
   )
   const loweredRunners: Array<{
@@ -4788,6 +4988,7 @@ export const lowerProgram = (
       discovery.calls,
       effectResults,
       generatedRunners,
+      opaqueRealizations,
     )
     if (runner !== undefined) loweredRunners.push(Object.freeze({ spec: generated, runner }))
   }

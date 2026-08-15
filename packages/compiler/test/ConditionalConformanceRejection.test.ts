@@ -83,13 +83,13 @@ impl<T: Right<T>> Decoder<Wrapper<Boxed<T>>> for Wrapper<Boxed<T>> { decode: Wra
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(
-      reported(snapshot, 'SEM0108').map((diagnostic) => diagnostic.message),
+      reported(snapshot, 'SEM0119').map((diagnostic) => diagnostic.message),
       [
         'conditional-conformance-rejection/bound-distinguished.Decoder<conditional-conformance-rejection/bound-distinguished.Wrapper<conditional-conformance-rejection/bound-distinguished.Boxed<%0>>> for conditional-conformance-rejection/bound-distinguished.Wrapper<conditional-conformance-rejection/bound-distinguished.Boxed<%0>> may overlap conditional-conformance-rejection/bound-distinguished.Decoder<conditional-conformance-rejection/bound-distinguished.Wrapper<%0>> for conditional-conformance-rejection/bound-distinguished.Wrapper<%0>',
       ],
     )
-    assert.deepEqual(reported(snapshot, 'SEM0108').at(0)?.related, ['overlapping implementation'])
-    assert.deepEqual(reported(snapshot, 'SEM0108').at(0)?.notes, [
+    assert.deepEqual(reported(snapshot, 'SEM0119').at(0)?.related, ['overlapping implementation'])
+    assert.deepEqual(reported(snapshot, 'SEM0119').at(0)?.notes, [
       'Conformance overlap is decided without consulting bounds, because whether a bound is satisfiable changes as a program grows.',
     ])
   }),
@@ -112,7 +112,7 @@ impl<!E> Marker<Effect<i32 ! E>> for Effect<i32 ! E> {}
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(
-      reported(snapshot, 'SEM0108').map((diagnostic) => diagnostic.message),
+      reported(snapshot, 'SEM0119').map((diagnostic) => diagnostic.message),
       [
         'conditional-conformance-rejection/open-row.Marker<Effect<i32 ! %0>> for Effect<i32 ! %0> may overlap conditional-conformance-rejection/open-row.Marker<Effect<i32 ! conditional-conformance-rejection/open-row.Problem>> for Effect<i32 ! conditional-conformance-rejection/open-row.Problem>',
       ],
@@ -165,8 +165,8 @@ pub fn main() -> i32 { return 0 }`,
       reported(snapshot, 'SEM0083').map((diagnostic) => diagnostic.message),
       ['Invalid conformance: requirement Gate must be an interface applied to its own provider'],
     )
-    assert.deepEqual(reported(snapshot, 'SEM0108'), [])
-    assert.deepEqual(reported(snapshot, 'SEM0109'), [])
+    assert.deepEqual(reported(snapshot, 'SEM0119'), [])
+    assert.deepEqual(reported(snapshot, 'SEM0120'), [])
     const index = Analysis.declarationIndex(snapshot)
     assert.strictEqual(index.modules.at(0)?.conformances.at(0)?.validity._tag, 'InvalidConformance')
     assert.strictEqual(
@@ -202,7 +202,7 @@ impl RequirementMarker<Effect<i32 ? &mut Clock>> for Effect<i32 ? &mut Clock> {}
 
 pub fn main() -> i32 { return 0 }`,
     )
-    const overlaps = reported(snapshot, 'SEM0108')
+    const overlaps = reported(snapshot, 'SEM0119')
     for (const name of ['EffectMarker', 'RequirementMarker'])
       assert.strictEqual(
         overlaps.filter((diagnostic) => diagnostic.message.includes(name)).length,
@@ -211,7 +211,7 @@ pub fn main() -> i32 { return 0 }`,
       )
     assert.strictEqual(overlaps.length, 2)
     assert.deepEqual(reported(snapshot, 'SEM0083'), [])
-    assert.deepEqual(reported(snapshot, 'SEM0109'), [])
+    assert.deepEqual(reported(snapshot, 'SEM0120'), [])
   }),
 )
 
@@ -226,7 +226,7 @@ impl<S: Decoder<MappedSchema<S>>> Decoder<MappedSchema<S>> for MappedSchema<S> {
 
 pub fn main() -> i32 { return 0 }`,
     )
-    assert.deepEqual(reported(snapshot, 'SEM0109'), [
+    assert.deepEqual(reported(snapshot, 'SEM0120'), [
       {
         message:
           'conditional-conformance-rejection/equal-provider.Decoder<conditional-conformance-rejection/equal-provider.MappedSchema<%0>> for conditional-conformance-rejection/equal-provider.MappedSchema<%0> declares a requirement that does not descend',
@@ -253,7 +253,7 @@ impl<S: Decoder<Wrap<S>>> Decoder<MappedSchema<S>> for MappedSchema<S> {
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(
-      reported(snapshot, 'SEM0109').flatMap((diagnostic) => diagnostic.notes),
+      reported(snapshot, 'SEM0120').flatMap((diagnostic) => diagnostic.notes),
       [
         'requirement conditional-conformance-rejection/growing-provider.Decoder<conditional-conformance-rejection/growing-provider.Wrap<%0>> for conditional-conformance-rejection/growing-provider.Wrap<%0> does not descend: conditional-conformance-rejection/growing-provider.Wrap<%0> is not a strict subterm of conditional-conformance-rejection/growing-provider.MappedSchema<%0>',
       ],
@@ -275,7 +275,7 @@ impl<S: Decoder<Sibling<S>>> Decoder<MappedSchema<S>> for MappedSchema<S> {
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(
-      reported(snapshot, 'SEM0109').flatMap((diagnostic) => diagnostic.notes),
+      reported(snapshot, 'SEM0120').flatMap((diagnostic) => diagnostic.notes),
       [
         'requirement conditional-conformance-rejection/peer-provider.Decoder<conditional-conformance-rejection/peer-provider.Sibling<%0>> for conditional-conformance-rejection/peer-provider.Sibling<%0> does not descend: conditional-conformance-rejection/peer-provider.Sibling<%0> is not a strict subterm of conditional-conformance-rejection/peer-provider.MappedSchema<%0>',
       ],
@@ -300,7 +300,7 @@ impl<S: Duo<S, S>> Decoder<MappedSchema<S>> for MappedSchema<S> {
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(
-      reported(snapshot, 'SEM0109').flatMap((diagnostic) => diagnostic.notes),
+      reported(snapshot, 'SEM0120').flatMap((diagnostic) => diagnostic.notes),
       [
         'requirement conditional-conformance-rejection/increasing-occurrences.Duo<%0, %0> for %0 repeats %0 3 times where the header uses it 2',
       ],
@@ -325,8 +325,8 @@ pub fn main() -> i32 { return 0 }`,
         'Invalid conformance: Decoder must be applied to its own provider conditional-conformance-rejection/wrong-provider.MappedSchema<S>',
       ],
     )
-    assert.deepEqual(reported(snapshot, 'SEM0108'), [])
-    assert.deepEqual(reported(snapshot, 'SEM0109'), [])
+    assert.deepEqual(reported(snapshot, 'SEM0119'), [])
+    assert.deepEqual(reported(snapshot, 'SEM0120'), [])
   }),
 )
 
@@ -348,7 +348,7 @@ pub fn main() -> i32 { return 0 }`,
     // Two headers that both declare requirements are reported as the overlap they are even when
     // their shapes are identical: naming them duplicates would suggest the bounds were compared,
     // and coherence never reads a bound. An unbounded repeat is still named a duplicate.
-    const overlaps = reported(snapshot, 'SEM0108')
+    const overlaps = reported(snapshot, 'SEM0119')
     assert.strictEqual(overlaps.length, 1)
     assert.include(overlaps.at(0)?.message ?? '', 'may overlap')
     assert.deepEqual(overlaps.at(0)?.related, ['overlapping implementation'])
@@ -373,9 +373,9 @@ pub fn main() -> i32 {
   return decodeOf<MappedSchema<Schema>>(MappedSchema<Schema> { source: Schema { tag: 41 } })
 }`,
     )
-    assert.isAbove(reported(snapshot, 'SEM0109').length, 0)
+    assert.isAbove(reported(snapshot, 'SEM0120').length, 0)
     assert.isAbove(
-      Analysis.diagnostics(snapshot).filter((diagnostic) => diagnostic.code !== 'SEM0109').length,
+      Analysis.diagnostics(snapshot).filter((diagnostic) => diagnostic.code !== 'SEM0120').length,
       0,
     )
   }),

@@ -623,6 +623,7 @@ export interface CallableSectionExpressionFact {
   readonly captures: ReadonlyArray<CallableCaptureFact>
   readonly retainedDependencies: ReadonlyArray<number>
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  readonly environmentOwner?: Type.CallableEnvironmentIdentity['owner']
   readonly substitution: Type.Substitution
   readonly mode: Type.CallableMode
   readonly type: ExpressionTypeFact
@@ -1039,6 +1040,15 @@ const unavailableExpressionType: ExpressionTypeFact = Object.freeze({ _tag: 'Una
 
 const typesCompatible = (source: SemanticType, target: SemanticType): boolean =>
   TypeCompatibility.isCompatible(TypeCompatibility.check(source, target))
+
+const declaredReturnTypesCompatible = (
+  declaration: DeclarationFact,
+  source: SemanticType,
+): boolean =>
+  declaration.returnType._tag === 'Resolved' &&
+  (typesCompatible(source, declaration.returnType.type) ||
+    (declaration.opaqueResult !== undefined &&
+      Type.haveSameRepresentationShape(source, declaration.returnType.type)))
 
 const representationJoinDiagnostic = (
   expected: SemanticType,
@@ -2679,15 +2689,14 @@ const exactCallableRepresentation = (
   reference: CallReferenceFact,
   contract: Type.Callable,
   typeArguments: ReadonlyArray<Type.GenericArgument> = Object.freeze([]),
-  environment?: string,
+  environment?: Type.CallableEnvironmentIdentity,
 ): Type.ExactRepresentationArgument | undefined => {
   const target = callableRepresentationTarget(reference)
   if (target === undefined) return undefined
   const identity =
-    environment ??
-    (target._tag === 'Declaration'
+    target._tag === 'Declaration'
       ? `declaration:${target.module}:${target.name}`
-      : `builtin:${target.actor}:${target.operation}`)
+      : `builtin:${target.actor}:${target.operation}`
   return Type.exactRepresentationArgument(
     Type.callableIdentityArgument(identity, target, typeArguments, environment),
     contract,
@@ -2698,7 +2707,7 @@ const exactCallableRepresentation = (
  * Recovers a compile-time representation from semantic expression structure. This is deliberately
  * frontend-owned: later phases consume the retained argument and never reconstruct it from syntax.
  */
-const representationOfExpression = (
+export const representationOfExpression = (
   expression: ExpressionFact,
 ): Type.RepresentationArgument | undefined => {
   if (expression.type._tag === 'Available' && Type.isRepresented(expression.type.type))
@@ -2712,8 +2721,11 @@ const representationOfExpression = (
   if (expression._tag === 'CallableSection' && expression.type._tag === 'Available') {
     const contract = expression.type.type
     if (!Type.isCallable(contract)) return undefined
-    const site = expression.site
-    const environment = `callable:${Hir.executableSiteKey(site)}`
+    if (expression.environmentOwner === undefined) return undefined
+    const environment = Hir.callableEnvironmentIdentity(
+      expression.site,
+      expression.environmentOwner,
+    )
     return exactCallableRepresentation(
       expression.reference,
       contract,
@@ -4985,6 +4997,19 @@ const finishCallableSection = (
     contract.valid && callable !== undefined
       ? availableExpressionType(callable)
       : unavailableExpressionType
+  const environmentOwner = (() => {
+    const owner = resolution.executableOwner
+    if (owner === undefined) return undefined
+    const declaration = DeclarationIndex.byCanonical(resolution.index, owner)
+    return declaration === undefined
+      ? undefined
+      : Object.freeze({
+          declaration: Object.freeze({ module: owner.module, name: owner.name }),
+          typeArguments: Object.freeze(
+            declaration.typeParameters.map((parameter) => parameter.type),
+          ),
+        })
+  })()
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'CallableSection',
@@ -5001,6 +5026,7 @@ const finishCallableSection = (
         ),
       ),
       typeArguments: contract.typeArguments,
+      ...(environmentOwner === undefined ? {} : { environmentOwner }),
       substitution: contract.substitution,
       mode,
       type,
@@ -8010,7 +8036,7 @@ const analyzeStatements = (
         !context.effectBlock &&
         context.declaration.returnType._tag === 'Resolved' &&
         expression.type !== undefined &&
-        !typesCompatible(expression.type, context.declaration.returnType.type)
+        !declaredReturnTypesCompatible(context.declaration, expression.type)
       ) {
         const diagnostic =
           representationJoinDiagnostic(
@@ -8309,7 +8335,7 @@ const analyzeFunctionBody = (
     terminal._tag === 'ReturnStatement' &&
     declaration.returnType._tag === 'Resolved' &&
     expressionType !== undefined &&
-    typesCompatible(expressionType, declaration.returnType.type)
+    declaredReturnTypesCompatible(declaration, expressionType)
       ? compatible
       : unavailableCompatibility
 
@@ -9496,12 +9522,7 @@ const hirExpectedExpression = (
     })
   const source = hirExpression(fact, borrow)
   if (source._tag === 'Unavailable') return source
-  if (
-    Type.isRepresented(target) &&
-    ((Type.isCallable(target.contract) && Type.isCallable(source.type)) ||
-      (Type.isEffect(target.contract) && Type.isEffect(source.type))) &&
-    typesCompatible(source.type, target.contract)
-  )
+  if (Type.isRepresented(target) && Type.haveSameRepresentationShape(source.type, target))
     return source
   const compatibility = TypeCompatibility.check(source.type, target)
   if (compatibility._tag === 'Exact') return source
@@ -9761,6 +9782,53 @@ const directExpressionChildren = (expression: ExpressionFact): ReadonlyArray<Exp
     case 'Identifier':
     case 'FunctionItem':
       return Object.freeze([])
+  }
+}
+
+/** Callbacks for one deterministic traversal of elaborated statement and expression facts. */
+export interface FactVisitor {
+  readonly statement?: (statement: StatementFact) => void
+  readonly expression?: (expression: ExpressionFact) => void
+  readonly descendExpressions?: boolean
+}
+
+const visitExpressionFact = (expression: ExpressionFact, visitor: FactVisitor): void => {
+  visitor.expression?.(expression)
+  if (expression._tag === 'Match') {
+    visitExpressionFact(expression.scrutinee, visitor)
+    for (const arm of expression.arms) {
+      if (arm.guard !== undefined) visitExpressionFact(arm.guard, visitor)
+      visitExpressionFact(arm.result, visitor)
+    }
+    return
+  }
+  if (expression._tag === 'EffectBlock') {
+    visitStatementFacts(expression.statements, visitor)
+    return
+  }
+  for (const child of directExpressionChildren(expression)) visitExpressionFact(child, visitor)
+}
+
+/** Visits one expression tree in deterministic source order. */
+export const visitExpressionFacts = (self: ExpressionFact, visitor: FactVisitor): void =>
+  visitExpressionFact(self, visitor)
+
+/** Visits statement trees and, by default, every nested expression in source order. */
+export const visitStatementFacts = (
+  self: ReadonlyArray<StatementFact>,
+  visitor: FactVisitor,
+): void => {
+  const descendExpressions = visitor.descendExpressions !== false
+  for (const statement of self) {
+    visitor.statement?.(statement)
+    if (descendExpressions)
+      for (const expression of directStatementExpressions(statement))
+        visitExpressionFact(expression, visitor)
+    if (statement._tag === 'UnsafeStatement') visitStatementFacts(statement.statements, visitor)
+    else if (statement._tag === 'IfStatement') {
+      visitStatementFacts(statement.taken, visitor)
+      visitStatementFacts(statement.otherwise, visitor)
+    } else if (statement._tag === 'WhileStatement') visitStatementFacts(statement.body, visitor)
   }
 }
 

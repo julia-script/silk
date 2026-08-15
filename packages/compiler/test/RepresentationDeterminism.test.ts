@@ -98,7 +98,7 @@ it.effect('keeps representation facts byte-identical across fresh processes', ()
     )
     assert.deepEqual(
       encoded.fences.diagnostics.map((diagnostic) => diagnostic.code),
-      ['SEM0103', 'SEM0107'],
+      ['SEM0107'],
     )
     assert.strictEqual(encoded.fences.layout, 'Unavailable')
     assert.strictEqual(encoded.fences.mir, 'Unavailable')

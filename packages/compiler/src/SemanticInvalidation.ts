@@ -1,5 +1,7 @@
+import * as Canonical from './internal/Canonical.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as ModuleSurface from './ModuleSurface.js'
+import type * as OpaqueRealization from './OpaqueRealization.js'
 
 /** Versioned compiler-known inputs that participate in semantic meaning. */
 export const environment = 'silk-bootstrap-frontend-v1' as const
@@ -8,6 +10,7 @@ export const environment = 'silk-bootstrap-frontend-v1' as const
 export interface Project {
   readonly closure: ModuleClosure.ProjectClosure
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
+  readonly opaqueRealizations: OpaqueRealization.Catalog
   readonly environment: string
 }
 
@@ -19,6 +22,9 @@ export interface LocalRevision {
 export type Reason =
   | 'Fresh'
   | 'LocalChange'
+  | 'OpaqueBodyChange'
+  | 'OpaqueTargetChange'
+  | 'OpaqueLayoutChange'
   | 'DependencySurfaceChange'
   | 'CyclicPeerChange'
   | 'EnvironmentChange'
@@ -42,6 +48,9 @@ export type Observation = Reusable | Recomputed
 export interface ReasonCounts {
   readonly Fresh: number
   readonly LocalChange: number
+  readonly OpaqueBodyChange: number
+  readonly OpaqueTargetChange: number
+  readonly OpaqueLayoutChange: number
   readonly DependencySurfaceChange: number
   readonly CyclicPeerChange: number
   readonly EnvironmentChange: number
@@ -74,6 +83,9 @@ const reasonOrder: ReadonlyArray<Reason> = Object.freeze([
   'Fresh',
   'EnvironmentChange',
   'LocalChange',
+  'OpaqueBodyChange',
+  'OpaqueTargetChange',
+  'OpaqueLayoutChange',
   'DependencySurfaceChange',
   'CyclicPeerChange',
   'SurfaceChange',
@@ -82,17 +94,15 @@ const reasonOrder: ReadonlyArray<Reason> = Object.freeze([
 const compareName = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0
 
-const frame = (value: string): string => `${value.length}:${value}`
-
 const importInput = (module: ModuleClosure.Module): string =>
   module.imports
     .map((fact) => {
       const target =
         fact.target._tag === 'Unavailable'
           ? 'Unavailable'
-          : `${fact.target._tag}:${frame(fact.target.module)}`
-      return frame(
-        `${frame(fact.sourceSpelling ?? '')}${frame(fact.canonicalTarget ?? '')}${target}`,
+          : `${fact.target._tag}:${Canonical.frame(fact.target.module)}`
+      return Canonical.frame(
+        `${Canonical.frame(fact.sourceSpelling ?? '')}${Canonical.frame(fact.canonicalTarget ?? '')}${target}`,
       )
     })
     .join('')
@@ -223,11 +233,49 @@ const surfaceChanged = (
 const emptyReasonCounts = (): MutableReasonCounts => ({
   Fresh: 0,
   LocalChange: 0,
+  OpaqueBodyChange: 0,
+  OpaqueTargetChange: 0,
+  OpaqueLayoutChange: 0,
   DependencySurfaceChange: 0,
   CyclicPeerChange: 0,
   EnvironmentChange: 0,
   SurfaceChange: 0,
 })
+
+interface OpaqueChanges {
+  readonly body: boolean
+  readonly target: boolean
+  readonly layout: boolean
+}
+
+const opaqueChanges = (
+  module: string,
+  current: Project,
+  previous: Project | undefined,
+): OpaqueChanges => {
+  const currentDefinitions = new Map(
+    [...current.opaqueRealizations.definitions].filter(
+      ([, definition]) => definition.family.producer.module === module,
+    ),
+  )
+  const previousDefinitions = new Map(
+    [...(previous?.opaqueRealizations.definitions ?? [])].filter(
+      ([, definition]) => definition.family.producer.module === module,
+    ),
+  )
+  const keys = new Set([...currentDefinitions.keys(), ...previousDefinitions.keys()])
+  let body = false
+  let target = false
+  let layout = false
+  for (const key of keys) {
+    const currentDefinition = currentDefinitions.get(key)
+    const previousDefinition = previousDefinitions.get(key)
+    body ||= currentDefinition?.bodyFingerprint !== previousDefinition?.bodyFingerprint
+    target ||= currentDefinition?.targetFingerprint !== previousDefinition?.targetFingerprint
+    layout ||= currentDefinition?.layoutFingerprint !== previousDefinition?.layoutFingerprint
+  }
+  return Object.freeze({ body, target, layout })
+}
 
 /**
  * Plan the semantic work a reusable frontend would need while the current frontend is still built
@@ -301,6 +349,23 @@ export const make = (input: Input): SemanticInvalidation => {
     }
   }
   for (const dependents of currentDependents.values()) dependents.sort(compareName)
+
+  if (input.previous !== undefined) {
+    for (const module of currentGraph.names) {
+      if (surfaceChanged(module, input.current, input.previous)) continue
+      const changed = opaqueChanges(module, input.current, input.previous)
+      if (changed.body) addReason(module, 'OpaqueBodyChange')
+      if (changed.target) addReason(module, 'OpaqueTargetChange')
+      if (changed.layout) addReason(module, 'OpaqueLayoutChange')
+      if (!changed.target && !changed.layout) continue
+      for (const dependent of currentDependents.get(module) ?? []) {
+        if (changed.target) addReason(dependent, 'OpaqueTargetChange')
+        if (changed.layout) addReason(dependent, 'OpaqueLayoutChange')
+        const component = revisionComponents.ofModule.get(dependent)
+        if (component !== undefined) enqueueComponent(component)
+      }
+    }
+  }
 
   while (queue.size > 0) {
     const component = [...queue].sort((left, right) => left - right).at(0)

@@ -6,6 +6,7 @@ import * as ModuleClosure from './ModuleClosure.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as ModuleSurface from './ModuleSurface.js'
 import type * as ModuleTooling from './ModuleTooling.js'
+import * as OpaqueRealization from './OpaqueRealization.js'
 import type * as PhaseReport from './PhaseReport.js'
 import * as Pipeline from './Pipeline.js'
 import * as SemanticInvalidation from './SemanticInvalidation.js'
@@ -56,6 +57,12 @@ export interface ProjectAnalysis {
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
 }
 
+const opaqueRealizationsOf = (self: ProjectAnalysis): OpaqueRealization.Catalog =>
+  OpaqueRealization.catalogOption(self) ??
+  OpaqueRealization.analyze(
+    new Map([...self.semantics].map(([module, semantics]) => [module, semantics.elaboration])),
+  )
+
 const analyze = Effect.fnUntraced(function* (
   roots: ReadonlyArray<SourceFile.SourceFile>,
   previous?: ProjectAnalysis,
@@ -72,6 +79,7 @@ const analyze = Effect.fnUntraced(function* (
           closure: previous.closure,
           surfaces: previous.surfaces,
           semantics: previous.semantics,
+          opaqueRealizations: opaqueRealizationsOf(previous),
           environment: previous.semanticEnvironment,
         },
   )
@@ -122,30 +130,36 @@ const analyze = Effect.fnUntraced(function* (
       throw new RangeError(`Project analysis lost requested root ${rootModule}`)
     views.set(
       rootModule,
-      Object.freeze({
-        _tag: 'ProjectAnalysisView',
-        realization: 'ProjectView',
-        ...frontend,
-        ...tooling,
-        closure,
-        semanticInvalidation: frontend.semanticInvalidation,
-        report,
-      }),
+      OpaqueRealization.withCatalog(
+        Object.freeze({
+          _tag: 'ProjectAnalysisView',
+          realization: 'ProjectView',
+          ...frontend,
+          ...tooling,
+          closure,
+          semanticInvalidation: frontend.semanticInvalidation,
+          report,
+        }),
+        OpaqueRealization.catalogOf(frontend),
+      ),
     )
   }
-  return Object.freeze({
-    _tag: 'ProjectAnalysis',
-    roots: frontend.closure.rootModules,
-    closure: frontend.closure,
-    views,
-    syntaxRevisions,
-    surfaces: frontend.surfaces,
-    semantics: frontend.semantics,
-    toolingModules: tooling.toolingModules,
-    semanticEnvironment: SemanticInvalidation.environment,
-    semanticInvalidation: frontend.semanticInvalidation,
-    report,
-  })
+  return OpaqueRealization.withCatalog(
+    Object.freeze({
+      _tag: 'ProjectAnalysis',
+      roots: frontend.closure.rootModules,
+      closure: frontend.closure,
+      views,
+      syntaxRevisions,
+      surfaces: frontend.surfaces,
+      semantics: frontend.semantics,
+      toolingModules: tooling.toolingModules,
+      semanticEnvironment: SemanticInvalidation.environment,
+      semanticInvalidation: frontend.semanticInvalidation,
+      report,
+    }),
+    OpaqueRealization.catalogOf(frontend),
+  )
 })
 
 /** Constructs one history-independent frontend analysis for the union closure of all roots. */

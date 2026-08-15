@@ -153,11 +153,10 @@ const continuationAllocatorOf = (
   const fieldLaneCount = (field: Layout.EffectEnvironmentField): number => {
     if (field.representation === 'Borrow') return 1
     if (field.callableIdentity !== undefined) {
-      const captured = program.layout.callableEnvironments.find(
-        (candidate) =>
-          candidate._tag === 'CallableEnvironment' &&
-          Instances.callableIdentity(candidate.callable) === field.callableIdentity?.environment,
-      )
+      const captured =
+        field.callableIdentity.environment === undefined
+          ? undefined
+          : Layout.callableEnvironmentByIdentity(program.layout, field.callableIdentity.environment)
       return captured?._tag === 'CallableEnvironment'
         ? Layout.callableEnvironmentLanes(program.layout, captured).length
         : 0

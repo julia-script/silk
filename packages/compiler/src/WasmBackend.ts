@@ -21,37 +21,12 @@ import * as Instances from './Instances.js'
 import * as LayoutPlan from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
-import type * as Ownership from './Ownership.js'
+import * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import * as StandardStreams from './StandardStreams.js'
 import * as Target from './Target.js'
 import * as Transcendental from './Transcendental.js'
 import * as SilkType from './Type.js'
-
-/** Tests whether one cleanup plan invokes a Drop hook at any nesting depth. */
-const planHasHook = (plan: Ownership.CleanupPlan): boolean =>
-  plan._tag === 'HookCleanup' ||
-  (plan._tag === 'StructCleanup' && plan.fields.some((field) => planHasHook(field.cleanup))) ||
-  (plan._tag === 'ArrayCleanup' && planHasHook(plan.element)) ||
-  (plan._tag === 'UnionCleanup' && plan.cases.some((entry) => planHasHook(entry.cleanup))) ||
-  ((plan._tag === 'CallableCleanup' || plan._tag === 'EffectCleanup') &&
-    plan.slots.some((slot) => planHasHook(slot.cleanup))) ||
-  (plan._tag === 'RawBufferCleanup' && planHasHook(plan.allocation))
-
-/**
- * Tests whether one cleanup plan consumes a reclaim ticket at any nesting depth. A plan can
- * reclaim without invoking a hook — a bare `Allocation` drop is exactly that — so this is the
- * second half of "this release has an effect", beside `planHasHook`.
- */
-const planReclaims = (plan: Ownership.CleanupPlan): boolean =>
-  plan._tag === 'AllocationCleanup' ||
-  plan._tag === 'RawBufferCleanup' ||
-  (plan._tag === 'HookCleanup' && planReclaims(plan.inner)) ||
-  (plan._tag === 'StructCleanup' && plan.fields.some((field) => planReclaims(field.cleanup))) ||
-  (plan._tag === 'ArrayCleanup' && planReclaims(plan.element)) ||
-  (plan._tag === 'UnionCleanup' && plan.cases.some((entry) => planReclaims(entry.cleanup))) ||
-  ((plan._tag === 'CallableCleanup' || plan._tag === 'EffectCleanup') &&
-    plan.slots.some((slot) => planReclaims(slot.cleanup)))
 
 /**
  * The Wasm backend's heap is a size-class free list over one bump region, so a released block
@@ -241,11 +216,11 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
             : []
       return [
         ...dropped.flatMap((release) =>
-          planHasHook(release.cleanup) ? [release.local.ordinal] : [],
+          Ownership.cleanupHasHook(release.cleanup) ? [release.local.ordinal] : [],
         ),
         ...(operation._tag === 'CloseEffectEntry'
           ? operation.failures.flatMap((failure) =>
-              planHasHook(failure.cleanup) ? [failure.payload.ordinal] : [],
+              Ownership.cleanupHasHook(failure.cleanup) ? [failure.payload.ordinal] : [],
             )
           : []),
       ]
@@ -1311,6 +1286,11 @@ const layoutOf = (
     }
     if (type._tag === 'EffectValue')
       return LayoutPlan.effectEnvironmentLanes(plan, type.environment)
+    if (type._tag === 'CallableValue' && type.storage !== undefined) {
+      const shape = LayoutPlan.callingShape(plan, type.storage.type)
+      if (shape === undefined) throw new RangeError('Wasm backend lost a stored callable shape')
+      return shape.lanes
+    }
     if (type._tag === 'CallableValue')
       return type.environment === undefined
         ? Object.freeze([])
@@ -1691,6 +1671,16 @@ const emitOperation = (
    */
   const reloadEscapingRoots = (): ReadonlyArray<Instr.Instr> =>
     [...(memory?.frame.escaping ?? [])].sort((left, right) => left - right).flatMap(reloadRoot)
+  const callableCaptureRange = (
+    cleanup: Extract<Ownership.CleanupPlan, { readonly _tag: 'CallableCleanup' }>,
+    capture: number,
+  ): LayoutPlan.CallableCaptureRange => {
+    if (cleanup.environment._tag !== 'CallableEnvironmentIdentity')
+      throw new RangeError('Wasm callable cleanup lost its specialized environment')
+    const range = LayoutPlan.callableCaptureRange(plan, cleanup.environment.identity, capture)
+    if (range !== undefined) return range
+    throw new RangeError('Wasm callable cleanup lost an owned capture lane')
+  }
   /**
    * Runs every Drop hook one cleanup plan invokes: the owner materializes to its frame root,
    * each hook receives the address of its (possibly nested) value, and the owner's slots
@@ -1700,7 +1690,7 @@ const emitOperation = (
     cleanup: Ownership.CleanupPlan,
     local: Mir.LocalId,
   ): ReadonlyArray<Instr.Instr> => {
-    if (!planHasHook(cleanup)) return []
+    if (!Ownership.cleanupHasHook(cleanup)) return []
     if (memory === undefined) throw new RangeError('Wasm hook cleanup has no private memory')
     const planned = memory.frame.roots.get(local.ordinal)
     if (planned === undefined) throw new RangeError('Wasm hook cleanup lost its frame root')
@@ -1712,12 +1702,16 @@ const emitOperation = (
             Instr.call(resolve(plan_.hook, plan_.typeArguments)),
             ...walk(plan_.inner, byteOffset),
           ]
+        case 'CallableCleanup':
+          return plan_.slots.flatMap((slot) =>
+            walk(slot.cleanup, byteOffset + callableCaptureRange(plan_, slot.ordinal).byteOffset),
+          )
         case 'StructCleanup': {
           const entry = LayoutPlan.entry(memory.plan, plan_.type)
           const representation = entry?.representation
           if (representation?._tag !== 'Aggregate') return []
           return plan_.fields.flatMap((field) => {
-            if (!planHasHook(field.cleanup)) return []
+            if (!Ownership.cleanupHasHook(field.cleanup)) return []
             const layoutField = representation.fields.find(
               (candidate) =>
                 candidate.id.ordinal === field.field.ordinal &&
@@ -1730,7 +1724,7 @@ const emitOperation = (
           })
         }
         case 'ArrayCleanup': {
-          if (!planHasHook(plan_.element)) return []
+          if (!Ownership.cleanupHasHook(plan_.element)) return []
           const entry = LayoutPlan.entry(memory.plan, plan_.type)
           const representation = entry?.representation
           if (representation?._tag !== 'Repeated') return []
@@ -1739,14 +1733,14 @@ const emitOperation = (
           ).flat()
         }
         case 'UnionCleanup': {
-          if (plan_.cases.every((entry) => !planHasHook(entry.cleanup))) return []
+          if (plan_.cases.every((entry) => !Ownership.cleanupHasHook(entry.cleanup))) return []
           const entry = LayoutPlan.entry(memory.plan, plan_.type)
           const representation = entry?.representation
           if (representation?._tag !== 'Union') return []
           // Only the live case owns the payload, so each hook-bearing case runs guarded on the
           // union's own tag. The tag sits at the union's base and the payload at its offset.
           return plan_.cases.flatMap((caseEntry) =>
-            planHasHook(caseEntry.cleanup)
+            Ownership.cleanupHasHook(caseEntry.cleanup)
               ? [
                   ...frameAddress(planned.offset + byteOffset),
                   Instr.memoryAccess('i32.load', memory.memory),
@@ -1818,7 +1812,7 @@ const emitOperation = (
     cleanup: Ownership.CleanupPlan,
     address: number,
   ): ReadonlyArray<Instr.Instr> => {
-    if (!planHasHook(cleanup)) return []
+    if (!Ownership.cleanupHasHook(cleanup)) return []
     if (memory === undefined) throw new RangeError('Wasm slot cleanup has no private memory')
     const addressAt = (byteOffset: number): ReadonlyArray<Instr.Instr> => [
       Instr.localGet(address),
@@ -1832,12 +1826,16 @@ const emitOperation = (
             Instr.call(resolve(plan_.hook, plan_.typeArguments)),
             ...walk(plan_.inner, byteOffset),
           ]
+        case 'CallableCleanup':
+          return plan_.slots.flatMap((slot) =>
+            walk(slot.cleanup, byteOffset + callableCaptureRange(plan_, slot.ordinal).byteOffset),
+          )
         case 'StructCleanup': {
           const entry = LayoutPlan.entry(memory.plan, plan_.type)
           const representation = entry?.representation
           if (representation?._tag !== 'Aggregate') return []
           return plan_.fields.flatMap((field) => {
-            if (!planHasHook(field.cleanup)) return []
+            if (!Ownership.cleanupHasHook(field.cleanup)) return []
             const layoutField = representation.fields.find(
               (candidate) =>
                 candidate.id.ordinal === field.field.ordinal &&
@@ -1850,7 +1848,7 @@ const emitOperation = (
           })
         }
         case 'ArrayCleanup': {
-          if (!planHasHook(plan_.element)) return []
+          if (!Ownership.cleanupHasHook(plan_.element)) return []
           const entry = LayoutPlan.entry(memory.plan, plan_.type)
           const representation = entry?.representation
           if (representation?._tag !== 'Repeated') return []
@@ -1859,14 +1857,14 @@ const emitOperation = (
           ).flat()
         }
         case 'UnionCleanup': {
-          if (plan_.cases.every((entry) => !planHasHook(entry.cleanup))) return []
+          if (plan_.cases.every((entry) => !Ownership.cleanupHasHook(entry.cleanup))) return []
           const entry = LayoutPlan.entry(memory.plan, plan_.type)
           const representation = entry?.representation
           if (representation?._tag !== 'Union') return []
           // Only the live case owns the payload, so each hook-bearing case runs guarded on the
           // union's own tag. The tag sits at the union's base and the payload at its offset.
           return plan_.cases.flatMap((caseEntry) =>
-            planHasHook(caseEntry.cleanup)
+            Ownership.cleanupHasHook(caseEntry.cleanup)
               ? [
                   ...addressAt(byteOffset),
                   Instr.memoryAccess('i32.load', memory.memory),
@@ -1909,7 +1907,7 @@ const emitOperation = (
     cleanup: Ownership.CleanupPlan,
     values: ReadonlyArray<number>,
   ): ReadonlyArray<Instr.Instr> => {
-    if (!planReclaims(cleanup)) return []
+    if (!Ownership.cleanupReclaims(cleanup)) return []
     switch (cleanup._tag) {
       case 'AllocationCleanup':
       case 'RawBufferCleanup': {
@@ -1921,6 +1919,14 @@ const emitOperation = (
       }
       case 'HookCleanup':
         return reclaimReleaseInstructions(cleanup.inner, values)
+      case 'CallableCleanup':
+        return cleanup.slots.flatMap((slot) => {
+          const range = callableCaptureRange(cleanup, slot.ordinal)
+          return reclaimReleaseInstructions(
+            slot.cleanup,
+            values.slice(range.laneOffset, range.laneOffset + range.laneCount),
+          )
+        })
       case 'EffectCleanup':
         return cleanup.slots.flatMap((slot) =>
           reclaimReleaseInstructions(
@@ -2017,7 +2023,7 @@ const emitOperation = (
     address: number,
     byteOffset = 0,
   ): ReadonlyArray<Instr.Instr> => {
-    if (!planReclaims(cleanup)) return []
+    if (!Ownership.cleanupReclaims(cleanup)) return []
     if (memory === undefined) throw new RangeError('Wasm slot reclaim has no private memory')
     switch (cleanup._tag) {
       case 'AllocationCleanup':
@@ -2030,6 +2036,14 @@ const emitOperation = (
       }
       case 'HookCleanup':
         return reclaimReleaseAtAddress(cleanup.inner, address, byteOffset)
+      case 'CallableCleanup':
+        return cleanup.slots.flatMap((slot) =>
+          reclaimReleaseAtAddress(
+            slot.cleanup,
+            address,
+            byteOffset + callableCaptureRange(cleanup, slot.ordinal).byteOffset,
+          ),
+        )
       case 'StructCleanup': {
         const representation = LayoutPlan.entry(memory.plan, cleanup.type)?.representation
         if (representation?._tag !== 'Aggregate') return []
@@ -3940,6 +3954,7 @@ const emitOperation = (
         ...captureOperands,
         Instr.call(resolve(target.declaration, operation.typeArguments)),
         ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
+        ...reloadEscapingRoots(),
       ]
     }
     case 'ConvertInteger': {
@@ -5383,7 +5398,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       staticEnd = alignUp(staticEnd + Math.max(transferStorageSize, 16), 16)
     // A cleanup plan can reclaim a block this module never allocated itself — a caller's owner
     // dropped here — so the release helper is needed wherever a reclaim ticket is consumed too.
-    const releasesBlocks = (plan: Ownership.CleanupPlan): boolean => planReclaims(plan)
+    const releasesBlocks = (plan: Ownership.CleanupPlan): boolean => Ownership.cleanupReclaims(plan)
     const needsHeap =
       suspensionEnabled ||
       program.functions.some((fn) =>

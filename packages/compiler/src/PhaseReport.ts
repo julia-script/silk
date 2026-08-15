@@ -5,6 +5,9 @@ export interface SemanticInvalidationCounters {
   readonly recomputed: number
   readonly fresh: number
   readonly localChange: number
+  readonly opaqueBodyChange: number
+  readonly opaqueTargetChange: number
+  readonly opaqueLayoutChange: number
   readonly dependencySurfaceChange: number
   readonly cyclicPeerChange: number
   readonly environmentChange: number

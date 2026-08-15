@@ -60,6 +60,7 @@ const expectedPhases = [
   'module-surface',
   'elaboration',
   'ownership',
+  'opaque-realization',
   'instance-discovery',
   'target-layout',
   'mir-lowering',
@@ -147,7 +148,7 @@ it.effect('reports every phase in order with counts and totals', () =>
     const closure = outcome.report.at(0)
     assert.strictEqual(closure?.inputs, 1)
     assert.strictEqual(closure?.outputs, 1)
-    const compilerPhases = expectedPhases.slice(0, 10)
+    const compilerPhases = expectedPhases.slice(0, 11)
     assert.deepEqual(
       Analysis.phases(analysis)
         .map((entry) => entry.phase)

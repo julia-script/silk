@@ -117,6 +117,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ParenthesizedType',
   'PipelineExpression',
   'CallableType',
+  'ExactRepresentationType',
   'PrefixExpression',
   'Requirement',
   'RequirementRow',
@@ -802,6 +803,9 @@ fn execute(problem: Token) -> i32 {
   let pending = delayed(move problem)
   let timed = timed() |> End.provide(&local, @Clock)
   return run pending
+}
+fn selected() -> typeof(helper) {
+  return helper
 }
 fn borrow(values: [i32; 2], output: [i32; 2]) -> i32 {
   let mut target = move output

@@ -242,7 +242,7 @@ pub fn main() -> i32 {
 }`,
     )
     const unproven = Analysis.diagnostics(snapshot).filter(
-      (diagnostic) => diagnostic.code === 'SEM0110',
+      (diagnostic) => diagnostic.code === 'SEM0121',
     )
     assert.strictEqual(unproven.length, 1)
     const reported = unproven.at(0)
@@ -600,7 +600,7 @@ pub fn main() -> i32 { return 0 }`,
     // No type satisfies both bounds today, and that is deliberately not consulted: whether a bound
     // is satisfiable moves as a program grows, so a coherence answer that read it would move too.
     const overlaps = Analysis.diagnostics(snapshot).filter(
-      (diagnostic) => diagnostic.code === 'SEM0108',
+      (diagnostic) => diagnostic.code === 'SEM0119',
     )
     assert.strictEqual(overlaps.length, 1)
     assert.include(overlaps.at(0)?.message ?? '', 'may overlap')
