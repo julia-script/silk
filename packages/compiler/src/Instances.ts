@@ -1223,7 +1223,11 @@ const effectParameterOrdinals = (
 ): ReadonlyArray<number> =>
   fn.contract._tag === 'Contract'
     ? fn.contract.parameters.flatMap((parameter, ordinal) =>
-        Type.isEffect(Type.substitute(parameter, substitution)) ? [ordinal] : [],
+        (() => {
+          const specialized = Type.substitute(parameter, substitution)
+          const contract = Type.isRepresented(specialized) ? specialized.contract : specialized
+          return Type.isEffect(contract) ? [ordinal] : []
+        })(),
       )
     : Object.freeze([])
 
@@ -1407,6 +1411,7 @@ interface EffectOriginContext {
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly index: DeclarationIndex.Index
   readonly resolving: ReadonlySet<string>
+  readonly resolveEffectIdentity?: (identity: Type.EffectIdentityArgument) => string | undefined
 }
 
 const returnedExpression = (fn: Hir.HirFunction): Hir.Expression | undefined => {
@@ -1486,6 +1491,52 @@ const effectOriginOf = (
   expression: Hir.Expression,
   context: EffectOriginContext,
 ): string | undefined => {
+  const exactIdentity = (type: Type.Type): string | undefined => {
+    const specialized = Type.substitute(type, context.substitution)
+    return Type.isRepresented(specialized) &&
+      Type.isEffect(specialized.contract) &&
+      Type.isExactRepresentationArgument(specialized.representation.argument) &&
+      Type.isEffectIdentityArgument(specialized.representation.argument.identity)
+      ? (context.resolveEffectIdentity?.(specialized.representation.argument.identity) ??
+          specialized.representation.argument.identity.identity)
+      : undefined
+  }
+  if (expression._tag !== 'Unavailable') {
+    const identity = exactIdentity(expression.type)
+    if (identity !== undefined) return identity
+  }
+  if (expression._tag === 'Project') {
+    const declaration = DeclarationIndex.byCanonical(context.index, {
+      _tag: 'CanonicalDeclarationId',
+      module: expression.nominal.module,
+      name: expression.nominal.name,
+    })
+    const field =
+      declaration?._tag === 'StructDeclaration'
+        ? declaration.fields.find((candidate) => candidate.id.ordinal === expression.field.ordinal)
+        : undefined
+    const substitution =
+      declaration?._tag === 'StructDeclaration'
+        ? Type.substitution(
+            declaration.typeParameters.map((parameter) => parameter.type),
+            expression.nominal.arguments,
+          )
+        : undefined
+    if (field?.declaredType._tag === 'RepresentationParameter' && substitution !== undefined) {
+      const argument = substitution.get(Type.key(field.declaredType.parameter))
+      if (
+        argument !== undefined &&
+        Type.isExactRepresentationArgument(argument) &&
+        Type.isEffectIdentityArgument(argument.identity)
+      )
+        return context.resolveEffectIdentity?.(argument.identity) ?? argument.identity.identity
+    }
+    if (field?.declaredType._tag === 'Resolved' && substitution !== undefined) {
+      const projected = Type.substitute(field.declaredType.type, substitution)
+      const identity = exactIdentity(projected)
+      if (identity !== undefined) return identity
+    }
+  }
   if (expression._tag === 'EffectBlock') return effectIdentity(context.owner, expression.site)
   if (
     (expression._tag === 'BoundOperationCall' || expression._tag === 'BuiltinCall') &&
@@ -1995,6 +2046,29 @@ const suspensionGraph = (
   const roots = new Set<string>()
   const dependencies = new Map<string, Set<string>>()
   const effectIdentities = new Set<string>()
+  const resolveEffectIdentity = (identity: Type.EffectIdentityArgument): string | undefined => {
+    const candidates = instances.flatMap((instance) => {
+      const owner = identity.owner
+      if (
+        owner !== undefined &&
+        (instance.key.declaration.module !== owner.declaration.module ||
+          instance.key.declaration.name !== owner.declaration.name ||
+          instance.key.typeArguments.length !== owner.typeArguments.length ||
+          !instance.key.typeArguments.every((argument, ordinal) => {
+            const expected = owner.typeArguments.at(ordinal)
+            return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+          }))
+      )
+        return []
+      return callableExpressions(instance.function).flatMap((expression) =>
+        expression._tag === 'EffectBlock' &&
+        Hir.effectRepresentationIdentity(expression.site) === identity.identity
+          ? [effectIdentity(instance.key, expression.site)]
+          : [],
+      )
+    })
+    return candidates.length === 1 ? candidates.at(0) : undefined
+  }
   const addDependency = (owner: string, target: string): void => {
     const targets = dependencies.get(owner) ?? new Set<string>()
     targets.add(target)
@@ -2009,6 +2083,7 @@ const suspensionGraph = (
       results,
       index,
       resolving: new Set(),
+      resolveEffectIdentity,
     }
     const bindings = callableBindings(instance.function)
 

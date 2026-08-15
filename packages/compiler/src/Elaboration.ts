@@ -2708,13 +2708,128 @@ const exactCallableRepresentation = (
   )
 }
 
+const exactEffectDeclarationRepresentation = (
+  declaration: DeclarationFact,
+  contract: Type.Effect,
+  typeArguments: ReadonlyArray<Type.GenericArgument>,
+): Type.ExactRepresentationArgument | undefined => {
+  if (declaration.functionKind !== 'Effect' || declaration.canonical._tag !== 'Canonical')
+    return undefined
+  const owner = Object.freeze({
+    declaration: Object.freeze({
+      module: declaration.canonical.id.module,
+      name: declaration.canonical.id.name,
+    }),
+    typeArguments,
+  })
+  const site: Hir.EffectSiteId = Object.freeze({
+    _tag: 'EffectSiteId',
+    function: declaration.id,
+    owner: declaration.canonical.id,
+    ordinal: -1,
+    span: declaration.syntax.span,
+  })
+  return Type.exactRepresentationArgument(
+    Type.effectIdentityArgument(Hir.effectRepresentationIdentity(site), owner),
+    contract,
+  )
+}
+
+const exactEffectIdentityOfExpression = (
+  expression: ExpressionFact,
+): Type.EffectIdentityArgument | undefined => {
+  const representation = representationOfExpression(expression)
+  return representation?._tag === 'ExactRepresentationArgument' &&
+    Type.isEffectIdentityArgument(representation.identity)
+    ? representation.identity
+    : undefined
+}
+
+const hiddenEffectArguments = (
+  declaration: DeclarationFact,
+  substitution: Type.Substitution,
+  argumentAt: (ordinal: number) => ExpressionFact | undefined,
+): ReadonlyArray<Type.EffectIdentityArgument> =>
+  Object.freeze(
+    declaration.parameters.flatMap((parameter, ordinal) => {
+      const declared = parameter.declaredType
+      if (declared._tag !== 'Resolved') return []
+      const specialized = Type.substitute(declared.type, substitution)
+      const contract = Type.isRepresented(specialized) ? specialized.contract : specialized
+      if (!Type.isEffect(contract)) return []
+      const argument = argumentAt(ordinal)
+      const identity =
+        argument === undefined ? undefined : exactEffectIdentityOfExpression(argument)
+      return identity === undefined ? [] : [identity]
+    }),
+  )
+
+const exactEffectApplicationContract = (
+  declaration: DeclarationFact,
+  substitution: Type.Substitution,
+  contract: Type.Effect,
+): Type.Effect => {
+  const accesses = declaration.parameters.flatMap((parameter) => {
+    const declared = parameter.declaredType
+    if (declared._tag !== 'Resolved') return []
+    const specialized = Type.substitute(declared.type, substitution)
+    const captured = Type.isRepresented(specialized) ? specialized.contract : specialized
+    if (Type.isEffect(captured)) return [captured.access]
+    if (Type.isCallable(captured)) return [captured.mode]
+    return []
+  })
+  const access = accesses.includes('Take')
+    ? 'Take'
+    : accesses.includes('Exclusive')
+      ? 'Exclusive'
+      : contract.access
+  return Type.effect(
+    contract.success,
+    contract.failures,
+    access,
+    contract.requirements,
+    contract.failureParameters,
+    contract.requirementParameters,
+  )
+}
+
+const effectCallableApplicationRepresentation = (
+  expression: CallableApplyExpressionFact,
+  contract: Type.Effect,
+): Type.ExactRepresentationArgument | undefined => {
+  const callee = expression.callee
+  if (callee._tag !== 'CallableSection' || callee.reference._tag !== 'Resolved') return undefined
+  const substitution = new Map(callee.substitution)
+  for (const [parameter, argument] of expression.substitution) substitution.set(parameter, argument)
+  const declaredArguments = Object.freeze(
+    callee.reference.declaration.typeParameters.map(
+      (parameter) =>
+        substitution.get(Type.key(parameter.type)) ??
+        Type.substituteGenericArgument(parameter.type, substitution),
+    ),
+  )
+  const applicationArgument = (ordinal: number): ExpressionFact | undefined => {
+    const captured = callee.captures.find((capture) => capture.parameterOrdinal === ordinal)
+    if (captured !== undefined) return captured.expression
+    return ordinal === callee.omittedParameter ? expression.arguments.at(0)?.expression : undefined
+  }
+  return exactEffectDeclarationRepresentation(
+    callee.reference.declaration,
+    exactEffectApplicationContract(callee.reference.declaration, substitution, contract),
+    Object.freeze([
+      ...declaredArguments,
+      ...hiddenEffectArguments(callee.reference.declaration, substitution, applicationArgument),
+    ]),
+  )
+}
+
 /**
  * Recovers a compile-time representation from semantic expression structure. This is deliberately
  * frontend-owned: later phases consume the retained argument and never reconstruct it from syntax.
  */
-export const representationOfExpression = (
+export function representationOfExpression(
   expression: ExpressionFact,
-): Type.RepresentationArgument | undefined => {
+): Type.RepresentationArgument | undefined {
   if (expression.type._tag === 'Available' && Type.isRepresented(expression.type.type))
     return expression.type.type.representation.argument
   if (expression._tag === 'FunctionItem' && expression.type._tag === 'Available') {
@@ -2749,6 +2864,33 @@ export const representationOfExpression = (
       ),
       contract,
     )
+  }
+  if (
+    expression._tag === 'Call' &&
+    expression.reference._tag === 'Resolved' &&
+    expression.contract._tag === 'Compatible' &&
+    expression.type._tag === 'Available' &&
+    Type.isEffect(expression.type.type)
+  ) {
+    return exactEffectDeclarationRepresentation(
+      expression.reference.declaration,
+      expression.type.type,
+      Object.freeze([
+        ...expression.contract.typeArguments,
+        ...hiddenEffectArguments(
+          expression.reference.declaration,
+          expression.contract.substitution,
+          (ordinal) => expression.arguments.at(ordinal)?.expression,
+        ),
+      ]),
+    )
+  }
+  if (
+    expression._tag === 'CallableApply' &&
+    expression.type._tag === 'Available' &&
+    Type.isEffect(expression.type.type)
+  ) {
+    return effectCallableApplicationRepresentation(expression, expression.type.type)
   }
   if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding')
     return representationOfExpression(expression.reference.binding.initializer)

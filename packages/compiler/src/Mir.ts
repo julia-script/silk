@@ -2263,6 +2263,28 @@ const instanceText = (self: Instances.InstanceKey): string =>
     .map(SilkType.genericArgumentKey)
     .join('\u0000')}\u0000${self.contractRow.join('\u0000')}`
 
+const callArgumentCompatible = (actual: Type, expected: Type): boolean => {
+  if (
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(semanticType(actual), semanticType(expected)),
+    )
+  )
+    return true
+  if (
+    actual._tag !== 'EffectValue' ||
+    expected._tag !== 'EffectValue' ||
+    actual.storage !== undefined ||
+    expected.storage?._tag !== 'StoredEffectField'
+  )
+    return false
+  const realization = expected.storage.realization
+  return (
+    SilkType.equals(actual.type, realization.contract) &&
+    Hir.sameExecutableSite(actual.site, realization.site) &&
+    instanceText(actual.environment.instance) === instanceText(realization.runnerInstance)
+  )
+}
+
 const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Type> => {
   switch (cleanup._tag) {
     case 'NoCleanup':
@@ -4933,9 +4955,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               return (
                 actual !== undefined &&
                 expected !== undefined &&
-                TypeCompatibility.isCompatible(
-                  TypeCompatibility.check(semanticType(actual), semanticType(expected)),
-                )
+                callArgumentCompatible(actual, expected)
               )
             }) &&
             SilkType.equals(semanticType(operation.type), semanticType(target.result))
