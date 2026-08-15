@@ -352,16 +352,31 @@ const unifyArgument = (
   if (Type.isTypeArgument(left) && Type.isTypeArgument(right)) return unify(left, right, bindings)
   if (Type.isRepresentationArgument(left) && Type.isRepresentationArgument(right))
     return representationsMayOverlap(left, right)
-  const rowKinds =
-    (Type.isFailureRowArgument(left) && Type.isFailureRowArgument(right)) ||
-    (Type.isRequirementRowArgument(left) && Type.isRequirementRowArgument(right)) ||
-    (Type.isHiddenIdentityArgument(left) && Type.isHiddenIdentityArgument(right))
-  if (!rowKinds) return false
-  // A row or hidden identity is decomposed no further here, so only two arguments that are already
-  // closed *and* ground can be shown disjoint. An open row stands for every extension of itself,
-  // and a closed row whose members still mention a binder stands for every instantiation of it.
-  if (isOpenArgument(left) || isOpenArgument(right)) return true
-  return Type.genericArgumentKey(left) === Type.genericArgumentKey(right)
+  if (Type.isFailureRowArgument(left) && Type.isFailureRowArgument(right)) {
+    // An open row stands for every extension of itself, and a closed row whose members still
+    // mention a binder stands for every instantiation of it.
+    if (isOpenArgument(left) || isOpenArgument(right)) return true
+    return Type.genericArgumentKey(left) === Type.genericArgumentKey(right)
+  }
+  if (Type.isRequirementRowArgument(left) && Type.isRequirementRowArgument(right)) {
+    if (isOpenArgument(left) || isOpenArgument(right)) return true
+    if (left.requirements.length !== right.requirements.length) return false
+    return left.requirements.every((requirement, ordinal) => {
+      const opposing = right.requirements.at(ordinal)
+      // Exclusive requirements accept a shared actual requirement. Therefore access differences
+      // cannot prove two closed rows disjoint: both patterns may select the shared form.
+      return (
+        opposing !== undefined &&
+        requirement.role === opposing.role &&
+        unify(requirement.capability, opposing.capability, bindings)
+      )
+    })
+  }
+  if (Type.isHiddenIdentityArgument(left) && Type.isHiddenIdentityArgument(right)) {
+    if (isOpenArgument(left) || isOpenArgument(right)) return true
+    return Type.genericArgumentKey(left) === Type.genericArgumentKey(right)
+  }
+  return false
 }
 
 const unify = (
@@ -398,7 +413,6 @@ const unify = (
     return left.access === right.access && unify(left.target, right.target, bindings)
   if (Type.isCallable(left) && Type.isCallable(right))
     return (
-      left.mode === right.mode &&
       left.parameters.length === right.parameters.length &&
       left.parameters.every((parameter, ordinal) => {
         const opposing = right.parameters.at(ordinal)
@@ -410,7 +424,6 @@ const unify = (
     return representationsMayOverlap(left.representation.argument, right.representation.argument)
   if (Type.isEffect(left) && Type.isEffect(right))
     return (
-      left.access === right.access &&
       unify(left.success, right.success, bindings) &&
       unifyArgument(
         Type.failureRowArgument(left.failures, left.failureParameters),

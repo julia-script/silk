@@ -185,6 +185,36 @@ pub fn main() -> i32 { return 0 }`,
   }),
 )
 
+it.effect('rejects access variants that share one concrete specialization', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance-rejection/access-overlap',
+      `interface EffectMarker<T> {}
+interface RequirementMarker<T> {}
+
+service Clock { effect fn now() -> i32 ? &Clock }
+
+impl EffectMarker<Effect<i32>> for Effect<i32> {}
+impl EffectMarker<mut Effect<i32>> for mut Effect<i32> {}
+
+impl RequirementMarker<Effect<i32 ? &Clock>> for Effect<i32 ? &Clock> {}
+impl RequirementMarker<Effect<i32 ? &mut Clock>> for Effect<i32 ? &mut Clock> {}
+
+pub fn main() -> i32 { return 0 }`,
+    )
+    const overlaps = reported(snapshot, 'SEM0108')
+    for (const name of ['EffectMarker', 'RequirementMarker'])
+      assert.strictEqual(
+        overlaps.filter((diagnostic) => diagnostic.message.includes(name)).length,
+        1,
+        `${name}: ${JSON.stringify(Analysis.diagnostics(snapshot), undefined, 2)}`,
+      )
+    assert.strictEqual(overlaps.length, 2)
+    assert.deepEqual(reported(snapshot, 'SEM0083'), [])
+    assert.deepEqual(reported(snapshot, 'SEM0109'), [])
+  }),
+)
+
 it.effect('rejects a requirement whose provider equals the header provider', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyze(

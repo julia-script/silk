@@ -191,12 +191,33 @@ it('treats an open Effect requirement row as covering a compatible closed row', 
   assert.isTrue(ConformanceHead.mayOverlap(left, right))
 })
 
-it('separates Effect heads with different access modes', () => {
+it('reports overlap between Effect heads whose access modes share one admissible actual', () => {
   const shared = Type.effect('i32', [], 'Shared')
   const exclusive = Type.effect('i32', [], 'Exclusive')
   const left = ConformanceHead.make(decoder(shared), shared)
   const right = ConformanceHead.make(decoder(exclusive), exclusive)
-  assert.isFalse(ConformanceHead.mayOverlap(left, right))
+  assert.isTrue(ConformanceHead.mayOverlap(left, right))
+})
+
+it('reports overlap between callable heads whose modes share one admissible actual', () => {
+  const shared = Type.callable(['i32'], 'i32', 'Shared')
+  const consuming = Type.callable(['i32'], 'i32', 'Take')
+  const left = ConformanceHead.make(decoder(shared), shared)
+  const right = ConformanceHead.make(decoder(consuming), consuming)
+  assert.isTrue(ConformanceHead.mayOverlap(left, right))
+})
+
+it('reports overlap between closed requirement rows whose access shares one actual', () => {
+  const capability = Type.nominal('heads', 'Clock')
+  const shared = Type.effect('i32', [], 'Shared', [
+    Object.freeze({ capability, role: 'provider', access: 'Shared' }),
+  ])
+  const exclusive = Type.effect('i32', [], 'Shared', [
+    Object.freeze({ capability, role: 'provider', access: 'Exclusive' }),
+  ])
+  const left = ConformanceHead.make(decoder(shared), shared)
+  const right = ConformanceHead.make(decoder(exclusive), exclusive)
+  assert.isTrue(ConformanceHead.mayOverlap(left, right))
 })
 
 it('separates representation-bounded headers whose bounds cannot intersect', () => {
