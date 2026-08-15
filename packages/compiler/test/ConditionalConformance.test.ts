@@ -5,6 +5,7 @@ import * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as Hir from '../src/Hir.js'
 import * as Mir from '../src/Mir.js'
 import * as Type from '../src/Type.js'
+import { raise } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array => Uint8Array.from(value, (unit) => unit.charCodeAt(0))
 
@@ -99,7 +100,10 @@ pub fn main() -> i32 { return 0 }`,
     assert.strictEqual(proof.selection._tag, 'SourceSelection')
     assert.strictEqual(proof.requirements.length, 1)
     assert.strictEqual(proof.typeArguments.length, 1)
-    assert.strictEqual(Type.genericArgumentKey(proof.typeArguments[0] ?? 'never'), Type.key(schema))
+    assert.strictEqual(
+      Type.genericArgumentKey(proof.typeArguments.at(0) ?? raise('expected one bound argument')),
+      Type.key(schema),
+    )
   }),
 )
 
@@ -277,5 +281,60 @@ pub fn main() -> i32 {
     )
     for (const spelling of ['witness', 'dictionary', 'vtable'])
       assert.isFalse(encoded.includes(spelling), `${spelling} reached generic HIR`)
+  }),
+)
+
+it.effect('rejects two headers whose bounds are the only difference between them', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance/bound-distinguished',
+      `interface Decoder<T> { fn decode(value: T) -> i32 }
+interface Left<T> { fn decode(value: T) -> i32 }
+interface Right<T> { fn decode(value: T) -> i32 }
+
+struct Wrap<S> { source: S }
+
+fn viaLeft<S: Left>(value: &Wrap<S>) -> i32 { return Left.decode(value.source) }
+fn viaRight<S: Right>(value: &Wrap<S>) -> i32 { return Right.decode(value.source) }
+
+impl<S: Left<S>> Decoder<Wrap<S>> for Wrap<S> { decode: Wrap.viaLeft }
+impl<S: Right<S>> Decoder<Wrap<S>> for Wrap<S> { decode: Wrap.viaRight }
+
+pub fn main() -> i32 { return 0 }`,
+    )
+    // No type satisfies both bounds today, and that is deliberately not consulted: whether a bound
+    // is satisfiable moves as a program grows, so a coherence answer that read it would move too.
+    const overlaps = Analysis.diagnostics(snapshot).filter(
+      (diagnostic) => diagnostic.code === 'SEM0108',
+    )
+    assert.strictEqual(overlaps.length, 1)
+    assert.include(overlaps.at(0)?.message ?? '', 'may overlap')
+  }),
+)
+
+it.effect('rejects a witness demanding a bound its header never promises', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance/unpromised',
+      `interface Decoder<T> { fn decode(value: T) -> i32 }
+interface Encoder<T> { fn decode(value: T) -> i32 }
+
+struct Wrap<S> { source: S }
+
+fn viaEncoder<S: Encoder>(value: &Wrap<S>) -> i32 { return Encoder.decode(value.source) }
+
+impl<S: Decoder<S>> Decoder<Wrap<S>> for Wrap<S> { decode: Wrap.viaEncoder }
+
+pub fn main() -> i32 { return 0 }`,
+    )
+    // The header promises a decoder for the source and the witness asks for an encoder. Admitting
+    // it would leave that obligation proved nowhere, and the call would lower to nothing.
+    const details = Analysis.diagnostics(snapshot)
+      .filter((diagnostic) => diagnostic.code === 'SEM0083')
+      .map((diagnostic) => diagnostic.message)
+    assert.isTrue(
+      details.some((detail) => detail.includes('which Decoder for') && detail.includes('Encoder')),
+      details.join(' | '),
+    )
   }),
 )

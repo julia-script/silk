@@ -571,16 +571,14 @@ export type ConformanceWitness =
         readonly name: string
         readonly implementation: CanonicalId
       }>
-      /** The header's binders as this specialization bound them, in declaration order. */
-      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       /**
-       * The goals this witness was proved from, innermost first.
+       * The header's binders as this specialization bound them, in declaration order.
        *
-       * Discovery follows them so every witness the program needs becomes reachable, and lowering
-       * ignores them: a requirement's witness is reached through its own instance rather than
-       * through anything handed to this one at run time.
+       * This is the whole of what a conditional witness carries. The goals it was proved from are
+       * reached through their own instances, so nothing about a requirement travels with the
+       * witness that selected it.
        */
-      readonly requirements: ReadonlyArray<ConformanceGoal.ConformanceGoal>
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
     }
 
 /** Any declaration kind occupying the shared module-level namespace. */
@@ -3113,6 +3111,27 @@ const resolveBounds = (
 }
 
 /**
+ * Reads one binder as the argument that re-supplies it to a declaration expecting its kind.
+ *
+ * A row or representation binder is not an ordinary type argument, so handing the bare parameter to
+ * a kind-checked substitution rejects it. This is what lets a witness function be generic in the
+ * same rows and representations its header binds rather than in ordinary types alone.
+ */
+const binderArgument = (parameter: Type.Parameter): Type.GenericArgument => {
+  switch (parameter.kind) {
+    case 'FailureRow':
+      return Type.failureRowArgument([], [parameter])
+    case 'RequirementRow':
+      return Type.requirementRowArgument([], [parameter])
+    case 'CallableRepresentation':
+    case 'EffectRepresentation':
+      return Type.representationParameterArgument(parameter)
+    case 'Value':
+      return parameter
+  }
+}
+
+/**
  * Reads one conformance's requirements as the interface applications proof search will follow.
  *
  * A requirement that resolved to something other than an applied interface, or that never stated
@@ -3699,12 +3718,16 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
                 conformance.syntax.span,
               ),
             )
-          // An exactly repeated head is reported once, as a duplicate, by header validation below.
+          // This is the one authority on whether two conformances may cover one provider. Two
+          // unbounded headers with one identical shape are the case a reader recognizes as a
+          // duplicate and are named that way; two headers a bound is the only difference between
+          // are reported as the overlap they are, because calling them duplicates would suggest the
+          // bounds were compared. Comparing the alpha-normalized heads is what makes the two tests
+          // agree — keying the duplicate check on unnormalized capabilities, as an earlier version
+          // did, let exactly the bound-distinguished pair match neither and survive.
           const headKey = ConformanceHead.key(head)
-          const overlapping = acceptedHeads.find(
-            (candidate) =>
-              ConformanceHead.key(candidate.head) !== headKey &&
-              ConformanceHead.mayOverlap(candidate.head, head),
+          const overlapping = acceptedHeads.find((candidate) =>
+            ConformanceHead.mayOverlap(candidate.head, head),
           )
           if (overlapping === undefined)
             acceptedHeads.push(
@@ -3713,6 +3736,22 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
                 ordinal: conformance.ordinal,
                 head,
                 span: conformance.syntax.span,
+              }),
+            )
+          else if (
+            ConformanceHead.key(overlapping.head) === headKey &&
+            head.requirements.length === 0 &&
+            overlapping.head.requirements.length === 0
+          )
+            diagnostics.push(
+              Object.freeze({
+                ...Diagnostic.invalidConformance(
+                  `duplicate ${conformance.capability.type.name} implementation for ${Type.encode(conformance.provider.type)}`,
+                  conformance.syntax.span,
+                ),
+                relatedSpans: Object.freeze([
+                  Object.freeze({ label: 'first implementation', span: overlapping.span }),
+                ]),
               }),
             )
           else
@@ -3745,7 +3784,6 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
     }),
   )
 
-  const conformanceKeys = new Map<string, SourceSpan.SourceSpan>()
   const copyMemo = new Map<string, boolean>()
   const containsPositionRestrictedBorrow = Type.containsPositionRestrictedBorrow
   const isCopyType = (type: Type.Type, visiting = new Set<string>()): boolean => {
@@ -3846,12 +3884,16 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           continue
         }
       }
-      const unstatedRequirement = conformance.requirements.find(
-        (requirement) =>
-          requirement.capability._tag !== 'Resolved' ||
-          !Type.isNominal(requirement.capability.type) ||
-          requirement.capability.type.arguments.length === 0,
-      )
+      // This predicate is the exact complement of what `declaredRequirements` admits. They have to
+      // agree: a requirement the reader accepts but the reader of obligations drops would be a
+      // bound nothing ever proves.
+      const unstatedRequirement = conformance.requirements.find((requirement) => {
+        if (requirement.capability._tag !== 'Resolved') return true
+        const applied = requirement.capability.type
+        if (!Type.isNominal(applied)) return true
+        const stated = applied.arguments.at(ConformanceHead.providerOrdinal)
+        return stated === undefined || !Type.isTypeArgument(stated)
+      })
       if (unstatedRequirement !== undefined) {
         diagnostics.push(
           Diagnostic.invalidConformance(
@@ -3878,33 +3920,6 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         )
         continue
       }
-      // Parametric impls collide when they cover the same provider shape, so the dedup key
-      // normalizes parameter identities positionally.
-      const normalization = new Map<string, Type.Type>(
-        declaredParameters.map((parameter, position) => [
-          Type.key(parameter),
-          Type.parameter({ module: '', name: 'impl' }, position, `%${position}`),
-        ]),
-      )
-      const normalizedProvider = Type.substitute(provider, normalization)
-      const key = `${Type.key(capability)}\0${Type.key(normalizedProvider)}`
-      const original = conformanceKeys.get(key)
-      if (original !== undefined) {
-        diagnostics.push(
-          Object.freeze({
-            ...Diagnostic.invalidConformance(
-              `duplicate ${capability.name} implementation for ${Type.encode(provider)}`,
-              conformance.syntax.span,
-            ),
-            relatedSpans: Object.freeze([
-              Object.freeze({ label: 'first implementation', span: original }),
-            ]),
-          }),
-        )
-        continue
-      }
-      conformanceKeys.set(key, conformance.syntax.span)
-
       if (sourceInterface !== undefined) {
         if (conformance.hook !== undefined) {
           diagnostics.push(
@@ -4018,13 +4033,42 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             // positionally. That correspondence is what lets one witness serve every
             // specialization the header covers, and it is the same shape the hidden Drop hook
             // already uses. A conformance that declares no binders still admits no generic witness.
-            const witnessParameters = implementation.typeParameters
-              .filter((parameter) => parameter.duplicateOf === undefined)
-              .map((parameter) => parameter.type)
+            const witnessBinders = implementation.typeParameters.filter(
+              (parameter) => parameter.duplicateOf === undefined,
+            )
+            const witnessParameters = witnessBinders.map((parameter) => parameter.type)
             const witnessSubstitution =
               witnessParameters.length === 0
                 ? new Map<string, Type.GenericArgument>()
-                : Type.substitution(witnessParameters, declaredParameters)
+                : Type.substitution(witnessParameters, declaredParameters.map(binderArgument))
+            // A witness may only ask for what the header already promises. Its own bounds are the
+            // obligations its body will discharge, so a bound the header never requires would be
+            // proved nowhere and would surface as a call with no lowering rather than a diagnostic.
+            const unpromisedBound = witnessBinders.find((binder, position) => {
+              const bound = binder.bound
+              if (bound?._tag !== 'ResolvedBound') return bound !== undefined
+              const header = declaredParameters.at(position)
+              return (
+                header === undefined ||
+                !conformance.requirements.some(
+                  (requirement) =>
+                    requirement.capability._tag === 'Resolved' &&
+                    Type.isNominal(requirement.capability.type) &&
+                    requirement.capability.type.module === bound.capability.module &&
+                    requirement.capability.type.name === bound.capability.name &&
+                    Type.equals(requirement.parameter, header),
+                )
+              )
+            })
+            if (unpromisedBound !== undefined) {
+              diagnostics.push(
+                Diagnostic.invalidConformance(
+                  `${target.spelling} requires ${unpromisedBound.bound?.spelling ?? 'a bound'} for ${unpromisedBound.type.name}, which ${capability.name} for ${Type.encode(provider)} does not require`,
+                  mapping.syntax.span,
+                ),
+              )
+              continue
+            }
             const specialize = (type: Type.Type): Type.Type =>
               witnessSubstitution === undefined ? type : Type.substitute(type, witnessSubstitution)
             const validParameters =
@@ -4650,8 +4694,6 @@ const proofMemos = new WeakMap<Index, Map<string, ConformanceGoal.Proof>>()
 
 const noGenericArguments: ReadonlyArray<Type.GenericArgument> = Object.freeze([])
 
-const noConformanceGoals: ReadonlyArray<ConformanceGoal.ConformanceGoal> = Object.freeze([])
-
 /** One conformance whose head covers a concrete goal, with the arguments matching it bound. */
 interface ConformanceCandidate {
   readonly module: string
@@ -4819,7 +4861,7 @@ const interfaceConformance = (
 /** Tests whether one nominal provider has a compiler-shipped or source-declared witness. */
 export const conforms = (self: Index, provider: Type.Type, capability: Type.Nominal): boolean =>
   interfaceByCapability(self, capability) !== undefined
-    ? interfaceConformance(self, provider, capability) !== undefined
+    ? prove(self, provider, capability)._tag === 'Proved'
     : witness(self, provider, capability) !== undefined
 
 /**
@@ -5049,10 +5091,6 @@ export const witness = (
   if (conformance.requirements.length > 0 && !provedHere) return undefined
   const typeArguments =
     proof._tag === 'Proved' && provedHere ? proof.typeArguments : noGenericArguments
-  const requirements =
-    proof._tag === 'Proved' && provedHere
-      ? Object.freeze(proof.requirements.map((requirement) => requirement.goal))
-      : noConformanceGoals
   return Type.equals(capability, Type.dropCapability) ||
     (completeService && completeOperationSet) ||
     (Type.equals(capability, Type.reportCapability) &&
@@ -5066,7 +5104,6 @@ export const witness = (
         provider,
         operations,
         typeArguments,
-        requirements,
       })
     : undefined
 }

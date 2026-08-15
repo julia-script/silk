@@ -208,7 +208,7 @@ const makeUnder = (
 
 /** The canonical alpha-invariant identity of one head. */
 export const key = (self: ConformanceHead): string =>
-  `${Type.key(self.capability)} ${Type.key(self.provider)}`
+  `${Type.key(self.capability)}\u0000${Type.key(self.provider)}`
 
 /** Renders one head the way a diagnostic spells it. */
 export const encode = (self: ConformanceHead): string =>
@@ -228,24 +228,44 @@ const resolve = (type: Type.Type, bindings: ReadonlyMap<string, Type.Type>): Typ
   return current
 }
 
+/**
+ * Applies every binding made so far, repeatedly, until the term names no bound parameter.
+ *
+ * One pass is not enough: a binding may name a parameter that a later binding resolved, so the
+ * occurs check has to see the term as it finally stands. The loop is bounded by the number of
+ * bindings because `bind` refuses any binding that would close a cycle, which keeps the map acyclic.
+ */
+const resolveDeep = (type: Type.Type, bindings: ReadonlyMap<string, Type.Type>): Type.Type => {
+  let current = type
+  for (let step = 0; step <= bindings.size; step += 1) {
+    const next = Type.substitute(current, bindings)
+    if (Type.equals(next, current)) return current
+    current = next
+  }
+  return current
+}
+
 const occurs = (parameter: Type.Parameter, type: Type.Type): boolean =>
   Type.parameters(type).some((candidate) => Type.key(candidate) === Type.key(parameter))
 
 /**
  * Binds one open parameter, refusing a binding that would only be satisfied by an infinite term.
  *
- * The occurs check is what makes `P<A>` and `A` disjoint rather than accidentally unifiable, which
- * is the difference between rejecting a wrapper that overlaps its own argument and admitting one.
+ * The occurs check runs against the fully resolved term rather than the one written at the call, so
+ * a pair of bindings that are each individually harmless cannot together demand an infinite term:
+ * `S ~ Wrap<T>` followed by `T ~ Wrap<S>` is refused here rather than left for a later traversal to
+ * chase forever. That is the difference between reporting two wrappers disjoint and not terminating.
  */
 const bind = (
   parameter: Type.Parameter,
   type: Type.Type,
   bindings: Map<string, Type.Type>,
 ): boolean => {
-  if (occurs(parameter, type)) return false
+  const resolved = resolveDeep(type, bindings)
+  if (occurs(parameter, resolved)) return false
   if (parameter.kind === 'CallableRepresentation' || parameter.kind === 'EffectRepresentation')
     return true
-  bindings.set(Type.key(parameter), type)
+  bindings.set(Type.key(parameter), resolved)
   return true
 }
 
@@ -262,7 +282,9 @@ const representationsMayOverlap = (
 ): boolean => {
   if (Type.representationArgumentKind(left) !== Type.representationArgumentKind(right)) return false
   if (Type.isExactRepresentationArgument(left) && Type.isExactRepresentationArgument(right))
-    return Type.genericArgumentKey(left) === Type.genericArgumentKey(right)
+    return isOpenArgument(left) || isOpenArgument(right)
+      ? true
+      : Type.genericArgumentKey(left) === Type.genericArgumentKey(right)
   if (
     Type.isRepresentationParameterArgument(left) &&
     Type.isRepresentationParameterArgument(right)
@@ -281,6 +303,31 @@ const representationsMayOverlap = (
   return Type.representationAdmissibility(exact.contract, bound)._tag !== 'Unavailable'
 }
 
+/**
+ * Reports whether an argument still names a binder, and so stands for more than itself.
+ *
+ * Canonical keys answer identity, not coverage: two arguments that mention binders live in the two
+ * disjoint namespaces this module renumbers into, so their keys can never match even when one
+ * instantiation satisfies both. Anything still open is therefore compared by coverage rather than
+ * by key, and reports overlap.
+ */
+const isOpenArgument = (self: Type.GenericArgument): boolean =>
+  Type.isUnavailableGenericArgument(self) ||
+  (Type.isTypeArgument(self)
+    ? Type.parameters(self).length > 0
+    : Type.isRepresentationParameterArgument(self)
+      ? true
+      : Type.isExactRepresentationArgument(self)
+        ? Type.parameters(self.contract).length > 0 || isOpenArgument(self.identity)
+        : Type.isCallableIdentityArgument(self)
+          ? self.typeArguments.some(isOpenArgument)
+          : Type.isFailureRowArgument(self)
+            ? self.parameters.length > 0 || self.failures.some((f) => Type.parameters(f).length > 0)
+            : Type.isRequirementRowArgument(self)
+              ? self.parameters.length > 0 ||
+                self.requirements.some((r) => Type.parameters(r.capability).length > 0)
+              : false)
+
 const unifyArgument = (
   left: Type.GenericArgument,
   right: Type.GenericArgument,
@@ -292,18 +339,16 @@ const unifyArgument = (
   if (Type.isTypeArgument(left) && Type.isTypeArgument(right)) return unify(left, right, bindings)
   if (Type.isRepresentationArgument(left) && Type.isRepresentationArgument(right))
     return representationsMayOverlap(left, right)
-  if (Type.isFailureRowArgument(left) && Type.isFailureRowArgument(right)) {
-    // An open row stands for every extension of itself, so only two closed rows can be disjoint.
-    if (left.parameters.length > 0 || right.parameters.length > 0) return true
-    return Type.genericArgumentKey(left) === Type.genericArgumentKey(right)
-  }
-  if (Type.isRequirementRowArgument(left) && Type.isRequirementRowArgument(right)) {
-    if (left.parameters.length > 0 || right.parameters.length > 0) return true
-    return Type.genericArgumentKey(left) === Type.genericArgumentKey(right)
-  }
-  if (Type.isHiddenIdentityArgument(left) && Type.isHiddenIdentityArgument(right))
-    return Type.genericArgumentKey(left) === Type.genericArgumentKey(right)
-  return false
+  const rowKinds =
+    (Type.isFailureRowArgument(left) && Type.isFailureRowArgument(right)) ||
+    (Type.isRequirementRowArgument(left) && Type.isRequirementRowArgument(right)) ||
+    (Type.isHiddenIdentityArgument(left) && Type.isHiddenIdentityArgument(right))
+  if (!rowKinds) return false
+  // A row or hidden identity is decomposed no further here, so only two arguments that are already
+  // closed *and* ground can be shown disjoint. An open row stands for every extension of itself,
+  // and a closed row whose members still mention a binder stands for every instantiation of it.
+  if (isOpenArgument(left) || isOpenArgument(right)) return true
+  return Type.genericArgumentKey(left) === Type.genericArgumentKey(right)
 }
 
 const unify = (
@@ -350,10 +395,12 @@ const unify = (
     )
   if (Type.isRepresented(left) && Type.isRepresented(right))
     return representationsMayOverlap(left.representation.argument, right.representation.argument)
-  // An Effect carries two open rows and a union has no canonical decomposition into cases, so
-  // neither shape can be shown disjoint here. Both report overlap rather than a coherence hole.
+  // An Effect carries two open rows, a union has no canonical decomposition into cases, and a
+  // failure projection stands for whatever row it is instantiated with — so none of the three can
+  // be shown disjoint here. All report overlap rather than leaving a coherence hole.
   if (Type.isEffect(left) && Type.isEffect(right)) return true
   if (Type.isUnion(left) || Type.isUnion(right)) return true
+  if (Type.isFailureProjection(left) || Type.isFailureProjection(right)) return true
   return false
 }
 
