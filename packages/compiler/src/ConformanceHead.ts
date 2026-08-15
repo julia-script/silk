@@ -420,13 +420,24 @@ export const mayOverlap = (left: ConformanceHead, right: ConformanceHead): boole
   )
 }
 
-/** Counts every occurrence of each parameter, with multiplicity, across the supplied terms. */
-const occurrences = (terms: ReadonlyArray<Type.Type>): ReadonlyMap<string, number> => {
-  const counts = new Map<string, number>()
+/**
+ * Counts every occurrence of each parameter, with multiplicity, across the supplied terms.
+ *
+ * The map is keyed by the parameter's canonical identity so two spellings of one binder are counted
+ * together, and carries the parameter itself so a diagnostic can name it the way the rest of the
+ * head is spelled rather than by that internal identity.
+ */
+const occurrences = (
+  terms: ReadonlyArray<Type.Type>,
+): ReadonlyMap<string, { readonly parameter: Type.Parameter; readonly count: number }> => {
+  const counts = new Map<string, { readonly parameter: Type.Parameter; readonly count: number }>()
   for (const term of terms)
     for (const parameter of occurringParameters([term])) {
       const parameterKey = Type.key(parameter)
-      counts.set(parameterKey, (counts.get(parameterKey) ?? 0) + countIn(parameter, term))
+      counts.set(parameterKey, {
+        parameter,
+        count: (counts.get(parameterKey)?.count ?? 0) + countIn(parameter, term),
+      })
     }
   return counts
 }
@@ -542,16 +553,16 @@ export const terminationFailures = (self: ConformanceHead): ReadonlyArray<Termin
           }),
         )
       const requiredOccurrences = occurrences([requirement.capability, requirement.provider])
-      for (const [parameter, required] of requiredOccurrences) {
-        const declared = declaredOccurrences.get(parameter) ?? 0
-        if (required > declared)
+      for (const [parameterKey, required] of requiredOccurrences) {
+        const declared = declaredOccurrences.get(parameterKey)?.count ?? 0
+        if (required.count > declared)
           failures.push(
             Object.freeze({
               _tag: 'IncreasingVariableOccurrences' as const,
               requirement: spelling,
-              variable: parameter,
+              variable: Type.encode(required.parameter),
               declared,
-              required,
+              required: required.count,
             }),
           )
       }

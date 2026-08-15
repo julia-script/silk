@@ -438,6 +438,26 @@ it('recovers from a malformed impl type-parameter list inside the declaration', 
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
+it('recovers from a malformed bounded impl type-parameter list inside the declaration', () => {
+  // The bound's own applied type closes, but the parameter list never does, so recovery has to
+  // decide the header ends without swallowing the declaration that follows it.
+  const source =
+    'impl<S: Decoder<S> Decoder<MappedSchema<S>> for MappedSchema<S> { decode: MappedSchema.mappedDecode } fn after() -> i32 { return 7 }'
+  const result = parseText('memory://damaged-conditional-conformance.silk', source)
+  assert.isAbove(result.parserDiagnostics.length, 0)
+  assert.strictEqual(
+    result.root.children.filter(
+      (element): element is SyntaxTree.Node =>
+        SyntaxTree.isNode(element) && element.kind === 'ImplDeclaration',
+    ).length,
+    1,
+  )
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
+  assert.deepEqual(missingLeaves(directFunctionDeclarations(result.root).at(0) ?? result.root), [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('bounds damaged conformance recovery before the following declaration', () => {
   const result = parseText(
     'memory://damaged-conformance.silk',
