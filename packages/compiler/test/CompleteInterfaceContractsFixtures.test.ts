@@ -255,7 +255,7 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
     }),
   )
 
-  it.effect('attaches the complete applied contract before legacy witness compatibility', () =>
+  it.effect('admits an exact complete witness without narrowing its applied caller contract', () =>
     Effect.gen(function* () {
       const snapshot = yield* analyze('mapped-effect')
       const conformance = Analysis.declarationIndex(snapshot)
@@ -277,9 +277,107 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
         ),
         ['complete-interface-contracts/mapped-effect.Clock'],
       )
-      // Task 1 only publishes the fact. The existing pure/shared-borrow witness checker remains the
-      // compatibility seam until ownership and row subsumption land in the next slice.
-      assert.strictEqual(conformance?.validity._tag, 'InvalidConformance')
+      assert.strictEqual(conformance?.validity._tag, 'ValidConformance')
+    }),
+  )
+
+  it.effect('admits a pure witness with smaller rows and weaker access', () =>
+    Effect.gen(function* () {
+      const snapshot = yield* analyze('subsumption')
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const conformance = Analysis.declarationIndex(snapshot)
+        .modules.flatMap((module) => module.conformances)
+        .at(0)
+      const contract = conformance?.operations.at(0)?.contract
+      const generic = namedDeclaration(Analysis.declarationIndex(snapshot), 'generic')
+      const genericBound = generic?.typeParameters.at(0)?.bound
+      const callerContract =
+        genericBound?._tag === 'ResolvedBound'
+          ? genericBound.application.operations.at(0)
+          : undefined
+      assert.strictEqual(conformance?.validity._tag, 'ValidConformance')
+      assert.strictEqual(contract?.functionKind, 'Effect')
+      assert.strictEqual(contract?.receiverAccess, 'Exclusive')
+      assert.deepEqual(contract?.failureRow.failures.map(Type.encode), [
+        'complete-interface-contracts/subsumption.DecodeError',
+        'complete-interface-contracts/subsumption.ExtraError',
+      ])
+      assert.deepEqual(
+        contract?.requirementRow.requirements.map((requirement) => ({
+          capability: Type.encode(requirement.capability),
+          access: requirement.access,
+        })),
+        [
+          {
+            capability: 'complete-interface-contracts/subsumption.Clock',
+            access: 'Exclusive',
+          },
+          {
+            capability: 'complete-interface-contracts/subsumption.Logger',
+            access: 'Shared',
+          },
+        ],
+      )
+      assert.deepEqual(callerContract?.failureRow.failures.map(Type.encode), [
+        'complete-interface-contracts/subsumption.DecodeError',
+        'complete-interface-contracts/subsumption.ExtraError',
+      ])
+      assert.deepEqual(
+        callerContract?.requirementRow.requirements.map((requirement) => ({
+          capability: Type.encode(requirement.capability),
+          access: requirement.access,
+        })),
+        [
+          {
+            capability: 'complete-interface-contracts/subsumption.Clock',
+            access: 'Exclusive',
+          },
+          {
+            capability: 'complete-interface-contracts/subsumption.Logger',
+            access: 'Shared',
+          },
+        ],
+      )
+    }),
+  )
+
+  it.effect('diagnoses the first stronger receiver and parameter demands by source order', () =>
+    Effect.gen(function* () {
+      const receiver = yield* analyze('stronger-receiver')
+      const receiverDiagnostics = Analysis.diagnostics(receiver).filter(
+        (diagnostic) =>
+          diagnostic.span.sourceId === 'complete-interface-contracts/stronger-receiver',
+      )
+      assert.strictEqual(receiverDiagnostics.length, 1)
+      assert.include(
+        receiverDiagnostics.at(0)?.message ?? '',
+        'receiver self requires exclusive access but the interface promises shared access',
+      )
+
+      const parameter = yield* analyze('stronger-parameter')
+      const parameterDiagnostics = Analysis.diagnostics(parameter).filter(
+        (diagnostic) =>
+          diagnostic.span.sourceId === 'complete-interface-contracts/stronger-parameter',
+      )
+      assert.strictEqual(parameterDiagnostics.length, 1)
+      assert.include(
+        parameterDiagnostics.at(0)?.message ?? '',
+        'parameter encoded requires exclusive access but the interface promises shared access',
+      )
+    }),
+  )
+
+  it.effect('rejects witness rows that exceed the complete interface contract', () =>
+    Effect.gen(function* () {
+      const snapshot = yield* analyze('stronger-rows')
+      const diagnostics = Analysis.diagnostics(snapshot).filter(
+        (diagnostic) => diagnostic.span.sourceId === 'complete-interface-contracts/stronger-rows',
+      )
+      assert.strictEqual(diagnostics.length, 1)
+      assert.include(
+        diagnostics.at(0)?.message ?? '',
+        'witness adds failure complete-interface-contracts/stronger-rows.ExtraError',
+      )
     }),
   )
 })

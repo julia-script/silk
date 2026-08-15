@@ -158,6 +158,10 @@
       "types": "./dist/IntrinsicAvailability.d.ts",
       "import": "./dist/IntrinsicAvailability.js"
     },
+    "./InterfaceWitnessCompatibility": {
+      "types": "./dist/InterfaceWitnessCompatibility.d.ts",
+      "import": "./dist/InterfaceWitnessCompatibility.js"
+    },
     "./ImportPlan": {
       "types": "./dist/ImportPlan.d.ts",
       "import": "./dist/ImportPlan.js"
