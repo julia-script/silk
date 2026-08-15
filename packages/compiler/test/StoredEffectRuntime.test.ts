@@ -3,7 +3,6 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as ContinuationLayout from '../src/ContinuationLayout.js'
-import * as Hir from '../src/Hir.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
@@ -61,7 +60,7 @@ const completedValue = (outcome: BootstrapEvaluation.Outcome): number => {
   return outcome.result.value
 }
 
-const storedRun = (module: Mir.Module, label = 'stored Effect', runnerName?: string) => {
+const storedRun = (module: Mir.Module, label = 'stored Effect') => {
   const realizations = module.layout.entries.flatMap((entry) =>
     entry.representation._tag === 'StoredEffectEnvironment'
       ? [entry.representation.realization]
@@ -71,38 +70,8 @@ const storedRun = (module: Mir.Module, label = 'stored Effect', runnerName?: str
     for (const operation of module.functions.flatMap(Mir.operations)) {
       if (operation._tag !== 'RunEffectValue') continue
       const runner = operation.runnerBase?.declaration ?? operation.runner
-      if (
-        runner.module === realization.runner.module &&
-        runner.name === realization.runner.name &&
-        (runnerName === undefined || runner.name === runnerName)
-      )
+      if (runner.module === realization.runner.module && runner.name === realization.runner.name)
         return Object.freeze({ operation, realization })
-    }
-  }
-  for (const fn of module.functions) {
-    for (const operation of Mir.operations(fn)) {
-      if (operation._tag !== 'RunEffectValue') continue
-      const runner = operation.runnerBase?.declaration ?? operation.runner
-      if (runnerName === undefined || runner.name !== runnerName) continue
-      const effect = fn.localTypes.at(operation.effect.ordinal)
-      if (effect?._tag !== 'EffectValue') continue
-      const exactRunner = Hir.effectRunnerId(
-        effect.environment.instance.declaration,
-        effect.environment.site,
-      )
-      if (runner.module !== exactRunner.module || runner.name !== exactRunner.name) continue
-      return Object.freeze({
-        operation,
-        realization: Object.freeze({
-          runner: exactRunner,
-          runnerArguments: effect.environment.instance.typeArguments,
-          rows: Object.freeze({
-            failures: effect.type.failures,
-            requirements: effect.type.requirements,
-          }),
-          access: effect.type.access,
-        }),
-      })
     }
   }
   const expected = realizations.map((realization) => realization.runner.name).join(', ')
@@ -117,12 +86,8 @@ const storedRun = (module: Mir.Module, label = 'stored Effect', runnerName?: str
   return unreachable(`expected one ${label} run (${expected || 'none'}; saw ${actual || 'none'})`)
 }
 
-const assertRunnerAndRows = (
-  module: Mir.Module,
-  outcome: BootstrapEvaluation.Outcome,
-  runnerName?: string,
-): void => {
-  const { operation, realization } = storedRun(module, 'stored Effect', runnerName)
+const assertRunnerAndRows = (module: Mir.Module, outcome: BootstrapEvaluation.Outcome): void => {
+  const { operation, realization } = storedRun(module)
   assert.deepEqual(operation.runnerBase?.declaration ?? operation.runner, realization.runner)
   assert.deepEqual(
     operation.runnerBase?.typeArguments ?? operation.runnerTypeArguments,
@@ -171,9 +136,35 @@ const assertProvidedSpecialization = (
   )
 }
 
+const assertOwnershipFacts = (
+  realization: ReturnType<typeof storedRun>['realization'],
+  name: (typeof runtimeMatrix)[number]['name'],
+): void => {
+  assert.isTrue('environment' in realization && 'cleanup' in realization, name)
+  if (!('environment' in realization) || !('cleanup' in realization)) return
+  if (name === 'shared' || name === 'exclusive') {
+    assert.isTrue(
+      name === 'shared'
+        ? realization.environment.every((slot) => !slot.owned)
+        : realization.environment.some((slot) => slot.borrowed),
+      name,
+    )
+    assert.lengthOf(realization.cleanup.unrunLanes, 0, name)
+    assert.isFalse(realization.cleanup.consumedByRun, name)
+    return
+  }
+  assert.isTrue(
+    realization.environment.some((slot) => slot.owned),
+    name,
+  )
+  assert.isAbove(realization.cleanup.unrunLanes.length, 0, name)
+  assert.isTrue(realization.cleanup.consumedByRun, name)
+}
+
 const shared = `struct Deferred<F: Effect<i32>> { operation: F }
 pub fn main() -> i32 {
-  let deferred = Deferred { operation: effect { return 21 } }
+  let base = 21
+  let deferred = Deferred { operation: effect { return base } }
   return (run deferred.operation) + (run deferred.operation)
 }`
 
@@ -187,13 +178,20 @@ pub fn main() -> i32 {
   return (run deferred.operation) + (run deferred.operation)
 }`
 
-const consuming = `struct Token { value: i32 }
+const consuming = `struct Token { value: i32 storage: Allocation }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
 struct Deferred<F: once Effect<i32>> { operation: F }
 fn consume(token: Token) -> i32 { return token.value }
-pub fn main() -> i32 {
-  let token = Token { value: 42 }
+effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
+  let storage = run Allocator.allocate(Layout.of<i32>())
+  let token = Token { value: 42, storage: move storage }
   let deferred = Deferred { operation: effect { return consume(move token) } }
   return run deferred.operation
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const provided = `service Counter { effect fn get() -> i32 ? &Counter }
@@ -223,12 +221,28 @@ it.effect('executes stored Effects with exact runner, rows, access, and ownershi
         testCase.source,
       )
       assert.deepEqual(Mir.verify(module), [], testCase.name)
-      const runnerName = testCase.name === 'provided' ? 'bindRequirement$effect$-1' : undefined
-      const { realization } = storedRun(module, testCase.name, runnerName)
+      const { realization } = storedRun(module, testCase.name)
       assert.strictEqual(realization.access, testCase.access, testCase.name)
+      assertOwnershipFacts(realization, testCase.name)
       const outcome = BootstrapEvaluation.evaluate(snapshot.instances, module)
       assert.strictEqual(completedValue(outcome), testCase.result, testCase.name)
-      assertRunnerAndRows(module, outcome, runnerName)
+      assertRunnerAndRows(module, outcome)
+      if (testCase.name === 'consuming') {
+        assert.strictEqual(
+          outcome._tag === 'Completed'
+            ? outcome.trace.filter(
+                (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl'),
+              ).length
+            : 0,
+          1,
+        )
+        assert.strictEqual(
+          outcome._tag === 'Completed'
+            ? outcome.trace.filter((event) => event._tag === 'AllocationRelease').length
+            : 0,
+          1,
+        )
+      }
       if (testCase.name === 'provided') assertProvidedSpecialization(module, outcome)
     }
   }),
