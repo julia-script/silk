@@ -554,6 +554,141 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('infers reordered target binders and discovers two exact static specializations', () =>
+  Effect.gen(function* () {
+    const module = 'conditional-conformance/generic-targets'
+    const snapshot = yield* analyze(
+      module,
+      `interface Renderer<T> { fn render(value: T) -> i32 }
+
+struct Box<A, F: fn(i32) -> i32> { value: A }
+
+fn box<F: fn(i32) -> i32>(value: i32, operation: F) -> Box<i32, F> {
+  drop operation
+  return Box<i32, F> { value: value }
+}
+
+fn render<F: fn(i32) -> i32, A>(value: &Box<A, F>) -> i32 { return 21 }
+impl<A, F: fn(i32) -> i32> Renderer<Box<A, F>> for Box<A, F> {
+  render: Box.render
+}
+
+fn first(value: i32) -> i32 { return value + 1 }
+fn second(value: i32) -> i32 { return value + 2 }
+fn renderOf<T: Renderer>(value: T) -> i32 { return Renderer.render(value) }
+
+pub fn main() -> i32 {
+  let left = box(1, first)
+  let right = box(2, second)
+  return renderOf(move left) + renderOf(move right)
+}`,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map(
+        (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`,
+      ),
+      [],
+    )
+    const conformance = Analysis.declarationIndex(snapshot)
+      .modules.flatMap((candidate) => candidate.conformances)
+      .at(0)
+    assert.deepEqual(
+      conformance?.operations.at(0)?.targetArguments?.map(Type.encodeGenericArgument),
+      ['F', 'A'],
+    )
+
+    const hir = Analysis.hirOf(snapshot, module)
+    assert.isDefined(hir)
+    if (hir === undefined) return
+    const encodedHir = Hir.encode(hir)
+    assert.include(encodedHir, `bound ${module}.Renderer<T>.render over T`)
+
+    const renderInstances = Analysis.instancesOf(snapshot).instances.filter(
+      (instance) => instance.key.declaration.name === 'render',
+    )
+    assert.strictEqual(renderInstances.length, 2)
+    assert.isTrue(
+      renderInstances.every(
+        (instance) =>
+          Type.isExactRepresentationArgument(instance.key.typeArguments.at(0) ?? 'never') &&
+          Type.equalsGenericArgument(instance.key.typeArguments.at(1) ?? 'never', 'i32'),
+      ),
+    )
+    assert.strictEqual(
+      new Set(
+        renderInstances.map((instance) =>
+          instance.key.typeArguments.map(Type.genericArgumentKey).join('|'),
+        ),
+      ).size,
+      2,
+    )
+
+    const mir = Analysis.loweredMir(snapshot)
+    const witnessCalls = mir.functions.flatMap((fn) =>
+      fn.regions.flatMap((region) =>
+        region._tag === 'OperationRegion'
+          ? region.operations.filter(
+              (operation) => operation._tag === 'Call' && operation.target.name === 'render',
+            )
+          : [],
+      ),
+    )
+    assert.strictEqual(witnessCalls.length, 2)
+    const encodedMir = Mir.encode(mir)
+    for (const spelling of ['dictionary', 'vtable', 'witnessTable', 'interfaceTag', 'typeTag'])
+      assert.isFalse(encodedMir.includes(spelling), `${spelling} reached MIR`)
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
+it.effect('diagnoses unresolved and conflicting target binders deterministically', () =>
+  Effect.gen(function* () {
+    const unresolved = yield* analyze(
+      'conditional-conformance/unresolved-target-binder',
+      `interface Mixer<S, A> { fn mix(left: S, right: A) -> i32 }
+struct Box<T> { value: T }
+fn mix<T, U>(left: &Box<T>, right: &bool) -> i32 { return 0 }
+impl Mixer<Box<i32>, bool> for Box<i32> { mix: Box.mix }
+pub fn main() -> i32 { return 0 }`,
+    )
+    const conflicting = yield* analyze(
+      'conditional-conformance/conflicting-target-binder',
+      `interface Mixer<S, A> { fn mix(left: S, right: A) -> i32 }
+struct Box<T> { value: T }
+fn mix<T>(left: &Box<T>, right: &T) -> i32 { return 0 }
+impl Mixer<Box<i32>, bool> for Box<i32> { mix: Box.mix }
+pub fn main() -> i32 { return 0 }`,
+    )
+    const repeated = yield* analyze(
+      'conditional-conformance/repeated-conflicting-target-binder',
+      `interface Inspect<S> { fn inspect(value: S) -> i32 }
+struct Pair<A, B> { left: A right: B }
+fn inspect<T>(value: &Pair<T, T>) -> i32 { return 0 }
+impl Inspect<Pair<i32, bool>> for Pair<i32, bool> { inspect: Pair.inspect }
+pub fn main() -> i32 { return 0 }`,
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(unresolved).map((diagnostic) => diagnostic.message),
+      ['Invalid conformance: Box.mix: cannot infer witness target binder U'],
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(conflicting).map((diagnostic) => diagnostic.message),
+      [
+        'Invalid conformance: Box.mix: witness target binder T is i32 from receiver left but bool from parameter right',
+      ],
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(repeated).map((diagnostic) => diagnostic.message),
+      [
+        'Invalid conformance: Pair.inspect: witness target binder T is i32 from receiver value (earlier occurrence) but bool from receiver value (later occurrence)',
+      ],
+    )
+  }),
+)
+
 it.effect('keeps the conditional witness question unresolved in generic HIR', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyze(

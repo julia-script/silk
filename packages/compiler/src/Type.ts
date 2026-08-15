@@ -2192,11 +2192,28 @@ export const specializeExecutableOwner = (
   return specializeType(self)
 }
 
+export interface GenericArgumentConflict {
+  readonly parameter: Parameter
+  readonly previous: GenericArgument
+  readonly conflicting: GenericArgument
+}
+
+export interface OpenGenericInference {
+  readonly matches: boolean
+  readonly conflicts: ReadonlyArray<GenericArgumentConflict>
+}
+
+interface InferenceContext {
+  readonly allowOpenGenericArguments: boolean
+  readonly conflicts?: Array<GenericArgumentConflict>
+}
+
 /** Adds structural constraints from one declared type pattern to one supplied concrete type. */
 const bindGenericArgument = (
   parameter_: Parameter,
   actual: GenericArgument,
   inferred: Map<string, GenericArgument>,
+  context: InferenceContext,
 ): boolean => {
   const identity = key(parameter_)
   const existing = inferred.get(identity)
@@ -2204,7 +2221,11 @@ const bindGenericArgument = (
     inferred.set(identity, actual)
     return true
   }
-  return genericArgumentKey(existing) === genericArgumentKey(actual)
+  if (genericArgumentKey(existing) === genericArgumentKey(actual)) return true
+  context.conflicts?.push(
+    Object.freeze({ parameter: parameter_, previous: existing, conflicting: actual }),
+  )
+  return false
 }
 
 const commitInference = (
@@ -2253,15 +2274,17 @@ const inferFailureRowArgument = (
   pattern: FailureRowArgument,
   actual: FailureRowArgument,
   inferred: Map<string, GenericArgument>,
-  allowOpenActual = true,
+  allowOpenActual: boolean,
+  context: InferenceContext,
 ): boolean => {
   if (!allowOpenActual && actual.parameters.length > 0) return false
   if (genericArgumentKey(pattern) === genericArgumentKey(actual)) return true
+  const memberContext = Object.freeze({ ...context, allowOpenGenericArguments: false })
   const matched = inferRowMembers(
     pattern.failures,
     actual.failures,
     inferred,
-    (failure, supplied, trial) => infer(failure, supplied, trial),
+    (failure, supplied, trial) => inferType(failure, supplied, trial, memberContext),
     (remaining, trial) => {
       if (pattern.parameters.length === 0)
         return remaining.length === 0 && actual.parameters.length === 0
@@ -2269,7 +2292,12 @@ const inferFailureRowArgument = (
       return (
         pattern.parameters.length === 1 &&
         parameter_ !== undefined &&
-        bindGenericArgument(parameter_, failureRowArgument(remaining, actual.parameters), trial)
+        bindGenericArgument(
+          parameter_,
+          failureRowArgument(remaining, actual.parameters),
+          trial,
+          context,
+        )
       )
     },
   )
@@ -2284,10 +2312,12 @@ const inferRequirementRowArgument = (
   pattern: RequirementRowArgument,
   actual: RequirementRowArgument,
   inferred: Map<string, GenericArgument>,
-  allowOpenActual = true,
+  allowOpenActual: boolean,
+  context: InferenceContext,
 ): boolean => {
   if (!allowOpenActual && actual.parameters.length > 0) return false
   if (genericArgumentKey(pattern) === genericArgumentKey(actual)) return true
+  const memberContext = Object.freeze({ ...context, allowOpenGenericArguments: false })
   const matched = inferRowMembers(
     pattern.requirements,
     actual.requirements,
@@ -2298,7 +2328,7 @@ const inferRequirementRowArgument = (
         requirement.role !== supplied.role
       )
         return false
-      return infer(requirement.capability, supplied.capability, trial)
+      return inferType(requirement.capability, supplied.capability, trial, memberContext)
     },
     (remaining, trial) => {
       if (pattern.parameters.length === 0)
@@ -2307,7 +2337,12 @@ const inferRequirementRowArgument = (
       return (
         pattern.parameters.length === 1 &&
         parameter_ !== undefined &&
-        bindGenericArgument(parameter_, requirementRowArgument(remaining, actual.parameters), trial)
+        bindGenericArgument(
+          parameter_,
+          requirementRowArgument(remaining, actual.parameters),
+          trial,
+          context,
+        )
       )
     },
   )
@@ -2321,16 +2356,31 @@ const inferGenericArgument = (
   pattern: GenericArgument,
   actual: GenericArgument,
   inferred: Map<string, GenericArgument>,
+  context: InferenceContext,
 ): boolean => {
   if (isRepresentationParameterArgument(pattern))
     return (
-      isRepresentationArgument(actual) && bindGenericArgument(pattern.parameter, actual, inferred)
+      isRepresentationArgument(actual) &&
+      bindGenericArgument(pattern.parameter, actual, inferred, context)
     )
   if (isFailureRowArgument(pattern) && isFailureRowArgument(actual))
-    return inferFailureRowArgument(pattern, actual, inferred, false)
+    return inferFailureRowArgument(
+      pattern,
+      actual,
+      inferred,
+      context.allowOpenGenericArguments,
+      context,
+    )
   if (isRequirementRowArgument(pattern) && isRequirementRowArgument(actual))
-    return inferRequirementRowArgument(pattern, actual, inferred, false)
-  if (isTypeArgument(pattern) && isTypeArgument(actual)) return infer(pattern, actual, inferred)
+    return inferRequirementRowArgument(
+      pattern,
+      actual,
+      inferred,
+      context.allowOpenGenericArguments,
+      context,
+    )
+  if (isTypeArgument(pattern) && isTypeArgument(actual))
+    return inferType(pattern, actual, inferred, context)
   return genericArgumentKey(pattern) === genericArgumentKey(actual)
 }
 
@@ -2338,22 +2388,28 @@ const inferFailureRows = (
   pattern: Effect,
   actual: Effect,
   inferred: Map<string, GenericArgument>,
+  context: InferenceContext,
 ): boolean =>
   inferFailureRowArgument(
     failureRowArgument(pattern.failures, pattern.failureParameters),
     failureRowArgument(actual.failures, actual.failureParameters),
     inferred,
+    true,
+    context,
   )
 
 const inferRequirementRows = (
   pattern: Effect,
   actual: Effect,
   inferred: Map<string, GenericArgument>,
+  context: InferenceContext,
 ): boolean =>
   inferRequirementRowArgument(
     requirementRowArgument(pattern.requirements, pattern.requirementParameters),
     requirementRowArgument(actual.requirements, actual.requirementParameters),
     inferred,
+    true,
+    context,
   )
 
 /** Explains a failed Effect-row decomposition without replacing ordinary type diagnostics. */
@@ -2447,13 +2503,14 @@ export const rowInferenceFailure = (
   return undefined
 }
 
-export const infer = (
+const inferType = (
   pattern: Type,
   actual: Type,
   inferred: Map<string, GenericArgument>,
+  context: InferenceContext,
 ): boolean => {
   if (isParameter(pattern)) {
-    return pattern.kind === 'Value' && bindGenericArgument(pattern, actual, inferred)
+    return pattern.kind === 'Value' && bindGenericArgument(pattern, actual, inferred, context)
   }
   if (isFailureProjection(pattern)) {
     const failures = isNever(actual)
@@ -2465,12 +2522,13 @@ export const infer = (
           : undefined
     return (
       (failures !== undefined &&
-        bindGenericArgument(pattern.parameter, failureRowArgument(failures), inferred)) ||
+        bindGenericArgument(pattern.parameter, failureRowArgument(failures), inferred, context)) ||
       (isFailureProjection(actual) &&
         bindGenericArgument(
           pattern.parameter,
           failureRowArgument([], [actual.parameter]),
           inferred,
+          context,
         ))
     )
   }
@@ -2483,17 +2541,26 @@ export const infer = (
       return false
     return pattern.arguments.every((argument, index) => {
       const supplied = actual.arguments.at(index)
-      return supplied !== undefined && inferGenericArgument(argument, supplied, inferred)
+      return supplied !== undefined && inferGenericArgument(argument, supplied, inferred, context)
     })
   }
   if (isFixedArray(pattern) && isFixedArray(actual)) {
-    return pattern.length === actual.length && infer(pattern.element, actual.element, inferred)
+    return (
+      pattern.length === actual.length &&
+      inferType(pattern.element, actual.element, inferred, context)
+    )
   }
   if (isSlice(pattern) && isSlice(actual)) {
-    return pattern.access === actual.access && infer(pattern.element, actual.element, inferred)
+    return (
+      pattern.access === actual.access &&
+      inferType(pattern.element, actual.element, inferred, context)
+    )
   }
   if (isReference(pattern) && isReference(actual)) {
-    return pattern.access === actual.access && infer(pattern.target, actual.target, inferred)
+    return (
+      pattern.access === actual.access &&
+      inferType(pattern.target, actual.target, inferred, context)
+    )
   }
   if (isCallable(pattern) && isCallable(actual)) {
     const patternRank = pattern.mode === 'Shared' ? 0 : pattern.mode === 'Exclusive' ? 1 : 2
@@ -2503,9 +2570,9 @@ export const infer = (
       pattern.parameters.length === actual.parameters.length &&
       pattern.parameters.every((parameter_, index) => {
         const supplied = actual.parameters.at(index)
-        return supplied !== undefined && infer(parameter_, supplied, inferred)
+        return supplied !== undefined && inferType(parameter_, supplied, inferred, context)
       }) &&
-      infer(pattern.result, actual.result, inferred)
+      inferType(pattern.result, actual.result, inferred, context)
     )
   }
   if (isEffect(pattern) && isEffect(actual)) {
@@ -2513,20 +2580,44 @@ export const infer = (
     const actualRank = actual.access === 'Shared' ? 0 : actual.access === 'Exclusive' ? 1 : 2
     return (
       actualRank <= patternRank &&
-      infer(pattern.success, actual.success, inferred) &&
-      inferFailureRows(pattern, actual, inferred) &&
-      inferRequirementRows(pattern, actual, inferred)
+      inferType(pattern.success, actual.success, inferred, context) &&
+      inferFailureRows(pattern, actual, inferred, context) &&
+      inferRequirementRows(pattern, actual, inferred, context)
     )
   }
   if (isRepresented(pattern) && isRepresented(actual)) {
-    if (!infer(pattern.contract, actual.contract, inferred)) return false
+    if (!inferType(pattern.contract, actual.contract, inferred, context)) return false
     return inferGenericArgument(
       pattern.representation.argument,
       actual.representation.argument,
       inferred,
+      context,
     )
   }
   return equals(pattern, actual)
+}
+
+export const infer = (
+  pattern: Type,
+  actual: Type,
+  inferred: Map<string, GenericArgument>,
+): boolean =>
+  inferType(pattern, actual, inferred, Object.freeze({ allowOpenGenericArguments: false }))
+
+/** Infers through generic arguments that remain open over an enclosing declaration. */
+export const inferOpenGenericArguments = (
+  pattern: Type,
+  actual: Type,
+  inferred: Map<string, GenericArgument>,
+): OpenGenericInference => {
+  const conflicts: Array<GenericArgumentConflict> = []
+  const matches = inferType(
+    pattern,
+    actual,
+    inferred,
+    Object.freeze({ allowOpenGenericArguments: true, conflicts }),
+  )
+  return Object.freeze({ matches, conflicts: Object.freeze(conflicts) })
 }
 
 /**
