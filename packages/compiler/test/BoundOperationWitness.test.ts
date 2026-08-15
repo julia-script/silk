@@ -472,13 +472,17 @@ pub fn main() -> i32 {
           operation.runner.module === runnerId.module &&
           operation.runner.name === runnerId.name,
       )
-    assert.isTrue(normalizedRunner !== undefined || staticRun?._tag === 'RunStaticEffect')
-    if (normalizedRunner?.result._tag === 'EffectOutcome')
+    if (normalizedRunner !== undefined) {
+      assert.strictEqual(normalizedRunner.result._tag, 'EffectOutcome')
+      if (normalizedRunner.result._tag !== 'EffectOutcome') return
       assert.deepEqual(normalizedRunner.result.type.failures.map(Type.encode), [
         `${module}.Problem`,
       ])
-    if (staticRun?._tag === 'RunStaticEffect')
+    } else {
+      assert.strictEqual(staticRun?._tag, 'RunStaticEffect')
+      if (staticRun?._tag !== 'RunStaticEffect') return
       assert.deepEqual(staticRun.outcomeType.type.failures.map(Type.encode), [`${module}.Problem`])
+    }
 
     const outcome = Analysis.evaluate(normalized)
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
@@ -573,7 +577,9 @@ pub fn main() -> i32 {
       (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'pending',
     )
     assert.strictEqual(pending?.contract._tag, 'Contract')
-    if (pending?.contract._tag !== 'Contract' || !Type.isEffect(pending.contract.result)) return
+    if (pending?.contract._tag !== 'Contract') return
+    assert.isTrue(Type.isEffect(pending.contract.result))
+    if (!Type.isEffect(pending.contract.result)) return
     assert.deepEqual(
       pending.contract.result.requirements.map((requirement) => ({
         capability: Type.encode(requirement.capability),
