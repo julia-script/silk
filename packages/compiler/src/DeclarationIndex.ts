@@ -3861,14 +3861,14 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       const markInvalid = (): void => {
         invalidConformances.add(conformance)
       }
-      const reject = <A extends Diagnostic.Diagnostic>(diagnostic: A): A => {
+      const rejectConformance = <A extends Diagnostic.Diagnostic>(diagnostic: A): A => {
         markInvalid()
         return diagnostic
       }
       const invalidDiagnostic = (
         ...args: Parameters<typeof Diagnostic.invalidConformance>
       ): ReturnType<typeof Diagnostic.invalidConformance> => {
-        return reject(Diagnostic.invalidConformance(...args))
+        return rejectConformance(Diagnostic.invalidConformance(...args))
       }
       if (
         conformance.capability._tag !== 'Resolved' ||
@@ -4054,7 +4054,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             contract.functionKind === 'Ordinary' &&
             contract.failureRow.failures.length === 0 &&
             contract.requirementRow.requirements.length === 0
-          const reject = (): void => {
+          const rejectIncompatibleMapping = (): void => {
             diagnostics.push(
               invalidDiagnostic(
                 `${target._tag === 'TypePath' ? target.spelling : '_'} is incompatible with ${capability.name}.${contractName}`,
@@ -4144,7 +4144,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
               implementation.failureRow.failures.length > 0 ||
               implementation.requirementRow.requirements.length > 0
             )
-              reject()
+              rejectIncompatibleMapping()
             continue
           }
           const operation =
@@ -4178,7 +4178,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             !validParameters ||
             !validResult
           )
-            reject()
+            rejectIncompatibleMapping()
         }
         continue
       }
@@ -4409,7 +4409,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         const hook = conformance.hook
         if (conformance.operations.length !== 0 || hook === undefined) {
           diagnostics.push(
-            reject(
+            rejectConformance(
               Diagnostic.invalidDropHook(
                 'Drop requires one inline fn drop hook and no operation mappings',
                 conformance.syntax.span,
@@ -4439,7 +4439,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           hook.requirementRow.requirements.length !== 0
         ) {
           diagnostics.push(
-            reject(
+            rejectConformance(
               Diagnostic.invalidDropHook(
                 'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
                 hook.syntax.span,
@@ -4450,7 +4450,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           // A parametric provider's Copy-ness depends on its arguments, so the prohibition is
           // enforced per instantiation during monomorphization instead of at the header.
           diagnostics.push(
-            reject(
+            rejectConformance(
               Diagnostic.invalidDropHook(
                 `Copy type ${Type.encode(provider)} cannot implement Drop`,
                 conformance.syntax.span,
