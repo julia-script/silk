@@ -231,6 +231,12 @@ export const conflictingSliceLoanCode = 'OWN0010' as const
 export const ownerAccessDuringLoanCode = 'OWN0011' as const
 export const borrowedMoveCode = 'OWN0012' as const
 
+/** Stable code for extracting one owned representation-bearing field out of its aggregate. */
+export const representationFieldExtractionCode = 'OWN0013' as const
+
+/** Stable code for invoking a stored callable through too weak an aggregate receiver access. */
+export const storedCallableInvocationAccessCode = 'OWN0014' as const
+
 /** Stable code for an exact `usize` magnitude outside the selected target word. */
 export const usizeTargetOutOfRangeCode = 'LAY0001' as const
 
@@ -369,6 +375,8 @@ export type Code =
   | typeof conflictingSliceLoanCode
   | typeof ownerAccessDuringLoanCode
   | typeof borrowedMoveCode
+  | typeof representationFieldExtractionCode
+  | typeof storedCallableInvocationAccessCode
   | typeof usizeTargetOutOfRangeCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
@@ -748,6 +756,20 @@ export type Reason =
       readonly moveSpan: SourceSpan.SourceSpan
     }
   | { readonly _tag: 'PartialMove' }
+  | {
+      readonly _tag: 'RepresentationFieldExtraction'
+      readonly aggregate: string
+      readonly field: string
+      readonly contract: string
+    }
+  | {
+      readonly _tag: 'StoredCallableInvocationAccess'
+      readonly aggregate: string
+      readonly field: string
+      readonly contract: string
+      readonly receiver: 'Shared' | 'Exclusive' | 'Take'
+      readonly required: 'Shared' | 'Exclusive' | 'Take'
+    }
   | { readonly _tag: 'ExplicitMoveRequired'; readonly spelling: string }
   | { readonly _tag: 'OverlappingAssignment'; readonly spelling: string }
   | { readonly _tag: 'IncompatibleLoopHeader'; readonly loop: number }
@@ -2858,6 +2880,57 @@ export const partialMove = (span: SourceSpan.SourceSpan): Diagnostic =>
     severity: 'error',
     message: 'Struct fields cannot be moved independently',
     reason: Object.freeze({ _tag: 'PartialMove' }),
+    span,
+  })
+
+/**
+ * Extracting an owned representation-bearing field would leave the aggregate holding a partially
+ * released callable environment, so its captures could be cleaned twice. Consuming invocation takes
+ * the whole aggregate instead.
+ */
+export const representationFieldExtraction = (
+  aggregate: string,
+  field: string,
+  contract: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: representationFieldExtractionCode,
+    severity: 'error',
+    message: `Cannot move field ${field} out of ${aggregate}: it stores the callable representation ${contract}, whose captures are cleaned with the whole aggregate`,
+    reason: Object.freeze({ _tag: 'RepresentationFieldExtraction', aggregate, field, contract }),
+    span,
+  })
+
+/**
+ * A stored callable is reached through its enclosing aggregate, so the aggregate's own access bounds
+ * the modes its environment admits: a shared receiver invokes only `fn`, an exclusive receiver also
+ * invokes `mut fn`, and only a whole-owner receiver may consume a `once fn`.
+ */
+export const storedCallableInvocationAccess = (
+  aggregate: string,
+  field: string,
+  contract: string,
+  receiver: 'Shared' | 'Exclusive' | 'Take',
+  required: 'Shared' | 'Exclusive' | 'Take',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: storedCallableInvocationAccessCode,
+    severity: 'error',
+    message: `Cannot invoke field ${field} of ${aggregate} through ${receiver.toLowerCase()} aggregate access: ${contract} requires ${required.toLowerCase()} access to the whole aggregate`,
+    reason: Object.freeze({
+      _tag: 'StoredCallableInvocationAccess',
+      aggregate,
+      field,
+      contract,
+      receiver,
+      required,
+    }),
     span,
   })
 

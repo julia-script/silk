@@ -97,6 +97,23 @@ export const compareExecutableSites = (
 export const executableSiteLabel = (self: EffectSiteId | CallableSiteId): string =>
   executableSiteKey(self).replaceAll('\u0000', ':')
 
+/** Projects a HIR callable site into the semantic identity retained across specialization. */
+export const callableEnvironmentSite = (self: CallableSiteId): Type.CallableEnvironmentSite =>
+  Type.callableEnvironmentSite(
+    self.owner === undefined
+      ? undefined
+      : Object.freeze({ module: self.owner.module, name: self.owner.name }),
+    self.function.ordinal,
+    self.ordinal,
+  )
+
+/** Retains one callable site's complete enclosing executable specialization. */
+export const callableEnvironmentIdentity = (
+  self: CallableSiteId,
+  owner: Type.CallableEnvironmentIdentity['owner'],
+): Type.CallableEnvironmentIdentity =>
+  Type.callableEnvironmentIdentity(callableEnvironmentSite(self), owner)
+
 /** Derives the canonical hidden runner declaration owned by one effect construction site. */
 export const effectRunnerId = (
   owner: DeclarationIndex.CanonicalId,
@@ -120,6 +137,69 @@ export type CallableTarget =
       readonly intrinsic: Intrinsic.OperationId
     }
 
+/** Converts the semantic callable identity retained by specialization into its HIR target. */
+export const callableTargetFromIdentity = (
+  target: Type.CallableIdentityArgument['target'],
+): CallableTarget =>
+  target._tag === 'Declaration'
+    ? Object.freeze({
+        _tag: 'DeclarationCallableTarget',
+        declaration: Object.freeze({
+          _tag: 'CanonicalDeclarationId',
+          module: target.module,
+          name: target.name,
+        }),
+      })
+    : Object.freeze({
+        _tag: 'BuiltinCallableTarget',
+        actor: target.actor,
+        operation: target.operation,
+        intrinsic: Object.freeze({
+          _tag: 'IntrinsicOperationId',
+          actor: target.intrinsic.actor,
+          name: target.intrinsic.name,
+        }),
+      })
+
+/** Projects a HIR callable target into the semantic identity retained by specialization. */
+export const callableTargetIdentity = (
+  self: CallableTarget,
+): Type.CallableIdentityArgument['target'] =>
+  self._tag === 'DeclarationCallableTarget'
+    ? Object.freeze({
+        _tag: 'Declaration',
+        module: self.declaration.module,
+        name: self.declaration.name,
+      })
+    : Object.freeze({
+        _tag: 'Builtin',
+        actor: self.actor,
+        operation: self.operation,
+        intrinsic: Object.freeze({
+          actor: self.intrinsic.actor,
+          name: self.intrinsic.name,
+        }),
+      })
+
+/** Tests complete structural identity for two HIR callable targets. */
+export const sameCallableTarget = (left: CallableTarget, right: CallableTarget): boolean =>
+  left._tag === right._tag &&
+  (left._tag === 'DeclarationCallableTarget' && right._tag === 'DeclarationCallableTarget'
+    ? left.declaration.module === right.declaration.module &&
+      left.declaration.name === right.declaration.name
+    : left._tag === 'BuiltinCallableTarget' && right._tag === 'BuiltinCallableTarget'
+      ? left.actor === right.actor &&
+        left.operation === right.operation &&
+        left.intrinsic.actor === right.intrinsic.actor &&
+        left.intrinsic.name === right.intrinsic.name
+      : false)
+
+/** Tests whether one HIR target is the target retained by a semantic callable identity. */
+export const matchesCallableTargetIdentity = (
+  self: CallableTarget,
+  identity: Type.CallableIdentityArgument['target'],
+): boolean => sameCallableTarget(self, callableTargetFromIdentity(identity))
+
 /** A canonical lexical loop identity local to one function. */
 export interface LoopId {
   readonly _tag: 'HirLoop'
@@ -128,46 +208,7 @@ export interface LoopId {
 }
 
 /** The closed built-in operation vocabulary of the compiler-known actors. */
-export type BuiltinOperation =
-  | Scalar.OperationCode
-  | 'LayoutOf'
-  | 'EffectSuspend'
-  | 'StorageAcquire'
-  | 'HostWrite'
-  | 'RawBufferFrom'
-  | 'RawBufferSlot'
-  | 'RawBufferCount'
-  | 'RawBufferRead'
-  | 'RawBufferView'
-  | 'RawBufferViewMut'
-  | 'RawBufferCopy'
-  | 'RawBufferFill'
-  | 'SlotWrite'
-  | 'SlotTake'
-  | 'SlotCopy'
-  | 'SlotDrop'
-  | 'StringFromUtf8Unchecked'
-  | 'StringUtf8Bytes'
-  | 'StringByteLength'
-  | 'StringEqualsExact'
-  | 'OsFileOpen'
-  | 'OsFileRead'
-  | 'OsFileWrite'
-  | 'OsDirectoryOpen'
-  | 'OsDirectoryNext'
-  | 'OsPathInspect'
-  | 'OsDirectoryCreate'
-  | 'OsDirectoryCreateUnique'
-  | 'OsFileRemove'
-  | 'OsDirectoryRemove'
-  | 'OsHandleClose'
-  | 'OsStandardInputRead'
-  | 'OsProcessExecute'
-  | 'OsProcessCapture'
-  | 'OsHostArgumentCount'
-  | 'OsHostArgument'
-  | 'OsHostVariable'
-  | 'OsHostWorkingDirectory'
+export type BuiltinOperation = Type.BuiltinOperation
 
 export type BoundsMode =
   | { readonly _tag: 'Proven'; readonly index: number; readonly length: number }

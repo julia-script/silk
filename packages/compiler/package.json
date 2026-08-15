@@ -54,6 +54,10 @@
       "types": "./dist/BootstrapEvaluation.d.ts",
       "import": "./dist/BootstrapEvaluation.js"
     },
+    "./CallableFieldRealization": {
+      "types": "./dist/CallableFieldRealization.d.ts",
+      "import": "./dist/CallableFieldRealization.js"
+    },
     "./Completion": {
       "types": "./dist/Completion.d.ts",
       "import": "./dist/Completion.js"

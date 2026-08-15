@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
+import * as Mir from '../src/Mir.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -20,7 +21,18 @@ const assertFenced = (snapshot: Analysis.Snapshot, code: 'SEM0103' | 'SEM0107'):
   assert.strictEqual(snapshot.mir._tag, 'Unavailable')
 }
 
-it.effect('fences exact represented callable storage before layout and MIR', () =>
+const assertRealizedCallable = (snapshot: Analysis.Snapshot): void => {
+  assert.notInclude(
+    Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+    'SEM0103',
+  )
+  assert.strictEqual(snapshot.layoutCatalog._tag, 'Available')
+  assert.strictEqual(snapshot.layout._tag, 'Available')
+  assert.strictEqual(snapshot.mir._tag, 'Available')
+  if (snapshot.mir._tag === 'Available') assert.deepEqual(Mir.verify(snapshot.mir.value), [])
+}
+
+it.effect('realizes exact represented callable storage through layout and MIR', () =>
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'representation-fence/callable-exact',
@@ -32,16 +44,11 @@ pub fn main() -> i32 {
 }`,
     )
 
-    assertFenced(snapshot, 'SEM0103')
-    assert.include(
-      Analysis.diagnostics(snapshot).find((diagnostic) => diagnostic.code === 'SEM0103')?.message ??
-        '',
-      'retains the static identity',
-    )
+    assertRealizedCallable(snapshot)
   }),
 )
 
-it.effect('fences an open callable field after reachable exact specialization', () =>
+it.effect('realizes an open callable field after reachable exact specialization', () =>
   Effect.gen(function* () {
     const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
 fn decode(value: i32) -> i32 { return value }
@@ -53,17 +60,7 @@ pub fn main() -> i32 {
   return parser.parse(1)
 }`
     const snapshot = yield* realized('representation-fence/callable-open', source)
-    const diagnostic = Analysis.diagnostics(snapshot).find(
-      (candidate) => candidate.code === 'SEM0103',
-    )
-
-    assertFenced(snapshot, 'SEM0103')
-    assert.strictEqual(
-      diagnostic === undefined
-        ? undefined
-        : source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
-      'make(decode)',
-    )
+    assertRealizedCallable(snapshot)
   }),
 )
 
@@ -170,7 +167,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('fences represented callable storage through a struct field and nested arrays', () =>
+it.effect('fences represented callable storage through nested arrays inside a struct field', () =>
   Effect.gen(function* () {
     const source = `struct Bucket<F: fn(i32) -> i32> { values: [[F; 1]; 1] }
 fn decode(value: i32) -> i32 { return value }
@@ -185,10 +182,8 @@ pub fn main() -> i32 {
 
     assertFenced(snapshot, 'SEM0103')
     assert.strictEqual(
-      Analysis.diagnostics(snapshot)
-        .filter((diagnostic) => diagnostic.code === 'SEM0103')
-        .some((diagnostic) => diagnostic.message.includes('values')),
-      true,
+      Analysis.diagnostics(snapshot).filter((diagnostic) => diagnostic.code === 'SEM0103').length,
+      2,
     )
   }),
 )
@@ -330,11 +325,13 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('fences nested repeated represented callable fields through the shared field index', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* realized(
-      'representation-fence/callable-nested-repeated',
-      `struct Parser<F: fn(i32) -> i32> { parse: F }
+it.effect(
+  'realizes nested repeated represented callable fields through the shared field index',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* realized(
+        'representation-fence/callable-nested-repeated',
+        `struct Parser<F: fn(i32) -> i32> { parse: F }
 struct Pair<F: fn(i32) -> i32> { first: Parser<F> second: Parser<F> }
 fn decode(value: i32) -> i32 { return value }
 fn pair<F: fn(i32) -> i32>(first: Parser<F>, second: Parser<F>) -> Pair<F> {
@@ -346,18 +343,9 @@ pub fn main() -> i32 {
   let paired = pair(move first, move second)
   return 0
 }`,
-    )
-    const diagnostics = Analysis.diagnostics(snapshot).filter(
-      (diagnostic) => diagnostic.code === 'SEM0103',
-    )
-
-    assertFenced(snapshot, 'SEM0103')
-    assert.strictEqual(diagnostics.length, 3)
-    assert.strictEqual(
-      diagnostics.some((diagnostic) => diagnostic.message.includes('field first')),
-      true,
-    )
-  }),
+      )
+      assertRealizedCallable(snapshot)
+    }),
 )
 
 it.effect('fences nested repeated represented Effect fields through the shared field index', () =>
@@ -389,5 +377,37 @@ pub fn main() -> i32 {
       diagnostics.some((diagnostic) => diagnostic.message.includes('field first')),
       true,
     )
+  }),
+)
+
+it.effect('realizes a represented capturing section stored in a nominal field', () =>
+  Effect.gen(function* () {
+    const source = `struct Adder<F: fn(i32) -> i32> { step: F }
+pub fn main() -> i32 {
+  let adder = Adder { step: i32.add(1) }
+  return adder.step(2)
+}`
+    const snapshot = yield* realized('representation-fence/callable-section', source)
+    assertRealizedCallable(snapshot)
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 3)
+  }),
+)
+
+it.effect('realizes a represented take-once callable field stored in a nominal', () =>
+  Effect.gen(function* () {
+    const source = `struct Once<F: once fn(i32) -> i32> { step: F }
+fn decode(value: i32) -> i32 { return value }
+pub fn main() -> i32 {
+  let taken = Once { step: decode }
+  return taken.step(1)
+}`
+    const snapshot = yield* realized('representation-fence/callable-once', source)
+
+    assertRealizedCallable(snapshot)
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 1)
   }),
 )

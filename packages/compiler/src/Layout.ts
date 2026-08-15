@@ -1,7 +1,9 @@
+import * as CallableFieldRealization from './CallableFieldRealization.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
+import * as RepresentationField from './RepresentationField.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
@@ -30,6 +32,12 @@ export type Representation =
   | {
       readonly _tag: 'Aggregate'
       readonly fields: ReadonlyArray<Field>
+      readonly tailPadding: number
+    }
+  | {
+      readonly _tag: 'CallableEnvironment'
+      readonly realization: CallableFieldRealization.Realization
+      readonly fields: ReadonlyArray<CallableEnvironmentField>
       readonly tailPadding: number
     }
   | {
@@ -273,6 +281,7 @@ export type CallingScalar = Type.Builtin | AddressScalar
 export type Selector =
   | DeclarationIndex.FieldId
   | { readonly _tag: 'ElementSelector'; readonly index: number }
+  | { readonly _tag: 'CallableCaptureSelector'; readonly ordinal: number }
   | { readonly _tag: 'UnionTagSelector' }
   | { readonly _tag: 'UnionPayloadSelector'; readonly slot: number }
   | { readonly _tag: 'SliceAddressSelector' }
@@ -319,6 +328,21 @@ export type CallingShapeNode =
       readonly type: Type.Reference
       readonly address: { readonly type: AddressScalar; readonly lane: 0 }
       readonly laneCount: 1
+    }
+  | {
+      readonly _tag: 'AddressShape'
+      readonly type: DeclarationIndex.SemanticType
+      readonly address: { readonly type: AddressScalar; readonly lane: 0 }
+      readonly laneCount: 1
+    }
+  | {
+      readonly _tag: 'CallableEnvironmentShape'
+      readonly type: Type.Represented
+      readonly fields: ReadonlyArray<{
+        readonly capture: number
+        readonly shape: CallingShapeNode
+      }>
+      readonly laneCount: number
     }
   | {
       readonly _tag: 'SumShape'
@@ -606,6 +630,67 @@ export const catalog = (
   )
   const completed = new Map<string, CatalogEntry>()
   const visiting = new Set<string>()
+  const callableRealizations =
+    discovery === undefined ? undefined : Instances.callableFieldRealizations(discovery, index)
+
+  const layoutRepresentedCallable = (
+    type: Type.Represented,
+    realization: CallableFieldRealization.Realization,
+  ): CatalogEntry => {
+    const key = Type.key(type)
+    const existing = completed.get(key)
+    if (existing !== undefined) return existing
+    let cursor = 0
+    let environmentAlignment = 1
+    const fields: Array<CallableEnvironmentField> = []
+    for (const capture of realization.captures) {
+      const borrowed = capture.access === 'Shared' || capture.access === 'Exclusive'
+      const valueLayout = borrowed ? undefined : layoutType(capture.type)
+      if (valueLayout?._tag === 'UnavailableLayoutEntry') {
+        const result = unavailable(
+          type,
+          Object.freeze(Type.nominals(capture.type)),
+          { _tag: 'UnavailableDependency', dependency: capture.type },
+          valueLayout?.cause,
+        )
+        completed.set(key, result)
+        return result
+      }
+      const size = borrowed ? target.pointerSize : (valueLayout?.size ?? 0)
+      const alignment = borrowed ? target.pointerAlignment : (valueLayout?.alignment ?? 1)
+      const offset = alignUp(cursor, alignment)
+      fields.push(
+        Object.freeze({
+          ordinal: capture.ordinal,
+          parameterOrdinal: capture.parameterOrdinal,
+          access: capture.access,
+          type: capture.type,
+          offset,
+          size,
+          alignment,
+          padding: offset - cursor,
+          representation: borrowed ? 'Borrow' : 'Value',
+        }),
+      )
+      cursor = offset + size
+      environmentAlignment = Math.max(environmentAlignment, alignment)
+    }
+    const size = alignUp(cursor, environmentAlignment)
+    const result: Entry = Object.freeze({
+      _tag: 'LayoutEntry',
+      type,
+      size,
+      alignment: environmentAlignment,
+      representation: Object.freeze({
+        _tag: 'CallableEnvironment',
+        realization,
+        fields: Object.freeze(fields),
+        tailPadding: size - cursor,
+      }),
+    })
+    completed.set(key, result)
+    return result
+  }
 
   const layoutNominal = (type: Type.Nominal): CatalogEntry => {
     const key = Type.key(type)
@@ -775,7 +860,46 @@ export const catalog = (
         break
       }
       const fieldType = Type.substitute(field.declaredType.type, substitution)
-      const fieldLayout = layoutType(fieldType)
+      const representationPlans = RepresentationField.plansOf(index, type).filter(
+        (plan) => plan.id.ordinal === field.id.ordinal,
+      )
+      let representationOrdinal = 0
+      const layoutFieldType = (candidate: DeclarationIndex.SemanticType): CatalogEntry => {
+        if (Type.isRepresented(candidate)) {
+          const plan = representationPlans.at(representationOrdinal)
+          representationOrdinal += 1
+          const realization =
+            plan === undefined || callableRealizations === undefined
+              ? undefined
+              : CallableFieldRealization.realizationOf(callableRealizations, type, plan.id)
+          if (realization === undefined) {
+            return unavailable(candidate, Object.freeze(Type.nominals(candidate)), {
+              _tag: 'InvalidDeclaration',
+              detail: 'represented executable values remain unavailable to layout',
+            })
+          }
+          return layoutRepresentedCallable(candidate, realization)
+        }
+        if (Type.isFixedArray(candidate)) {
+          const element = layoutFieldType(candidate.element)
+          if (element._tag === 'UnavailableLayoutEntry') return element
+          return (
+            repeatedEntry(candidate, element) ??
+            unavailable(candidate, Object.freeze(Type.nominals(candidate.element)), {
+              _tag: 'InvalidDeclaration',
+              detail: `array layout overflows for ${Type.encode(candidate)}`,
+            })
+          )
+        }
+        if (Type.isSlice(candidate)) {
+          const element = layoutFieldType(candidate.element)
+          return element._tag === 'UnavailableLayoutEntry'
+            ? element
+            : sliceEntry(target, candidate, element)
+        }
+        return layoutType(candidate)
+      }
+      const fieldLayout = layoutFieldType(fieldType)
       if (fieldLayout._tag === 'UnavailableLayoutEntry') {
         failure = unavailable(
           type,
@@ -1295,8 +1419,10 @@ const effectEnvironments = (
                     { readonly _tag: 'CallableEnvironment' }
                   > =>
                     candidate._tag === 'CallableEnvironment' &&
-                    Instances.callableIdentity(candidate.callable) ===
-                      capturedCallableIdentity.environment,
+                    CallableFieldRealization.matchesIdentity(
+                      capturedCallableIdentity,
+                      candidate.callable,
+                    ),
                 )
           const fieldType =
             capturedEffectEnvironment?.effect ??
@@ -1605,6 +1731,8 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     entries.set(key, candidate)
     if (candidate.representation._tag === 'Aggregate') {
       for (const field of candidate.representation.fields) add(field.type)
+    } else if (candidate.representation._tag === 'CallableEnvironment') {
+      for (const field of candidate.representation.fields) add(field.type)
     } else if (candidate.representation._tag === 'Repeated') {
       add(candidate.representation.element)
     } else if (candidate.representation._tag === 'Slice') {
@@ -1764,9 +1892,39 @@ const shapeNode = (
     )
   }
   if (Type.isRepresented(type)) {
-    throw new RangeError(
-      `represented executable ${Type.encode(type)} is unavailable to calling-shape planning`,
+    const representation = entries.get(Type.key(type))?.representation
+    if (representation?._tag !== 'CallableEnvironment') {
+      throw new RangeError(
+        `represented executable ${Type.encode(type)} is unavailable to calling-shape planning`,
+      )
+    }
+    const fields = representation.fields.map((field) =>
+      Object.freeze({
+        capture: field.ordinal,
+        shape:
+          field.representation === 'Borrow'
+            ? Object.freeze({
+                _tag: 'AddressShape' as const,
+                type: field.type,
+                address: Object.freeze({
+                  type: Object.freeze({
+                    _tag: 'Address' as const,
+                    element: field.type,
+                    bits: target.pointerSize === 4 ? (32 as const) : (64 as const),
+                  }),
+                  lane: 0 as const,
+                }),
+                laneCount: 1 as const,
+              })
+            : shapeNode(target, field.type, entries),
+      }),
     )
+    return Object.freeze({
+      _tag: 'CallableEnvironmentShape',
+      type,
+      fields: Object.freeze(fields),
+      laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
+    })
   }
   const candidate = entries.get(Type.key(type))
   if (Type.isFixedArray(type)) {
@@ -1926,7 +2084,7 @@ const materializeLanes = (
       }),
     ])
   }
-  if (node._tag === 'ReferenceShape') {
+  if (node._tag === 'ReferenceShape' || node._tag === 'AddressShape') {
     return Object.freeze([
       Object.freeze({
         _tag: 'CallingLane',
@@ -1939,6 +2097,19 @@ const materializeLanes = (
     return Object.freeze(
       node.fields.flatMap((field) =>
         materializeLanes(field.shape, Object.freeze([...path, field.field])),
+      ),
+    )
+  }
+  if (node._tag === 'CallableEnvironmentShape') {
+    return Object.freeze(
+      node.fields.flatMap((field) =>
+        materializeLanes(
+          field.shape,
+          Object.freeze([
+            ...path,
+            Object.freeze({ _tag: 'CallableCaptureSelector' as const, ordinal: field.capture }),
+          ]),
+        ),
       ),
     )
   }
@@ -2027,6 +2198,22 @@ export const callingShape = (
 ): CallingShape | undefined =>
   self.callingShapes.find((candidate) => Type.equals(candidate.type, type))
 
+/** Resolves one canonical callable-environment identity in this target's runtime plan. */
+export const callableEnvironmentByIdentity = (
+  self: Plan,
+  identity: Type.CallableEnvironmentIdentity,
+): Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> | undefined =>
+  self.callableEnvironments.find(
+    (
+      candidate,
+    ): candidate is Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
+      candidate._tag === 'CallableEnvironment' &&
+      Type.equalsCallableEnvironmentIdentity(
+        Instances.callableEnvironmentIdentity(candidate.callable),
+        identity,
+      ),
+  )
+
 /** Materializes the ABI lanes of one hidden Effect environment separately from its outcome. */
 export const effectEnvironmentLanes = (
   self: Plan,
@@ -2048,11 +2235,10 @@ export const effectEnvironmentLanes = (
         ]
       }
       if (field.callableIdentity !== undefined) {
-        const captured = self.callableEnvironments.find(
-          (candidate) =>
-            candidate._tag === 'CallableEnvironment' &&
-            Instances.callableIdentity(candidate.callable) === field.callableIdentity?.environment,
-        )
+        const captured =
+          field.callableIdentity.environment === undefined
+            ? undefined
+            : callableEnvironmentByIdentity(self, field.callableIdentity.environment)
         return captured?._tag === 'CallableEnvironment'
           ? callableEnvironmentLanes(self, captured)
           : Object.freeze([])
@@ -2094,6 +2280,32 @@ export const callableEnvironmentLanes = (
       return callingShape(self, field.type)?.lanes ?? Object.freeze([])
     }),
   )
+
+/** The logical lane and byte range occupied by one capture in a specialized environment. */
+export interface CallableCaptureRange {
+  readonly laneOffset: number
+  readonly laneCount: number
+  readonly byteOffset: number
+}
+
+/** Resolves one owned capture's runtime range from its canonical environment identity. */
+export const callableCaptureRange = (
+  self: Plan,
+  identity: Type.CallableEnvironmentIdentity,
+  capture: number,
+): CallableCaptureRange | undefined => {
+  const environment = callableEnvironmentByIdentity(self, identity)
+  if (environment === undefined) return undefined
+  let laneOffset = 0
+  for (const field of environment.fields) {
+    const laneCount =
+      field.representation === 'Borrow' ? 1 : (callingShape(self, field.type)?.laneCount ?? 0)
+    if (field.ordinal === capture)
+      return Object.freeze({ laneOffset, laneCount, byteOffset: field.offset })
+    laneOffset += laneCount
+  }
+  return undefined
+}
 
 const fieldSlice = (
   node: CallingShapeNode,
@@ -2166,6 +2378,29 @@ const representationEquals = (left: Representation, right: Representation): bool
       left.bits === right.bits &&
       left.falseValue === right.falseValue &&
       left.trueValue === right.trueValue
+    )
+  }
+  if (left._tag === 'CallableEnvironment') {
+    return (
+      right._tag === 'CallableEnvironment' &&
+      CallableFieldRealization.equals(left.realization, right.realization) &&
+      left.tailPadding === right.tailPadding &&
+      left.fields.length === right.fields.length &&
+      left.fields.every((field, ordinal) => {
+        const other = right.fields.at(ordinal)
+        return (
+          other !== undefined &&
+          field.ordinal === other.ordinal &&
+          field.parameterOrdinal === other.parameterOrdinal &&
+          field.access === other.access &&
+          Type.equals(field.type, other.type) &&
+          field.offset === other.offset &&
+          field.size === other.size &&
+          field.alignment === other.alignment &&
+          field.padding === other.padding &&
+          field.representation === other.representation
+        )
+      })
     )
   }
   if (left._tag === 'Repeated') {
@@ -2405,6 +2640,73 @@ const verifyEntry = (
           ),
         ])
   }
+  if (Type.isRepresented(candidate.type)) {
+    if (candidate.representation._tag !== 'CallableEnvironment') {
+      return Object.freeze([
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `${Type.encode(candidate.type)} has no concrete callable environment`,
+        ),
+      ])
+    }
+    const violations: Array<Violation> = []
+    let cursor = 0
+    let alignment = 1
+    for (const [ordinal, field] of candidate.representation.fields.entries()) {
+      const capture = candidate.representation.realization.captures.at(ordinal)
+      const borrowed = field.representation === 'Borrow'
+      const fieldLayout = borrowed
+        ? undefined
+        : Type.isBuiltin(field.type)
+          ? scalarEntry(target, field.type)
+          : available.get(Type.key(field.type))
+      const expectedSize = borrowed ? target.pointerSize : fieldLayout?.size
+      const expectedAlignment = borrowed ? target.pointerAlignment : fieldLayout?.alignment
+      const offset =
+        expectedAlignment === undefined ? undefined : alignUp(cursor, expectedAlignment)
+      if (
+        capture === undefined ||
+        capture.ordinal !== field.ordinal ||
+        capture.parameterOrdinal !== field.parameterOrdinal ||
+        capture.access !== field.access ||
+        !Type.equals(capture.type, field.type) ||
+        expectedSize === undefined ||
+        expectedAlignment === undefined ||
+        offset === undefined ||
+        field.offset !== offset ||
+        field.size !== expectedSize ||
+        field.alignment !== expectedAlignment ||
+        field.padding !== offset - cursor
+      ) {
+        violations.push(
+          invalid(
+            'InvalidAggregate',
+            candidate.type,
+            `callable capture ${field.ordinal} has non-canonical physical facts`,
+          ),
+        )
+        continue
+      }
+      cursor = offset + expectedSize
+      alignment = Math.max(alignment, expectedAlignment)
+    }
+    const size = alignUp(cursor, alignment)
+    if (
+      candidate.size !== size ||
+      candidate.alignment !== alignment ||
+      candidate.representation.tailPadding !== size - cursor
+    ) {
+      violations.push(
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `${Type.encode(candidate.type)} has non-canonical callable environment size or alignment`,
+        ),
+      )
+    }
+    return Object.freeze(violations)
+  }
   if (candidate.representation._tag !== 'Aggregate') {
     return Object.freeze([
       invalid(
@@ -2537,21 +2839,23 @@ const fieldIdEquals = (left: DeclarationIndex.FieldId, right: DeclarationIndex.F
 export const selectorEquals = (left: Selector, right: Selector): boolean =>
   left._tag === 'ElementSelector'
     ? right._tag === 'ElementSelector' && left.index === right.index
-    : left._tag === 'UnionTagSelector'
-      ? right._tag === 'UnionTagSelector'
-      : left._tag === 'UnionPayloadSelector'
-        ? right._tag === 'UnionPayloadSelector' && left.slot === right.slot
-        : left._tag === 'SliceAddressSelector'
-          ? right._tag === 'SliceAddressSelector'
-          : left._tag === 'SliceLengthSelector'
-            ? right._tag === 'SliceLengthSelector'
-            : left._tag === 'StringStorageSelector'
-              ? right._tag === 'StringStorageSelector'
-              : left._tag === 'StringByteLengthSelector'
-                ? right._tag === 'StringByteLengthSelector'
-                : left._tag === 'ReferenceAddressSelector'
-                  ? right._tag === 'ReferenceAddressSelector'
-                  : right._tag === 'FieldId' && fieldIdEquals(left, right)
+    : left._tag === 'CallableCaptureSelector'
+      ? right._tag === 'CallableCaptureSelector' && left.ordinal === right.ordinal
+      : left._tag === 'UnionTagSelector'
+        ? right._tag === 'UnionTagSelector'
+        : left._tag === 'UnionPayloadSelector'
+          ? right._tag === 'UnionPayloadSelector' && left.slot === right.slot
+          : left._tag === 'SliceAddressSelector'
+            ? right._tag === 'SliceAddressSelector'
+            : left._tag === 'SliceLengthSelector'
+              ? right._tag === 'SliceLengthSelector'
+              : left._tag === 'StringStorageSelector'
+                ? right._tag === 'StringStorageSelector'
+                : left._tag === 'StringByteLengthSelector'
+                  ? right._tag === 'StringByteLengthSelector'
+                  : left._tag === 'ReferenceAddressSelector'
+                    ? right._tag === 'ReferenceAddressSelector'
+                    : right._tag === 'FieldId' && fieldIdEquals(left, right)
 
 /** Resolves one compiler-planned scalar lane to its byte offset within a logical value. */
 export const laneOffset = (
@@ -2577,6 +2881,16 @@ export const laneOffset = (
       if (selector.index < 0 || selector.index >= candidate.representation.length) return undefined
       offset += selector.index * candidate.representation.stride
       current = candidate.representation.element
+      continue
+    }
+    if (selector._tag === 'CallableCaptureSelector') {
+      if (candidate.representation._tag !== 'CallableEnvironment') return undefined
+      const field = candidate.representation.fields.find(
+        (capture) => capture.ordinal === selector.ordinal,
+      )
+      if (field === undefined) return undefined
+      offset += field.offset
+      current = field.type
       continue
     }
     if (selector._tag === 'UnionTagSelector') {
@@ -2805,17 +3119,23 @@ const representationText = (representation: Representation): string =>
         ? `float${representation.bits}`
         : representation._tag === 'Boolean'
           ? `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
-          : representation._tag === 'Repeated'
-            ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
-            : representation._tag === 'Slice'
-              ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=usize@${representation.length.offset}/${representation.length.size} address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
-              : representation._tag === 'String'
-                ? `string storage=${representation.storage.provenance}:i${representation.storage.bits}@${representation.storage.offset}/${representation.storage.size}/${representation.storage.alignment} byte-length=usize@${representation.byteLength.offset}/${representation.byteLength.size} storage-padding=${representation.storagePadding} tail-padding=${representation.tailPadding}`
-                : representation._tag === 'Reference'
-                  ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
-                  : representation._tag === 'Union'
-                    ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
-                    : `aggregate tail-padding=${representation.tailPadding}`
+          : representation._tag === 'CallableEnvironment'
+            ? `callable-environment target=${
+                representation.realization.target._tag === 'Declaration'
+                  ? `${representation.realization.target.module}.${representation.realization.target.name}`
+                  : `${representation.realization.target.actor}.${representation.realization.target.operation}`
+              } environment=${representation.realization.environment === undefined ? 'none' : Type.callableEnvironmentKey(representation.realization.environment)} tail-padding=${representation.tailPadding}`
+            : representation._tag === 'Repeated'
+              ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
+              : representation._tag === 'Slice'
+                ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=usize@${representation.length.offset}/${representation.length.size} address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
+                : representation._tag === 'String'
+                  ? `string storage=${representation.storage.provenance}:i${representation.storage.bits}@${representation.storage.offset}/${representation.storage.size}/${representation.storage.alignment} byte-length=usize@${representation.byteLength.offset}/${representation.byteLength.size} storage-padding=${representation.storagePadding} tail-padding=${representation.tailPadding}`
+                  : representation._tag === 'Reference'
+                    ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
+                    : representation._tag === 'Union'
+                      ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
+                      : `aggregate tail-padding=${representation.tailPadding}`
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
   `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
@@ -2824,30 +3144,35 @@ const entryLines = (candidate: Entry): ReadonlyArray<string> => [
         (field) =>
           `  field ${field.id.ordinal} ${field.name}: ${Type.encode(field.type)} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
       )
-    : candidate.representation._tag === 'Repeated'
-      ? [
-          `  elements ${Type.encode(candidate.representation.element)} count=${candidate.representation.length} stride=${candidate.representation.stride}`,
-        ]
-      : candidate.representation._tag === 'Slice'
+    : candidate.representation._tag === 'CallableEnvironment'
+      ? candidate.representation.fields.map(
+          (field) =>
+            `  capture ${field.ordinal}->p${field.parameterOrdinal}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
+        )
+      : candidate.representation._tag === 'Repeated'
         ? [
-            `  address Address<${Type.encode(candidate.representation.element)}> bits=${candidate.representation.address.bits} offset=${candidate.representation.address.offset} size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
-            `  length usize offset=${candidate.representation.length.offset} size=${candidate.representation.length.size} stride=${candidate.representation.stride}`,
+            `  elements ${Type.encode(candidate.representation.element)} count=${candidate.representation.length} stride=${candidate.representation.stride}`,
           ]
-        : candidate.representation._tag === 'String'
+        : candidate.representation._tag === 'Slice'
           ? [
-              `  storage StringUtf8 bits=${candidate.representation.storage.bits} offset=${candidate.representation.storage.offset} size=${candidate.representation.storage.size} align=${candidate.representation.storage.alignment}`,
-              `  byte-length usize offset=${candidate.representation.byteLength.offset} size=${candidate.representation.byteLength.size}`,
+              `  address Address<${Type.encode(candidate.representation.element)}> bits=${candidate.representation.address.bits} offset=${candidate.representation.address.offset} size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+              `  length usize offset=${candidate.representation.length.offset} size=${candidate.representation.length.size} stride=${candidate.representation.stride}`,
             ]
-          : candidate.representation._tag === 'Reference'
+          : candidate.representation._tag === 'String'
             ? [
-                `  address Address<${Type.encode(candidate.representation.target)}> bits=${candidate.representation.address.bits} offset=0 size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+                `  storage StringUtf8 bits=${candidate.representation.storage.bits} offset=${candidate.representation.storage.offset} size=${candidate.representation.storage.size} align=${candidate.representation.storage.alignment}`,
+                `  byte-length usize offset=${candidate.representation.byteLength.offset} size=${candidate.representation.byteLength.size}`,
               ]
-            : candidate.representation._tag === 'Union'
-              ? candidate.representation.members.map(
-                  (member) =>
-                    `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
-                )
-              : []),
+            : candidate.representation._tag === 'Reference'
+              ? [
+                  `  address Address<${Type.encode(candidate.representation.target)}> bits=${candidate.representation.address.bits} offset=0 size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+                ]
+              : candidate.representation._tag === 'Union'
+                ? candidate.representation.members.map(
+                    (member) =>
+                      `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
+                  )
+                : []),
 ]
 
 /** Deterministic textual encoding of a complete runtime layout plan. */
@@ -2882,21 +3207,23 @@ export const encode = (self: Plan): string =>
                       .map((selector) =>
                         selector._tag === 'ElementSelector'
                           ? `[${selector.index}]`
-                          : selector._tag === 'UnionTagSelector'
-                            ? 'tag'
-                            : selector._tag === 'UnionPayloadSelector'
-                              ? `payload[${selector.slot}]`
-                              : selector._tag === 'SliceAddressSelector'
-                                ? 'address'
-                                : selector._tag === 'SliceLengthSelector'
-                                  ? 'length'
-                                  : selector._tag === 'StringStorageSelector'
-                                    ? 'storage'
-                                    : selector._tag === 'StringByteLengthSelector'
-                                      ? 'byte-length'
-                                      : selector._tag === 'ReferenceAddressSelector'
-                                        ? 'address'
-                                        : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
+                          : selector._tag === 'CallableCaptureSelector'
+                            ? `capture[${selector.ordinal}]`
+                            : selector._tag === 'UnionTagSelector'
+                              ? 'tag'
+                              : selector._tag === 'UnionPayloadSelector'
+                                ? `payload[${selector.slot}]`
+                                : selector._tag === 'SliceAddressSelector'
+                                  ? 'address'
+                                  : selector._tag === 'SliceLengthSelector'
+                                    ? 'length'
+                                    : selector._tag === 'StringStorageSelector'
+                                      ? 'storage'
+                                      : selector._tag === 'StringByteLengthSelector'
+                                        ? 'byte-length'
+                                        : selector._tag === 'ReferenceAddressSelector'
+                                          ? 'address'
+                                          : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
                       )
                       .join('.')}]`,
                 )

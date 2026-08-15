@@ -1,3 +1,4 @@
+import * as CallableFieldRealization from './CallableFieldRealization.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -454,6 +455,8 @@ const storedExecutableViolations = (
   index: DeclarationIndex.Index,
   kind: 'Callable' | 'Effect',
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
+  const callableRealizations =
+    kind === 'Callable' ? callableFieldRealizations(self, index) : undefined
   const specializingCalls = new Map<string, CallInstance>()
   for (const call of self.calls) {
     const target = keyText(call.target)
@@ -472,6 +475,13 @@ const storedExecutableViolations = (
           const aggregate = Type.substitute(expression.type, instance.substitution)
           const found = storedExecutable(index, aggregate, kind)
           if (found === undefined) return []
+          if (
+            found.represented &&
+            callableRealizations !== undefined &&
+            Type.isNominal(aggregate) &&
+            CallableFieldRealization.supportsInstance(callableRealizations, aggregate)
+          )
+            return []
           const declared = storedExecutable(index, expression.type, kind)
           const specializing =
             declared === undefined || declared.open
@@ -518,6 +528,87 @@ const storedExecutableViolations = (
     ),
   )
 }
+
+const collectNominals = (
+  index: DeclarationIndex.Index,
+  type: Type.Type,
+  into: Map<string, Type.Nominal>,
+  seen: Set<string>,
+): void => {
+  if (Type.isFixedArray(type) || Type.isSlice(type)) {
+    collectNominals(index, type.element, into, seen)
+    return
+  }
+  if (Type.isUnion(type)) {
+    for (const member of type.members) collectNominals(index, member, into, seen)
+    return
+  }
+  if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return
+  const typeKey = Type.key(type)
+  if (seen.has(typeKey)) return
+  seen.add(typeKey)
+  if (!into.has(typeKey) && RepresentationField.plansOf(index, type).length > 0)
+    into.set(typeKey, type)
+  const declaration = DeclarationIndex.byCanonical(index, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (declaration?._tag !== 'StructDeclaration') return
+  const substitution =
+    Type.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      type.arguments,
+    ) ?? new Map()
+  for (const field of declaration.fields) {
+    if (field.declaredType._tag !== 'Resolved') continue
+    collectNominals(index, Type.substitute(field.declaredType.type, substitution), into, seen)
+  }
+}
+
+/**
+ * Every reachable complete nominal instance carrying at least one represented field, in
+ * deterministic type-key order. Constructions name the instance through their retained semantic
+ * type, never through initializer syntax.
+ */
+export const representedNominals = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<Type.Nominal> => {
+  const found = new Map<string, Type.Nominal>()
+  for (const instance of self.instances) {
+    const expressions = instance.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+    for (const expression of expressions) {
+      if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') continue
+      collectNominals(
+        index,
+        Type.substitute(expression.type, instance.substitution),
+        found,
+        new Set(),
+      )
+    }
+  }
+  return Object.freeze(
+    [...found.entries()]
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([, nominal]) => nominal),
+  )
+}
+
+/**
+ * The runtime realization index for every reachable represented callable field. Ownership, layout,
+ * MIR, and every engine read realizations from here rather than re-deriving callable identity.
+ */
+export const callableFieldRealizations = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+): CallableFieldRealization.Index =>
+  CallableFieldRealization.realize(
+    RepresentationField.resolveFields(index, representedNominals(self, index)),
+    self.callables,
+  )
 
 /** Rejects reachable constructions that retain bare or represented callable values. */
 export const storedCallableViolations = (
@@ -1059,28 +1150,12 @@ export const parameterCallableIdentity = (
   return key.typeArguments.filter(Type.isCallableIdentityArgument).at(position)
 }
 
-const callableTargetIdentity = (
-  target: Hir.CallableTarget,
-): Type.CallableIdentityArgument['target'] =>
-  target._tag === 'DeclarationCallableTarget'
-    ? Object.freeze({
-        _tag: 'Declaration' as const,
-        module: target.declaration.module,
-        name: target.declaration.name,
-      })
-    : Object.freeze({
-        _tag: 'Builtin' as const,
-        actor: target.actor,
-        operation: target.operation,
-        intrinsic: target.intrinsic,
-      })
-
 const callableOriginOf = (
   expression: Hir.Expression,
   context: EffectOriginContext,
 ): Type.CallableIdentityArgument | undefined => {
   if (expression._tag === 'FunctionItem') {
-    const target = callableTargetIdentity(expression.target)
+    const target = Hir.callableTargetIdentity(expression.target)
     const identity =
       target._tag === 'Declaration'
         ? `declaration:${target.module}:${target.name}`
@@ -1091,13 +1166,19 @@ const callableOriginOf = (
     const typeArguments = expression.typeArguments.map((argument) =>
       Type.substituteGenericArgument(argument, context.substitution),
     )
-    const identity = `${keyText(context.owner)}\u0001${Hir.executableSiteKey(expression.site)}\u0001${typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
-    return Type.callableIdentityArgument(
-      identity,
-      callableTargetIdentity(expression.target),
-      typeArguments,
-      identity,
-    )
+    const environment = Hir.callableEnvironmentIdentity(expression.site, {
+      declaration: Object.freeze({
+        module: context.owner.declaration.module,
+        name: context.owner.declaration.name,
+      }),
+      typeArguments: context.owner.typeArguments,
+    })
+    const target = Hir.callableTargetIdentity(expression.target)
+    const identity =
+      target._tag === 'Declaration'
+        ? `declaration:${target.module}:${target.name}`
+        : `builtin:${target.actor}:${target.operation}`
+    return Type.callableIdentityArgument(identity, target, typeArguments, environment)
   }
   if (expression._tag === 'ParameterReference')
     return parameterCallableIdentity(context.fn, context.owner, expression.parameter.ordinal)
@@ -1564,6 +1645,18 @@ const forwardedRequirementTargets = (
 
 export const callableIdentity = (self: CallableInstance): string =>
   `${keyText(self.owner)}\u0001${Hir.executableSiteKey(self.site)}\u0001${self.typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
+
+/** Returns the canonical specialized identity of one discovered callable environment. */
+export const callableEnvironmentIdentity = (
+  self: CallableInstance,
+): Type.CallableEnvironmentIdentity =>
+  Hir.callableEnvironmentIdentity(self.site, {
+    declaration: Object.freeze({
+      module: self.owner.declaration.module,
+      name: self.owner.declaration.name,
+    }),
+    typeArguments: self.owner.typeArguments,
+  })
 
 const concreteCallables = (
   fn: Hir.HirFunction,

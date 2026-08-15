@@ -102,6 +102,29 @@ export interface EffectIdentityArgument {
   readonly identity: string
 }
 
+/** The path- and span-independent construction site of one callable capture environment. */
+export type CallableEnvironmentSite =
+  | {
+      readonly _tag: 'DeclaredCallableEnvironmentSite'
+      readonly declaration: { readonly module: string; readonly name: string }
+      readonly ordinal: number
+    }
+  | {
+      readonly _tag: 'RecoveredCallableEnvironmentSite'
+      readonly functionOrdinal: number
+      readonly ordinal: number
+    }
+
+/** The complete specialized identity of one callable capture environment. */
+export interface CallableEnvironmentIdentity {
+  readonly _tag: 'CallableEnvironmentIdentity'
+  readonly site: CallableEnvironmentSite
+  readonly owner: {
+    readonly declaration: { readonly module: string; readonly name: string }
+    readonly typeArguments: ReadonlyArray<GenericArgument>
+  }
+}
+
 /** One compiler-only hidden callable identity used for monomorphic higher-order lowering. */
 export interface CallableIdentityArgument {
   readonly _tag: 'CallableIdentityArgument'
@@ -111,12 +134,54 @@ export interface CallableIdentityArgument {
     | {
         readonly _tag: 'Builtin'
         readonly actor: string
-        readonly operation: string
+        readonly operation: BuiltinOperation
         readonly intrinsic: { readonly actor: string; readonly name: string }
       }
   readonly typeArguments: ReadonlyArray<GenericArgument>
-  readonly environment?: string
+  readonly environment?: CallableEnvironmentIdentity
 }
+
+/** The closed operation vocabulary shared by semantic callable identities and HIR targets. */
+export type BuiltinOperation =
+  | Scalar.OperationCode
+  | 'LayoutOf'
+  | 'EffectSuspend'
+  | 'StorageAcquire'
+  | 'HostWrite'
+  | 'RawBufferFrom'
+  | 'RawBufferSlot'
+  | 'RawBufferCount'
+  | 'RawBufferRead'
+  | 'RawBufferView'
+  | 'RawBufferViewMut'
+  | 'RawBufferCopy'
+  | 'RawBufferFill'
+  | 'SlotWrite'
+  | 'SlotTake'
+  | 'SlotCopy'
+  | 'SlotDrop'
+  | 'StringFromUtf8Unchecked'
+  | 'StringUtf8Bytes'
+  | 'StringByteLength'
+  | 'StringEqualsExact'
+  | 'OsFileOpen'
+  | 'OsFileRead'
+  | 'OsFileWrite'
+  | 'OsDirectoryOpen'
+  | 'OsDirectoryNext'
+  | 'OsPathInspect'
+  | 'OsDirectoryCreate'
+  | 'OsDirectoryCreateUnique'
+  | 'OsFileRemove'
+  | 'OsDirectoryRemove'
+  | 'OsHandleClose'
+  | 'OsStandardInputRead'
+  | 'OsProcessExecute'
+  | 'OsProcessCapture'
+  | 'OsHostArgumentCount'
+  | 'OsHostArgument'
+  | 'OsHostVariable'
+  | 'OsHostWorkingDirectory'
 
 /** A structural contract that may bound one statically known executable representation. */
 export type RepresentationBound = Callable | Effect
@@ -496,15 +561,47 @@ export const requirementRowArgument = (
 export const effectIdentityArgument = (identity: string): EffectIdentityArgument =>
   Object.freeze({ _tag: 'EffectIdentityArgument', identity })
 
+/** Constructs the stable structural site of one callable capture environment. */
+export const callableEnvironmentSite = (
+  declaration: { readonly module: string; readonly name: string } | undefined,
+  functionOrdinal: number,
+  ordinal: number,
+): CallableEnvironmentSite =>
+  declaration === undefined
+    ? Object.freeze({
+        _tag: 'RecoveredCallableEnvironmentSite',
+        functionOrdinal,
+        ordinal,
+      })
+    : Object.freeze({
+        _tag: 'DeclaredCallableEnvironmentSite',
+        declaration: Object.freeze({ ...declaration }),
+        ordinal,
+      })
+
+/** Constructs the complete specialization identity of one callable capture environment. */
+export const callableEnvironmentIdentity = (
+  site: CallableEnvironmentSite,
+  owner: CallableEnvironmentIdentity['owner'],
+): CallableEnvironmentIdentity =>
+  Object.freeze({
+    _tag: 'CallableEnvironmentIdentity',
+    site,
+    owner: Object.freeze({
+      declaration: Object.freeze({ ...owner.declaration }),
+      typeArguments: Object.freeze(Array.from(owner.typeArguments)),
+    }),
+  })
+
 export const callableIdentityArgument = (
   identity: string,
   target: CallableIdentityArgument['target'],
   typeArguments: ReadonlyArray<GenericArgument> = [],
-  environment?: string,
+  environment?: CallableEnvironmentIdentity,
 ): CallableIdentityArgument =>
   Object.freeze({
     _tag: 'CallableIdentityArgument',
-    identity,
+    identity: environment === undefined ? identity : callableEnvironmentKey(environment),
     target: Object.freeze(target),
     typeArguments: Object.freeze(Array.from(typeArguments)),
     ...(environment === undefined ? {} : { environment }),
@@ -712,6 +809,21 @@ export const typeArgumentAt = (self: Nominal, ordinal: number): Type | undefined
 }
 
 /** Returns the canonical deterministic identity of any erased generic argument. */
+const callableEnvironmentSiteKey = (self: CallableEnvironmentSite): string =>
+  self._tag === 'DeclaredCallableEnvironmentSite'
+    ? `declaration:${self.declaration.module}.${self.declaration.name}:site:${self.ordinal}`
+    : `recovered:${self.functionOrdinal}:site:${self.ordinal}`
+
+/** Returns the deterministic identity of one specialized callable capture environment. */
+export const callableEnvironmentKey = (self: CallableEnvironmentIdentity): string =>
+  `${callableEnvironmentSiteKey(self.site)}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>`
+
+/** Tests complete callable-environment specialization identity. */
+export const equalsCallableEnvironmentIdentity = (
+  left: CallableEnvironmentIdentity,
+  right: CallableEnvironmentIdentity,
+): boolean => callableEnvironmentKey(left) === callableEnvironmentKey(right)
+
 const callableIdentityKey = (self: CallableIdentityArgument): string =>
   [
     'callable-identity:',
@@ -723,7 +835,7 @@ const callableIdentityKey = (self: CallableIdentityArgument): string =>
     ':arguments=<',
     self.typeArguments.map(genericArgumentKey).join(','),
     '>:environment=',
-    self.environment ?? '',
+    self.environment === undefined ? '' : callableEnvironmentKey(self.environment),
   ].join('')
 
 export const genericArgumentKey = (self: GenericArgument): string =>
@@ -786,11 +898,7 @@ const encodeRepresentationOrigin = (
         self.target._tag === 'Declaration'
           ? `${self.target.module}.${self.target.name}`
           : `${self.target.actor}.${self.target.operation}`
-      }${
-        self.environment === undefined
-          ? ''
-          : `@${self.environment.split('\u0001').at(0) ?? self.environment}`
-      }`
+      }${self.environment === undefined ? '' : `@${callableEnvironmentKey(self.environment)}`}`
 
 const compareText = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0
@@ -1181,9 +1289,11 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
     else if (isExactRepresentationArgument(argument)) {
       visit(argument.contract)
       visitArgument(argument.identity)
-    } else if (isCallableIdentityArgument(argument))
+    } else if (isCallableIdentityArgument(argument)) {
       for (const typeArgument of argument.typeArguments) visitArgument(typeArgument)
-    else if (isFailureRowArgument(argument)) {
+      for (const typeArgument of argument.environment?.owner.typeArguments ?? [])
+        visitArgument(typeArgument)
+    } else if (isFailureRowArgument(argument)) {
       for (const failure of argument.failures) visit(failure)
       for (const parameter_ of argument.parameters) found.set(key(parameter_), parameter_)
     } else if (isRequirementRowArgument(argument)) {
@@ -1236,7 +1346,8 @@ export const isConcreteGenericArgument = (self: GenericArgument): boolean =>
         : isEffectIdentityArgument(self)
           ? true
           : isCallableIdentityArgument(self)
-            ? self.typeArguments.every(isConcreteGenericArgument)
+            ? self.typeArguments.every(isConcreteGenericArgument) &&
+              (self.environment?.owner.typeArguments.every(isConcreteGenericArgument) ?? true)
             : isFailureRowArgument(self)
               ? self.parameters.length === 0 && self.failures.every(isConcrete)
               : isRequirementRowArgument(self)
@@ -1270,6 +1381,28 @@ export const containsViewBorrow = (self: Type): boolean => {
     return containsViewBorrow(self.success) || self.failures.some(containsViewBorrow)
   if (isRepresented(self)) return containsViewBorrow(self.contract)
   if (isUnion(self)) return self.members.some(containsViewBorrow)
+  return false
+}
+
+/**
+ * Tests whether a type stores one statically known callable environment anywhere inside it.
+ *
+ * A nominal that stores a callable names it in its own arguments, so the whole environment — and
+ * every borrow it captured — travels with any value of that type. Ownership uses this to keep a
+ * stored capture's loan alive for as long as the enclosing value holds the callable, exactly as it
+ * does for a callable bound directly.
+ */
+export const containsCallableRepresentation = (self: Type): boolean => {
+  if (isRepresented(self)) return isCallable(self.contract)
+  if (isNominal(self))
+    return self.arguments.some(
+      (argument) =>
+        (isExactRepresentationArgument(argument) &&
+          isCallableIdentityArgument(argument.identity)) ||
+        (isTypeArgument(argument) && containsCallableRepresentation(argument)),
+    )
+  if (isFixedArray(self)) return containsCallableRepresentation(self.element)
+  if (isUnion(self)) return self.members.some(containsCallableRepresentation)
   return false
 }
 
@@ -1424,7 +1557,14 @@ export const substituteGenericArgument = (
                 self.typeArguments.map((argument) =>
                   substituteGenericArgument(argument, substitution),
                 ),
-                self.environment,
+                self.environment === undefined
+                  ? undefined
+                  : callableEnvironmentIdentity(self.environment.site, {
+                      declaration: self.environment.owner.declaration,
+                      typeArguments: self.environment.owner.typeArguments.map((argument) =>
+                        substituteGenericArgument(argument, substitution),
+                      ),
+                    }),
               )
             : isFailureRowArgument(self)
               ? failureRowArgument(

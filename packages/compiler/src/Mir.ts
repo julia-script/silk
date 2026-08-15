@@ -1,7 +1,7 @@
 import * as Option from 'effect/Option'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
-import type * as Instances from './Instances.js'
+import * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as Match from './Match.js'
@@ -56,23 +56,32 @@ export type Type =
         Layout.CallableEnvironment,
         { readonly _tag: 'CallableEnvironment' }
       >
+      readonly storage?: {
+        readonly _tag: 'StoredCallableField'
+        readonly type: SilkType.Represented
+        readonly realization: Extract<
+          Layout.Representation,
+          { readonly _tag: 'CallableEnvironment' }
+        >['realization']
+      }
     }
   | { readonly _tag: 'EffectOutcome'; readonly type: SilkType.Effect }
 
-export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
-  self._tag === 'Nominal' ||
-  self._tag === 'Bottom' ||
-  self._tag === 'FixedArray' ||
-  self._tag === 'String' ||
-  self._tag === 'Slice' ||
-  self._tag === 'Reference' ||
-  self._tag === 'Union' ||
-  self._tag === 'EffectBorrow' ||
-  self._tag === 'EffectValue' ||
-  self._tag === 'CallableValue' ||
-  self._tag === 'EffectOutcome'
+export const semanticType = (self: Type): DeclarationIndex.SemanticType => {
+  if (self._tag === 'CallableValue') return self.storage?.type ?? self.type
+  return self._tag === 'Nominal' ||
+    self._tag === 'Bottom' ||
+    self._tag === 'FixedArray' ||
+    self._tag === 'String' ||
+    self._tag === 'Slice' ||
+    self._tag === 'Reference' ||
+    self._tag === 'Union' ||
+    self._tag === 'EffectBorrow' ||
+    self._tag === 'EffectValue' ||
+    self._tag === 'EffectOutcome'
     ? self.type
     : self._tag
+}
 
 const typeText = (self: Type): string => SilkType.encode(semanticType(self))
 const isCopyType = (type: DeclarationIndex.SemanticType): boolean =>
@@ -793,6 +802,7 @@ export type Operation =
       readonly fields: ReadonlyArray<{
         readonly field: DeclarationIndex.FieldId
         readonly value: LocalId
+        readonly stored?: Extract<Type, { readonly _tag: 'CallableValue' }>['storage']
       }>
       readonly provenance: Provenance
     }
@@ -2156,14 +2166,8 @@ const callableTargetText = (target: Hir.CallableTarget): string =>
     ? targetText(target.declaration)
     : `${target.actor}.${target.operation}`
 
-const sameCallableTarget = (left: Hir.CallableTarget, right: Hir.CallableTarget): boolean =>
-  left._tag === right._tag &&
-  (left._tag === 'DeclarationCallableTarget' && right._tag === 'DeclarationCallableTarget'
-    ? left.declaration.module === right.declaration.module &&
-      left.declaration.name === right.declaration.name
-    : left._tag === 'BuiltinCallableTarget' && right._tag === 'BuiltinCallableTarget'
-      ? left.actor === right.actor && left.operation === right.operation
-      : false)
+const storedCallableTargetText = (target: SilkType.CallableIdentityArgument['target']): string =>
+  callableTargetText(Hir.callableTargetFromIdentity(target))
 
 const borrowKey = (borrow: Hir.BorrowId): string =>
   `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
@@ -2192,6 +2196,8 @@ const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Ty
     case 'CallableCleanup':
     case 'EffectCleanup':
       return [cleanup.type, ...cleanup.slots.flatMap((slot) => cleanupTypes(slot.cleanup))]
+    case 'RepresentedCallableCleanup':
+      return [cleanup.type, cleanup.contract]
   }
 }
 
@@ -4191,6 +4197,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const cleanupTypeMatches =
             droppedSemantic !== undefined &&
             (SilkType.equals(droppedSemantic, cleanup.type) ||
+              (dropped?._tag === 'CallableValue' &&
+                dropped.storage !== undefined &&
+                SilkType.equals(dropped.storage.realization.contract, cleanup.type)) ||
               (SilkType.isEffect(droppedSemantic) &&
                 SilkType.isEffect(cleanup.type) &&
                 (() => {
@@ -4220,7 +4229,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             (dropped?._tag === 'CallableValue' &&
               dropped.environment !== undefined &&
               dropped.site !== undefined &&
-              Hir.sameExecutableSite(dropped.site, cleanup.site) &&
+              cleanup.environment._tag === 'CallableEnvironmentIdentity' &&
+              SilkType.equalsCallableEnvironmentIdentity(
+                cleanup.environment.identity,
+                Instances.callableEnvironmentIdentity(dropped.environment.callable),
+              ) &&
               (() => {
                 const expected = dropped.environment.fields
                   .filter((field) => field.access === 'Take' && !isCopyType(field.type))
@@ -4264,11 +4277,26 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             operation.fields.every((field, ordinal) => {
               const declared = expected.at(ordinal)
               const valueType = fn.localTypes.at(field.value.ordinal)
+              const storedValid =
+                field.stored !== undefined &&
+                declared !== undefined &&
+                valueType?._tag === 'CallableValue' &&
+                SilkType.equals(field.stored.type, declared.type) &&
+                TypeCompatibility.isCompatible(
+                  TypeCompatibility.check(valueType.type, field.stored.realization.contract),
+                ) &&
+                Hir.matchesCallableTargetIdentity(
+                  valueType.target,
+                  field.stored.realization.target,
+                ) &&
+                field.stored.realization.field.ordinal === field.field.ordinal &&
+                field.stored.realization.instance.module === operation.type.type.module &&
+                field.stored.realization.instance.name === operation.type.type.name
               return (
                 declared !== undefined &&
                 declared.id.ordinal === field.field.ordinal &&
                 valueType !== undefined &&
-                SilkType.equals(semanticType(valueType), declared.type)
+                (SilkType.equals(semanticType(valueType), declared.type) || storedValid)
               )
             })
           if (!valid) {
@@ -4369,6 +4397,22 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 candidate.access === 'Shared' &&
                 candidate.root.ordinal === operation.destination.ordinal,
             )
+          const callableViewProjection =
+            operation._tag === 'ReadPlace' &&
+            operation.consume !== true &&
+            operation.type._tag === 'CallableValue' &&
+            operation.type.storage !== undefined &&
+            operations.filter((candidate) =>
+              accessedOwnerLocals(candidate).some(
+                (local) => local.ordinal === operation.destination.ordinal,
+              ),
+            ).length === 1 &&
+            operations.some(
+              (candidate) =>
+                candidate._tag === 'ApplyCallable' &&
+                candidate.callable?.ordinal === operation.destination.ordinal &&
+                (candidate.access === 'Shared' || candidate.access === 'Exclusive'),
+            )
           if (
             selected === undefined ||
             !SilkType.equals(selected, semanticType(operation.type)) ||
@@ -4376,7 +4420,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               !isStructurallyCopy(self.layout, selected) &&
               operation.consume !== true &&
               !sharedMatchProjection &&
-              !sharedBorrowProjection)
+              !sharedBorrowProjection &&
+              !callableViewProjection)
           ) {
             violations.push(
               Object.freeze({
@@ -4488,13 +4533,13 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const valid =
             destination?._tag === 'CallableValue' &&
             SilkType.equals(destination.type, operation.type.type) &&
-            sameCallableTarget(destination.target, operation.target) &&
-            sameCallableTarget(operation.type.target, operation.target) &&
+            Hir.sameCallableTarget(destination.target, operation.target) &&
+            Hir.sameCallableTarget(operation.type.target, operation.target) &&
             operation.typeArguments.every(SilkType.isConcreteGenericArgument) &&
             (environment === undefined
               ? operation.captures.length === 0
               : capturesValid &&
-                sameCallableTarget(environment.callable.target, operation.target) &&
+                Hir.sameCallableTarget(environment.callable.target, operation.target) &&
                 environment.callable.mode === operation.type.type.mode)
           if (!valid) {
             violations.push(
@@ -5041,7 +5086,7 @@ const operationText = (operation: Operation): string => {
     case 'CloseEffectEntry':
       return `${localText(operation.destination)} = close-effect-entry ${targetText(operation.target)} effect=${localText(operation.effect)} runner=${targetText(operation.runner)} outcome=${localText(operation.outcome)} failures=${operation.failures.map((failure) => `${failure.tag}:${SilkType.encode(failure.type)}->${localText(failure.payload)}:${failure.cleanup._tag}`).join(',') || 'none'} : i32 ${provenanceText(operation.provenance)}`
     case 'Construct':
-      return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`).join(', ')} } ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value, stored }) => `#${field.ordinal}: ${localText(value)}${stored === undefined ? '' : ` stored=${storedCallableTargetText(stored.realization.target)}`}`).join(', ')} } ${provenanceText(operation.provenance)}`
     case 'ConstructArray':
       return `${localText(operation.destination)} = construct-array ${typeText(operation.type)} [${operation.elements.map(localText).join(', ')}] ${provenanceText(operation.provenance)}`
     case 'Project':
