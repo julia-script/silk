@@ -3704,11 +3704,17 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
             conformance.provider._tag !== 'Resolved'
           )
             return conformance
+          const requirements = declaredRequirements(conformance)
           const head = ConformanceHead.make(
             conformance.capability.type,
             conformance.provider.type,
-            declaredRequirements(conformance),
+            requirements,
           )
+          // A damaged requirement is retained on the conformance fact for diagnostics, but cannot
+          // be shortened into a zero-obligation head. Header validation below reports the source
+          // error; leaving termination unavailable keeps the fact out of coherence and proof search.
+          if (requirements.length !== conformance.requirements.length)
+            return Object.freeze({ ...conformance, head })
           const failures = ConformanceHead.terminationFailures(head)
           if (failures.length > 0)
             diagnostics.push(
@@ -3868,7 +3874,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       }
       // Every interface application states its provider explicitly rather than through an implicit
       // `Self`, so the head's own first argument has to be the type it is declared `for`.
-      if (sourceInterface !== undefined && capability.arguments.length > 0) {
+      if (sourceInterface !== undefined) {
         const declaredProvider = capability.arguments.at(ConformanceHead.providerOrdinal)
         if (
           declaredProvider === undefined ||
@@ -4720,7 +4726,7 @@ const conformanceCandidates = (
           !Type.isNominal(conformance.capability.type) ||
           conformance.provider._tag !== 'Resolved' ||
           conformance.coherence._tag !== 'Coherent' ||
-          conformance.termination._tag === 'NonTerminating'
+          conformance.termination._tag !== 'Terminating'
         )
           return []
         const inferred = new Map<string, Type.GenericArgument>()
@@ -4962,6 +4968,8 @@ export const interfaceWitnessImplementation = (
 export interface InterfaceWitnessTarget {
   readonly implementation: CanonicalId
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  /** The selected declaration proved at least one strict-subterm requirement for this target. */
+  readonly structurallyDescending: boolean
 }
 
 /**
@@ -4984,6 +4992,7 @@ export const interfaceWitnessTarget = (
   return Object.freeze({
     implementation,
     typeArguments: proof._tag === 'Proved' ? proof.typeArguments : noGenericArguments,
+    structurallyDescending: proof._tag === 'Proved' && proof.requirements.length > 0,
   })
 }
 

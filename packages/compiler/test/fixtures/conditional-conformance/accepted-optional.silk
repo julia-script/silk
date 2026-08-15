@@ -1,0 +1,23 @@
+interface Decoder<T> {
+  fn decode(value: T) -> i32
+}
+
+struct Schema { tag: i32 }
+fn schemaDecode(value: &Schema) -> i32 { return value.tag }
+impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
+
+struct OptionalSchema<S> { source: S }
+fn optionalDecode<S: Decoder>(value: &OptionalSchema<S>) -> i32 {
+  return Decoder.decode(value.source) + 1
+}
+impl<S: Decoder<S>> Decoder<OptionalSchema<S>> for OptionalSchema<S> {
+  decode: OptionalSchema.optionalDecode
+}
+
+fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(value) }
+pub fn main() -> i32 {
+  let inner = OptionalSchema<Schema> { source: Schema { tag: 40 } }
+  return decodeOf<OptionalSchema<OptionalSchema<Schema>>>(
+    OptionalSchema<OptionalSchema<Schema>> { source: move inner }
+  )
+}

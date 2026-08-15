@@ -734,6 +734,7 @@ const resolveEntry = (root: Elaboration.Result, index: DeclarationIndex.Index): 
 interface CallTarget {
   readonly declaration: DeclarationIndex.CanonicalId
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  readonly structurallyDescending?: boolean
 }
 
 const witnessCallTargets = (
@@ -963,6 +964,7 @@ const interfaceWitnessTargets = (
             Object.freeze({
               declaration: target.implementation,
               typeArguments: target.typeArguments,
+              structurallyDescending: target.structurallyDescending,
             }),
           ]
     if (expression._tag === 'Match') {
@@ -2102,7 +2104,7 @@ export const discover = (
     const identityOfCall = (call: CallTarget): string =>
       `${call.declaration.module}\u0000${call.declaration.name}\u0000${call.typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
     const cleanupIdentities = new Set(cleanupTargets.map(identityOfCall))
-    for (const call of [
+    const reachableCalls: ReadonlyArray<CallTarget> = [
       ...bodyCallTargets(fn),
       ...interfaceWitnessTargets(fn, index, substitution),
       ...requirementBindingCallTargets(fn, substitution, index),
@@ -2114,9 +2116,20 @@ export const discover = (
       ...callableTargets,
       ...forwardedRequirementTargets(callableTargets, results, index),
       ...cleanupTargets,
-    ]) {
+    ]
+    for (const call of reachableCalls) {
       const identity = identityOfCall(call)
-      if (!calls.has(identity)) calls.set(identity, call)
+      const recorded = calls.get(identity)
+      // An ordinary edge must keep the recursion guard even when the same target is also reached
+      // through a proved conditional requirement. Only an exclusively structural edge earns the
+      // narrow exception below.
+      if (recorded === undefined || recorded.structurallyDescending === true)
+        calls.set(
+          identity,
+          recorded?.structurallyDescending === true && call.structurallyDescending === true
+            ? recorded
+            : call,
+        )
     }
     for (const call of calls.values()) {
       const target = call.declaration
@@ -2141,6 +2154,7 @@ export const discover = (
       if (
         ancestor !== undefined &&
         !sameArguments(ancestor, targetKey) &&
+        call.structurallyDescending !== true &&
         !(
           recorded.has(keyText(targetKey)) &&
           (item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)))

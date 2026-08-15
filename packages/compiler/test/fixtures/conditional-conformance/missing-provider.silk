@@ -1,0 +1,5 @@
+interface Decoder<T> { fn decode(value: T) -> i32 }
+struct Wrapper<S> { source: S }
+fn decode<S>(value: &Wrapper<S>) -> i32 { return 0 }
+impl<S> Decoder for Wrapper<S> { decode: Wrapper.decode }
+pub fn main() -> i32 { return 0 }

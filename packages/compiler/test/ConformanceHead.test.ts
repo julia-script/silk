@@ -163,6 +163,37 @@ it('separates representation-bounded headers whose bounds cannot intersect', () 
   assert.isTrue(ConformanceHead.mayOverlap(left, left))
 })
 
+it('normalizes parameters inside representation bounds before comparing overlap', () => {
+  const leftValue = binder('a', 0, 'T')
+  const leftBound = Type.callable([leftValue], leftValue)
+  const leftRepresentation = binder('a', 1, 'F', 'CallableRepresentation', leftBound)
+  const rightValue = binder('b', 1, 'Element')
+  const rightBound = Type.callable([rightValue], rightValue)
+  const rightRepresentation = binder('b', 0, 'Operation', 'CallableRepresentation', rightBound)
+  const left = ConformanceHead.make(
+    Type.nominal('heads', 'Holder', [
+      leftValue,
+      Type.representationParameterArgument(leftRepresentation),
+    ]),
+    Type.nominal('heads', 'Holder', [
+      leftValue,
+      Type.representationParameterArgument(leftRepresentation),
+    ]),
+  )
+  const right = ConformanceHead.make(
+    Type.nominal('heads', 'Holder', [
+      rightValue,
+      Type.representationParameterArgument(rightRepresentation),
+    ]),
+    Type.nominal('heads', 'Holder', [
+      rightValue,
+      Type.representationParameterArgument(rightRepresentation),
+    ]),
+  )
+  assert.strictEqual(ConformanceHead.key(left), ConformanceHead.key(right))
+  assert.isTrue(ConformanceHead.mayOverlap(left, right))
+})
+
 it('accepts a requirement that names the immediate inner provider', () => {
   const inner = binder('a', 0, 'S')
   const head = ConformanceHead.make(decoder(wrap(inner)), wrap(inner), [

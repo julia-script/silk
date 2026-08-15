@@ -145,9 +145,33 @@ const normalization = (
   readonly substitution: Type.Substitution
   readonly parameters: ReadonlyArray<Type.Parameter>
 } => {
-  const normalized = parameters.map((parameter, position) =>
-    Type.parameter(owner, position, `%${position}`, parameter.kind, parameter.representationBound),
+  const placeholders = parameters.map((parameter, position) =>
+    Type.parameter(owner, position, `%${position}`, parameter.kind),
   )
+  const placeholderSubstitution = new Map(
+    parameters.map((parameter, position) => {
+      const replacement = placeholders.at(position)
+      if (replacement === undefined) throw new RangeError('Head normalization lost a parameter')
+      return [Type.key(parameter), replacement] as const
+    }),
+  )
+  // Representation bounds are terms in the same binder vocabulary as the head. Renumbering only
+  // the parameter that owns a bound would leave parameters inside `F: fn(T) -> T` carrying their
+  // declaration identities, so alpha-renamed headers could appear disjoint. Build placeholders
+  // first, then substitute those identities through every bound before publishing the parameters.
+  const normalized = parameters.map((parameter, position) => {
+    const substitutedBound =
+      parameter.representationBound === undefined
+        ? undefined
+        : Type.substitute(parameter.representationBound, placeholderSubstitution)
+    if (
+      substitutedBound !== undefined &&
+      !Type.isCallable(substitutedBound) &&
+      !Type.isEffect(substitutedBound)
+    )
+      throw new RangeError('Head normalization changed a representation bound kind')
+    return Type.parameter(owner, position, `%${position}`, parameter.kind, substitutedBound)
+  })
   return Object.freeze({
     substitution: new Map(
       parameters.map((parameter, position) => {
@@ -292,6 +316,12 @@ const representationsMayOverlap = (
     const leftBound = left.parameter.representationBound
     const rightBound = right.parameter.representationBound
     if (leftBound === undefined || rightBound === undefined) return true
+    // A bound that still mentions a head binder denotes a family of contracts. The representation
+    // intersection helper answers exact contract intersection, so using declaration identities
+    // here would make two alpha-renamed families look disjoint. If either side is still open, a
+    // common admissible concrete contract cannot be disproved and coherence must report overlap.
+    if (occurringParameters([leftBound]).length > 0 || occurringParameters([rightBound]).length > 0)
+      return true
     return Type.intersectRepresentationBounds(leftBound, rightBound) !== undefined
   }
   const open = Type.isRepresentationParameterArgument(left) ? left : right
@@ -412,6 +442,10 @@ const unify = (
  * read them would not be stable across an evolving program.
  */
 export const mayOverlap = (left: ConformanceHead, right: ConformanceHead): boolean => {
+  // Identity is stronger than unifiability. This fast path also keeps alpha-equivalent
+  // representation bounds from being reinterpreted under the deliberately distinct opposing
+  // binder owner used by the general unifier.
+  if (key(left) === key(right)) return true
   const opposing = makeUnder(right.capability, right.provider, [], opposingOwner)
   const bindings = new Map<string, Type.Type>()
   return (
@@ -490,7 +524,7 @@ const countIn = (parameter: Type.Parameter, term: Type.Type): number => {
 }
 
 /** Reports whether one term occurs strictly inside another. */
-export const isStrictSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
+const isStrictSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
   if (Type.equals(candidate, whole)) return false
   return containsSubterm(candidate, whole)
 }
