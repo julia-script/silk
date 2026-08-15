@@ -97,7 +97,7 @@ pub fn main() -> i32 {
   )
 
   assert.deepEqual(identities, [
-    'callable:callable\u0000declaration:representation-inference/sites:main\u0000site:0',
+    'declaration:representation-inference/sites.main:site:0:owner=representation-inference/sites.main<>',
     'effect:effect\u0000declaration:representation-inference/sites:main\u0000site:1',
   ])
   assert.deepEqual(result.diagnostics, [])
