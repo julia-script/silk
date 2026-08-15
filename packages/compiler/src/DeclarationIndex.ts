@@ -5,6 +5,7 @@ import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
 import type * as ModuleClosure from './ModuleClosure.js'
+import * as ResolutionSeams from './ResolutionSeams.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as StaticText from './StaticText.js'
@@ -656,12 +657,6 @@ export type ItemResolution =
     }
 
 export type ItemResolver = (module: string, path: TypePathFact) => ItemResolution
-
-export interface ResolutionSeams {
-  readonly type: TypeResolver
-  readonly item: ItemResolver
-  readonly representationBindings?: ReadonlyMap<string, Type.Parameter>
-}
 
 const spelling = (source: SourceFile.SourceFile, token: Token.Token): string =>
   Option.getOrThrowWith(
@@ -1907,7 +1902,7 @@ const collectReturnType = (
       family: Object.freeze({
         _tag: 'OpaqueFamilyKey',
         producer: Object.freeze({ module: source.id, name: ownerName }),
-        binderOrdinal: binder.type.ordinal,
+        binderOrdinal: 0,
       }),
       publicSignature: Object.freeze({
         bound:
@@ -2615,7 +2610,7 @@ export const collect = (closure: ModuleClosure.Facts): Index => {
 const resolveExactRepresentation = (
   module: string,
   fact: Extract<DeclaredTypeFact, { readonly _tag: 'ExactRepresentation' }>,
-  resolvers: ResolutionSeams,
+  resolvers: ResolutionSeams.ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
 ): TypeResolution => {
   const arguments_ = fact.arguments.map((argument) =>
@@ -2670,14 +2665,22 @@ const resolveExactRepresentation = (
     )
   if (declaration.typeParameters.length !== arguments_.length)
     return reject(open(declaration.typeParameters.length), declaration)
-  const supplied = arguments_.flatMap((argument) =>
-    argument.fact._tag === 'Resolved' ? [argument.fact.type] : [],
+  const supplied = arguments_.map((argument, ordinal) =>
+    argument.fact._tag === 'Resolved'
+      ? genericArgumentForParameter(
+          declaration.typeParameters.at(ordinal)?.type,
+          argument.fact.type,
+        )
+      : undefined,
   )
-  if (supplied.length !== arguments_.length)
+  if (supplied.some((argument) => argument === undefined))
     return reject(open(declaration.typeParameters.length), declaration)
+  const concrete = supplied.filter(
+    (argument): argument is Type.GenericArgument => argument !== undefined,
+  )
   const substitution = Type.substitution(
     declaration.typeParameters.map((parameter) => parameter.type),
-    supplied,
+    concrete,
   )
   if (substitution === undefined)
     return reject(open(declaration.typeParameters.length), declaration)
@@ -2703,13 +2706,10 @@ const resolveExactRepresentation = (
     ),
     Type.substitute(declaredReturn.fact.type, substitution),
   )
-  if (Type.parameters(structural).length > 0)
-    return reject(open(declaration.typeParameters.length), declaration)
-  const identityArguments = supplied.map((argument) => argument)
   const identity = Type.callableIdentityArgument(
     `declaration:${canonical.module}:${canonical.name}`,
     Object.freeze({ _tag: 'Declaration', module: canonical.module, name: canonical.name }),
-    identityArguments,
+    concrete,
   )
   const type = Type.represented(
     structural,
@@ -2733,7 +2733,7 @@ const resolveExactRepresentation = (
 const resolveDeclaredType = (
   module: string,
   fact: DeclaredTypeFact,
-  resolvers: ResolutionSeams,
+  resolvers: ResolutionSeams.ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
 ): TypeResolution => {
   if (fact._tag === 'RepresentationParameter') {
@@ -2940,24 +2940,7 @@ const resolveDeclaredType = (
       const declaredParameters = declaration?.typeParameters.map((parameter) => parameter.type)
       const available = arguments_.map((argument, ordinal): Type.GenericArgument | undefined => {
         if (argument.fact._tag !== 'Resolved') return undefined
-        const parameter = declaredParameters?.at(ordinal)
-        if (
-          parameter !== undefined &&
-          (parameter.kind === 'CallableRepresentation' || parameter.kind === 'EffectRepresentation')
-        )
-          return Type.isRepresented(argument.fact.type)
-            ? argument.fact.type.representation.argument
-            : argument.fact.type
-        if (parameter?.kind === 'FailureRow')
-          return Type.isParameter(argument.fact.type) && argument.fact.type.kind === 'FailureRow'
-            ? Type.failureRowArgument([], [argument.fact.type])
-            : argument.fact.type
-        if (parameter?.kind === 'RequirementRow')
-          return Type.isParameter(argument.fact.type) &&
-            argument.fact.type.kind === 'RequirementRow'
-            ? Type.requirementRowArgument([], [argument.fact.type])
-            : argument.fact.type
-        return argument.fact.type
+        return genericArgumentForParameter(declaredParameters?.at(ordinal), argument.fact.type)
       })
       if (expected === arguments_.length && available.every((argument) => argument !== undefined)) {
         const concrete = available.filter(
@@ -3322,6 +3305,32 @@ const memberByNominal = (
   )
 }
 
+/** Converts one resolved source type to the erased argument kind its declaration parameter owns. */
+const genericArgumentForParameter = (
+  parameter: Type.Parameter | undefined,
+  type: Type.Type,
+): Type.GenericArgument => {
+  if (parameter?.kind === 'CallableRepresentation' || parameter?.kind === 'EffectRepresentation')
+    return Type.isRepresented(type) ? type.representation.argument : type
+  if (parameter?.kind === 'FailureRow') {
+    if (Type.isParameter(type) && type.kind === 'FailureRow')
+      return Type.failureRowArgument([], [type])
+    if (Type.isNever(type)) return Type.failureRowArgument([])
+    if (Type.isNominal(type)) return Type.failureRowArgument([type])
+    if (Type.isUnion(type) && type.members.every(Type.isNominal))
+      return Type.failureRowArgument(type.members)
+  }
+  if (parameter?.kind === 'RequirementRow') {
+    if (Type.isParameter(type) && type.kind === 'RequirementRow')
+      return Type.requirementRowArgument([], [type])
+    if (Type.isNominal(type) || (Type.isParameter(type) && type.kind === 'Value'))
+      return Type.requirementRowArgument([
+        Object.freeze({ capability: type, role: 'DefaultRole', access: 'Shared' }),
+      ])
+  }
+  return type
+}
+
 /**
  * Resolves every type parameter's bound to the interface its spelling names in the bounded
  * declaration's own module scope, recording that interface's ordered operation contract.
@@ -3333,7 +3342,7 @@ const memberByNominal = (
 const resolveBounds = (
   module: string,
   typeParameters: ReadonlyArray<TypeParameterFact>,
-  resolvers: ResolutionSeams,
+  resolvers: ResolutionSeams.ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
   diagnostics: Array<Diagnostic.Diagnostic>,
 ): ReadonlyArray<TypeParameterFact> => {
@@ -3420,7 +3429,7 @@ export const resolveTypeFact = (
 const resolveFailureRow = (
   module: string,
   row: FailureRowFact,
-  resolvers: ResolutionSeams,
+  resolvers: ResolutionSeams.ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
 ): {
   readonly fact: FailureRowFact
@@ -3464,7 +3473,7 @@ const resolveFailureRow = (
 const resolveRequirementRow = (
   module: string,
   row: RequirementRowFact,
-  resolvers: ResolutionSeams,
+  resolvers: ResolutionSeams.ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
 ): {
   readonly fact: RequirementRowFact
@@ -3733,13 +3742,22 @@ const stronglyConnected = (
 const resolveOpaqueResult = (
   module: string,
   opaqueResult: OpaqueResultFact | undefined,
-  resolvers: ResolutionSeams,
+  resolvers: ResolutionSeams.ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
   diagnostics: Array<Diagnostic.Diagnostic>,
 ): OpaqueResultFact | undefined => {
   if (opaqueResult === undefined) return undefined
   const binder = resolveBounds(module, [opaqueResult.binder], resolvers, modules, diagnostics).at(0)
-  return binder === undefined ? undefined : Object.freeze({ ...opaqueResult, binder })
+  if (binder === undefined) return undefined
+  if (binder.type.kind !== 'CallableRepresentation' && binder.type.kind !== 'EffectRepresentation')
+    diagnostics.push(
+      Diagnostic.invalidOpaqueResultBinder(
+        binder.name._tag === 'Present' ? binder.name.spelling : binder.type.name,
+        binder.type.kind,
+        binder.syntax.span,
+      ),
+    )
+  return Object.freeze({ ...opaqueResult, binder })
 }
 
 const opaqueEnclosingArgument = (parameter: Type.Parameter): Type.GenericArgument => {
@@ -3781,7 +3799,7 @@ const closeOpaqueReturnType = (
 }
 
 /** Resolves all retained type paths and validates public exposure and inline dependencies. */
-export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
+export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams): Index => {
   const diagnostics: Array<Diagnostic.Diagnostic> = [...self.diagnostics]
   let modules = self.modules.map((module): ModuleHeaders => {
     const members = module.members.map((member): MemberFact => {
@@ -3810,15 +3828,14 @@ export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
           self.modules,
           diagnostics,
         )
-        const memberResolvers: ResolutionSeams =
+        const memberResolvers: ResolutionSeams.ResolutionSeams =
           member.opaqueResult === undefined || opaqueResult === undefined
             ? resolvers
-            : Object.freeze({
-                ...resolvers,
-                representationBindings: new Map([
-                  [Type.key(member.opaqueResult.binder.type), opaqueResult.binder.type],
-                ]),
-              })
+            : ResolutionSeams.withRepresentationBinding(
+                resolvers,
+                member.opaqueResult.binder.type,
+                opaqueResult.binder.type,
+              )
         const parameters = member.parameters.map((parameter) => {
           const resolved = resolveDeclaredType(
             module.module,
@@ -3874,6 +3891,17 @@ export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
           diagnostics,
         )
         const operations = member.operations.map((operation) => {
+          if (operation.opaqueResult !== undefined) {
+            const owner = member.name._tag === 'Present' ? member.name.spelling : '<anonymous>'
+            const name = operation.name._tag === 'Present' ? operation.name.spelling : '<anonymous>'
+            diagnostics.push(
+              Diagnostic.bodylessOpaqueResult(
+                `${owner}.${name}`,
+                member._tag === 'ServiceDeclaration' ? 'ServiceOperation' : 'InterfaceOperation',
+                operation.opaqueResult.syntax.span,
+              ),
+            )
+          }
           const resolvedOperationTypeParameters = resolveBounds(
             module.module,
             operation.typeParameters,
@@ -3888,15 +3916,14 @@ export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
             self.modules,
             diagnostics,
           )
-          const operationResolvers: ResolutionSeams =
+          const operationResolvers: ResolutionSeams.ResolutionSeams =
             operation.opaqueResult === undefined || opaqueResult === undefined
               ? resolvers
-              : Object.freeze({
-                  ...resolvers,
-                  representationBindings: new Map([
-                    [Type.key(operation.opaqueResult.binder.type), opaqueResult.binder.type],
-                  ]),
-                })
+              : ResolutionSeams.withRepresentationBinding(
+                  resolvers,
+                  operation.opaqueResult.binder.type,
+                  opaqueResult.binder.type,
+                )
           const parameters = operation.parameters.map((parameter) => {
             const resolved = resolveDeclaredType(
               module.module,

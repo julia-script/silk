@@ -74,7 +74,6 @@ export interface FrontendSnapshot {
   readonly semanticOccurrences: SemanticOccurrence.Index
   readonly anonymousExpressions: ReadonlyMap<string, ReadonlyArray<AnonymousExpression>>
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
-  readonly [OpaqueRealization.catalogSymbol]: OpaqueRealization.Catalog
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
   readonly semanticInvalidation?: SemanticInvalidation.SemanticInvalidation
@@ -129,12 +128,15 @@ export const make = Effect.fn('Analysis.make')(function* (
 ): Effect.fn.Return<SingleRootFrontendSnapshot, never, SourceResolver.SourceResolver> {
   const frontend = yield* Pipeline.frontend(request)
   const tooling = FrontendTooling.make(frontend)
-  return Object.freeze({
-    _tag: 'AnalysisSnapshot',
-    realization: 'SingleRoot',
-    ...frontend,
-    ...tooling,
-  })
+  return OpaqueRealization.withCatalog(
+    Object.freeze({
+      _tag: 'AnalysisSnapshot',
+      realization: 'SingleRoot',
+      ...frontend,
+      ...tooling,
+    }),
+    OpaqueRealization.catalogOf(frontend),
+  )
 })
 
 /** Explicitly derives one immutable runtime snapshot from completed frontend facts. */
@@ -144,12 +146,15 @@ export const realize = (
   options: Pipeline.Options = {},
 ): Snapshot => {
   const realization = Pipeline.realize(self, target, options)
-  return Object.freeze({
-    ...self,
-    ...realization,
-    _tag: 'AnalysisSnapshot',
-    realization: 'SingleRoot',
-  })
+  return OpaqueRealization.withCatalog(
+    Object.freeze({
+      ...self,
+      ...realization,
+      _tag: 'AnalysisSnapshot',
+      realization: 'SingleRoot',
+    }),
+    OpaqueRealization.catalogOf(self),
+  )
 }
 
 /** Builds and explicitly realizes one compilation request in a single effect. */

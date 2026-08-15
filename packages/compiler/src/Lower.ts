@@ -168,7 +168,7 @@ class FunctionLowering {
 
   type(type: Type.Type): Mir.Type | undefined {
     return (
-      opaqueValueType(this.layout, this.opaqueRealizations, type, this.substitution) ??
+      representedValueType(this.layout, this.opaqueRealizations, type, this.substitution) ??
       mirType(type, this.substitution)
     )
   }
@@ -491,7 +491,7 @@ const sameArguments = (
     return candidate !== undefined && Type.equalsGenericArgument(argument, candidate)
   })
 
-const opaqueValueType = (
+const representedValueType = (
   layout: Layout.Plan,
   catalog: OpaqueRealization.Catalog,
   type: Type.Type,
@@ -499,10 +499,25 @@ const opaqueValueType = (
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' | 'EffectValue' }> | undefined => {
   const specialized = Type.substitute(type, substitution)
   if (!Type.isRepresented(specialized)) return undefined
-  const opaque = specialized.representation.argument
+  const representation = specialized.representation.argument
+  if (Type.isExactRepresentationArgument(representation)) {
+    if (
+      Type.isCallable(specialized.contract) &&
+      Type.isCallableIdentityArgument(representation.identity)
+    )
+      return callableValueByIdentity(layout, representation.identity, specialized.contract)
+    if (
+      Type.isEffect(specialized.contract) &&
+      Type.isEffectIdentityArgument(representation.identity)
+    )
+      return effectValueByIdentity(layout, representation.identity.identity)
+    return undefined
+  }
+  const opaque = representation
   if (!Type.isOpaqueRepresentationArgument(opaque)) return undefined
   const definition = OpaqueRealization.definitionOf(catalog, opaque)
-  const realization = definition?.realization
+  if (definition === undefined) return undefined
+  const realization = definition.realization
   if (realization?._tag !== 'ExactRepresentationArgument') return undefined
   if (
     Type.isCallable(specialized.contract) &&
@@ -519,15 +534,16 @@ const opaqueValueType = (
         { readonly _tag: 'CallableEnvironment' }
       > =>
         candidate._tag === 'CallableEnvironment' &&
-        candidate.callable.owner.declaration.module === opaque.family.producer.module &&
-        candidate.callable.owner.declaration.name === opaque.family.producer.name &&
+        candidate.callable.owner.declaration.module === definition.construction.producer.module &&
+        candidate.callable.owner.declaration.name === definition.construction.producer.name &&
         sameArguments(
           candidate.callable.owner.typeArguments.filter(
             (argument) => !Type.isHiddenIdentityArgument(argument),
           ),
-          opaque.arguments,
+          definition.construction.arguments,
         ) &&
-        identity.environment === `callable:${Hir.executableSiteKey(candidate.callable.site)}`,
+        definition.construction.site ===
+          `callable:${Hir.executableSiteKey(candidate.callable.site)}`,
     )
     return environment === undefined
       ? undefined
@@ -548,15 +564,15 @@ const opaqueValueType = (
         candidate,
       ): candidate is Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
         candidate._tag === 'EffectEnvironment' &&
-        candidate.instance.declaration.module === opaque.family.producer.module &&
-        candidate.instance.declaration.name === opaque.family.producer.name &&
+        candidate.instance.declaration.module === definition.construction.producer.module &&
+        candidate.instance.declaration.name === definition.construction.producer.name &&
         sameArguments(
           candidate.instance.typeArguments.filter(
             (argument) => !Type.isHiddenIdentityArgument(argument),
           ),
-          opaque.arguments,
+          definition.construction.arguments,
         ) &&
-        realization.identity.identity === `effect:${Hir.executableSiteKey(candidate.site)}`,
+        definition.construction.site === `effect:${Hir.executableSiteKey(candidate.site)}`,
     )
     return environment === undefined
       ? undefined
@@ -3607,23 +3623,8 @@ const cleanupForLocal = (
     }
     return cleanupForEnvironment(localType, new Set())
   }
-  if (specialized._tag !== 'CallableCleanup' || localType._tag !== 'CallableValue') {
-    return specialized
-  }
-  const fields = localType.environment?.fields ?? []
-  return Object.freeze({
-    _tag: 'CallableCleanup',
-    type: localType.type,
-    site: specialized.site,
-    slots: Object.freeze(
-      specialized.slots.flatMap((slot) => {
-        const field = fields.find((candidate) => candidate.ordinal === slot.ordinal)
-        return field === undefined
-          ? []
-          : [Object.freeze({ ordinal: slot.ordinal, cleanup: concreteCleanup(fn, field.type) })]
-      }),
-    ),
-  })
+  if (localType._tag === 'CallableValue') return callableLocalCleanup(fn, localType)
+  return specialized
 }
 
 /**
@@ -4620,7 +4621,7 @@ const lowerInstance = (
             return callable === undefined ? [] : [callable]
           }
           const lowered =
-            opaqueValueType(layout, opaqueRealizations, type, instance.substitution) ??
+            representedValueType(layout, opaqueRealizations, type, instance.substitution) ??
             mirType(type, instance.substitution)
           return lowered === undefined ? [] : [lowered]
         })
@@ -4651,7 +4652,7 @@ const lowerInstance = (
     specializedEffectResult ??
     hiddenEffectResult ??
     (contract._tag === 'Contract'
-      ? (opaqueValueType(
+      ? (representedValueType(
           layout,
           opaqueRealizations,
           effectOutcome ?? contract.result,

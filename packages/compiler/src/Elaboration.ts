@@ -9484,12 +9484,7 @@ const hirExpectedExpression = (
     })
   const source = hirExpression(fact, borrow)
   if (source._tag === 'Unavailable') return source
-  if (
-    Type.isRepresented(target) &&
-    ((Type.isCallable(target.contract) && Type.isCallable(source.type)) ||
-      (Type.isEffect(target.contract) && Type.isEffect(source.type))) &&
-    typesCompatible(source.type, target.contract)
-  )
+  if (Type.isRepresented(target) && Type.haveSameRepresentationShape(source.type, target))
     return source
   const compatibility = TypeCompatibility.check(source.type, target)
   if (compatibility._tag === 'Exact') return source

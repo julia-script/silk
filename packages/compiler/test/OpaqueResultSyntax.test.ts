@@ -1,48 +1,15 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import type * as DeclarationIndex from '../src/DeclarationIndex.js'
-import * as FormattedDocument from '../src/FormattedDocument.js'
-import * as Formatter from '../src/Formatter.js'
-import * as Lexer from '../src/Lexer.js'
-import * as ModuleClosure from '../src/ModuleClosure.js'
-import * as NameResolution from '../src/NameResolution.js'
-import * as Parser from '../src/Parser.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
+import * as DeclaredTypeSyntax from './support/DeclaredTypeSyntax.js'
+import { raise } from './support/raise.js'
 
-const encoder = new TextEncoder()
-const decoder = new TextDecoder()
-
-const parse = (id: string, source: string) =>
-  Parser.parse(Lexer.lex(SourceFile.make(id, encoder.encode(source))))
-
-const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Element> =>
-  node.children.flatMap(
-    (child): ReadonlyArray<SyntaxTree.Element> =>
-      SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [child],
-  )
-
-const formatted = Effect.fnUntraced(function* (source: string) {
-  const document = yield* Formatter.format(parse('opaque-result/format', source))
-  return decoder.decode(FormattedDocument.toUint8Array(document))
-})
-
-const index = (id: string, source: string) =>
-  Effect.map(
-    ModuleClosure.load({ root: SourceFile.make(id, encoder.encode(source)) }).pipe(
-      Effect.provide(SourceResolver.memory(new Map())),
-    ),
-    (closure) => NameResolution.analyze(closure).index,
-  )
-
-const declaration = (self: DeclarationIndex.Index, module: string, name: string) =>
-  self.modules
-    .find((candidate) => candidate.module === module)
-    ?.declarations.find(
-      (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === name,
-    )
+const parse = DeclaredTypeSyntax.parse
+const descendants = DeclaredTypeSyntax.descendants
+const formatted = (source: string) => DeclaredTypeSyntax.format('opaque-result/format', source)
+const index = DeclaredTypeSyntax.index
+const declaration = DeclaredTypeSyntax.declaration
 
 it('parses a contextual some binder only in result position', () => {
   const syntax = parse(
@@ -57,7 +24,10 @@ pub fn make() -> some<F: fn(i32) -> i32> Parser<F> { return 0 }`,
   )
   assert.strictEqual(binders.length, 1)
   assert.strictEqual(
-    SyntaxTree.directNode(binders[0] ?? assert.fail('binder'), 'TypeParameterList') !== undefined,
+    SyntaxTree.directNode(
+      binders[0] ?? raise('expected opaque result binder'),
+      'TypeParameterList',
+    ) !== undefined,
     true,
   )
 })
@@ -126,6 +96,35 @@ it('rejects value and row parameters in opaque binder position', () => {
     assert.isAbove(syntax.parserDiagnostics.length, 0, binder)
   }
 })
+
+it.effect('diagnoses an ordinary type bound in opaque binder position', () =>
+  Effect.gen(function* () {
+    const self = yield* index(
+      'opaque-result/ordinary-bound',
+      'pub fn broken() -> some<T: i32> T { loop {} }',
+    )
+    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0116')
+    assert.strictEqual(diagnostic?.reason._tag, 'InvalidOpaqueResultBinder')
+  }),
+)
+
+it.effect('rejects opaque results on bodyless service and interface operations', () =>
+  Effect.gen(function* () {
+    const self = yield* index(
+      'opaque-result/bodyless-operation',
+      `pub service Factory { fn make() -> some<F: fn(i32) -> i32> F }
+pub interface FactoryShape { fn make() -> some<G: fn(i32) -> i32> G }`,
+    )
+    const diagnostics = self.diagnostics.filter((candidate) => candidate.code === 'SEM0118')
+    assert.strictEqual(diagnostics.length, 2)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) =>
+        diagnostic.reason._tag === 'BodylessOpaqueResult' ? diagnostic.reason.context : undefined,
+      ),
+      ['ServiceOperation', 'InterfaceOperation'],
+    )
+  }),
+)
 
 it('recovers a missing binder close before the complete result type', () => {
   const syntax = parse(

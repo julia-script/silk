@@ -232,6 +232,12 @@ export const divergentOpaqueRealizationCode = 'SEM0113' as const
 export const opaqueRealizationCycleCode = 'SEM0114' as const
 /** Stable code for an opaque realization whose inline captures contain that same family. */
 export const inlineOpaqueLayoutCycleCode = 'SEM0115' as const
+/** Stable code for an opaque result binder whose bound is not callable or Effect representation. */
+export const invalidOpaqueResultBinderCode = 'SEM0116' as const
+/** Stable code for an opaque producer whose reachable returns establish no representation. */
+export const missingOpaqueRealizationCode = 'SEM0117' as const
+/** Stable code for an opaque result declared where no producer body can establish its identity. */
+export const bodylessOpaqueResultCode = 'SEM0118' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -381,6 +387,9 @@ export type Code =
   | typeof divergentOpaqueRealizationCode
   | typeof opaqueRealizationCycleCode
   | typeof inlineOpaqueLayoutCycleCode
+  | typeof invalidOpaqueResultBinderCode
+  | typeof missingOpaqueRealizationCode
+  | typeof bodylessOpaqueResultCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -548,7 +557,18 @@ export type Reason =
       readonly realizations: ReadonlyArray<string>
     }
   | { readonly _tag: 'OpaqueRealizationCycle'; readonly families: ReadonlyArray<string> }
-  | { readonly _tag: 'InlineOpaqueLayoutCycle'; readonly family: string }
+  | { readonly _tag: 'InlineOpaqueLayoutCycle'; readonly families: ReadonlyArray<string> }
+  | {
+      readonly _tag: 'InvalidOpaqueResultBinder'
+      readonly binder: string
+      readonly actual: 'Value' | 'FailureRow' | 'RequirementRow'
+    }
+  | { readonly _tag: 'MissingOpaqueRealization'; readonly family: string }
+  | {
+      readonly _tag: 'BodylessOpaqueResult'
+      readonly declaration: string
+      readonly context: 'ServiceOperation' | 'InterfaceOperation'
+    }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
@@ -1914,19 +1934,25 @@ export const ambiguousExactRepresentationItem = (
  */
 export const uncallableExactRepresentationItem = (
   item: string,
-  subject: UncallableExactRepresentationSubject,
+  subjectKind: UncallableExactRepresentationSubject,
   span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
+): Diagnostic => {
+  const subject = uncallableSubjectProse(subjectKind)
+  return Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: uncallableExactRepresentationItemCode,
     severity: 'error',
-    message: `Cannot name the exact representation of ${item}: it names ${uncallableSubjectProse(subject)}, which has no source-nameable exact identity`,
-    reason: Object.freeze({ _tag: 'UncallableExactRepresentationItem', item, subject }),
+    message: `Cannot name the exact representation of ${item}: it names ${subject}, which has no source-nameable exact identity`,
+    reason: Object.freeze({
+      _tag: 'UncallableExactRepresentationItem',
+      item,
+      subject: subjectKind,
+    }),
     span,
     notes: Object.freeze([opaqueResultNote]),
   })
+}
 
 /** Rejects one `typeof` item whose generic parameters are not all supplied. */
 export const openExactRepresentationItem = (
@@ -2011,16 +2037,72 @@ export const opaqueRealizationCycle = (
   })
 
 /** Rejects a capture layout that would contain the opaque family it is defining inline. */
-export const inlineOpaqueLayoutCycle = (family: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const inlineOpaqueLayoutCycle = (
+  families: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: inlineOpaqueLayoutCycleCode,
     severity: 'error',
-    message: `Opaque result ${family} has an infinite inline layout because its realization captures the same family`,
-    reason: Object.freeze({ _tag: 'InlineOpaqueLayoutCycle', family }),
+    message: `Opaque results form an infinite inline layout cycle: ${families.join(' -> ')}`,
+    reason: Object.freeze({
+      _tag: 'InlineOpaqueLayoutCycle',
+      families: Object.freeze([...families]),
+    }),
     span,
   })
+
+/** Rejects an opaque result binder whose bound is not a callable or Effect representation. */
+export const invalidOpaqueResultBinder = (
+  binder: string,
+  actual: 'Value' | 'FailureRow' | 'RequirementRow',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidOpaqueResultBinderCode,
+    severity: 'error',
+    message: `Opaque result binder ${binder} must have a callable or Effect representation bound, but its kind is ${actual}`,
+    reason: Object.freeze({ _tag: 'InvalidOpaqueResultBinder', binder, actual }),
+    span,
+  })
+
+/** Rejects an opaque producer whose reachable returns select no representation construction. */
+export const missingOpaqueRealization = (family: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: missingOpaqueRealizationCode,
+    severity: 'error',
+    message: `Opaque result ${family} has no reachable callable or Effect representation construction`,
+    reason: Object.freeze({ _tag: 'MissingOpaqueRealization', family }),
+    span,
+  })
+
+/** Rejects an opaque result in a contract-only declaration that has no producer body. */
+export const bodylessOpaqueResult = (
+  declaration: string,
+  contextKind: 'ServiceOperation' | 'InterfaceOperation',
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const context = contextKind === 'ServiceOperation' ? 'service' : 'interface'
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: bodylessOpaqueResultCode,
+    severity: 'error',
+    message: `Opaque result ${declaration} is not permitted on a ${context} operation because no producer body can establish one static representation`,
+    reason: Object.freeze({
+      _tag: 'BodylessOpaqueResult',
+      declaration,
+      context: contextKind,
+    }),
+    span,
+  })
+}
 
 /** Rejects represented Effect storage until a downstream runtime layout has been proven. */
 export const storedRepresentedEffectConstruction = (

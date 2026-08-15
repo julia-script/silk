@@ -1,67 +1,20 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import type * as DeclarationIndex from '../src/DeclarationIndex.js'
-import * as FormattedDocument from '../src/FormattedDocument.js'
-import * as Formatter from '../src/Formatter.js'
-import * as Lexer from '../src/Lexer.js'
-import * as ModuleClosure from '../src/ModuleClosure.js'
-import * as NameResolution from '../src/NameResolution.js'
-import * as Parser from '../src/Parser.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
+import * as DeclaredTypeSyntax from './support/DeclaredTypeSyntax.js'
+import { raise } from './support/raise.js'
 
 const encoder = new TextEncoder()
-const decoder = new TextDecoder()
-
-const parse = (id: string, source: string) =>
-  Parser.parse(Lexer.lex(SourceFile.make(id, encoder.encode(source))))
-
-const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Element> =>
-  node.children.flatMap(
-    (child): ReadonlyArray<SyntaxTree.Element> =>
-      SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [child],
-  )
-
-const index = (id: string, source: string) =>
-  Effect.map(
-    ModuleClosure.load({ root: SourceFile.make(id, encoder.encode(source)) }).pipe(
-      Effect.provide(SourceResolver.memory(new Map())),
-    ),
-    (closure) => NameResolution.analyze(closure).index,
-  )
-
-const indexWithImports = (root: string, sources: Readonly<Record<string, string>>) => {
-  const rootSource = sources[root] ?? assert.fail(`missing root source ${root}`)
-  const imports = new Map(
-    Object.entries(sources).flatMap(([module, source]) =>
-      module === root ? [] : ([[module, encoder.encode(source)] as const] as const),
-    ),
-  )
-  return Effect.map(
-    ModuleClosure.load({ root: SourceFile.make(root, encoder.encode(rootSource)) }).pipe(
-      Effect.provide(SourceResolver.memory(imports)),
-    ),
-    (closure) => NameResolution.analyze(closure).index,
-  )
-}
-
-const declaration = (self: DeclarationIndex.Index, module: string, name: string) =>
-  self.modules
-    .find((candidate) => candidate.module === module)
-    ?.declarations.find(
-      (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === name,
-    )
-
-const codes = (self: DeclarationIndex.Index): ReadonlyArray<string> =>
-  self.diagnostics.map((diagnostic) => diagnostic.code)
-
-const formatted = Effect.fnUntraced(function* (source: string) {
-  const document = yield* Formatter.format(parse('exact-representation/format', source))
-  return decoder.decode(FormattedDocument.toUint8Array(document))
-})
+const parse = DeclaredTypeSyntax.parse
+const descendants = DeclaredTypeSyntax.descendants
+const index = DeclaredTypeSyntax.index
+const indexWithImports = DeclaredTypeSyntax.indexWithImports
+const declaration = DeclaredTypeSyntax.declaration
+const codes = DeclaredTypeSyntax.codes
+const formatted = (source: string) =>
+  DeclaredTypeSyntax.format('exact-representation/format', source)
 
 it('parses an exact representation result into one ExactRepresentationType node', () => {
   const syntax = parse(
@@ -76,7 +29,8 @@ pub fn selected() -> typeof(decode) { return decode }`,
   )
   assert.strictEqual(nodes.length, 1)
   assert.strictEqual(
-    SyntaxTree.directNode(nodes[0] ?? assert.fail('node'), 'TypePath') !== undefined,
+    SyntaxTree.directNode(nodes[0] ?? raise('expected exact representation node'), 'TypePath') !==
+      undefined,
     true,
   )
 })
@@ -258,15 +212,64 @@ pub fn selected() -> typeof(identity) { return 0 }`,
   }),
 )
 
-it.effect('rejects an item that is still generic in an enclosing parameter', () =>
+it.effect('preserves every supplied generic kind in an exact item identity', () =>
   Effect.gen(function* () {
     const self = yield* index(
-      'exact-representation/open',
-      `pub fn identity<T>(value: T) -> T { return value }
-pub fn selected<T>() -> typeof(identity<T>) { return 0 }`,
+      'exact-representation/kinded',
+      `pub fn target<A, !E, ?R, F: fn(A) -> A, G: Effect<A>>(value: A) -> A {
+  return move value
+}
+pub fn selected<A, !E, ?R, F: fn(A) -> A, G: Effect<A>>() -> typeof(target<A, E, R, F, G>) {
+  loop {}
+}`,
     )
-    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0111')
-    assert.strictEqual(diagnostic?.reason._tag, 'OpenExactRepresentationItem')
+    const found = declaration(self, 'exact-representation/kinded', 'selected')
+    assert.strictEqual(found?.returnType._tag, 'Resolved')
+    if (found?.returnType._tag !== 'Resolved' || !Type.isRepresented(found.returnType.type)) return
+    const exact = found.returnType.type.representation.argument
+    assert.strictEqual(Type.isExactRepresentationArgument(exact), true)
+    if (!Type.isExactRepresentationArgument(exact)) return
+    assert.strictEqual(Type.isCallableIdentityArgument(exact.identity), true)
+    if (!Type.isCallableIdentityArgument(exact.identity)) return
+    const [value, failures, requirements, callable, effect] = exact.identity.typeArguments
+    assert.strictEqual(value !== undefined && Type.isTypeArgument(value), true)
+    assert.strictEqual(failures !== undefined && Type.isFailureRowArgument(failures), true)
+    assert.strictEqual(
+      requirements !== undefined && Type.isRequirementRowArgument(requirements),
+      true,
+    )
+    assert.strictEqual(
+      callable !== undefined && Type.isRepresentationParameterArgument(callable),
+      true,
+    )
+    assert.strictEqual(effect !== undefined && Type.isRepresentationParameterArgument(effect), true)
+    assert.notInclude(codes(self), 'SEM0111')
+  }),
+)
+
+it.effect('rejects private exact identities nested in every non-value generic position', () =>
+  Effect.gen(function* () {
+    const self = yield* index(
+      'exact-representation/nested-private',
+      `fn hidden(value: i32) -> i32 { return value }
+pub struct Failure<F: fn(i32) -> i32> { value: i32 }
+pub struct Capability<F: fn(i32) -> i32> { value: i32 }
+pub fn generic<F: fn(i32) -> i32>(value: i32) -> i32 { return value }
+pub fn rows<!E, ?R>(value: i32) -> i32 { return value }
+pub fn nominalLeak() -> Failure<typeof(hidden)> { loop {} }
+pub fn identityLeak() -> typeof(generic<typeof(hidden)>) { loop {} }
+pub fn rowLeak() -> typeof(rows<Failure<typeof(hidden)>, Capability<typeof(hidden)>>) { loop {} }`,
+    )
+    const leaks = self.diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0112')
+    assert.strictEqual(leaks.length, 3)
+    assert.deepEqual(
+      leaks.map((diagnostic) => diagnostic.reason._tag),
+      [
+        'PrivateExactRepresentationLeak',
+        'PrivateExactRepresentationLeak',
+        'PrivateExactRepresentationLeak',
+      ],
+    )
   }),
 )
 

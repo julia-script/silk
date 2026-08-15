@@ -6,6 +6,7 @@ import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
+import { raise } from './support/raise.js'
 
 const encoder = new TextEncoder()
 
@@ -36,10 +37,10 @@ const opaqueArgument = (
       (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === name,
     )
   const type = declaration?.returnType
-  if (type?._tag !== 'Resolved') return assert.fail(`missing opaque result ${module}.${name}`)
+  if (type?._tag !== 'Resolved') return raise(`missing opaque result ${module}.${name}`)
   return (
     Type.opaqueRepresentationArguments(type.type).at(0) ??
-    assert.fail(`missing opaque family ${module}.${name}`)
+    raise(`missing opaque family ${module}.${name}`)
   )
 }
 
@@ -189,6 +190,20 @@ pub fn make(flag: bool) -> some<F: fn(i32) -> i32> F {
   }),
 )
 
+it.effect('distinguishes missing construction evidence from a realization cycle', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(
+      'opaque/missing-realization',
+      'pub fn make() -> some<F: fn(i32) -> i32> F { return 0 }',
+    )
+    const codes = self.diagnostics.map((diagnostic) => diagnostic.code)
+    assert.include(codes, 'SEM0117')
+    assert.notInclude(codes, 'SEM0114')
+    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0117')
+    assert.strictEqual(diagnostic?.reason._tag, 'MissingOpaqueRealization')
+  }),
+)
+
 it.effect('rejects an inline capture of the family being realized', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
@@ -201,6 +216,176 @@ pub fn make(flag: bool) -> some<F: fn(i32) -> i32> F {
     )
     const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0115')
     assert.strictEqual(diagnostic?.reason._tag, 'InlineOpaqueLayoutCycle')
+  }),
+)
+
+it.effect('rejects a mutually recursive inline capture cycle across two opaque families', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(
+      'opaque/mutual-inline-cycle',
+      `fn apply<F: fn(i32) -> i32>(value: i32, parser: F) -> i32 { return parser(value) }
+pub fn first(flag: bool) -> some<F: fn(i32) -> i32> F {
+  let other = second(flag)
+  return apply(move other)
+}
+pub fn second(flag: bool) -> some<G: fn(i32) -> i32> G {
+  let other = first(flag)
+  return apply(move other)
+}`,
+    )
+    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0115')
+    assert.strictEqual(diagnostic?.reason._tag, 'InlineOpaqueLayoutCycle')
+    if (diagnostic?.reason._tag !== 'InlineOpaqueLayoutCycle') return
+    assert.strictEqual(diagnostic.reason.families.length, 2)
+  }),
+)
+
+it.effect('specializes and lowers a generic opaque family forwarded through another producer', () =>
+  Effect.gen(function* () {
+    const module = 'opaque/forwarded-generic'
+    const source = `fn keep<T>(value: T, enabled: bool) -> T { return move value }
+pub fn inner<T>(enabled: bool) -> some<F: fn(T) -> T> F { return keep<T>(enabled) }
+pub fn outer<T>(enabled: bool) -> some<G: fn(T) -> T> G { return inner<T>(enabled) }
+pub fn main() -> i32 { let parser = outer<i32>(true) return parser(1) }`
+    const frontend = yield* snapshot(module, source)
+    assert.deepEqual(
+      frontend.diagnostics.map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const open = opaqueArgument(frontend, module, 'outer')
+    const specialized = Type.opaqueRepresentationArgument(open.family, open.contract, ['i32'])
+    const definition = OpaqueRealization.definitionOf(
+      OpaqueRealization.catalogOf(frontend),
+      specialized,
+    )
+    assert.strictEqual(definition?.construction.producer.module, module)
+    assert.strictEqual(definition?.construction.producer.name, 'inner')
+    assert.deepEqual(definition?.construction.arguments, ['i32'])
+
+    const realized = yield* Analysis.ofSourceRealized(
+      module,
+      encoder.encode(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(
+      realized.diagnostics.map((diagnostic) => diagnostic.code),
+      [],
+    )
+    assert.strictEqual(realized.mir._tag, 'Available')
+    if (realized.mir._tag === 'Available')
+      assert.notInclude(Mir.encode(realized.mir.value), 'unavailable contract type')
+  }),
+)
+
+it.effect('executes a generic opaque realization forwarded through a cross-module wrapper', () =>
+  Effect.gen(function* () {
+    const root = 'opaque/App'
+    const source =
+      'import opaque.Outer { outer } pub fn main() -> i32 { let parser = outer<i32>(42) return parser(0) }'
+    const self = yield* Analysis.makeRealized({
+      root: SourceFile.make(root, encoder.encode(source)),
+      target: 'wasm32-unknown-unknown',
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([
+            [
+              'opaque/Outer',
+              encoder.encode(`import opaque.Inner { inner }
+pub fn outer<T>(value: T) -> some<G: once fn(i32) -> T> G { return inner<T>(move value) }`),
+            ],
+            [
+              'opaque/Inner',
+              encoder.encode(`fn keep<T>(ignored: i32, value: T) -> T { return move value }
+pub fn inner<T>(value: T) -> some<F: once fn(i32) -> T> F { return keep<T>(move value) }`),
+            ],
+          ]),
+        ),
+      ),
+    )
+    assert.deepEqual(
+      self.diagnostics.map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const open = opaqueArgument(self, 'opaque/Outer', 'outer')
+    const definition = OpaqueRealization.definitionOf(
+      OpaqueRealization.catalogOf(self),
+      Type.opaqueRepresentationArgument(open.family, open.contract, ['i32']),
+    )
+    assert.strictEqual(definition?.construction.producer.module, 'opaque/Inner')
+    assert.strictEqual(definition?.construction.producer.name, 'inner')
+    assert.deepEqual(definition?.construction.arguments, ['i32'])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(
+      outcome._tag,
+      'Completed',
+      outcome._tag === 'Blocked' ? JSON.stringify(outcome.reason) : outcome._tag,
+    )
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
+it.effect(
+  'materializes distinct layouts per generic specialization and reuses one layout per value',
+  () =>
+    Effect.gen(function* () {
+      const module = 'opaque/specialized-layouts'
+      const source = `pub struct Token { left: i32 right: i32 }
+fn keep<T>(ignored: i32, value: T) -> T { return move value }
+pub fn make<T>(value: T) -> some<F: fn(i32) -> T> F { return keep<T>(value) }
+pub fn main() -> i32 {
+  let first = make<i32>(40)
+  let second = make<i32>(1)
+  let tokenParser = make<Token>(Token { left: 1, right: 0 })
+  let token = tokenParser(0)
+  return first(0) + second(0) + token.left
+}`
+      const self = yield* Analysis.ofSourceRealized(
+        module,
+        encoder.encode(source),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(
+        self.diagnostics.map((diagnostic) => diagnostic.code),
+        [],
+      )
+      const makeInstances = self.instances.instances.filter(
+        (instance) => instance.key.declaration.name === 'make',
+      )
+      assert.strictEqual(makeInstances.length, 2)
+      assert.strictEqual(self.layout._tag, 'Available')
+      if (self.layout._tag !== 'Available') return
+      const sizes = self.layout.value.callableEnvironments
+        .filter(
+          (environment) =>
+            environment._tag === 'CallableEnvironment' &&
+            environment.callable.owner.declaration.name === 'make',
+        )
+        .map((environment) => (environment._tag === 'CallableEnvironment' ? environment.size : -1))
+        .sort((left, right) => left - right)
+      assert.deepEqual(sizes, [4, 8])
+    }),
+)
+
+it.effect('rejects a static join between values from distinct opaque families', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(
+      'opaque/distinct-family-join',
+      `struct First {}
+struct Second {}
+fn identity(value: i32) -> i32 { return value }
+fn first() -> some<F: fn(i32) -> i32> F { return identity }
+fn second() -> some<G: fn(i32) -> i32> G { return identity }
+fn choose(input: First | Second) -> i32 {
+  let parser = match move input {
+    First {} => first()
+    Second {} => second()
+  }
+  return parser(0)
+}`,
+    )
+    const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0105')
+    assert.strictEqual(diagnostic?.reason._tag, 'DivergentRepresentationJoin')
   }),
 )
 
@@ -220,7 +405,10 @@ pub fn make<T>(enabled: bool) -> some<F: fn(T) -> T> F { return keep<T>(enabled)
     const family = Type.opaqueFamilyKey(open.family)
     const privateDefinition = OpaqueRealization.catalogOf(self).definitions.get(family)
     assert.isDefined(privateDefinition)
-    const publicSurface = self.surfaces.get(library)?.canonical ?? assert.fail('missing surface')
+    const predictableCatalogSymbol = Symbol.for('@silk-effect/compiler/OpaqueRealizationCatalog')
+    assert.strictEqual(predictableCatalogSymbol in self, false)
+    assert.notInclude(Object.getOwnPropertySymbols(self), predictableCatalogSymbol)
+    const publicSurface = self.surfaces.get(library)?.canonical ?? raise('missing surface')
     assert.notInclude(publicSurface, 'exact-representation:')
     assert.notInclude(publicSurface, 'OpaqueCapture')
     const specialized = Type.opaqueRepresentationArgument(open.family, open.contract, ['i32'])

@@ -1,3 +1,4 @@
+import * as Canonical from './internal/Canonical.js'
 import * as Scalar from './Scalar.js'
 
 /** The built-in scalar types implemented by the current executable bootstrap surface. */
@@ -703,7 +704,10 @@ export const isOpaqueRepresentationArgument = (
 
 /** Returns the canonical source identity shared by every specialization of one opaque family. */
 export const opaqueFamilyKey = (self: OpaqueFamilyKey): string =>
-  `${self.producer.module}.${self.producer.name}#${self.binderOrdinal}`
+  Canonical.record('OpaqueFamily', [
+    Canonical.record('Producer', [self.producer.module, self.producer.name]),
+    String(self.binderOrdinal),
+  ])
 
 /** Tests family identity without consulting a realization or any source location. */
 export const equalsOpaqueFamily = (left: OpaqueFamilyKey, right: OpaqueFamilyKey): boolean =>
@@ -784,7 +788,11 @@ export const genericArgumentKey = (self: GenericArgument): string =>
     : isRepresentationParameterArgument(self)
       ? `representation-parameter:${key(self.parameter)}`
       : isOpaqueRepresentationArgument(self)
-        ? `opaque-representation:${self.family.producer.module}.${self.family.producer.name}:${self.family.binderOrdinal}:<${self.arguments.map(genericArgumentKey).join(',')}>:${key(self.contract)}`
+        ? Canonical.record('OpaqueRepresentation', [
+            opaqueFamilyKey(self.family),
+            Canonical.array(self.arguments.map(genericArgumentKey)),
+            key(self.contract),
+          ])
         : isExactRepresentationArgument(self)
           ? `exact-representation:${genericArgumentKey(self.identity)}:${key(self.contract)}`
           : isEffectIdentityArgument(self)
@@ -1403,44 +1411,74 @@ export const opaqueRepresentationEvidence = (
   return Object.freeze([])
 }
 
+interface FoldVisitor<A> {
+  readonly type?: (self: Type) => A | undefined
+  readonly argument?: (self: GenericArgument) => A | undefined
+}
+
+/**
+ * Folds every semantic type and erased generic argument in deterministic preorder.
+ *
+ * This is the single structural walk used by Type-owned collectors. Adding a new type or generic
+ * argument kind therefore has one exhaustiveness point instead of several subtly different walks.
+ */
+const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
+  const found: Array<A> = []
+  const append = (value: A | undefined): void => {
+    if (value !== undefined) found.push(value)
+  }
+  const visitArgument = (argument: GenericArgument): void => {
+    append(visitor.argument?.(argument))
+    if (isTypeArgument(argument)) visitType(argument)
+    else if (isOpaqueRepresentationArgument(argument)) {
+      visitType(argument.contract)
+      for (const enclosing of argument.arguments) visitArgument(enclosing)
+    } else if (isExactRepresentationArgument(argument)) {
+      visitArgument(argument.identity)
+      visitType(argument.contract)
+    } else if (isCallableIdentityArgument(argument)) {
+      for (const typeArgument of argument.typeArguments) visitArgument(typeArgument)
+    } else if (isFailureRowArgument(argument)) {
+      for (const failure of argument.failures) visitType(failure)
+      for (const parameter_ of argument.parameters) visitType(parameter_)
+    } else if (isRequirementRowArgument(argument)) {
+      for (const requirement of argument.requirements) visitType(requirement.capability)
+      for (const parameter_ of argument.parameters) visitType(parameter_)
+    }
+  }
+  const visitType = (type: Type): void => {
+    append(visitor.type?.(type))
+    if (isNominal(type)) {
+      for (const argument of type.arguments) visitArgument(argument)
+    } else if (isFixedArray(type) || isSlice(type)) visitType(type.element)
+    else if (isReference(type)) visitType(type.target)
+    else if (isCallable(type)) {
+      for (const parameter_ of type.parameters) visitType(parameter_)
+      visitType(type.result)
+    } else if (isEffect(type)) {
+      visitType(type.success)
+      for (const failure of type.failures) visitType(failure)
+      for (const parameter_ of type.failureParameters) visitType(parameter_)
+      for (const requirement of type.requirements) visitType(requirement.capability)
+      for (const parameter_ of type.requirementParameters) visitType(parameter_)
+    } else if (isRepresented(type)) {
+      visitArgument(type.representation.argument)
+      visitType(type.contract)
+    } else if (isUnion(type)) {
+      for (const member of type.members) visitType(member)
+    }
+  }
+  visitType(self)
+  return Object.freeze(found)
+}
+
 /** Returns every opaque family instance nested in one semantic type. */
 export const opaqueRepresentationArguments = (
   self: Type,
-): ReadonlyArray<OpaqueRepresentationArgument> => {
-  const found: Array<OpaqueRepresentationArgument> = []
-  const visitArgument = (argument: GenericArgument): void => {
-    if (isOpaqueRepresentationArgument(argument)) {
-      found.push(argument)
-      for (const enclosing of argument.arguments) visitArgument(enclosing)
-      return
-    }
-    if (isTypeArgument(argument)) visit(argument)
-    else if (isExactRepresentationArgument(argument)) visit(argument.contract)
-    else if (isCallableIdentityArgument(argument))
-      for (const supplied of argument.typeArguments) visitArgument(supplied)
-    else if (isFailureRowArgument(argument)) for (const failure of argument.failures) visit(failure)
-    else if (isRequirementRowArgument(argument))
-      for (const requirement of argument.requirements) visit(requirement.capability)
-  }
-  const visit = (type: Type): void => {
-    if (isNominal(type)) for (const argument of type.arguments) visitArgument(argument)
-    else if (isFixedArray(type) || isSlice(type)) visit(type.element)
-    else if (isReference(type)) visit(type.target)
-    else if (isCallable(type)) {
-      for (const parameter_ of type.parameters) visit(parameter_)
-      visit(type.result)
-    } else if (isEffect(type)) {
-      visit(type.success)
-      for (const failure of type.failures) visit(failure)
-      for (const requirement of type.requirements) visit(requirement.capability)
-    } else if (isRepresented(type)) {
-      visitArgument(type.representation.argument)
-      visit(type.contract)
-    } else if (isUnion(type)) for (const member of type.members) visit(member)
-  }
-  visit(self)
-  return Object.freeze(found)
-}
+): ReadonlyArray<OpaqueRepresentationArgument> =>
+  fold(self, {
+    argument: (argument) => (isOpaqueRepresentationArgument(argument) ? argument : undefined),
+  })
 
 /** Orders semantic types by canonical identity. */
 export const compare = (left: Type, right: Type): number => compareText(key(left), key(right))
@@ -1504,7 +1542,6 @@ export const encode = (self: Type): string => {
   return self.members.map(encode).join(' | ')
 }
 
-/** Returns every canonical nominal nested in a type, in deterministic preorder. */
 /** One declaration named by an exact representation carried inside a type. */
 export interface ExactRepresentationDeclaration {
   readonly module: string
@@ -1514,128 +1551,41 @@ export interface ExactRepresentationDeclaration {
 /**
  * Names every declaration whose exact representation one type carries, in encounter order.
  *
- * The walk mirrors `nominals` so the two agree about which positions a type reaches. An exact
- * representation is reported before descending into its structural contract, because the contract
- * alone does not name the construction the representation fixed.
+ * An exact representation is reported before descending into its identity arguments and structural
+ * contract, because the contract alone does not name the construction the representation fixed.
  */
 export const exactRepresentationDeclarations = (
   self: Type,
 ): ReadonlyArray<ExactRepresentationDeclaration> =>
-  isRepresented(self)
-    ? Object.freeze([
-        ...(isExactRepresentationArgument(self.representation.argument) &&
-        isCallableIdentityArgument(self.representation.argument.identity) &&
-        self.representation.argument.identity.target._tag === 'Declaration'
-          ? [
-              Object.freeze({
-                module: self.representation.argument.identity.target.module,
-                name: self.representation.argument.identity.target.name,
-              }),
-            ]
-          : []),
-        ...exactRepresentationDeclarations(self.contract),
-      ])
-    : isNominal(self)
-      ? Object.freeze(
-          self.arguments.filter(isTypeArgument).flatMap(exactRepresentationDeclarations),
-        )
-      : isFixedArray(self)
-        ? exactRepresentationDeclarations(self.element)
-        : isSlice(self)
-          ? exactRepresentationDeclarations(self.element)
-          : isReference(self)
-            ? exactRepresentationDeclarations(self.target)
-            : isCallable(self)
-              ? Object.freeze([
-                  ...self.parameters.flatMap(exactRepresentationDeclarations),
-                  ...exactRepresentationDeclarations(self.result),
-                ])
-              : isEffect(self)
-                ? Object.freeze([
-                    ...exactRepresentationDeclarations(self.success),
-                    ...self.failures.flatMap(exactRepresentationDeclarations),
-                    ...self.requirements.flatMap((requirement) =>
-                      exactRepresentationDeclarations(requirement.capability),
-                    ),
-                  ])
-                : isUnion(self)
-                  ? Object.freeze(self.members.flatMap(exactRepresentationDeclarations))
-                  : []
+  fold(self, {
+    argument: (argument) =>
+      isExactRepresentationArgument(argument) &&
+      isCallableIdentityArgument(argument.identity) &&
+      argument.identity.target._tag === 'Declaration'
+        ? Object.freeze({
+            module: argument.identity.target.module,
+            name: argument.identity.target.name,
+          })
+        : undefined,
+  })
 
+/** Returns every canonical nominal nested in a type, in deterministic preorder. */
 export const nominals = (self: Type): ReadonlyArray<Nominal> =>
-  isNominal(self)
-    ? Object.freeze([self, ...self.arguments.filter(isTypeArgument).flatMap(nominals)])
-    : isFixedArray(self)
-      ? nominals(self.element)
-      : isSlice(self)
-        ? nominals(self.element)
-        : isReference(self)
-          ? nominals(self.target)
-          : isCallable(self)
-            ? Object.freeze([...self.parameters.flatMap(nominals), ...nominals(self.result)])
-            : isEffect(self)
-              ? Object.freeze([
-                  ...nominals(self.success),
-                  ...self.failures.flatMap(nominals),
-                  ...self.requirements.flatMap((requirement) => nominals(requirement.capability)),
-                ])
-              : isRepresented(self)
-                ? nominals(self.contract)
-                : isUnion(self)
-                  ? Object.freeze(self.members.flatMap(nominals))
-                  : []
+  fold(self, { type: (type) => (isNominal(type) ? type : undefined) })
 
 /** Returns every declaration-owned parameter nested in a type, without duplicates. */
 export const parameters = (self: Type): ReadonlyArray<Parameter> => {
   const found = new Map<string, Parameter>()
-  const visitArgument = (argument: GenericArgument): void => {
-    if (isTypeArgument(argument)) visit(argument)
-    else if (isRepresentationParameterArgument(argument))
-      found.set(key(argument.parameter), argument.parameter)
-    else if (isOpaqueRepresentationArgument(argument)) {
-      visit(argument.contract)
-      for (const enclosing of argument.arguments) visitArgument(enclosing)
-    } else if (isExactRepresentationArgument(argument)) {
-      visit(argument.contract)
-      visitArgument(argument.identity)
-    } else if (isCallableIdentityArgument(argument))
-      for (const typeArgument of argument.typeArguments) visitArgument(typeArgument)
-    else if (isFailureRowArgument(argument)) {
-      for (const failure of argument.failures) visit(failure)
-      for (const parameter_ of argument.parameters) found.set(key(parameter_), parameter_)
-    } else if (isRequirementRowArgument(argument)) {
-      for (const requirement of argument.requirements) visit(requirement.capability)
-      for (const parameter_ of argument.parameters) found.set(key(parameter_), parameter_)
-    }
-  }
-  const visit = (type: Type): void => {
-    if (isParameter(type)) {
-      found.set(key(type), type)
-    } else if (isFailureProjection(type)) {
-      found.set(key(type.parameter), type.parameter)
-      return
-    }
-    if (isNominal(type)) {
-      for (const argument of type.arguments) visitArgument(argument)
-      return
-    }
-    if (isFixedArray(type) || isSlice(type)) visit(type.element)
-    else if (isReference(type)) visit(type.target)
-    else if (isCallable(type)) {
-      for (const parameter_ of type.parameters) visit(parameter_)
-      visit(type.result)
-    } else if (isEffect(type)) {
-      visit(type.success)
-      for (const failure of type.failures) visit(failure)
-      for (const parameter_ of type.failureParameters) visit(parameter_)
-      for (const requirement of type.requirements) visit(requirement.capability)
-      for (const parameter_ of type.requirementParameters) visit(parameter_)
-    } else if (isRepresented(type)) {
-      visit(type.contract)
-      visitArgument(type.representation.argument)
-    } else if (isUnion(type)) for (const member of type.members) visit(member)
-  }
-  visit(self)
+  fold(self, {
+    type: (type) => {
+      if (isParameter(type)) found.set(key(type), type)
+      else if (isFailureProjection(type)) found.set(key(type.parameter), type.parameter)
+    },
+    argument: (argument) => {
+      if (isRepresentationParameterArgument(argument))
+        found.set(key(argument.parameter), argument.parameter)
+    },
+  })
   return Object.freeze([...found.values()].sort(compare))
 }
 

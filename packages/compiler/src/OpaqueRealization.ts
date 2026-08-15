@@ -13,6 +13,14 @@ export interface Capture {
   readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
 }
 
+/** The actual producer specialization and executable site that constructed one realization. */
+export interface Construction {
+  readonly _tag: 'OpaqueConstruction'
+  readonly producer: { readonly module: string; readonly name: string }
+  readonly arguments: ReadonlyArray<Type.GenericArgument>
+  readonly site?: string
+}
+
 /**
  * Compiler-private realization data for one declaration-owned opaque family.
  *
@@ -26,6 +34,7 @@ export interface Definition {
   readonly instance: Type.OpaqueRepresentationArgument
   readonly parameters: ReadonlyArray<Type.Parameter>
   readonly realization: Type.RepresentationArgument
+  readonly construction: Construction
   readonly target:
     | Type.CallableIdentityArgument
     | Type.EffectIdentityArgument
@@ -47,18 +56,24 @@ export interface Catalog {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
-/** Non-public object key used to carry private realization catalogs between compiler phases. */
-export const catalogSymbol: unique symbol = Symbol.for(
-  '@silk-effect/compiler/OpaqueRealizationCatalog',
-)
+const catalogs = new WeakMap<object, Catalog>()
 
-/** A compiler phase artifact carrying private opaque definitions under the non-public symbol. */
-export interface HasCatalog {
-  readonly [catalogSymbol]: Catalog
+/** Associates a compiler phase artifact with its private opaque definitions. */
+export const withCatalog = <A extends object>(self: A, catalog: Catalog): A => {
+  catalogs.set(self, catalog)
+  return self
 }
 
 /** Reads the private catalog inside compiler code and compiler-internal tests. */
-export const catalogOf = (self: HasCatalog): Catalog => self[catalogSymbol]
+export const catalogOf = (self: object): Catalog => {
+  const catalog = catalogs.get(self)
+  if (catalog === undefined)
+    throw new RangeError('Compiler artifact has no opaque realization catalog')
+  return catalog
+}
+
+/** Reads an associated private catalog when an artifact has retained its compiler identity. */
+export const catalogOption = (self: object): Catalog | undefined => catalogs.get(self)
 
 interface Evidence {
   readonly argument: Type.RepresentationArgument
@@ -74,28 +89,130 @@ interface Producer {
 
 const familyKey = (family: Type.OpaqueFamilyKey): string => Type.opaqueFamilyKey(family)
 
+interface ElaborationVisitor {
+  readonly statement?: (statement: Elaboration.StatementFact) => void
+  readonly expression?: (expression: Elaboration.ExpressionFact) => void
+  readonly descendExpressions?: boolean
+}
+
+const walkExpression = (
+  expression: Elaboration.ExpressionFact,
+  visitor: ElaborationVisitor,
+): void => {
+  visitor.expression?.(expression)
+  if (expression._tag === 'Match') {
+    walkExpression(expression.scrutinee, visitor)
+    for (const arm of expression.arms) {
+      if (arm.guard !== undefined) walkExpression(arm.guard, visitor)
+      walkExpression(arm.result, visitor)
+    }
+    return
+  }
+  if (expression._tag === 'EffectBlock') {
+    walkStatements(expression.statements, visitor)
+    return
+  }
+  const children: ReadonlyArray<Elaboration.ExpressionFact> = (() => {
+    switch (expression._tag) {
+      case 'Move':
+      case 'Borrow':
+      case 'FieldProjection':
+      case 'Run':
+        return Object.freeze([expression.subject])
+      case 'PlaceReplace':
+        return Object.freeze([expression.destination, expression.value])
+      case 'IndexProjection':
+        return Object.freeze([expression.subject, expression.index])
+      case 'ArrayLiteral':
+        return Object.freeze(expression.elements.map((element) => element.expression))
+      case 'StructLiteral':
+        return Object.freeze(expression.initializers.map((initializer) => initializer.expression))
+      case 'Grouped':
+        return Object.freeze([expression.expression])
+      case 'EffectResult':
+      case 'EffectBindRequirement':
+        return Object.freeze([expression.protected])
+      case 'EffectCatch':
+        return Object.freeze([expression.protected, expression.handler])
+      case 'CallableSection':
+        return Object.freeze(expression.captures.map((capture) => capture.expression))
+      case 'CallableApply':
+        return Object.freeze([
+          expression.callee,
+          ...expression.arguments.map((argument) => argument.expression),
+        ])
+      case 'Operator':
+      case 'ShortCircuit':
+      case 'Call':
+        return Object.freeze(expression.arguments.map((argument) => argument.expression))
+      case 'Integer':
+      case 'Floating':
+      case 'StaticText':
+      case 'Character':
+      case 'Unit':
+      case 'Boolean':
+      case 'Constant':
+      case 'Identifier':
+      case 'FunctionItem':
+        return Object.freeze([])
+    }
+  })()
+  for (const child of children) walkExpression(child, visitor)
+}
+
+const walkStatements = (
+  statements: ReadonlyArray<Elaboration.StatementFact>,
+  visitor: ElaborationVisitor,
+): void => {
+  const descendExpressions = visitor.descendExpressions !== false
+  for (const statement of statements) {
+    visitor.statement?.(statement)
+    if (statement._tag === 'UnsafeStatement') walkStatements(statement.statements, visitor)
+    else if (statement._tag === 'IfStatement') {
+      if (descendExpressions) walkExpression(statement.condition, visitor)
+      walkStatements(statement.taken, visitor)
+      walkStatements(statement.otherwise, visitor)
+    } else if (statement._tag === 'WhileStatement') {
+      if (descendExpressions) walkExpression(statement.condition, visitor)
+      walkStatements(statement.body, visitor)
+    } else if (descendExpressions && statement._tag === 'BindStatement')
+      walkExpression(statement.binding.initializer, visitor)
+    else if (descendExpressions && statement._tag === 'ExpressionStatement')
+      walkExpression(statement.expression, visitor)
+    else if (descendExpressions && statement._tag === 'WriteStatement') {
+      walkExpression(statement.destination, visitor)
+      walkExpression(statement.value, visitor)
+    } else if (
+      descendExpressions &&
+      (statement._tag === 'ReturnStatement' ||
+        statement._tag === 'FailStatement' ||
+        statement._tag === 'DropStatement')
+    )
+      walkExpression(statement.expression, visitor)
+  }
+}
+
+const reachableResults = (
+  expression: Elaboration.ExpressionFact,
+): ReadonlyArray<Elaboration.ExpressionFact> => {
+  if (expression._tag === 'Grouped') return reachableResults(expression.expression)
+  if (expression._tag !== 'Match') return Object.freeze([expression])
+  return Object.freeze(
+    expression.arms.flatMap((arm) => (arm.reachable ? reachableResults(arm.result) : [])),
+  )
+}
+
 const returnExpressions = (
   statements: ReadonlyArray<Elaboration.StatementFact>,
 ): ReadonlyArray<Elaboration.ExpressionFact> => {
   const found: Array<Elaboration.ExpressionFact> = []
-  const visitExpression = (expression: Elaboration.ExpressionFact): void => {
-    if (expression._tag !== 'Match') {
-      found.push(expression)
-      return
-    }
-    for (const arm of expression.arms) if (arm.reachable) visitExpression(arm.result)
-  }
-  const visitStatements = (body: ReadonlyArray<Elaboration.StatementFact>): void => {
-    for (const statement of body) {
-      if (statement._tag === 'ReturnStatement') visitExpression(statement.expression)
-      else if (statement._tag === 'UnsafeStatement') visitStatements(statement.statements)
-      else if (statement._tag === 'IfStatement') {
-        visitStatements(statement.taken)
-        visitStatements(statement.otherwise)
-      } else if (statement._tag === 'WhileStatement') visitStatements(statement.body)
-    }
-  }
-  visitStatements(statements)
+  walkStatements(statements, {
+    descendExpressions: false,
+    statement: (statement) => {
+      if (statement._tag === 'ReturnStatement')
+        found.push(...reachableResults(statement.expression))
+    },
+  })
   return Object.freeze(found)
 }
 
@@ -218,57 +335,14 @@ const capturesOf = (expression: Elaboration.ExpressionFact): ReadonlyArray<Captu
 }
 
 const expressionSuspends = (expression: Elaboration.ExpressionFact): boolean => {
-  if (expression._tag === 'Run') return true
-  if (expression._tag === 'Grouped') return expressionSuspends(expression.expression)
-  if (expression._tag === 'Move' || expression._tag === 'Borrow')
-    return expressionSuspends(expression.subject)
-  if (expression._tag === 'Match')
-    return (
-      expressionSuspends(expression.scrutinee) ||
-      expression.arms.some(
-        (arm) =>
-          (arm.guard !== undefined && expressionSuspends(arm.guard)) ||
-          expressionSuspends(arm.result),
-      )
-    )
-  if (
-    expression._tag === 'Call' ||
-    expression._tag === 'Operator' ||
-    expression._tag === 'ShortCircuit'
-  )
-    return expression.arguments.some((argument) => expressionSuspends(argument.expression))
-  if (expression._tag === 'CallableApply')
-    return (
-      expressionSuspends(expression.callee) ||
-      expression.arguments.some((argument) => expressionSuspends(argument.expression))
-    )
-  if (expression._tag === 'EffectBlock') return statementsSuspend(expression.statements)
-  return false
-}
-
-const statementsSuspend = (statements: ReadonlyArray<Elaboration.StatementFact>): boolean =>
-  statements.some((statement) => {
-    if (statement._tag === 'UnsafeStatement') return statementsSuspend(statement.statements)
-    if (statement._tag === 'IfStatement')
-      return (
-        expressionSuspends(statement.condition) ||
-        statementsSuspend(statement.taken) ||
-        statementsSuspend(statement.otherwise)
-      )
-    if (statement._tag === 'WhileStatement')
-      return expressionSuspends(statement.condition) || statementsSuspend(statement.body)
-    if (statement._tag === 'BindStatement') return expressionSuspends(statement.binding.initializer)
-    if (statement._tag === 'ExpressionStatement') return expressionSuspends(statement.expression)
-    if (statement._tag === 'WriteStatement')
-      return expressionSuspends(statement.destination) || expressionSuspends(statement.value)
-    if (
-      statement._tag === 'ReturnStatement' ||
-      statement._tag === 'FailStatement' ||
-      statement._tag === 'DropStatement'
-    )
-      return expressionSuspends(statement.expression)
-    return false
+  let suspendable = false
+  walkExpression(expression, {
+    expression: (current) => {
+      if (current._tag === 'Run') suspendable = true
+    },
   })
+  return suspendable
+}
 
 const accessOf = (argument: Type.RepresentationArgument): Definition['access'] => {
   const contract =
@@ -296,6 +370,53 @@ const argumentsOf = (argument: Type.RepresentationArgument): ReadonlyArray<Type.
       ? argument.arguments
       : Object.freeze([])
 
+const constructionSite = (argument: Type.RepresentationArgument): string | undefined => {
+  if (argument._tag !== 'ExactRepresentationArgument') return undefined
+  return Type.isCallableIdentityArgument(argument.identity)
+    ? argument.identity.environment
+    : argument.identity.identity
+}
+
+const constructionOf = (
+  producer: Producer,
+  realization: Type.RepresentationArgument,
+  inherited: Definition | undefined,
+): Construction => {
+  if (inherited !== undefined) return inherited.construction
+  const site = constructionSite(realization)
+  return Object.freeze({
+    _tag: 'OpaqueConstruction',
+    producer: Object.freeze({ ...producer.instance.family.producer }),
+    arguments: Object.freeze([...producer.instance.arguments]),
+    ...(site === undefined ? {} : { site }),
+  })
+}
+
+const fingerprints = (
+  realization: Type.RepresentationArgument,
+  captures: ReadonlyArray<Capture>,
+  access: Definition['access'],
+  cleanup: Definition['cleanup'],
+  suspendable: boolean,
+): Pick<Definition, 'targetFingerprint' | 'layoutFingerprint'> =>
+  Object.freeze({
+    targetFingerprint: Canonical.record('OpaqueTarget', [Type.genericArgumentKey(realization)]),
+    layoutFingerprint: Canonical.record('OpaqueLayout', [
+      access,
+      cleanup,
+      String(suspendable),
+      Canonical.array(
+        captures.map((capture) =>
+          Canonical.record('Capture', [
+            String(capture.ordinal),
+            Type.key(capture.type),
+            capture.access,
+          ]),
+        ),
+      ),
+    ]),
+  })
+
 const definition = (
   producer: Producer,
   realization: Type.RepresentationArgument,
@@ -308,21 +429,7 @@ const definition = (
   const cleanup = captures.some((capture) => capture.access === 'Take') ? 'Required' : 'Trivial'
   const suspendable =
     source === undefined ? (inherited?.suspendable ?? false) : expressionSuspends(source)
-  const targetFingerprint = Canonical.record('OpaqueTarget', [Type.genericArgumentKey(realization)])
-  const layoutFingerprint = Canonical.record('OpaqueLayout', [
-    access,
-    cleanup,
-    String(suspendable),
-    Canonical.array(
-      captures.map((capture) =>
-        Canonical.record('Capture', [
-          String(capture.ordinal),
-          Type.key(capture.type),
-          capture.access,
-        ]),
-      ),
-    ),
-  ])
+  const computedFingerprints = fingerprints(realization, captures, access, cleanup, suspendable)
   return Object.freeze({
     _tag: 'OpaqueRealizationDefinition',
     family: producer.instance.family,
@@ -331,6 +438,7 @@ const definition = (
       producer.function.declaration.typeParameters.map((parameter) => parameter.type),
     ),
     realization,
+    construction: constructionOf(producer, realization, inherited),
     target: targetOf(realization),
     arguments: argumentsOf(realization),
     captures,
@@ -338,14 +446,178 @@ const definition = (
     cleanup,
     suspendable,
     bodyFingerprint: producer.bodyFingerprint,
-    targetFingerprint,
-    layoutFingerprint,
+    ...computedFingerprints,
   })
+}
+
+const specializeRealization = (
+  producer: Producer,
+  instance: Type.OpaqueRepresentationArgument,
+  realization: Type.RepresentationArgument,
+): Type.RepresentationArgument | undefined => {
+  const substitution = Type.substitution(
+    producer.function.declaration.typeParameters.map((parameter) => parameter.type),
+    instance.arguments,
+  )
+  if (substitution === undefined) return undefined
+  const specialized = Type.substituteGenericArgument(realization, substitution)
+  return Type.isRepresentationArgument(specialized) ? specialized : undefined
+}
+
+const specializeDefinition = (
+  found: Definition,
+  instance: Type.OpaqueRepresentationArgument,
+): Definition | undefined => {
+  const substitution = Type.substitution(found.parameters, instance.arguments)
+  if (substitution === undefined) return undefined
+  const realization = Type.substituteGenericArgument(found.realization, substitution)
+  if (!Type.isRepresentationArgument(realization)) return undefined
+  const captures = Object.freeze(
+    found.captures.map((capture) =>
+      Object.freeze({ ...capture, type: Type.substitute(capture.type, substitution) }),
+    ),
+  )
+  const constructionArguments = Object.freeze(
+    found.construction.arguments.map((argument) =>
+      Type.substituteGenericArgument(argument, substitution),
+    ),
+  )
+  const access = accessOf(realization)
+  const cleanup = captures.some((capture) => capture.access === 'Take') ? 'Required' : 'Trivial'
+  return Object.freeze({
+    ...found,
+    instance,
+    realization,
+    construction: Object.freeze({
+      ...found.construction,
+      arguments: constructionArguments,
+    }),
+    target: targetOf(realization),
+    arguments: argumentsOf(realization),
+    captures,
+    access,
+    cleanup,
+    ...fingerprints(realization, captures, access, cleanup, found.suspendable),
+  })
+}
+
+const inlineLayoutCycles = (
+  definitions: ReadonlyMap<string, Definition>,
+): ReadonlyArray<ReadonlyArray<string>> => {
+  const dependencies = (key: string): ReadonlyArray<string> =>
+    Object.freeze(
+      [
+        ...new Set(
+          (definitions.get(key)?.captures ?? []).flatMap((capture) =>
+            Type.opaqueRepresentationArguments(capture.type).map((argument) =>
+              familyKey(argument.family),
+            ),
+          ),
+        ),
+      ]
+        .filter((dependency) => definitions.has(dependency))
+        .sort(),
+    )
+  let nextIndex = 0
+  const indices = new Map<string, number>()
+  const lows = new Map<string, number>()
+  const stack: Array<string> = []
+  const stacked = new Set<string>()
+  const cycles: Array<ReadonlyArray<string>> = []
+  const visit = (key: string): void => {
+    indices.set(key, nextIndex)
+    lows.set(key, nextIndex)
+    nextIndex += 1
+    stack.push(key)
+    stacked.add(key)
+    for (const dependency of dependencies(key)) {
+      if (!indices.has(dependency)) {
+        visit(dependency)
+        lows.set(key, Math.min(lows.get(key) ?? 0, lows.get(dependency) ?? 0))
+      } else if (stacked.has(dependency)) {
+        lows.set(key, Math.min(lows.get(key) ?? 0, indices.get(dependency) ?? 0))
+      }
+    }
+    if (lows.get(key) !== indices.get(key)) return
+    const component: Array<string> = []
+    for (;;) {
+      const member = stack.pop()
+      if (member === undefined) break
+      stacked.delete(member)
+      component.push(member)
+      if (member === key) break
+    }
+    component.sort()
+    if (component.length > 1 || dependencies(key).includes(key))
+      cycles.push(Object.freeze(component))
+  }
+  for (const key of [...definitions.keys()].sort()) if (!indices.has(key)) visit(key)
+  return Object.freeze(cycles)
+}
+
+const unresolvedRealizationCycles = (
+  pending: ReadonlyArray<Producer>,
+): ReadonlyArray<ReadonlyArray<string>> => {
+  const byFamily = new Map(
+    pending.map((producer) => [familyKey(producer.instance.family), producer]),
+  )
+  const dependencies = (key: string): ReadonlyArray<string> =>
+    Object.freeze(
+      [
+        ...new Set(
+          (byFamily.get(key)?.evidence ?? []).flatMap((evidence) =>
+            evidence.argument._tag === 'OpaqueRepresentationArgument'
+              ? [familyKey(evidence.argument.family)]
+              : [],
+          ),
+        ),
+      ]
+        .filter((dependency) => byFamily.has(dependency))
+        .sort(),
+    )
+  let nextIndex = 0
+  const indices = new Map<string, number>()
+  const lows = new Map<string, number>()
+  const stack: Array<string> = []
+  const stacked = new Set<string>()
+  const cycles: Array<ReadonlyArray<string>> = []
+  const visit = (key: string): void => {
+    indices.set(key, nextIndex)
+    lows.set(key, nextIndex)
+    nextIndex += 1
+    stack.push(key)
+    stacked.add(key)
+    for (const dependency of dependencies(key)) {
+      if (!indices.has(dependency)) {
+        visit(dependency)
+        lows.set(key, Math.min(lows.get(key) ?? 0, lows.get(dependency) ?? 0))
+      } else if (stacked.has(dependency)) {
+        lows.set(key, Math.min(lows.get(key) ?? 0, indices.get(dependency) ?? 0))
+      }
+    }
+    if (lows.get(key) !== indices.get(key)) return
+    const component: Array<string> = []
+    for (;;) {
+      const member = stack.pop()
+      if (member === undefined) break
+      stacked.delete(member)
+      component.push(member)
+      if (member === key) break
+    }
+    component.sort()
+    if (component.length > 1 || dependencies(key).includes(key))
+      cycles.push(Object.freeze(component))
+  }
+  for (const key of [...byFamily.keys()].sort()) if (!indices.has(key)) visit(key)
+  return Object.freeze(cycles)
 }
 
 /** Builds all private definitions and diagnoses non-finite or divergent opaque families. */
 export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catalog => {
   const pending = producers(results)
+  const producersByFamily = new Map(
+    pending.map((producer) => [familyKey(producer.instance.family), producer]),
+  )
   const resolved = new Map<string, ReadonlyMap<string, Type.RepresentationArgument>>()
   for (const producer of pending) {
     const leaves = new Map<string, Type.RepresentationArgument>()
@@ -364,8 +636,14 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
       const current = new Map(resolved.get(key) ?? [])
       for (const evidence of producer.evidence) {
         if (evidence.argument._tag !== 'OpaqueRepresentationArgument') continue
-        for (const [identity, argument] of resolved.get(familyKey(evidence.argument.family)) ?? [])
-          current.set(identity, argument)
+        const dependencyKey = familyKey(evidence.argument.family)
+        const dependency = producersByFamily.get(dependencyKey)
+        if (dependency === undefined) continue
+        for (const argument of resolved.get(dependencyKey)?.values() ?? []) {
+          const specialized = specializeRealization(dependency, evidence.argument, argument)
+          if (specialized !== undefined)
+            current.set(Type.genericArgumentKey(specialized), specialized)
+        }
       }
       if (current.size !== (resolved.get(key)?.size ?? 0)) {
         resolved.set(key, current)
@@ -377,6 +655,24 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const definitions = new Map<string, Definition>()
   const invalid = new Set<string>()
+  const realizationCycles = unresolvedRealizationCycles(
+    pending.filter(
+      (producer) => (resolved.get(familyKey(producer.instance.family))?.size ?? 0) === 0,
+    ),
+  )
+  const cyclic = new Set(realizationCycles.flat())
+  for (const cycle of realizationCycles) {
+    for (const key of cycle) invalid.add(key)
+    const producer = producersByFamily.get(cycle.at(0) ?? '')
+    if (producer === undefined) continue
+    diagnostics.push(
+      Diagnostic.opaqueRealizationCycle(
+        cycle,
+        producer.function.declaration.opaqueResult?.syntax.span ??
+          producer.function.declaration.syntax.span,
+      ),
+    )
+  }
   for (const producer of pending) {
     const key = familyKey(producer.instance.family)
     const alternatives = [...(resolved.get(key)?.entries() ?? [])].sort(([left], [right]) =>
@@ -393,16 +689,11 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
             producer.function.declaration.syntax.span,
         ),
       )
-    } else if (alternatives.length === 0) {
+    } else if (alternatives.length === 0 && !cyclic.has(key)) {
       invalid.add(key)
-      const dependencies = producer.evidence.flatMap((evidence) =>
-        evidence.argument._tag === 'OpaqueRepresentationArgument'
-          ? [familyKey(evidence.argument.family)]
-          : [],
-      )
       diagnostics.push(
-        Diagnostic.opaqueRealizationCycle(
-          Object.freeze([key, ...dependencies]),
+        Diagnostic.missingOpaqueRealization(
+          key,
           producer.function.declaration.opaqueResult?.syntax.span ??
             producer.function.declaration.syntax.span,
         ),
@@ -430,29 +721,37 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
           ): evidence is Evidence & { readonly argument: Type.OpaqueRepresentationArgument } =>
             evidence.argument._tag === 'OpaqueRepresentationArgument',
         )
-        .map((evidence) => definitions.get(familyKey(evidence.argument.family)))
+        .map((evidence) => {
+          const found = definitions.get(familyKey(evidence.argument.family))
+          return found === undefined ? undefined : specializeDefinition(found, evidence.argument)
+        })
+        .filter(
+          (candidate): candidate is Definition =>
+            candidate !== undefined &&
+            Type.equalsGenericArgument(candidate.realization, realization),
+        )
         .find((candidate) => candidate !== undefined)
       if (direct === undefined && dependency === undefined) continue
       const built = definition(producer, realization, direct?.expression, dependency)
-      if (
-        built.captures.some((capture) =>
-          Type.opaqueRepresentationArguments(capture.type).some((argument) =>
-            Type.equalsOpaqueFamily(argument.family, built.family),
-          ),
-        )
-      ) {
-        invalid.add(key)
-        diagnostics.push(
-          Diagnostic.inlineOpaqueLayoutCycle(
-            key,
-            direct?.expression.syntax.span ?? producer.function.declaration.syntax.span,
-          ),
-        )
-        continue
-      }
       definitions.set(key, built)
       progress = true
     }
+  }
+
+  for (const cycle of inlineLayoutCycles(definitions)) {
+    for (const key of cycle) {
+      definitions.delete(key)
+      invalid.add(key)
+    }
+    const producer = producersByFamily.get(cycle.at(0) ?? '')
+    if (producer === undefined) continue
+    diagnostics.push(
+      Diagnostic.inlineOpaqueLayoutCycle(
+        cycle,
+        producer?.function.declaration.opaqueResult?.syntax.span ??
+          producer.function.declaration.syntax.span,
+      ),
+    )
   }
 
   return Object.freeze({
@@ -468,43 +767,7 @@ export const definitionOf = (
   instance: Type.OpaqueRepresentationArgument,
 ): Definition | undefined => {
   const found = self.definitions.get(familyKey(instance.family))
-  if (found === undefined) return undefined
-  const substitution = Type.substitution(found.parameters, instance.arguments)
-  if (substitution === undefined) return found
-  const realization = Type.substituteGenericArgument(found.realization, substitution)
-  if (!Type.isRepresentationArgument(realization)) return undefined
-  const captures = Object.freeze(
-    found.captures.map((capture) =>
-      Object.freeze({ ...capture, type: Type.substitute(capture.type, substitution) }),
-    ),
-  )
-  const access = accessOf(realization)
-  const cleanup = captures.some((capture) => capture.access === 'Take') ? 'Required' : 'Trivial'
-  return Object.freeze({
-    ...found,
-    instance,
-    realization,
-    target: targetOf(realization),
-    arguments: argumentsOf(realization),
-    captures,
-    access,
-    cleanup,
-    targetFingerprint: Canonical.record('OpaqueTarget', [Type.genericArgumentKey(realization)]),
-    layoutFingerprint: Canonical.record('OpaqueLayout', [
-      access,
-      cleanup,
-      String(found.suspendable),
-      Canonical.array(
-        captures.map((capture) =>
-          Canonical.record('Capture', [
-            String(capture.ordinal),
-            Type.key(capture.type),
-            capture.access,
-          ]),
-        ),
-      ),
-    ]),
-  })
+  return found === undefined ? undefined : specializeDefinition(found, instance)
 }
 
 /** Stable source family identity used by incremental dependency maps and test fixtures. */

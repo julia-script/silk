@@ -3,6 +3,7 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as ModuleClosure from './ModuleClosure.js'
+import * as ResolutionSeams from './ResolutionSeams.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Stdlib from './Stdlib.js'
@@ -747,12 +748,12 @@ export const analyze = (
 ): { readonly index: DeclarationIndex.Index; readonly resolution: Resolution } => {
   const collected = DeclarationIndex.collect(closure)
   const preliminary = resolve(closure, collected)
-  const resolvers: DeclarationIndex.ResolutionSeams = Object.freeze({
-    type: (module: string, path: DeclarationIndex.TypePathFact) =>
+  const resolvers = ResolutionSeams.make(
+    (module: string, path: DeclarationIndex.TypePathFact) =>
       resolveType(preliminary, collected, module, path),
-    item: (module: string, path: DeclarationIndex.TypePathFact) =>
+    (module: string, path: DeclarationIndex.TypePathFact) =>
       resolveItem(preliminary, collected, module, path),
-  })
+  )
   const index = DeclarationIndex.complete(collected, resolvers)
   return Object.freeze({ index, resolution: resolve(closure, index) })
 }
