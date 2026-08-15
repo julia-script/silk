@@ -87,6 +87,12 @@ export interface TypeParameterFact {
 export interface OpaqueResultFact {
   readonly _tag: 'OpaqueResult'
   readonly binder: TypeParameterFact
+  readonly family: Type.OpaqueFamilyKey
+  readonly publicSignature: {
+    readonly bound: string
+    readonly result: string
+    readonly enclosingKinds: ReadonlyArray<Type.ParameterKind>
+  }
   readonly syntax: SyntaxTree.Node
 }
 
@@ -236,6 +242,14 @@ export type DeclaredTypeFact =
       readonly syntax: SyntaxTree.Node
       readonly cause?: Diagnostic.Identity
       readonly itemCandidate?: CanonicalId
+    }
+  | {
+      readonly _tag: 'RepresentationParameter'
+      readonly parameter: Type.Parameter
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+      readonly path: TypePathFact
     }
   | {
       readonly _tag: 'Unavailable'
@@ -646,6 +660,7 @@ export type ItemResolver = (module: string, path: TypePathFact) => ItemResolutio
 export interface ResolutionSeams {
   readonly type: TypeResolver
   readonly item: ItemResolver
+  readonly representationBindings?: ReadonlyMap<string, Type.Parameter>
 }
 
 const spelling = (source: SourceFile.SourceFile, token: Token.Token): string =>
@@ -1509,7 +1524,14 @@ export const analyzeDeclaredType = (
       const bound = parameterType.representationBound
       if (bound === undefined) {
         return Object.freeze({
-          fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+          fact: Object.freeze({
+            _tag: 'RepresentationParameter',
+            parameter: parameterType,
+            spelling: first.spelling,
+            token: first.token,
+            syntax,
+            path,
+          }),
           diagnostics: Object.freeze([]),
         })
       }
@@ -1879,7 +1901,25 @@ const collectReturnType = (
   const analyzed = analyzeDeclaredType(source, resultSyntax, collected.environment)
   return Object.freeze({
     fact: analyzed.fact,
-    opaqueResult: Object.freeze({ _tag: 'OpaqueResult', binder, syntax }),
+    opaqueResult: Object.freeze({
+      _tag: 'OpaqueResult',
+      binder,
+      family: Object.freeze({
+        _tag: 'OpaqueFamilyKey',
+        producer: Object.freeze({ module: source.id, name: ownerName }),
+        binderOrdinal: binder.type.ordinal,
+      }),
+      publicSignature: Object.freeze({
+        bound:
+          binder.type.representationBound === undefined
+            ? 'unavailable'
+            : Type.key(binder.type.representationBound),
+        result:
+          analyzed.fact._tag === 'Resolved' ? Type.key(analyzed.fact.type) : analyzed.fact._tag,
+        enclosingKinds: Object.freeze(typeParameters.map((parameter) => parameter.type.kind)),
+      }),
+      syntax,
+    }),
     diagnostics: Object.freeze([...collected.diagnostics, ...analyzed.diagnostics]),
   })
 }
@@ -2696,6 +2736,24 @@ const resolveDeclaredType = (
   resolvers: ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
 ): TypeResolution => {
+  if (fact._tag === 'RepresentationParameter') {
+    const parameter =
+      resolvers.representationBindings?.get(Type.key(fact.parameter)) ?? fact.parameter
+    const bound = parameter.representationBound
+    if (bound === undefined) return Object.freeze({ fact, diagnostics: Object.freeze([]) })
+    const type = Type.represented(bound, bound, Type.representationParameterArgument(parameter))
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Resolved',
+        type,
+        spelling: fact.spelling,
+        token: fact.token,
+        syntax: fact.syntax,
+        path: fact.path,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
   if (fact._tag === 'ExactRepresentation')
     return resolveExactRepresentation(module, fact, resolvers, modules)
   if (fact._tag === 'Unresolved') {
@@ -2930,9 +2988,9 @@ const resolveDeclaredType = (
             if (prior === undefined) return false
             const required = Type.substitute(parameter.representationBound, prior)
             const actual =
-              argument._tag === 'ExactRepresentationArgument'
-                ? argument.contract
-                : argument.parameter.representationBound
+              argument._tag === 'RepresentationParameterArgument'
+                ? argument.parameter.representationBound
+                : argument.contract
             return (
               actual !== undefined &&
               (Type.isCallable(required) || Type.isEffect(required)) &&
@@ -2961,9 +3019,9 @@ const resolveDeclaredType = (
                 ? incompatibleParameter.representationBound
                 : Type.substitute(incompatibleParameter.representationBound, prior)
             const actual =
-              incompatibleArgument._tag === 'ExactRepresentationArgument'
-                ? incompatibleArgument.contract
-                : incompatibleArgument.parameter.representationBound
+              incompatibleArgument._tag === 'RepresentationParameterArgument'
+                ? incompatibleArgument.parameter.representationBound
+                : incompatibleArgument.contract
             const actualParameter =
               incompatibleArgument._tag === 'RepresentationParameterArgument'
                 ? modules
@@ -3684,6 +3742,44 @@ const resolveOpaqueResult = (
   return binder === undefined ? undefined : Object.freeze({ ...opaqueResult, binder })
 }
 
+const opaqueEnclosingArgument = (parameter: Type.Parameter): Type.GenericArgument => {
+  if (parameter.kind === 'FailureRow') return Type.failureRowArgument([], [parameter])
+  if (parameter.kind === 'RequirementRow') return Type.requirementRowArgument([], [parameter])
+  if (parameter.kind === 'CallableRepresentation' || parameter.kind === 'EffectRepresentation')
+    return Type.representationParameterArgument(parameter)
+  return parameter
+}
+
+const closeOpaqueReturnType = (
+  fact: ReturnTypeFact,
+  opaqueResult: OpaqueResultFact | undefined,
+  enclosing: ReadonlyArray<TypeParameterFact>,
+): { readonly fact: ReturnTypeFact; readonly opaqueResult?: OpaqueResultFact } => {
+  const bound = opaqueResult?.binder.type.representationBound
+  if (fact._tag !== 'Resolved' || opaqueResult === undefined || bound === undefined)
+    return Object.freeze({ fact, ...(opaqueResult === undefined ? {} : { opaqueResult }) })
+  const argument = Type.opaqueRepresentationArgument(
+    opaqueResult.family,
+    bound,
+    enclosing.map((parameter) => opaqueEnclosingArgument(parameter.type)),
+  )
+  const closed = Type.substitute(
+    fact.type,
+    new Map([[Type.key(opaqueResult.binder.type), argument]]),
+  )
+  return Object.freeze({
+    fact: Object.freeze({ ...fact, type: closed, spelling: Type.encode(closed) }),
+    opaqueResult: Object.freeze({
+      ...opaqueResult,
+      publicSignature: Object.freeze({
+        bound: Type.key(bound),
+        result: Type.key(closed),
+        enclosingKinds: Object.freeze(enclosing.map((parameter) => parameter.type.kind)),
+      }),
+    }),
+  })
+}
+
 /** Resolves all retained type paths and validates public exposure and inline dependencies. */
 export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
   const diagnostics: Array<Diagnostic.Diagnostic> = [...self.diagnostics]
@@ -3700,6 +3796,13 @@ export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
         return Object.freeze({ ...member, declaredType: resolved.fact })
       }
       if (member._tag === 'FunctionDeclaration') {
+        const resolvedTypeParameters = resolveBounds(
+          module.module,
+          member.typeParameters,
+          resolvers,
+          self.modules,
+          diagnostics,
+        )
         const opaqueResult = resolveOpaqueResult(
           module.module,
           member.opaqueResult,
@@ -3707,6 +3810,15 @@ export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
           self.modules,
           diagnostics,
         )
+        const memberResolvers: ResolutionSeams =
+          member.opaqueResult === undefined || opaqueResult === undefined
+            ? resolvers
+            : Object.freeze({
+                ...resolvers,
+                representationBindings: new Map([
+                  [Type.key(member.opaqueResult.binder.type), opaqueResult.binder.type],
+                ]),
+              })
         const parameters = member.parameters.map((parameter) => {
           const resolved = resolveDeclaredType(
             module.module,
@@ -3717,13 +3829,18 @@ export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
           diagnostics.push(...resolved.diagnostics)
           return Object.freeze({ ...parameter, declaredType: resolved.fact })
         })
-        const result = resolveDeclaredType(
+        const resolvedResult = resolveDeclaredType(
           module.module,
           member.returnType,
-          resolvers,
+          memberResolvers,
           self.modules,
         )
-        diagnostics.push(...result.diagnostics)
+        diagnostics.push(...resolvedResult.diagnostics)
+        const result = closeOpaqueReturnType(
+          resolvedResult.fact,
+          opaqueResult,
+          resolvedTypeParameters,
+        )
         const failureRow = resolveFailureRow(
           module.module,
           member.failureRow,
@@ -3740,22 +3857,30 @@ export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
         diagnostics.push(...requirementRow.diagnostics)
         return Object.freeze({
           ...member,
-          typeParameters: resolveBounds(
-            module.module,
-            member.typeParameters,
-            resolvers,
-            self.modules,
-            diagnostics,
-          ),
+          typeParameters: resolvedTypeParameters,
           parameters: Object.freeze(parameters),
           returnType: result.fact,
-          ...(opaqueResult === undefined ? {} : { opaqueResult }),
+          ...(result.opaqueResult === undefined ? {} : { opaqueResult: result.opaqueResult }),
           failureRow: failureRow.fact,
           requirementRow: requirementRow.fact,
         })
       }
       if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
+        const resolvedMemberTypeParameters = resolveBounds(
+          module.module,
+          member.typeParameters,
+          resolvers,
+          self.modules,
+          diagnostics,
+        )
         const operations = member.operations.map((operation) => {
+          const resolvedOperationTypeParameters = resolveBounds(
+            module.module,
+            operation.typeParameters,
+            resolvers,
+            self.modules,
+            diagnostics,
+          )
           const opaqueResult = resolveOpaqueResult(
             module.module,
             operation.opaqueResult,
@@ -3763,6 +3888,15 @@ export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
             self.modules,
             diagnostics,
           )
+          const operationResolvers: ResolutionSeams =
+            operation.opaqueResult === undefined || opaqueResult === undefined
+              ? resolvers
+              : Object.freeze({
+                  ...resolvers,
+                  representationBindings: new Map([
+                    [Type.key(operation.opaqueResult.binder.type), opaqueResult.binder.type],
+                  ]),
+                })
           const parameters = operation.parameters.map((parameter) => {
             const resolved = resolveDeclaredType(
               module.module,
@@ -3773,12 +3907,16 @@ export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
             diagnostics.push(...resolved.diagnostics)
             return Object.freeze({ ...parameter, declaredType: resolved.fact })
           })
-          const result = resolveDeclaredType(
+          const resolvedResult = resolveDeclaredType(
             module.module,
             operation.returnType,
-            resolvers,
+            operationResolvers,
             self.modules,
           )
+          const result = closeOpaqueReturnType(resolvedResult.fact, opaqueResult, [
+            ...resolvedMemberTypeParameters,
+            ...resolvedOperationTypeParameters,
+          ])
           const failureRow = resolveFailureRow(
             module.module,
             operation.failureRow,
@@ -3792,20 +3930,25 @@ export const complete = (self: Index, resolvers: ResolutionSeams): Index => {
             self.modules,
           )
           diagnostics.push(
-            ...result.diagnostics,
+            ...resolvedResult.diagnostics,
             ...failureRow.diagnostics,
             ...requirementRow.diagnostics,
           )
           return Object.freeze({
             ...operation,
+            typeParameters: resolvedOperationTypeParameters,
             parameters: Object.freeze(parameters),
             returnType: result.fact,
-            ...(opaqueResult === undefined ? {} : { opaqueResult }),
+            ...(result.opaqueResult === undefined ? {} : { opaqueResult: result.opaqueResult }),
             failureRow: failureRow.fact,
             requirementRow: requirementRow.fact,
           })
         })
-        return Object.freeze({ ...member, operations: Object.freeze(operations) })
+        return Object.freeze({
+          ...member,
+          typeParameters: resolvedMemberTypeParameters,
+          operations: Object.freeze(operations),
+        })
       }
       const fields = member.fields.map((field) => {
         const resolved = resolveDeclaredType(

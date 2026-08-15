@@ -226,6 +226,12 @@ export const uncallableExactRepresentationItemCode = 'SEM0110' as const
 export const openExactRepresentationItemCode = 'SEM0111' as const
 /** Stable code for a public contract exposing the exact identity of a private item. */
 export const privateExactRepresentationLeakCode = 'SEM0112' as const
+/** Stable code for one opaque producer specialization yielding multiple exact identities. */
+export const divergentOpaqueRealizationCode = 'SEM0113' as const
+/** Stable code for an opaque family whose representation evidence contains no local construction. */
+export const opaqueRealizationCycleCode = 'SEM0114' as const
+/** Stable code for an opaque realization whose inline captures contain that same family. */
+export const inlineOpaqueLayoutCycleCode = 'SEM0115' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -372,6 +378,9 @@ export type Code =
   | typeof uncallableExactRepresentationItemCode
   | typeof openExactRepresentationItemCode
   | typeof privateExactRepresentationLeakCode
+  | typeof divergentOpaqueRealizationCode
+  | typeof opaqueRealizationCycleCode
+  | typeof inlineOpaqueLayoutCycleCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -533,6 +542,13 @@ export type Reason =
       readonly actual: number
     }
   | { readonly _tag: 'PrivateExactRepresentationLeak'; readonly item: string }
+  | {
+      readonly _tag: 'DivergentOpaqueRealization'
+      readonly family: string
+      readonly realizations: ReadonlyArray<string>
+    }
+  | { readonly _tag: 'OpaqueRealizationCycle'; readonly families: ReadonlyArray<string> }
+  | { readonly _tag: 'InlineOpaqueLayoutCycle'; readonly family: string }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
@@ -1944,6 +1960,66 @@ export const privateExactRepresentationLeak = (
     reason: Object.freeze({ _tag: 'PrivateExactRepresentationLeak', item }),
     span,
     notes: Object.freeze([opaqueResultNote]),
+  })
+
+/** Rejects one opaque family whose reachable returns select more than one exact realization. */
+export const divergentOpaqueRealization = (
+  family: string,
+  realizations: ReadonlyArray<string>,
+  related: ReadonlyArray<SourceSpan.SourceSpan>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: divergentOpaqueRealizationCode,
+    severity: 'error',
+    message: `Opaque result ${family} has divergent reachable realizations: ${realizations.join(', ')}`,
+    reason: Object.freeze({
+      _tag: 'DivergentOpaqueRealization',
+      family,
+      realizations: Object.freeze([...realizations]),
+    }),
+    span,
+    ...(related.length === 0
+      ? {}
+      : {
+          relatedSpans: Object.freeze(
+            related.map((candidate) =>
+              Object.freeze({ label: 'conflicting realization returned here', span: candidate }),
+            ),
+          ),
+        }),
+  })
+
+/** Rejects opaque families whose only representation evidence is another unresolved family. */
+export const opaqueRealizationCycle = (
+  families: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: opaqueRealizationCycleCode,
+    severity: 'error',
+    message: `Opaque realization cycle has no local concrete construction: ${families.join(' -> ')}`,
+    reason: Object.freeze({
+      _tag: 'OpaqueRealizationCycle',
+      families: Object.freeze([...families]),
+    }),
+    span,
+  })
+
+/** Rejects a capture layout that would contain the opaque family it is defining inline. */
+export const inlineOpaqueLayoutCycle = (family: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: inlineOpaqueLayoutCycleCode,
+    severity: 'error',
+    message: `Opaque result ${family} has an infinite inline layout because its realization captures the same family`,
+    reason: Object.freeze({ _tag: 'InlineOpaqueLayoutCycle', family }),
+    span,
   })
 
 /** Rejects represented Effect storage until a downstream runtime layout has been proven. */

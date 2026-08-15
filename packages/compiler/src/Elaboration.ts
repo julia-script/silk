@@ -1039,6 +1039,15 @@ const unavailableExpressionType: ExpressionTypeFact = Object.freeze({ _tag: 'Una
 const typesCompatible = (source: SemanticType, target: SemanticType): boolean =>
   TypeCompatibility.isCompatible(TypeCompatibility.check(source, target))
 
+const declaredReturnTypesCompatible = (
+  declaration: DeclarationFact,
+  source: SemanticType,
+): boolean =>
+  declaration.returnType._tag === 'Resolved' &&
+  (typesCompatible(source, declaration.returnType.type) ||
+    (declaration.opaqueResult !== undefined &&
+      Type.haveSameRepresentationShape(source, declaration.returnType.type)))
+
 const representationJoinDiagnostic = (
   expected: SemanticType,
   actual: SemanticType,
@@ -2697,7 +2706,7 @@ const exactCallableRepresentation = (
  * Recovers a compile-time representation from semantic expression structure. This is deliberately
  * frontend-owned: later phases consume the retained argument and never reconstruct it from syntax.
  */
-const representationOfExpression = (
+export const representationOfExpression = (
   expression: ExpressionFact,
 ): Type.RepresentationArgument | undefined => {
   if (expression.type._tag === 'Available' && Type.isRepresented(expression.type.type))
@@ -7989,7 +7998,7 @@ const analyzeStatements = (
         !context.effectBlock &&
         context.declaration.returnType._tag === 'Resolved' &&
         expression.type !== undefined &&
-        !typesCompatible(expression.type, context.declaration.returnType.type)
+        !declaredReturnTypesCompatible(context.declaration, expression.type)
       ) {
         const diagnostic =
           representationJoinDiagnostic(
@@ -8288,7 +8297,7 @@ const analyzeFunctionBody = (
     terminal._tag === 'ReturnStatement' &&
     declaration.returnType._tag === 'Resolved' &&
     expressionType !== undefined &&
-    typesCompatible(expressionType, declaration.returnType.type)
+    declaredReturnTypesCompatible(declaration, expressionType)
       ? compatible
       : unavailableCompatibility
 

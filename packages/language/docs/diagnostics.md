@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 111 |
+| `SEM` | Semantic | 114 |
 | `OWN` | Ownership | 12 |
 | `LAY` | Layout | 1 |
 
-There are 139 codes in total.
+There are 142 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -167,6 +167,9 @@ There are 139 codes in total.
 | `SEM0110` | Stable code for a `typeof` item that names something other than an ordinary callable. | `Cannot name the exact representation of <item>: it names <uncallableSubjectProsesubject>, which has no source-nameable exact identity` |
 | `SEM0111` | Stable code for a `typeof` item whose generic parameters are not all supplied. | `Cannot name the exact representation of <item>: an exact representation names one construction, but <expected> generic parameters were declared and <actual> concrete arguments were supplied` |
 | `SEM0112` | Stable code for a public contract exposing the exact identity of a private item. | `Public contract exposes the exact representation of private <item>` |
+| `SEM0113` | Stable code for one opaque producer specialization yielding multiple exact identities. | `Opaque result <family> has divergent reachable realizations: <join>` |
+| `SEM0114` | Stable code for an opaque family whose representation evidence contains no local construction. | `Opaque realization cycle has no local concrete construction: <join>` |
+| `SEM0115` | Stable code for an opaque realization whose inline captures contain that same family. | `Opaque result <family> has an infinite inline layout because its realization captures the same family` |
 
 ## Ownership (`OWN`)
 

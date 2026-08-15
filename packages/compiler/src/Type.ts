@@ -127,6 +127,21 @@ export interface RepresentationParameterArgument {
   readonly parameter: Parameter
 }
 
+/** Stable source identity of one declaration-owned opaque representation family. */
+export interface OpaqueFamilyKey {
+  readonly _tag: 'OpaqueFamilyKey'
+  readonly producer: { readonly module: string; readonly name: string }
+  readonly binderOrdinal: number
+}
+
+/** One opaque family specialized over every enclosing generic argument. */
+export interface OpaqueRepresentationArgument {
+  readonly _tag: 'OpaqueRepresentationArgument'
+  readonly family: OpaqueFamilyKey
+  readonly contract: RepresentationBound
+  readonly arguments: ReadonlyArray<GenericArgument>
+}
+
 /** One exact callable or Effect construction together with its intrinsic contract. */
 export interface ExactRepresentationArgument {
   readonly _tag: 'ExactRepresentationArgument'
@@ -135,7 +150,10 @@ export interface ExactRepresentationArgument {
 }
 
 /** A statically known representation supplied to a representation parameter. */
-export type RepresentationArgument = RepresentationParameterArgument | ExactRepresentationArgument
+export type RepresentationArgument =
+  | RepresentationParameterArgument
+  | OpaqueRepresentationArgument
+  | ExactRepresentationArgument
 
 /** A deterministic recovery placeholder that never reaches specialization or runtime phases. */
 export interface UnavailableGenericArgument {
@@ -516,6 +534,23 @@ export const representationParameterArgument = (
 ): RepresentationParameterArgument =>
   Object.freeze({ _tag: 'RepresentationParameterArgument', parameter: parameter_ })
 
+/** Constructs one opaque family instance from canonical producer and enclosing arguments. */
+export const opaqueRepresentationArgument = (
+  family: OpaqueFamilyKey,
+  contract: RepresentationBound,
+  arguments_: ReadonlyArray<GenericArgument>,
+): OpaqueRepresentationArgument =>
+  Object.freeze({
+    _tag: 'OpaqueRepresentationArgument',
+    family: Object.freeze({
+      _tag: 'OpaqueFamilyKey',
+      producer: Object.freeze({ ...family.producer }),
+      binderOrdinal: family.binderOrdinal,
+    }),
+    contract,
+    arguments: Object.freeze(Array.from(arguments_)),
+  })
+
 /** Constructs one exact representation argument without mixing its identity with a use bound. */
 export const exactRepresentationArgument = (
   identity: EffectIdentityArgument | CallableIdentityArgument,
@@ -661,13 +696,28 @@ export const isRepresentationParameterArgument = (
 ): self is RepresentationParameterArgument =>
   typeof self !== 'string' && self._tag === 'RepresentationParameterArgument'
 
+export const isOpaqueRepresentationArgument = (
+  self: GenericArgument,
+): self is OpaqueRepresentationArgument =>
+  typeof self !== 'string' && self._tag === 'OpaqueRepresentationArgument'
+
+/** Returns the canonical source identity shared by every specialization of one opaque family. */
+export const opaqueFamilyKey = (self: OpaqueFamilyKey): string =>
+  `${self.producer.module}.${self.producer.name}#${self.binderOrdinal}`
+
+/** Tests family identity without consulting a realization or any source location. */
+export const equalsOpaqueFamily = (left: OpaqueFamilyKey, right: OpaqueFamilyKey): boolean =>
+  opaqueFamilyKey(left) === opaqueFamilyKey(right)
+
 export const isExactRepresentationArgument = (
   self: GenericArgument,
 ): self is ExactRepresentationArgument =>
   typeof self !== 'string' && self._tag === 'ExactRepresentationArgument'
 
 export const isRepresentationArgument = (self: GenericArgument): self is RepresentationArgument =>
-  isRepresentationParameterArgument(self) || isExactRepresentationArgument(self)
+  isRepresentationParameterArgument(self) ||
+  isOpaqueRepresentationArgument(self) ||
+  isExactRepresentationArgument(self)
 
 export const isUnavailableGenericArgument = (
   self: GenericArgument,
@@ -689,7 +739,9 @@ export const representationArgumentKind = (
 const representationArgumentContract = (
   self: RepresentationArgument,
 ): RepresentationBound | undefined =>
-  self._tag === 'ExactRepresentationArgument' ? self.contract : self.parameter.representationBound
+  self._tag === 'RepresentationParameterArgument'
+    ? self.parameter.representationBound
+    : self.contract
 
 export const isHiddenIdentityArgument = (
   self: GenericArgument,
@@ -731,22 +783,24 @@ export const genericArgumentKey = (self: GenericArgument): string =>
     ? `unavailable:${self.expectedKind}:${self.reason}`
     : isRepresentationParameterArgument(self)
       ? `representation-parameter:${key(self.parameter)}`
-      : isExactRepresentationArgument(self)
-        ? `exact-representation:${genericArgumentKey(self.identity)}:${key(self.contract)}`
-        : isEffectIdentityArgument(self)
-          ? `effect-identity:${self.identity}`
-          : isCallableIdentityArgument(self)
-            ? callableIdentityKey(self)
-            : isFailureRowArgument(self)
-              ? `failure-row:${self.failures.map(key).join('|')};${self.parameters.map(key).join('|')}`
-              : isRequirementRowArgument(self)
-                ? `requirement-row:${self.requirements
-                    .map(
-                      (requirement) =>
-                        `${requirement.access}:${key(requirement.capability)}@${requirement.role}`,
-                    )
-                    .join('|')};${self.parameters.map(key).join('|')}`
-                : key(self)
+      : isOpaqueRepresentationArgument(self)
+        ? `opaque-representation:${self.family.producer.module}.${self.family.producer.name}:${self.family.binderOrdinal}:<${self.arguments.map(genericArgumentKey).join(',')}>:${key(self.contract)}`
+        : isExactRepresentationArgument(self)
+          ? `exact-representation:${genericArgumentKey(self.identity)}:${key(self.contract)}`
+          : isEffectIdentityArgument(self)
+            ? `effect-identity:${self.identity}`
+            : isCallableIdentityArgument(self)
+              ? callableIdentityKey(self)
+              : isFailureRowArgument(self)
+                ? `failure-row:${self.failures.map(key).join('|')};${self.parameters.map(key).join('|')}`
+                : isRequirementRowArgument(self)
+                  ? `requirement-row:${self.requirements
+                      .map(
+                        (requirement) =>
+                          `${requirement.access}:${key(requirement.capability)}@${requirement.role}`,
+                      )
+                      .join('|')};${self.parameters.map(key).join('|')}`
+                  : key(self)
 
 /** Encodes any erased generic argument for semantic presentation and artifact inspection. */
 export const encodeGenericArgument = (self: GenericArgument): string =>
@@ -754,28 +808,30 @@ export const encodeGenericArgument = (self: GenericArgument): string =>
     ? `<unavailable ${self.expectedKind}: ${self.reason}>`
     : isRepresentationParameterArgument(self)
       ? self.parameter.name
-      : isExactRepresentationArgument(self)
-        ? `typeof(${encodeRepresentationOrigin(self.identity)})`
-        : isEffectIdentityArgument(self)
-          ? `effect@${self.identity}`
-          : isCallableIdentityArgument(self)
-            ? `callable@${self.identity}`
-            : isFailureRowArgument(self)
-              ? `! ${
-                  [
-                    ...self.failures.map(encode),
-                    ...self.parameters.map((parameter_) => parameter_.name),
-                  ].join(' | ') || 'never'
-                }`
-              : isRequirementRowArgument(self)
-                ? `? ${self.requirements
-                    .map(
-                      (requirement) =>
-                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
-                    )
-                    .concat(self.parameters.map((parameter_) => parameter_.name))
-                    .join(' | ')}`
-                : encode(self)
+      : isOpaqueRepresentationArgument(self)
+        ? `some(${self.family.producer.module}.${self.family.producer.name}#${self.family.binderOrdinal})`
+        : isExactRepresentationArgument(self)
+          ? `typeof(${encodeRepresentationOrigin(self.identity)})`
+          : isEffectIdentityArgument(self)
+            ? `effect@${self.identity}`
+            : isCallableIdentityArgument(self)
+              ? `callable@${self.identity}`
+              : isFailureRowArgument(self)
+                ? `! ${
+                    [
+                      ...self.failures.map(encode),
+                      ...self.parameters.map((parameter_) => parameter_.name),
+                    ].join(' | ') || 'never'
+                  }`
+                : isRequirementRowArgument(self)
+                  ? `? ${self.requirements
+                      .map(
+                        (requirement) =>
+                          `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+                      )
+                      .concat(self.parameters.map((parameter_) => parameter_.name))
+                      .join(' | ')}`
+                  : encode(self)
 
 const encodeRepresentationOrigin = (
   self: EffectIdentityArgument | CallableIdentityArgument,
@@ -1085,6 +1141,307 @@ export const firstRepresentationDivergence = (
   return undefined
 }
 
+const genericArgumentsHaveSameRepresentationShape = (
+  left: GenericArgument,
+  right: GenericArgument,
+): boolean => {
+  if (isRepresentationArgument(left) || isRepresentationArgument(right)) {
+    if (!isRepresentationArgument(left) || !isRepresentationArgument(right)) return false
+    const leftContract = representationArgumentContract(left)
+    const rightContract = representationArgumentContract(right)
+    return (
+      leftContract !== undefined &&
+      rightContract !== undefined &&
+      haveSameRepresentationShape(leftContract, rightContract)
+    )
+  }
+  if (isFailureRowArgument(left) || isFailureRowArgument(right)) {
+    return (
+      isFailureRowArgument(left) &&
+      isFailureRowArgument(right) &&
+      left.failures.length === right.failures.length &&
+      left.parameters.length === right.parameters.length &&
+      left.failures.every((failure, ordinal) => {
+        const compared = right.failures.at(ordinal)
+        return compared !== undefined && haveSameRepresentationShape(failure, compared)
+      }) &&
+      left.parameters.every((parameter_, ordinal) => {
+        const compared = right.parameters.at(ordinal)
+        return compared !== undefined && equals(parameter_, compared)
+      })
+    )
+  }
+  if (isRequirementRowArgument(left) || isRequirementRowArgument(right)) {
+    return (
+      isRequirementRowArgument(left) &&
+      isRequirementRowArgument(right) &&
+      left.requirements.length === right.requirements.length &&
+      left.parameters.length === right.parameters.length &&
+      left.requirements.every((requirement, ordinal) => {
+        const compared = right.requirements.at(ordinal)
+        return (
+          compared !== undefined &&
+          requirement.role === compared.role &&
+          requirement.access === compared.access &&
+          haveSameRepresentationShape(requirement.capability, compared.capability)
+        )
+      }) &&
+      left.parameters.every((parameter_, ordinal) => {
+        const compared = right.parameters.at(ordinal)
+        return compared !== undefined && equals(parameter_, compared)
+      })
+    )
+  }
+  return isTypeArgument(left) && isTypeArgument(right)
+    ? haveSameRepresentationShape(left, right)
+    : equalsGenericArgument(left, right)
+}
+
+/**
+ * Compares the complete value shape of two types while deliberately ignoring concrete executable
+ * identities. Producer return checking uses this relation before its opaque-realization pass
+ * unifies those identities; ordinary type equality remains identity-sensitive.
+ */
+export const haveSameRepresentationShape = (left: Type, right: Type): boolean => {
+  if (isRepresented(left)) return haveSameRepresentationShape(left.contract, right)
+  if (isRepresented(right)) return haveSameRepresentationShape(left, right.contract)
+  if (typeof left === 'string' || typeof right === 'string') return left === right
+  if (isParameter(left) || isParameter(right))
+    return isParameter(left) && isParameter(right) && equals(left, right)
+  if (isFailureProjection(left) || isFailureProjection(right))
+    return isFailureProjection(left) && isFailureProjection(right) && equals(left, right)
+  if (isNominal(left) || isNominal(right))
+    return (
+      isNominal(left) &&
+      isNominal(right) &&
+      left.module === right.module &&
+      left.name === right.name &&
+      left.arguments.length === right.arguments.length &&
+      left.arguments.every((argument, ordinal) => {
+        const compared = right.arguments.at(ordinal)
+        return (
+          compared !== undefined && genericArgumentsHaveSameRepresentationShape(argument, compared)
+        )
+      })
+    )
+  if (isFixedArray(left) || isFixedArray(right))
+    return (
+      isFixedArray(left) &&
+      isFixedArray(right) &&
+      left.length === right.length &&
+      haveSameRepresentationShape(left.element, right.element)
+    )
+  if (isSlice(left) || isSlice(right))
+    return (
+      isSlice(left) &&
+      isSlice(right) &&
+      left.access === right.access &&
+      haveSameRepresentationShape(left.element, right.element)
+    )
+  if (isReference(left) || isReference(right))
+    return (
+      isReference(left) &&
+      isReference(right) &&
+      left.access === right.access &&
+      haveSameRepresentationShape(left.target, right.target)
+    )
+  if (isCallable(left) || isCallable(right)) {
+    if (!isCallable(left) || !isCallable(right)) return false
+    const leftRank = left.mode === 'Shared' ? 0 : left.mode === 'Exclusive' ? 1 : 2
+    const rightRank = right.mode === 'Shared' ? 0 : right.mode === 'Exclusive' ? 1 : 2
+    return (
+      leftRank <= rightRank &&
+      left.parameters.length === right.parameters.length &&
+      left.parameters.every((parameter_, ordinal) => {
+        const compared = right.parameters.at(ordinal)
+        return compared !== undefined && haveSameRepresentationShape(parameter_, compared)
+      }) &&
+      haveSameRepresentationShape(left.result, right.result)
+    )
+  }
+  if (isEffect(left) || isEffect(right)) {
+    if (!isEffect(left) || !isEffect(right)) return false
+    const leftRank = left.access === 'Shared' ? 0 : left.access === 'Exclusive' ? 1 : 2
+    const rightRank = right.access === 'Shared' ? 0 : right.access === 'Exclusive' ? 1 : 2
+    return (
+      leftRank <= rightRank &&
+      haveSameRepresentationShape(left.success, right.success) &&
+      left.failures.length === right.failures.length &&
+      left.failures.every((failure, ordinal) => {
+        const compared = right.failures.at(ordinal)
+        return compared !== undefined && haveSameRepresentationShape(failure, compared)
+      }) &&
+      left.failureParameters.length === right.failureParameters.length &&
+      left.failureParameters.every((parameter_, ordinal) => {
+        const compared = right.failureParameters.at(ordinal)
+        return compared !== undefined && equals(parameter_, compared)
+      }) &&
+      left.requirements.length === right.requirements.length &&
+      left.requirements.every((requirement, ordinal) => {
+        const compared = right.requirements.at(ordinal)
+        return (
+          compared !== undefined &&
+          requirement.role === compared.role &&
+          requirement.access === compared.access &&
+          haveSameRepresentationShape(requirement.capability, compared.capability)
+        )
+      }) &&
+      left.requirementParameters.length === right.requirementParameters.length &&
+      left.requirementParameters.every((parameter_, ordinal) => {
+        const compared = right.requirementParameters.at(ordinal)
+        return compared !== undefined && equals(parameter_, compared)
+      })
+    )
+  }
+  if (isUnion(left) || isUnion(right))
+    return (
+      isUnion(left) &&
+      isUnion(right) &&
+      left.members.length === right.members.length &&
+      left.members.every((member, ordinal) => {
+        const compared = right.members.at(ordinal)
+        return compared !== undefined && haveSameRepresentationShape(member, compared)
+      })
+    )
+  return false
+}
+
+const opaqueEvidenceInGenericArguments = (
+  actual: GenericArgument,
+  expected: GenericArgument,
+  family: OpaqueFamilyKey,
+): ReadonlyArray<RepresentationArgument> => {
+  if (isOpaqueRepresentationArgument(expected) && equalsOpaqueFamily(expected.family, family))
+    return isRepresentationArgument(actual) ? Object.freeze([actual]) : Object.freeze([])
+  if (isTypeArgument(actual) && isTypeArgument(expected))
+    return opaqueRepresentationEvidence(actual, expected, family)
+  if (isFailureRowArgument(actual) && isFailureRowArgument(expected))
+    return Object.freeze(
+      expected.failures.flatMap((failure, ordinal) => {
+        const supplied = actual.failures.at(ordinal)
+        return supplied === undefined ? [] : opaqueRepresentationEvidence(supplied, failure, family)
+      }),
+    )
+  if (isRequirementRowArgument(actual) && isRequirementRowArgument(expected))
+    return Object.freeze(
+      expected.requirements.flatMap((requirement, ordinal) => {
+        const supplied = actual.requirements.at(ordinal)
+        return supplied === undefined
+          ? []
+          : opaqueRepresentationEvidence(supplied.capability, requirement.capability, family)
+      }),
+    )
+  return Object.freeze([])
+}
+
+/**
+ * Extracts concrete or dependent representation evidence from the positions occupied by one
+ * opaque family in an expected producer result.
+ */
+export const opaqueRepresentationEvidence = (
+  actual: Type,
+  expected: Type,
+  family: OpaqueFamilyKey,
+): ReadonlyArray<RepresentationArgument> => {
+  if (
+    isRepresented(expected) &&
+    isOpaqueRepresentationArgument(expected.representation.argument) &&
+    equalsOpaqueFamily(expected.representation.argument.family, family)
+  )
+    return isRepresented(actual)
+      ? Object.freeze([actual.representation.argument])
+      : Object.freeze([])
+  if (isRepresented(actual)) return opaqueRepresentationEvidence(actual.contract, expected, family)
+  if (isRepresented(expected))
+    return opaqueRepresentationEvidence(actual, expected.contract, family)
+  if (isNominal(actual) && isNominal(expected))
+    return Object.freeze(
+      expected.arguments.flatMap((argument, ordinal) => {
+        const supplied = actual.arguments.at(ordinal)
+        return supplied === undefined
+          ? []
+          : opaqueEvidenceInGenericArguments(supplied, argument, family)
+      }),
+    )
+  if (isFixedArray(actual) && isFixedArray(expected))
+    return opaqueRepresentationEvidence(actual.element, expected.element, family)
+  if (isSlice(actual) && isSlice(expected))
+    return opaqueRepresentationEvidence(actual.element, expected.element, family)
+  if (isReference(actual) && isReference(expected))
+    return opaqueRepresentationEvidence(actual.target, expected.target, family)
+  if (isCallable(actual) && isCallable(expected))
+    return Object.freeze([
+      ...expected.parameters.flatMap((parameter_, ordinal) => {
+        const supplied = actual.parameters.at(ordinal)
+        return supplied === undefined
+          ? []
+          : opaqueRepresentationEvidence(supplied, parameter_, family)
+      }),
+      ...opaqueRepresentationEvidence(actual.result, expected.result, family),
+    ])
+  if (isEffect(actual) && isEffect(expected))
+    return Object.freeze([
+      ...opaqueRepresentationEvidence(actual.success, expected.success, family),
+      ...expected.failures.flatMap((failure, ordinal) => {
+        const supplied = actual.failures.at(ordinal)
+        return supplied === undefined ? [] : opaqueRepresentationEvidence(supplied, failure, family)
+      }),
+      ...expected.requirements.flatMap((requirement, ordinal) => {
+        const supplied = actual.requirements.at(ordinal)
+        return supplied === undefined
+          ? []
+          : opaqueRepresentationEvidence(supplied.capability, requirement.capability, family)
+      }),
+    ])
+  if (isUnion(actual) && isUnion(expected))
+    return Object.freeze(
+      expected.members.flatMap((member, ordinal) => {
+        const supplied = actual.members.at(ordinal)
+        return supplied === undefined ? [] : opaqueRepresentationEvidence(supplied, member, family)
+      }),
+    )
+  return Object.freeze([])
+}
+
+/** Returns every opaque family instance nested in one semantic type. */
+export const opaqueRepresentationArguments = (
+  self: Type,
+): ReadonlyArray<OpaqueRepresentationArgument> => {
+  const found: Array<OpaqueRepresentationArgument> = []
+  const visitArgument = (argument: GenericArgument): void => {
+    if (isOpaqueRepresentationArgument(argument)) {
+      found.push(argument)
+      for (const enclosing of argument.arguments) visitArgument(enclosing)
+      return
+    }
+    if (isTypeArgument(argument)) visit(argument)
+    else if (isExactRepresentationArgument(argument)) visit(argument.contract)
+    else if (isCallableIdentityArgument(argument))
+      for (const supplied of argument.typeArguments) visitArgument(supplied)
+    else if (isFailureRowArgument(argument)) for (const failure of argument.failures) visit(failure)
+    else if (isRequirementRowArgument(argument))
+      for (const requirement of argument.requirements) visit(requirement.capability)
+  }
+  const visit = (type: Type): void => {
+    if (isNominal(type)) for (const argument of type.arguments) visitArgument(argument)
+    else if (isFixedArray(type) || isSlice(type)) visit(type.element)
+    else if (isReference(type)) visit(type.target)
+    else if (isCallable(type)) {
+      for (const parameter_ of type.parameters) visit(parameter_)
+      visit(type.result)
+    } else if (isEffect(type)) {
+      visit(type.success)
+      for (const failure of type.failures) visit(failure)
+      for (const requirement of type.requirements) visit(requirement.capability)
+    } else if (isRepresented(type)) {
+      visitArgument(type.representation.argument)
+      visit(type.contract)
+    } else if (isUnion(type)) for (const member of type.members) visit(member)
+  }
+  visit(self)
+  return Object.freeze(found)
+}
+
 /** Orders semantic types by canonical identity. */
 export const compare = (left: Type, right: Type): number => compareText(key(left), key(right))
 
@@ -1235,7 +1592,10 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
     if (isTypeArgument(argument)) visit(argument)
     else if (isRepresentationParameterArgument(argument))
       found.set(key(argument.parameter), argument.parameter)
-    else if (isExactRepresentationArgument(argument)) {
+    else if (isOpaqueRepresentationArgument(argument)) {
+      visit(argument.contract)
+      for (const enclosing of argument.arguments) visitArgument(enclosing)
+    } else if (isExactRepresentationArgument(argument)) {
       visit(argument.contract)
       visitArgument(argument.identity)
     } else if (isCallableIdentityArgument(argument))
@@ -1288,18 +1648,20 @@ export const isConcreteGenericArgument = (self: GenericArgument): boolean =>
     ? false
     : isRepresentationParameterArgument(self)
       ? false
-      : isExactRepresentationArgument(self)
-        ? isConcrete(self.contract) && isConcreteGenericArgument(self.identity)
-        : isEffectIdentityArgument(self)
-          ? true
-          : isCallableIdentityArgument(self)
-            ? self.typeArguments.every(isConcreteGenericArgument)
-            : isFailureRowArgument(self)
-              ? self.parameters.length === 0 && self.failures.every(isConcrete)
-              : isRequirementRowArgument(self)
-                ? self.parameters.length === 0 &&
-                  self.requirements.every((requirement) => isConcrete(requirement.capability))
-                : isConcrete(self)
+      : isOpaqueRepresentationArgument(self)
+        ? isConcrete(self.contract) && self.arguments.every(isConcreteGenericArgument)
+        : isExactRepresentationArgument(self)
+          ? isConcrete(self.contract) && isConcreteGenericArgument(self.identity)
+          : isEffectIdentityArgument(self)
+            ? true
+            : isCallableIdentityArgument(self)
+              ? self.typeArguments.every(isConcreteGenericArgument)
+              : isFailureRowArgument(self)
+                ? self.parameters.length === 0 && self.failures.every(isConcrete)
+                : isRequirementRowArgument(self)
+                  ? self.parameters.length === 0 &&
+                    self.requirements.every((requirement) => isConcrete(requirement.capability))
+                  : isConcrete(self)
 
 /** Tests whether a type contains a lexical borrow at any depth. */
 export const containsBorrow = (self: Type): boolean => {
@@ -1438,9 +1800,9 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
         : substituteGenericArgument(open, substitution)
     if (!isRepresentationArgument(argument)) return self
     const intrinsicContract =
-      argument._tag === 'ExactRepresentationArgument'
-        ? argument.contract
-        : argument.parameter.representationBound
+      argument._tag === 'RepresentationParameterArgument'
+        ? argument.parameter.representationBound
+        : argument.contract
     const contract = intrinsicContract ?? contextualContract
     if (!isCallable(contract) && !isEffect(contract)) return self
     return represented(contract, requiredBound, argument)
@@ -1461,73 +1823,83 @@ export const substituteGenericArgument = (
     ? self
     : isRepresentationParameterArgument(self)
       ? (substitution.get(key(self.parameter)) ?? self)
-      : isExactRepresentationArgument(self)
+      : isOpaqueRepresentationArgument(self)
         ? (() => {
             const contract = substitute(self.contract, substitution)
             if (!isCallable(contract) && !isEffect(contract)) return self
-            const identity = isCallableIdentityArgument(self.identity)
-              ? substituteGenericArgument(self.identity, substitution)
-              : self.identity
-            return isCallableIdentityArgument(identity) || isEffectIdentityArgument(identity)
-              ? exactRepresentationArgument(identity, contract)
-              : self
+            return opaqueRepresentationArgument(
+              self.family,
+              contract,
+              self.arguments.map((argument) => substituteGenericArgument(argument, substitution)),
+            )
           })()
-        : isEffectIdentityArgument(self)
-          ? self
-          : isCallableIdentityArgument(self)
-            ? callableIdentityArgument(
-                self.identity,
-                self.target,
-                self.typeArguments.map((argument) =>
-                  substituteGenericArgument(argument, substitution),
-                ),
-                self.environment,
-              )
-            : isFailureRowArgument(self)
-              ? failureRowArgument(
-                  [
-                    ...self.failures.flatMap((failure) => {
-                      const specialized = substitute(failure, substitution)
-                      return isNominal(specialized) ? [specialized] : []
-                    }),
-                    ...self.parameters.flatMap((parameter_) => {
-                      const replacement = substitution.get(key(parameter_))
-                      return replacement !== undefined && isFailureRowArgument(replacement)
-                        ? replacement.failures
-                        : []
-                    }),
-                  ],
-                  self.parameters.flatMap((parameter_) => {
-                    const replacement = substitution.get(key(parameter_))
-                    return replacement !== undefined && isFailureRowArgument(replacement)
-                      ? replacement.parameters
-                      : [parameter_]
-                  }),
+        : isExactRepresentationArgument(self)
+          ? (() => {
+              const contract = substitute(self.contract, substitution)
+              if (!isCallable(contract) && !isEffect(contract)) return self
+              const identity = isCallableIdentityArgument(self.identity)
+                ? substituteGenericArgument(self.identity, substitution)
+                : self.identity
+              return isCallableIdentityArgument(identity) || isEffectIdentityArgument(identity)
+                ? exactRepresentationArgument(identity, contract)
+                : self
+            })()
+          : isEffectIdentityArgument(self)
+            ? self
+            : isCallableIdentityArgument(self)
+              ? callableIdentityArgument(
+                  self.identity,
+                  self.target,
+                  self.typeArguments.map((argument) =>
+                    substituteGenericArgument(argument, substitution),
+                  ),
+                  self.environment,
                 )
-              : isRequirementRowArgument(self)
-                ? requirementRowArgument(
+              : isFailureRowArgument(self)
+                ? failureRowArgument(
                     [
-                      ...self.requirements.flatMap((requirement) => {
-                        const capability = substitute(requirement.capability, substitution)
-                        return isNominal(capability) || isParameter(capability)
-                          ? [Object.freeze({ ...requirement, capability })]
-                          : []
+                      ...self.failures.flatMap((failure) => {
+                        const specialized = substitute(failure, substitution)
+                        return isNominal(specialized) ? [specialized] : []
                       }),
                       ...self.parameters.flatMap((parameter_) => {
                         const replacement = substitution.get(key(parameter_))
-                        return replacement !== undefined && isRequirementRowArgument(replacement)
-                          ? replacement.requirements
+                        return replacement !== undefined && isFailureRowArgument(replacement)
+                          ? replacement.failures
                           : []
                       }),
                     ],
                     self.parameters.flatMap((parameter_) => {
                       const replacement = substitution.get(key(parameter_))
-                      return replacement !== undefined && isRequirementRowArgument(replacement)
+                      return replacement !== undefined && isFailureRowArgument(replacement)
                         ? replacement.parameters
                         : [parameter_]
                     }),
                   )
-                : substitute(self, substitution)
+                : isRequirementRowArgument(self)
+                  ? requirementRowArgument(
+                      [
+                        ...self.requirements.flatMap((requirement) => {
+                          const capability = substitute(requirement.capability, substitution)
+                          return isNominal(capability) || isParameter(capability)
+                            ? [Object.freeze({ ...requirement, capability })]
+                            : []
+                        }),
+                        ...self.parameters.flatMap((parameter_) => {
+                          const replacement = substitution.get(key(parameter_))
+                          return replacement !== undefined && isRequirementRowArgument(replacement)
+                            ? replacement.requirements
+                            : []
+                        }),
+                      ],
+                      self.parameters.flatMap((parameter_) => {
+                        const replacement = substitution.get(key(parameter_))
+                        return replacement !== undefined && isRequirementRowArgument(replacement)
+                          ? replacement.parameters
+                          : [parameter_]
+                      }),
+                    )
+                  : substitute(self, substitution)
 
 /** Adds structural constraints from one declared type pattern to one supplied concrete type. */
 const bindGenericArgument = (

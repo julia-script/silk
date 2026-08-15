@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
 import * as SemanticInvalidation from '../src/SemanticInvalidation.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -78,6 +79,9 @@ it.effect('keeps unrelated modules and body-only importers reusable', () =>
       reasons: {
         Fresh: 0,
         LocalChange: 2,
+        OpaqueBodyChange: 0,
+        OpaqueTargetChange: 0,
+        OpaqueLayoutChange: 0,
         DependencySurfaceChange: 0,
         CyclicPeerChange: 0,
         EnvironmentChange: 0,
@@ -305,5 +309,157 @@ it.effect('keeps plans deterministic under root and source-map reordering', () =
     const second = yield* analyze(reversedSources, ['order/C', 'order/A'], previous)
 
     assert.deepEqual(first.semanticInvalidation, second.semanticInvalidation)
+  }),
+)
+
+it.effect('bounds value-only opaque edits to the producer body', () =>
+  Effect.gen(function* () {
+    const importer =
+      'import opaque.Dependency { make } pub fn use() -> i32 { let parser = make(1) return parser(2) }'
+    const beforeDependency = `fn add(left: i32, right: i32) -> i32 { return left + right }
+pub fn make(value: i32) -> some<F: fn(i32) -> i32> F { return add(value) }`
+    const previous = yield* analyze(
+      sources({ 'opaque/Importer': importer, 'opaque/Dependency': beforeDependency }),
+      ['opaque/Importer'],
+    )
+    const current = yield* analyze(
+      sources({
+        'opaque/Importer': importer,
+        'opaque/Dependency': `fn add(left: i32, right: i32) -> i32 { return left + right }
+pub fn make(value: i32) -> some<F: fn(i32) -> i32> F { return add(value + 1) }`,
+      }),
+      ['opaque/Importer'],
+      previous,
+    )
+
+    expectReasons(current, 'opaque/Dependency', ['LocalChange', 'OpaqueBodyChange'])
+    expectReusable(current, 'opaque/Importer')
+    const before = [...OpaqueRealization.catalogOf(previous).definitions.values()].at(0)
+    const after = [...OpaqueRealization.catalogOf(current).definitions.values()].at(0)
+    assert.notStrictEqual(before?.bodyFingerprint, after?.bodyFingerprint)
+    assert.strictEqual(before?.targetFingerprint, after?.targetFingerprint)
+    assert.strictEqual(before?.layoutFingerprint, after?.layoutFingerprint)
+  }),
+)
+
+it.effect('invalidates opaque dependents for target-only edits while retaining layout', () =>
+  Effect.gen(function* () {
+    const importer =
+      'import opaque.Dependency { make } pub fn use() -> i32 { let parser = make(1) return parser(2) }'
+    const declarations = `fn add(left: i32, right: i32) -> i32 { return left + right }
+fn multiply(left: i32, right: i32) -> i32 { return left * right }`
+    const previous = yield* analyze(
+      sources({
+        'opaque/Importer': importer,
+        'opaque/Dependency': `${declarations}
+pub fn make(value: i32) -> some<F: fn(i32) -> i32> F { return add(value) }`,
+      }),
+      ['opaque/Importer'],
+    )
+    const current = yield* analyze(
+      sources({
+        'opaque/Importer': importer,
+        'opaque/Dependency': `${declarations}
+pub fn make(value: i32) -> some<F: fn(i32) -> i32> F { return multiply(value) }`,
+      }),
+      ['opaque/Importer'],
+      previous,
+    )
+
+    expectReasons(current, 'opaque/Dependency', [
+      'LocalChange',
+      'OpaqueBodyChange',
+      'OpaqueTargetChange',
+    ])
+    expectReasons(current, 'opaque/Importer', ['OpaqueTargetChange'])
+    const before = [...OpaqueRealization.catalogOf(previous).definitions.values()].at(0)
+    const after = [...OpaqueRealization.catalogOf(current).definitions.values()].at(0)
+    assert.notStrictEqual(before?.targetFingerprint, after?.targetFingerprint)
+    assert.strictEqual(before?.layoutFingerprint, after?.layoutFingerprint)
+  }),
+)
+
+it.effect('invalidates opaque dependents for capture-shape and suspendability edits', () =>
+  Effect.gen(function* () {
+    const importer =
+      'import opaque.Dependency { make } pub fn use() -> i32 { let pending = make(1, 2) return run pending }'
+    const before = yield* analyze(
+      sources({
+        'opaque/Importer': importer,
+        'opaque/Dependency':
+          'pub fn make(left: i32, right: i32) -> some<F: Effect<i32>> F { return effect { return left } }',
+      }),
+      ['opaque/Importer'],
+    )
+    const captureShape = yield* analyze(
+      sources({
+        'opaque/Importer': importer,
+        'opaque/Dependency':
+          'pub fn make(left: i32, right: i32) -> some<F: Effect<i32>> F { return effect { return left + right } }',
+      }),
+      ['opaque/Importer'],
+      before,
+    )
+    expectReasons(captureShape, 'opaque/Importer', ['OpaqueLayoutChange'])
+
+    const suspendImporter =
+      'import opaque.Suspend { make, pending } pub fn use() -> i32 { let recipe = make(pending()) return run recipe }'
+    const suspendBefore = yield* analyze(
+      sources({
+        'opaque/SuspendImporter': suspendImporter,
+        'opaque/Suspend': `pub fn pending() -> some<P: Effect<i32>> P { return effect { return 1 } }
+pub fn make<F: Effect<i32>>(pending: F) -> some<G: Effect<i32>> G {
+  return effect { drop pending return 1 }
+}`,
+      }),
+      ['opaque/SuspendImporter'],
+    )
+    const suspendAfter = yield* analyze(
+      sources({
+        'opaque/SuspendImporter': suspendImporter,
+        'opaque/Suspend': `pub fn pending() -> some<P: Effect<i32>> P { return effect { return 1 } }
+pub fn make<F: Effect<i32>>(pending: F) -> some<G: Effect<i32>> G {
+  return effect { return run pending }
+}`,
+      }),
+      ['opaque/SuspendImporter'],
+      suspendBefore,
+    )
+    expectReasons(suspendAfter, 'opaque/SuspendImporter', ['OpaqueLayoutChange'])
+    const beforeDefinition = [
+      ...OpaqueRealization.catalogOf(suspendBefore).definitions.values(),
+    ].find((definition) => definition.family.producer.name === 'make')
+    const afterDefinition = [
+      ...OpaqueRealization.catalogOf(suspendAfter).definitions.values(),
+    ].find((definition) => definition.family.producer.name === 'make')
+    assert.strictEqual(beforeDefinition?.suspendable, false)
+    assert.strictEqual(afterDefinition?.suspendable, true)
+  }),
+)
+
+it.effect('uses public-surface invalidation for opaque bound and binder-order edits', () =>
+  Effect.gen(function* () {
+    const before = yield* analyze(
+      sources({
+        'opaque/BoundImporter':
+          'import opaque.Bound { make } pub fn use() -> i32 { let parser = make() return parser(1) }',
+        'opaque/Bound': `fn identity(value: i32) -> i32 { return value }
+pub fn make() -> some<F: fn(i32) -> i32> F { return identity }`,
+      }),
+      ['opaque/BoundImporter'],
+    )
+    const changed = yield* analyze(
+      sources({
+        'opaque/BoundImporter':
+          'import opaque.Bound { make } pub fn use() -> i32 { let parser = make() return parser(1) }',
+        'opaque/Bound': `fn identity(value: i64) -> i64 { return value }
+pub fn make<T>() -> some<F: fn(i64) -> i64> F { return identity }`,
+      }),
+      ['opaque/BoundImporter'],
+      before,
+    )
+    const importer = observation(changed, 'opaque/BoundImporter')
+    assert.strictEqual(importer._tag, 'Recomputed')
+    if (importer._tag === 'Recomputed') assert.include(importer.reasons, 'DependencySurfaceChange')
   }),
 )

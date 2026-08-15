@@ -486,6 +486,17 @@ const collectDeclaredType = (
     for (const argument of fact.arguments) collectDeclaredType(argument, index, scope, pending)
     return
   }
+  if (fact._tag === 'RepresentationParameter') {
+    const declaration = typeParameterFact(index, fact.parameter)
+    push(
+      pending,
+      fact.token.span,
+      'Type',
+      available(Object.freeze({ _tag: 'TypeParameterIdentity', id: fact.parameter })),
+      declaration === undefined ? undefined : locationOfTypeParameter(declaration),
+    )
+    return
+  }
   if (fact._tag === 'Union')
     for (const member of fact.members) collectDeclaredType(member, index, scope, pending)
 }

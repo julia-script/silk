@@ -24,6 +24,7 @@ import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as ModuleSurface from './ModuleSurface.js'
 import type * as ModuleTooling from './ModuleTooling.js'
 import * as NameResolution from './NameResolution.js'
+import * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
 import type * as PhaseReport from './PhaseReport.js'
 import * as Pipeline from './Pipeline.js'
@@ -73,6 +74,7 @@ export interface FrontendSnapshot {
   readonly semanticOccurrences: SemanticOccurrence.Index
   readonly anonymousExpressions: ReadonlyMap<string, ReadonlyArray<AnonymousExpression>>
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
+  readonly [OpaqueRealization.catalogSymbol]: OpaqueRealization.Catalog
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
   readonly semanticInvalidation?: SemanticInvalidation.SemanticInvalidation

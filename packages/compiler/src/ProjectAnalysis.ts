@@ -6,6 +6,7 @@ import * as ModuleClosure from './ModuleClosure.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as ModuleSurface from './ModuleSurface.js'
 import type * as ModuleTooling from './ModuleTooling.js'
+import * as OpaqueRealization from './OpaqueRealization.js'
 import type * as PhaseReport from './PhaseReport.js'
 import * as Pipeline from './Pipeline.js'
 import * as SemanticInvalidation from './SemanticInvalidation.js'
@@ -50,6 +51,7 @@ export interface ProjectAnalysis {
   readonly syntaxRevisions: ReadonlyMap<string, SyntaxRevision>
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
+  readonly [OpaqueRealization.catalogSymbol]: OpaqueRealization.Catalog
   readonly toolingModules: ReadonlyMap<string, ModuleTooling.ModuleTooling>
   readonly semanticEnvironment: string
   readonly semanticInvalidation: SemanticInvalidation.SemanticInvalidation
@@ -72,6 +74,7 @@ const analyze = Effect.fnUntraced(function* (
           closure: previous.closure,
           surfaces: previous.surfaces,
           semantics: previous.semantics,
+          [OpaqueRealization.catalogSymbol]: OpaqueRealization.catalogOf(previous),
           environment: previous.semanticEnvironment,
         },
   )
@@ -141,6 +144,7 @@ const analyze = Effect.fnUntraced(function* (
     syntaxRevisions,
     surfaces: frontend.surfaces,
     semantics: frontend.semantics,
+    [OpaqueRealization.catalogSymbol]: OpaqueRealization.catalogOf(frontend),
     toolingModules: tooling.toolingModules,
     semanticEnvironment: SemanticInvalidation.environment,
     semanticInvalidation: frontend.semanticInvalidation,
