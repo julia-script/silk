@@ -2258,10 +2258,7 @@ const storedExecutableText = (
 const borrowKey = (borrow: Hir.BorrowId): string =>
   `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
 
-const instanceText = (self: Instances.InstanceKey): string =>
-  `${self.declaration.module}\u0000${self.declaration.name}\u0000${self.typeArguments
-    .map(SilkType.genericArgumentKey)
-    .join('\u0000')}\u0000${self.contractRow.join('\u0000')}`
+const instanceText = Instances.keyText
 
 const callArgumentCompatible = (actual: Type, expected: Type): boolean => {
   if (

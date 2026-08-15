@@ -60,12 +60,22 @@ const completedValue = (outcome: BootstrapEvaluation.Outcome): number => {
   return outcome.result.value
 }
 
-const storedRun = (module: Mir.Module, label = 'stored Effect') => {
-  const realizations = module.layout.entries.flatMap((entry) =>
+const storedRealizations = (module: Mir.Module) =>
+  module.layout.entries.flatMap((entry) =>
     entry.representation._tag === 'StoredEffectEnvironment'
       ? [entry.representation.realization]
       : [],
   )
+
+const storedRealization = (module: Mir.Module, label = 'stored Effect') => {
+  const realizations = storedRealizations(module)
+  return realizations.length === 1
+    ? (realizations.at(0) ?? unreachable(`expected one ${label} realization`))
+    : unreachable(`expected one ${label} realization (${realizations.length} found)`)
+}
+
+const storedRun = (module: Mir.Module, label = 'stored Effect') => {
+  const realizations = storedRealizations(module)
   for (const realization of realizations) {
     for (const operation of module.functions.flatMap(Mir.operations)) {
       if (operation._tag !== 'RunEffectValue') continue
@@ -159,6 +169,21 @@ const assertOwnershipFacts = (
   )
   assert.isAbove(realization.cleanup.unrunLanes.length, 0, name)
   assert.isTrue(realization.cleanup.consumedByRun, name)
+}
+
+const assertTicketsReleasedExactlyOnce = (
+  acquired: ReadonlyArray<number>,
+  released: ReadonlyArray<number>,
+  label: string,
+): void => {
+  assert.isAbove(acquired.length, 0, `${label} acquired`)
+  assert.strictEqual(new Set(acquired).size, acquired.length, `${label} duplicate acquire`)
+  assert.strictEqual(new Set(released).size, released.length, `${label} duplicate release`)
+  assert.deepEqual(
+    [...released].sort((left, right) => left - right),
+    [...acquired].sort((left, right) => left - right),
+    `${label} ticket balance`,
+  )
 }
 
 const shared = `struct Deferred<F: Effect<i32>> { operation: F }
@@ -267,7 +292,7 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
 effect fn build() -> i32 ! Problem | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let storage = run Allocator.allocate(Layout.of<i32>()) |> Effect.provideMut(&mut allocator)
-  let guard = Guard { tag: 42, storage: move storage }
+  let guard = Guard { tag: 7, storage: move storage }
   let deferred = defer(failing(move guard))
   ${exit === 'failure' ? 'return run deferred.operation' : 'return 42'}
 }
@@ -282,8 +307,16 @@ it.effect('cleans unrun and failing stored Effect environments exactly once', ()
         cleanupProgram(exit),
       )
       assert.deepEqual(Mir.verify(module), [], exit)
+      const realization = storedRealization(module, exit)
       const outcome = BootstrapEvaluation.evaluate(snapshot.instances, module)
       assert.strictEqual(completedValue(outcome), 42, exit)
+      const runnerCalls = outcome.trace.filter(
+        (event) =>
+          event._tag === 'Call' &&
+          event.target.module === realization.runner.module &&
+          event.target.name === realization.runner.name,
+      )
+      assert.lengthOf(runnerCalls, exit === 'failure' ? 1 : 0, `${exit} stored runner calls`)
       assert.strictEqual(
         outcome.trace.filter(
           (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl'),
@@ -301,7 +334,21 @@ it.effect('cleans unrun and failing stored Effect environments exactly once', ()
         1,
         `${exit} allocation release`,
       )
-      if (exit === 'failure') assertRunnerAndRows(module, outcome)
+      if (exit === 'failure') {
+        assert.isAbove(
+          outcome.trace.filter((event) => event._tag === 'EffectFailure').length,
+          0,
+          'typed failure trace',
+        )
+        assert.lengthOf(
+          outcome.trace.filter(
+            (event) => event._tag === 'Call' && event.target.name.startsWith('recover$effect$'),
+          ),
+          1,
+          'recovery runner calls',
+        )
+        assertRunnerAndRows(module, outcome)
+      }
     }
   }),
 )
@@ -344,9 +391,24 @@ it.effect('resumes a suspending stored Effect and cleans its environment exactly
       1,
     )
     assert.isAbove(outcome.trace.filter((event) => event._tag === 'SuspensionOrigin').length, 0)
-    assert.strictEqual(
-      outcome.trace.filter((event) => event._tag === 'ContinuationAcquire').length,
-      outcome.trace.filter((event) => event._tag === 'ContinuationRelease').length,
+    const allocationAcquires = outcome.trace.flatMap((event) =>
+      event._tag === 'AllocationAcquire' ? [event.ticket] : [],
     )
+    const allocationReleases = outcome.trace.flatMap((event) =>
+      event._tag === 'AllocationRelease' ? [event.ticket] : [],
+    )
+    assert.isAbove(allocationAcquires.length, 1, 'guard plus continuation allocations')
+    assertTicketsReleasedExactlyOnce(
+      allocationAcquires,
+      allocationReleases,
+      'suspending allocation',
+    )
+    const continuationAcquires = outcome.trace.flatMap((event) =>
+      event._tag === 'ContinuationAcquire' && event.ticket !== undefined ? [event.ticket] : [],
+    )
+    const continuationReleases = outcome.trace.flatMap((event) =>
+      event._tag === 'ContinuationRelease' && event.ticket !== undefined ? [event.ticket] : [],
+    )
+    assertTicketsReleasedExactlyOnce(continuationAcquires, continuationReleases, 'continuation')
   }),
 )
