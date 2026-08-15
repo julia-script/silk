@@ -1,5 +1,5 @@
 import { NodeServices } from '@effect/platform-node'
-import { assert, it } from '@effect/vitest'
+import { assert, layer } from '@effect/vitest'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
@@ -26,6 +26,8 @@ import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 const clangPath = Effect.fnUntraced(function* () {
   const configured = yield* Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(''))
@@ -74,6 +76,14 @@ const runNative = Effect.fnUntraced(function* (
   )
   if (linked._tag !== 'Executable') return unreachable('expected a native executable')
   return yield* Process.run(linked.path, [])
+})
+
+const makeToolchain = Effect.fnUntraced(function* () {
+  return Object.freeze({
+    _tag: 'Toolchain' as const,
+    clang: yield* clangPath(),
+    shimCache: NativeToolchain.makeShimCache(),
+  })
 })
 
 const lowerSource = Effect.fnUntraced(function* (
@@ -225,9 +235,6 @@ const emittedFunction = (module: Mir.Module, runner: { module: string; name: str
   )
 }
 
-const emittedSymbol = (module: Mir.Module, runner: { module: string; name: string }): string =>
-  Backend.symbolFor(emittedFunction(module, runner), Mir.machineEntry(module))
-
 /** The exact debug-WAT call target for one runner, including the suspend-step suffix when needed. */
 const emittedWasmCallTarget = (
   module: Mir.Module,
@@ -249,6 +256,26 @@ const assertDirectWasmRunner = (
   const target = emittedWasmCallTarget(module, runner)
   assert.include(wat, `call $${target}`, `${label} direct call $${target}`)
   assert.notInclude(wat, 'call_indirect', label)
+}
+
+/**
+ * Pins the LLVM call instruction, not merely that the runner symbol is defined.
+ *
+ * A `define ... @symbol` line would satisfy a substring check; `call ... @symbol(` is the
+ * static dispatch the stored run must emit, including `$suspend_step` when the runner suspends.
+ */
+const assertDirectLlvmRunner = (
+  ir: string,
+  module: Mir.Module,
+  runner: { module: string; name: string },
+  label: string,
+): void => {
+  const target = emittedWasmCallTarget(module, runner)
+  assert.match(
+    ir,
+    new RegExp(`\\bcall\\b[^\\n]*@${escapeRegExp(target)}\\(`),
+    `${label} LLVM call @${target}`,
+  )
 }
 
 const dropCalls = (outcome: BootstrapEvaluation.Outcome): number =>
@@ -316,111 +343,111 @@ const runtimeMatrix = [
   { name: 'provided', source: provided, result: 42, access: 'Take' },
 ] as const
 
-it.effect(
-  'executes stored Effects with identical results and runner identity in every engine',
-  () =>
-    Effect.gen(function* () {
-      const host = yield* Target.host()
-      const toolchain = Object.freeze({
-        _tag: 'Toolchain' as const,
-        clang: yield* clangPath(),
-        shimCache: NativeToolchain.makeShimCache(),
-      })
-      for (const testCase of runtimeMatrix) {
-        // One module name for both targets: the runner identity must not depend on the target.
-        const moduleName = `stored-effect-parity/${testCase.name}`
-        const wasmLowering = yield* lowerStored(
-          moduleName,
-          testCase.source,
-          Target.wasm32UnknownUnknown,
-        )
-        const { realization } = storedRunner(wasmLowering.module, testCase.name)
-        assert.strictEqual(realization.access, testCase.access, testCase.name)
-        assertExactRows(wasmLowering.module, testCase.name)
+layer(NodeServices.layer)('stored Effect engine parity', (it) => {
+  it.effect(
+    'executes stored Effects with identical results and runner identity in every engine',
+    () =>
+      Effect.gen(function* () {
+        const host = yield* Target.host()
+        const toolchain = yield* makeToolchain()
+        for (const testCase of runtimeMatrix) {
+          // One module name for both targets: the runner identity must not depend on the target.
+          const moduleName = `stored-effect-parity/${testCase.name}`
+          const wasmLowering = yield* lowerStored(
+            moduleName,
+            testCase.source,
+            Target.wasm32UnknownUnknown,
+          )
+          const { realization } = storedRunner(wasmLowering.module, testCase.name)
+          assert.strictEqual(realization.access, testCase.access, testCase.name)
+          assertExactRows(wasmLowering.module, testCase.name)
 
-        const evaluated = BootstrapEvaluation.evaluate(
-          wasmLowering.snapshot.instances,
-          wasmLowering.module,
-        )
-        assert.strictEqual(completedValue(evaluated), testCase.result, testCase.name)
+          const evaluated = BootstrapEvaluation.evaluate(
+            wasmLowering.snapshot.instances,
+            wasmLowering.module,
+          )
+          assert.strictEqual(completedValue(evaluated), testCase.result, testCase.name)
 
-        // Debug WAT names the exact call target; release would only give a numeric index.
-        const wasm = yield* Backend.emit(WasmBackend.WasmBackend, wasmLowering.module, {
-          mode: 'debug',
-        })
-        assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
-        if (wasm._tag !== 'WebAssemblyModuleArtifact') return
-        assert.strictEqual(yield* runWasm(wasm.bytes), testCase.result, `${testCase.name} Wasm`)
-        assertDirectWasmRunner(wasm.wat, wasmLowering.module, realization.runner, testCase.name)
+          // Debug WAT names the exact call target; release would only give a numeric index.
+          const wasm = yield* Backend.emit(WasmBackend.WasmBackend, wasmLowering.module, {
+            mode: 'debug',
+          })
+          assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
+          if (wasm._tag !== 'WebAssemblyModuleArtifact') return
+          assert.strictEqual(yield* runWasm(wasm.bytes), testCase.result, `${testCase.name} Wasm`)
+          assertDirectWasmRunner(wasm.wat, wasmLowering.module, realization.runner, testCase.name)
 
-        const nativeLowering = yield* lowerStored(moduleName, testCase.source, host)
-        const nativeRunner = storedRunner(nativeLowering.module, testCase.name)
-        // The native lowering carries the same exact rows the Wasm lowering and evaluator proved.
-        assertExactRows(nativeLowering.module, testCase.name)
-        const llvm = yield* Backend.emit(Backend.LlvmBackend, nativeLowering.module, {
-          mode: 'release',
-        })
-        assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact', testCase.name)
-        if (llvm._tag !== 'LlvmBitcodeArtifact') return
-        assert.include(llvm.ir, 'define i32 @silk_main', testCase.name)
-        // The same static runner the evaluator called is the one LLVM emitted.
-        assert.include(
-          llvm.ir,
-          emittedSymbol(nativeLowering.module, nativeRunner.realization.runner),
-          testCase.name,
-        )
-        assert.deepEqual(
-          nativeRunner.realization.runner,
-          realization.runner,
-          `${testCase.name} runner identity across targets`,
-        )
-        const nativeRun = yield* runNative(toolchain, llvm, host)
-        assert.strictEqual(
-          Number(nativeRun.exitCode),
-          testCase.result,
-          `${testCase.name} native: ${nativeRun.stderr}`,
-        )
-        if (testCase.name === 'provided') {
-          // Service provision resolves statically: the specialized runner reaches the backend, and
-          // the provider travels in the environment rather than a runtime dictionary.
-          const specialized = nativeLowering.module.functions
-            .flatMap(Mir.operations)
-            .find(
-              (candidate) =>
-                candidate._tag === 'RunEffectValue' &&
-                candidate.runnerBase?.declaration.name === 'count$effect$-1',
-            )
-          assert.isDefined(specialized, testCase.name)
-          if (specialized?._tag !== 'RunEffectValue') return
-          assert.match(specialized.runner.name, /^count\$effect\$-1\$provided\$/)
-          assert.lengthOf(specialized.providers, 1, testCase.name)
-          assert.include(
+          const nativeLowering = yield* lowerStored(moduleName, testCase.source, host)
+          const nativeRunner = storedRunner(nativeLowering.module, testCase.name)
+          // The native lowering carries the same exact rows the Wasm lowering and evaluator proved.
+          assertExactRows(nativeLowering.module, testCase.name)
+          const llvm = yield* Backend.emit(Backend.LlvmBackend, nativeLowering.module, {
+            mode: 'release',
+          })
+          assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact', testCase.name)
+          if (llvm._tag !== 'LlvmBitcodeArtifact') return
+          assert.include(llvm.ir, 'define i32 @silk_main', testCase.name)
+          assertDirectLlvmRunner(
             llvm.ir,
-            emittedSymbol(nativeLowering.module, specialized.runner),
+            nativeLowering.module,
+            nativeRunner.realization.runner,
             testCase.name,
           )
-          assertDirectWasmRunner(
-            wasm.wat,
-            wasmLowering.module,
-            specialized.runner,
-            `${testCase.name} specialized`,
+          assert.deepEqual(
+            nativeRunner.realization.runner,
+            realization.runner,
+            `${testCase.name} runner identity across targets`,
           )
+          const nativeRun = yield* runNative(toolchain, llvm, host)
+          assert.strictEqual(
+            Number(nativeRun.exitCode),
+            testCase.result,
+            `${testCase.name} native: ${nativeRun.stderr}`,
+          )
+          if (testCase.name === 'provided') {
+            // Service provision resolves statically: the specialized runner reaches the backend, and
+            // the provider travels in the environment rather than a runtime dictionary.
+            const specialized = nativeLowering.module.functions
+              .flatMap(Mir.operations)
+              .find(
+                (candidate) =>
+                  candidate._tag === 'RunEffectValue' &&
+                  candidate.runnerBase?.declaration.name === 'count$effect$-1',
+              )
+            assert.isDefined(specialized, testCase.name)
+            if (specialized?._tag !== 'RunEffectValue') return
+            assert.match(specialized.runner.name, /^count\$effect\$-1\$provided\$/)
+            assert.lengthOf(specialized.providers, 1, testCase.name)
+            assertDirectLlvmRunner(
+              llvm.ir,
+              nativeLowering.module,
+              specialized.runner,
+              `${testCase.name} specialized`,
+            )
+            assertDirectWasmRunner(
+              wasm.wat,
+              wasmLowering.module,
+              specialized.runner,
+              `${testCase.name} specialized`,
+            )
+          }
         }
-      }
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  180_000,
-)
+      }).pipe(Effect.scoped),
+    180_000,
+  )
 
-type CleanupExit = 'unrun' | 'failure'
+  type CleanupExit = 'unrun' | 'failure'
 
-/**
- * Shared stored-Effect cleanup surface.
- *
- * Guard.drop poisons `tag` on the first call and traps on the second, so a double cleanup cannot
- * return 42. A missed cleanup is a leak: the cycle programs compare heap pages as the iteration
- * count grows. Together those two observations fail unless each live capture is cleaned once.
- */
-const cleanupSurface = `struct Problem { code: i32 }
+  /**
+   * Shared stored-Effect cleanup surface.
+   *
+   * Guard.drop poisons `tag` on the first call and traps on the second, so a double cleanup cannot
+   * return 42. A missed cleanup leaves the capture's `i32` block off Wasm free-list class 0
+   * (`heapTableBase` 65536). A mut-borrow ticket cannot be read after the stored Effect is dropped
+   * (OWN0011 / InvalidLoan), so the free-list head is the 0-vs-1 signal both backends can share
+   * with poison for 2.
+   */
+  const cleanupSurface = `struct Problem { code: i32 }
 struct Guard { tag: i32 storage: Allocation }
 impl Drop for Guard {
   fn drop(self: &mut Guard) -> () {
@@ -444,14 +471,14 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
   fail Problem { code: result }
 }`
 
-/**
- * Repeats one stored-Effect construct-and-clean cycle `count` times.
- *
- * Failure recovers inside each iteration so the loop can actually repeat. Each capture is 2KiB
- * (`[i64; 256]`) so 80 leaked cycles must grow the Wasm heap past a 64KiB page; an `i32` leak
- * would stay inside the first page and the comparison would pass. A double Drop traps.
- */
-const cleanupCycles = (exit: CleanupExit, count: number): string => `${cleanupSurface}
+  /**
+   * Repeats one stored-Effect construct-and-clean cycle `count` times.
+   *
+   * Failure recovers inside each iteration so the loop can actually repeat. Each capture is 2KiB
+   * (`[i64; 256]`) so 80 leaked cycles must grow the Wasm heap past a 64KiB page; an `i32` leak
+   * would stay inside the first page and the comparison would pass. A double Drop traps.
+   */
+  const cleanupCycles = (exit: CleanupExit, count: number): string => `${cleanupSurface}
 effect fn cycle() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<[i64; 256]>())
   let guard = Guard { tag: 7, storage: move storage }
@@ -475,26 +502,29 @@ pub fn main() -> i32 {
   return 1
 }`
 
-const pagesOf = (instance: WebAssembly.Instance): number => {
-  const memory = instance.exports[StandardStreams.wasmMemoryExport]
-  assert.instanceOf(memory, WebAssembly.Memory)
-  return memory instanceof WebAssembly.Memory
-    ? memory.buffer.byteLength / 65536
-    : Number.POSITIVE_INFINITY
-}
+  const pagesOf = (instance: WebAssembly.Instance): number => {
+    const memory = instance.exports[StandardStreams.wasmMemoryExport]
+    assert.instanceOf(memory, WebAssembly.Memory)
+    return memory instanceof WebAssembly.Memory
+      ? memory.buffer.byteLength / 65536
+      : Number.POSITIVE_INFINITY
+  }
 
-/** Runs a Wasm artifact and reports both its result and the heap it needed. */
-const runWasmMeasured = Effect.fnUntraced(function* (bytes: Uint8Array) {
-  return yield* Effect.try(() => {
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice()), {})
-    const main = instance.exports.silk_main
-    if (typeof main !== 'function') return unreachable('expected Wasm main')
-    const value = main()
-    return Object.freeze({ value, pages: pagesOf(instance) })
+  /** Runs a Wasm artifact and reports both its result and the heap it needed. */
+  const runWasmMeasured = Effect.fnUntraced(function* (bytes: Uint8Array) {
+    return yield* Effect.try(() => {
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice()), {})
+      const main = instance.exports.silk_main
+      if (typeof main !== 'function') return unreachable('expected Wasm main')
+      const value = main()
+      const memory = instance.exports[StandardStreams.wasmMemoryExport]
+      const class0 =
+        memory instanceof WebAssembly.Memory ? new DataView(memory.buffer).getInt32(65536, true) : 0
+      return Object.freeze({ value, pages: pagesOf(instance), class0 })
+    })
   })
-})
 
-const cleanupProgram = (exit: CleanupExit): string => `${cleanupSurface}
+  const cleanupProgram = (exit: CleanupExit): string => `${cleanupSurface}
 effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
 effect fn build() -> i32 ! Problem | OutOfMemory {
   let mut allocator = SystemAllocator.make()
@@ -505,81 +535,93 @@ effect fn build() -> i32 ! Problem | OutOfMemory {
 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
-it.effect(
-  'cleans unrun and failing stored Effect environments exactly once in every engine',
-  () =>
-    Effect.gen(function* () {
-      const host = yield* Target.host()
-      const toolchain = Object.freeze({
-        _tag: 'Toolchain' as const,
-        clang: yield* clangPath(),
-        shimCache: NativeToolchain.makeShimCache(),
-      })
-      for (const exit of ['unrun', 'failure'] as const) {
-        const moduleName = `stored-effect-parity/cleanup-${exit}`
-        const { snapshot, module } = yield* lowerStored(
-          moduleName,
-          cleanupProgram(exit),
-          Target.wasm32UnknownUnknown,
-        )
-        const outcome = BootstrapEvaluation.evaluate(snapshot.instances, module)
-        assert.strictEqual(completedValue(outcome), 42, exit)
-        // The evaluator's cleanup trace is the contract the backends must match.
-        assert.strictEqual(dropCalls(outcome), 1, `${exit} Drop hook`)
-        assert.strictEqual(traceCount(outcome, 'AllocationAcquire'), 1, `${exit} acquire`)
-        assert.strictEqual(traceCount(outcome, 'AllocationRelease'), 1, `${exit} release`)
-
-        const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'debug' })
-        assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact', exit)
-        if (wasm._tag !== 'WebAssemblyModuleArtifact') return
-        // 42 means the poisoned Drop did not run twice. A missed cleanup is a leak, proven by cycles.
-        assert.strictEqual(yield* runWasm(wasm.bytes), 42, `${exit} Wasm`)
-        assert.notInclude(wasm.wat, 'call_indirect', exit)
-        if (exit === 'failure') {
-          assertDirectWasmRunner(
-            wasm.wat,
-            module,
-            storedRunner(module, exit).realization.runner,
-            exit,
+  it.effect(
+    'cleans unrun and failing stored Effect environments exactly once in every engine',
+    () =>
+      Effect.gen(function* () {
+        const host = yield* Target.host()
+        const toolchain = yield* makeToolchain()
+        for (const exit of ['unrun', 'failure'] as const) {
+          const moduleName = `stored-effect-parity/cleanup-${exit}`
+          const { snapshot, module } = yield* lowerStored(
+            moduleName,
+            cleanupProgram(exit),
+            Target.wasm32UnknownUnknown,
           )
+          const outcome = BootstrapEvaluation.evaluate(snapshot.instances, module)
+          assert.strictEqual(completedValue(outcome), 42, exit)
+          // The evaluator's cleanup trace is the contract the backends must match.
+          assert.strictEqual(dropCalls(outcome), 1, `${exit} Drop hook`)
+          assert.strictEqual(traceCount(outcome, 'AllocationAcquire'), 1, `${exit} acquire`)
+          assert.strictEqual(traceCount(outcome, 'AllocationRelease'), 1, `${exit} release`)
+
+          const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'debug' })
+          assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact', exit)
+          if (wasm._tag !== 'WebAssemblyModuleArtifact') return
+          const wasmRun = yield* runWasmMeasured(wasm.bytes)
+          // 42 is not enough: poison rejects 2, a non-zero class-0 free-list head rejects 0.
+          assert.strictEqual(wasmRun.value, 42, `${exit} Wasm`)
+          assert.notStrictEqual(wasmRun.class0, 0, `${exit} Wasm capture returned to class 0`)
+          assert.notInclude(wasm.wat, 'call_indirect', exit)
+          if (exit === 'failure') {
+            assertDirectWasmRunner(
+              wasm.wat,
+              module,
+              storedRunner(module, exit).realization.runner,
+              exit,
+            )
+          }
+
+          const native = yield* lowerStored(moduleName, cleanupProgram(exit), host)
+          const llvm = yield* Backend.emit(Backend.LlvmBackend, native.module, { mode: 'release' })
+          assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact', exit)
+          if (llvm._tag !== 'LlvmBitcodeArtifact') return
+          // The Drop hook that cleans the stored environment survives into native code.
+          const dropFn =
+            native.module.functions.find((candidate) =>
+              candidate.id.name.startsWith('drop@impl'),
+            ) ?? unreachable(`expected an emitted Drop hook for ${exit}`)
+          const dropSymbol = Backend.symbolFor(dropFn, Mir.machineEntry(native.module))
+          assert.match(
+            llvm.ir,
+            new RegExp(`\\bcall\\b[^\\n]*@${escapeRegExp(dropSymbol)}\\(`),
+            `${exit} LLVM Drop call`,
+          )
+          if (exit === 'failure') {
+            assertDirectLlvmRunner(
+              llvm.ir,
+              native.module,
+              storedRunner(native.module, exit).realization.runner,
+              `${exit} native`,
+            )
+          }
+          const nativeRun = yield* runNative(toolchain, llvm, host)
+          assert.strictEqual(Number(nativeRun.exitCode), 42, `${exit} native: ${nativeRun.stderr}`)
+
+          // `unrun` never reaches a run operation, so the realization is the only runner fact.
+          const runner = storedRealization(module, exit).runner
+          const runnerCalls =
+            outcome._tag === 'Completed'
+              ? outcome.trace.filter(
+                  (event) =>
+                    event._tag === 'Call' &&
+                    event.target.module === runner.module &&
+                    event.target.name === runner.name,
+                ).length
+              : -1
+          assert.strictEqual(runnerCalls, exit === 'failure' ? 1 : 0, `${exit} stored runner calls`)
+          if (exit === 'failure') {
+            assert.isAbove(traceCount(outcome, 'EffectFailure'), 0, 'typed failure trace')
+            // A typed failure keeps its exact failure rows through both lowerings.
+            assertExactRows(module, exit)
+            assertExactRows(native.module, `${exit} native`)
+          }
         }
+      }).pipe(Effect.scoped),
+    180_000,
+  )
 
-        const native = yield* lowerStored(moduleName, cleanupProgram(exit), host)
-        const llvm = yield* Backend.emit(Backend.LlvmBackend, native.module, { mode: 'release' })
-        assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact', exit)
-        if (llvm._tag !== 'LlvmBitcodeArtifact') return
-        // The Drop hook that cleans the stored environment survives into native code.
-        const dropFn =
-          native.module.functions.find((candidate) => candidate.id.name.startsWith('drop@impl')) ??
-          unreachable(`expected an emitted Drop hook for ${exit}`)
-        assert.include(llvm.ir, Backend.symbolFor(dropFn, Mir.machineEntry(native.module)), exit)
-        const nativeRun = yield* runNative(toolchain, llvm, host)
-        assert.strictEqual(Number(nativeRun.exitCode), 42, `${exit} native: ${nativeRun.stderr}`)
-
-        // `unrun` never reaches a run operation, so the realization is the only runner fact.
-        const runner = storedRealization(module, exit).runner
-        const runnerCalls =
-          outcome._tag === 'Completed'
-            ? outcome.trace.filter(
-                (event) =>
-                  event._tag === 'Call' &&
-                  event.target.module === runner.module &&
-                  event.target.name === runner.name,
-              ).length
-            : -1
-        assert.strictEqual(runnerCalls, exit === 'failure' ? 1 : 0, `${exit} stored runner calls`)
-        if (exit === 'failure') {
-          assert.isAbove(traceCount(outcome, 'EffectFailure'), 0, 'typed failure trace')
-          // A typed failure keeps its exact failure rows through both lowerings.
-          assertExactRows(module, exit)
-          assertExactRows(native.module, `${exit} native`)
-        }
-      }
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  180_000,
-)
-
-const suspending = `${cleanupSurface}
+  const suspending = `${cleanupSurface}
 effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
@@ -596,63 +638,62 @@ pub fn main() -> i32 {
   return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-it.effect(
-  'resumes a suspending stored Effect with matching cleanup in every engine',
-  () =>
-    Effect.gen(function* () {
-      const host = yield* Target.host()
-      const toolchain = Object.freeze({
-        _tag: 'Toolchain' as const,
-        clang: yield* clangPath(),
-        shimCache: NativeToolchain.makeShimCache(),
-      })
-      const moduleName = 'stored-effect-parity/suspending'
-      const { snapshot, module } = yield* lowerStored(
-        moduleName,
-        suspending,
-        Target.wasm32UnknownUnknown,
-      )
-      const outcome = BootstrapEvaluation.evaluate(snapshot.instances, module)
-      assert.strictEqual(completedValue(outcome), 42)
-      assert.strictEqual(dropCalls(outcome), 1)
-      assert.isAbove(traceCount(outcome, 'SuspensionOrigin'), 0)
-      assertExactRows(module, 'suspending')
+  it.effect(
+    'resumes a suspending stored Effect with matching cleanup in every engine',
+    () =>
+      Effect.gen(function* () {
+        const host = yield* Target.host()
+        const toolchain = yield* makeToolchain()
+        const moduleName = 'stored-effect-parity/suspending'
+        const { snapshot, module } = yield* lowerStored(
+          moduleName,
+          suspending,
+          Target.wasm32UnknownUnknown,
+        )
+        const outcome = BootstrapEvaluation.evaluate(snapshot.instances, module)
+        assert.strictEqual(completedValue(outcome), 42)
+        assert.strictEqual(dropCalls(outcome), 1)
+        assert.isAbove(traceCount(outcome, 'SuspensionOrigin'), 0)
+        assertExactRows(module, 'suspending')
 
-      const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'debug' })
-      assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact')
-      if (wasm._tag !== 'WebAssemblyModuleArtifact') return
-      // 42 means resume succeeded and the poisoned Drop did not run twice.
-      assert.strictEqual(yield* runWasm(wasm.bytes), 42)
-      assertDirectWasmRunner(
-        wasm.wat,
-        module,
-        storedRunner(module, 'suspending').realization.runner,
-        'suspending',
-      )
+        const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'debug' })
+        assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact')
+        if (wasm._tag !== 'WebAssemblyModuleArtifact') return
+        const wasmRun = yield* runWasmMeasured(wasm.bytes)
+        assert.strictEqual(wasmRun.value, 42)
+        assert.notStrictEqual(wasmRun.class0, 0, 'suspending Wasm capture returned to class 0')
+        assertDirectWasmRunner(
+          wasm.wat,
+          module,
+          storedRunner(module, 'suspending').realization.runner,
+          'suspending',
+        )
 
-      const native = yield* lowerStored(moduleName, suspending, host)
-      const llvm = yield* Backend.emit(Backend.LlvmBackend, native.module, { mode: 'release' })
-      assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact')
-      if (llvm._tag !== 'LlvmBitcodeArtifact') return
-      assert.include(llvm.ir, 'define i32 @silk_main')
-      assert.include(
-        llvm.ir,
-        emittedSymbol(native.module, storedRunner(native.module, 'suspending').realization.runner),
-      )
-      const nativeRun = yield* runNative(toolchain, llvm, host)
-      assert.strictEqual(Number(nativeRun.exitCode), 42, `suspending native: ${nativeRun.stderr}`)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  180_000,
-)
+        const native = yield* lowerStored(moduleName, suspending, host)
+        const llvm = yield* Backend.emit(Backend.LlvmBackend, native.module, { mode: 'release' })
+        assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact')
+        if (llvm._tag !== 'LlvmBitcodeArtifact') return
+        assert.include(llvm.ir, 'define i32 @silk_main')
+        assertDirectLlvmRunner(
+          llvm.ir,
+          native.module,
+          storedRunner(native.module, 'suspending').realization.runner,
+          'suspending',
+        )
+        const nativeRun = yield* runNative(toolchain, llvm, host)
+        assert.strictEqual(Number(nativeRun.exitCode), 42, `suspending native: ${nativeRun.stderr}`)
+      }).pipe(Effect.scoped),
+    180_000,
+  )
 
-/**
- * Keeps `count` 2KiB allocations live until `main` returns. Wasm does not shrink pages on free, so
- * this is the missing-cleanup control: 80 holds must use more pages than 8, or the flat-heap
- * comparison below cannot see a leaked capture.
- */
-const leakHolds = (
-  count: number,
-): string => `effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+  /**
+   * Keeps `count` 2KiB allocations live until `main` returns. Wasm does not shrink pages on free, so
+   * this is the missing-cleanup control: 80 holds must use more pages than 8, or the flat-heap
+   * comparison below cannot see a leaked capture.
+   */
+  const leakHolds = (
+    count: number,
+  ): string => `effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 effect fn drive() -> i32 ! OutOfMemory ? &mut Allocator {
   ${Array.from({ length: count }, (_, index) => `let hold${index} = run Allocator.allocate(Layout.of<[i64; 256]>())`).join('\n  ')}
   return 42
@@ -662,7 +703,7 @@ pub fn main() -> i32 {
   return run Effect.catch(drive() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-const suspendCycles = (count: number): string => `${cleanupSurface}
+  const suspendCycles = (count: number): string => `${cleanupSurface}
 effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
@@ -685,83 +726,84 @@ pub fn main() -> i32 {
   return 1
 }`
 
-it.effect('keeps the Wasm heap flat across repeated stored Effect cleanup cycles', () =>
-  Effect.gen(function* () {
-    const leakShort = yield* lowerSource(
-      'stored-effect-parity/cycles-leak-short',
-      leakHolds(8),
-      Target.wasm32UnknownUnknown,
-      'open',
-    )
-    const leakLong = yield* lowerSource(
-      'stored-effect-parity/cycles-leak-long',
-      leakHolds(80),
-      Target.wasm32UnknownUnknown,
-      'open',
-    )
-    const leakShortWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakShort.module, {
-      mode: 'release',
-    })
-    const leakLongWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakLong.module, {
-      mode: 'release',
-    })
-    assert.strictEqual(leakShortWasm._tag, 'WebAssemblyModuleArtifact', 'leak short')
-    assert.strictEqual(leakLongWasm._tag, 'WebAssemblyModuleArtifact', 'leak long')
-    if (leakShortWasm._tag !== 'WebAssemblyModuleArtifact') return
-    if (leakLongWasm._tag !== 'WebAssemblyModuleArtifact') return
-    const leakShortRun = yield* runWasmMeasured(leakShortWasm.bytes)
-    const leakLongRun = yield* runWasmMeasured(leakLongWasm.bytes)
-    assert.strictEqual(leakShortRun.value, 42, 'leak short')
-    assert.strictEqual(leakLongRun.value, 42, 'leak long')
-    // Sensitivity: 80 live 2KiB holds must grow past the 8-hold heap, or a missed Drop is invisible.
-    assert.isAbove(leakLongRun.pages, leakShortRun.pages, 'leak control must grow Wasm pages')
+  it.effect('keeps the Wasm heap flat across repeated stored Effect cleanup cycles', () =>
+    Effect.gen(function* () {
+      const leakShort = yield* lowerSource(
+        'stored-effect-parity/cycles-leak-short',
+        leakHolds(8),
+        Target.wasm32UnknownUnknown,
+        'open',
+      )
+      const leakLong = yield* lowerSource(
+        'stored-effect-parity/cycles-leak-long',
+        leakHolds(80),
+        Target.wasm32UnknownUnknown,
+        'open',
+      )
+      const leakShortWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakShort.module, {
+        mode: 'release',
+      })
+      const leakLongWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakLong.module, {
+        mode: 'release',
+      })
+      assert.strictEqual(leakShortWasm._tag, 'WebAssemblyModuleArtifact', 'leak short')
+      assert.strictEqual(leakLongWasm._tag, 'WebAssemblyModuleArtifact', 'leak long')
+      if (leakShortWasm._tag !== 'WebAssemblyModuleArtifact') return
+      if (leakLongWasm._tag !== 'WebAssemblyModuleArtifact') return
+      const leakShortRun = yield* runWasmMeasured(leakShortWasm.bytes)
+      const leakLongRun = yield* runWasmMeasured(leakLongWasm.bytes)
+      assert.strictEqual(leakShortRun.value, 42, 'leak short')
+      assert.strictEqual(leakLongRun.value, 42, 'leak long')
+      // Sensitivity: 80 live 2KiB holds must grow past the 8-hold heap, or a missed Drop is invisible.
+      assert.isAbove(leakLongRun.pages, leakShortRun.pages, 'leak control must grow Wasm pages')
 
-    const programs = [
-      {
-        name: 'unrun',
-        short: 8,
-        long: 80,
-        source: (count: number) => cleanupCycles('unrun', count),
-      },
-      {
-        name: 'failure',
-        short: 8,
-        long: 80,
-        source: (count: number) => cleanupCycles('failure', count),
-      },
-      { name: 'suspending', short: 8, long: 80, source: suspendCycles },
-    ] as const
-    for (const testCase of programs) {
-      const short = yield* lowerStored(
-        `stored-effect-parity/cycles-${testCase.name}-short`,
-        testCase.source(testCase.short),
-        Target.wasm32UnknownUnknown,
-      )
-      const long = yield* lowerStored(
-        `stored-effect-parity/cycles-${testCase.name}-long`,
-        testCase.source(testCase.long),
-        Target.wasm32UnknownUnknown,
-      )
-      const shortWasm = yield* Backend.emit(WasmBackend.WasmBackend, short.module, {
-        mode: 'release',
-      })
-      const longWasm = yield* Backend.emit(WasmBackend.WasmBackend, long.module, {
-        mode: 'release',
-      })
-      assert.strictEqual(shortWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
-      assert.strictEqual(longWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
-      if (shortWasm._tag !== 'WebAssemblyModuleArtifact') return
-      if (longWasm._tag !== 'WebAssemblyModuleArtifact') return
-      const shortRun = yield* runWasmMeasured(shortWasm.bytes)
-      const longRun = yield* runWasmMeasured(longWasm.bytes)
-      assert.strictEqual(shortRun.value, 42, `${testCase.name} short cycles`)
-      assert.strictEqual(longRun.value, 42, `${testCase.name} long cycles`)
-      // Same counts as the leak control: cleanup must reuse, so pages stay flat.
-      assert.strictEqual(
-        longRun.pages,
-        shortRun.pages,
-        `${testCase.name} heap growth across cycles`,
-      )
-    }
-  }),
-)
+      const programs = [
+        {
+          name: 'unrun',
+          short: 8,
+          long: 80,
+          source: (count: number) => cleanupCycles('unrun', count),
+        },
+        {
+          name: 'failure',
+          short: 8,
+          long: 80,
+          source: (count: number) => cleanupCycles('failure', count),
+        },
+        { name: 'suspending', short: 8, long: 80, source: suspendCycles },
+      ] as const
+      for (const testCase of programs) {
+        const short = yield* lowerStored(
+          `stored-effect-parity/cycles-${testCase.name}-short`,
+          testCase.source(testCase.short),
+          Target.wasm32UnknownUnknown,
+        )
+        const long = yield* lowerStored(
+          `stored-effect-parity/cycles-${testCase.name}-long`,
+          testCase.source(testCase.long),
+          Target.wasm32UnknownUnknown,
+        )
+        const shortWasm = yield* Backend.emit(WasmBackend.WasmBackend, short.module, {
+          mode: 'release',
+        })
+        const longWasm = yield* Backend.emit(WasmBackend.WasmBackend, long.module, {
+          mode: 'release',
+        })
+        assert.strictEqual(shortWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
+        assert.strictEqual(longWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
+        if (shortWasm._tag !== 'WebAssemblyModuleArtifact') return
+        if (longWasm._tag !== 'WebAssemblyModuleArtifact') return
+        const shortRun = yield* runWasmMeasured(shortWasm.bytes)
+        const longRun = yield* runWasmMeasured(longWasm.bytes)
+        assert.strictEqual(shortRun.value, 42, `${testCase.name} short cycles`)
+        assert.strictEqual(longRun.value, 42, `${testCase.name} long cycles`)
+        // Same counts as the leak control: cleanup must reuse, so pages stay flat.
+        assert.strictEqual(
+          longRun.pages,
+          shortRun.pages,
+          `${testCase.name} heap growth across cycles`,
+        )
+      }
+    }),
+  )
+})
