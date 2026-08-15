@@ -38,8 +38,10 @@ does not change source-visible caller types.
 
 Substitute the conformance head and specialized interface arguments, then unify the target function's
 receiver, ordinary parameters, success, rows, and representation contracts in declaration order.
-Every target binder must resolve uniquely. Record the resulting arguments in the HIR witness question
-and concrete instance key; reject missing or conflicting inference before MIR.
+Every target binder must resolve uniquely. Keep the generic HIR witness question unresolved while
+retaining its substituted provider, interface application, and operation contract; retain the
+resulting arguments on the conformance mapping and concrete instance key. Reject missing or
+conflicting inference before MIR.
 
 ### Migrate ordinary operator interfaces explicitly
 

@@ -5614,6 +5614,23 @@ const lowerWitnessEffectRunner = (
     regions: Object.freeze(
       lowering.regions.flatMap((candidate) => (candidate === undefined ? [] : [candidate])),
     ),
+    effectRunner: Object.freeze({
+      base: Object.freeze({
+        declaration: Hir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
+        typeArguments: spec.type.environment.instance.typeArguments,
+      }),
+      providers: Object.freeze(
+        spec.providedRequirements.map((requirement) =>
+          Object.freeze({
+            capability: requirement.capability,
+            providerType: requirement.providerType,
+            witness: requirement.witness,
+            role: requirement.role,
+            access: requirement.access,
+          }),
+        ),
+      ),
+    }),
   })
 }
 

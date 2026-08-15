@@ -6,9 +6,12 @@ import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Driver from '../src/Driver.js'
+import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
+import * as Mir from '../src/Mir.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Type from '../src/Type.js'
 
 /**
  * The bound-operation call at a source witness.
@@ -23,8 +26,12 @@ import * as SourceResolver from '../src/SourceResolver.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const analyzed = (name: string, source: string, target?: string) =>
-  Analysis.ofSourceRealized(name, ascii(source), target)
+const analyzed = (
+  name: string,
+  source: string,
+  target?: string,
+  options?: Parameters<typeof Analysis.ofSourceRealized>[3],
+) => Analysis.ofSourceRealized(name, ascii(source), target, options)
 
 const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
@@ -177,6 +184,33 @@ pub fn main() -> i32 { return combineOf<Cell>(Cell { weight: 20 }, Cell { weight
   }),
 )
 
+it.effect('rejects a borrowed source witness for a value-owned interface contract', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyzed(
+      'bound-operation-witness/value-contract-borrowed-witness',
+      `interface Decoder<T> {
+  fn decode(value: T) -> i32
+}
+
+struct Cell { code: i32 }
+
+fn decodeCell(value: &Cell) -> i32 { return value.code }
+
+impl Decoder<Cell> for Cell { decode: Cell.decodeCell }
+
+pub fn main() -> i32 { return 0 }`,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map(
+        (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`,
+      ),
+      [
+        'SEM0083: Invalid conformance: Cell.decodeCell is incompatible with Decoder.decode: parameter value requires shared ownership but the interface promises take ownership',
+      ],
+    )
+  }),
+)
+
 it.effect('requires explicit moves for operator-spelled value operands', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyzed(
@@ -234,6 +268,56 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect(
+  'releases a weaker witness reborrow after propagating a typed failure on all three engines',
+  () =>
+    Effect.gen(function* () {
+      const outcome = yield* threeEngineValue(
+        'bound-operation-witness/fallible-weaker-access',
+        `import silk.result { Result, Success, Failure }
+
+pub struct Problem { code: i32 }
+
+interface Decoder<T> {
+  effect fn decode(value: &mut T) -> i32 ! Problem
+}
+
+struct Cell { code: i32 }
+
+effect fn decodeCell(value: &Cell) -> i32 ! Problem {
+  fail Problem { code: 1 }
+}
+
+impl Decoder<Cell> for Cell { decode: Cell.decodeCell }
+
+fn pending<T: Decoder>(value: &mut T) -> Effect<i32 ! Problem> {
+  return Decoder.decode(value)
+}
+
+fn observe(result: Result<i32, Problem>) -> i32 {
+  return match move result {
+    Result<i32, Problem> { value: outcome } => match move outcome {
+      Success<i32> { value } => value
+      Failure<Problem> { error } => error.code
+    }
+  }
+}
+
+pub fn main() -> i32 {
+  let mut cell = Cell { code: 40 }
+  let failure = observe(run Effect.result(pending<Cell>(&mut cell)))
+  cell.code = cell.code + 1
+  return failure + cell.code
+}`,
+        'fallible-weaker-access',
+      )
+      assert.strictEqual(outcome.bootstrap, 42)
+      assert.strictEqual(outcome.direct, 42)
+      assert.strictEqual(outcome.native, 42, outcome.stderr)
+    }),
+  120_000,
+)
+
 it.effect('weakens implicit operator borrows to a source witness demand', () =>
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
@@ -285,9 +369,8 @@ pub fn main() -> i32 {
 
 it.effect('widens a pure source witness to the exact interface Effect contract', () =>
   Effect.gen(function* () {
-    const value = yield* evaluatedValue(
-      'bound-operation-witness/pure-effect-boundary',
-      `import silk.result { Result, Success, Failure }
+    const module = 'bound-operation-witness/pure-effect-boundary'
+    const source = `import silk.result { Result, Success, Failure }
 
 pub struct Problem {}
 
@@ -317,9 +400,93 @@ fn observe(result: Result<i32, Problem>) -> i32 {
 pub fn main() -> i32 {
   let cell = Cell { code: 42 }
   return observe(run Effect.result(pending<Cell>(&cell)))
-}`,
+}`
+    const raw = yield* analyzed(module, source, 'wasm32-unknown-unknown', {
+      normalizeMir: false,
+    })
+    const normalized = yield* analyzed(module, source, 'wasm32-unknown-unknown', {
+      normalizeMir: true,
+    })
+    assert.deepEqual(messages(raw), [])
+    assert.deepEqual(messages(normalized), [])
+
+    const pending = Analysis.hirOf(raw, module)?.functions.find(
+      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'pending',
     )
-    assert.strictEqual(value, 42)
+    const bound = pending?.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+      .find((expression) => expression._tag === 'BoundOperationCall')
+    assert.strictEqual(bound?._tag, 'BoundOperationCall')
+    if (bound?._tag !== 'BoundOperationCall') return
+    assert.deepEqual(bound.contract.failureRow.failures.map(Type.encode), [`${module}.Problem`])
+
+    const owner =
+      pending?.declaration.canonical._tag === 'Canonical'
+        ? pending.declaration.canonical.id
+        : undefined
+    assert.isDefined(bound.witnessEffectSite)
+    assert.isDefined(owner)
+    if (bound.witnessEffectSite === undefined || owner === undefined) return
+
+    const rawMir = Analysis.loweredMir(raw)
+    const runnerId = Hir.effectRunnerId(owner, bound.witnessEffectSite)
+    const runner = rawMir.functions.find(
+      (fn) => fn.id.module === runnerId.module && fn.id.name === runnerId.name,
+    )
+    assert.strictEqual(runner?.result._tag, 'EffectOutcome')
+    if (runner?.result._tag !== 'EffectOutcome') return
+    assert.deepEqual(runner.result.type.failures.map(Type.encode), [`${module}.Problem`])
+    const operations = Mir.operations(runner)
+    assert.strictEqual(
+      operations.filter(
+        (operation) => operation._tag === 'Call' && operation.target.name === 'decodeCell',
+      ).length,
+      1,
+    )
+    assert.isFalse(
+      operations.some(
+        (operation) => operation._tag === 'RunEffectValue' || operation._tag === 'RunEffect',
+      ),
+      'a pure witness should not retain unreachable failure execution machinery',
+    )
+    const encoded = Mir.encode(rawMir)
+    for (const spelling of [
+      'dictionary',
+      'vtable',
+      'witnessTable',
+      'ServiceCall',
+      'ServiceEffectConstruct',
+    ])
+      assert.isFalse(encoded.includes(spelling), `${spelling} reached interface-only MIR`)
+
+    const normalizedMir = Analysis.loweredMir(normalized)
+    const normalizedRunner = normalizedMir.functions.find(
+      (fn) => fn.id.module === runnerId.module && fn.id.name === runnerId.name,
+    )
+    const staticRun = normalizedMir.functions
+      .flatMap(Mir.operations)
+      .find(
+        (operation) =>
+          operation._tag === 'RunStaticEffect' &&
+          operation.runner.module === runnerId.module &&
+          operation.runner.name === runnerId.name,
+      )
+    if (normalizedRunner !== undefined) {
+      assert.strictEqual(normalizedRunner.result._tag, 'EffectOutcome')
+      if (normalizedRunner.result._tag !== 'EffectOutcome') return
+      assert.deepEqual(normalizedRunner.result.type.failures.map(Type.encode), [
+        `${module}.Problem`,
+      ])
+    } else {
+      assert.strictEqual(staticRun?._tag, 'RunStaticEffect')
+      if (staticRun?._tag !== 'RunStaticEffect') return
+      assert.deepEqual(staticRun.outcomeType.type.failures.map(Type.encode), [`${module}.Problem`])
+    }
+
+    const outcome = Analysis.evaluate(normalized)
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
   }),
 )
 
@@ -364,6 +531,86 @@ pub fn main() -> i32 {
 }`,
     )
     assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('retains exact caller requirements while widening witness access and rows', () =>
+  Effect.gen(function* () {
+    const module = 'bound-operation-witness/requirement-access-widening'
+    const snapshot = yield* analyzed(
+      module,
+      `struct Clock {}
+struct Meter {}
+
+interface Decoder<T> {
+  effect fn decode(value: &mut T) -> i32 ? &mut Clock | &Meter
+}
+
+struct Cell { code: i32 }
+
+effect fn readClock() -> i32 ? &Clock { return 42 }
+
+effect fn decodeCell(value: &Cell) -> i32 ? &Clock {
+  return run readClock()
+}
+
+impl Decoder<Cell> for Cell { decode: Cell.decodeCell }
+
+fn pending<T: Decoder>(value: &mut T) -> Effect<i32 ? &mut Clock | &Meter> {
+  return Decoder.decode(value)
+}
+
+pub fn main() -> i32 {
+  let mut cell = Cell { code: 0 }
+  let mut clock = Clock {}
+  let meter = Meter {}
+  let provided = pending<Cell>(&mut cell)
+    |> Effect.provideMut(&mut clock)
+    |> Effect.provide(&meter)
+  return run provided
+}`,
+    )
+    assert.deepEqual(messages(snapshot), [])
+
+    const hir = Analysis.hirOf(snapshot, module)
+    const pending = hir?.functions.find(
+      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'pending',
+    )
+    assert.strictEqual(pending?.contract._tag, 'Contract')
+    if (pending?.contract._tag !== 'Contract') return
+    assert.isTrue(Type.isEffect(pending.contract.result))
+    if (!Type.isEffect(pending.contract.result)) return
+    assert.deepEqual(
+      pending.contract.result.requirements.map((requirement) => ({
+        capability: Type.encode(requirement.capability),
+        access: requirement.access,
+      })),
+      [
+        { capability: `${module}.Clock`, access: 'Exclusive' },
+        { capability: `${module}.Meter`, access: 'Shared' },
+      ],
+    )
+
+    const call = pending.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+      .find((expression) => expression._tag === 'BoundOperationCall')
+    assert.strictEqual(call?._tag, 'BoundOperationCall')
+    if (call?._tag !== 'BoundOperationCall') return
+    assert.deepEqual(
+      call.contract.requirementRow.requirements.map((requirement) => ({
+        capability: Type.encode(requirement.capability),
+        access: requirement.access,
+      })),
+      [
+        { capability: `${module}.Clock`, access: 'Exclusive' },
+        { capability: `${module}.Meter`, access: 'Shared' },
+      ],
+    )
+
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
   }),
 )
 
