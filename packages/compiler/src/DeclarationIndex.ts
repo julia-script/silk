@@ -2496,7 +2496,7 @@ const resolveExactRepresentation = (
     return reject(
       Diagnostic.uncallableExactRepresentationItem(
         fact.item.spelling,
-        'an Effect construction site rather than an ordinary callable',
+        'EffectDeclaration',
         fact.token.span,
       ),
     )
@@ -3307,43 +3307,6 @@ const resolveRequirementRow = (
   })
 }
 
-/** Names every declaration whose exact representation one type carries, in encounter order. */
-const exactRepresentationTargets = (
-  self: Type.Type,
-): ReadonlyArray<{ readonly module: string; readonly name: string }> => {
-  const found: Array<{ readonly module: string; readonly name: string }> = []
-  const visit = (type: Type.Type): void => {
-    if (Type.isRepresented(type)) {
-      const argument = type.representation.argument
-      if (
-        Type.isExactRepresentationArgument(argument) &&
-        Type.isCallableIdentityArgument(argument.identity) &&
-        argument.identity.target._tag === 'Declaration'
-      )
-        found.push(
-          Object.freeze({
-            module: argument.identity.target.module,
-            name: argument.identity.target.name,
-          }),
-        )
-      visit(type.contract)
-      return
-    }
-    if (Type.isCallable(type)) {
-      for (const parameter of type.parameters) visit(parameter)
-      visit(type.result)
-      return
-    }
-    if (Type.isFixedArray(type) || Type.isSlice(type)) visit(type.element)
-    else if (Type.isReference(type)) visit(type.target)
-    else if (Type.isEffect(type)) visit(type.success)
-    else if (Type.isNominal(type))
-      for (const argument of type.arguments) if (Type.isTypeArgument(argument)) visit(argument)
-  }
-  visit(self)
-  return Object.freeze(found)
-}
-
 const attachExposure = (
   fact: DeclaredTypeFact,
   modules: ReadonlyArray<ModuleHeaders>,
@@ -3352,7 +3315,7 @@ const attachExposure = (
   if (fact._tag !== 'Resolved') return fact
   // An exact representation names a callable declaration rather than a nominal, so the private
   // leak it can create is invisible to the nominal walk below and is reported on its own terms.
-  const leaked = exactRepresentationTargets(fact.type).find((target) => {
+  const leaked = Type.exactRepresentationDeclarations(fact.type).find((target) => {
     const owner = modules.find((candidate) => candidate.module === target.module)
     const found = lookupDeclaration(owner?.declarations ?? [], target.name)
     return found._tag === 'Resolved' && found.declaration.visibility === 'Private'

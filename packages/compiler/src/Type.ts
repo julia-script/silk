@@ -1148,6 +1148,63 @@ export const encode = (self: Type): string => {
 }
 
 /** Returns every canonical nominal nested in a type, in deterministic preorder. */
+/** One declaration named by an exact representation carried inside a type. */
+export interface ExactRepresentationDeclaration {
+  readonly module: string
+  readonly name: string
+}
+
+/**
+ * Names every declaration whose exact representation one type carries, in encounter order.
+ *
+ * The walk mirrors `nominals` so the two agree about which positions a type reaches. An exact
+ * representation is reported before descending into its structural contract, because the contract
+ * alone does not name the construction the representation fixed.
+ */
+export const exactRepresentationDeclarations = (
+  self: Type,
+): ReadonlyArray<ExactRepresentationDeclaration> =>
+  isRepresented(self)
+    ? Object.freeze([
+        ...(isExactRepresentationArgument(self.representation.argument) &&
+        isCallableIdentityArgument(self.representation.argument.identity) &&
+        self.representation.argument.identity.target._tag === 'Declaration'
+          ? [
+              Object.freeze({
+                module: self.representation.argument.identity.target.module,
+                name: self.representation.argument.identity.target.name,
+              }),
+            ]
+          : []),
+        ...exactRepresentationDeclarations(self.contract),
+      ])
+    : isNominal(self)
+      ? Object.freeze(
+          self.arguments.filter(isTypeArgument).flatMap(exactRepresentationDeclarations),
+        )
+      : isFixedArray(self)
+        ? exactRepresentationDeclarations(self.element)
+        : isSlice(self)
+          ? exactRepresentationDeclarations(self.element)
+          : isReference(self)
+            ? exactRepresentationDeclarations(self.target)
+            : isCallable(self)
+              ? Object.freeze([
+                  ...self.parameters.flatMap(exactRepresentationDeclarations),
+                  ...exactRepresentationDeclarations(self.result),
+                ])
+              : isEffect(self)
+                ? Object.freeze([
+                    ...exactRepresentationDeclarations(self.success),
+                    ...self.failures.flatMap(exactRepresentationDeclarations),
+                    ...self.requirements.flatMap((requirement) =>
+                      exactRepresentationDeclarations(requirement.capability),
+                    ),
+                  ])
+                : isUnion(self)
+                  ? Object.freeze(self.members.flatMap(exactRepresentationDeclarations))
+                  : []
+
 export const nominals = (self: Type): ReadonlyArray<Nominal> =>
   isNominal(self)
     ? Object.freeze([self, ...self.arguments.filter(isTypeArgument).flatMap(nominals)])

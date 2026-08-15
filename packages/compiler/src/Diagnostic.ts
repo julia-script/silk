@@ -524,7 +524,7 @@ export type Reason =
   | {
       readonly _tag: 'UncallableExactRepresentationItem'
       readonly item: string
-      readonly kind: string
+      readonly subject: UncallableExactRepresentationSubject
     }
   | {
       readonly _tag: 'OpenExactRepresentationItem'
@@ -1833,6 +1833,23 @@ export const storedCallableConstruction = (
   })
 }
 
+/** What one rejected `typeof` item names instead of an ordinary callable declaration. */
+export type UncallableExactRepresentationSubject =
+  | 'EffectDeclaration'
+  | 'LocalBinding'
+  | 'CallableSection'
+
+const uncallableSubjectProse = (subject: UncallableExactRepresentationSubject): string => {
+  switch (subject) {
+    case 'EffectDeclaration':
+      return 'an Effect declaration rather than an ordinary callable'
+    case 'LocalBinding':
+      return 'a local binding, which exists only where it is written'
+    case 'CallableSection':
+      return 'a callable section, whose identity belongs to its construction site'
+  }
+}
+
 const opaqueResultNote =
   'Return an opaque representation result instead when the concrete identity must stay private.'
 
@@ -1878,7 +1895,7 @@ export const ambiguousExactRepresentationItem = (
  */
 export const uncallableExactRepresentationItem = (
   item: string,
-  kind: string,
+  subject: UncallableExactRepresentationSubject,
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
@@ -1886,8 +1903,8 @@ export const uncallableExactRepresentationItem = (
     phase: 'semantic',
     code: uncallableExactRepresentationItemCode,
     severity: 'error',
-    message: `Cannot name the exact representation of ${item}: it names ${kind}, which has no source-nameable exact identity`,
-    reason: Object.freeze({ _tag: 'UncallableExactRepresentationItem', item, kind }),
+    message: `Cannot name the exact representation of ${item}: it names ${uncallableSubjectProse(subject)}, which has no source-nameable exact identity`,
+    reason: Object.freeze({ _tag: 'UncallableExactRepresentationItem', item, subject }),
     span,
     notes: Object.freeze([opaqueResultNote]),
   })
