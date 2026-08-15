@@ -15,14 +15,14 @@
 
 - [x] 3.1 Add canonical concrete conformance goals, completed-proof memoization, and finite strict-subterm traversal.
 - [x] 3.2 Preserve active-goal cycle detection as defensive recovery without admitting coinductive proof.
-- [ ] 3.3 Emit deterministic missing-base, overlap, termination, and cycle requirement traces.
+- [x] 3.3 Emit deterministic missing-base, overlap, termination, and cycle requirement traces.
 
 ## 4. HIR and Instance Discovery
 
-- [ ] 4.1 Retain unresolved conditional witness questions in generic HIR.
-- [ ] 4.2 Substitute concrete kinded arguments and discover every transitive base and wrapper witness.
-- [ ] 4.3 Key one deterministic witness per concrete provider/interface pair and lower only direct targets.
-- [ ] 4.4 Assert that no runtime witness dictionary, interface tag, or standard-library actor lookup is emitted.
+- [x] 4.1 Retain unresolved conditional witness questions in generic HIR.
+- [x] 4.2 Substitute concrete kinded arguments and discover every transitive base and wrapper witness.
+- [x] 4.3 Key one deterministic witness per concrete provider/interface pair and lower only direct targets.
+- [x] 4.4 Assert that no runtime witness dictionary, interface tag, or standard-library actor lookup is emitted.
 
 ## 5. Verification
 

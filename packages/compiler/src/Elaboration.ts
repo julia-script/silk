@@ -4355,7 +4355,8 @@ const interfaceConstraintDiagnostics = (
         const proof = DeclarationIndex.prove(index, provider, capability)
         if (
           proof._tag === 'Unproved' &&
-          ConformanceGoal.key(proof.goal) !== ConformanceGoal.key(ConformanceGoal.make(capability, provider))
+          ConformanceGoal.key(proof.goal) !==
+            ConformanceGoal.key(ConformanceGoal.make(capability, provider))
         )
           return [
             Diagnostic.unprovenConformance(

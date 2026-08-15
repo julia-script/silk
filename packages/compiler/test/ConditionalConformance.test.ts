@@ -2,6 +2,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as DeclarationIndex from '../src/DeclarationIndex.js'
+import * as Hir from '../src/Hir.js'
+import * as Mir from '../src/Mir.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array => Uint8Array.from(value, (unit) => unit.charCodeAt(0))
@@ -138,5 +140,142 @@ pub fn main() -> i32 {
       'required by Decoder for conditional-conformance/trace.MappedSchema<conditional-conformance/trace.Loose>',
       '  Decoder for conditional-conformance/trace.Loose: no conformance declares this specialization',
     ])
+  }),
+)
+
+/**
+ * Two wrappers over one base, so a proof chain has depth two and two unrelated specializations of
+ * one conditional header exist in one program.
+ */
+const nestedDecoder = `interface Decoder<T> {
+  fn decode(value: T) -> i32
+}
+
+struct Schema { tag: i32 }
+struct Other { code: i32 }
+
+fn schemaDecode(value: &Schema) -> i32 { return value.tag }
+fn otherDecode(value: &Other) -> i32 { return value.code }
+
+impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
+impl Decoder<Other> for Other { decode: Other.otherDecode }
+
+struct OptionalSchema<S> { source: S }
+
+fn optionalDecode<S: Decoder>(value: &OptionalSchema<S>) -> i32 {
+  return Decoder.decode(value.source) + 1
+}
+
+impl<S: Decoder<S>> Decoder<OptionalSchema<S>> for OptionalSchema<S> {
+  decode: OptionalSchema.optionalDecode
+}
+
+fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(value) }`
+
+it.effect('discovers one witness instance per concrete specialization of one header', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance/specializations',
+      `${nestedDecoder}
+
+pub fn main() -> i32 {
+  let outer = decodeOf<OptionalSchema<Schema>>(OptionalSchema<Schema> { source: Schema { tag: 1 } })
+  let other = decodeOf<OptionalSchema<Other>>(OptionalSchema<Other> { source: Other { code: 2 } })
+  return outer + other
+}`,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map(
+        (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`,
+      ),
+      [],
+    )
+    const instances = Analysis.instancesOf(snapshot).instances
+    const wrappers = instances.filter(
+      (instance) => instance.key.declaration.name === 'optionalDecode',
+    )
+    // One conditional header, two concrete providers, two witness instances — and no third for the
+    // unsubstituted form.
+    assert.strictEqual(wrappers.length, 2)
+    assert.deepEqual(
+      wrappers
+        .map((instance) => instance.key.typeArguments.map(Type.genericArgumentKey).join(','))
+        .toSorted(),
+      [
+        Type.key(Type.nominal('conditional-conformance/specializations', 'Other')),
+        Type.key(Type.nominal('conditional-conformance/specializations', 'Schema')),
+      ].toSorted(),
+    )
+    // The base witnesses are reached through the wrapper's own proof, not by being called directly.
+    assert.strictEqual(
+      instances.filter((instance) => instance.key.declaration.name === 'schemaDecode').length,
+      1,
+    )
+    assert.strictEqual(
+      instances.filter((instance) => instance.key.declaration.name === 'otherDecode').length,
+      1,
+    )
+  }),
+)
+
+it.effect('lowers a conditional witness to one direct static call and no runtime dispatch', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance/lowering',
+      `${nestedDecoder}
+
+pub fn main() -> i32 {
+  return decodeOf<OptionalSchema<Schema>>(OptionalSchema<Schema> { source: Schema { tag: 41 } })
+}`,
+    )
+    const mir = Analysis.loweredMir(snapshot)
+    const encoded = Mir.encode(mir)
+    // Every call names a declaration and its concrete arguments. Nothing selects a witness at run
+    // time, so no dictionary, interface tag, or actor-name lookup can appear.
+    for (const spelling of ['dictionary', 'vtable', 'witnessTable', 'interfaceTag', 'typeTag'])
+      assert.isFalse(encoded.includes(spelling), `${spelling} reached MIR`)
+    const witnessCalls = mir.functions.flatMap((fn) =>
+      fn.regions.flatMap((region) =>
+        region._tag === 'OperationRegion'
+          ? region.operations.filter(
+              (operation) =>
+                operation._tag === 'Call' && operation.target.name === 'optionalDecode',
+            )
+          : [],
+      ),
+    )
+    assert.strictEqual(witnessCalls.length, 1)
+    const witnessCall = witnessCalls.at(0)
+    assert.deepEqual(
+      witnessCall?._tag === 'Call'
+        ? witnessCall.typeArguments.map(Type.genericArgumentKey)
+        : ['no call'],
+      [Type.key(Type.nominal('conditional-conformance/lowering', 'Schema'))],
+    )
+  }),
+)
+
+it.effect('keeps the conditional witness question unresolved in generic HIR', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance/generic-hir',
+      `${nestedDecoder}
+
+pub fn main() -> i32 {
+  return decodeOf<OptionalSchema<Schema>>(OptionalSchema<Schema> { source: Schema { tag: 1 } })
+}`,
+    )
+    const hir = Analysis.hirOf(snapshot, 'conditional-conformance/generic-hir')
+    assert.isDefined(hir)
+    if (hir === undefined) return
+    const encoded = Hir.encode(hir)
+    // The wrapper's body names the interface, the operation, and the bounded parameter it dispatches
+    // over — and no witness. Which conformance answers it is decided per specialization, so a
+    // generic body that already carried an answer would have to carry one answer for every provider.
+    assert.isTrue(
+      encoded.includes('bound conditional-conformance/generic-hir.Decoder<S>.decode over S'),
+    )
+    for (const spelling of ['witness', 'dictionary', 'vtable'])
+      assert.isFalse(encoded.includes(spelling), `${spelling} reached generic HIR`)
   }),
 )
