@@ -4348,6 +4348,17 @@ const interfaceConstraintDiagnostics = (
           ),
         ]
       const capability = Type.nominal(bound.capability.module, bound.capability.name, [provider])
+      // Selection excludes rejected declarations, but a partial declaration still carries the most
+      // useful source error: name the exact operation it failed to map before reporting the broader
+      // missing-witness result.
+      const unmapped = DeclarationIndex.unmappedInterfaceOperations(index, provider, capability)
+      if (unmapped.length > 0)
+        return unmapped.map((operation) =>
+          Diagnostic.invalidConformance(
+            `${Type.encode(provider)} does not implement ${bound.spelling}.${operation}`,
+            span,
+          ),
+        )
       if (!DeclarationIndex.conforms(index, provider, capability)) {
         // A conditional header that covers this provider but whose own requirements failed has a
         // more useful answer than "does not implement": the chain says which requirement is
@@ -4373,16 +4384,7 @@ const interfaceConstraintDiagnostics = (
           ),
         ]
       }
-      // A witness that exists is not yet a witness that is complete: specialization admits the type
-      // argument only when the conformance maps every operation the bound declares, so a bound with
-      // more than one operation cannot be half-satisfied.
-      return DeclarationIndex.unmappedInterfaceOperations(index, provider, capability).map(
-        (operation) =>
-          Diagnostic.invalidConformance(
-            `${Type.encode(provider)} does not implement ${bound.spelling}.${operation}`,
-            span,
-          ),
-      )
+      return []
     }),
   )
 }

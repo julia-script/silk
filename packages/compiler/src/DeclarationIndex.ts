@@ -3861,11 +3861,14 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       const markInvalid = (): void => {
         invalidConformances.add(conformance)
       }
+      const reject = <A extends Diagnostic.Diagnostic>(diagnostic: A): A => {
+        markInvalid()
+        return diagnostic
+      }
       const invalidDiagnostic = (
         ...args: Parameters<typeof Diagnostic.invalidConformance>
       ): ReturnType<typeof Diagnostic.invalidConformance> => {
-        markInvalid()
-        return Diagnostic.invalidConformance(...args)
+        return reject(Diagnostic.invalidConformance(...args))
       }
       if (
         conformance.capability._tag !== 'Resolved' ||
@@ -4406,9 +4409,11 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         const hook = conformance.hook
         if (conformance.operations.length !== 0 || hook === undefined) {
           diagnostics.push(
-            Diagnostic.invalidDropHook(
-              'Drop requires one inline fn drop hook and no operation mappings',
-              conformance.syntax.span,
+            reject(
+              Diagnostic.invalidDropHook(
+                'Drop requires one inline fn drop hook and no operation mappings',
+                conformance.syntax.span,
+              ),
             ),
           )
           continue
@@ -4434,18 +4439,22 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           hook.requirementRow.requirements.length !== 0
         ) {
           diagnostics.push(
-            Diagnostic.invalidDropHook(
-              'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
-              hook.syntax.span,
+            reject(
+              Diagnostic.invalidDropHook(
+                'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
+                hook.syntax.span,
+              ),
             ),
           )
         } else if (Type.isConcrete(provider) && isCopyType(provider)) {
           // A parametric provider's Copy-ness depends on its arguments, so the prohibition is
           // enforced per instantiation during monomorphization instead of at the header.
           diagnostics.push(
-            Diagnostic.invalidDropHook(
-              `Copy type ${Type.encode(provider)} cannot implement Drop`,
-              conformance.syntax.span,
+            reject(
+              Diagnostic.invalidDropHook(
+                `Copy type ${Type.encode(provider)} cannot implement Drop`,
+                conformance.syntax.span,
+              ),
             ),
           )
         }
@@ -4805,6 +4814,7 @@ interface ConformanceCandidate {
 const conformanceCandidates = (
   self: Index,
   goal: ConformanceGoal.ConformanceGoal,
+  admission: 'Selectable' | 'Declared' = 'Selectable',
 ): ReadonlyArray<ConformanceCandidate> =>
   Object.freeze(
     self.modules.flatMap((module) =>
@@ -4813,7 +4823,7 @@ const conformanceCandidates = (
           conformance.capability._tag !== 'Resolved' ||
           !Type.isNominal(conformance.capability.type) ||
           conformance.provider._tag !== 'Resolved' ||
-          conformance.validity._tag !== 'ValidConformance' ||
+          (admission === 'Selectable' && conformance.validity._tag !== 'ValidConformance') ||
           conformance.coherence._tag !== 'Coherent' ||
           conformance.termination._tag !== 'Terminating'
         )
@@ -4966,10 +4976,10 @@ export const conforms = (self: Index, provider: Type.Type, capability: Type.Nomi
 
 /**
  * Returns, in declaration order, the operations one interface declares that the provider's selected
- * conformance leaves unmapped. An empty result means the witness covers the whole contract — which
- * is the only state under which specialization may substitute the provider for a bounded parameter.
- * A capability that is not an interface, or a provider with no single conformance, has no partial
- * witness to report and returns nothing.
+ * declared conformance leaves unmapped. Rejected declarations remain visible here only to preserve
+ * the most specific diagnostic after selection excludes them. An empty result means the declaration
+ * covers the whole contract. A capability that is not an interface, or a provider with no single
+ * coherent, terminating declaration, has no partial witness to report and returns nothing.
  */
 export const unmappedInterfaceOperations = (
   self: Index,
@@ -4977,7 +4987,12 @@ export const unmappedInterfaceOperations = (
   capability: Type.Nominal,
 ): ReadonlyArray<string> => {
   const interface_ = interfaceByCapability(self, capability)
-  const conformance = interfaceConformance(self, provider, capability)
+  const declared = conformanceCandidates(
+    self,
+    ConformanceGoal.make(capability, provider),
+    'Declared',
+  )
+  const conformance = declared.length === 1 ? declared.at(0)?.conformance : undefined
   if (interface_ === undefined || conformance === undefined) return Object.freeze([])
   const mapped = new Set(
     conformance.operations.flatMap((mapping) =>

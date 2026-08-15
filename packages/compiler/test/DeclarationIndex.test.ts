@@ -892,12 +892,45 @@ struct CopyValue { value: i32 }
 struct Left { value: i32 }
 struct Right { value: i32 }
 struct UnionHolder { value: Left | Right }
+struct Malformed { allocation: Allocation }
+struct Missing { allocation: Allocation }
+struct Problem {}
+struct Fallible { allocation: Allocation }
 impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
 impl Drop for CopyValue { fn drop(self: &mut CopyValue) -> () { return () } }
 impl Drop for UnionHolder { fn drop(self: &mut UnionHolder) -> () { return () } }
+impl Drop for Malformed { fn drop(self: &Malformed) -> () { return () } }
+impl Drop for Missing {}
+impl Drop for Fallible { fn drop(self: &mut Fallible) -> () ! Problem { return () } }
 impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
       ],
     ])
+    const copyValue = Type.nominal('drop-hooks', 'CopyValue')
+    const malformed = Type.nominal('drop-hooks', 'Malformed')
+    const missing = Type.nominal('drop-hooks', 'Missing')
+    const fallible = Type.nominal('drop-hooks', 'Fallible')
+    for (const rejected of [copyValue, malformed, missing, fallible]) {
+      assert.strictEqual(
+        index.modules
+          .at(0)
+          ?.conformances.find(
+            (conformance) =>
+              conformance.provider._tag === 'Resolved' &&
+              Type.equals(conformance.provider.type, rejected),
+          )?.validity._tag,
+        'InvalidConformance',
+      )
+      assert.strictEqual(
+        DeclarationIndex.prove(index, rejected, Type.dropCapability)._tag,
+        'Unproved',
+      )
+      assert.isUndefined(DeclarationIndex.witness(index, rejected, Type.dropCapability))
+      assert.isFalse(DeclarationIndex.conforms(index, rejected, Type.dropCapability))
+    }
+    const guard = Type.nominal('drop-hooks', 'Guard')
+    assert.strictEqual(DeclarationIndex.prove(index, guard, Type.dropCapability)._tag, 'Proved')
+    assert.isDefined(DeclarationIndex.witness(index, guard, Type.dropCapability))
+    assert.isTrue(DeclarationIndex.conforms(index, guard, Type.dropCapability))
     assert.deepEqual(
       index.diagnostics
         .filter((diagnostic) => diagnostic.code === 'SEM0084')
@@ -907,6 +940,9 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
       [
         'Copy type drop-hooks.CopyValue cannot implement Drop',
         'Copy type drop-hooks.UnionHolder cannot implement Drop',
+        'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
+        'Drop requires one inline fn drop hook and no operation mappings',
+        'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
       ],
     )
     assert.include(
