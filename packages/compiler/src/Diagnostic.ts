@@ -3316,8 +3316,8 @@ export const partialMove = (span: SourceSpan.SourceSpan): Diagnostic =>
 
 /**
  * Extracting an owned representation-bearing field would leave the aggregate holding a partially
- * released callable environment, so its captures could be cleaned twice. Consuming invocation takes
- * the whole aggregate instead.
+ * released executable environment, so its captures could be cleaned twice. Consuming invocation or
+ * execution takes the whole aggregate instead.
  */
 export const representationFieldExtraction = (
   aggregate: string,
@@ -3330,7 +3330,7 @@ export const representationFieldExtraction = (
     phase: 'ownership',
     code: representationFieldExtractionCode,
     severity: 'error',
-    message: `Cannot move field ${field} out of ${aggregate}: it stores the callable representation ${contract}, whose captures are cleaned with the whole aggregate`,
+    message: `Cannot move field ${field} out of ${aggregate}: it stores the executable representation ${contract}, whose captures are cleaned with the whole aggregate`,
     reason: Object.freeze({ _tag: 'RepresentationFieldExtraction', aggregate, field, contract }),
     span,
   })

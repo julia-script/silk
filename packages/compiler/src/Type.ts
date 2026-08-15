@@ -1833,6 +1833,24 @@ export const containsCallableRepresentation = (self: Type): boolean => {
   return false
 }
 
+/** Tests whether a value stores one statically known Effect environment anywhere inside it. */
+export const containsEffectRepresentation = (self: Type): boolean => {
+  if (isRepresented(self)) return isEffect(self.contract)
+  if (isNominal(self))
+    return self.arguments.some(
+      (argument) =>
+        (isExactRepresentationArgument(argument) && isEffectIdentityArgument(argument.identity)) ||
+        (isTypeArgument(argument) && containsEffectRepresentation(argument)),
+    )
+  if (isFixedArray(self)) return containsEffectRepresentation(self.element)
+  if (isUnion(self)) return self.members.some(containsEffectRepresentation)
+  return false
+}
+
+/** Tests for either concrete executable environment carried through an enclosing value. */
+export const containsExecutableRepresentation = (self: Type): boolean =>
+  containsCallableRepresentation(self) || containsEffectRepresentation(self)
+
 /** Tests for explicit borrow wrappers forbidden inside ordinary type positions. */
 export const containsPositionRestrictedBorrow = (self: Type): boolean => {
   if (isString(self)) return false

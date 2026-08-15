@@ -12,7 +12,7 @@
 
 ## 3. Ownership, Layout, and MIR
 
-- [ ] 3.1 Preserve Effect loans, exact rows, whole-value moves, nesting, and direct-field-extraction rejection.
+- [x] 3.1 Preserve Effect loans, exact rows, whole-value moves, nesting, and direct-field-extraction rejection.
 - [ ] 3.2 Plan inline concrete environments and suspendability dependencies in the enclosing build-internal nominal ABI.
 - [ ] 3.3 Carry lazy construction, run, suspension/resume, typed failure, and cleanup through HIR and MIR.
 

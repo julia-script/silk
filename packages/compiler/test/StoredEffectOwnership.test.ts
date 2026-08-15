@@ -122,3 +122,90 @@ pub fn main() -> i32 { return 0 }`,
     assert.notInclude(codesOf(snapshot), 'OWN0015')
   }),
 )
+
+it.effect('consumes the whole aggregate when its take-once Effect runs', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'stored-effect-ownership/whole-owner-move',
+      `${declarations}fn runTwice<F: once Effect<i32>>(value: Once<F>) -> i32 {
+  let first = run value.operation
+  return first + run value.operation
+}
+pub fn main() -> i32 { return 0 }`,
+    )
+
+    assert.include(codesOf(snapshot), 'OWN0001')
+    const facts =
+      snapshot.ownership.get('stored-effect-ownership/whole-owner-move') ??
+      unreachable('expected ownership facts')
+    const runTwice = facts.functions.at(0) ?? unreachable('expected runTwice ownership')
+    const owner =
+      runTwice.bindings.find((binding) => binding.name === 'value') ??
+      unreachable('expected value binding')
+    assert.notStrictEqual(owner.movedAt, undefined)
+  }),
+)
+
+it.effect('consumes the outer owner through a nested stored Effect projection', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'stored-effect-ownership/nested-owner-move',
+      `${declarations}struct Boxed<F: once Effect<i32>> { inner: Once<F> }
+fn runTwice<F: once Effect<i32>>(value: Boxed<F>) -> i32 {
+  let first = run value.inner.operation
+  return first + run value.inner.operation
+}
+pub fn main() -> i32 { return 0 }`,
+    )
+
+    assert.include(codesOf(snapshot), 'OWN0001')
+    assert.notInclude(codesOf(snapshot), 'OWN0013')
+  }),
+)
+
+it.effect('rejects extracting a represented Effect field directly', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'stored-effect-ownership/extraction',
+      `${declarations}pub fn main() -> i32 {
+  let deferred = Once { operation: effect { return 42 } }
+  let operation = move deferred.operation
+  return 0
+}`,
+    )
+    const diagnostic = Analysis.diagnostics(snapshot).find(
+      (candidate) => candidate.code === 'OWN0013',
+    )
+
+    assert.strictEqual(diagnostic?.reason._tag, 'RepresentationFieldExtraction')
+    assert.include(diagnostic?.message ?? '', 'executable representation')
+    assert.notInclude(codesOf(snapshot), 'OWN0002')
+  }),
+)
+
+it.effect('retains a stored Effect loan until the enclosing aggregate is consumed', () =>
+  Effect.gen(function* () {
+    const module = 'stored-effect-ownership/retained-loan'
+    const source = `struct Deferred<F: Effect<i32>> { operation: F }
+effect fn inspect(values: &[i32]) -> i32 { return values[0] }
+pub fn main() -> i32 {
+  let mut values = [1]
+  let recipe = inspect(&values)
+  let deferred = Deferred { operation: move recipe }
+  values[0] = 2
+  drop deferred
+  return values[0]
+}`
+    const snapshot = yield* realized(module, source)
+    const facts = snapshot.ownership.get(module) ?? unreachable('expected ownership facts')
+    const loan = facts.functions.flatMap((fn) => [...fn.loans]).at(0)
+
+    assert.notStrictEqual(loan, undefined)
+    assert.strictEqual(loan?.origin, 'FixedArrayBorrow')
+    assert.include(codesOf(snapshot), 'OWN0011')
+    assert.strictEqual(
+      loan === undefined ? undefined : source.slice(loan.endSpan.start, loan.endSpan.end).trim(),
+      'drop deferred',
+    )
+  }),
+)

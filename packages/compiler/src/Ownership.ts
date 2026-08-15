@@ -401,9 +401,9 @@ const placeSite = (expression: Hir.Expression): BindingSite | undefined => {
 
 /**
  * Names the dedicated extraction rejection when a place resolves to a field holding a concrete
- * callable representation. Extracting one would leave the aggregate owning a partially released
- * environment, so its captures could be cleaned twice; consuming invocation takes the whole
- * aggregate instead. Every other partial move keeps the general struct-field rejection.
+ * executable representation. Extracting one would leave the aggregate owning a partially released
+ * environment, so its captures could be cleaned twice; consuming invocation or execution takes the
+ * whole aggregate instead. Every other partial move keeps the general struct-field rejection.
  */
 const representationFieldExtraction = (
   place: Hir.Expression,
@@ -411,7 +411,11 @@ const representationFieldExtraction = (
 ): Diagnostic.Diagnostic | undefined => {
   if (place._tag !== 'Project') return undefined
   const type = place.type
-  if (!Type.isRepresented(type) || !Type.isCallable(type.contract)) return undefined
+  if (
+    !Type.isRepresented(type) ||
+    (!Type.isCallable(type.contract) && !Type.isEffect(type.contract))
+  )
+    return undefined
   return Diagnostic.representationFieldExtraction(
     Type.encode(place.nominal),
     `#${place.field.ordinal}`,
@@ -886,6 +890,20 @@ const checkExpression = (
     case 'Run': {
       const stored = storedEffectRunAccess(state, expression.subject, expression.span)
       if (stored !== undefined) state.diagnostics.push(stored)
+      const storedContract = storedEffectContract(expression.subject)
+      const rootSite = placeSite(expression.subject)
+      if (
+        storedContract?.access === 'Take' &&
+        stored === undefined &&
+        rootSite !== undefined
+      ) {
+        // A stored consuming Effect owns its environment through the aggregate. Running it moves
+        // the complete root in one use, including through nested field projections; the Effect
+        // field is never extracted as an independently owned value.
+        checkPlaceInterior(state, live, expression.subject, guard, escaping)
+        checkUse(state, live, rootSite, placeRoot(expression.subject).span, true)
+        return
+      }
       const site = useSite(expression.subject)
       if (
         site !== undefined &&
@@ -1327,42 +1345,45 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
   }
   scanStatementRunEnds(fn.statements)
 
-  const movedCallableBindings = (expression: Elaboration.ExpressionFact): ReadonlyArray<number> => {
-    if (expression._tag === 'Grouped') return movedCallableBindings(expression.expression)
+  const movedExecutableBindings = (
+    expression: Elaboration.ExpressionFact,
+  ): ReadonlyArray<number> => {
+    if (expression._tag === 'Grouped') return movedExecutableBindings(expression.expression)
     if (expression._tag === 'Move') {
       const site = directSite(expression.subject)?.site
       return site?._tag === 'Let' &&
         expression.subject.type._tag === 'Available' &&
-        Type.containsCallableRepresentation(expression.subject.type.type)
+        (Type.isEffect(expression.subject.type.type) ||
+          Type.containsExecutableRepresentation(expression.subject.type.type))
         ? Object.freeze([site.binding.ordinal])
-        : movedCallableBindings(expression.subject)
+        : movedExecutableBindings(expression.subject)
     }
     if (expression._tag === 'StructLiteral')
       return Object.freeze(
         expression.initializers.flatMap((initializer) =>
-          movedCallableBindings(initializer.expression),
+          movedExecutableBindings(initializer.expression),
         ),
       )
     if (expression._tag === 'ArrayLiteral')
       return Object.freeze(
-        expression.elements.flatMap((element) => movedCallableBindings(element.expression)),
+        expression.elements.flatMap((element) => movedExecutableBindings(element.expression)),
       )
     return Object.freeze([])
   }
-  const callableAliases = new Map<number, number>()
+  const executableAliases = new Map<number, number>()
   for (const binding of fn.bindings) {
-    for (const source of movedCallableBindings(binding.initializer)) {
-      callableAliases.set(source, binding.id.ordinal)
+    for (const source of movedExecutableBindings(binding.initializer)) {
+      executableAliases.set(source, binding.id.ordinal)
     }
   }
-  let propagatedCallableEnd = true
-  while (propagatedCallableEnd) {
-    propagatedCallableEnd = false
-    for (const [source, destination] of callableAliases) {
+  let propagatedExecutableEnd = true
+  while (propagatedExecutableEnd) {
+    propagatedExecutableEnd = false
+    for (const [source, destination] of executableAliases) {
       const ending = callableEnds.get(destination)
       if (ending === undefined || callableEnds.get(source) === ending) continue
       callableEnds.set(source, ending)
-      propagatedCallableEnd = true
+      propagatedExecutableEnd = true
     }
   }
 
@@ -1811,16 +1832,17 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
             [],
             'Read',
             initializerType._tag === 'Available' && Type.isEffect(initializerType.type)
-              ? (runEnds.get(statement.binding.id.ordinal) ?? {
+              ? (runEnds.get(statement.binding.id.ordinal) ??
+                callableEnds.get(statement.binding.id.ordinal) ?? {
                   region: statement.region,
                   span: fn.declaration.syntax.span,
                 })
-              : // A binding that stores a callable holds its captured borrows for as long as it
-                // holds the callable, whether the callable is the binding's own value or sits in a
-                // field of the aggregate it names.
+              : // A binding that stores an executable holds its captured borrows for as long as it
+                // holds that environment, whether it is the binding's own value or sits in a field
+                // of the aggregate it names.
                 initializerType._tag === 'Available' &&
                   (Type.isCallable(initializerType.type) ||
-                    Type.containsCallableRepresentation(initializerType.type))
+                    Type.containsExecutableRepresentation(initializerType.type))
                 ? (callableEnds.get(statement.binding.id.ordinal) ?? {
                     region: statement.region,
                     span: fn.declaration.syntax.span,
