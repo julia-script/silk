@@ -578,6 +578,7 @@ export interface OperatorExpressionFact {
   readonly mappings: ReadonlyArray<BuiltinArgumentMappingFact>
   readonly contract: CallContractFact
   readonly interfaceOperation?: InterfaceOperationFact
+  readonly witnessEffectSite?: Hir.EffectSiteId
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
 }
@@ -782,6 +783,7 @@ export type ExpressionFact =
       readonly arguments: ReadonlyArray<ArgumentFact>
       readonly mappings: ReadonlyArray<ArgumentMappingFact>
       readonly contract: CallContractFact
+      readonly witnessEffectSite?: Hir.EffectSiteId
       readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }
@@ -3523,6 +3525,7 @@ function analyzeArguments(
   let target: SourceCallable | undefined
   let builtinParameters: ReadonlyArray<SemanticType> = Object.freeze([])
   let builtinTypeParameters: ReadonlyArray<Type.Parameter> = Object.freeze([])
+  let boundParameters: ReadonlyArray<SemanticType> = Object.freeze([])
   if (first !== undefined && second === undefined) {
     const name = spelling(source, first)
     const resolved = NameResolution.lookup(resolution.scope, resolution.index, name)
@@ -3566,6 +3569,32 @@ function analyzeArguments(
       target = serviceOperation(qualifier.declaration, memberSpelling)
     } else if (
       qualifier._tag === 'Resolved' &&
+      qualifier.declaration._tag === 'InterfaceDeclaration'
+    ) {
+      const memberToken = second
+      const bound = boundOperationReference(
+        declaration,
+        qualifier.declaration,
+        qualifierSpelling,
+        memberSpelling,
+        memberToken,
+      )
+      if (bound?._tag === 'BoundOperation') boundParameters = bound.reference.parameters
+      else if (qualifier.declaration.canonical._tag === 'Canonical') {
+        const member = DeclarationIndex.lookup(
+          resolution.index,
+          qualifier.declaration.canonical.id.module,
+          memberSpelling,
+        )
+        target =
+          member._tag === 'Resolved' &&
+          member.declaration._tag === 'FunctionDeclaration' &&
+          member.declaration.visibility === 'Public'
+            ? member.declaration
+            : undefined
+      }
+    } else if (
+      qualifier._tag === 'Resolved' &&
       (qualifier.declaration._tag === 'StructDeclaration' ||
         qualifier.declaration._tag === 'InterfaceDeclaration') &&
       qualifier.declaration.canonical._tag === 'Canonical'
@@ -3604,27 +3633,29 @@ function analyzeArguments(
       ? Type.prefixSubstitution(declaredTypeParameters, explicitTypes)
       : undefined
   const expectedTypes = Object.freeze(
-    builtinParameters.length > 0
-      ? builtinParameters
-          .slice(
-            builtinParameters.length >= 2 && argumentNodes.length === builtinParameters.length - 1
-              ? 1
-              : 0,
-          )
-          .map((parameter) => Type.substitute(parameter, builtinSubstitution ?? new Map()))
-      : (target?.parameters ?? [])
-          .slice(
-            target !== undefined &&
-              target.parameters.length >= 2 &&
-              argumentNodes.length === target.parameters.length - 1
-              ? 1
-              : 0,
-          )
-          .map((parameter) =>
-            parameter.declaredType._tag === 'Resolved'
-              ? Type.substitute(parameter.declaredType.type, substitution ?? new Map())
-              : undefined,
-          ),
+    boundParameters.length > 0
+      ? boundParameters
+      : builtinParameters.length > 0
+        ? builtinParameters
+            .slice(
+              builtinParameters.length >= 2 && argumentNodes.length === builtinParameters.length - 1
+                ? 1
+                : 0,
+            )
+            .map((parameter) => Type.substitute(parameter, builtinSubstitution ?? new Map()))
+        : (target?.parameters ?? [])
+            .slice(
+              target !== undefined &&
+                target.parameters.length >= 2 &&
+                argumentNodes.length === target.parameters.length - 1
+                ? 1
+                : 0,
+            )
+            .map((parameter) =>
+              parameter.declaredType._tag === 'Resolved'
+                ? Type.substitute(parameter.declaredType.type, substitution ?? new Map())
+                : undefined,
+            ),
   )
   return analyzeArgumentNodes(
     source,
@@ -5829,7 +5860,22 @@ const analyzeOperatorExpression = (
           : operandNodes.map(() => genericType ?? signature.result),
       )
     : signature.parameters
-  const operatorResult = genericInterface ? overActor(signature.result) : signature.result
+  const interfaceResult = (() => {
+    const contract = interfaceOperation?.contract
+    if (contract?.success._tag !== 'Resolved') return undefined
+    return contract.functionKind === 'Ordinary'
+      ? contract.success.type
+      : Type.effect(
+          contract.success.type,
+          contract.failureRow.failures,
+          'Shared',
+          contract.requirementRow.requirements,
+          contract.failureRow.parameters,
+          contract.requirementRow.parameters,
+        )
+  })()
+  const operatorResult =
+    interfaceResult ?? (genericInterface ? overActor(signature.result) : signature.result)
   const reference: CallReferenceFact = Object.freeze({
     _tag: 'ResolvedBuiltin',
     spelling: `${target.actor}.${target.operation}`,
@@ -5859,6 +5905,9 @@ const analyzeOperatorExpression = (
       mappings: builtinArgumentMappings(reference, argumentsResult.facts),
       contract: contract.fact,
       ...(interfaceOperation === undefined ? {} : { interfaceOperation }),
+      ...(interfaceOperation?.contract.functionKind === 'Effect'
+        ? { witnessEffectSite: executableSite('EffectSiteId', resolution, node) }
+        : {}),
       type: expressionType,
       syntax: node,
     }),
@@ -7179,7 +7228,13 @@ function analyzeExpression(
         )
       }
       if (bound !== undefined)
-        return finishBoundOperationCall(node, bound.reference, argumentsResult, callTypeArguments)
+        return finishBoundOperationCall(
+          node,
+          bound.reference,
+          argumentsResult,
+          callTypeArguments,
+          resolution,
+        )
     }
     if (
       qualifierLookup._tag === 'Resolved' &&
@@ -7586,6 +7641,7 @@ const finishBoundOperationCall = (
   reference: Extract<CallReferenceFact, { readonly _tag: 'ResolvedBoundOperation' }>,
   argumentsResult: ArgumentsResult,
   callTypeArguments: CallTypeArgumentsResult,
+  resolution: ResolutionContext,
 ): ExpressionResult => {
   const typeArgumentDiagnostic =
     callTypeArguments.explicit && callTypeArguments.facts.length > 0
@@ -7612,6 +7668,9 @@ const finishBoundOperationCall = (
       arguments: argumentsResult.facts,
       mappings: callContract.mappings,
       contract: callContract.fact,
+      ...(reference.interfaceContract.functionKind === 'Effect'
+        ? { witnessEffectSite: executableSite('EffectSiteId', resolution, node) }
+        : {}),
       type: expressionType,
       syntax: node,
     }),
@@ -9220,6 +9279,9 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       provider: fact.reference.provider,
       operation: fact.reference.operation,
       contract: fact.reference.interfaceContract,
+      ...(fact.witnessEffectSite === undefined
+        ? {}
+        : { witnessEffectSite: fact.witnessEffectSite }),
       arguments: Object.freeze(
         fact.arguments.map((argument, ordinal) =>
           hirExpression(
@@ -9361,6 +9423,9 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       intrinsic: fact.reference.intrinsic,
       ...(fact._tag === 'Operator' && fact.interfaceOperation !== undefined
         ? { interfaceOperation: fact.interfaceOperation }
+        : {}),
+      ...(fact._tag === 'Operator' && fact.witnessEffectSite !== undefined
+        ? { witnessEffectSite: fact.witnessEffectSite }
         : {}),
       typeArguments: Object.freeze(
         fact._tag === 'Call'

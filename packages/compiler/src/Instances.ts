@@ -1487,6 +1487,11 @@ const effectOriginOf = (
   context: EffectOriginContext,
 ): string | undefined => {
   if (expression._tag === 'EffectBlock') return effectIdentity(context.owner, expression.site)
+  if (
+    (expression._tag === 'BoundOperationCall' || expression._tag === 'BuiltinCall') &&
+    expression.witnessEffectSite !== undefined
+  )
+    return effectIdentity(context.owner, expression.witnessEffectSite)
   if (expression._tag === 'ParameterReference')
     return parameterEffectIdentity(context.fn, context.owner, expression.parameter.ordinal)
   if (expression._tag === 'BindingReference') {

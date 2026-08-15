@@ -34,5 +34,5 @@ impl Integer<isize> for isize { add: Intrinsic.isizeAdd }
 
 /// Adds two values using the concrete integer operation selected during specialization.
 pub fn add<T: Integer>(left: T, right: T) -> T {
-  return left + right
+  return move left + move right
 }

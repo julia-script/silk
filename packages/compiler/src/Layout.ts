@@ -1215,6 +1215,17 @@ const addExpressionTypes = (
     expression._tag === 'BoundOperationCall'
   ) {
     for (const argument of expression.arguments) addExpressionTypes(types, argument, substitution)
+    const contract =
+      expression._tag === 'BoundOperationCall'
+        ? expression.contract
+        : expression._tag === 'BuiltinCall'
+          ? expression.interfaceOperation?.contract
+          : undefined
+    for (const operand of contract?.operands ?? []) {
+      if (operand.type._tag !== 'Resolved') continue
+      const type = Type.substitute(operand.type.type, substitution)
+      types.set(Type.key(type), type)
+    }
   }
   if (expression._tag === 'CallableSection') {
     for (const capture of expression.captures) {
@@ -1528,6 +1539,100 @@ const effectEnvironments = (
             site: block.site,
             effect,
             ...(successEffectIdentity === undefined ? {} : { successEffectIdentity }),
+            fields: Object.freeze(fields),
+            size,
+            alignment: environmentAlignment,
+            tailPadding: size - cursor,
+          }),
+        )
+      }
+
+      const witnessEffects = instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .flatMap((expression) => {
+          if (expression._tag !== 'BoundOperationCall' && expression._tag !== 'BuiltinCall')
+            return []
+          if (expression.witnessEffectSite === undefined) return []
+          const contract =
+            expression._tag === 'BoundOperationCall'
+              ? expression.contract
+              : expression._tag === 'BuiltinCall'
+                ? expression.interfaceOperation?.contract
+                : undefined
+          return contract === undefined
+            ? []
+            : [Object.freeze({ expression, contract, site: expression.witnessEffectSite })]
+        })
+      for (const witness of witnessEffects) {
+        const structuralEffect = Type.substitute(witness.expression.type, instance.substitution)
+        if (!Type.isEffect(structuralEffect)) continue
+        let cursor = 0
+        let environmentAlignment = 1
+        let unavailable: string | undefined
+        const fields: Array<EffectEnvironmentField> = []
+        for (const [ordinal, operand] of witness.contract.operands.entries()) {
+          if (operand.type._tag !== 'Resolved') {
+            unavailable = `interface operand ${ordinal} has no concrete type`
+            break
+          }
+          const fieldType = Type.substitute(operand.type.type, instance.substitution)
+          const valueLayout = layouts.get(Type.key(fieldType))
+          if (valueLayout === undefined) {
+            unavailable = `interface operand ${ordinal} has no value layout`
+            break
+          }
+          const access =
+            Type.isReference(fieldType) || Type.isSlice(fieldType) ? fieldType.access : 'Take'
+          const offset = alignUp(cursor, valueLayout.alignment)
+          fields.push(
+            Object.freeze({
+              source: 'Parameter',
+              ordinal,
+              access,
+              type: fieldType,
+              offset,
+              size: valueLayout.size,
+              alignment: valueLayout.alignment,
+              padding: offset - cursor,
+              representation: 'Value',
+            }),
+          )
+          cursor = offset + valueLayout.size
+          environmentAlignment = Math.max(environmentAlignment, valueLayout.alignment)
+        }
+        const access = fields.some((field) => field.access === 'Take')
+          ? 'Take'
+          : fields.some((field) => field.access === 'Exclusive')
+            ? 'Exclusive'
+            : 'Shared'
+        const effect = Type.effect(
+          structuralEffect.success,
+          structuralEffect.failures,
+          access,
+          structuralEffect.requirements,
+          structuralEffect.failureParameters,
+          structuralEffect.requirementParameters,
+        )
+        if (unavailable !== undefined) {
+          environments.push(
+            Object.freeze({
+              _tag: 'UnavailableEffectEnvironment',
+              instance: instance.key,
+              site: witness.site,
+              effect,
+              reason: unavailable,
+            }),
+          )
+          continue
+        }
+        const size = alignUp(cursor, environmentAlignment)
+        environments.push(
+          Object.freeze({
+            _tag: 'EffectEnvironment',
+            instance: instance.key,
+            site: witness.site,
+            effect,
             fields: Object.freeze(fields),
             size,
             alignment: environmentAlignment,

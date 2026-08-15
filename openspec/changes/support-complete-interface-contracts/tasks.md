@@ -6,9 +6,7 @@
 
 ## 2. Literal Ownership and Subsumption
 
-- [ ] 2.1 Replace general value-to-shared-borrow witness adaptation with literal source operand matching.
-  - Deferred in PR2: removing the legacy value adapter depends on the atomic `Order`/`HashKey`
-    ownership-convention migration in tasks 4.1–4.3; mixed source conventions are not mergeable.
+- [x] 2.1 Replace general value-to-shared-borrow witness adaptation with literal source operand matching.
 - [x] 2.2 Implement receiver/parameter access compatibility and deterministic stronger-demand diagnostics.
 - [x] 2.3 Implement failure-row, requirement-row, and access subsumption while preserving exact generic caller contracts.
 - [x] 2.4 Add pure/smaller witness positives and stronger-row/access negatives.
@@ -25,9 +23,9 @@
 
 ## 4. Interface Migration
 
-- [ ] 4.1 Rewrite ordinary `Order` and `HashKey` interface operands and witnesses with explicit intended borrows.
-- [ ] 4.2 Confine any transitional operand adapter to sealed intrinsic witness lowering.
-- [ ] 4.3 Update standard-library, operator, collection, and compiler acceptance fixtures for the breaking ownership convention.
+- [x] 4.1 Rewrite ordinary `Order` and `HashKey` interface operands and witnesses with explicit intended borrows.
+- [x] 4.2 Confine any transitional operand adapter to sealed intrinsic witness lowering.
+- [x] 4.3 Update standard-library, operator, collection, and compiler acceptance fixtures for the breaking ownership convention.
 
 ## 5. Verification
 

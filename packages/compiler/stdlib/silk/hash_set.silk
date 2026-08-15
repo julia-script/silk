@@ -352,7 +352,7 @@ pub effect fn insert<T: HashKey>(
   self: &mut HashSet<T>,
   value: T
 ) -> bool ! OutOfMemory ? &mut Allocator {
-  let hashed = HashKey.hash(value, self.seed)
+  let hashed = HashKey.hash(&value, &self.seed)
   if usize.ZERO < self.capacity {
     let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
     let mut owned = openStorage<T>(move storage)
@@ -420,7 +420,7 @@ pub fn contains<T: HashKey>(self: &HashSet<T>, value: T) -> bool {
   if self.capacity == usize.ZERO {
     return false
   }
-  let hashed = HashKey.hash(value, self.seed)
+  let hashed = HashKey.hash(&value, &self.seed)
   let mut index = bucketOf(hashed, self.capacity)
   let mut scanned = usize.ZERO
   while scanned < self.capacity {
@@ -451,7 +451,7 @@ pub fn indexOf<T: HashKey>(self: &HashSet<T>, value: T) -> Option<usize> {
   if self.capacity == usize.ZERO {
     return Option.none<usize>()
   }
-  let hashed = HashKey.hash(value, self.seed)
+  let hashed = HashKey.hash(&value, &self.seed)
   let mut index = bucketOf(hashed, self.capacity)
   let mut scanned = usize.ZERO
   while scanned < self.capacity {
@@ -482,7 +482,7 @@ pub fn remove<T: HashKey>(self: &mut HashSet<T>, value: T) -> Option<T> {
   if self.capacity == usize.ZERO {
     return Option.none<T>()
   }
-  let hashed = HashKey.hash(value, self.seed)
+  let hashed = HashKey.hash(&value, &self.seed)
   let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
   let mut owned = openStorage<T>(move storage)
   let mut found = self.capacity

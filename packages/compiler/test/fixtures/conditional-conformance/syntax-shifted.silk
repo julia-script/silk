@@ -1,5 +1,5 @@
 struct Prefix { value: i32 }
-interface Decoder<T>{fn decode(value:T)->i32}
+interface Decoder<T>{fn decode(value:&T)->i32}
 struct Wrapper<S>{source:S}
-fn wrapperDecode<S:Decoder>(value:&Wrapper<S>)->i32{return Decoder.decode(value.source)}
+fn wrapperDecode<S:Decoder>(value:&Wrapper<S>)->i32{return Decoder.decode(&value.source)}
 impl < S : Decoder < S > > Decoder < Wrapper < S > > for Wrapper < S > {decode:Wrapper.wrapperDecode}

@@ -3,7 +3,7 @@ interface Ready<T> {
 }
 
 interface Renderer<T, F: fn(i32) -> i32> {
-  fn render(value: T) -> i32
+  fn render(value: &T) -> i32
 }
 
 struct Box<S, F: fn(i32) -> i32> {
