@@ -17,7 +17,8 @@
 ## 3. Generic Witness Targets
 
 - [x] 3.1 Infer mapped target type, row, and representation binders from substituted conformance and operation contracts.
-- [x] 3.2 Preserve inferred target arguments in HIR witness questions and concrete instance keys.
+- [x] 3.2 Preserve generic target-inference inputs in unresolved HIR witness questions and inferred
+  target arguments in conformance mappings and concrete instance keys.
 - [x] 3.3 Add two-specialization acceptance plus unresolved and conflicting binder diagnostics.
 - [x] 3.4 Lower every admitted witness to one static target with no runtime dictionary or service slot.
 

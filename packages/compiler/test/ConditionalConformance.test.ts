@@ -602,6 +602,24 @@ pub fn main() -> i32 {
     if (hir === undefined) return
     const encodedHir = Hir.encode(hir)
     assert.include(encodedHir, `bound ${module}.Renderer<T>.render over T`)
+    const renderQuestion = hir.functions
+      .find(
+        (fn) =>
+          fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'renderOf',
+      )
+      ?.statements.flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+      .find((expression) => expression._tag === 'BoundOperationCall')
+    assert.strictEqual(renderQuestion?._tag, 'BoundOperationCall')
+    if (renderQuestion?._tag !== 'BoundOperationCall') return
+    assert.strictEqual(Type.encode(renderQuestion.provider), 'T')
+    assert.strictEqual(Type.encode(renderQuestion.capability), `${module}.Renderer<T>`)
+    assert.deepEqual(
+      renderQuestion.contract.operands.map((operand) =>
+        operand.type._tag === 'Resolved' ? Type.encode(operand.type.type) : operand.type._tag,
+      ),
+      ['&T'],
+    )
 
     const renderInstances = Analysis.instancesOf(snapshot).instances.filter(
       (instance) => instance.key.declaration.name === 'render',
@@ -769,12 +787,14 @@ pub fn main() -> i32 { return 0 }`,
   }),
 )
 
-it.effect('infers operand binders before admitting a smaller generic witness row', () =>
+it.effect('infers operand binders and propagates a failing smaller generic witness row', () =>
   Effect.gen(function* () {
     const module = 'conditional-conformance/smaller-generic-row'
     const snapshot = yield* analyze(
       module,
-      `struct Problem {}
+      `import silk.result { Result, Success, Failure }
+
+struct Problem { code: i32 }
 struct Extra {}
 
 interface Decoder<T> {
@@ -783,11 +803,32 @@ interface Decoder<T> {
 
 struct Box<A> { value: A }
 
-effect fn decodeBox<A>(value: &Box<A>) -> i32 ! Problem { return 42 }
+effect fn decodeBox<A>(value: &Box<A>) -> i32 ! Problem {
+  fail Problem { code: 42 }
+}
 
 impl Decoder<Box<i32>> for Box<i32> { decode: Box.decodeBox }
 
-pub fn main() -> i32 { return 0 }`,
+fn pending<T: Decoder>(value: &T) -> Effect<i32 ! Problem | Extra> {
+  return Decoder.decode(value)
+}
+
+fn observe(result: Result<i32, Problem | Extra>) -> i32 {
+  return match move result {
+    Result<i32, Problem | Extra> { value: outcome } => match move outcome {
+      Success<i32> { value } => value
+      Failure<Problem | Extra> { error } => match move error {
+        Problem { code } => code
+        Extra {} => 0
+      }
+    }
+  }
+}
+
+pub fn main() -> i32 {
+  let boxed = Box<i32> { value: 0 }
+  return observe(run Effect.result(pending<Box<i32>>(&boxed)))
+}`,
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const provider = Type.nominal(module, 'Box', ['i32'])
@@ -800,5 +841,14 @@ pub fn main() -> i32 { return 0 }`,
     )
     assert.strictEqual(target?.implementation.name, 'decodeBox')
     assert.deepEqual(target?.typeArguments.map(Type.encodeGenericArgument), ['i32'])
+    const instances = Analysis.instancesOf(snapshot).instances.filter(
+      (instance) => instance.key.declaration.name === 'decodeBox',
+    )
+    assert.strictEqual(instances.length, 1)
+    assert.deepEqual(instances.at(0)?.key.typeArguments.map(Type.encodeGenericArgument), ['i32'])
+
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
   }),
 )
