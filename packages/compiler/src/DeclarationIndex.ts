@@ -2,6 +2,7 @@ import * as Option from 'effect/Option'
 import * as ConformanceGoal from './ConformanceGoal.js'
 import * as ConformanceHead from './ConformanceHead.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as InterfaceWitnessInference from './InterfaceWitnessInference.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
@@ -873,6 +874,8 @@ export interface ConformanceFact {
       | TypePathFact
       | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
     readonly contract?: InterfaceOperationApplicationFact
+    /** The mapped declaration's binders expressed over this conformance header. */
+    readonly targetArguments?: ReadonlyArray<Type.GenericArgument>
     readonly syntax: SyntaxTree.Node
   }>
   readonly hook?: DropHookFact
@@ -4096,16 +4099,91 @@ const witnessBinding = (
   })
 }
 
+/** Infers an interface witness declaration's own binders without assuming header position. */
+const inferInterfaceWitnessTarget = (
+  implementation: DeclarationFact,
+  contract: InterfaceOperationApplicationFact | undefined,
+): InterfaceWitnessInference.Inference | undefined => {
+  if (
+    contract === undefined ||
+    implementation.parameters.length !== contract.operands.length ||
+    implementation.returnType._tag !== 'Resolved'
+  )
+    return undefined
+  const constraints: Array<InterfaceWitnessInference.Constraint> = []
+  for (const [ordinal, operand] of contract.operands.entries()) {
+    const pattern = implementation.parameters.at(ordinal)?.declaredType
+    if (pattern?._tag !== 'Resolved' || operand.type._tag !== 'Resolved') return undefined
+    const name =
+      operand.parameter.name._tag === 'Present'
+        ? operand.parameter.name.spelling
+        : `#${ordinal + 1}`
+    constraints.push(
+      Object.freeze({
+        label: Type.equals(
+          Type.isReference(operand.type.type) ? operand.type.type.target : operand.type.type,
+          contract.provider,
+        )
+          ? `receiver ${name}`
+          : `parameter ${name}`,
+        pattern: pattern.type,
+        // PR3 infers through the existing witness ABI. PR4 replaces this one adapter together with
+        // the atomic Order/HashKey literal-ownership migration.
+        actual: Type.reference('Shared', operand.type.type),
+      }),
+    )
+  }
+  constraints.push(
+    Object.freeze({
+      label: 'success',
+      pattern: implementation.returnType.type,
+      actual: contract.success._tag === 'Resolved' ? contract.success.type : 'never',
+    }),
+  )
+  constraints.push(
+    Object.freeze({
+      label: 'failure and requirement rows',
+      pattern: Type.effect(
+        Type.unit,
+        implementation.failureRow.failures,
+        'Shared',
+        implementation.requirementRow.requirements,
+        implementation.failureRow.parameters,
+        implementation.requirementRow.parameters,
+      ),
+      actual: Type.effect(
+        Type.unit,
+        contract.failureRow.failures,
+        'Shared',
+        contract.requirementRow.requirements,
+        contract.failureRow.parameters,
+        contract.requirementRow.parameters,
+      ),
+    }),
+  )
+  return InterfaceWitnessInference.infer(
+    implementation.typeParameters
+      .filter((parameter) => parameter.duplicateOf === undefined)
+      .map((parameter) => parameter.type),
+    constraints,
+  )
+}
+
 /** Finds the first implementation bound the conformance header never promises. */
 const unpromisedWitnessBound = (
   binding: ReturnType<typeof witnessBinding>,
-  declaredParameters: ReadonlyArray<Type.Parameter>,
+  arguments_: ReadonlyArray<Type.GenericArgument>,
   conformance: ConformanceFact,
 ): TypeParameterFact | undefined =>
   binding.binders.find((binder, position) => {
     const bound = binder.bound
     if (bound?._tag !== 'ResolvedBound') return bound !== undefined
-    const header = declaredParameters.at(position)
+    const argument = arguments_.at(position)
+    const header =
+      argument !== undefined && Type.isTypeArgument(argument) && Type.isParameter(argument)
+        ? conformance.typeParameters.find((parameter) => Type.equals(parameter.type, argument))
+            ?.type
+        : undefined
     return (
       header === undefined ||
       !conformance.requirements.some(
@@ -5037,6 +5115,10 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
   }
 
   const invalidConformances = new Set<ConformanceFact>()
+  const inferredWitnessArguments = new Map<
+    ConformanceFact['operations'][number],
+    ReadonlyArray<Type.GenericArgument>
+  >()
   for (const module of modules) {
     for (const conformance of module.conformances) {
       const markInvalid = (): void => {
@@ -5271,16 +5353,33 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
               )
               continue
             }
-            // A conditional conformance's witness is generic in the same binders its header
-            // declares, so the witness function's own parameters are bound to the header's
-            // positionally. That correspondence is what lets one witness serve every
-            // specialization the header covers, and it is the same shape the hidden Drop hook
-            // already uses. A conformance that declares no binders still admits no generic witness.
+            const inference = inferInterfaceWitnessTarget(implementation, mapping.contract)
+            if (inference === undefined || inference._tag === 'Failed') {
+              if (inference?._tag === 'Failed') {
+                const problem = inference.problem
+                const detail =
+                  problem._tag === 'UnresolvedBinder'
+                    ? `cannot infer witness target binder ${problem.binder.name}`
+                    : problem._tag === 'ConflictingBinder'
+                      ? `witness target binder ${problem.binder.name} is ${Type.encodeGenericArgument(problem.previous)} from ${problem.previousConstraint} but ${Type.encodeGenericArgument(problem.conflicting)} from ${problem.conflictingConstraint}`
+                      : problem._tag === 'IncompatibleArguments'
+                        ? `witness target binder ${problem.binder.name} cannot accept ${Type.encodeGenericArgument(problem.argument)}`
+                        : `${problem.constraint} cannot determine a compatible witness target`
+                diagnostics.push(
+                  invalidDiagnostic(`${target.spelling}: ${detail}`, mapping.syntax.span),
+                )
+              } else rejectIncompatibleMapping()
+              continue
+            }
             const binding = witnessBinding(implementation, declaredParameters)
             // A witness may only ask for what the header already promises. Its own bounds are the
             // obligations its body will discharge, so a bound the header never requires would be
             // proved nowhere and would surface as a call with no lowering rather than a diagnostic.
-            const unpromisedBound = unpromisedWitnessBound(binding, declaredParameters, conformance)
+            const unpromisedBound = unpromisedWitnessBound(
+              binding,
+              inference.arguments,
+              conformance,
+            )
             if (unpromisedBound !== undefined) {
               diagnostics.push(
                 invalidDiagnostic(
@@ -5291,11 +5390,8 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
               continue
             }
             const specialize = (type: Type.Type): Type.Type =>
-              binding.substitution === undefined
-                ? type
-                : Type.substitute(type, binding.substitution)
+              Type.substitute(type, inference.substitution)
             const validParameters =
-              binding.substitution !== undefined &&
               implementation.parameters.length === contract.parameters.length &&
               contract.parameters.every((parameter, ordinal) => {
                 const actual = implementation.parameters.at(ordinal)?.declaredType
@@ -5322,11 +5418,11 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
               !validParameters ||
               !validResult ||
               implementation.functionKind !== 'Ordinary' ||
-              binding.parameters.length !== declaredParameters.length ||
               implementation.failureRow.failures.length > 0 ||
               implementation.requirementRow.requirements.length > 0
-            )
+            ) {
               rejectIncompatibleMapping()
+            } else inferredWitnessArguments.set(mapping, inference.arguments)
             continue
           }
           const operation =
@@ -5464,7 +5560,11 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             continue
           }
           const binding = witnessBinding(implementation, declaredParameters)
-          const unpromisedBound = unpromisedWitnessBound(binding, declaredParameters, conformance)
+          const unpromisedBound = unpromisedWitnessBound(
+            binding,
+            declaredParameters.map(Type.parameterArgument),
+            conformance,
+          )
           if (unpromisedBound !== undefined) {
             diagnostics.push(
               invalidDiagnostic(
@@ -5671,6 +5771,14 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         module.conformances.map((conformance) =>
           Object.freeze({
             ...conformance,
+            operations: Object.freeze(
+              conformance.operations.map((operation) => {
+                const targetArguments = inferredWitnessArguments.get(operation)
+                return targetArguments === undefined
+                  ? operation
+                  : Object.freeze({ ...operation, targetArguments })
+              }),
+            ),
             validity:
               invalidConformances.has(conformance) ||
               conformance.coherence._tag !== 'Coherent' ||
@@ -5983,8 +6091,6 @@ const interfaceByCapability = (self: Index, capability: Type.Nominal): Interface
  */
 const proofMemos = new WeakMap<Index, Map<string, ConformanceGoal.Proof>>()
 
-const noGenericArguments: ReadonlyArray<Type.GenericArgument> = Object.freeze([])
-
 /** One conformance whose head covers a concrete goal, with the arguments matching it bound. */
 interface ConformanceCandidate {
   readonly module: string
@@ -6281,6 +6387,25 @@ export interface InterfaceWitnessTarget {
   readonly structuralProvider?: Type.Type
 }
 
+const inferredTargetArguments = (
+  conformance: ConformanceFact,
+  mapping: ConformanceFact['operations'][number],
+  proof: Extract<ConformanceGoal.Proof, { readonly _tag: 'Proved' }>,
+): ReadonlyArray<Type.GenericArgument> | undefined => {
+  if (mapping.targetArguments === undefined) return undefined
+  const headerParameters = conformance.typeParameters
+    .filter((parameter) => parameter.duplicateOf === undefined)
+    .map((parameter) => parameter.type)
+  const headerSubstitution = Type.substitution(headerParameters, proof.typeArguments)
+  if (headerSubstitution === undefined) return undefined
+  const arguments_ = Object.freeze(
+    mapping.targetArguments.map((argument) =>
+      Type.substituteGenericArgument(argument, headerSubstitution),
+    ),
+  )
+  return arguments_.every(Type.isConcreteGenericArgument) ? arguments_ : undefined
+}
+
 /**
  * Selects the provider's own function one interface operation maps to, with its type arguments.
  *
@@ -6295,15 +6420,21 @@ export const interfaceWitnessTarget = (
   capability: Type.Nominal,
   operation: string,
 ): InterfaceWitnessTarget | undefined => {
-  const implementation = interfaceWitnessImplementation(self, provider, capability, operation)
-  if (implementation === undefined) return undefined
   const proof = prove(self, provider, capability)
+  if (proof._tag !== 'Proved' || proof.selection._tag !== 'SourceSelection') return undefined
+  const conformance = selectedConformance(self, proof.selection)
+  if (conformance === undefined) return undefined
+  const mapping = conformance.operations.find(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === operation,
+  )
+  if (mapping === undefined) return undefined
+  const implementation = witnessImplementation(self, provider, conformance, operation)
+  const typeArguments = inferredTargetArguments(conformance, mapping, proof)
+  if (implementation === undefined || typeArguments === undefined) return undefined
   return Object.freeze({
     implementation,
-    typeArguments: proof._tag === 'Proved' ? proof.typeArguments : noGenericArguments,
-    ...(proof._tag === 'Proved' && proof.requirements.length > 0
-      ? { structuralProvider: provider }
-      : {}),
+    typeArguments,
+    ...(proof.requirements.length > 0 ? { structuralProvider: provider } : {}),
   })
 }
 
@@ -6337,17 +6468,18 @@ export const witnessDependencyTargets = (
         conformance,
         mapping.name.spelling,
       )
-      if (implementation === undefined) continue
+      const typeArguments = inferredTargetArguments(conformance, mapping, dependency)
+      if (implementation === undefined || typeArguments === undefined) continue
       const identity = Specialization.key({
         declaration: implementation,
-        typeArguments: dependency.typeArguments,
+        typeArguments,
       })
       if (!found.has(identity))
         found.set(
           identity,
           Object.freeze({
             implementation,
-            typeArguments: dependency.typeArguments,
+            typeArguments,
             structuralProvider: dependency.goal.provider,
           }),
         )

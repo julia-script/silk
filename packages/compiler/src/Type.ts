@@ -2155,16 +2155,18 @@ const inferGenericArgument = (
   pattern: GenericArgument,
   actual: GenericArgument,
   inferred: Map<string, GenericArgument>,
+  allowOpenActual: boolean,
 ): boolean => {
   if (isRepresentationParameterArgument(pattern))
     return (
       isRepresentationArgument(actual) && bindGenericArgument(pattern.parameter, actual, inferred)
     )
   if (isFailureRowArgument(pattern) && isFailureRowArgument(actual))
-    return inferFailureRowArgument(pattern, actual, inferred, false)
+    return inferFailureRowArgument(pattern, actual, inferred, allowOpenActual)
   if (isRequirementRowArgument(pattern) && isRequirementRowArgument(actual))
-    return inferRequirementRowArgument(pattern, actual, inferred, false)
-  if (isTypeArgument(pattern) && isTypeArgument(actual)) return infer(pattern, actual, inferred)
+    return inferRequirementRowArgument(pattern, actual, inferred, allowOpenActual)
+  if (isTypeArgument(pattern) && isTypeArgument(actual))
+    return infer(pattern, actual, inferred, allowOpenActual)
   return genericArgumentKey(pattern) === genericArgumentKey(actual)
 }
 
@@ -2285,6 +2287,7 @@ export const infer = (
   pattern: Type,
   actual: Type,
   inferred: Map<string, GenericArgument>,
+  allowOpenGenericArguments = false,
 ): boolean => {
   if (isParameter(pattern)) {
     return pattern.kind === 'Value' && bindGenericArgument(pattern, actual, inferred)
@@ -2317,17 +2320,29 @@ export const infer = (
       return false
     return pattern.arguments.every((argument, index) => {
       const supplied = actual.arguments.at(index)
-      return supplied !== undefined && inferGenericArgument(argument, supplied, inferred)
+      return (
+        supplied !== undefined &&
+        inferGenericArgument(argument, supplied, inferred, allowOpenGenericArguments)
+      )
     })
   }
   if (isFixedArray(pattern) && isFixedArray(actual)) {
-    return pattern.length === actual.length && infer(pattern.element, actual.element, inferred)
+    return (
+      pattern.length === actual.length &&
+      infer(pattern.element, actual.element, inferred, allowOpenGenericArguments)
+    )
   }
   if (isSlice(pattern) && isSlice(actual)) {
-    return pattern.access === actual.access && infer(pattern.element, actual.element, inferred)
+    return (
+      pattern.access === actual.access &&
+      infer(pattern.element, actual.element, inferred, allowOpenGenericArguments)
+    )
   }
   if (isReference(pattern) && isReference(actual)) {
-    return pattern.access === actual.access && infer(pattern.target, actual.target, inferred)
+    return (
+      pattern.access === actual.access &&
+      infer(pattern.target, actual.target, inferred, allowOpenGenericArguments)
+    )
   }
   if (isCallable(pattern) && isCallable(actual)) {
     const patternRank = pattern.mode === 'Shared' ? 0 : pattern.mode === 'Exclusive' ? 1 : 2
@@ -2337,9 +2352,11 @@ export const infer = (
       pattern.parameters.length === actual.parameters.length &&
       pattern.parameters.every((parameter_, index) => {
         const supplied = actual.parameters.at(index)
-        return supplied !== undefined && infer(parameter_, supplied, inferred)
+        return (
+          supplied !== undefined && infer(parameter_, supplied, inferred, allowOpenGenericArguments)
+        )
       }) &&
-      infer(pattern.result, actual.result, inferred)
+      infer(pattern.result, actual.result, inferred, allowOpenGenericArguments)
     )
   }
   if (isEffect(pattern) && isEffect(actual)) {
@@ -2347,17 +2364,18 @@ export const infer = (
     const actualRank = actual.access === 'Shared' ? 0 : actual.access === 'Exclusive' ? 1 : 2
     return (
       actualRank <= patternRank &&
-      infer(pattern.success, actual.success, inferred) &&
+      infer(pattern.success, actual.success, inferred, allowOpenGenericArguments) &&
       inferFailureRows(pattern, actual, inferred) &&
       inferRequirementRows(pattern, actual, inferred)
     )
   }
   if (isRepresented(pattern) && isRepresented(actual)) {
-    if (!infer(pattern.contract, actual.contract, inferred)) return false
+    if (!infer(pattern.contract, actual.contract, inferred, allowOpenGenericArguments)) return false
     return inferGenericArgument(
       pattern.representation.argument,
       actual.representation.argument,
       inferred,
+      allowOpenGenericArguments,
     )
   }
   return equals(pattern, actual)
