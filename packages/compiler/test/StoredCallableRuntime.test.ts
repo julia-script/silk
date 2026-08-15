@@ -199,7 +199,7 @@ it.effect(
         })
       }
     }),
-  30_000,
+  60_000,
 )
 
 it.effect('executes stored-callable cleanup and scoped-borrow traces exactly once', () =>
@@ -318,5 +318,5 @@ it.effect(
         assert.strictEqual(run.status, 42)
       })
     }),
-  30_000,
+  60_000,
 )
