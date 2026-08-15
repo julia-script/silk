@@ -52,30 +52,30 @@ it.effect(
   'specializes a conditional generic service witness and its unused proof dependency',
   () =>
     Effect.gen(function* () {
-      const source = `interface Marker<T> { fn mark(value: T) -> i32 }
+      const source = `interface Marker<T> { fn mark(value: &T) -> i32 }
 
 struct Token {}
 fn markToken(value: &Token) -> i32 { return 1 }
 impl Marker<Token> for Token { mark: Token.markToken }
 
-interface Decoder<T> { fn decode(value: T) -> i32 }
+interface Decoder<T> { fn decode(value: &T) -> i32 }
 struct Schema { tag: i32 }
 fn schemaDecode(value: &Schema) -> i32 { return value.tag }
 impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
 
 struct Mapped<S> { source: S }
 fn mappedDecode<S: Decoder>(value: &Mapped<S>) -> i32 {
-  return Decoder.decode(value.source) + 1
+  return Decoder.decode(&value.source) + 1
 }
 impl<S: Decoder<S>> Decoder<Mapped<S>> for Mapped<S> { decode: Mapped.mappedDecode }
 
 struct Optional<S> { source: S }
 fn optionalDecode<S: Decoder>(value: &Optional<S>) -> i32 {
-  return Decoder.decode(value.source) + 1
+  return Decoder.decode(&value.source) + 1
 }
 impl<S: Decoder<S>> Decoder<Optional<S>> for Optional<S> { decode: Optional.optionalDecode }
 
-fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(value) }
+fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(&value) }
 
 service Counter<Prefix, Value> {
   effect fn get(value: &Value) -> i32 ? &Counter<Prefix, Value>
