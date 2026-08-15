@@ -73,13 +73,19 @@ it.effect('rejects incomplete cleanup inside nested Effect and callable captures
   Effect.gen(function* () {
     const module = yield* lowerStored(
       'stored-effect-cleanup-verification/nested-executables',
-      `struct Token { value: i32 }
+      `struct Token<F: once fn(i32) -> i32> { value: i32 marker: F }
 struct Deferred<F: once Effect<i32>> { operation: F }
-fn consume(value: i32, token: Token) -> i32 { return value + token.value }
+fn marker(value: i32) -> i32 { return value }
+fn consume<F: once fn(i32) -> i32>(value: i32, token: Token<F>) -> i32 {
+  return value + token.value
+}
+impl<F: once fn(i32) -> i32> Drop for Token<F> {
+  fn drop(self: &mut Token<F>) -> () { return () }
+}
 pub fn main() -> i32 {
-  let effectToken = Token { value: 1 }
+  let effectToken = Token { value: 1, marker: marker }
   let nested = effect { return consume(1, move effectToken) }
-  let callableToken = Token { value: 2 }
+  let callableToken = Token { value: 2, marker: marker }
   let transform = consume(move callableToken)
   let deferred = Deferred { operation: effect {
     let value = run move nested
@@ -174,8 +180,17 @@ pub fn main() -> i32 {
 
     const nestedEffectSlot =
       effectSlot.cleanup.slots.at(0) ?? unreachable('expected nested Effect cleanup slot')
+    assert.strictEqual(nestedEffectSlot.cleanup._tag, 'HookCleanup')
+    if (nestedEffectSlot.cleanup._tag !== 'HookCleanup') return
+    const strippedHook: Ownership.CleanupPlan = Object.freeze({
+      ...effectSlot.cleanup,
+      slots: Object.freeze([
+        Object.freeze({ ...nestedEffectSlot, cleanup: nestedEffectSlot.cleanup.inner }),
+      ]),
+    })
     const malformed: ReadonlyArray<readonly [Ownership.CleanupPlan, Ownership.CleanupPlan]> = [
       [Object.freeze({ _tag: 'NoCleanup', type: effectSlot.cleanup.type }), effectSlot.cleanup],
+      [strippedHook, effectSlot.cleanup],
       [
         Object.freeze({
           ...effectSlot.cleanup,

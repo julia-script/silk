@@ -2441,14 +2441,14 @@ const cleanupMatchesSemanticType = (
 ): boolean => {
   if (SilkType.isRepresented(type)) {
     const representation = Layout.entry(layout, type)?.representation
+    const contractValid = TypeCompatibility.isCompatible(
+      TypeCompatibility.check(type.contract, cleanup.type),
+    )
     if (representation?._tag === 'CallableEnvironment')
-      return (
-        (cleanup._tag === 'CallableCleanup' || cleanup._tag === 'NoCleanup') &&
-        SilkType.equals(cleanup.type, type.contract)
-      )
+      return (cleanup._tag === 'CallableCleanup' || cleanup._tag === 'NoCleanup') && contractValid
     if (representation?._tag === 'StoredEffectEnvironment')
       return (
-        SilkType.equals(cleanup.type, type.contract) &&
+        contractValid &&
         (cleanup._tag === 'EffectCleanup'
           ? storedEffectCleanupPlanValid(layout, type, representation, cleanup)
           : cleanup._tag === 'NoCleanup' &&
@@ -2494,6 +2494,20 @@ const cleanupMatchesSemanticType = (
   if (seen.has(key)) return cleanup._tag === 'NoCleanup'
   const representation = Layout.entry(layout, type)?.representation
   if (representation?._tag !== 'Aggregate') return cleanup._tag === 'NoCleanup'
+  const requiredHook = representation.cleanupHook
+  if (requiredHook !== undefined) {
+    if (
+      cleanup._tag !== 'HookCleanup' ||
+      cleanup.hook.module !== requiredHook.hook.module ||
+      cleanup.hook.name !== requiredHook.hook.name ||
+      cleanup.typeArguments.length !== requiredHook.typeArguments.length ||
+      !cleanup.typeArguments.every((argument, ordinal) => {
+        const expected = requiredHook.typeArguments.at(ordinal)
+        return expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
+      })
+    )
+      return false
+  } else if (cleanup._tag === 'HookCleanup') return false
   const concrete = cleanup._tag === 'HookCleanup' ? cleanup.inner : cleanup
   if (concrete._tag !== 'StructCleanup' || concrete.fields.length !== representation.fields.length)
     return false

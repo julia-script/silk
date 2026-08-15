@@ -3693,7 +3693,11 @@ const concreteCleanup = (
       if (effectValue !== undefined) return effectLocalCleanup(fn, effectValue, new Set())
     }
   }
-  return Ownership.cleanupPlan(fn.index, specialized, seen)
+  return Ownership.specializeCleanup(
+    Ownership.cleanupPlan(fn.index, specialized, seen),
+    new Map(),
+    (nested) => concreteCleanup(fn, nested, seen),
+  )
 }
 
 function effectLocalCleanup(

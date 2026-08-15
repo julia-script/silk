@@ -3,6 +3,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
+import * as Ownership from './Ownership.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -33,6 +34,11 @@ export type Representation =
       readonly _tag: 'Aggregate'
       readonly fields: ReadonlyArray<Field>
       readonly tailPadding: number
+      /** Static cleanup hook required before structural field cleanup; contributes no ABI bytes. */
+      readonly cleanupHook?: {
+        readonly hook: DeclarationIndex.CanonicalId
+        readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+      }
     }
   | {
       readonly _tag: 'CallableEnvironment'
@@ -1088,6 +1094,7 @@ export const catalog = (
       return failure
     }
     const size = alignUp(cursor, aggregateAlignment)
+    const cleanup = Ownership.cleanupPlan(index, type)
     const entry: Entry = Object.freeze({
       _tag: 'LayoutEntry',
       type,
@@ -1097,6 +1104,14 @@ export const catalog = (
         _tag: 'Aggregate',
         fields: Object.freeze(fields),
         tailPadding: size - cursor,
+        ...(cleanup._tag === 'HookCleanup'
+          ? {
+              cleanupHook: Object.freeze({
+                hook: cleanup.hook,
+                typeArguments: cleanup.typeArguments,
+              }),
+            }
+          : {}),
       }),
     })
     completed.set(key, entry)
