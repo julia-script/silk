@@ -76,25 +76,27 @@ const runNative = Effect.fnUntraced(function* (
   return yield* Process.run(linked.path, [])
 })
 
-/**
- * Lowers one stored-Effect program to MIR for a chosen target.
- *
- * `SEM0107` still fences every stored Effect out of `Analysis.realize`, so this mirrors the merged
- * evaluator harness and drives the phases directly instead of reading `snapshot.mir`. The fence
- * assertion is deliberate: task 4.4 narrows it only for shapes these engines prove first.
- */
-const lowerStored = Effect.fnUntraced(function* (
+const lowerSource = Effect.fnUntraced(function* (
   name: string,
   source: string,
   target: Target.Target,
+  fence: 'stored' | 'open',
 ) {
   const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), target.id)
   const diagnostics = Analysis.diagnostics(snapshot)
-  assert.isTrue(diagnostics.length > 0, name)
-  assert.isTrue(
-    diagnostics.every((diagnostic) => diagnostic.code === 'SEM0107'),
-    JSON.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
-  )
+  if (fence === 'stored') {
+    assert.isTrue(diagnostics.length > 0, name)
+    assert.isTrue(
+      diagnostics.every((diagnostic) => diagnostic.code === 'SEM0107'),
+      JSON.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
+    )
+  } else {
+    assert.deepEqual(
+      diagnostics,
+      [],
+      JSON.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
+    )
+  }
   const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
   const layout = Layout.plan(catalog, snapshot.instances)
   const ownership =
@@ -119,6 +121,16 @@ const lowerStored = Effect.fnUntraced(function* (
   assert.deepEqual(Mir.verify(module), [], name)
   return Object.freeze({ snapshot, module })
 })
+
+/**
+ * Lowers one stored-Effect program to MIR for a chosen target.
+ *
+ * `SEM0107` still fences every stored Effect out of `Analysis.realize`, so this mirrors the merged
+ * evaluator harness and drives the phases directly instead of reading `snapshot.mir`. The fence
+ * assertion is deliberate: task 4.4 narrows it only for shapes these engines prove first.
+ */
+const lowerStored = (name: string, source: string, target: Target.Target) =>
+  lowerSource(name, source, target, 'stored')
 
 const runWasm = Effect.fnUntraced(function* (bytes: Uint8Array) {
   const result = yield* Effect.try(() => {
@@ -435,12 +447,13 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
 /**
  * Repeats one stored-Effect construct-and-clean cycle `count` times.
  *
- * Failure recovers inside each iteration so the loop can actually repeat. A leaked capture grows
- * the Wasm heap as `count` grows; a double Drop traps on the poisoned tag.
+ * Failure recovers inside each iteration so the loop can actually repeat. Each capture is 2KiB
+ * (`[i64; 256]`) so 80 leaked cycles must grow the Wasm heap past a 64KiB page; an `i32` leak
+ * would stay inside the first page and the comparison would pass. A double Drop traps.
  */
 const cleanupCycles = (exit: CleanupExit, count: number): string => `${cleanupSurface}
 effect fn cycle() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
-  let storage = run Allocator.allocate(Layout.of<i32>())
+  let storage = run Allocator.allocate(Layout.of<[i64; 256]>())
   let guard = Guard { tag: 7, storage: move storage }
   let deferred = defer(failing(move guard))
   ${exit === 'failure' ? 'return run deferred.operation' : 'return 42'}
@@ -632,13 +645,30 @@ it.effect(
   180_000,
 )
 
+/**
+ * Keeps `count` 2KiB allocations live until `main` returns. Wasm does not shrink pages on free, so
+ * this is the missing-cleanup control: 80 holds must use more pages than 8, or the flat-heap
+ * comparison below cannot see a leaked capture.
+ */
+const leakHolds = (
+  count: number,
+): string => `effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn drive() -> i32 ! OutOfMemory ? &mut Allocator {
+  ${Array.from({ length: count }, (_, index) => `let hold${index} = run Allocator.allocate(Layout.of<[i64; 256]>())`).join('\n  ')}
+  return 42
+}
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  return run Effect.catch(drive() |> Effect.provideMut(&mut allocator), recover)
+}`
+
 const suspendCycles = (count: number): string => `${cleanupSurface}
 effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
 }
 effect fn cycle() -> i32 ! OutOfMemory ? &mut Allocator {
-  let storage = run Allocator.allocate(Layout.of<i32>())
+  let storage = run Allocator.allocate(Layout.of<[i64; 256]>())
   let guard = Guard { tag: 2, storage: move storage }
   let deferred = defer(delayed(move guard))
   return run deferred.operation
@@ -657,6 +687,35 @@ pub fn main() -> i32 {
 
 it.effect('keeps the Wasm heap flat across repeated stored Effect cleanup cycles', () =>
   Effect.gen(function* () {
+    const leakShort = yield* lowerSource(
+      'stored-effect-parity/cycles-leak-short',
+      leakHolds(8),
+      Target.wasm32UnknownUnknown,
+      'open',
+    )
+    const leakLong = yield* lowerSource(
+      'stored-effect-parity/cycles-leak-long',
+      leakHolds(80),
+      Target.wasm32UnknownUnknown,
+      'open',
+    )
+    const leakShortWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakShort.module, {
+      mode: 'release',
+    })
+    const leakLongWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakLong.module, {
+      mode: 'release',
+    })
+    assert.strictEqual(leakShortWasm._tag, 'WebAssemblyModuleArtifact', 'leak short')
+    assert.strictEqual(leakLongWasm._tag, 'WebAssemblyModuleArtifact', 'leak long')
+    if (leakShortWasm._tag !== 'WebAssemblyModuleArtifact') return
+    if (leakLongWasm._tag !== 'WebAssemblyModuleArtifact') return
+    const leakShortRun = yield* runWasmMeasured(leakShortWasm.bytes)
+    const leakLongRun = yield* runWasmMeasured(leakLongWasm.bytes)
+    assert.strictEqual(leakShortRun.value, 42, 'leak short')
+    assert.strictEqual(leakLongRun.value, 42, 'leak long')
+    // Sensitivity: 80 live 2KiB holds must grow past the 8-hold heap, or a missed Drop is invisible.
+    assert.isAbove(leakLongRun.pages, leakShortRun.pages, 'leak control must grow Wasm pages')
+
     const programs = [
       {
         name: 'unrun',
@@ -670,7 +729,7 @@ it.effect('keeps the Wasm heap flat across repeated stored Effect cleanup cycles
         long: 80,
         source: (count: number) => cleanupCycles('failure', count),
       },
-      { name: 'suspending', short: 4, long: 20, source: suspendCycles },
+      { name: 'suspending', short: 8, long: 80, source: suspendCycles },
     ] as const
     for (const testCase of programs) {
       const short = yield* lowerStored(
@@ -697,7 +756,7 @@ it.effect('keeps the Wasm heap flat across repeated stored Effect cleanup cycles
       const longRun = yield* runWasmMeasured(longWasm.bytes)
       assert.strictEqual(shortRun.value, 42, `${testCase.name} short cycles`)
       assert.strictEqual(longRun.value, 42, `${testCase.name} long cycles`)
-      // Ten times the cycles must not cost more heap: a capture leaked once per cycle would grow it.
+      // Same counts as the leak control: cleanup must reuse, so pages stay flat.
       assert.strictEqual(
         longRun.pages,
         shortRun.pages,
