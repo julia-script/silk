@@ -1,8 +1,9 @@
 ## 1. Vertical Slice
 
-- [ ] 1.1 Confirm `introduce-representation-parameters` is complete and identify the existing callable storage fences.
-- [ ] 1.2 Build one named-callable and one affine-capturing nominal field slice through symbolic and resolved field representations.
-- [ ] 1.3 Stop and revise the design if any phase rediscovers callable construction from syntax instead of consuming the shared resolved fact.
+- [x] 1.1 Confirm `introduce-representation-parameters` is complete and identify the existing callable storage fences.
+- [x] 1.2 Add one `CallableFieldRealization` actor that consumes `RepresentationField` resolutions and enriches them with the static target, concrete target arguments, ordered captures, invocation access, loan dependencies, liveness, and cleanup, with deterministic lookup by complete instance and field identity.
+- [x] 1.3 Build one named-callable and one affine-capturing nominal field slice through symbolic plans, resolved field representations, and realizations.
+- [x] 1.4 Stop and revise the design if any phase rediscovers callable construction from syntax instead of consuming the shared resolved fact.
 
 ## 2. Ownership and Cleanup
 

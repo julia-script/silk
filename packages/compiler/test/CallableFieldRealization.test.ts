@@ -1,0 +1,291 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
+import * as CallableFieldRealization from '../src/CallableFieldRealization.js'
+import * as Instances from '../src/Instances.js'
+import * as RepresentationField from '../src/RepresentationField.js'
+import * as Type from '../src/Type.js'
+import { unreachable } from './support/raise.js'
+
+/**
+ * The runtime realization seam of nominal callable storage.
+ *
+ * `RepresentationField` (issue #187) owns stable field identity, the retained representation
+ * argument, and admissibility. These tests pin the enrichment this change adds on top: one static
+ * target, its concrete arguments, the ordered capture environment, the receiver access an
+ * invocation demands, capture loans, liveness, and the exactly-once cleanup plan — all reached
+ * through one deterministic lookup rather than re-read from initializer syntax.
+ */
+
+const ascii = (value: string): Uint8Array =>
+  Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const realized = (name: string, source: string) =>
+  Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
+
+/** Builds the realization index the same way every downstream phase reaches it. */
+const realizationsOf = (snapshot: Analysis.Snapshot): CallableFieldRealization.Index =>
+  Instances.callableFieldRealizations(snapshot.instances, snapshot.index)
+
+const soleRealization = (
+  index: CallableFieldRealization.Index,
+): CallableFieldRealization.Realization => {
+  const supported = index.entries.flatMap((entry) =>
+    entry.support._tag === 'Supported' ? [entry.support.realization] : [],
+  )
+  return supported.at(0) ?? unreachable('expected one supported callable field realization')
+}
+
+const namedCallable = `struct Parser<F: fn(i32) -> i32> { parse: F }
+fn decode(value: i32) -> i32 { return value }
+pub fn main() -> i32 {
+  let parser = Parser { parse: decode }
+  return parser.parse(1)
+}`
+
+const capturingSection = `struct Adder<F: fn(i32) -> i32> { step: F }
+pub fn main() -> i32 {
+  let adder = Adder { step: i32.add(1) }
+  return adder.step(2)
+}`
+
+it.effect('realizes a named callable field with a static target and no capture lanes', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized('callable-field/named', namedCallable)
+    const realization = soleRealization(realizationsOf(snapshot))
+
+    assert.deepEqual(realization.target, {
+      _tag: 'Declaration',
+      module: 'callable-field/named',
+      name: 'decode',
+    })
+    assert.strictEqual(realization.environment, undefined)
+    assert.deepEqual(realization.captures, [])
+    assert.deepEqual(realization.loans, [])
+    assert.deepEqual(realization.cleanup.lanes, [])
+    assert.strictEqual(realization.cleanup.consumedByInvocation, false)
+    assert.strictEqual(realization.invocation, 'Shared')
+    assert.strictEqual(realization.liveness.moveOnly, true)
+    assert.strictEqual(realization.liveness.ownedLanes, 0)
+  }),
+)
+
+it.effect('realizes a capturing section field with one ordered inline capture lane', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized('callable-field/capturing', capturingSection)
+    const realization = soleRealization(realizationsOf(snapshot))
+
+    assert.strictEqual(realization.target._tag, 'Declaration')
+    assert.strictEqual(
+      realization.target._tag === 'Declaration' ? realization.target.name : undefined,
+      'add',
+    )
+    assert.strictEqual(realization.environment?.startsWith('callable:'), true)
+    assert.strictEqual(realization.captures.length, 1)
+    const capture = realization.captures.at(0) ?? unreachable('expected one capture lane')
+    assert.strictEqual(capture.ordinal, 0)
+    assert.strictEqual(capture.parameterOrdinal, 1)
+    assert.strictEqual(capture.access, 'Copy')
+    assert.strictEqual(Type.encode(capture.type), 'i32')
+    assert.strictEqual(capture.owned, false)
+    assert.strictEqual(capture.borrowed, false)
+    // A Copy capture is neither loaned nor cleaned, so the aggregate carries no drop obligation.
+    assert.deepEqual(realization.loans, [])
+    assert.deepEqual(realization.cleanup.lanes, [])
+    assert.strictEqual(realization.invocation, 'Shared')
+  }),
+)
+
+it.effect('keeps the realization keyed by the shared representation field identity', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized('callable-field/lookup', namedCallable)
+    const index = realizationsOf(snapshot)
+    const nominals = Instances.representedNominals(snapshot.instances, snapshot.index)
+    const instance = nominals.at(0) ?? unreachable('expected one represented nominal instance')
+    const plan =
+      RepresentationField.plansOf(snapshot.index, instance).at(0) ??
+      unreachable('expected one representation field plan')
+
+    // The same identity #187 resolves is the identity #189 realizes; no second scheme exists.
+    assert.strictEqual(
+      CallableFieldRealization.key(instance, plan.id),
+      RepresentationField.key(instance, plan.id),
+    )
+    const support = CallableFieldRealization.lookup(index, instance, plan.id)
+    assert.strictEqual(support?._tag, 'Supported')
+    assert.deepEqual(
+      CallableFieldRealization.realizationOf(index, instance, plan.id)?.field,
+      plan.id,
+    )
+    assert.strictEqual(CallableFieldRealization.supportsInstance(index, instance), true)
+  }),
+)
+
+it.effect('derives invocation admissibility from the aggregate receiver access', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized('callable-field/access', namedCallable)
+    const realization = soleRealization(realizationsOf(snapshot))
+
+    assert.deepEqual([...CallableFieldRealization.admittedModes('Shared')], ['Shared'])
+    assert.deepEqual(
+      [...CallableFieldRealization.admittedModes('Exclusive')],
+      ['Shared', 'Exclusive'],
+    )
+    assert.deepEqual(
+      [...CallableFieldRealization.admittedModes('Take')],
+      ['Shared', 'Exclusive', 'Take'],
+    )
+    // A shared `fn` field is reachable through every receiver access.
+    assert.strictEqual(CallableFieldRealization.admitsInvocation('Shared', realization), true)
+    assert.strictEqual(CallableFieldRealization.admitsInvocation('Exclusive', realization), true)
+    assert.strictEqual(CallableFieldRealization.admitsInvocation('Take', realization), true)
+  }),
+)
+
+it.effect('reports an unresolved representation field as explicitly unsupported', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized('callable-field/unsupported', namedCallable)
+    const nominals = Instances.representedNominals(snapshot.instances, snapshot.index)
+    const instance = nominals.at(0) ?? unreachable('expected one represented nominal instance')
+    const plan =
+      RepresentationField.plansOf(snapshot.index, instance).at(0) ??
+      unreachable('expected one representation field plan')
+    const bound = Type.callable(['i32'], 'i32')
+
+    // An unavailable #187 resolution never becomes a realization; it keeps an explicit proof.
+    const open = CallableFieldRealization.realizeField(
+      Object.freeze({
+        _tag: 'UnavailableRepresentationField',
+        id: plan.id,
+        instance,
+        reason: Object.freeze({ _tag: 'OpenRepresentationArgument', requiredBound: bound }),
+        provenance: Object.freeze({
+          field: { sourceId: 'callable-field/unsupported', start: 0, end: 1 },
+          parameter: { sourceId: 'callable-field/unsupported', start: 0, end: 1 },
+        }),
+      }),
+      snapshot.instances.callables,
+    )
+    assert.strictEqual(open._tag, 'Unsupported')
+    assert.strictEqual(
+      open._tag === 'Unsupported' ? open.reason._tag : undefined,
+      'UnresolvedRepresentation',
+    )
+
+    // An Effect identity is a resolved representation, but never a callable realization.
+    const effect = Type.effect('i32', [])
+    const stored = CallableFieldRealization.realizeField(
+      Object.freeze({
+        _tag: 'ResolvedRepresentationField',
+        id: plan.id,
+        instance,
+        argument: Type.exactRepresentationArgument(
+          Type.effectIdentityArgument('callable-field/unsupported.effect'),
+          effect,
+        ),
+        requiredBound: effect,
+        admissibility: Object.freeze({ _tag: 'Admitted' }),
+      }),
+      snapshot.instances.callables,
+    )
+    assert.strictEqual(stored._tag, 'Unsupported')
+    assert.strictEqual(
+      stored._tag === 'Unsupported' ? stored.reason._tag : undefined,
+      'EffectRepresentation',
+    )
+
+    // A section identity whose specialized environment was never discovered stays unsupported.
+    const missing = CallableFieldRealization.realizeField(
+      Object.freeze({
+        _tag: 'ResolvedRepresentationField',
+        id: plan.id,
+        instance,
+        argument: Type.exactRepresentationArgument(
+          Type.callableIdentityArgument(
+            'callable:absent',
+            Object.freeze({
+              _tag: 'Declaration',
+              module: 'callable-field/unsupported',
+              name: 'decode',
+            }),
+            [],
+            'callable:absent',
+          ),
+          bound,
+        ),
+        requiredBound: bound,
+        admissibility: Object.freeze({ _tag: 'Admitted' }),
+      }),
+      snapshot.instances.callables,
+    )
+    assert.strictEqual(missing._tag, 'Unsupported')
+    assert.strictEqual(
+      missing._tag === 'Unsupported' ? missing.reason._tag : undefined,
+      'MissingCallableEnvironment',
+    )
+  }),
+)
+
+it.effect('orders realization entries deterministically across repeated analyses', () =>
+  Effect.gen(function* () {
+    const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
+struct Pair<F: fn(i32) -> i32> { first: Parser<F> second: Parser<F> }
+fn decode(value: i32) -> i32 { return value }
+fn pair<F: fn(i32) -> i32>(first: Parser<F>, second: Parser<F>) -> Pair<F> {
+  return Pair<F> { first: move first, second: move second }
+}
+pub fn main() -> i32 {
+  let first = Parser { parse: decode }
+  let second = Parser { parse: decode }
+  let paired = pair(move first, move second)
+  return 0
+}`
+    const first = yield* realized('callable-field/determinism', source)
+    const second = yield* realized('callable-field/determinism', source)
+
+    const keys = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
+      realizationsOf(snapshot).entries.map((entry) => entry.key)
+
+    assert.deepEqual(keys(first), keys(second))
+    assert.deepEqual([...keys(first)], [...keys(first)].sort())
+  }),
+)
+
+it.effect('keeps the realization identical when source spans shift', () =>
+  Effect.gen(function* () {
+    const shifted = `// a leading comment that moves every span in this module
+${capturingSection}`
+    const baseline = soleRealization(
+      realizationsOf(yield* realized('callable-field/stability', capturingSection)),
+    )
+    const moved = soleRealization(
+      realizationsOf(yield* realized('callable-field/stability', shifted)),
+    )
+
+    // Identity is the precomputed executable site, never a source path or offset, so shifting the
+    // whole module leaves the target, environment, captures, and cleanup byte-identical.
+    assert.deepEqual(moved.target, baseline.target)
+    assert.strictEqual(moved.environment, baseline.environment)
+    assert.deepEqual(moved.captures, baseline.captures)
+    assert.deepEqual(moved.cleanup, baseline.cleanup)
+    assert.deepEqual(moved.liveness, baseline.liveness)
+    assert.strictEqual(moved.invocation, baseline.invocation)
+  }),
+)
+
+it('mints the callable environment identity in exactly one frontend module', () => {
+  const sources = readdirSync(new URL('../src/', import.meta.url)).filter((name) =>
+    name.endsWith('.ts'),
+  )
+  const minting = sources.filter((name) =>
+    readFileSync(new URL(`../src/${name}`, import.meta.url), 'utf8').includes(
+      '`callable:${Hir.executableSiteKey(',
+    ),
+  )
+
+  // Elaboration is the only phase allowed to derive a callable identity from an expression.
+  // Every later phase must reach the same fact through `CallableFieldRealization`, so a new
+  // minting site here means some phase started rediscovering identity from syntax.
+  assert.deepEqual(minting, ['Elaboration.ts'])
+})

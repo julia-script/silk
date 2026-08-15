@@ -1,3 +1,4 @@
+import * as CallableFieldRealization from './CallableFieldRealization.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -518,6 +519,87 @@ const storedExecutableViolations = (
     ),
   )
 }
+
+const collectNominals = (
+  index: DeclarationIndex.Index,
+  type: Type.Type,
+  into: Map<string, Type.Nominal>,
+  seen: Set<string>,
+): void => {
+  if (Type.isFixedArray(type) || Type.isSlice(type)) {
+    collectNominals(index, type.element, into, seen)
+    return
+  }
+  if (Type.isUnion(type)) {
+    for (const member of type.members) collectNominals(index, member, into, seen)
+    return
+  }
+  if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return
+  const typeKey = Type.key(type)
+  if (seen.has(typeKey)) return
+  seen.add(typeKey)
+  if (!into.has(typeKey) && RepresentationField.plansOf(index, type).length > 0)
+    into.set(typeKey, type)
+  const declaration = DeclarationIndex.byCanonical(index, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (declaration?._tag !== 'StructDeclaration') return
+  const substitution =
+    Type.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      type.arguments,
+    ) ?? new Map()
+  for (const field of declaration.fields) {
+    if (field.declaredType._tag !== 'Resolved') continue
+    collectNominals(index, Type.substitute(field.declaredType.type, substitution), into, seen)
+  }
+}
+
+/**
+ * Every reachable complete nominal instance carrying at least one represented field, in
+ * deterministic type-key order. Constructions name the instance through their retained semantic
+ * type, never through initializer syntax.
+ */
+export const representedNominals = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<Type.Nominal> => {
+  const found = new Map<string, Type.Nominal>()
+  for (const instance of self.instances) {
+    const expressions = instance.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+    for (const expression of expressions) {
+      if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') continue
+      collectNominals(
+        index,
+        Type.substitute(expression.type, instance.substitution),
+        found,
+        new Set(),
+      )
+    }
+  }
+  return Object.freeze(
+    [...found.entries()]
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([, nominal]) => nominal),
+  )
+}
+
+/**
+ * The runtime realization index for every reachable represented callable field. Ownership, layout,
+ * MIR, and every engine read realizations from here rather than re-deriving callable identity.
+ */
+export const callableFieldRealizations = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+): CallableFieldRealization.Index =>
+  CallableFieldRealization.realize(
+    RepresentationField.resolveFields(index, representedNominals(self, index)),
+    self.callables,
+  )
 
 /** Rejects reachable constructions that retain bare or represented callable values. */
 export const storedCallableViolations = (

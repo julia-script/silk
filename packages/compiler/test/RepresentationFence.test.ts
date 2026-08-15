@@ -391,3 +391,35 @@ pub fn main() -> i32 {
     )
   }),
 )
+
+it.effect('fences a represented capturing section stored in a nominal field', () =>
+  Effect.gen(function* () {
+    const source = `struct Adder<F: fn(i32) -> i32> { step: F }
+pub fn main() -> i32 {
+  let adder = Adder { step: i32.add(1) }
+  return adder.step(2)
+}`
+    const snapshot = yield* realized('representation-fence/callable-section', source)
+    const diagnostic = Analysis.diagnostics(snapshot).find(
+      (candidate) => candidate.code === 'SEM0103',
+    )
+
+    assertFenced(snapshot, 'SEM0103')
+    assert.include(diagnostic?.message ?? '', 'retains the static identity')
+    assert.include(diagnostic?.message ?? '', 'field step')
+  }),
+)
+
+it.effect('fences a represented take-once callable field stored in a nominal', () =>
+  Effect.gen(function* () {
+    const source = `struct Once<F: once fn(i32) -> i32> { step: F }
+fn decode(value: i32) -> i32 { return value }
+pub fn main() -> i32 {
+  let taken = Once { step: decode }
+  return taken.step(1)
+}`
+    const snapshot = yield* realized('representation-fence/callable-once', source)
+
+    assertFenced(snapshot, 'SEM0103')
+  }),
+)

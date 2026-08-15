@@ -30,6 +30,27 @@ consume this shared fact rather than rediscovering callable construction from sy
 The first task is a vertical slice for one named callable and one affine capturing section. Work
 stops if any phase needs a parallel representation model.
 
+#### Split the semantic plan from the runtime realization
+
+`introduce-representation-parameters` owns the semantic half and keeps owning it. Its
+`RepresentationField` actor is the sole source of stable field and use identities, concrete or
+explicitly unavailable representation arguments, substituted required bounds, admissibility, and
+unavailable provenance. This change adds no second identity scheme and re-derives none of those
+facts.
+
+This change owns the runtime half: one `CallableFieldRealization` per resolved callable field. A
+realization consumes a `ResolvedRepresentationField` and enriches it with the static call target,
+concrete target arguments, the ordered capture environment, the receiver access each invocation
+mode demands, capture loan dependencies, liveness, and the cleanup plan. Realization lookup is keyed
+by the complete nominal instance and the `RepresentationField` identity, so every downstream phase
+reaches the same record.
+
+The two records stay separate values in separate actors. A phase that needs a semantic fact reads
+the resolution; a phase that needs to build, borrow, invoke, move, or clean a stored callable reads
+the realization. No phase after elaboration may recover callable identity from initializer syntax:
+the realization's target and captures come from the retained representation argument and the
+specialized callable instance it names.
+
 ### Keep representation-bearing nominals move-only
 
 This milestone does not generalize nominal Copy. Shared and exclusive borrows preserve field access;
