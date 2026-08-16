@@ -35,8 +35,10 @@ import { statusAddress, statusStackOverflow } from '../src/WasmBackend.js'
  *    just under a thousand levels deep.
  * 2. **Crossing reports.** Past that depth the module traps at the reservation and names the reason,
  *    and its frames never reach the heap page.
- * 3. **The host is not involved.** A recursion that needs no shadow-stack frame carries ten times
- *    that depth on the same engine before V8 raises `RangeError`.
+ * 3. **The host is not involved.** A recursion that needs no shadow-stack frame carries the depth
+ *    that reported on the same engine, and at least double it, before V8 raises `RangeError`. The
+ *    headroom is measured rather than assumed, because engines draw their own execution-stack
+ *    bound differently across versions and platforms.
  * 4. **Only the walk pays.** Building and releasing the same chain iteratively reserves one frame,
  *    so it is unaffected at any depth.
  *
@@ -183,19 +185,23 @@ const unwalked = (depth: number): string =>
   )
 
 /**
- * Recursion with nothing to spill: no borrow, no aggregate, no frame. The backend gives this
- * function no shadow-stack frame at all — the module has no linear memory — so its only limit is
- * the engine's, which is the control this test needs.
+ * Recursion with nothing to spill: no borrow, no aggregate, no frame. The backend gives these
+ * functions no shadow-stack frame at all — the module has no linear memory — so their only limit
+ * is the engine's own execution stack, which is the control this test needs. The probe takes its
+ * depth as a parameter rather than baking it into the source, so one instance answers at every
+ * depth the host-control case walks.
  */
-const plainRecursion = (depth: number): string => `fn count(n: i32) -> i32 {
+const framelessProbe = `fn count(n: i32) -> i32 {
   if n == 0 { return 0 }
   return 1 + count(n - 1)
 }
 
-pub fn main() -> i32 {
-  if count(${depth}) == ${depth} { return 0 }
+pub fn probe(depth: i32) -> i32 {
+  if count(depth) == depth { return 0 }
   return 2
-}`
+}
+
+pub fn main() -> i32 { return probe(1) }`
 
 interface Run {
   /** `silk_main`'s value, or `undefined` when the module failed instead of returning. */
@@ -204,8 +210,9 @@ interface Run {
   readonly failure: string | undefined
   /**
    * Highest address below the allocator's own region that the module ever wrote, or `undefined`
-   * without a memory — which only the frameless control is allowed to be. Everywhere else
-   * `measuredReach` turns that `undefined` into a named failure.
+   * without a memory — which no fixture measured this way may be: every one of them spends shadow
+   * stack, and `measuredReach` turns that `undefined` into a named failure. (The frameless
+   * host-control module also has no memory, but it never comes through here.)
    *
    * Between the end of static data and the heap page there is nothing but the shadow stack, so for
    * this fixture — whose static data is a handful of bytes — this is the high-water mark of
@@ -296,7 +303,7 @@ const measure = (id: string, source: string) =>
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const globals = globalInitializers(artifact.wat)
     // The backend declares the shadow-stack pointer first and the heap pointer second; a module
-    // with neither has no linear memory and no shadow stack, which is the control case.
+    // with neither has no linear memory and no shadow stack, which `measuredReach` names below.
     const heapBase = globals.at(1) ?? 0
     return Object.freeze({ heapBase, ...execute(artifact.bytes, heapBase) })
   })
@@ -416,19 +423,67 @@ it.effect(
 )
 
 it.effect(
-  'has host stack to spare an order of magnitude past the depth that reported',
+  'has host stack to spare past the depth that reported',
   () =>
     Effect.gen(function* () {
       const measured = yield* growth
 
-      // Same engine, same call depth times ten, no shadow-stack frame: it returns. So the report
-      // above is not the machine stack running out, and the bound that fired was not the host's.
-      const deep = yield* measure(
-        `shadow-stack-collision/host-control/${measured.bounded * 10}`,
-        plainRecursion(measured.bounded * 10),
+      const id = 'shadow-stack-collision/host-control'
+      const snapshot = yield* Analysis.ofSourceRealized(
+        id,
+        ascii(framelessProbe),
+        'wasm32-unknown-unknown',
       )
-      assert.strictEqual(deep.value, 0)
-      assert.isUndefined(deep.stackReach, 'a frameless recursion needs no linear memory at all')
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+        id,
+      )
+      const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+      assert.isUndefined(
+        instance.exports[wasmMemoryExport],
+        'a frameless recursion needs no linear memory at all',
+      )
+      // Non-entry functions carry a mangled symbol; the declaration's name survives inside it.
+      const probeExport = Object.keys(instance.exports).find((name) => name.includes('_probe__'))
+      assert.isDefined(probeExport, 'the control must export its probe')
+      const probe = instance.exports[probeExport ?? ''] as (depth: number) => number
+
+      // The host's own bound is measured here rather than assumed, because it is the one number
+      // in this file the emitted module cannot derive: V8 sizes its execution stack differently
+      // across versions and platforms, so a fixed multiple of the shadow-stack depth fits some
+      // engines and not others. `RangeError` is the host refusing; anything else is a real
+      // failure and propagates.
+      const completes = (depth: number): boolean => {
+        try {
+          assert.strictEqual(probe(depth), 0, `frameless recursion at ${depth} must count itself`)
+          return true
+        } catch (error) {
+          if (error instanceof RangeError) return false
+          throw error
+        }
+      }
+
+      // Same engine, the exact call depth whose reservation reported, no shadow-stack frame: it
+      // returns. So the report above is not the machine stack running out, and the bound that
+      // fired was not the host's.
+      assert.isTrue(
+        completes(measured.bounded),
+        `the host must carry ${measured.bounded} frameless levels — the depth that reported`,
+      )
+
+      // And with room to spare: doubling the depth until the host refuses shows the engine's own
+      // bound sits at least a factor of two past the module's, which is what makes the two
+      // distinguishable. The walk is capped because some hosts never refuse within useful range —
+      // by then the headroom is proven many times over.
+      let headroom = 1
+      while (headroom < 16 && completes(measured.bounded * headroom * 2)) headroom *= 2
+      assert.isAtLeast(
+        headroom,
+        2,
+        `the host refused between ${measured.bounded} and ${measured.bounded * 2} frameless levels — too close to the shadow-stack bound to tell the module's report from the engine's`,
+      )
     }),
   120_000,
 )
