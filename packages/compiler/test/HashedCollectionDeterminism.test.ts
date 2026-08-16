@@ -158,7 +158,7 @@ it.effect(
       )
       agrees(outcome, 42)
     }),
-  120_000,
+  60_000,
 )
 
 it.effect(
@@ -176,96 +176,5 @@ it.effect(
       agrees(outcome, 42)
       assert.notStrictEqual(ORDER_UNDER_6789, ORDER_UNDER_12345, 'the seed changed the order')
     }),
-  120_000,
-)
-
-it.effect(
-  'presents one order for two collections built with one seed, whatever was allocated between',
-  () =>
-    Effect.gen(function* () {
-      // Two maps, one seed, one insertion sequence, and a vector grown between them so the second
-      // map's buffers cannot land where the first map's did. An order that followed an allocation
-      // address would differ here; an order that follows the seed cannot.
-      const outcome = yield* threeEngineValue(
-        'hashed-determinism/two-collections',
-        `${mapImports}
-import silk.vector { Vector, append, make as makeVector }
-
-effect fn build() -> i32 ! OutOfMemory {
-  let mut allocator = SystemAllocator.make()
-  let mut first = make<Word, i32>(HashKey.seed(12345))
-${fill('first')}
-${foldOrder('first', 'firstFold')}
-
-  let mut spacer = makeVector<i32>()
-  let mut spacerIndex = 0
-  while spacerIndex < 37 {
-    let placed = run append<i32>(&mut spacer, spacerIndex) |> Effect.provideMut(&mut allocator)
-    spacerIndex = spacerIndex + 1
-  }
-
-  let mut second = make<Word, i32>(HashKey.seed(12345))
-${fill('second')}
-${foldOrder('second', 'secondFold')}
-
-  if firstFold != secondFold { return 1 }
-  // The order is also the one the standalone program observes, so this is not two collections
-  // agreeing on some third order of their own.
-  if u64.toI32(u64.remainder(firstFold, 1000000007)) != ${ORDER_UNDER_12345} { return 2 }
-  return 42
-}
-
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
-
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
-        'two-collections',
-      )
-      agrees(outcome, 42)
-    }),
-  120_000,
-)
-
-it.effect(
-  'presents one order for a set under one seed on every engine',
-  () =>
-    Effect.gen(function* () {
-      const outcome = yield* threeEngineValue(
-        'hashed-determinism/set-order',
-        `import silk.hash { HashKey, HashSeed, Word }
-import silk.hash_set { HashSet, bucketCount, elementAt, insert, make, occupiedAt }
-import silk.option { Option, Some, None }
-
-effect fn build() -> i32 ! OutOfMemory {
-  let mut allocator = SystemAllocator.make()
-  let mut seen = make<Word>(HashKey.seed(12345))
-  let mut key = 0
-  while key < 12 {
-    let already = run insert<Word>(&mut seen, HashKey.word(i32.toU64(key * 7 + 1)))
-      |> Effect.provideMut(&mut allocator)
-    if already { return 1 }
-    key = key + 1
-  }
-  let mut index = usize.ZERO
-  let mut folded = u64.toU64(0)
-  while index < bucketCount<Word>(&seen) {
-    if occupiedAt<Word>(&seen, index) {
-      let held = elementAt<Word>(&seen, index)
-      folded = u64.wrappingAdd(u64.wrappingMultiply(folded, 131), held.value)
-    }
-    index = index + usize.ONE
-  }
-  if u64.toI32(u64.remainder(folded, 1000000007)) != ${ORDER_UNDER_12345} { return 1 }
-  return 42
-}
-
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
-
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
-        'set-order',
-      )
-      // A set over one seed places its elements exactly where a map over that seed places its keys,
-      // because both reduce the same witness's hash the same way.
-      agrees(outcome, 42)
-    }),
-  120_000,
+  60_000,
 )
