@@ -9,7 +9,7 @@ import * as Driver from '../src/Driver.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import { corpus } from './support/corpus.js'
+import { nativeCorpus } from './support/corpus.js'
 
 const clang =
   process.env.SILK_TEST_CLANG ??
@@ -51,7 +51,7 @@ it.effect(
   'keeps the interpreter and native execution in agreement across the corpus',
   () =>
     Effect.gen(function* () {
-      for (const program of corpus) {
+      for (const program of nativeCorpus) {
         const interpreted = Analysis.evaluate(
           yield* Analysis.ofSourceRealized('memory/driver', ascii(program.source)),
         )

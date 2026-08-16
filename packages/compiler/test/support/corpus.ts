@@ -1116,9 +1116,6 @@ pub fn main() -> i32 {
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
-  // Static-composition runtime parity belongs in the shared native differential rather than a
-  // feature-local compile/link loop. Trapping Drop variants causally prove the three cleanup exits.
-  ...staticCompositionCorpus,
   // The float math conformance programs join the corpus so the native differential compiles and
   // runs each one, which is the third engine behind the evaluator and direct WebAssembly.
   ...floatMathPrograms.map((program) => ({
@@ -1126,6 +1123,18 @@ pub fn main() -> i32 {
     source: program.source,
     expected: { _tag: 'Completes', result: 42 } as const,
   })),
+]
+
+/**
+ * Native-only extensions to the shared evaluator corpus. These programs retain the optimized
+ * single compile/link loop without making the evaluator's pinned-outcome gate repeat large
+ * feature fixtures that already have focused evaluator coverage.
+ */
+export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
+  ...corpus,
+  // Static-composition runtime parity belongs in the shared native differential rather than a
+  // feature-local compile/link loop. Trapping Drop variants causally prove the three cleanup exits.
+  ...staticCompositionCorpus,
 ]
 
 /** Invalid generic programs that must stop before target layout and MIR. */
