@@ -755,6 +755,7 @@ const equalsEffect = (left: EffectRealization, right: EffectRealization): boolea
   sameArguments(left.runnerArguments, right.runnerArguments) &&
   Hir.sameExecutableSite(left.site, right.site) &&
   equalsEffectEnvironment(left.environment, right.environment) &&
+  left.access === right.access &&
   left.cleanup.consumedByRun === right.cleanup.consumedByRun &&
   left.cleanup.unrunLanes.length === right.cleanup.unrunLanes.length &&
   left.cleanup.unrunLanes.every((lane, ordinal) => lane === right.cleanup.unrunLanes.at(ordinal)) &&

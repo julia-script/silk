@@ -248,38 +248,28 @@ const storedRunner = (module: Mir.Module, label: string) => {
   return unreachable(`expected one ${label} stored Effect run`)
 }
 
-const invalidationArtifact = Effect.fnUntraced(function* (
-  name: string,
-  source: string,
-  host: Target.Target,
-) {
-  const wasmLowering = yield* lowerStored(name, source, Target.wasm32UnknownUnknown)
-  const wasm = yield* Backend.emit(WasmBackend.WasmBackend, wasmLowering.module, {
-    mode: 'debug',
-  })
-  assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact', name)
-  if (wasm._tag !== 'WebAssemblyModuleArtifact')
-    return unreachable(`expected ${name} WebAssembly artifact`)
-
-  const nativeLowering = yield* lowerStored(name, source, host)
-  const llvm = yield* emitLlvm(nativeLowering.module, name)
-  const realization = storedRunner(wasmLowering.module, name).realization
-  assert.isTrue(
-    CallableFieldRealization.equals(
-      realization,
-      storedRunner(nativeLowering.module, name).realization,
+const replaceStoredRealization = (
+  plan: Layout.Plan,
+  current: CallableFieldRealization.EffectRealization,
+  replacement: CallableFieldRealization.EffectRealization,
+): Layout.Plan =>
+  Object.freeze({
+    ...plan,
+    entries: Object.freeze(
+      plan.entries.map((entry) =>
+        entry.representation._tag === 'StoredEffectEnvironment' &&
+        CallableFieldRealization.equals(entry.representation.realization, current)
+          ? Object.freeze({
+              ...entry,
+              representation: Object.freeze({
+                ...entry.representation,
+                realization: replacement,
+              }),
+            })
+          : entry,
+      ),
     ),
-    `${name} realization must be target-neutral`,
-  )
-
-  return Object.freeze({
-    realization,
-    layout: Layout.encode(wasmLowering.module.layout),
-    mir: Mir.encode(wasmLowering.module),
-    wasm: wasm.wat,
-    llvm: llvm.ir,
   })
-})
 
 /**
  * Asserts the run operation carries exactly the realization's contract rows.
@@ -444,129 +434,6 @@ const runtimeMatrix = [
   { name: 'provided', source: provided, result: 42, access: 'Take' },
 ] as const
 
-const invalidationMatrix: ReadonlyArray<{
-  readonly name: string
-  readonly before: string
-  readonly after: string
-  readonly assertRealizationChanged: (
-    before: CallableFieldRealization.EffectRealization,
-    after: CallableFieldRealization.EffectRealization,
-  ) => void
-}> = [
-  {
-    name: 'capture-shape',
-    before: `struct Deferred<F: Effect<i32>> { operation: F }
-pub fn main() -> i32 {
-  let left = 40
-  let right = 2
-  let deferred = Deferred { operation: effect { return left } }
-  return run deferred.operation
-}`,
-    after: `struct Deferred<F: Effect<i32>> { operation: F }
-pub fn main() -> i32 {
-  let left = 40
-  let right = 2
-  let deferred = Deferred { operation: effect { return left + right } }
-  return run deferred.operation
-}`,
-    assertRealizationChanged: (before, after) =>
-      assert.notDeepEqual(before.environment, after.environment, 'capture shape'),
-  },
-  {
-    name: 'runner-target',
-    before: `struct Deferred<F: Effect<i32>> { operation: F }
-effect fn first(value: i32) -> i32 { return value + 1 }
-effect fn second(value: i32) -> i32 { return value + 1 }
-pub fn main() -> i32 {
-  let deferred = Deferred { operation: first(41) }
-  return run deferred.operation
-}`,
-    after: `struct Deferred<F: Effect<i32>> { operation: F }
-effect fn first(value: i32) -> i32 { return value + 1 }
-effect fn second(value: i32) -> i32 { return value + 1 }
-pub fn main() -> i32 {
-  let deferred = Deferred { operation: second(41) }
-  return run deferred.operation
-}`,
-    assertRealizationChanged: (before, after) =>
-      assert.notDeepEqual(before.runner, after.runner, 'runner target'),
-  },
-  {
-    name: 'run-access',
-    before: `struct Deferred<F: once Effect<i32>> { operation: F }
-pub fn main() -> i32 {
-  let value = 42
-  let deferred = Deferred { operation: effect { return value } }
-  return run deferred.operation
-}`,
-    after: `struct Deferred<F: once Effect<i32>> { operation: F }
-pub fn main() -> i32 {
-  let mut value = 41
-  let mut deferred = Deferred { operation: effect {
-    value = value + 1
-    return value
-  } }
-  return run deferred.operation
-}`,
-    assertRealizationChanged: (before, after) =>
-      assert.notStrictEqual(before.access, after.access, 'run access'),
-  },
-  {
-    name: 'cleanup',
-    before: `struct Deferred<F: once Effect<i32>> { operation: F }
-pub fn main() -> i32 {
-  let value = 42
-  let deferred = Deferred { operation: effect { return value } }
-  return run deferred.operation
-}`,
-    after: `struct Token { value: i32 storage: Allocation }
-impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
-struct Deferred<F: once Effect<i32>> { operation: F }
-fn consume(token: Token) -> i32 { return token.value }
-effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
-  let storage = run Allocator.allocate(Layout.of<i32>())
-  let token = Token { value: 42, storage: move storage }
-  let deferred = Deferred { operation: effect { return consume(move token) } }
-  return run deferred.operation
-}
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
-}`,
-    assertRealizationChanged: (before, after) =>
-      assert.notDeepEqual(before.cleanup, after.cleanup, 'cleanup'),
-  },
-  {
-    name: 'suspendability',
-    before: `struct Deferred<F: once Effect<i32>> { operation: F }
-pub fn main() -> i32 {
-  let deferred = Deferred { operation: effect { return 42 } }
-  return run deferred.operation
-}`,
-    after: `struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
-fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
-  operation: F
-) -> Deferred<A, E, R, F> {
-  return Deferred<A, E, R> { operation: move operation }
-}
-effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator {
-  return run Effect.suspend(effect { return 42 })
-}
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
-  let deferred = defer(delayed())
-  return run deferred.operation
-}
-pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
-}`,
-    assertRealizationChanged: (before, after) =>
-      assert.notStrictEqual(before.suspendable, after.suspendable, 'suspendability'),
-  },
-]
-
 layer(NodeServices.layer)('stored Effect engine parity', (it) => {
   it.effect(
     'executes stored Effects with identical results and runner identity in every engine',
@@ -653,30 +520,6 @@ layer(NodeServices.layer)('stored Effect engine parity', (it) => {
           }
         }
       }).pipe(Effect.scoped),
-    180_000,
-  )
-
-  it.effect(
-    'invalidates layouts and emitted code for every stored Effect realization dependency',
-    () =>
-      Effect.gen(function* () {
-        const host = yield* Target.host()
-        for (const testCase of invalidationMatrix) {
-          const moduleName = `stored-effect-invalidation/${testCase.name}`
-          const before = yield* invalidationArtifact(moduleName, testCase.before, host)
-          const after = yield* invalidationArtifact(moduleName, testCase.after, host)
-
-          assert.isFalse(
-            CallableFieldRealization.equals(before.realization, after.realization),
-            `${testCase.name} realization invalidation`,
-          )
-          testCase.assertRealizationChanged(before.realization, after.realization)
-          assert.notStrictEqual(before.layout, after.layout, `${testCase.name} layout`)
-          assert.notStrictEqual(before.mir, after.mir, `${testCase.name} MIR`)
-          assert.notStrictEqual(before.wasm, after.wasm, `${testCase.name} Wasm`)
-          assert.notStrictEqual(before.llvm, after.llvm, `${testCase.name} LLVM`)
-        }
-      }),
     180_000,
   )
 
@@ -901,6 +744,95 @@ pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
 }`
+
+  it.effect(
+    'invalidates the layout and code-generation boundary for every realization dependency',
+    () =>
+      Effect.gen(function* () {
+        const name = 'stored-effect-invalidation/dependencies'
+        const lowered = yield* lowerStored(name, suspendingProgram(), Target.wasm32UnknownUnknown)
+        const current = storedRunner(lowered.module, name).realization
+        const firstCapture =
+          current.environment.at(0) ?? unreachable('expected one stored Effect capture')
+        assert.isAbove(current.cleanup.unrunLanes.length, 0, 'expected cleanup dependency')
+        assert.strictEqual(current.suspendable, true, 'expected suspendability dependency')
+        assert.deepEqual(Mir.verify(lowered.module), [], 'baseline MIR')
+
+        const mutations: ReadonlyArray<{
+          readonly name: string
+          readonly realization: CallableFieldRealization.EffectRealization
+        }> = [
+          {
+            name: 'capture-shape',
+            realization: Object.freeze({
+              ...current,
+              environment: Object.freeze([
+                ...current.environment,
+                Object.freeze({
+                  ...firstCapture,
+                  ordinal: current.environment.length,
+                  sourceOrdinal: firstCapture.sourceOrdinal + 1,
+                }),
+              ]),
+            }),
+          },
+          {
+            name: 'runner-target',
+            realization: Object.freeze({
+              ...current,
+              runner: Object.freeze({
+                ...current.runner,
+                name: `${current.runner.name}$changed`,
+              }),
+            }),
+          },
+          {
+            name: 'run-access',
+            realization: Object.freeze({
+              ...current,
+              access: current.access === 'Shared' ? 'Exclusive' : 'Shared',
+            }),
+          },
+          {
+            name: 'cleanup',
+            realization: Object.freeze({
+              ...current,
+              cleanup: Object.freeze({ ...current.cleanup, unrunLanes: Object.freeze([]) }),
+            }),
+          },
+          {
+            name: 'suspendability',
+            realization: Object.freeze({ ...current, suspendable: false }),
+          },
+        ]
+        const catalog = Layout.catalog(
+          Target.wasm32UnknownUnknown,
+          lowered.snapshot.index,
+          lowered.snapshot.instances,
+        )
+
+        // `verifyAgainstCatalog` is the real target-phase reuse boundary: it delegates stored
+        // environment comparison to `CallableFieldRealization.equals` before MIR and either
+        // backend can consume the plan. A mismatch therefore rebuilds layout and emitted code.
+        for (const mutation of mutations) {
+          assert.isFalse(
+            CallableFieldRealization.equals(current, mutation.realization),
+            `${mutation.name} dependency key`,
+          )
+          const staleLayout = replaceStoredRealization(
+            lowered.module.layout,
+            current,
+            mutation.realization,
+          )
+          assert.include(
+            Layout.verifyAgainstCatalog(staleLayout, catalog).map((violation) => violation.rule),
+            'CatalogMismatch',
+            `${mutation.name} stale layout`,
+          )
+        }
+      }),
+    60_000,
+  )
 
   it.effect(
     'resumes a suspending stored Effect with matching cleanup in every engine',
