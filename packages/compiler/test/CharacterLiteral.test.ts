@@ -1,14 +1,7 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Mir from '../src/Mir.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const utf8 = (value: string): Uint8Array => new TextEncoder().encode(value)
 
@@ -20,9 +13,6 @@ const codes = (snapshot: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
 
 const messages = (snapshot: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-character-literal-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 it.effect('gives a character literal the char type', () =>
   Effect.gen(function* () {
@@ -137,8 +127,10 @@ it.effect('lowers a character literal to one general MIR literal over char', () 
 
 /**
  * Every accepted escape, a multi-byte scalar, the six comparisons, and a `char` constant, run on
- * the evaluator, the Wasm backend, and the native backend. The comparisons take parameters rather
- * than literals so no engine can fold the operator away and still report the right answer.
+ * the evaluator and the Wasm backend; the native backend runs the same program through the corpus
+ * entry `character-literal-acceptance` in `DriverNativeAcceptance.test.ts`. The comparisons take
+ * parameters rather than literals so no engine can fold the operator away and still report the
+ * right answer.
  */
 const acceptance = `import silk.char { equals, notEquals, lessThan, lessOrEqual, greaterThan, greaterOrEqual }
 
@@ -183,7 +175,7 @@ pub fn main() -> i32 {
 }`
 
 it.effect(
-  'runs the same character-literal program identically on all three engines',
+  'runs the same character-literal program identically on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* analyze('acceptance', acceptance)
@@ -203,19 +195,6 @@ it.effect(
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make('char-literal/acceptance', utf8(acceptance)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'acceptance'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
     }),
   120_000,
 )
@@ -226,7 +205,7 @@ it.effect(
  * and a signed comparison would be a silent, engine-specific difference.
  */
 it.effect(
-  'orders the whole scalar range the same way on all three engines',
+  'orders the whole scalar range the same way on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       const source = `fn below(left: char, right: char) -> bool { return left < right }
@@ -249,17 +228,6 @@ pub fn main() -> i32 {
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-      const compiled = yield* Driver.compile({
-        compilation: { root: SourceFile.make('char-literal/ordering', utf8(source)) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'ordering'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
     }),
   120_000,
 )

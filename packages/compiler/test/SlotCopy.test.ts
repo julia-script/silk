@@ -1,20 +1,10 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Mir from '../src/Mir.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-slot-copy-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /** Copy reads the same initialized slot twice without consuming it; take still works after. */
 const copyRead = `effect fn store() -> i32 ! OutOfMemory {
@@ -92,7 +82,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
 
-it.effect('copies initialized Copy slots without consuming them on all three engines', () =>
+it.effect('copies initialized Copy slots without consuming them on the evaluator and Wasm', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'slot-copy/read',
@@ -109,22 +99,11 @@ it.effect('copies initialized Copy slots without consuming them on all three eng
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make('slot-copy/read', ascii(copyRead)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, 'read'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 42, run.stderr)
   }),
 )
 
 it.effect(
-  'copies all-Copy structural unions through Slot and shared aliases on all three engines',
+  'copies all-Copy structural unions through Slot and shared aliases on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* Analysis.ofSourceRealized(
@@ -178,17 +157,6 @@ it.effect(
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 59)
-
-      const compiled = yield* Driver.compile({
-        compilation: { root: SourceFile.make('slot-copy/structural-union', ascii(unionCopyRead)) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'structural-union'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 59, run.stderr)
     }),
 )
 

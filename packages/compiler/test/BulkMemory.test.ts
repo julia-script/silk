@@ -95,12 +95,6 @@ it.effect('copies a raw-storage range identically on the evaluator, LLVM, and Wa
     // memmove, not memcpy: overlapping ranges are a defined move rather than undefined behavior.
     assert.include(bitcode.ir, 'llvm.memmove')
     assert.notInclude(bitcode.ir, 'llvm.memcpy')
-
-    const compiled = yield* compileNative('bulk-memory/copy-range', copyRange)
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const executed = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(executed.status, 76, executed.stderr)
   }),
 )
 
@@ -163,12 +157,6 @@ it.effect('moves a range of move-only elements and leaves the source slots empty
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     assert.strictEqual(runWasm(wasm.bytes), 42)
-
-    const compiled = yield* compileNative('bulk-memory/move-only', source)
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const executed = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(executed.status, 42, executed.stderr)
 
     // Taking from the moved-from range traps: the copy gave those slots up. Only the evaluator
     // tracks per-slot initialization, so this is where the emptied source is observable.
@@ -237,12 +225,6 @@ it.effect('fills a byte range identically on the evaluator, LLVM, and Wasm', () 
 
     const bitcode = yield* Analysis.codegen(snapshot, { mode: 'release' })
     assert.include(bitcode.ir, 'llvm.memset')
-
-    const compiled = yield* compileNative('bulk-memory/fill-range', fillRange)
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const executed = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(executed.status, 99, executed.stderr)
   }),
 )
 
@@ -400,7 +382,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
 
-it.effect('appends borrowed bytes through the copy intrinsic on all three engines', () =>
+it.effect('appends borrowed bytes through the copy intrinsic on the evaluator and Wasm', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'bulk-memory/bytes-append',
@@ -418,12 +400,6 @@ it.effect('appends borrowed bytes through the copy intrinsic on all three engine
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     assert.strictEqual(runWasm(wasm.bytes), 95)
-
-    const compiled = yield* compileNative('bulk-memory/bytes-append', bulkBytes)
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const executed = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(executed.status, 95, executed.stderr)
   }),
 )
 
@@ -448,7 +424,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
 
-it.effect('grows a vector through one bulk copy per migration on all three engines', () =>
+it.effect('grows a vector through one bulk copy per migration on the evaluator and Wasm', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'bulk-memory/vector-growth',
@@ -466,12 +442,6 @@ it.effect('grows a vector through one bulk copy per migration on all three engin
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     assert.strictEqual(runWasm(wasm.bytes), 80)
-
-    const compiled = yield* compileNative('bulk-memory/vector-growth', vectorGrowth)
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const executed = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(executed.status, 80, executed.stderr)
   }),
 )
 

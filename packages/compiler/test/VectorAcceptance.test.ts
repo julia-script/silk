@@ -1,14 +1,7 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Mir from '../src/Mir.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -27,9 +20,6 @@ const watOperationNames = (wat: string): ReadonlyArray<string> =>
     const operation = match.at(1)
     return operation === undefined ? [] : [operation]
   })
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-vector-acceptance-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /**
  * The first useful owned sequence written entirely in Silk: six appends force two geometric
@@ -64,7 +54,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'grows, reads, and releases a Silk-written vector on all three engines',
+  'grows, reads, and releases a Silk-written vector on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* Analysis.ofSourceRealized(
@@ -123,17 +113,6 @@ it.effect(
       assert.isFalse(
         llvmOperationNames(llvm.ir).some((operation) => operation.toLowerCase().includes('vector')),
       )
-
-      const compiled = yield* Driver.compile({
-        compilation: { root: SourceFile.make('vector-acceptance/growth', ascii(growth)) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'growth'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
     }),
   60_000,
 )
@@ -160,7 +139,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'returns shared and exclusive Vector views on all three engines',
+  'returns shared and exclusive Vector views on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       const wasmSnapshot = yield* Analysis.ofSourceRealized(
@@ -187,19 +166,6 @@ it.effect(
       const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make('vector-acceptance/lexical-views', ascii(lexicalViews)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'lexical-views'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
     }),
   60_000,
 )
@@ -280,19 +246,6 @@ it.effect(
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make('vector-acceptance/failed-growth', ascii(failedGrowth)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'failed-growth'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
     }),
   60_000,
 )
@@ -364,22 +317,6 @@ it.effect('drops initialized elements in order before releasing vector storage',
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-    const compiled = yield* Driver.compile({
-      compilation: {
-        root: SourceFile.make(
-          'vector-acceptance/element-release-order',
-          ascii(elementReleaseOrder),
-        ),
-      },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, 'element-release-order'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 42, run.stderr)
   }),
 )
 
@@ -420,7 +357,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
-it.effect('transfers vector ownership and drops it early on all three engines', () =>
+it.effect('transfers vector ownership and drops it early on the evaluator and Wasm', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'vector-acceptance/transferred-early-drop',
@@ -451,26 +388,10 @@ it.effect('transfers vector ownership and drops it early on all three engines', 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-    const compiled = yield* Driver.compile({
-      compilation: {
-        root: SourceFile.make(
-          'vector-acceptance/transferred-early-drop',
-          ascii(transferredEarlyDrop),
-        ),
-      },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, 'transferred-early-drop'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 42, run.stderr)
   }),
 )
 
-it.effect('reads a zero-sized Copy element through a shared vector on all three engines', () =>
+it.effect('reads a zero-sized Copy element through a shared vector on the evaluator and Wasm', () =>
   Effect.gen(function* () {
     const source = `import silk.vector { Vector, make, append, get }
 struct Marker {}
@@ -498,24 +419,11 @@ pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-    const compiled = yield* Driver.compile({
-      compilation: {
-        root: SourceFile.make('vector-acceptance/zero-sized-read', ascii(source)),
-      },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, 'zero-sized-read'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 42, run.stderr)
   }),
 )
 
 it.effect(
-  'reads all-Copy structural-union elements through a shared vector on all three engines',
+  'reads all-Copy structural-union elements through a shared vector on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       const source = `import silk.vector { Vector, make, append, get }
@@ -565,19 +473,6 @@ pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make('vector-acceptance/structural-union-read', ascii(source)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'structural-union-read'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
     }),
 )
 
@@ -622,11 +517,11 @@ pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 )
 
 /**
- * Runs one program on the evaluator, Wasm, and the native toolchain, asserting each engine
+ * Runs one program on the evaluator and Wasm, asserting each engine
  * agrees on the exit value. Returns the evaluator trace so a caller can assert on drop order
  * and allocation pairing.
  */
-const acceptOnAllEngines = (name: string, source: string) =>
+const acceptOnEngines = (name: string, source: string) =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       `vector-acceptance/${name}`,
@@ -649,17 +544,6 @@ const acceptOnAllEngines = (name: string, source: string) =>
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make(`vector-acceptance/${name}`, ascii(source)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, name),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') throw new Error('unreachable')
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 42, run.stderr)
 
     return evaluated
   })
@@ -702,8 +586,8 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'pops the last element and decreases the length by one on all three engines',
-  () => acceptOnAllEngines('pop-shrinks', popShrinks),
+  'pops the last element and decreases the length by one on the evaluator and Wasm',
+  () => acceptOnEngines('pop-shrinks', popShrinks),
   60_000,
 )
 
@@ -726,8 +610,8 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'returns an absent value when popping an empty vector on all three engines',
-  () => acceptOnAllEngines('pop-empty', popEmpty),
+  'returns an absent value when popping an empty vector on the evaluator and Wasm',
+  () => acceptOnEngines('pop-empty', popEmpty),
   60_000,
 )
 
@@ -760,8 +644,8 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'removes an element and shifts later elements down on all three engines',
-  () => acceptOnAllEngines('remove-shifts', removeShifts),
+  'removes an element and shifts later elements down on the evaluator and Wasm',
+  () => acceptOnEngines('remove-shifts', removeShifts),
   60_000,
 )
 
@@ -793,10 +677,10 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'clears the length while keeping the capacity on all three engines',
+  'clears the length while keeping the capacity on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
-      const evaluated = yield* acceptOnAllEngines('clear-keeps-capacity', clearKeepsCapacity)
+      const evaluated = yield* acceptOnEngines('clear-keeps-capacity', clearKeepsCapacity)
       // Reusing the cleared buffer needs no second allocation.
       const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
       const releases = evaluated.trace.filter((event) => event._tag === 'AllocationRelease')
@@ -843,10 +727,10 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'drops the overwritten element exactly once on all three engines',
+  'drops the overwritten element exactly once on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
-      const evaluated = yield* acceptOnAllEngines('set-drops-old', setDropsOldElement)
+      const evaluated = yield* acceptOnEngines('set-drops-old', setDropsOldElement)
       // The overwritten 3 drops during set; 9 and 5 drop with the vector at scope end.
       assert.deepEqual(recordedValues(evaluated), [3, 9, 5])
     }),
@@ -891,10 +775,10 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'releases each truncated element exactly once on all three engines',
+  'releases each truncated element exactly once on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
-      const evaluated = yield* acceptOnAllEngines('truncate-releases-tail', truncateReleasesTail)
+      const evaluated = yield* acceptOnEngines('truncate-releases-tail', truncateReleasesTail)
       // The tail drops in index order during truncate; the survivor drops with the vector.
       assert.deepEqual(recordedValues(evaluated), [5, 7, 3])
     }),
@@ -960,7 +844,7 @@ it.effect(
   'pairs every acquire with one release across append, pop, and drop of move-only elements',
   () =>
     Effect.gen(function* () {
-      const evaluated = yield* acceptOnAllEngines('move-only-round-trip', moveOnlyRoundTrip)
+      const evaluated = yield* acceptOnEngines('move-only-round-trip', moveOnlyRoundTrip)
       // Ownership leaves the vector with pop and remove, so each element is released once: the
       // two extracted elements drop at their binding, the two survivors with the vector.
       const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
@@ -1020,7 +904,7 @@ it.effect(
   'leaves the vector unchanged when reserve fails with OutOfMemory',
   () =>
     Effect.gen(function* () {
-      const evaluated = yield* acceptOnAllEngines('failed-reserve', failedReserve)
+      const evaluated = yield* acceptOnEngines('failed-reserve', failedReserve)
       // Only the original buffer was ever acquired, and it is released exactly once.
       const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
       const releases = evaluated.trace.filter((event) => event._tag === 'AllocationRelease')
@@ -1058,8 +942,8 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'reads back element zero of a move-only element on all three engines',
-  () => acceptOnAllEngines('move-only-element-zero', moveOnlyElementZero),
+  'reads back element zero of a move-only element on the evaluator and Wasm',
+  () => acceptOnEngines('move-only-element-zero', moveOnlyElementZero),
   60_000,
 )
 
@@ -1095,8 +979,8 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'reads back every element of a move-only append sequence on all three engines',
-  () => acceptOnAllEngines('move-only-append-sequence', moveOnlyAppendSequence),
+  'reads back every element of a move-only append sequence on the evaluator and Wasm',
+  () => acceptOnEngines('move-only-append-sequence', moveOnlyAppendSequence),
   60_000,
 )
 
@@ -1139,8 +1023,8 @@ effect fn recover(error: OutOfMemory) -> i32 { return 8 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'reads back every element across both growths of a move-only vector on all three engines',
-  () => acceptOnAllEngines('move-only-growth-sequence', moveOnlyGrowthSequence),
+  'reads back every element across both growths of a move-only vector on the evaluator and Wasm',
+  () => acceptOnEngines('move-only-growth-sequence', moveOnlyGrowthSequence),
   60_000,
 )
 
@@ -1175,7 +1059,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'reads back element zero when the move-only field is Bytes on all three engines',
-  () => acceptOnAllEngines('move-only-bytes-field', moveOnlyBytesField),
+  'reads back element zero when the move-only field is Bytes on the evaluator and Wasm',
+  () => acceptOnEngines('move-only-bytes-field', moveOnlyBytesField),
   60_000,
 )

@@ -1,20 +1,14 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as FloatingPoint from '../src/FloatingPoint.js'
 import * as Hir from '../src/Hir.js'
 import * as Mir from '../src/Mir.js'
-import type * as NativeToolchain from '../src/NativeToolchain.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as Transcendental from '../src/Transcendental.js'
+import { transcendentalCanonicalBits } from './support/corpus.js'
 
 const Vector = Schema.Struct({
   width: Schema.Literals([32, 64]),
@@ -58,55 +52,13 @@ it('stays within four ulp of independently generated high-precision vectors', ()
   }
 })
 
-const executionVectors = [
-  ...fixture.vectors,
-  { width: 32 as const, inputBits: '0x00000000', operation: 'Sin' as const },
-  { width: 32 as const, inputBits: '0x80000000', operation: 'Sin' as const },
-  { width: 32 as const, inputBits: '0x00000000', operation: 'Cos' as const },
-  { width: 32 as const, inputBits: '0x7f800000', operation: 'Sin' as const },
-  { width: 32 as const, inputBits: '0xff800000', operation: 'Cos' as const },
-  { width: 32 as const, inputBits: '0x7fc12345', operation: 'Sin' as const },
-  { width: 64 as const, inputBits: '0x0000000000000000', operation: 'Sin' as const },
-  { width: 64 as const, inputBits: '0x8000000000000000', operation: 'Sin' as const },
-  { width: 64 as const, inputBits: '0x0000000000000000', operation: 'Cos' as const },
-  { width: 64 as const, inputBits: '0x7ff0000000000000', operation: 'Sin' as const },
-  { width: 64 as const, inputBits: '0xfff0000000000000', operation: 'Cos' as const },
-  { width: 64 as const, inputBits: '0x7ff8123456789abc', operation: 'Sin' as const },
-].map((vector) => {
-  const inputBits = BigInt(vector.inputBits)
-  return Object.freeze({
-    width: vector.width,
-    inputBits,
-    operation: vector.operation,
-    expectedBits: Transcendental.evaluate(vector.operation, {
-      width: vector.width,
-      bits: inputBits,
-    }).bits,
-  })
-})
-
-const source = `pub fn main() -> i32 {
-${executionVectors
-  .map(
-    (vector, index) =>
-      `  if f${vector.width}.toBits(f${vector.width}.${vector.operation.toLowerCase()}(f${vector.width}.fromBits(${vector.inputBits.toString()}))) != ${vector.expectedBits.toString()} { return ${index + 1} }`,
-  )
-  .join('\n')}
-  return 42
-}`
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-transcendental-'))
-afterAll(() => {
-  rmSync(destinationRoot, { recursive: true, force: true })
-})
-
-const toolchain: NativeToolchain.Toolchain = Object.freeze({
-  _tag: 'Toolchain',
-  clang: '/usr/bin/clang',
-})
+// The canonical-bits program is generated in the corpus so its native execution rides the
+// differential in `DriverNativeAcceptance.test.ts`; this file keeps the IR-shape, evaluator, and
+// direct-Wasm claims on the same source text.
+const source = transcendentalCanonicalBits
 
 it.effect(
-  'returns identical canonical bits through evaluation, native, and direct Wasm',
+  'returns identical canonical bits through evaluation and direct Wasm',
   () =>
     Effect.gen(function* () {
       const bytes = new TextEncoder().encode(source)
@@ -140,18 +92,6 @@ it.effect(
       assert.notInclude(nativeArtifact.ir, 'llvm.sin')
       assert.notInclude(nativeArtifact.ir, 'llvm.cos')
       assert.notInclude(nativeArtifact.ir, ' fast ')
-
-      const compiled = yield* Driver.compile({
-        compilation: { root: SourceFile.make('transcendental/process', bytes) },
-        toolchain,
-        profile: 'release',
-        destination: join(destinationRoot, 'program'),
-      }).pipe(Effect.provide(SourceResolver.memory(new Map())))
-      assert.strictEqual(compiled._tag, 'Compiled', JSON.stringify(compiled))
-      if (compiled._tag === 'Compiled') {
-        const process = spawnSync(compiled.path, [], { encoding: 'utf8' })
-        assert.strictEqual(process.status, 42, process.stderr)
-      }
 
       const wasm = yield* Analysis.ofSourceRealized(
         'transcendental/wasm',

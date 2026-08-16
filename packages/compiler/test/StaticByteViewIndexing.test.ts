@@ -1,16 +1,8 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Hir from '../src/Hir.js'
 import * as Mir from '../src/Mir.js'
-import type * as NativeToolchain from '../src/NativeToolchain.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -34,14 +26,6 @@ const directSource = `pub fn main() -> i32 {
   let index = usize.add(0, 1)
   return u8.toI32(bytes[index]) + usize.toI32(bytes.length)
 }`
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-static-byte-view-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
-
-const toolchain: NativeToolchain.Toolchain = Object.freeze({
-  _tag: 'Toolchain',
-  clang: '/usr/bin/clang',
-})
 
 const replaceFunction = (module: Mir.Module, index: number, fn: Mir.MirFunction): Mir.Module =>
   Object.freeze({
@@ -278,18 +262,6 @@ it.effect('loads immutable static storage on LLVM and Wasm and traps before over
     assert.strictEqual(typeof wasmMain, 'function')
     if (typeof wasmMain === 'function') assert.strictEqual(wasmMain(), 201)
 
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make(moduleName, ascii(bytesSource)) },
-      toolchain,
-      profile: 'release',
-      destination: join(destinationRoot, 'valid'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag === 'Compiled') {
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 201, run.stderr)
-    }
-
     const boundsSource = `pub fn main() -> i32 {
   let bytes = b"\\x99\\x13\\x1d\\x00"
   let index = usize.add(0, 4)
@@ -309,18 +281,6 @@ it.effect('loads immutable static storage on LLVM and Wasm and traps before over
     assert.strictEqual(typeof wasmBoundsMain, 'function')
     if (typeof wasmBoundsMain === 'function') {
       assert.throws(() => wasmBoundsMain(), WebAssembly.RuntimeError)
-    }
-
-    const nativeBounds = yield* Driver.compile({
-      compilation: { root: SourceFile.make(`${moduleName}/native-bounds`, ascii(boundsSource)) },
-      toolchain,
-      profile: 'release',
-      destination: join(destinationRoot, 'bounds'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(nativeBounds._tag, 'Compiled')
-    if (nativeBounds._tag === 'Compiled') {
-      const run = spawnSync(nativeBounds.path, [], { encoding: 'utf8' })
-      assert.notStrictEqual(run.signal, null)
     }
   }),
 )

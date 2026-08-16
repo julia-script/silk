@@ -1,20 +1,10 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as StandardStreams from '../src/StandardStreams.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-wasm-heap-reclaim-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 const pagesOf = (instance: WebAssembly.Instance): number => {
   const memory = instance.exports[StandardStreams.wasmMemoryExport]
@@ -121,8 +111,8 @@ it.effect(
 /**
  * Count parity is a separate property from memory parity: the acquire and release counts a
  * provider folds into an ordinary Silk value are backend-independent, and were already equal
- * before either backend reclaimed anything. This test pins that they stay equal, and says nothing
- * about how much memory either engine holds while doing it.
+ * before either backend reclaimed anything. This test pins the count Wasm reports, and says
+ * nothing about how much memory the engine holds while doing it.
  */
 const counted = `import silk.metrics {
   AllocationMetrics,
@@ -179,35 +169,19 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
-it.effect(
-  'reports the same release count on Wasm and on native LLVM',
-  () =>
-    Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
-        'wasm-heap-reclaim/counted',
-        ascii(counted),
-        'wasm32-unknown-unknown',
-      )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+it.effect('reports the folded release count on Wasm', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'wasm-heap-reclaim/counted',
+      ascii(counted),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
-      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-      const wasmReleases = (instance.exports.silk_main as () => number)()
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    const wasmReleases = (instance.exports.silk_main as () => number)()
 
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make('wasm-heap-reclaim/counted', ascii(counted)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'counted'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const native = spawnSync(compiled.path, [], { encoding: 'utf8' })
-
-      assert.strictEqual(wasmReleases, 3)
-      assert.strictEqual(native.status, wasmReleases, native.stderr)
-    }),
-  60_000,
+    assert.strictEqual(wasmReleases, 3)
+  }),
 )

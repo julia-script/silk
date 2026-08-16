@@ -24,8 +24,10 @@ const toolchain: NativeToolchain.Toolchain = Object.freeze({
   shimCache: NativeToolchain.makeShimCache(),
 })
 
-const ascii = (value: string): Uint8Array =>
-  Uint8Array.from(value, (character) => character.charCodeAt(0))
+// UTF-8, not charCodeAt: corpus programs may carry non-ASCII literals, and for ASCII sources the
+// bytes are identical.
+const encoder = new TextEncoder()
+const ascii = (value: string): Uint8Array => encoder.encode(value)
 
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-driver-native-acceptance-'))
 afterAll(() => {
@@ -92,5 +94,5 @@ it.effect(
         }
       }
     }),
-  180_000,
+  240_000,
 )

@@ -1,20 +1,10 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Ownership from '../src/Ownership.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-bytes-acceptance-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 const parity = `import silk.bytes { Bytes, copy, append, asMutSlice, asSlice, length }
 
@@ -50,7 +40,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'copies, appends, mutates, and releases arbitrary octets on all three engines',
+  'copies, appends, mutates, and releases arbitrary octets on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       const wasmSnapshot = yield* Analysis.ofSourceRealized(
@@ -89,17 +79,6 @@ it.effect(
       assert.deepEqual(WebAssembly.Module.imports(module), [])
       const instance = new WebAssembly.Instance(module, {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 180)
-
-      const compiled = yield* Driver.compile({
-        compilation: { root: SourceFile.make('bytes-acceptance/parity', ascii(parity)) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'parity'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 180, run.stderr)
     }),
   60_000,
 )

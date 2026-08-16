@@ -1,23 +1,15 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { readFileSync } from 'node:fs'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const bytes = new Uint8Array(
   readFileSync(new URL('./fixtures/runtime-slice-exclusive.silk', import.meta.url)),
 )
 const moduleName = 'runtime-slice-acceptance/main'
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-runtime-slice-acceptance-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 it.effect(
-  'keeps exclusive move-only replacement and cleanup in parity across all three engines',
+  'keeps exclusive move-only replacement and cleanup in parity across the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       const native = yield* Analysis.ofSourceRealized(moduleName, bytes, 'aarch64-apple-darwin')
@@ -42,16 +34,5 @@ it.effect(
       )
       const wasmMain = wasmInstance.exports.silk_main as () => number
       assert.strictEqual(wasmMain(), 42)
-
-      const compiled = yield* Driver.compile({
-        compilation: { root: SourceFile.make(moduleName, bytes) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'exclusive'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
     }),
 )

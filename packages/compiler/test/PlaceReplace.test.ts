@@ -1,19 +1,9 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-place-replace-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /** Swap a scalar field through an exclusive reference and observe both halves. */
 const scalarSwap = `struct Counter {
@@ -52,7 +42,7 @@ pub fn main() -> i32 {
   return first + second
 }`
 
-it.effect('swaps places atomically on all three engines', () =>
+it.effect('swaps places atomically on the evaluator and Wasm', () =>
   Effect.gen(function* () {
     for (const [name, source, expected] of [
       ['scalar', scalarSwap, 42],
@@ -72,17 +62,6 @@ it.effect('swaps places atomically on all three engines', () =>
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), expected, `${name} wasm`)
-
-      const compiled = yield* Driver.compile({
-        compilation: { root: SourceFile.make(`place-replace/${name}`, ascii(source)) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, name),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled', name)
-      if (compiled._tag !== 'Compiled') continue
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, expected, `${name} native: ${run.stderr}`)
     }
   }),
 )

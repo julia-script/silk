@@ -4,7 +4,53 @@
  * results against compiled output. Expected results were pinned against the fact-based
  * evaluator before the MIR retarget.
  */
+import { readFileSync } from 'node:fs'
+import * as Transcendental from '../../src/Transcendental.js'
 import { floatMathPrograms } from './floatMath.js'
+
+// folded from Transcendental.test.ts: the canonical-bits program is generated from the pinned
+// high-precision vectors plus the fixed edge cases, so the expected bits can never drift from the
+// reference implementation. Transcendental.test.ts imports this source for its IR assertions.
+interface TranscendentalVector {
+  readonly width: 32 | 64
+  readonly inputBits: string
+  readonly operation: 'Sin' | 'Cos'
+}
+
+const transcendentalFixture = JSON.parse(
+  readFileSync(new URL('../fixtures/transcendental-vectors.json', import.meta.url), 'utf8'),
+) as { readonly vectors: ReadonlyArray<TranscendentalVector> }
+
+const transcendentalVectors: ReadonlyArray<TranscendentalVector> = [
+  ...transcendentalFixture.vectors,
+  { width: 32, inputBits: '0x00000000', operation: 'Sin' },
+  { width: 32, inputBits: '0x80000000', operation: 'Sin' },
+  { width: 32, inputBits: '0x00000000', operation: 'Cos' },
+  { width: 32, inputBits: '0x7f800000', operation: 'Sin' },
+  { width: 32, inputBits: '0xff800000', operation: 'Cos' },
+  { width: 32, inputBits: '0x7fc12345', operation: 'Sin' },
+  { width: 64, inputBits: '0x0000000000000000', operation: 'Sin' },
+  { width: 64, inputBits: '0x8000000000000000', operation: 'Sin' },
+  { width: 64, inputBits: '0x0000000000000000', operation: 'Cos' },
+  { width: 64, inputBits: '0x7ff0000000000000', operation: 'Sin' },
+  { width: 64, inputBits: '0xfff0000000000000', operation: 'Cos' },
+  { width: 64, inputBits: '0x7ff8123456789abc', operation: 'Sin' },
+]
+
+/** Canonical-bits transcendental program: bit-exact sin/cos parity across every engine. */
+export const transcendentalCanonicalBits = `pub fn main() -> i32 {
+${transcendentalVectors
+  .map((vector, index) => {
+    const inputBits = BigInt(vector.inputBits)
+    const expectedBits = Transcendental.evaluate(vector.operation, {
+      width: vector.width,
+      bits: inputBits,
+    }).bits
+    return `  if f${vector.width}.toBits(f${vector.width}.${vector.operation.toLowerCase()}(f${vector.width}.fromBits(${inputBits.toString()}))) != ${expectedBits.toString()} { return ${index + 1} }`
+  })
+  .join('\n')}
+  return 42
+}`
 
 export interface CorpusProgram {
   readonly name: string
@@ -451,6 +497,419 @@ pub fn main() -> i32 {
     name: 'parameterized-entry',
     source: 'pub fn main(value: i32) -> i32 { return value }',
     expected: { _tag: 'UnavailableEntry', reason: 'ParameterizedEntry' },
+  },
+  // folded from StringAcceptance.test.ts: literals, owned copy/view/append, exact equality, and
+  // scalar traversal.
+  {
+    name: 'string-owned-scalars',
+    source: `import silk.string {
+  ScalarCursor,
+  ScalarStep,
+  copy,
+  append,
+  view,
+  scalarCursor,
+  nextScalar,
+  scalarValue,
+  nextCursor
+}
+import silk.option { Some, None }
+
+fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
+  return match move nextScalar(value, move cursor) {
+    Some<ScalarStep> { value: step } => continueSum(value, move step)
+    None nothing => u32.toU32(0)
+  }
+}
+
+fn continueSum(value: string, step: ScalarStep) -> u32 {
+  let scalar = scalarValue(&step)
+  let cursor = nextCursor(move step)
+  return scalar + scalarSum(value, move cursor)
+}
+
+effect fn build() -> i32 ! OutOfMemory {
+  let literal = "A\\u{a2}"
+  if literal == "A\\u{a2}" {} else { return 1 }
+  if literal != "A\\u{a3}" {} else { return 2 }
+
+  let mut allocator = SystemAllocator.make()
+  let copying = copy(literal) |> Effect.provideMut(&mut allocator)
+  let mut owned = run copying
+  let appending = append(&mut owned, "\\u{20ac}\\u{10348}")
+    |> Effect.provideMut(&mut allocator)
+  let appended = run appending
+  let borrowed = view(&owned)
+  if borrowed == "A\\u{a2}\\u{20ac}\\u{10348}" {} else { return 3 }
+  if scalarSum(borrowed, scalarCursor()) == u32.toU32(74967) {} else { return 4 }
+  return 42
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // folded from UnicodeNormalization.test.ts: the two normalized owners compared directly, which
+  // the evaluator and native answer correctly while direct WebAssembly still cannot.
+  {
+    name: 'unicode-compared-directly',
+    source: `import silk.string { String, view }
+import silk.unicode { normalizeNfc }
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let left = run normalizeNfc("\\u{e9}") |> Effect.provideMut(&mut allocator)
+  let right = run normalizeNfc("e\\u{301}") |> Effect.provideMut(&mut allocator)
+  if view(&left) == view(&right) {} else { return 1 }
+  return 42
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // folded from CharacterLiteral.test.ts: every accepted escape, multi-byte scalars, and the six
+  // comparisons. The source deliberately carries non-ASCII literals.
+  {
+    name: 'character-literal-acceptance',
+    source: `import silk.char { equals, notEquals, lessThan, lessOrEqual, greaterThan, greaterOrEqual }
+
+const asciiSpace: char = ' '
+const asciiTab: char = '\\t'
+const snowman: char = '\\u{2603}'
+
+fn eq(left: char, right: char) -> bool { return left == right }
+fn ne(left: char, right: char) -> bool { return left != right }
+fn lt(left: char, right: char) -> bool { return left < right }
+fn le(left: char, right: char) -> bool { return left <= right }
+fn gt(left: char, right: char) -> bool { return left > right }
+fn ge(left: char, right: char) -> bool { return left >= right }
+
+pub fn main() -> i32 {
+  if eq('a', 'a') {} else { return 1 }
+  if ne('a', 'b') {} else { return 2 }
+  if lt('a', 'b') {} else { return 3 }
+  if le('a', 'a') {} else { return 4 }
+  if gt('b', 'a') {} else { return 5 }
+  if ge('a', 'a') {} else { return 6 }
+  if eq('\\n', '\\u{a}') {} else { return 7 }
+  if eq('\\r', '\\u{d}') {} else { return 8 }
+  if eq('\\t', asciiTab) {} else { return 9 }
+  if eq('\\0', '\\u{0}') {} else { return 10 }
+  if eq('\\\\', '\\u{5c}') {} else { return 11 }
+  if eq('\\'', '\\u{27}') {} else { return 12 }
+  if eq('\\"', '"') {} else { return 13 }
+  if eq('\\x41', 'A') {} else { return 14 }
+  if eq(' ', asciiSpace) {} else { return 15 }
+  if eq('é', '\\u{e9}') {} else { return 16 }
+  if eq('☃', snowman) {} else { return 17 }
+  if lt('é', snowman) {} else { return 18 }
+  if gt('😀', snowman) {} else { return 19 }
+  if equals('a', 'a') {} else { return 20 }
+  if notEquals('a', 'b') {} else { return 21 }
+  if lessThan('a', 'b') {} else { return 22 }
+  if lessOrEqual('a', 'b') {} else { return 23 }
+  if greaterThan('b', 'a') {} else { return 24 }
+  if greaterOrEqual('b', 'a') {} else { return 25 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // folded from ShortCircuitOperatorAcceptance.test.ts: the counter proves the right operand of
+  // `&&`/`||` runs exactly when short-circuiting says it must.
+  {
+    name: 'short-circuit-counting',
+    source: `fn bump(counter: &mut [i32], answer: bool) -> bool {
+  counter[0] = counter[0] + 1
+  return answer
+}
+
+fn conjunction(gate: bool) -> i32 {
+  let mut counter = [0]
+  if gate && bump(&mut counter, true) { return counter[0] }
+  return counter[0]
+}
+
+fn disjunction(gate: bool) -> i32 {
+  let mut counter = [0]
+  if gate || bump(&mut counter, true) { return counter[0] }
+  return counter[0]
+}
+
+pub fn main() -> i32 {
+  if conjunction(false) == 0 {} else { return 1 }
+  if conjunction(true) == 1 {} else { return 2 }
+  if disjunction(true) == 0 {} else { return 3 }
+  if disjunction(false) == 1 {} else { return 4 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // folded from Transcendental.test.ts: bit-exact sin/cos results across every engine.
+  {
+    name: 'transcendental-canonical-bits',
+    source: transcendentalCanonicalBits,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // folded from HashedCollections.test.ts: seeded map growth with checked reads.
+  {
+    name: 'hashed-map-growth',
+    source: `import silk.hash { HashKey, HashSeed, Word }
+import silk.hash_map { HashMap, bucketCount, contains, get, insert, length, make, remove }
+import silk.option { Option, Some, None }
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut map = make<Word, i32>(HashKey.seed(4242))
+  let mut key = 0
+  while key < 40 {
+    let previous = run insert<Word, i32>(&mut map, HashKey.word(i32.toU64(key)), key * 3)
+      |> Effect.provideMut(&mut allocator)
+    drop previous
+    key = key + 1
+  }
+  if length<Word, i32>(&map) != 40 { return 1 }
+  if bucketCount<Word, i32>(&map) <= 40 { return 2 }
+  let mut probe = 0
+  let mut total = 0
+  while probe < 40 {
+    let found = Option.unwrapOr<i32>(get<Word, i32>(&map, HashKey.word(i32.toU64(probe))), -1)
+    if found != probe * 3 { return 3 }
+    total = total + found
+    probe = probe + 1
+  }
+  if total != 2340 { return 4 }
+  return 42
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // folded from VectorAcceptance.test.ts: growth past the initial capacity with boundary reads.
+  {
+    name: 'vector-growth-reads',
+    source: `import silk.vector { Vector, make, append, get, length, capacity }
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut values = make<i32>()
+  let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
+  let appended0 = run pending0
+  let pending1 = append<i32>(&mut values, 11) |> Effect.provideMut(&mut allocator)
+  let appended1 = run pending1
+  let pending2 = append<i32>(&mut values, 12) |> Effect.provideMut(&mut allocator)
+  let appended2 = run pending2
+  let pending3 = append<i32>(&mut values, 13) |> Effect.provideMut(&mut allocator)
+  let appended3 = run pending3
+  let pending4 = append<i32>(&mut values, 14) |> Effect.provideMut(&mut allocator)
+  let appended4 = run pending4
+  let pending5 = append<i32>(&mut values, 15) |> Effect.provideMut(&mut allocator)
+  let appended5 = run pending5
+  if length<i32>(&values) == 6 {} else { return 0 }
+  if capacity<i32>(&values) == 8 {} else { return 1 }
+  let first = get<i32>(&values, 0)
+  let last = get<i32>(&values, 5)
+  return first + last + 17
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // folded from OwnedAllocationDispatch.test.ts: quota refusal propagates typed OutOfMemory.
+  {
+    name: 'owned-allocation-quota-refusal',
+    source: `struct QuotaAllocator { remaining: i32 }
+
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+  if self.remaining == 0 { fail OutOfMemory {} }
+  self.remaining = self.remaining - 1
+  let mut inner = SystemAllocator.make()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
+  let block = run recipe
+  return move block
+}
+
+impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = QuotaAllocator { remaining: 1 }
+  let first = Layout.of<[i32; 2]>()
+  let recipeA = Allocator.allocate(move first) |> Effect.provideMut(&mut allocator)
+  let a = run recipeA
+  let second = Layout.of<[i32; 2]>()
+  let recipeB = Allocator.allocate(move second) |> Effect.provideMut(&mut allocator)
+  let b = run recipeB
+  drop a
+  drop b
+  return 42
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+
+pub fn main() -> i32 {
+  return run Effect.catch(build(), recover)
+}`,
+    expected: { _tag: 'Completes', result: 7 },
+  },
+  // folded from SlotLaneWidth.test.ts: u8 lane writes, copies, and takes through a raw buffer.
+  {
+    name: 'slot-lane-u8',
+    source: `effect fn store() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[u8; 4]>()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let allocation = run recipe
+  unsafe {
+    let mut buffer = RawBuffer.from<u8>(move allocation, 4)
+    let firstWritten = Slot.write<u8>(RawBuffer.slot(&mut buffer, 0), 7)
+    let secondWritten = Slot.write<u8>(RawBuffer.slot(&mut buffer, 3), 11)
+    let firstCopy = Slot.copy(RawBuffer.slot(&mut buffer, 0))
+    let secondCopy = Slot.copy(RawBuffer.slot(&mut buffer, 3))
+    let firstTake = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    let secondTake = Slot.take(RawBuffer.slot(&mut buffer, 3))
+    drop buffer
+    return 100 + u8.toI32(firstCopy) + u8.toI32(secondCopy) + u8.toI32(firstTake) + u8.toI32(secondTake)
+  }
+  return 0
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+
+pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
+    expected: { _tag: 'Completes', result: 136 },
+  },
+  // folded from SlotLaneWidth.test.ts: f64 lane parity including a negative value.
+  {
+    name: 'slot-lane-f64',
+    source: `effect fn store() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[f64; 4]>()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let allocation = run recipe
+  unsafe {
+    let mut buffer = RawBuffer.from<f64>(move allocation, 4)
+    let firstWritten = Slot.write<f64>(RawBuffer.slot(&mut buffer, 0), -7.0)
+    let secondWritten = Slot.write<f64>(RawBuffer.slot(&mut buffer, 1), 11.0)
+    let firstCopy = Slot.copy(RawBuffer.slot(&mut buffer, 0))
+    let secondCopy = Slot.copy(RawBuffer.slot(&mut buffer, 1))
+    let firstTake = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    let secondTake = Slot.take(RawBuffer.slot(&mut buffer, 1))
+    drop buffer
+    return 100 + f64.toI32(firstCopy) + f64.toI32(secondCopy) + f64.toI32(firstTake) + f64.toI32(secondTake)
+  }
+  return 0
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+
+pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
+    expected: { _tag: 'Completes', result: 108 },
+  },
+  // folded from BytesAcceptance.test.ts: copy, append, and mutate through byte slices (exit 180).
+  {
+    name: 'bytes-parity',
+    source: `import silk.bytes { Bytes, copy, append, asMutSlice, asSlice, length }
+
+fn octet(value: u8) -> u8 { return value }
+
+fn checksum(values: &[u8]) -> i32 {
+  let mut index = usize.add(0, 0)
+  let mut total = 0
+  while index < values.length {
+    total = total + u8.toI32(values[index])
+    index = index + usize.add(0, 1)
+  }
+  return total
+}
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let source = [octet(0), octet(255), octet(128), octet(1)]
+  let copying = copy(&source) |> Effect.provideMut(&mut allocator)
+  let mut bytes = run copying
+  let suffix = [octet(42), octet(7)]
+  let appending = append(&mut bytes, &suffix) |> Effect.provideMut(&mut allocator)
+  let appended = run appending
+  let mut writable = asMutSlice(&mut bytes)
+  writable[1] = octet(2)
+  let readable = asSlice(&bytes)
+  if length(&bytes) == 6 {} else { return 1 }
+  return checksum(move readable)
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 180 },
+  },
+  // folded from StaticByteViewIndexing.test.ts: out-of-bounds static byte read traps.
+  {
+    name: 'static-byte-view-bounds',
+    source: `pub fn main() -> i32 {
+  let bytes = b"\\x99\\x13\\x1d\\x00"
+  let index = usize.add(0, 4)
+  return u8.toI32(bytes[index])
+}`,
+    expected: { _tag: 'Trap' },
+  },
+  // folded from OwnedAllocationAcceptance.test.ts: guarded slot writes and takes release cleanly.
+  {
+    name: 'owned-allocation-guard',
+    source: `struct Element { value: i32 }
+
+effect fn build(count: usize) -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[Element; 4]>()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let allocation = run recipe
+  unsafe {
+    let mut buffer = RawBuffer.from<Element>(move allocation, 4)
+    let head0 = Element { value: 11 }
+    let tail0 = Element { value: 31 }
+    let first = Slot.write(RawBuffer.slot(&mut buffer, 0), move head0)
+    let second = Slot.write(RawBuffer.slot(&mut buffer, 1), move tail0)
+    let head = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    let tail = Slot.take(RawBuffer.slot(&mut buffer, 1))
+    drop buffer
+    return head.value + tail.value
+  }
+  return 0
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+
+pub fn main() -> i32 {
+  return run Effect.catch(build(4), recover)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // folded from RuntimeSliceAcceptance.test.ts: exclusive slice writes reach the caller.
+  {
+    name: 'runtime-slice-exclusive',
+    source: `struct Token {
+  value: i32
+}
+
+fn replace(values: &mut [Token], index: usize) -> i32 {
+  values[index] = Token {value: 42}
+  return usize.toI32(values.length)
+}
+
+pub fn main() -> i32 {
+  let mut values = [Token {value: 1}, Token {value: 2}]
+  let length = replace(&mut values, 0)
+  if length != 2 {
+    return 0
+  }
+  return values[0].value
+}`,
+    expected: { _tag: 'Completes', result: 42 },
   },
   // The float math conformance programs join the corpus so the native differential compiles and
   // runs each one, which is the third engine behind the evaluator and direct WebAssembly.

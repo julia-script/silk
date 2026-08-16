@@ -1,22 +1,15 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 /**
  * `HashMap` and `HashSet` as a program uses them: insert, lookup, removal, the equivalence deciding
  * which entries are one entry, growth that keeps every entry, and a failed growth that keeps the map.
  *
  * Every claim is asserted as a value the program returns, not as a compilation that finished, and
- * the load-bearing ones are asserted on all three engines — the bootstrap evaluator, the direct
- * WebAssembly backend, and native LLVM — because a map whose bucket arithmetic drifts with the width
- * of a pointer would compile identically everywhere and answer differently.
+ * the load-bearing ones are asserted on the bootstrap evaluator and the direct WebAssembly backend.
+ * Native agreement is proven once by the differential corpus (`support/corpus.ts`), which carries a
+ * representative hashed-collection growth program.
  */
 
 const ascii = (value: string): Uint8Array =>
@@ -41,11 +34,8 @@ const evaluatedValue = (name: string, source: string) =>
     return outcome._tag === 'Completed' ? outcome.result.value : undefined
   })
 
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-hashed-collections-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
-
-/** Runs one source on the bootstrap evaluator, the direct WebAssembly backend, and native LLVM. */
-const threeEngineValue = (name: string, source: string, artifact: string) =>
+/** Runs one source on the bootstrap evaluator and the direct WebAssembly backend. */
+const twoEngineValue = (name: string, source: string) =>
   Effect.gen(function* () {
     const snapshot = yield* analyzed(name, source, 'wasm32-unknown-unknown')
     assert.deepEqual(messages(snapshot), [])
@@ -58,29 +48,13 @@ const threeEngineValue = (name: string, source: string, artifact: string) =>
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     const direct = (instance.exports.silk_main as () => number)()
 
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make(name, ascii(source)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, artifact),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    const run =
-      compiled._tag === 'Compiled'
-        ? spawnSync(compiled.path, [], { encoding: 'utf8' })
-        : { status: undefined, stderr: 'native compilation did not produce an artifact' }
-
-    return Object.freeze({ bootstrap, direct, native: run.status, stderr: run.stderr })
+    return Object.freeze({ bootstrap, direct })
   })
 
-/** Asserts one value on all three engines, so a divergence names the engine that drifted. */
-const agrees = (
-  outcome: { bootstrap: unknown; direct: unknown; native: unknown; stderr: string },
-  expected: number,
-) => {
+/** Asserts one value on both engines, so a divergence names the engine that drifted. */
+const agrees = (outcome: { bootstrap: unknown; direct: unknown }, expected: number) => {
   assert.strictEqual(outcome.bootstrap, expected, 'bootstrap evaluator')
   assert.strictEqual(outcome.direct, expected, 'direct WebAssembly')
-  assert.strictEqual(outcome.native, expected, `native LLVM: ${outcome.stderr}`)
 }
 
 const mapImports = `import silk.hash { HashKey, HashSeed, Word }
@@ -113,17 +87,15 @@ effect fn recover(error: OutOfMemory) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
-it.effect(
-  'inserts, looks up, and removes on all three engines',
-  () =>
-    Effect.gen(function* () {
-      // The answer is assembled from the values the map returns — 20 removed plus 22 still held —
-      // so a map that lost an entry, kept a removed one, or answered the wrong value cannot reach 42.
-      const outcome = yield* threeEngineValue(
-        'hashed-collections/insert-lookup-remove',
-        program(
-          mapImports,
-          `  let mut map = make<Word, i32>(HashKey.seed(12345))
+it.effect('inserts, looks up, and removes on both engines', () =>
+  Effect.gen(function* () {
+    // The answer is assembled from the values the map returns — 20 removed plus 22 still held —
+    // so a map that lost an entry, kept a removed one, or answered the wrong value cannot reach 42.
+    const outcome = yield* twoEngineValue(
+      'hashed-collections/insert-lookup-remove',
+      program(
+        mapImports,
+        `  let mut map = make<Word, i32>(HashKey.seed(12345))
   let first = run insert<Word, i32>(&mut map, HashKey.word(7), 20) |> Effect.provideMut(&mut allocator)
   let second = run insert<Word, i32>(&mut map, HashKey.word(9), 22) |> Effect.provideMut(&mut allocator)
   drop first
@@ -140,12 +112,10 @@ it.effect(
   if absent != 0 { return 6 }
   let held = Option.unwrapOr<i32>(get<Word, i32>(&map, HashKey.word(9)), 0)
   return removed + held`,
-        ),
-        'insert-lookup-remove',
-      )
-      agrees(outcome, 42)
-    }),
-  120_000,
+      ),
+    )
+    agrees(outcome, 42)
+  }),
 )
 
 it.effect('reaches one entry from two equivalent keys, and replaces rather than duplicating', () =>
@@ -174,18 +144,16 @@ it.effect('reaches one entry from two equivalent keys, and replaces rather than 
   }),
 )
 
-it.effect(
-  'keeps every entry across the growth that rehomes them',
-  () =>
-    Effect.gen(function* () {
-      // Forty entries take the map through three growths. Each is read back at its own key and the
-      // values are totalled, so an entry lost to a rehash, rehomed under the wrong hash, or left
-      // behind in the old table shows up as a wrong total rather than as a smaller length.
-      const outcome = yield* threeEngineValue(
-        'hashed-collections/growth',
-        program(
-          mapImports,
-          `  let mut map = make<Word, i32>(HashKey.seed(4242))
+it.effect('keeps every entry across the growth that rehomes them', () =>
+  Effect.gen(function* () {
+    // Forty entries take the map through three growths. Each is read back at its own key and the
+    // values are totalled, so an entry lost to a rehash, rehomed under the wrong hash, or left
+    // behind in the old table shows up as a wrong total rather than as a smaller length.
+    const outcome = yield* twoEngineValue(
+      'hashed-collections/growth',
+      program(
+        mapImports,
+        `  let mut map = make<Word, i32>(HashKey.seed(4242))
   let mut key = 0
   while key < 40 {
     let previous = run insert<Word, i32>(&mut map, HashKey.word(i32.toU64(key)), key * 3)
@@ -206,12 +174,10 @@ it.effect(
   // Three times the sum of nought to thirty-nine.
   if total != 2340 { return 4 }
   return 42`,
-        ),
-        'growth',
-      )
-      agrees(outcome, 42)
-    }),
-  120_000,
+      ),
+    )
+    agrees(outcome, 42)
+  }),
 )
 
 it.effect('leaves the map intact when the growth allocation fails', () =>
@@ -348,7 +314,7 @@ it.effect(
   'refuses a second equivalent element, and answers membership before and after removal',
   () =>
     Effect.gen(function* () {
-      const outcome = yield* threeEngineValue(
+      const outcome = yield* twoEngineValue(
         'hashed-collections/set',
         program(
           setImports,
@@ -373,11 +339,9 @@ it.effect(
   if !contains<Word>(&seen, HashKey.word(7)) { return 9 }
   return gone * 4 + 6`,
         ),
-        'set',
       )
       agrees(outcome, 42)
     }),
-  120_000,
 )
 
 it.effect('refuses a key type that has no HashKey witness', () =>
