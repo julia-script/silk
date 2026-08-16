@@ -10,6 +10,7 @@ import * as PlatformError from 'effect/PlatformError'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
+import * as CallableFieldRealization from '../src/CallableFieldRealization.js'
 import * as ContinuationLayout from '../src/ContinuationLayout.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
@@ -246,6 +247,29 @@ const storedRunner = (module: Mir.Module, label: string) => {
   }
   return unreachable(`expected one ${label} stored Effect run`)
 }
+
+const replaceStoredRealization = (
+  plan: Layout.Plan,
+  current: CallableFieldRealization.EffectRealization,
+  replacement: CallableFieldRealization.EffectRealization,
+): Layout.Plan =>
+  Object.freeze({
+    ...plan,
+    entries: Object.freeze(
+      plan.entries.map((entry) =>
+        entry.representation._tag === 'StoredEffectEnvironment' &&
+        CallableFieldRealization.equals(entry.representation.realization, current)
+          ? Object.freeze({
+              ...entry,
+              representation: Object.freeze({
+                ...entry.representation,
+                realization: replacement,
+              }),
+            })
+          : entry,
+      ),
+    ),
+  })
 
 /**
  * Asserts the run operation carries exactly the realization's contract rows.
@@ -720,6 +744,95 @@ pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
 }`
+
+  it.effect(
+    'invalidates the layout and code-generation boundary for every realization dependency',
+    () =>
+      Effect.gen(function* () {
+        const name = 'stored-effect-invalidation/dependencies'
+        const lowered = yield* lowerStored(name, suspendingProgram(), Target.wasm32UnknownUnknown)
+        const current = storedRunner(lowered.module, name).realization
+        const firstCapture =
+          current.environment.at(0) ?? unreachable('expected one stored Effect capture')
+        assert.isAbove(current.cleanup.unrunLanes.length, 0, 'expected cleanup dependency')
+        assert.strictEqual(current.suspendable, true, 'expected suspendability dependency')
+        assert.deepEqual(Mir.verify(lowered.module), [], 'baseline MIR')
+
+        const mutations: ReadonlyArray<{
+          readonly name: string
+          readonly realization: CallableFieldRealization.EffectRealization
+        }> = [
+          {
+            name: 'capture-shape',
+            realization: Object.freeze({
+              ...current,
+              environment: Object.freeze([
+                ...current.environment,
+                Object.freeze({
+                  ...firstCapture,
+                  ordinal: current.environment.length,
+                  sourceOrdinal: firstCapture.sourceOrdinal + 1,
+                }),
+              ]),
+            }),
+          },
+          {
+            name: 'runner-target',
+            realization: Object.freeze({
+              ...current,
+              runner: Object.freeze({
+                ...current.runner,
+                name: `${current.runner.name}$changed`,
+              }),
+            }),
+          },
+          {
+            name: 'run-access',
+            realization: Object.freeze({
+              ...current,
+              access: current.access === 'Shared' ? 'Exclusive' : 'Shared',
+            }),
+          },
+          {
+            name: 'cleanup',
+            realization: Object.freeze({
+              ...current,
+              cleanup: Object.freeze({ ...current.cleanup, unrunLanes: Object.freeze([]) }),
+            }),
+          },
+          {
+            name: 'suspendability',
+            realization: Object.freeze({ ...current, suspendable: false }),
+          },
+        ]
+        const catalog = Layout.catalog(
+          Target.wasm32UnknownUnknown,
+          lowered.snapshot.index,
+          lowered.snapshot.instances,
+        )
+
+        // `verifyAgainstCatalog` is the real target-phase reuse boundary: it delegates stored
+        // environment comparison to `CallableFieldRealization.equals` before MIR and either
+        // backend can consume the plan. A mismatch therefore rebuilds layout and emitted code.
+        for (const mutation of mutations) {
+          assert.isFalse(
+            CallableFieldRealization.equals(current, mutation.realization),
+            `${mutation.name} dependency key`,
+          )
+          const staleLayout = replaceStoredRealization(
+            lowered.module.layout,
+            current,
+            mutation.realization,
+          )
+          assert.include(
+            Layout.verifyAgainstCatalog(staleLayout, catalog).map((violation) => violation.rule),
+            'CatalogMismatch',
+            `${mutation.name} stale layout`,
+          )
+        }
+      }),
+    60_000,
+  )
 
   it.effect(
     'resumes a suspending stored Effect with matching cleanup in every engine',
