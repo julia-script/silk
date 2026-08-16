@@ -1163,13 +1163,11 @@ it('does not reinterpret an unknown final value as an invalid assignment place',
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => ({
       code: diagnostic.code,
-      message: diagnostic.message,
       reason: diagnostic.reason,
     })),
     [
       {
         code: 'SEM0006',
-        message: 'Unknown value missing',
         reason: { _tag: 'UnknownValueReference', spelling: 'missing' },
       },
     ],

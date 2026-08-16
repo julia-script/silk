@@ -6,9 +6,9 @@
 ## 2. Determinism consolidation (spec: bootstrap-compiler-driver)
 
 - [x] 2.1 Pick the third canary: verify `LlvmWasmDeterminism`, `ConditionalConformanceDeterminism`, and the chosen stored-callable determinism file together cover native+wasm release backends, stdlib imports, generics, and callable environments; extend a canary's program if a surface is missing
-- [ ] 2.2 Verify each of the other 20 `*Determinism.test.ts` files' feature areas keep in-process golden byte-comparisons in their remaining test files; add a golden assertion where one is missing
-- [ ] 2.3 Delete the 20 `*Determinism.test.ts` files and their `fixtures/*-determinism.mjs` fixtures in one commit
-- [ ] 2.4 Mutation spot-check (design D7): for 2 sampled deleted files, locally re-introduce a representative nondeterminism/regression and confirm a surviving test fails; record the check in the PR description
+- [x] 2.2 Verify each of the other 20 `*Determinism.test.ts` files' feature areas keep in-process golden byte-comparisons in their remaining test files; add a golden assertion where one is missing
+- [x] 2.3 Delete the 20 `*Determinism.test.ts` files and their `fixtures/*-determinism.mjs` fixtures in one commit
+- [x] 2.4 Mutation spot-check (design D7): for 2 sampled deleted files, locally re-introduce a representative nondeterminism/regression and confirm a surviving test fails; record the check in the PR description
 
 ## 3. Native legs fold into the corpus (spec: bootstrap-compiler-driver)
 
@@ -29,7 +29,7 @@
 
 - [x] 5.1 Trim `SynchronousEffectCost.test.ts` to its structural normalization assertions (spec: entry structure only, no byte/branch/timing counts)
 - [x] 5.2 Delete `OccurrencePerformance.test.ts`
-- [ ] 5.3 Replace exact diagnostic-message-string assertions with code+span assertions in the 12 affected files (catalog gates wording via `documentation:check`)
+- [x] 5.3 Replace exact diagnostic-message-string assertions with code+span assertions in the 12 affected files (catalog gates wording via `documentation:check`)
 - [x] 5.4 Prune the ~8–10 `EditorIntelligence.test.ts` cases duplicated by `DeclarationIndex.test.ts`
 
 ## 6. Native artifact disk cache (spec: bootstrap-native-toolchain)
