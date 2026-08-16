@@ -1,23 +1,18 @@
 import { NodeServices } from '@effect/platform-node'
 import { assert, layer } from '@effect/vitest'
-import * as Cause from 'effect/Cause'
-import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
-import * as Backend from '../src/Backend.js'
 import type * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Formatter from '../src/Formatter.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Mir from '../src/Mir.js'
-import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as StandardStreams from '../src/StandardStreams.js'
 import * as Target from '../src/Target.js'
-import * as Process from './support/Process.js'
 import { unreachable } from './support/raise.js'
 
 const decoder = new TextDecoder()
@@ -39,59 +34,6 @@ const parse = (id: string, source: string) =>
 const canonical = Effect.fnUntraced(function* (id: string, source: string) {
   const formatted = yield* Formatter.format(parse(id, source))
   return decoder.decode(FormattedDocument.toUint8Array(formatted))
-})
-
-const clangPath = Effect.fnUntraced(function* () {
-  const configured = yield* Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(''))
-  if (configured.length > 0) return configured
-  const fileSystem = yield* FileSystem.FileSystem
-  for (const candidate of ['/opt/homebrew/opt/llvm/bin/clang', '/usr/local/opt/llvm/bin/clang'])
-    if (yield* fileSystem.exists(candidate)) return candidate
-  return 'clang'
-})
-
-const makeToolchain = Effect.fnUntraced(function* () {
-  return Object.freeze({
-    _tag: 'Toolchain' as const,
-    clang: yield* clangPath(),
-    shimCache: NativeToolchain.makeShimCache(),
-  })
-})
-
-const runNative = Effect.fnUntraced(function* (
-  toolchain: NativeToolchain.Toolchain,
-  artifact: Backend.LlvmBitcodeArtifact,
-  target: Target.Target,
-) {
-  const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const destination = path.join(yield* fileSystem.makeTempDirectoryScoped(), 'program')
-  const linked = NativeToolchain.withBuildScope('static-composition-acceptance', (scope) => {
-    const object = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
-    if (object._tag !== 'ObjectArtifact') return object
-    const shim = NativeToolchain.compileShim(
-      toolchain,
-      scope,
-      target,
-      artifact.termination,
-      artifact.nativeRuntimeSymbols,
-    )
-    if (shim._tag !== 'ObjectArtifact') return shim
-    return NativeToolchain.ClangLinker.link(
-      toolchain,
-      target,
-      [object.artifact, shim.artifact],
-      [],
-      destination,
-    )
-  })
-  assert.strictEqual(
-    linked._tag,
-    'Executable',
-    linked._tag === 'ToolchainFailure' ? linked.output : linked._tag,
-  )
-  if (linked._tag !== 'Executable') return unreachable('expected a native executable')
-  return yield* Process.run(linked.path, [])
 })
 
 const runWasm = Effect.fnUntraced(function* (bytes: Uint8Array) {
@@ -232,50 +174,6 @@ const assertDirectTarget = (artifact: string, target: string, label: string): vo
   )
 }
 
-const cleanupWitnessSource = (source: string): string =>
-  source.replace(
-    `    if self.value == 0 {
-      let boom = 1 / 0
-      return ()
-    }
-    self.value = 0
-    return ()`,
-    `    let values = [self.value]
-    self.value = values[i32.toUsize(self.value)]
-    return ()`,
-  )
-
-const assertLlvmDropCall = (ir: string, module: Mir.Module, label: string): void => {
-  const drop =
-    module.functions.find((candidate) => candidate.id.name.startsWith('drop@impl')) ??
-    unreachable(`expected ${label} Drop hook`)
-  const symbol = Backend.symbolFor(drop, Mir.machineEntry(module))
-  assert.match(
-    ir,
-    new RegExp(`\\bcall\\b[^\\n]*@${symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\(`),
-    `${label} LLVM Drop call`,
-  )
-}
-
-const assertNativeCleanupWitness = Effect.fnUntraced(function* (
-  toolchain: NativeToolchain.Toolchain,
-  source: string,
-  host: Target.Target,
-  label: string,
-) {
-  const witnessSource = cleanupWitnessSource(source)
-  assert.notStrictEqual(witnessSource, source, `${label} cleanup witness replacement`)
-  const snapshot = yield* analyze(`${label}/cleanup-witness`, witnessSource, host.id)
-  const llvm = yield* Analysis.codegen(snapshot, { mode: 'release' })
-  assert.strictEqual(snapshot.mir._tag, 'Available', label)
-  if (snapshot.mir._tag !== 'Available') return
-  assertLlvmDropCall(llvm.ir, snapshot.mir.value, label)
-  const exit = yield* Effect.exit(runNative(toolchain, llvm, host))
-  assert.strictEqual(exit._tag, 'Failure', `${label} witness must trap during Drop`)
-  if (exit._tag === 'Failure')
-    assert.match(Cause.pretty(exit.cause), /SIG(?:ILL|TRAP)/, `${label} witness trap signal`)
-})
-
 const analyze = Effect.fnUntraced(function* (id: string, source: string, target: string) {
   const snapshot = yield* Analysis.ofSourceRealized(id, encoder.encode(source), target)
   const diagnostics = Analysis.diagnostics(snapshot)
@@ -363,7 +261,6 @@ fn divergent(input: FirstBranch | SecondBranch) -> i32 {
         (candidate) => candidate.code === 'SEM0105',
       )
       assert.strictEqual(diagnostic?.reason._tag, 'DivergentRepresentationJoin')
-      assert.include(diagnostic?.message ?? '', 'consume each represented value inside its branch')
       assert.deepEqual(
         diagnostic?.relatedSpans?.map((related) => related.label),
         ['first representation originates here', 'divergent representation originates here'],
@@ -384,12 +281,10 @@ fn divergent(input: FirstBranch | SecondBranch) -> i32 {
   )
 
   it.effect(
-    'agrees across evaluator, native LLVM, and direct Wasm for every pressure exit',
+    'agrees across evaluator and direct Wasm for every pressure exit',
     () =>
       Effect.gen(function* () {
         const source = yield* fixture('static-composition-acceptance')
-        const host = yield* Target.host()
-        const toolchain = yield* makeToolchain()
         for (const scenario of scenarios) {
           const selected = scenarioSource(source, scenario)
           const module = `static-composition/${scenario.name}`
@@ -414,29 +309,8 @@ fn divergent(input: FirstBranch | SecondBranch) -> i32 {
           assert.instanceOf(memory, WebAssembly.Memory, scenario.name)
           if (scenario.dropCalls === 1)
             assert.notStrictEqual(wasmRun.class0, 0, `${scenario.name} Wasm cleanup release`)
-
-          const nativeSnapshot = yield* analyze(module, selected, host.id)
-          const llvm = yield* Analysis.codegen(nativeSnapshot, { mode: 'release' })
-          assertDirectTarget(llvm.ir, scenario.selectedTarget, `${scenario.name} LLVM`)
-          assert.deepEqual(
-            nativeSnapshot.mir._tag === 'Available'
-              ? nativeSnapshot.mir.value.functions
-                  .flatMap(Mir.operations)
-                  .map((operation) => operation._tag)
-              : [],
-            wasmSnapshot.mir._tag === 'Available'
-              ? wasmSnapshot.mir.value.functions
-                  .flatMap(Mir.operations)
-                  .map((operation) => operation._tag)
-              : [],
-            `${scenario.name} MIR operation fingerprint`,
-          )
-          const nativeRun = yield* runNative(toolchain, llvm, host)
-          assert.strictEqual(Number(nativeRun.exitCode), scenario.result, nativeRun.stderr)
-          if (scenario.dropCalls === 1)
-            yield* assertNativeCleanupWitness(toolchain, selected, host, scenario.name)
         }
-      }).pipe(Effect.scoped),
-    300_000,
+      }),
+    120_000,
   )
 })

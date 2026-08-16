@@ -49,8 +49,10 @@ semantic occurrences (both shapes)
 - Timing and heap are observations, not gates. A future stable benchmarking environment should add
   target-emission time/heap thresholds after addressing left-associated aggregate lowering.
 
-Run from `packages/compiler` after building the package:
+Run the opt-in benchmark from `packages/compiler` after building the package. It is intentionally
+excluded from the default correctness suite because it launches two fresh processes and records
+performance/count data:
 
 ```sh
-node test/characterization/static-composition/characterize.mjs
+pnpm bench:static-composition
 ```

@@ -33,3 +33,17 @@ The integrated fixture exposed one genuine cross-feature bug: synchronous comple
 witness wrappers lacked inherited `effectRunner` classification. The repair was made at the shared
 provisional-MIR classification seam rather than weakening a fence, adding a dictionary, or teaching
 the compiler any fixture actor name. No failed spike was worked around locally.
+
+## Final pressure evidence
+
+- The formatter-stable canonical and renamed fixtures pass the evaluator/direct-Wasm matrix for
+  success, help, two typed failures, uncalled cleanup, called cleanup, and suspension. Native parity
+  for the same seven programs plus three trapping Drop witnesses is registered in the shared
+  `DriverNativeAcceptance` corpus.
+- The opt-in static-composition benchmark completed two fresh processes over both tree shapes and all
+  five sizes in 580 seconds on macOS arm64 / Node v26.7.0. Canonical, semantic, MIR, LLVM-bitcode, and
+  Wasm artifacts matched exactly; semantic occurrences, layouts, and MIR operations remained within
+  the measured linear thresholds recorded beside the benchmark.
+- The characterization is excluded from `pnpm check` by design. It records empirical timing, sampled
+  heap, and artifact-size evidence without restoring per-feature fresh-process or performance-count
+  work to the compiler correctness critical path.

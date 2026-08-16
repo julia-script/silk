@@ -57,7 +57,7 @@ const deterministic = (measurement: Measurement) =>
     wasmSha256: measurement.wasmSha256,
   })
 
-layer(NodeServices.layer)('static composition characterization', (it) => {
+layer(NodeServices.layer)('static composition characterization benchmark', (it) => {
   it.effect(
     'keeps two fresh-process static-tree artifacts deterministic and semantic growth linear',
     () =>

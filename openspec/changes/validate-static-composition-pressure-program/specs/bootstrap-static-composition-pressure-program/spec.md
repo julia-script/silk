@@ -34,9 +34,10 @@ implicit erasure, heterogeneous executable collections, or runtime interface dis
 
 Evaluator, native LLVM, and direct WebAssembly SHALL produce equal observable results and typed
 failure outcomes. The evaluator SHALL expose handler, failure, suspension, selected-target, and
-cleanup trace counts; native LLVM and direct WebAssembly artifacts SHALL prove the selected direct
-target and a causal cleanup path for the corresponding execution. WebAssembly output MUST contain
-no function table or `call_indirect` introduced by this capability.
+cleanup trace counts. Native LLVM execution SHALL participate through the shared differential corpus
+with trapping cleanup witnesses; direct WebAssembly artifacts SHALL prove the selected direct target
+and cleanup path for the corresponding execution. WebAssembly output MUST contain no function table
+or `call_indirect` introduced by this capability.
 
 #### Scenario: Run the acceptance matrix
 - **WHEN** success, help, selection failure, decode failure, uncalled cleanup, and called cleanup
@@ -51,7 +52,8 @@ leaves SHALL include per-leaf transforms and normalization to one application-ac
 SHALL record semantic, representation, instance, layout, MIR, canonical-byte, phase-time,
 phase-boundary sampled-heap, LLVM-bitcode-size, and Wasm-size metrics in two fresh processes. Counts
 and artifacts MUST be deterministic, and every unexplained superlinear semantic expansion MUST fail
-the characterization.
+the characterization. This empirical characterization SHALL be opt-in rather than part of the
+default correctness suite.
 
 #### Scenario: Establish a baseline before thresholds
 - **WHEN** the generated suite completes for both shapes and every size

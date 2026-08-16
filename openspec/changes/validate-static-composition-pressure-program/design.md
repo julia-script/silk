@@ -38,8 +38,9 @@ intrinsics, never standard-library declarations by spelling.
 Run success, help, selection failure, decode failure, uncalled cleanup, called cleanup, and suspended
 Effect cases through evaluator, LLVM, and direct Wasm. The evaluator provides the detailed handler,
 failure, suspension, and cleanup trace contract. Native and Wasm execution must match its observable
-result or failure, while emitted artifacts prove the selected direct target and causal cleanup path.
-Inspect Wasm for zero tables and `call_indirect`.
+result or failure. Native runtime parity and trapping cleanup witnesses live in the shared driver
+corpus rather than a feature-local compile loop; emitted Wasm artifacts prove the selected direct
+target and cleanup path. Inspect Wasm for zero tables and `call_indirect`.
 
 ### Characterize two static-tree shapes
 
@@ -49,6 +50,10 @@ semantic/representation/instance/layout/MIR counts, phase time, phase-boundary h
 bitcode bytes, and Wasm bytes twice in fresh processes. Counts and artifacts are hard deterministic
 gates; timing, memory, and size trends establish the first measured baseline. Any unexplained
 superlinear semantic growth fails and returns to implementation analysis.
+
+This characterization is an opt-in benchmark, not a default correctness test. The checked-in report
+and a deliberate benchmark run carry the empirical evidence without adding fresh-process and
+performance-count work to `pnpm check`.
 
 ### Keep evidence failures scoped
 

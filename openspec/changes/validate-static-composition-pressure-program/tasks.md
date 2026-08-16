@@ -14,14 +14,14 @@
 ## 3. Differential Engine Matrix
 
 - [x] 3.1 Add evaluator traces for success, help, selection failure, decode failure, uncalled cleanup, called cleanup, and suspension.
-- [x] 3.2 Add native LLVM execution and structural artifact comparisons for the same cases.
+- [x] 3.2 Add the same cases and trapping cleanup witnesses to the shared native LLVM differential corpus.
 - [x] 3.3 Add direct-Wasm execution and assert zero tables and `call_indirect` introduced by static composition.
 - [x] 3.4 Compare evaluator trace counts with native/Wasm results, selected direct targets, and causal cleanup artifacts.
 
 ## 4. Static-Tree Characterization
 
 - [x] 4.1 Generate left-associated and balanced trees at `1`, `8`, `32`, `64`, and `128` distinct leaves.
-- [x] 4.2 Record canonical bytes, semantic/representation/instance/layout/MIR counts, phase times, phase-boundary sampled heap, LLVM bitcode size, and Wasm size in two fresh processes.
+- [x] 4.2 Record canonical bytes, semantic/representation/instance/layout/MIR counts, phase times, phase-boundary sampled heap, LLVM bitcode size, and Wasm size in two fresh processes through an opt-in benchmark.
 - [x] 4.3 Fail and diagnose any nondeterministic artifact or unexplained superlinear semantic growth.
 - [x] 4.4 Check in the environment metadata, plots, findings, and recommended measured regression thresholds.
 

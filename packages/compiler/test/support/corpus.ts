@@ -67,6 +67,88 @@ export interface InvalidCorpusProgram {
   readonly codes: ReadonlyArray<string>
 }
 
+const staticCompositionFixture = readFileSync(
+  new URL('../fixtures/static-composition/static-composition-acceptance.silk', import.meta.url),
+  'utf8',
+)
+
+const staticCompositionScenarios: ReadonlyArray<{
+  readonly name: string
+  readonly selection: string
+  readonly result: number
+  readonly cleanupWitness: boolean
+}> = [
+  { name: 'success', selection: 'RunRequest { value: 40 }', result: 42, cleanupWitness: false },
+  { name: 'help', selection: 'HelpRequest {}', result: 10, cleanupWitness: false },
+  {
+    name: 'selection-failure',
+    selection: 'SelectionFailureRequest {}',
+    result: 20,
+    cleanupWitness: false,
+  },
+  {
+    name: 'decode-failure',
+    selection: 'DecodeFailureRequest {}',
+    result: 30,
+    cleanupWitness: false,
+  },
+  {
+    name: 'uncalled-cleanup',
+    selection: 'UncalledCleanupRequest { value: 40 }',
+    result: 40,
+    cleanupWitness: true,
+  },
+  {
+    name: 'called-cleanup',
+    selection: 'CalledCleanupRequest { value: 40 }',
+    result: 40,
+    cleanupWitness: true,
+  },
+  {
+    name: 'suspension',
+    selection: 'SuspensionRequest { value: 42 }',
+    result: 42,
+    cleanupWitness: true,
+  },
+]
+
+const selectStaticCompositionScenario = (selection: string): string =>
+  staticCompositionFixture.replace('RunRequest {value: 40}', selection)
+
+const withTrappingStaticCompositionDrop = (source: string): string =>
+  source.replace(
+    `    if self.value == 0 {
+      let boom = 1 / 0
+      return ()
+    }
+    self.value = 0
+    return ()`,
+    `    let values = [self.value]
+    self.value = values[i32.toUsize(self.value)]
+    return ()`,
+  )
+
+const staticCompositionCorpus: ReadonlyArray<CorpusProgram> = [
+  ...staticCompositionScenarios.map(
+    (scenario): CorpusProgram => ({
+      name: `static-composition-${scenario.name}`,
+      source: selectStaticCompositionScenario(scenario.selection),
+      expected: { _tag: 'Completes', result: scenario.result },
+    }),
+  ),
+  ...staticCompositionScenarios
+    .filter((scenario) => scenario.cleanupWitness)
+    .map(
+      (scenario): CorpusProgram => ({
+        name: `static-composition-${scenario.name}-cleanup-witness`,
+        source: withTrappingStaticCompositionDrop(
+          selectStaticCompositionScenario(scenario.selection),
+        ),
+        expected: { _tag: 'Trap' },
+      }),
+    ),
+]
+
 export const corpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'literal',
@@ -1034,6 +1116,9 @@ pub fn main() -> i32 {
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
+  // Static-composition runtime parity belongs in the shared native differential rather than a
+  // feature-local compile/link loop. Trapping Drop variants causally prove the three cleanup exits.
+  ...staticCompositionCorpus,
   // The float math conformance programs join the corpus so the native differential compiles and
   // runs each one, which is the third engine behind the evaluator and direct WebAssembly.
   ...floatMathPrograms.map((program) => ({
