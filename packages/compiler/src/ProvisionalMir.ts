@@ -164,6 +164,16 @@ const executionInstance = (key: ExecutionKey): Instances.InstanceKey =>
 const sameInstance = (left: Instances.InstanceKey, right: Instances.InstanceKey): boolean =>
   Instances.keyText(left) === Instances.keyText(right)
 
+const sameTypeArguments = (
+  left: ReadonlyArray<Type.GenericArgument>,
+  right: ReadonlyArray<Type.GenericArgument>,
+): boolean =>
+  left.length === right.length &&
+  left.every((argument, ordinal) => {
+    const other = right.at(ordinal)
+    return other !== undefined && Type.equalsGenericArgument(argument, other)
+  })
+
 const sameSpan = (left: SourceSpan.SourceSpan, right: SourceSpan.SourceSpan): boolean =>
   left.sourceId === right.sourceId && left.start === right.start && left.end === right.end
 
@@ -224,13 +234,34 @@ const providedClassification = (
       const key = outcome.runner.execution
       return key.runner.module === instance.declaration.module &&
         key.runner.name === baseName &&
-        key.owner.typeArguments.map(Type.genericArgumentKey).join('\u0000') ===
-          instance.typeArguments.map(Type.genericArgumentKey).join('\u0000')
+        sameTypeArguments(key.owner.typeArguments, instance.typeArguments)
         ? [outcome.runner.classification]
         : []
     }),
   )
-  return classifications.length === 0 ? undefined : mergeClassifications(classifications)
+  if (classifications.length > 0) return mergeClassifications(classifications)
+
+  // A synchronous bound-operation or forwarded Effect is not represented by a provisional
+  // suspension region, so it cannot contribute to the collection above. Its generated runner
+  // still belongs to the exact source-function instance and must inherit that proven
+  // classification; leaving it Unknown makes backends invent suspension control for a contract
+  // that has no continuation allocator requirement.
+  if (!instance.contractRow.some((entry) => entry.startsWith('witness-effect-site:')))
+    return undefined
+  const effectMarker = baseName.lastIndexOf('$effect$')
+  if (effectMarker < 0) return undefined
+  const ownerName = baseName.slice(0, effectMarker)
+  const owner = self.executions.find((execution) => {
+    if (execution.key._tag !== 'InstanceExecution') return false
+    const key = execution.key.instance
+    return (
+      key.declaration.module === instance.declaration.module &&
+      key.declaration.name === ownerName &&
+      sameTypeArguments(key.typeArguments, instance.typeArguments) &&
+      key.contractRow.every((entry, ordinal) => instance.contractRow.at(ordinal) === entry)
+    )
+  })
+  return owner?.classification
 }
 
 const controlId = (
@@ -474,7 +505,10 @@ const runnerOf = (expression: Hir.Expression, context: BuildContext): Runner => 
           candidate._tag === 'EffectBlock' &&
           Hir.sameExecutableSite(candidate.site, environment.site),
       )
-    if (block?._tag !== 'EffectBlock') return 'Unknown'
+    // Provider substitution can only change suspendability through service constructions in an
+    // explicit effect block. Bound-operation and forwarded environments have no such local
+    // constructions; their discovered effect identity already carries the exact witness result.
+    if (block?._tag !== 'EffectBlock') return baseClassification
     for (const service of block.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)

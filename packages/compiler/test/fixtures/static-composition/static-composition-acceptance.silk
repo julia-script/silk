@@ -1,0 +1,250 @@
+struct SelectionProblem {
+  code: i32
+}
+
+struct DecodeProblem {
+  code: i32
+}
+
+service Clock {
+  effect fn tick() -> i32 ? &Clock
+}
+
+struct FixedClock {}
+
+effect fn fixedTick(self: &FixedClock) -> i32 {
+  return 0
+}
+
+impl Clock for FixedClock {
+  tick: FixedClock.fixedTick
+}
+
+interface Decoder<T> {
+  fn decode(value: &T) -> i32
+}
+
+interface CompleteDecoder<S, Arguments, A, !E, ?R> {
+  effect fn decode(self: &S, arguments: Arguments) -> A ! E ? R
+}
+
+struct NumberSchema {
+  value: i32
+}
+
+fn numberDecode(value: &NumberSchema) -> i32 {
+  return value.value
+}
+
+effect fn completeNumberDecode(self: &NumberSchema, encoded: i32) -> i32
+! DecodeProblem
+? &Clock {
+  return self.value + encoded + run Clock.tick()
+}
+
+impl Decoder<NumberSchema> for NumberSchema {
+  decode: NumberSchema.numberDecode
+}
+
+impl CompleteDecoder<NumberSchema, i32, i32 ! DecodeProblem ? &Clock> for NumberSchema {
+  decode: NumberSchema.completeNumberDecode
+}
+
+fn pendingComplete<T: CompleteDecoder<T, i32, i32 ! DecodeProblem ? &Clock>>(value: &T) -> Effect<i32 ! DecodeProblem ? &Clock> {
+  return CompleteDecoder.decode(value, 0)
+}
+
+struct MappedSchema<S, F: fn(i32) -> i32> {
+  source: S
+  transform: F
+}
+
+fn mappedDecode<S: Decoder<S>, F: fn(i32) -> i32>(value: &MappedSchema<S, F>) -> i32 {
+  return value.transform(Decoder.decode(&value.source))
+}
+
+impl<S: Decoder<S>, F: fn(i32) -> i32> Decoder<MappedSchema<S, F>> for MappedSchema<S, F> {
+  decode: MappedSchema.mappedDecode
+}
+
+fn add(value: i32, amount: i32) -> i32 {
+  return value + amount
+}
+
+fn makeTransform(amount: i32) -> some<F: fn(i32) -> i32> F {
+  return add(amount)
+}
+
+fn exactTransform() -> typeof(add) {
+  return add
+}
+
+struct Guard {
+  value: i32
+  storage: Allocation
+}
+
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    if self.value == 0 {
+      let boom = 1 / 0
+      return ()
+    }
+    self.value = 0
+    return ()
+  }
+}
+
+struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> {
+  operation: F
+}
+
+fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(operation: F) -> Deferred<A, E, R, F> {
+  return Deferred<A, E, R> {operation: move operation}
+}
+
+effect fn guarded(guard: Guard) -> i32 {
+  return guard.value
+}
+
+effect fn delayed(guard: Guard) -> i32
+! OutOfMemory
+? &mut Allocator {
+  let base = run Effect.suspend(
+    effect {
+      return 0
+    },
+  )
+  return base + guard.value
+}
+
+effect fn selectionFailure() -> i32
+! SelectionProblem {
+  fail SelectionProblem {code: 20}
+}
+
+effect fn recoverSelection(problem: SelectionProblem) -> i32 {
+  return problem.code
+}
+
+effect fn decodeFailure() -> i32
+! DecodeProblem {
+  fail DecodeProblem {code: 30}
+}
+
+effect fn recoverDecode(problem: DecodeProblem) -> i32 {
+  return problem.code
+}
+
+struct RunRequest {
+  value: i32
+}
+
+struct HelpRequest {}
+
+struct SelectionFailureRequest {}
+
+struct DecodeFailureRequest {}
+
+struct UncalledCleanupRequest {
+  value: i32
+}
+
+struct CalledCleanupRequest {
+  value: i32
+}
+
+struct SuspensionRequest {
+  value: i32
+}
+
+struct HelpLeaf {
+  code: i32
+}
+
+struct HelpBranch<L, R> {
+  left: L
+  right: R
+}
+
+fn selectSuccess() -> RunRequest | HelpRequest | SelectionFailureRequest | DecodeFailureRequest | UncalledCleanupRequest | CalledCleanupRequest | SuspensionRequest {
+  return RunRequest {value: 40}
+}
+
+fn applicationHandler(value: i32) -> i32 {
+  return value
+}
+
+fn helpCase() -> i32 {
+  let tree = HelpBranch<HelpLeaf, HelpLeaf> {left: HelpLeaf {code: 4}, right: HelpLeaf {code: 6}}
+  return tree.left.code + tree.right.code
+}
+
+fn runCase(value: i32) -> i32 {
+  let schema = MappedSchema<NumberSchema> {source: NumberSchema {value: value}, transform: add(2)}
+  let opaque = makeTransform(1)
+  let exact = exactTransform()
+  let clock = FixedClock {}
+  let complete = run Effect.catch(
+    pendingComplete<NumberSchema>(&schema.source)
+      |> Effect.provide(&clock),
+    recoverDecode,
+  )
+  return applicationHandler(opaque(exact(mappedDecode(&schema), complete - value) - 1))
+}
+
+effect fn uncalledCleanupCase(value: i32) -> i32
+! OutOfMemory
+? &mut Allocator {
+  let storage = run Allocator.allocate(Layout.of<i32>())
+  let guard = Guard {value: value, storage: move storage}
+  let deferred = defer(guarded(move guard))
+  return 40
+}
+
+effect fn calledCleanupCase(value: i32) -> i32
+! OutOfMemory
+? &mut Allocator {
+  let storage = run Allocator.allocate(Layout.of<i32>())
+  let guard = Guard {value: value, storage: move storage}
+  let deferred = defer(guarded(move guard))
+  return run deferred.operation
+}
+
+effect fn suspensionCase(value: i32) -> i32
+! OutOfMemory
+? &mut Allocator {
+  let storage = run Allocator.allocate(Layout.of<i32>())
+  let guard = Guard {value: value, storage: move storage}
+  let deferred = defer(delayed(move guard))
+  return run deferred.operation
+}
+
+effect fn dispatch(
+  request: RunRequest | HelpRequest | SelectionFailureRequest | DecodeFailureRequest | UncalledCleanupRequest | CalledCleanupRequest | SuspensionRequest,
+) -> i32
+! OutOfMemory
+? &mut Allocator {
+  return match move request {
+    RunRequest {value} => runCase(value)
+    HelpRequest {} => helpCase()
+    SelectionFailureRequest {} => run Effect.catch(selectionFailure(), recoverSelection)
+    DecodeFailureRequest {} => run Effect.catch(decodeFailure(), recoverDecode)
+    UncalledCleanupRequest {value} => run uncalledCleanupCase(value)
+    CalledCleanupRequest {value} => run calledCleanupCase(value)
+    SuspensionRequest {value} => run suspensionCase(value)
+  }
+}
+
+effect fn recoverOutOfMemory(error: OutOfMemory) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  return run Effect.catch(
+    dispatch(selectSuccess())
+      |> Effect.provideMut(&mut allocator),
+    recoverOutOfMemory,
+  )
+}
