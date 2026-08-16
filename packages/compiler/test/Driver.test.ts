@@ -529,3 +529,47 @@ it.effect('serves identical bitcode from the artifact cache without invoking the
     assert.strictEqual(run.status, 42)
   }),
 )
+
+it.effect('selects the durable disk cache from SILK_NATIVE_CACHE_DIR by default', () =>
+  Effect.gen(function* () {
+    const cacheDirectory = mkdtempSync(join(tmpdir(), 'silk-default-cache-'))
+    const previous = process.env.SILK_NATIVE_CACHE_DIR
+    process.env.SILK_NATIVE_CACHE_DIR = cacheDirectory
+    try {
+      // No artifactCache is pinned on either toolchain: the durable reuse below can only come
+      // from the environment-selected default, and each compile builds its own toolchain value
+      // so nothing is shared between them but the directory.
+      const source = 'pub fn main() -> i32 { return 40 + 2 }'
+      const first = yield* compileSource('default-cache-first', source, {
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang }),
+        cache: true,
+      })
+      const second = yield* compileSource('default-cache-second', source, {
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang }),
+        cache: true,
+      })
+      assert.strictEqual(first._tag, 'Compiled')
+      assert.strictEqual(second._tag, 'Compiled')
+      if (first._tag !== 'Compiled' || second._tag !== 'Compiled') return
+      assert.strictEqual(
+        first.report.some((entry) => entry.phase === 'link'),
+        true,
+      )
+      assert.strictEqual(
+        second.report.some((entry) => entry.phase === 'artifact-cache'),
+        true,
+      )
+      assert.strictEqual(
+        second.report.some((entry) => entry.phase === 'object'),
+        false,
+      )
+      assert.deepEqual(readFileSync(second.path), readFileSync(first.path))
+      const run = spawnSync(second.path, [], { encoding: 'utf8' })
+      assert.strictEqual(run.status, 42)
+    } finally {
+      if (previous === undefined) delete process.env.SILK_NATIVE_CACHE_DIR
+      else process.env.SILK_NATIVE_CACHE_DIR = previous
+      rmSync(cacheDirectory, { recursive: true, force: true })
+    }
+  }),
+)
