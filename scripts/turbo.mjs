@@ -38,7 +38,19 @@ if (!hasExplicitConcurrency) {
 const require = createRequire(import.meta.url)
 const turboBin = require.resolve('turbo/bin/turbo')
 
-const child = spawn(process.execPath, [turboBin, ...turboArgs], { stdio: 'inherit' })
+/**
+ * Worktrees under `.claude/worktrees/` share the main checkout's Turbo cache. Turbo's hashes are
+ * repo-relative, so a task cached in one worktree is a valid hit in another; without this every
+ * fresh worktree re-runs the whole gate cold. Cache writes are content-addressed and atomic, so
+ * concurrent runs at worst duplicate a write. An explicit TURBO_CACHE_DIR still wins.
+ */
+const worktreeRoot = process.cwd().match(/^(.*?)[\\/]\.claude[\\/]worktrees[\\/]/)
+const env =
+  worktreeRoot && !process.env.TURBO_CACHE_DIR
+    ? { ...process.env, TURBO_CACHE_DIR: `${worktreeRoot[1]}/.turbo/cache` }
+    : process.env
+
+const child = spawn(process.execPath, [turboBin, ...turboArgs], { stdio: 'inherit', env })
 
 child.on('error', (error) => {
   console.error(`turbo: failed to start (${error.message})`)

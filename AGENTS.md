@@ -206,6 +206,33 @@ Do not build a `ManagedRuntime` test harness, call `Effect.runPromise` or `Effec
 each test, rebuild common layers per test, or wrap Effect code in `async` callbacks. A test that
 genuinely needs isolation may scope a distinct layer within that test.
 
+## Keep tests cheap
+
+The compiler suite is the critical path of `pnpm check`; every test pays for the compiler
+pipelines it runs. Prove each claim at the cheapest tier that can falsify it.
+
+- Prove language semantics with `Analysis.evaluate`. Add a wasm leg only when the claim is about
+  wasm codegen. Add a native leg only when lowering is genuinely target-specific: syscalls,
+  suspension frames, drop hooks, recursion stack bounds, or native allocation metrics.
+- Never add a per-feature "the native binary agrees" test. That claim is proven differentially by
+  `DriverNativeAcceptance` — add your program to `test/support/corpus.ts` instead of calling
+  `Driver.compile` in a feature file.
+- Do not write per-feature fresh-process determinism tests. Fresh-process determinism is a global
+  property, guarded by the designated canary determinism tests; per-feature determinism is proven
+  by committed-golden byte comparisons in-process.
+- Build one `Analysis` snapshot per source program per file and share it across assertions and
+  engines. Do not re-run `ofSourceRealized` on the same source.
+- Assert diagnostic codes and spans, not message text. The generated diagnostic catalog gates
+  wording.
+- No timing assertions, byte counts, or instruction counts in the correctness suite. Structural
+  claims assert structure; performance claims live in opt-in bench targets.
+- In failure-ordinal and stress sweeps, run the evaluator and wasm at every point; run native only
+  at boundary points (first failure, one mid-growth, completion).
+- Prefer adding a case to an existing file over creating a new test file: each new file costs
+  ~0.5s of worker startup and re-imports the compiler.
+- A test that cannot fail for a reason distinct from its neighbors is not a test; delete it rather
+  than keeping it for coverage optics.
+
 ## Scope resource lifecycles
 
 Use `Effect.acquireRelease`, `Effect.acquireUseRelease`, or an equivalent scoped bracket whenever
