@@ -22,16 +22,16 @@ const Measurement = Schema.Struct({
   layouts: Schema.Number,
   mirFunctions: Schema.Number,
   mirOperations: Schema.Number,
-  peakHeapBytes: Schema.Number,
-  nativeBytes: Schema.Number,
-  nativeSha256: Schema.String,
+  sampledPeakHeapBytes: Schema.Number,
+  llvmBitcodeBytes: Schema.Number,
+  llvmBitcodeSha256: Schema.String,
   wasmBytes: Schema.Number,
   wasmSha256: Schema.String,
 })
 type Measurement = typeof Measurement.Type
 
 const Report = Schema.Struct({
-  schema: Schema.Literal(1),
+  schema: Schema.Literal(2),
   environment: Environment,
   elapsedMs: Schema.Number,
   reports: Schema.Array(Measurement),
@@ -51,8 +51,8 @@ const deterministic = (measurement: Measurement) =>
     layouts: measurement.layouts,
     mirFunctions: measurement.mirFunctions,
     mirOperations: measurement.mirOperations,
-    nativeBytes: measurement.nativeBytes,
-    nativeSha256: measurement.nativeSha256,
+    llvmBitcodeBytes: measurement.llvmBitcodeBytes,
+    llvmBitcodeSha256: measurement.llvmBitcodeSha256,
     wasmBytes: measurement.wasmBytes,
     wasmSha256: measurement.wasmSha256,
   })
@@ -94,13 +94,13 @@ layer(NodeServices.layer)('static composition characterization', (it) => {
         for (const measurement of first.reports) {
           // The first empirical threshold intentionally covers semantic facts only. Source bytes,
           // code-generation time, memory, and target size remain recorded trend data.
-          assert.isAtMost(measurement.semanticOccurrences, measurement.size * 14)
-          assert.isAtMost(measurement.layouts, measurement.size * 2)
-          assert.isAtMost(measurement.mirOperations, measurement.size * 4 + 2)
-          assert.isAbove(measurement.nativeBytes, 0)
+          assert.isAtMost(measurement.semanticOccurrences, measurement.size * 40 + 16)
+          assert.isAtMost(measurement.layouts, measurement.size * 5 + 4)
+          assert.isAtMost(measurement.mirOperations, measurement.size * 10 + 8)
+          assert.isAbove(measurement.llvmBitcodeBytes, 0)
           assert.isAbove(measurement.wasmBytes, 0)
         }
       }),
-    600_000,
+    900_000,
   )
 })

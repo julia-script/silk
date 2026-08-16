@@ -371,7 +371,7 @@ fn divergent(input: FirstBranch | SecondBranch) -> i32 {
 
       const module = 'static-composition/tooling'
       const snapshot = yield* Analysis.ofSource(module, encoder.encode(source))
-      const hover = Analysis.hoverSubjectAt(snapshot, module, source.indexOf('schema ='))
+      const hover = Analysis.hoverSubjectAt(snapshot, module, source.indexOf('leftSchema ='))
       assert.include(hover?.presentation.text ?? '', 'MappedSchema<NumberSchema, typeof(')
       assert.include(hover?.presentation.text ?? '', '.add@declaration:')
       const operationOffset =

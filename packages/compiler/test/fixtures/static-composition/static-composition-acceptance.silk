@@ -158,39 +158,97 @@ struct SuspensionRequest {
   value: i32
 }
 
-struct HelpLeaf {
-  code: i32
+struct ExecuteAction {
+  value: i32
 }
 
-struct HelpBranch<L, R> {
+struct InspectAction {
+  value: i32
+}
+
+struct FirstRoute {}
+
+struct SecondRoute {}
+
+struct RouteLeaf {
+  help: i32
+  choice: i32
+}
+
+struct RouteBranch<L, R> {
   left: L
   right: R
+}
+
+fn routes() -> RouteBranch<RouteLeaf, RouteBranch<RouteLeaf, RouteLeaf>> {
+  return RouteBranch<RouteLeaf, RouteBranch<RouteLeaf, RouteLeaf>> {
+    left: RouteLeaf {help: 4, choice: 0},
+    right: RouteBranch<RouteLeaf, RouteLeaf> {
+      left: RouteLeaf {help: 3, choice: 1},
+      right: RouteLeaf {help: 3, choice: 2},
+    },
+  }
+}
+
+fn routeHelp(tree: &RouteBranch<RouteLeaf, RouteBranch<RouteLeaf, RouteLeaf>>) -> i32 {
+  return tree.left.help + tree.right.left.help + tree.right.right.help
 }
 
 fn selectSuccess() -> RunRequest | HelpRequest | SelectionFailureRequest | DecodeFailureRequest | UncalledCleanupRequest | CalledCleanupRequest | SuspensionRequest {
   return RunRequest {value: 40}
 }
 
-fn applicationHandler(value: i32) -> i32 {
-  return value
+fn applicationHandler(action: ExecuteAction | InspectAction) -> i32 {
+  return match move action {
+    ExecuteAction {value} => value
+    InspectAction {value} => value
+  }
+}
+
+fn chooseRoute(choice: i32) -> FirstRoute | SecondRoute {
+  if choice == 0 {
+    return FirstRoute {}
+  }
+  return SecondRoute {}
+}
+
+fn executeMapped<S: Decoder<S>, F: fn(i32) -> i32>(schema: &MappedSchema<S, F>) -> ExecuteAction {
+  return ExecuteAction {value: schema.transform(Decoder.decode(&schema.source))}
+}
+
+fn inspectMapped<S: Decoder<S>, F: fn(i32) -> i32>(schema: &MappedSchema<S, F>) -> InspectAction {
+  return InspectAction {value: schema.transform(Decoder.decode(&schema.source))}
 }
 
 fn helpCase() -> i32 {
-  let tree = HelpBranch<HelpLeaf, HelpLeaf> {left: HelpLeaf {code: 4}, right: HelpLeaf {code: 6}}
-  return tree.left.code + tree.right.code
+  let tree = routes()
+  return routeHelp(&tree)
 }
 
 fn runCase(value: i32) -> i32 {
-  let schema = MappedSchema<NumberSchema> {source: NumberSchema {value: value}, transform: add(2)}
+  let tree = routes()
+  let leftSchema = MappedSchema<NumberSchema> {
+    source: NumberSchema {value: value},
+    transform: add(2),
+  }
+  let rightSchema = MappedSchema<NumberSchema> {
+    source: NumberSchema {value: value},
+    transform: add(3),
+  }
   let opaque = makeTransform(1)
   let exact = exactTransform()
   let clock = FixedClock {}
   let complete = run Effect.catch(
-    pendingComplete<NumberSchema>(&schema.source)
+    pendingComplete<NumberSchema>(&leftSchema.source)
       |> Effect.provide(&clock),
     recoverDecode,
   )
-  return applicationHandler(opaque(exact(mappedDecode(&schema), complete - value) - 1))
+  let action = match move chooseRoute(tree.left.choice) {
+    FirstRoute {} => executeMapped(&leftSchema)
+    SecondRoute {} => inspectMapped(&rightSchema)
+  }
+  let handled = applicationHandler(move action)
+  return opaque(exact(handled, complete - value) - 1)
 }
 
 effect fn uncalledCleanupCase(value: i32) -> i32

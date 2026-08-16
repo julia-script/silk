@@ -158,42 +158,97 @@ struct SuspendedNode {
   value: i32
 }
 
-struct DescriptionLeaf {
-  code: i32
+struct CommitValue {
+  value: i32
 }
 
-struct DescriptionPair<L, R> {
+struct InspectValue {
+  value: i32
+}
+
+struct PrimaryPlan {}
+
+struct SecondaryPlan {}
+
+struct PlanLeaf {
+  help: i32
+  choice: i32
+}
+
+struct PlanFork<L, R> {
   left: L
   right: R
+}
+
+fn plans() -> PlanFork<PlanLeaf, PlanFork<PlanLeaf, PlanLeaf>> {
+  return PlanFork<PlanLeaf, PlanFork<PlanLeaf, PlanLeaf>> {
+    left: PlanLeaf {help: 4, choice: 0},
+    right: PlanFork<PlanLeaf, PlanLeaf> {
+      left: PlanLeaf {help: 3, choice: 1},
+      right: PlanLeaf {help: 3, choice: 2},
+    },
+  }
+}
+
+fn describePlans(tree: &PlanFork<PlanLeaf, PlanFork<PlanLeaf, PlanLeaf>>) -> i32 {
+  return tree.left.help + tree.right.left.help + tree.right.right.help
 }
 
 fn chooseNode() -> ExecuteNode | DescribeNode | ChooseFaultNode | ReadFaultNode | DeferredDropNode | InvokedDropNode | SuspendedNode {
   return ExecuteNode {value: 40}
 }
 
-fn commitAction(value: i32) -> i32 {
-  return value
+fn commitAction(action: CommitValue | InspectValue) -> i32 {
+  return match move action {
+    CommitValue {value} => value
+    InspectValue {value} => value
+  }
+}
+
+fn selectPlan(choice: i32) -> PrimaryPlan | SecondaryPlan {
+  if choice == 0 {
+    return PrimaryPlan {}
+  }
+  return SecondaryPlan {}
+}
+
+fn commitMapped<S: Reader<S>, F: fn(i32) -> i32>(schema: &ConvertedPlan<S, F>) -> CommitValue {
+  return CommitValue {value: schema.transform(Reader.decode(&schema.source))}
+}
+
+fn inspectMapped<S: Reader<S>, F: fn(i32) -> i32>(schema: &ConvertedPlan<S, F>) -> InspectValue {
+  return InspectValue {value: schema.transform(Reader.decode(&schema.source))}
 }
 
 fn describeNode() -> i32 {
-  let tree = DescriptionPair<DescriptionLeaf, DescriptionLeaf> {
-    left: DescriptionLeaf {code: 4},
-    right: DescriptionLeaf {code: 6},
-  }
-  return tree.left.code + tree.right.code
+  let tree = plans()
+  return describePlans(&tree)
 }
 
 fn executeNode(value: i32) -> i32 {
-  let schema = ConvertedPlan<ScalarPlan> {source: ScalarPlan {value: value}, transform: add(2)}
+  let tree = plans()
+  let primarySchema = ConvertedPlan<ScalarPlan> {
+    source: ScalarPlan {value: value},
+    transform: add(2),
+  }
+  let secondarySchema = ConvertedPlan<ScalarPlan> {
+    source: ScalarPlan {value: value},
+    transform: add(3),
+  }
   let opaque = makeTransform(1)
   let exact = exactTransform()
   let clock = FixedPulse {}
   let complete = run Effect.catch(
-    pendingComplete<ScalarPlan>(&schema.source)
+    pendingComplete<ScalarPlan>(&primarySchema.source)
       |> Effect.provide(&clock),
     recoverDecode,
   )
-  return commitAction(opaque(exact(mappedDecode(&schema), complete - value) - 1))
+  let action = match move selectPlan(tree.left.choice) {
+    PrimaryPlan {} => commitMapped(&primarySchema)
+    SecondaryPlan {} => inspectMapped(&secondarySchema)
+  }
+  let handled = commitAction(move action)
+  return opaque(exact(handled, complete - value) - 1)
 }
 
 effect fn uncalledCleanupCase(value: i32) -> i32

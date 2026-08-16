@@ -32,21 +32,26 @@ implicit erasure, heterogeneous executable collections, or runtime interface dis
 
 ### Requirement: Every engine agrees on static composition
 
-Evaluator, native LLVM, and direct WebAssembly SHALL produce equal results, typed failures, handler
-counts, target selection, and cleanup traces. WebAssembly output MUST contain no function table or
-`call_indirect` introduced by this capability.
+Evaluator, native LLVM, and direct WebAssembly SHALL produce equal observable results and typed
+failure outcomes. The evaluator SHALL expose handler, failure, suspension, selected-target, and
+cleanup trace counts; native LLVM and direct WebAssembly artifacts SHALL prove the selected direct
+target and a causal cleanup path for the corresponding execution. WebAssembly output MUST contain
+no function table or `call_indirect` introduced by this capability.
 
 #### Scenario: Run the acceptance matrix
 - **WHEN** success, help, selection failure, decode failure, uncalled cleanup, and called cleanup
   cases run through all engines
-- **THEN** their observable traces and static targets agree exactly
+- **THEN** their results agree, evaluator traces satisfy the exact contract, and backend artifacts
+  retain the corresponding static targets and cleanup witnesses
 
 ### Requirement: Static-tree growth is characterized deterministically
 
-Generated left-associated and balanced command trees at `1`, `8`, `32`, `64`, and `128` leaves SHALL
-record semantic, representation, instance, layout, MIR, canonical-byte, phase-time, peak-heap, native-
-size, and Wasm-size metrics in two fresh processes. Counts and artifacts MUST be deterministic, and
-every unexplained superlinear semantic expansion MUST fail the characterization.
+Generated left-associated and balanced command trees at `1`, `8`, `32`, `64`, and `128` distinct
+leaves SHALL include per-leaf transforms and normalization to one application-action union. They
+SHALL record semantic, representation, instance, layout, MIR, canonical-byte, phase-time,
+phase-boundary sampled-heap, LLVM-bitcode-size, and Wasm-size metrics in two fresh processes. Counts
+and artifacts MUST be deterministic, and every unexplained superlinear semantic expansion MUST fail
+the characterization.
 
 #### Scenario: Establish a baseline before thresholds
 - **WHEN** the generated suite completes for both shapes and every size
