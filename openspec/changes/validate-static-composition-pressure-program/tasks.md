@@ -34,5 +34,5 @@
 ## 6. Verification
 
 - [x] 6.1 Run `pnpm typecheck` and `pnpm exec biome check .`.
-- [ ] 6.2 Run `pnpm test`, `pnpm check`, and `pnpm release:candidate`; report exact failures.
+- [x] 6.2 Run `pnpm test`, `pnpm check`, and `pnpm release:candidate`; report exact failures.
 - [x] 6.3 Run `openspec validate validate-static-composition-pressure-program --strict` after all prerequisite change specs are synchronized.

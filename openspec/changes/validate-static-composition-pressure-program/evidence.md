@@ -47,3 +47,7 @@ the compiler any fixture actor name. No failed spike was worked around locally.
 - The characterization is excluded from `pnpm check` by design. It records empirical timing, sampled
   heap, and artifact-size evidence without restoring per-feature fresh-process or performance-count
   work to the compiler correctness critical path.
+- Final local gates at head `44aa964adddc22a8e5724cba9be770688a5c8dd8`: `pnpm test`
+  passed all 24 Turbo tasks (compiler: 213 files / 1,821 tests plus the shared native corpus),
+  `pnpm check` passed all 36 Turbo tasks and 16 script-policy tests, and
+  `pnpm release:candidate` passed 7/7 packaging validations. Strict OpenSpec validation also passes.
