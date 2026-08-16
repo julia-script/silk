@@ -151,10 +151,13 @@ pub fn main() -> i32 {
       .flatMap((fn) => fn.localTypes)
       .find((type) => type._tag === 'EffectValue' && type.storage !== undefined)
 
-    assert.include(
+    assert.notInclude(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       'SEM0107',
     )
+    assert.strictEqual(snapshot.layoutCatalog._tag, 'Available')
+    assert.strictEqual(snapshot.layout._tag, 'Available')
+    assert.strictEqual(snapshot.mir._tag, 'Available')
     assert.strictEqual(make?._tag, 'MakeEffect')
     assert.strictEqual(stored?._tag, 'StoredEffectField')
     assert.strictEqual(projected?._tag, 'EffectValue')

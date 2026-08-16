@@ -6,8 +6,8 @@ import { unreachable } from './support/raise.js'
 /**
  * Aggregate receiver access for Effect representations stored in nominal fields.
  *
- * This is an ownership-only contract: every concrete storage attempt remains fenced by `SEM0107`
- * until later slices prove the complete runtime realization in every engine.
+ * These receiver rules remain the ownership admission boundary after proven nominal realizations
+ * cross the layout fence.
  */
 
 const ascii = (value: string): Uint8Array =>

@@ -444,15 +444,13 @@ pub fn main() -> i32 {
     const movedRealized = Analysis.realize(moved, 'wasm32-unknown-unknown')
     assert.deepEqual(
       Analysis.diagnostics(firstRealized).map((diagnostic) => diagnostic.code),
-      ['SEM0107'],
+      [],
     )
     assert.deepEqual(
       Analysis.diagnostics(movedRealized).map((diagnostic) => diagnostic.code),
-      ['SEM0107'],
+      [],
     )
-    assert.notDeepEqual(
-      Analysis.diagnostics(firstRealized).map((diagnostic) => diagnostic.span),
-      Analysis.diagnostics(movedRealized).map((diagnostic) => diagnostic.span),
-    )
+    assert.strictEqual(firstRealized.mir._tag, 'Available')
+    assert.strictEqual(movedRealized.mir._tag, 'Available')
   }),
 )

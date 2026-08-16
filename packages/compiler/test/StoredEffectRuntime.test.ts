@@ -25,9 +25,9 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
     Target.wasm32UnknownUnknown.id,
   )
   const diagnostics = Analysis.diagnostics(snapshot)
-  assert.isTrue(diagnostics.length > 0)
-  assert.isTrue(
-    diagnostics.every((diagnostic) => diagnostic.code === 'SEM0107'),
+  assert.deepEqual(
+    diagnostics,
+    [],
     JSON.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
   )
   const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
