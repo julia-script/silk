@@ -44,7 +44,8 @@ const clangPath = Effect.fnUntraced(function* () {
 
 /**
  * Takes one already-lowered LLVM artifact through object emission, shim compilation, linking, and
- * execution. `SEM0107` still fences `Driver.compile`, so this is the native path task 4.2 can use.
+ * execution. Keeping this boundary explicit lets the parity suite inspect and run the same LLVM
+ * artifact without involving CLI filesystem policy.
  */
 const runNative = Effect.fnUntraced(function* (
   toolchain: NativeToolchain.Toolchain,
@@ -94,23 +95,14 @@ const lowerSource = Effect.fnUntraced(function* (
   name: string,
   source: string,
   target: Target.Target,
-  fence: 'stored' | 'open',
 ) {
   const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), target.id)
   const diagnostics = Analysis.diagnostics(snapshot)
-  if (fence === 'stored') {
-    assert.isTrue(diagnostics.length > 0, name)
-    assert.isTrue(
-      diagnostics.every((diagnostic) => diagnostic.code === 'SEM0107'),
-      JSON.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
-    )
-  } else {
-    assert.deepEqual(
-      diagnostics,
-      [],
-      JSON.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
-    )
-  }
+  assert.deepEqual(
+    diagnostics,
+    [],
+    JSON.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
+  )
   const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
   const layout = Layout.plan(catalog, snapshot.instances)
   const ownership =
@@ -139,16 +131,15 @@ const lowerSource = Effect.fnUntraced(function* (
 /**
  * Lowers one stored-Effect program to MIR for a chosen target.
  *
- * `SEM0107` still fences every stored Effect out of `Analysis.realize`, so this mirrors the merged
- * evaluator harness and drives the phases directly instead of reading `snapshot.mir`. The fence
- * assertion is deliberate: task 4.4 narrows it only for shapes these engines prove first.
+ * These fixtures are the proven shapes for which task 4.4 retires `SEM0107`. Driving the phases
+ * directly keeps the cross-engine comparison on the same MIR module for every target.
  */
 const lowerStored = Effect.fnUntraced(function* (
   name: string,
   source: string,
   target: Target.Target,
 ) {
-  return yield* lowerSource(name, source, target, 'stored')
+  return yield* lowerSource(name, source, target)
 })
 
 const emitLlvm = Effect.fnUntraced(function* (module: Mir.Module, label: string) {
@@ -934,13 +925,11 @@ pub fn main() -> i32 {
         'stored-effect-parity/cycles-leak-short',
         leakHolds(8),
         Target.wasm32UnknownUnknown,
-        'open',
       )
       const leakLong = yield* lowerSource(
         'stored-effect-parity/cycles-leak-long',
         leakHolds(80),
         Target.wasm32UnknownUnknown,
-        'open',
       )
       const leakShortWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakShort.module, {
         mode: 'release',

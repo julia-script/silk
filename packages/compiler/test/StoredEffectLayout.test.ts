@@ -48,11 +48,13 @@ pub fn main() -> i32 {
           (entry) => Type.isNominal(entry.type) && entry.type.name === 'Deferred',
         ) ?? unreachable('expected Deferred layout')
 
-      assert.include(
+      assert.notInclude(
         Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
         'SEM0107',
       )
-      assert.strictEqual(snapshot.layoutCatalog._tag, 'Unavailable')
+      assert.strictEqual(snapshot.layoutCatalog._tag, 'Available')
+      assert.strictEqual(snapshot.layout._tag, 'Available')
+      assert.strictEqual(snapshot.mir._tag, 'Available')
       assert.strictEqual(represented.representation._tag, 'StoredEffectEnvironment')
       if (represented.representation._tag !== 'StoredEffectEnvironment') continue
       assert.deepEqual(

@@ -57,6 +57,16 @@ const soleEffectRealization = (
   return supported.at(0) ?? unreachable('expected one supported Effect field realization')
 }
 
+const assertEffectRealized = (snapshot: Analysis.Snapshot): void => {
+  assert.notInclude(
+    Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+    'SEM0107',
+  )
+  assert.strictEqual(snapshot.layoutCatalog._tag, 'Available')
+  assert.strictEqual(snapshot.layout._tag, 'Available')
+  assert.strictEqual(snapshot.mir._tag, 'Available')
+}
+
 const namedCallable = `struct Parser<F: fn(i32) -> i32> { parse: F }
 fn decode(value: i32) -> i32 { return value }
 pub fn main() -> i32 {
@@ -117,14 +127,12 @@ it.effect('realizes a capturing section field with one ordered inline capture la
   }),
 )
 
-it.effect(
-  'records exactly-once cleanup for an unrun stored Effect without crossing its fence',
-  () =>
-    Effect.gen(function* () {
-      const module = 'effect-field/unrun-cleanup'
-      const snapshot = yield* realized(
-        module,
-        `struct Token { value: i32 }
+it.effect('records exactly-once cleanup for an unrun stored Effect in the realized pipeline', () =>
+  Effect.gen(function* () {
+    const module = 'effect-field/unrun-cleanup'
+    const snapshot = yield* realized(
+      module,
+      `struct Token { value: i32 }
 struct Deferred<F: once Effect<i32>> { operation: F }
 fn consume(token: Token) -> i32 { return token.value }
 pub fn main() -> i32 {
@@ -132,35 +140,31 @@ pub fn main() -> i32 {
   let deferred = Deferred { operation: effect { return consume(move token) } }
   return 0
 }`,
-      )
-      const realization = soleEffectRealization(realizationsOf(snapshot))
+    )
+    const realization = soleEffectRealization(realizationsOf(snapshot))
 
-      assert.include(
-        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-        'SEM0107',
-      )
-      assert.strictEqual(snapshot.layoutCatalog._tag, 'Unavailable')
-      assert.deepEqual(realization.runner, {
-        _tag: 'CanonicalDeclarationId',
-        module,
-        name: 'main$effect$0',
-      })
-      assert.deepEqual(realization.runnerArguments, [])
-      assert.strictEqual(realization.access, 'Take')
-      assert.strictEqual(realization.suspendable, false)
-      assert.deepEqual(realization.rows.failures, [])
-      assert.deepEqual(realization.rows.requirements, [])
-      assert.strictEqual(realization.environment.length, 1)
-      const capture =
-        realization.environment.at(0) ?? unreachable('expected one owned Effect environment slot')
-      assert.strictEqual(capture.source, 'Binding')
-      assert.strictEqual(capture.sourceOrdinal, 0)
-      assert.strictEqual(capture.access, 'Take')
-      assert.strictEqual(Type.encode(capture.type), `${module}.Token`)
-      assert.strictEqual(capture.owned, true)
-      assert.deepEqual(realization.cleanup.unrunLanes, [0])
-      assert.strictEqual(realization.cleanup.consumedByRun, true)
-    }),
+    assertEffectRealized(snapshot)
+    assert.deepEqual(realization.runner, {
+      _tag: 'CanonicalDeclarationId',
+      module,
+      name: 'main$effect$0',
+    })
+    assert.deepEqual(realization.runnerArguments, [])
+    assert.strictEqual(realization.access, 'Take')
+    assert.strictEqual(realization.suspendable, false)
+    assert.deepEqual(realization.rows.failures, [])
+    assert.deepEqual(realization.rows.requirements, [])
+    assert.strictEqual(realization.environment.length, 1)
+    const capture =
+      realization.environment.at(0) ?? unreachable('expected one owned Effect environment slot')
+    assert.strictEqual(capture.source, 'Binding')
+    assert.strictEqual(capture.sourceOrdinal, 0)
+    assert.strictEqual(capture.access, 'Take')
+    assert.strictEqual(Type.encode(capture.type), `${module}.Token`)
+    assert.strictEqual(capture.owned, true)
+    assert.deepEqual(realization.cleanup.unrunLanes, [0])
+    assert.strictEqual(realization.cleanup.consumedByRun, true)
+  }),
 )
 
 it.effect('realizes a suspending stored runner with exact rows and no structural Effect ABI', () =>
@@ -181,11 +185,7 @@ pub fn main() -> i32 {
     )
     const realization = soleEffectRealization(realizationsOf(snapshot))
 
-    assert.include(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      'SEM0107',
-    )
-    assert.strictEqual(snapshot.layoutCatalog._tag, 'Unavailable')
+    assertEffectRealized(snapshot)
     assert.strictEqual(realization.suspendable, true)
     assert.strictEqual(realization.runner.module, 'effect-field/suspending')
     assert.strictEqual(realization.runner.name, 'main$effect$0')
@@ -226,10 +226,7 @@ pub fn main() -> i32 {
           : [],
       )
 
-      assert.deepEqual(
-        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-        ['SEM0107', 'SEM0107'],
-      )
+      assertEffectRealized(snapshot)
       assert.strictEqual(realizations.length, 2)
       assert.deepEqual(
         realizations
@@ -272,10 +269,7 @@ pub fn main() -> i32 {
         : [],
     )
 
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      ['SEM0107', 'SEM0107'],
-    )
+    assertEffectRealized(snapshot)
     assert.strictEqual(realizations.length, 2)
     assert.strictEqual(
       realizations.every(
@@ -345,10 +339,7 @@ pub fn main() -> i32 {
     )
     const realization = soleEffectRealization(realizationsOf(snapshot))
 
-    assert.include(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      'SEM0107',
-    )
+    assertEffectRealized(snapshot)
     assert.deepEqual(
       realization.environment.map((slot) => [slot.source, slot.sourceOrdinal]),
       [

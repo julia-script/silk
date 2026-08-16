@@ -21,7 +21,7 @@
 - [x] 4.1 Execute shared, exclusive, consuming, unrun, failing, and suspending stored Effects in the evaluator.
 - [x] 4.2 Add native LLVM and direct-Wasm parity for results, failures, runner identity, and cleanup traces.
 - [x] 4.3 Add capture-shape, target, access, cleanup, and suspendability invalidation fixtures.
-- [ ] 4.4 Narrow the unavailable-Effect-layout fence only for shapes proven by all engines.
+- [x] 4.4 Narrow the unavailable-Effect-layout fence only for shapes proven by all engines.
 
 ## 5. Verification
 

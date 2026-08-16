@@ -32,6 +32,17 @@ const assertRealizedCallable = (snapshot: Analysis.Snapshot): void => {
   if (snapshot.mir._tag === 'Available') assert.deepEqual(Mir.verify(snapshot.mir.value), [])
 }
 
+const assertRealizedEffect = (snapshot: Analysis.Snapshot): void => {
+  assert.notInclude(
+    Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+    'SEM0107',
+  )
+  assert.strictEqual(snapshot.layoutCatalog._tag, 'Available')
+  assert.strictEqual(snapshot.layout._tag, 'Available')
+  assert.strictEqual(snapshot.mir._tag, 'Available')
+  if (snapshot.mir._tag === 'Available') assert.deepEqual(Mir.verify(snapshot.mir.value), [])
+}
+
 it.effect('realizes exact represented callable storage through layout and MIR', () =>
   Effect.gen(function* () {
     const snapshot = yield* realized(
@@ -64,7 +75,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('fences exact represented Effect storage before layout and MIR', () =>
+it.effect('realizes exact represented Effect storage through layout and MIR', () =>
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'representation-fence/effect-exact',
@@ -75,11 +86,11 @@ pub fn main() -> i32 {
 }`,
     )
 
-    assertFenced(snapshot, 'SEM0107')
+    assertRealizedEffect(snapshot)
   }),
 )
 
-it.effect('keeps represented Effect storage fenced for every declared run mode', () =>
+it.effect('realizes represented Effect storage for every proven run mode', () =>
   Effect.gen(function* () {
     const modes = [
       ['shared', 'Effect<i32>'],
@@ -97,12 +108,12 @@ pub fn main() -> i32 {
 }`,
       )
 
-      assertFenced(snapshot, 'SEM0107')
+      assertRealizedEffect(snapshot)
     }
   }),
 )
 
-it.effect('fences an open Effect field after reachable exact specialization', () =>
+it.effect('realizes an open Effect field after reachable exact specialization', () =>
   Effect.gen(function* () {
     const source = `struct Deferred<F: Effect<i32>> { operation: F }
 fn defer<F: Effect<i32>>(operation: F) -> Deferred<F> {
@@ -113,17 +124,7 @@ pub fn main() -> i32 {
   return run deferred.operation
 }`
     const snapshot = yield* realized('representation-fence/effect-open', source)
-    const diagnostic = Analysis.diagnostics(snapshot).find(
-      (candidate) => candidate.code === 'SEM0107',
-    )
-
-    assertFenced(snapshot, 'SEM0107')
-    assert.strictEqual(
-      diagnostic === undefined
-        ? undefined
-        : source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
-      'defer(effect { return 1 })',
-    )
+    assertRealizedEffect(snapshot)
   }),
 )
 
@@ -371,7 +372,7 @@ pub fn main() -> i32 {
     }),
 )
 
-it.effect('fences nested repeated represented Effect fields through the shared field index', () =>
+it.effect('realizes nested repeated represented Effect fields through the shared field index', () =>
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'representation-fence/effect-nested-repeated',
@@ -390,16 +391,7 @@ pub fn main() -> i32 {
   return 0
 }`,
     )
-    const diagnostics = Analysis.diagnostics(snapshot).filter(
-      (diagnostic) => diagnostic.code === 'SEM0107',
-    )
-
-    assertFenced(snapshot, 'SEM0107')
-    assert.strictEqual(diagnostics.length, 3)
-    assert.strictEqual(
-      diagnostics.some((diagnostic) => diagnostic.message.includes('field first')),
-      true,
-    )
+    assertRealizedEffect(snapshot)
   }),
 )
 

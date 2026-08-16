@@ -51,8 +51,9 @@ later phases never recover them from binding initializers.
 Effect tag enriches the existing `RepresentationField` identity with the discovered runner, exact
 contract rows, actual run access, ordered environment, unrun cleanup lanes, and suspendability. It
 contains no sizes, offsets, row dictionaries, or dispatch ABI. Callable consumers explicitly narrow
-to the callable tag, and no Effect consumer is enabled in this slice, so `SEM0107` still stops every
-stored Effect before layout and MIR.
+to the callable tag. Effect storage crosses `SEM0107` only when the shared field index proves the
+complete concrete nominal instance; arrays and every other unsupported storage path remain fenced
+before layout and MIR.
 
 The task-2 cleanup and suspension cases are realization proofs, not runtime claims. The unrun case
 records the owned lanes that later ownership and cleanup phases must release; the suspension case
