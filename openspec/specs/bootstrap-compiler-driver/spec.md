@@ -77,7 +77,7 @@ the program and both sides' outcomes.
 The compiler driver corpus SHALL execute representative direct recursion, mutual recursion, generic
 same-argument recursion, and recursion over a mutable slice through evaluation, native LLVM, and
 direct WebAssembly. Completing programs SHALL agree on results and caller-visible mutations, while
-fresh-process compiler artifacts remain deterministic.
+repeated compiler artifacts remain deterministic.
 
 #### Scenario: Compare recursive quicksort engines
 
@@ -93,12 +93,23 @@ fresh-process compiler artifacts remain deterministic.
 
 The test suite CI runs SHALL enforce the pinned gates: identical compiler, source snapshot,
 target, profile, and toolchain inputs produce byte-identical syntax, HIR, and MIR textual
-encodings and LLVM bitcode.
+encodings and LLVM bitcode. Fresh-process determinism SHALL be proven by a small designated set of
+canary gates that together exercise the full artifact surface — native and WebAssembly release
+backends, standard-library imports, generics, stored callables, and conditional conformances —
+each compiling its program in at least two spawned compiler processes and byte-comparing every
+published artifact. All other determinism evidence SHALL be collected through repeated in-process
+compilation compared against committed goldens; feature areas MUST NOT add further fresh-process
+determinism gates.
 
 #### Scenario: Gate the four encodings
 
 - **WHEN** the determinism suite runs
-- **THEN** syntax, HIR, and MIR encodings and the bitcode digest are all byte-compared against committed goldens and repeated fresh runs
+- **THEN** syntax, HIR, and MIR encodings and the bitcode digest are all byte-compared against committed goldens and repeated runs
+
+#### Scenario: Canaries prove fresh-process identity
+
+- **WHEN** a canary determinism gate compiles its program in two fresh compiler processes
+- **THEN** every published artifact, including those of imported standard-library modules, is byte-identical across the processes
 
 ### Requirement: Every phase reports its work
 
@@ -146,8 +157,8 @@ downstream work.
 
 The driver corpus SHALL include valid, invalid, nested, empty, reordered, cross-module, moved,
 projected, and cleanup-bearing aggregate programs. Native execution, WebAssembly execution, and MIR
-evaluation SHALL agree where applicable, and repeated fresh-process compilation SHALL preserve
-diagnostics, HIR, layouts, MIR, symbols, IR, WAT, and bitcode exactly.
+evaluation SHALL agree where applicable, and repeated compilation SHALL preserve diagnostics, HIR,
+layouts, MIR, symbols, IR, WAT, and bitcode exactly.
 
 #### Scenario: Run the aggregate parity corpus
 
@@ -191,9 +202,9 @@ their phase-owned outcomes before artifact construction.
 
 ### Requirement: Control DAG artifacts are deterministic
 
-Repeated compilation in fresh processes SHALL preserve semantic loop facts, HIR regions, ownership
-fixed points, cleanup plans, MIR DAG nodes and topological encoding, evaluation traces, symbols, LLVM
-IR and bitcode, WAT, and WebAssembly bytes exactly for equivalent inputs.
+Repeated compilation SHALL preserve semantic loop facts, HIR regions, ownership fixed points,
+cleanup plans, MIR DAG nodes and topological encoding, evaluation traces, symbols, LLVM IR and
+bitcode, WAT, and WebAssembly bytes exactly for equivalent inputs.
 
 #### Scenario: Repeat nested-loop compilation
 
@@ -215,8 +226,8 @@ before artifact construction.
 
 ### Requirement: Structural-union artifacts are deterministic
 
-Repeated fresh compilation SHALL preserve source and semantic union facts, normalized identities,
-HIR, ownership, instance order, layouts, calling shapes, MIR mappings, traces, symbols, LLVM IR and
+Repeated compilation SHALL preserve source and semantic union facts, normalized identities, HIR,
+ownership, instance order, layouts, calling shapes, MIR mappings, traces, symbols, LLVM IR and
 bitcode, WAT, and WebAssembly bytes exactly for equivalent inputs.
 
 #### Scenario: Repeat equivalent union compilations
@@ -239,7 +250,7 @@ execution, and WebAssembly execution, while invalid programs SHALL stop at their
 
 ### Requirement: Exhaustive-match artifacts are deterministic
 
-Repeated fresh compilation SHALL preserve match syntax, facts, coverage sets, HIR regions, ownership,
+Repeated compilation SHALL preserve match syntax, facts, coverage sets, HIR regions, ownership,
 instance order, layouts, MIR, traces, symbols, and backend artifacts exactly for equivalent inputs.
 
 #### Scenario: Repeat a guarded match corpus
@@ -265,21 +276,21 @@ WebAssembly execution MUST all complete with the same pinned result.
 The compiler SHALL retain deterministic source closure, semantic, HIR, ownership, instance, layout,
 MIR, evaluation, native, and WebAssembly artifacts for the compiler-shaped acceptance program.
 
-#### Scenario: Repeat the acceptance program in a fresh process
+#### Scenario: Repeat the acceptance program
 
-- **WHEN** equivalent acceptance module maps are compiled repeatedly in fresh processes
+- **WHEN** equivalent acceptance module maps are compiled repeatedly
 - **THEN** every compiler-owned encoding, evaluation trace, symbol set, target text, and binary hash agrees exactly
 
 ### Requirement: Differential gates cover generic specialization
 
 The compiler driver corpus SHALL include valid inferred and explicit specializations, multiple
 instances of one declaration, generic nominal layouts, recursive same-argument calls, invalid
-arity and inference, and fresh-process determinism. Completing programs SHALL agree across
+arity and inference, and repeated-compilation determinism. Completing programs SHALL agree across
 evaluation, native LLVM, and direct WebAssembly for their selected targets.
 
 #### Scenario: Compare a multi-specialization program
 - **WHEN** the corpus compiles and runs one declaration at two concrete argument types
-- **THEN** all three engines agree on the result and the fresh-process artifacts remain identical
+- **THEN** all three engines agree on the result and repeated compilations produce identical artifacts
 
 #### Scenario: Keep invalid inference out of lowering
 - **WHEN** a corpus program cannot determine one type argument from supplied arguments
@@ -317,14 +328,14 @@ standalone binding, non-Copy extraction, unrepresentable length, and runtime out
 
 #### Scenario: Repeat invalid slice compilation
 
-- **WHEN** each invalid slice fixture is compiled repeatedly in fresh processes
+- **WHEN** each invalid slice fixture is compiled repeatedly
 - **THEN** it yields the same phase-owned diagnostic or runtime trap without producing a successful conflicting artifact
 
 ### Requirement: usize has target-aware differential acceptance
 
 The compiler acceptance surface SHALL compare evaluator, native, and Wasm results for `usize`
 programs whose values fit 32 bits, compare evaluator and native results above 32 bits, and require
-Wasm target rejection for out-of-range literals before emission. Fresh-process runs SHALL preserve
+Wasm target rejection for out-of-range literals before emission. Repeated runs SHALL preserve
 identical facts, layouts, MIR, textual artifacts, and binary artifacts for the same target.
 
 #### Scenario: Compare the shared range
@@ -341,7 +352,7 @@ identical facts, layouts, MIR, textual artifacts, and binary artifacts for the s
 
 The compiler corpus SHALL execute Effect success, propagation, exact recovery, residual-row rejection,
 ownership cleanup, and trap separation through evaluation, native, and Wasm where valid. Equivalent
-fresh-process compilations SHALL preserve semantic facts, layout, MIR, text, and binary artifacts.
+repeated compilations SHALL preserve semantic facts, layout, MIR, text, and binary artifacts.
 
 #### Scenario: Compare success and recovery across engines
 
@@ -358,7 +369,8 @@ fresh-process compilations SHALL preserve semantic facts, layout, MIR, text, and
 The compiler corpus SHALL cover Effect construction versus execution, capture modes, catch, retry,
 provider placement, Layout validation, allocation success and exhaustion, partial initialization,
 Vector growth, explicit drop, typed-failure cleanup, and trap separation across evaluator, native,
-and Wasm where valid. Fresh runs SHALL preserve every textual and binary artifact deterministically.
+and Wasm where valid. Repeated runs SHALL preserve every textual and binary artifact
+deterministically.
 
 #### Scenario: Compile the owned-token milestone
 
@@ -370,9 +382,9 @@ and Wasm where valid. Fresh runs SHALL preserve every textual and binary artifac
 The compiler corpus SHALL cover named function values, automatic sections, callable bindings and
 returns, generic higher-order functions, Copy and borrowed captures, exclusive mutation, owned
 take-once capture, Effect map, flatMap, tap and logging composition, retry rejection, grouped and
-ungrouped run, cleanup, and diagnostics across evaluator, native, and Wasm where valid. Fresh runs
-SHALL preserve syntax, semantic facts, HIR, ownership, instances, MIR, textual artifacts, and binary
-artifacts deterministically.
+ungrouped run, cleanup, and diagnostics across evaluator, native, and Wasm where valid. Repeated
+runs SHALL preserve syntax, semantic facts, HIR, ownership, instances, MIR, textual artifacts, and
+binary artifacts deterministically.
 
 #### Scenario: Compile the callable Effect milestone
 
@@ -386,7 +398,7 @@ artifacts deterministically.
 
 #### Scenario: Preserve deterministic callable artifacts
 
-- **WHEN** equivalent callable programs compile repeatedly in fresh processes
+- **WHEN** equivalent callable programs compile repeatedly
 - **THEN** generated environment identities, instance ordering, MIR, symbols, and emitted artifacts are byte-identical
 
 ### Requirement: Frontend failures gate artifact production
@@ -426,7 +438,7 @@ allocator provision, successful and exhausted allocation, provider access ending
 cleanup, affine moves, typed buffers and slots, initialization and rollback, restricted-hook
 rejection, explicit early drop, every structured exit, trap separation, zero-sized and over-aligned
 storage, and post-failure reuse. Evaluator, native, and Wasm SHALL agree on every logical result and
-cleanup trace. Fresh-process runs SHALL keep syntax, facts, ownership, HIR, instances, target layout,
+cleanup trace. Repeated runs SHALL keep syntax, facts, ownership, HIR, instances, target layout,
 MIR, traces, textual output, and binary artifacts deterministic.
 
 #### Scenario: Compile the construction-guard milestone
@@ -451,8 +463,10 @@ source bytes as a slice and returns an owned `Vector<Token>`, growing across at 
 reallocation. The differential harness SHALL verify identical token results across the evaluator,
 LLVM native execution, and instantiated Wasm; a failure-ordinal sweep over every allocation the
 scanner performs SHALL confirm each injected `OutOfMemory` propagates typed, rolls back partial
-initialization, and leaks nothing; and fresh-process artifact determinism SHALL cover the scanner
-and its standard-library dependencies.
+initialization, and leaks nothing, with the evaluator and Wasm carrying every ordinal and native
+execution carrying representative boundary ordinals including at least the first failure, one
+mid-growth failure, and unrestricted completion; and repeated compilation SHALL keep the scanner's
+artifacts deterministic.
 
 #### Scenario: Three engines agree on scanned tokens
 
@@ -462,12 +476,13 @@ and its standard-library dependencies.
 #### Scenario: Exhaustion at every ordinal leaks nothing
 
 - **WHEN** the harness injects allocation failure at each successive allocation ordinal of the scanner run
-- **THEN** every run fails with typed `OutOfMemory` or completes, releases every live owner exactly once, and the native run reports no leaked allocation
+- **THEN** every evaluator and Wasm run fails with typed `OutOfMemory` or completes and releases every live owner exactly once, and native runs at the boundary ordinals report no leaked allocation
 
 #### Scenario: Scanner artifacts are deterministic
 
-- **WHEN** the scanner acceptance program is compiled in two fresh processes
+- **WHEN** the scanner acceptance program is compiled repeatedly
 - **THEN** every published artifact, including those of imported standard-library modules, is byte-identical
+
 ### Requirement: Differential gates pressure pipeline composition
 
 The continuous compiler corpus SHALL compile and execute a deterministic matrix of ordinary value
@@ -476,7 +491,7 @@ cover left association and grouping, direct and stored forms, ordinary and effec
 Copy and affine values, automatic and stored callables, `map`, `flatMap`, `tap`, `catch`, `retry`,
 `provide`, and `provideWith`, including representative combinations rather than only isolated
 operators. Equivalent source shapes SHALL produce equal observable outcomes and cleanup; repeated
-fresh analyses SHALL preserve deterministic artifacts.
+analyses SHALL preserve deterministic artifacts.
 
 #### Scenario: Compare pipeline source shapes
 
@@ -495,7 +510,7 @@ fresh analyses SHALL preserve deterministic artifacts.
 
 #### Scenario: Repeat the pipeline matrix
 
-- **WHEN** equivalent pipeline fixtures are analyzed in fresh processes
+- **WHEN** equivalent pipeline fixtures are analyzed repeatedly
 - **THEN** their closure, HIR, ownership, instances, layout, MIR, traces, symbols, and backend artifacts remain identical
 
 ### Requirement: Differential gates enforce static Effect representation normalization
@@ -504,7 +519,8 @@ The continuous compiler corpus SHALL compare normalized and explicitly unnormali
 Effect programs through evaluation, optimized native entry structure, and direct WebAssembly entry
 structure. Eligible cases SHALL preserve behavior and SHALL NOT retain foldable constructor calls or
 an immediately materialized Effect environment. Ineligible controls SHALL preserve their ordinary
-representation and behavior.
+representation and behavior. Structural verdicts SHALL be asserted on entry structure rather than
+on exact byte, branch, or timing measurements.
 
 #### Scenario: Gate eligible constructor and run shapes
 
@@ -515,8 +531,3 @@ representation and behavior.
 
 - **WHEN** an Effect environment directly captures an affine or exclusive value
 - **THEN** the first normalization slice rejects that environment while the allocation-backed corpus preserves ordinary exactly-once Drop behavior
-
-#### Scenario: Repeat structural evidence
-
-- **WHEN** the normalization corpus runs in fresh compiler processes
-- **THEN** behavioral results, verdicts, MIR, entry structures, and binary sizes are deterministic

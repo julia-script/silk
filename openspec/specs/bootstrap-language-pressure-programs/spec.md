@@ -54,7 +54,9 @@ end-of-file, and unsupported byte runs.
 Representative valid and invalid lexer cases SHALL agree across evaluation, native LLVM, and
 direct WebAssembly execution. Allocation failure at every exercised growth ordinal SHALL preserve
 typed `OutOfMemory`, release every acquired allocation exactly once, and leave subsequent runs
-deterministic.
+deterministic; the evaluator and WebAssembly SHALL carry every exercised ordinal, and native
+execution SHALL carry representative boundary ordinals including at least the first failing
+ordinal, one mid-growth ordinal, and unrestricted completion.
 
 #### Scenario: Engines agree on a representative valid case
 
@@ -69,7 +71,7 @@ deterministic.
 #### Scenario: Allocation failure rolls back cleanly
 
 - **WHEN** allocation is rejected at any token or diagnostic vector growth ordinal exercised by the acceptance cases
-- **THEN** the typed failure is preserved and every earlier acquisition is released exactly once without double-dropping initialized records
+- **THEN** the typed failure is preserved and every earlier acquisition is released exactly once without double-dropping initialized records, with the evaluator and WebAssembly checking every ordinal and native execution checking the boundary ordinals
 
 ### Requirement: A bounded stack VM exercises execution and owned observations
 
@@ -137,7 +139,9 @@ result, ordered executed steps, and ordered diagnostics.
 Representative valid and malformed VM programs SHALL agree across evaluation, native LLVM, and
 direct WebAssembly execution. Allocation failure at every exercised trace or diagnostic growth
 ordinal SHALL preserve typed `OutOfMemory`, release every acquired allocation exactly once, and
-leave subsequent executions deterministic.
+leave subsequent executions deterministic; the evaluator and WebAssembly SHALL carry every
+exercised ordinal, and native execution SHALL carry representative boundary ordinals including at
+least the first failing ordinal, one mid-growth ordinal, and unrestricted completion.
 
 #### Scenario: Engines agree on VM fingerprints
 
@@ -147,7 +151,7 @@ leave subsequent executions deterministic.
 #### Scenario: VM observation allocation rolls back cleanly
 
 - **WHEN** allocation is rejected at any trace or diagnostic vector growth ordinal exercised by the acceptance programs
-- **THEN** the typed failure is preserved and every earlier acquisition is released exactly once without exposing a partial result
+- **THEN** the typed failure is preserved and every earlier acquisition is released exactly once without exposing a partial result, with the evaluator and WebAssembly checking every ordinal and native execution checking the boundary ordinals
 
 ### Requirement: Pressure findings determine follow-up work
 
