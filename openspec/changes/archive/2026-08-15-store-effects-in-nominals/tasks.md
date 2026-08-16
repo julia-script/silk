@@ -25,6 +25,6 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Run `pnpm typecheck` and `pnpm exec biome check .`.
-- [ ] 5.2 Run `pnpm test`, `pnpm check`, and `pnpm release:candidate`; report exact failures.
-- [ ] 5.3 Verify rows create no runtime lanes and direct Wasm introduces no indirect dispatch.
+- [x] 5.1 Run `pnpm typecheck` and `pnpm exec biome check .`.
+- [x] 5.2 Run `pnpm test`, `pnpm check`, and `pnpm release:candidate`; report exact failures.
+- [x] 5.3 Verify rows create no runtime lanes and direct Wasm introduces no indirect dispatch.
