@@ -106,13 +106,12 @@ interface CostReport {
 const fixture = fileURLToPath(new URL('./fixtures/synchronous-effect-cost.mjs', import.meta.url))
 const run = () => spawnSync(process.execPath, [fixture], { encoding: 'utf8', maxBuffer: 8_000_000 })
 
-it('captures synchronous Effect costs deterministically in fresh processes', () => {
+it('captures synchronous Effect entry structure', () => {
+  // One run: the structural verdicts below are the claim. Fresh-process artifact determinism is
+  // the canary determinism gates' job, not one more double-spawn here.
   const first = run()
-  const second = run()
 
   assert.strictEqual(first.status, 0, first.stderr)
-  assert.strictEqual(second.status, 0, second.stderr)
-  assert.strictEqual(first.stdout, second.stdout)
 
   const report = JSON.parse(first.stdout) as CostReport
   assert.strictEqual(report.schema, 3)

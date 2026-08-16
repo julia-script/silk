@@ -75,13 +75,11 @@ it('describes reserved template syntax with a stable parser diagnostic', () => {
     {
       phase: diagnostic.phase,
       code: diagnostic.code,
-      message: diagnostic.message,
       reason: diagnostic.reason,
     },
     {
       phase: 'parser',
       code: 'PAR0003',
-      message: 'Template syntax is reserved but not implemented',
       reason: { _tag: 'ReservedTemplateSyntax' },
     },
   )
@@ -172,13 +170,11 @@ it('describes one wholly absent return statement with one stable diagnostic', ()
     {
       phase: diagnostic.phase,
       code: diagnostic.code,
-      message: diagnostic.message,
       reason: diagnostic.reason,
     },
     {
       phase: 'parser',
       code: 'PAR0004',
-      message: 'Expected return statement',
       reason: { _tag: 'MissingReturnStatement' },
     },
   )

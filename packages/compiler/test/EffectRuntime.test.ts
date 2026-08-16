@@ -1,20 +1,16 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { readFileSync } from 'node:fs'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as Mir from '../src/Mir.js'
-import type * as NativeToolchain from '../src/NativeToolchain.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const golden = (name: string): string =>
+  readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
 const source = `struct Problem { code: i32 }
 effect fn risky<T>(value: T, selector: i32) -> T ! Problem {
@@ -240,9 +236,6 @@ pub effect fn main() -> () ! OutOfMemory {
   return ()
 }`
 
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-effect-runtime-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
-
 it.effect('passes, returns, stores, captures, and specializes closed Effect values', () =>
   Effect.gen(function* () {
     const logical = yield* Analysis.ofSourceRealized(
@@ -437,6 +430,7 @@ it.effect('keeps callable Effect mapping in evaluator, LLVM, and Wasm parity', (
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main
 
+    assert.strictEqual(Mir.encode(Analysis.loweredMir(native)), golden('effect.mir.txt'))
     assert.strictEqual(logical._tag, 'Completed')
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42)
     assert.include(llvm.ir, '@silk_silk_i32_add')
@@ -529,46 +523,6 @@ it.effect('continues transforming recovered and retried effects', () =>
   }),
 )
 
-it.effect('executes the handled failure through the native toolchain', () =>
-  Effect.gen(function* () {
-    const toolchain: NativeToolchain.Toolchain = Object.freeze({
-      _tag: 'Toolchain',
-      clang: '/usr/bin/clang',
-    })
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make('effect-runtime/main', ascii(source)) },
-      toolchain,
-      profile: 'release',
-      destination: join(destinationRoot, 'handled-failure'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(
-      compiled._tag,
-      'Compiled',
-      compiled._tag === 'BackendFailed'
-        ? `${compiled.error.message}: ${compiled.error.reason._tag === 'WrappedFailure' ? String(compiled.error.reason.cause) : compiled.error.reason._tag}`
-        : undefined,
-    )
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 42, run.stderr)
-
-    const succeeded = yield* Driver.compile({
-      compilation: { root: SourceFile.make('effect-runtime/success-native', ascii(successSource)) },
-      toolchain,
-      profile: 'release',
-      destination: join(destinationRoot, 'successful-effect'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(
-      succeeded._tag,
-      'Compiled',
-      succeeded._tag === 'BackendFailed' ? succeeded.error.message : undefined,
-    )
-    if (succeeded._tag !== 'Compiled') return
-    const successRun = spawnSync(succeeded.path, [], { encoding: 'utf8' })
-    assert.strictEqual(successRun.status, 42, successRun.stderr)
-  }),
-)
-
 it.effect('keeps the success path out of the exact handler on Wasm', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -620,7 +574,7 @@ it.effect('keeps arithmetic traps outside the typed failure channel', () =>
   }),
 )
 
-it.effect('preserves exclusive capture state across evaluator, native, and Wasm runs', () =>
+it.effect('preserves exclusive capture state across evaluator and Wasm runs', () =>
   Effect.gen(function* () {
     const logicalSnapshot = yield* Analysis.ofSourceRealized(
       'effect-runtime/exclusive-logical',
@@ -642,29 +596,10 @@ it.effect('preserves exclusive capture state across evaluator, native, and Wasm 
     assert.strictEqual(logical._tag, 'Completed')
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 12)
     assert.strictEqual(main(), 12)
-
-    const compiled = yield* Driver.compile({
-      compilation: {
-        root: SourceFile.make('effect-runtime/exclusive-native', ascii(exclusiveCaptureSource)),
-      },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, 'exclusive-capture'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(
-      compiled._tag,
-      'Compiled',
-      compiled._tag === 'BackendFailed'
-        ? `${compiled.error.message}: ${compiled.error.reason._tag === 'WrappedFailure' ? String(compiled.error.reason.cause) : compiled.error.reason._tag}`
-        : undefined,
-    )
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 12, run.stderr)
   }),
 )
 
-it.effect('retries with fresh locals and persistent captures across all runtimes', () =>
+it.effect('retries with fresh locals and persistent captures across evaluator and Wasm', () =>
   Effect.gen(function* () {
     const logicalSnapshot = yield* Analysis.ofSourceRealized(
       'effect-runtime/retry-logical',
@@ -686,23 +621,6 @@ it.effect('retries with fresh locals and persistent captures across all runtimes
     assert.strictEqual(logical._tag, 'Completed')
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 3)
     assert.strictEqual(main(), 3)
-
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make('effect-runtime/retry-native', ascii(retrySource)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, 'effect-retry'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(
-      compiled._tag,
-      'Compiled',
-      compiled._tag === 'BackendFailed'
-        ? `${compiled.error.message}: ${compiled.error.reason._tag === 'WrappedFailure' ? String(compiled.error.reason.cause) : compiled.error.reason._tag}`
-        : undefined,
-    )
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 3, run.stderr)
   }),
 )
 

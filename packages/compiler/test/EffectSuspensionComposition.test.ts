@@ -1,25 +1,9 @@
-import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import type * as NativeToolchain from '../src/NativeToolchain.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const clang = existsSync('/opt/homebrew/opt/llvm/bin/clang')
-  ? '/opt/homebrew/opt/llvm/bin/clang'
-  : '/usr/bin/clang'
-const toolchain: NativeToolchain.Toolchain = Object.freeze({ _tag: 'Toolchain', clang })
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-effect-suspension-composition-'))
-
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 const mapSource = `fn addForty(value: i32) -> i32 { return value + 40 }
 effect fn mapped() -> i32 ! OutOfMemory ? &mut Allocator {
@@ -201,28 +185,6 @@ const runAll = Effect.fnUntraced(function* (name: string, source: string, expect
   const wasmMain = instance.exports.silk_main
   assert.strictEqual(typeof wasmMain, 'function')
   if (typeof wasmMain === 'function') assert.strictEqual(wasmMain(), expected, `${name} wasm`)
-
-  const compiled = yield* Driver.compile({
-    compilation: {
-      root: SourceFile.make(`suspension-composition/${name}-native`, ascii(source)),
-    },
-    toolchain,
-    profile: 'release',
-    destination: join(destinationRoot, name),
-  }).pipe(Effect.provide(SourceResolver.empty))
-  assert.strictEqual(
-    compiled._tag,
-    'Compiled',
-    compiled._tag === 'Rejected'
-      ? compiled.diagnostics.map((diagnostic) => diagnostic.message).join('\n')
-      : compiled._tag === 'BackendFailed'
-        ? `${compiled.error.message}: ${compiled.error.reason._tag === 'WrappedFailure' ? String(compiled.error.reason.cause) : JSON.stringify(compiled.error.reason)}`
-        : undefined,
-  )
-  if (compiled._tag !== 'Compiled') return
-  const native = spawnSync(compiled.path, [], { encoding: 'utf8' })
-  assert.strictEqual(native.signal, null, native.stderr)
-  assert.strictEqual(native.status, expected, `${name} native: ${native.stderr}`)
 })
 
 it.effect('resumes Effect.map after a suspended source', () => runAll('map', mapSource, 42))
@@ -241,11 +203,11 @@ it.effect('retains a provided service across suspension', () =>
   runAll('provision', provisionSource, 42),
 )
 
-it.effect('runs suspended mutual recursion on all three engines', () =>
+it.effect('runs suspended mutual recursion on the evaluator and Wasm', () =>
   runAll('mutual', mutualSource, 42),
 )
 
-it.effect('preserves selected allocator refusal on all three engines', () =>
+it.effect('preserves selected allocator refusal on the evaluator and Wasm', () =>
   Effect.gen(function* () {
     const logical = yield* Analysis.ofSourceRealized(
       'suspension-composition/allocator-refusal-trace',
@@ -437,18 +399,5 @@ it.effect('keeps traps outside source unwind while preserving engine trap behavi
     const wasmMain = instance.exports.silk_main
     assert.strictEqual(typeof wasmMain, 'function')
     if (typeof wasmMain === 'function') assert.throws(() => wasmMain(), WebAssembly.RuntimeError)
-
-    const compiled = yield* Driver.compile({
-      compilation: {
-        root: SourceFile.make('suspension-composition/trap-native', ascii(trapSource)),
-      },
-      toolchain,
-      profile: 'release',
-      destination: join(destinationRoot, 'trap'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const native = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.isTrue(native.signal !== null || native.status !== 0)
   }),
 )

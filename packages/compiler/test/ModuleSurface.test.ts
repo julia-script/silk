@@ -72,6 +72,11 @@ it.effect('keeps string distinct from an immutable byte view in module surfaces'
     assert.strictEqual(ModuleSurface.equals(text, bytes), false)
     assert.include(text.canonical, 'string')
     assert.include(bytes.canonical, 'slice:Shared<builtin:u8>')
+    // Pins the canonical surface encoding byte-for-byte; an encoding change must be deliberate.
+    assert.strictEqual(
+      text.canonical,
+      '13:ModuleSurface12:surface/Main460:5:Array449:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public8:Ordinary7:5:Array11:6:Number1:1103:5:Array93:9:Parameter11:6:Number1:021:11:PresentName5:value41:12:ResolvedType14:4:Type6:string7:5:False24:11:PresentName8:identity41:12:ResolvedType14:4:Type6:string7:5:False6:4:None48:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array52:14:RequirementRow6:4:True7:5:Array7:5:Array7:5:Array7:5:Array',
+    )
   }),
 )
 

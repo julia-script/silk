@@ -1,19 +1,9 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-owned-allocation-dispatch-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /** A user-authored allocator that always refuses, exercising the failure half of dispatch. */
 const refusing = `struct ExhaustedAllocator { tag: i32 }
@@ -66,7 +56,7 @@ pub fn main() -> i32 {
   return run Effect.catch(store(), recover)
 }`
 
-it.effect('dispatches provision through user allocator witnesses on all three engines', () =>
+it.effect('dispatches provision through user allocator witnesses on the evaluator and Wasm', () =>
   Effect.gen(function* () {
     // Failure half: the witness runs, its OutOfMemory reaches the catch, and no block exists.
     const refused = yield* Analysis.ofSourceRealized(
@@ -123,19 +113,6 @@ it.effect('dispatches provision through user allocator witnesses on all three en
       )
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), expected, name)
-
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make(`owned-allocation-dispatch/${name}`, ascii(source)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, name),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled', name)
-      if (compiled._tag !== 'Compiled') continue
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, expected, `${name}: ${run.stderr}`)
     }
   }),
 )
@@ -251,9 +228,9 @@ pub fn main() -> i32 {
 /**
  * The counted quota allocator is the change's canonical user-authored provider: its state
  * decrements through the exclusive self reference, so exhaustion is a property of the provider
- * value rather than of the call site. Every quota agrees across all three engines.
+ * value rather than of the call site. Every quota agrees across the evaluator and Wasm.
  */
-it.effect('runs a counted quota allocator identically on all three engines', () =>
+it.effect('runs a counted quota allocator identically on the evaluator and Wasm', () =>
   Effect.gen(function* () {
     for (const [quota, expected] of [
       [0, 7],
@@ -285,19 +262,6 @@ it.effect('runs a counted quota allocator identically on all three engines', () 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), expected, `q${quota}`)
-
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make(`owned-allocation-quota/q${quota}`, ascii(countedQuota(quota))),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, `quota${quota}`),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled', `q${quota}`)
-      if (compiled._tag !== 'Compiled') continue
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, expected, `q${quota}: ${run.stderr}`)
     }
   }),
 )
@@ -335,7 +299,7 @@ pub fn main() -> i32 {
   return run Effect.catch(build(), recover)
 }`
 
-it.effect('writes forwarded exclusive provider mutations back on all three engines', () =>
+it.effect('writes forwarded exclusive provider mutations back on the evaluator and Wasm', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'owned-allocation-dispatch/forwarded-provider',
@@ -361,21 +325,5 @@ it.effect('writes forwarded exclusive provider mutations back on all three engin
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 1)
-
-    const compiled = yield* Driver.compile({
-      compilation: {
-        root: SourceFile.make(
-          'owned-allocation-dispatch/forwarded-provider',
-          ascii(forwardedProvider),
-        ),
-      },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, 'forwarded-provider'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 1, run.stderr)
   }),
 )

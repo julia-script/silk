@@ -1,29 +1,22 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { readFileSync } from 'node:fs'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Mir from '../src/Mir.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const bytes = new Uint8Array(
   readFileSync(new URL('./fixtures/owned-allocation-guard.silk', import.meta.url)),
 )
 const moduleName = 'owned-allocation-acceptance/main'
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-owned-allocation-acceptance-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /**
- * The three engines only agree by construction if they agree on the substrate, so the guard
- * program runs on all of them rather than on the evaluator alone. The logical trace is asserted
- * on the evaluator because it is the only engine that publishes one; the other two are held to
- * the observable result the trace predicts.
+ * The engines only agree by construction if they agree on the substrate, so the guard program
+ * runs on the evaluator and Wasm rather than on the evaluator alone. The logical trace is
+ * asserted on the evaluator because it is the only engine that publishes one; Wasm is held to
+ * the observable result the trace predicts. Native agreement on this program is proven by the
+ * differential corpus (`support/corpus.ts`).
  */
-it.effect('keeps one owned allocation in parity across all three engines', () =>
+it.effect('keeps one owned allocation in parity across the evaluator and Wasm', () =>
   Effect.gen(function* () {
     const native = yield* Analysis.ofSourceRealized(moduleName, bytes, 'aarch64-apple-darwin')
     const wasm = yield* Analysis.ofSourceRealized(moduleName, bytes, 'wasm32-unknown-unknown')
@@ -60,17 +53,6 @@ it.effect('keeps one owned allocation in parity across all three engines', () =>
       {},
     )
     assert.strictEqual((wasmInstance.exports.silk_main as () => number)(), 42)
-
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make(moduleName, bytes) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, 'guard'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 42, run.stderr)
   }),
 )
 

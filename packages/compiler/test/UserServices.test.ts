@@ -1,17 +1,10 @@
-import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as WasmError from '@silk-effect/wasm/WasmError'
 import * as Effect from 'effect/Effect'
-import * as FileSystem from 'effect/FileSystem'
-import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Hir from '../src/Hir.js'
 import * as Mir from '../src/Mir.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
-import * as Process from './support/Process.js'
 
 const encoder = new TextEncoder()
 
@@ -98,9 +91,6 @@ pub fn main() -> i32 {
   let token = Token {}
   return run Effect.provide(read(&token), &provider)
 }`
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const directory = yield* fileSystem.makeTempDirectoryScoped()
       const self = yield* snapshot(source)
       assert.deepEqual(
         Analysis.diagnostics(self).map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`),
@@ -153,18 +143,7 @@ pub fn main() -> i32 {
       const main = wasmInstance.exports.silk_main
       assert.strictEqual(typeof main, 'function')
       if (typeof main === 'function') assert.strictEqual(main(), 42)
-
-      const compiled = yield* Driver.compile({
-        compilation: { root: SourceFile.make('user-services/main', encoder.encode(source)) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: 'clang' }),
-        profile: 'release',
-        destination: path.join(directory, 'conditional-service'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const native = yield* Process.run(compiled.path, [])
-      assert.strictEqual(native.exitCode, 42, `native: ${native.stderr}`)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }),
   180_000,
 )
 

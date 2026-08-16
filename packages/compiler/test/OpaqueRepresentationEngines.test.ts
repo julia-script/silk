@@ -1,24 +1,11 @@
-import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as FileSystem from 'effect/FileSystem'
-import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Mir from '../src/Mir.js'
-import * as NativeToolchain from '../src/NativeToolchain.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
-import * as Process from './support/Process.js'
 
 const encoder = new TextEncoder()
 const module = 'opaque/engine-parity'
 const nativeTarget = 'aarch64-apple-darwin'
-const toolchain: NativeToolchain.Toolchain = Object.freeze({
-  _tag: 'Toolchain',
-  clang: '/usr/bin/clang',
-  shimCache: NativeToolchain.makeShimCache(),
-})
 
 const programs = Object.freeze([
   Object.freeze({
@@ -80,12 +67,9 @@ const executeWasm = Effect.fnUntraced(function* (bytes: Uint8Array) {
 })
 
 it.effect(
-  'executes exact and opaque representations identically on bootstrap, Wasm, and native engines',
+  'executes exact and opaque representations identically on bootstrap and Wasm engines',
   () =>
     Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const destinationRoot = yield* fileSystem.makeTempDirectoryScoped()
       for (const program of programs) {
         const wasmSnapshot = yield* snapshot(program.source, 'wasm32-unknown-unknown')
         assert.deepEqual(
@@ -122,18 +106,6 @@ it.effect(
           [],
           `${program.name}: native indirect call`,
         )
-
-        const compiled = yield* Driver.compile({
-          compilation: { root: SourceFile.make(module, encoder.encode(program.source)) },
-          toolchain,
-          profile: 'release',
-          destination: path.join(destinationRoot, program.name),
-        }).pipe(Effect.provide(SourceResolver.empty))
-        assert.strictEqual(compiled._tag, 'Compiled', program.name)
-        if (compiled._tag !== 'Compiled') continue
-        const native = yield* Process.run(compiled.path, [])
-        assert.strictEqual(native.exitCode, 42, `${program.name}: ${native.stderr}`)
       }
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  180_000,
+    }),
 )

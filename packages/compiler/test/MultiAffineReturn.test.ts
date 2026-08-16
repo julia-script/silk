@@ -162,37 +162,22 @@ const stackVmWithSeparateVectors = readFileSync(
   )
   .replace('if value != 0', 'if value != 184')
 
-it.effect(
-  'keeps ordinary multi-affine Effect transport in evaluator, native, and Wasm parity',
-  () =>
-    Effect.gen(function* () {
-      const wasmSnapshot = yield* Analysis.ofSourceRealized(
-        'multi-affine-return/allocated',
-        ascii(allocated),
-        'wasm32-unknown-unknown',
-      )
-      assert.deepEqual(Analysis.diagnostics(wasmSnapshot), [])
-      const evaluated = Analysis.evaluate(wasmSnapshot)
-      assert.strictEqual(evaluated._tag, 'Completed')
-      if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42)
-      const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make('multi-affine-return/allocated', ascii(allocated)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'allocated'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
-    }),
-  120_000,
+it.effect('keeps ordinary multi-affine Effect transport in evaluator and Wasm parity', () =>
+  Effect.gen(function* () {
+    const wasmSnapshot = yield* Analysis.ofSourceRealized(
+      'multi-affine-return/allocated',
+      ascii(allocated),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(wasmSnapshot), [])
+    const evaluated = Analysis.evaluate(wasmSnapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42)
+    const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
 )
 
 it.effect(

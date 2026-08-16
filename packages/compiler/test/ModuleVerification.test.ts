@@ -16,8 +16,10 @@ import { corpus } from './support/corpus.js'
  * checked against the real one is only a claim.
  */
 
-const ascii = (value: string): Uint8Array =>
-  Uint8Array.from(value, (character) => character.charCodeAt(0))
+// UTF-8, not charCodeAt: corpus programs may carry non-ASCII literals, and for ASCII sources the
+// bytes are identical.
+const encoder = new TextEncoder()
+const ascii = (value: string): Uint8Array => encoder.encode(value)
 
 const toolchain = llvmToolchain(['opt'], 'the LLVM verifier cross-check')
 

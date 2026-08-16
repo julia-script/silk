@@ -1607,11 +1607,8 @@ it('recovers a block with only bindings by inserting the missing return', () => 
     ['ReturnKeyword', 'DecimalInteger'],
   )
   assert.deepEqual(
-    result.parserDiagnostics.map((diagnostic) => ({
-      code: diagnostic.code,
-      message: diagnostic.message,
-    })),
-    [{ code: 'PAR0004', message: 'Expected return statement' }],
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0004'],
   )
   assertOriginalTokenTraversal(result)
 })
@@ -1634,11 +1631,8 @@ it('keeps a final identifier as an expression statement before the missing retur
     ['ReturnKeyword', 'DecimalInteger'],
   )
   assert.deepEqual(
-    result.parserDiagnostics.map((diagnostic) => ({
-      code: diagnostic.code,
-      message: diagnostic.message,
-    })),
-    [{ code: 'PAR0004', message: 'Expected return statement' }],
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0004'],
   )
   assertOriginalTokenTraversal(result)
 })

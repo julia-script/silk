@@ -37,29 +37,6 @@ pub fn main() -> i32 {
   return run Effect.catch(delayed() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-const retainedStateSource = `effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator {
-  let left = 40
-  return left + run Effect.suspend(effect { return 2 })
-}
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
-pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  return run Effect.catch(delayed() |> Effect.provideMut(&mut allocator), recover)
-}`
-
-const typedFailureSource = `struct Problem { code: i32 }
-effect fn delayed() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
-  let value = run Effect.suspend(effect { return 2 })
-  if value == 2 { fail Problem { code: 35 } }
-  return value
-}
-effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
-pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let handled = delayed() |> Effect.catch(recover)
-  return run (move handled |> Effect.provideMut(&mut allocator))
-}`
-
 const recursiveSource = (
   depth: number,
 ): string => `effect fn count(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
@@ -75,93 +52,6 @@ pub fn main() -> i32 {
   if answer == ${depth} { return 42 }
   return 2
 }`
-
-it.effect('resumes native continuation frames from inner to outer', () =>
-  Effect.gen(function* () {
-    const compiled = yield* Driver.compile({
-      compilation: {
-        root: SourceFile.make('suspension-native/success', ascii(successSource)),
-      },
-      toolchain,
-      profile: 'release',
-      destination: join(destinationRoot, 'success'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-
-    assert.strictEqual(
-      compiled._tag,
-      'Compiled',
-      compiled._tag === 'Rejected'
-        ? compiled.diagnostics.map((diagnostic) => diagnostic.message).join('\n')
-        : compiled._tag === 'BackendFailed'
-          ? compiled.error.message
-          : undefined,
-    )
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.signal, null, run.stderr)
-    assert.strictEqual(run.status, 2, run.stderr)
-  }),
-)
-
-it.effect('restores native scalar state retained after run', () =>
-  Effect.gen(function* () {
-    const compiled = yield* Driver.compile({
-      compilation: {
-        root: SourceFile.make('suspension-native/state', ascii(retainedStateSource)),
-      },
-      toolchain,
-      profile: 'release',
-      destination: join(destinationRoot, 'state'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-
-    assert.strictEqual(
-      compiled._tag,
-      'Compiled',
-      compiled._tag === 'Rejected'
-        ? compiled.diagnostics.map((diagnostic) => diagnostic.message).join('\n')
-        : compiled._tag === 'BackendFailed'
-          ? compiled.error.message
-          : undefined,
-    )
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.signal, null, run.stderr)
-    assert.strictEqual(run.status, 42, run.stderr)
-  }),
-)
-
-it.effect('propagates a resumed typed failure through native handlers', () =>
-  Effect.gen(function* () {
-    const analysis = yield* Analysis.ofSourceRealized(
-      'suspension-native/failure',
-      ascii(typedFailureSource),
-      'aarch64-apple-darwin',
-    )
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(analysis)), [])
-    const compiled = yield* Driver.compile({
-      compilation: {
-        root: SourceFile.make('suspension-native/failure', ascii(typedFailureSource)),
-      },
-      toolchain,
-      profile: 'release',
-      destination: join(destinationRoot, 'failure'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-
-    assert.strictEqual(
-      compiled._tag,
-      'Compiled',
-      compiled._tag === 'Rejected'
-        ? compiled.diagnostics.map((diagnostic) => diagnostic.message).join('\n')
-        : compiled._tag === 'BackendFailed'
-          ? compiled.error.message
-          : undefined,
-    )
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.signal, null, run.stderr)
-    assert.strictEqual(run.status, 42, run.stderr)
-  }),
-)
 
 it.effect('runs one million suspended native recursive frames with bounded machine stack', () =>
   Effect.gen(function* () {

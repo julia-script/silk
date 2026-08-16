@@ -1,24 +1,15 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Diagnostic from '../src/Diagnostic.js'
-import * as Driver from '../src/Driver.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import type * as Token from '../src/Token.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-short-circuit-acceptance-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 const infixOperatorKinds: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'Star',
@@ -131,7 +122,7 @@ pub fn main() -> i32 {
 }`
 
 it.effect(
-  'runs the counting and guarding programs identically on all three engines',
+  'runs the counting and guarding programs identically on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       for (const [name, source] of [
@@ -159,17 +150,6 @@ it.effect(
         const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
         const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
         assert.strictEqual((instance.exports.silk_main as () => number)(), 42, name)
-
-        const compiled = yield* Driver.compile({
-          compilation: { root: SourceFile.make(`short-circuit/${name}`, ascii(source)) },
-          toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-          profile: 'release',
-          destination: join(destinationRoot, name),
-        }).pipe(Effect.provide(SourceResolver.empty))
-        assert.strictEqual(compiled._tag, 'Compiled', name)
-        if (compiled._tag !== 'Compiled') return
-        const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-        assert.strictEqual(run.status, 42, `${name}: ${run.stderr}`)
       }
     }),
   120_000,

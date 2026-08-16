@@ -1,0 +1,38 @@
+mir-module golden/program
+entry ordinary target=golden/program.main machine=golden/program.main
+target aarch64-apple-darwin kind=Native pointer=8/8 endian=little
+layout i32 size=4 align=4 repr=signed-i32
+layout golden/program.Box size=4 align=4 repr=aggregate cleanup-hook=none tail-padding=0
+  field 0 token: golden/program.Token offset=0 size=4 align=4 padding=0
+layout golden/program.Token size=4 align=4 repr=aggregate cleanup-hook=none tail-padding=0
+  field 0 kind: i32 offset=0 size=4 align=4 padding=0
+calling i32 lanes=1 i32[]
+calling golden/program.Box lanes=1 i32[golden/program#1.0.golden/program#0.0]
+calling golden/program.Token lanes=1 i32[golden/program#0.0]
+fn golden/program.main params=0 locals=9 -> i32 entry=r0
+  r0 operation:
+    %0 = literal 41 : i32 [180, 183)
+    %1 = construct golden/program.Token { #0: %0 } [166, 185)
+    %2 = construct golden/program.Box { #0: %1 } [153, 187)
+    %3 = move %2 [139, 187)
+    forward r1 [139, 187) generated
+  r1 operation:
+    %8 = match#196 move %3 : golden/program.Box -> i32 [196, 312)
+      members golden/program.Box
+      decision golden/program.Box candidates=#0
+      arm #0 golden/program.Box before=golden/program.Box after=empty [215, 308)
+        bind #0 %4 <- #0 : golden/program.Token access=Move [225, 231)
+        selected access=Move result=%7 end-borrow=false
+          %7 = match#236 move %4 : golden/program.Token -> i32 [236, 308)
+            members golden/program.Token
+            decision golden/program.Token candidates=#0
+            arm #0 golden/program.Token before=golden/program.Token after=empty [255, 302)
+              bind #0 %5 <- #0 : i32 access=Move [269, 282)
+              selected access=Move result=%6 end-borrow=false
+                %6 = call golden/program.adjust(%5) : i32 [287, 302)
+    return %8 [196, 312)
+fn golden/program.adjust params=1 locals=3 -> i32 entry=r0
+  r0 operation:
+    %1 = literal 1 : i32 [112, 114)
+    %2 = add %0, %1 : i32 [104, 114)
+    return %2 [104, 114)

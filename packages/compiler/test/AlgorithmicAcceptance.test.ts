@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,9 +8,13 @@ import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Driver from '../src/Driver.js'
+import * as Mir from '../src/Mir.js'
 import type * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+
+const golden = (name: string): string =>
+  readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
 const fixtureRoot = fileURLToPath(new URL('./fixtures/algorithmic-acceptance', import.meta.url))
 const rootModule = 'app/Main'
@@ -78,7 +83,12 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
     }
     assert.isAbove(Analysis.instancesOf(self).instances.length, 0)
     assert.strictEqual(Analysis.layoutOf(self)._tag, 'Available')
-    assert.isAbove(Analysis.loweredMir(self).functions.length, 0)
+    const lowered = Analysis.loweredMir(self)
+    assert.isAbove(lowered.functions.length, 0)
+    assert.strictEqual(
+      `${createHash('sha256').update(Mir.encode(lowered)).digest('hex')}\n`,
+      golden('algorithmic.mir.sha256'),
+    )
 
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')

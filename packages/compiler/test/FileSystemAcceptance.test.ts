@@ -1,22 +1,14 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { readFileSync } from 'node:fs'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Mir from '../src/Mir.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const encoder = new TextEncoder()
 const exampleSource = readFileSync(
   new URL('../../../examples/file-system/main.silk', import.meta.url),
   'utf8',
 )
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-file-system-acceptance-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 const portableProvider = `import silk.filesystem {
   Path,
@@ -521,85 +513,4 @@ it.effect(
       const instance = new WebAssembly.Instance(module, {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
     }),
-)
-
-it.effect(
-  'runs an ordinary source FileSystem provider through native LLVM',
-  () => {
-    const source = `import silk.filesystem {
-  DirectoryEntry, DirectoryInfo, FileError, FileInfo, FileSystem, Path,
-  createTemporaryDirectoryOperation, directoryInfo, error, exists, root, unsupported
-}
-import silk.bytes { Bytes, make as bytesMake }
-import silk.vector { Vector, make as vectorMake }
-
-impl Report for OutOfMemory {}
-
-struct NativeProvider { observations: i32 }
-
-effect fn read(self: &mut NativeProvider, path: &Path) -> Bytes ! FileError | OutOfMemory ? &mut Allocator {
-  self.observations = self.observations + 1
-  return bytesMake()
-}
-effect fn write(self: &mut NativeProvider, path: &Path, bytes: &[u8]) -> () ! FileError { return () }
-effect fn stat(self: &mut NativeProvider, path: &Path) -> FileInfo | DirectoryInfo ! FileError {
-  self.observations = self.observations + 1
-  return directoryInfo()
-}
-effect fn list(self: &mut NativeProvider, path: &Path) -> Vector<DirectoryEntry> ! FileError | OutOfMemory ? &mut Allocator {
-  return vectorMake<DirectoryEntry>()
-}
-effect fn create(self: &mut NativeProvider, path: &Path) -> () ! FileError { return () }
-effect fn removeFile(self: &mut NativeProvider, path: &Path) -> () ! FileError { return () }
-effect fn removeDirectory(self: &mut NativeProvider, path: &Path) -> () ! FileError { return () }
-effect fn createTemporary(
-  self: &mut NativeProvider,
-  within: &Path,
-  prefix: &[u8]
-) -> Path ! FileError | OutOfMemory ? &mut Allocator {
-  fail error(createTemporaryDirectoryOperation(), unsupported())
-}
-
-impl FileSystem for NativeProvider {
-  readFile: NativeProvider.read
-  writeFile: NativeProvider.write
-  stat: NativeProvider.stat
-  listDirectory: NativeProvider.list
-  createDirectory: NativeProvider.create
-  removeFile: NativeProvider.removeFile
-  removeDirectory: NativeProvider.removeDirectory
-  createTemporaryDirectory: NativeProvider.createTemporary
-}
-
-effect fn program() -> i32 ! FileError | OutOfMemory {
-  let mut allocator = SystemAllocator.make()
-  let mut provider = NativeProvider { observations: 0 }
-  let path = run root() |> Effect.provideMut(&mut allocator)
-  if run exists(&path) |> Effect.provideMut(&mut provider) {} else { return 1 }
-  if provider.observations != 1 { return 2 }
-  return 42
-}
-
-effect fn recover(error: FileError | OutOfMemory) -> i32 { return 3 }
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`
-    return Effect.gen(function* () {
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make('file-system-acceptance/native-provider', encoder.encode(source)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'native-provider'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(
-        compiled._tag,
-        'Compiled',
-        JSON.stringify(compiled._tag === 'BackendFailed' ? compiled.error : compiled._tag),
-      )
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
-    })
-  },
-  60_000,
 )

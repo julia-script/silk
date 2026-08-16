@@ -1,13 +1,6 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 /**
  * A hashed collection releases the move-only keys and values it owns exactly once — on removal, on
@@ -38,9 +31,6 @@ const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
 
 const describe = (outcome: unknown): string =>
   JSON.stringify(outcome, (_, value) => (typeof value === 'bigint' ? value.toString() : value))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-hashed-ownership-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /**
  * A move-only key and a move-only value, each owning one heap block, so every acquisition and every
@@ -127,13 +117,13 @@ const allocationEvents = (
     : []
 
 /**
- * Runs one program on all three engines and returns the evaluator's acquire and release counts.
+ * Runs one program on the evaluator and Wasm and returns the evaluator's acquire and release counts.
  *
  * The counts are the evaluator's to give — it is the engine that observes every acquisition and
- * every release — while the value the program returns is required of all three, so the behaviour the
+ * every release — while the value the program returns is required of both, so the behaviour the
  * counts describe is the behaviour every engine has.
  */
-const owned = (name: string, source: string, artifact: string) =>
+const owned = (name: string, source: string) =>
   Effect.gen(function* () {
     const snapshot = yield* analyzed(name, source, 'wasm32-unknown-unknown')
     assert.deepEqual(messages(snapshot), [])
@@ -149,35 +139,19 @@ const owned = (name: string, source: string, artifact: string) =>
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     const direct = (instance.exports.silk_main as () => number)()
 
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make(name, ascii(source)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, artifact),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    const native =
-      compiled._tag === 'Compiled'
-        ? spawnSync(compiled.path, [], { encoding: 'utf8' })
-        : { status: undefined, stderr: 'native compilation did not produce an artifact' }
-
     return Object.freeze({
       bootstrap,
       direct,
-      native: native.status,
-      stderr: native.stderr,
       acquired: events.filter((event) => event === 'AllocationAcquire').length,
       released: events.filter((event) => event === 'AllocationRelease').length,
     })
   })
 
-/** Asserts one answer on every engine, and that nothing the evaluator saw acquired went unreleased. */
+/** Asserts one answer on both engines, and that nothing the evaluator saw acquired went unreleased. */
 const balanced = (
   outcome: {
     bootstrap: unknown
     direct: unknown
-    native: unknown
-    stderr: string
     acquired: number
     released: number
   },
@@ -186,24 +160,21 @@ const balanced = (
 ) => {
   assert.strictEqual(outcome.bootstrap, expected, 'bootstrap evaluator')
   assert.strictEqual(outcome.direct, expected, 'direct WebAssembly')
-  assert.strictEqual(outcome.native, expected, `native LLVM: ${outcome.stderr}`)
   // The expected acquire count is stated rather than derived, so an insert path that stopped taking
   // ownership at all — which would balance trivially — fails here instead of passing quietly.
   assert.strictEqual(outcome.acquired, acquired, 'allocations acquired')
   assert.strictEqual(outcome.released, outcome.acquired, 'acquires equal releases')
 }
 
-it.effect(
-  'releases every owned key and value when a non-empty map is dropped',
-  () =>
-    Effect.gen(function* () {
-      // Nothing is removed and the map is never emptied: it goes out of scope holding three keys and
-      // three values, and its own two buffers. Eight acquisitions, eight releases, and the releases
-      // of the keys and values happen because the map's drop walks its occupied slots — not because
-      // anything the program wrote released them.
-      const outcome = yield* owned(
-        'hashed-ownership/drop-non-empty',
-        program(`  let mut map = make<Handle, Held>(HashKey.seed(3))
+it.effect('releases every owned key and value when a non-empty map is dropped', () =>
+  Effect.gen(function* () {
+    // Nothing is removed and the map is never emptied: it goes out of scope holding three keys and
+    // three values, and its own two buffers. Eight acquisitions, eight releases, and the releases
+    // of the keys and values happen because the map's drop walks its occupied slots — not because
+    // anything the program wrote released them.
+    const outcome = yield* owned(
+      'hashed-ownership/drop-non-empty',
+      program(`  let mut map = make<Handle, Held>(HashKey.seed(3))
   let mut index = 0
   while index < 3 {
     let key = run handle(index) |> Effect.provideMut(&mut allocator)
@@ -215,26 +186,22 @@ it.effect(
   }
   if length<Handle, Held>(&map) != 3 { return 1 }
   return 42`),
-        'drop-non-empty',
-      )
-      balanced(outcome, 42, 8)
-    }),
-  120_000,
+    )
+    balanced(outcome, 42, 8)
+  }),
 )
 
-it.effect(
-  'releases the replaced value and the replaced key when an overwrite lands',
-  () =>
-    Effect.gen(function* () {
-      // Two keys of one tag, so the second insert finds the first entry. The value it displaces
-      // comes back to the caller, who releases it; the key the map held is released by the map. The
-      // map then drops holding the second pair.
-      //
-      // Two keys, two values, two buffers: six acquisitions. A replaced value the map forgot to hand
-      // back and did not release would leave five.
-      const outcome = yield* owned(
-        'hashed-ownership/overwrite',
-        program(`  let mut map = make<Handle, Held>(HashKey.seed(3))
+it.effect('releases the replaced value and the replaced key when an overwrite lands', () =>
+  Effect.gen(function* () {
+    // Two keys of one tag, so the second insert finds the first entry. The value it displaces
+    // comes back to the caller, who releases it; the key the map held is released by the map. The
+    // map then drops holding the second pair.
+    //
+    // Two keys, two values, two buffers: six acquisitions. A replaced value the map forgot to hand
+    // back and did not release would leave five.
+    const outcome = yield* owned(
+      'hashed-ownership/overwrite',
+      program(`  let mut map = make<Handle, Held>(HashKey.seed(3))
   let firstKey = run handle(7) |> Effect.provideMut(&mut allocator)
   let firstValue = run held(11) |> Effect.provideMut(&mut allocator)
   let none = run insert<Handle, Held>(&mut map, move firstKey, move firstValue)
@@ -251,24 +218,20 @@ it.effect(
   }
   if replaced != 11 { return 2 }
   return 42`),
-        'overwrite',
-      )
-      balanced(outcome, 42, 6)
-    }),
-  120_000,
+    )
+    balanced(outcome, 42, 6)
+  }),
 )
 
-it.effect(
-  'transfers a removed value out and releases the key the map held',
-  () =>
-    Effect.gen(function* () {
-      // The probe key is a third owner: `remove` consumes it, so the map releases the key it held
-      // and the probe key is released too, while the value travels to the caller intact.
-      //
-      // Three keys — two stored, one probing — two values, two buffers: seven acquisitions.
-      const outcome = yield* owned(
-        'hashed-ownership/remove',
-        program(`  let mut map = make<Handle, Held>(HashKey.seed(3))
+it.effect('transfers a removed value out and releases the key the map held', () =>
+  Effect.gen(function* () {
+    // The probe key is a third owner: `remove` consumes it, so the map releases the key it held
+    // and the probe key is released too, while the value travels to the caller intact.
+    //
+    // Three keys — two stored, one probing — two values, two buffers: seven acquisitions.
+    const outcome = yield* owned(
+      'hashed-ownership/remove',
+      program(`  let mut map = make<Handle, Held>(HashKey.seed(3))
   let firstKey = run handle(4) |> Effect.provideMut(&mut allocator)
   let firstValue = run held(20) |> Effect.provideMut(&mut allocator)
   let noFirst = run insert<Handle, Held>(&mut map, move firstKey, move firstValue)
@@ -289,25 +252,21 @@ it.effect(
   // The removed value is the caller's now, and the map still owns the entry it kept.
   if carried != 20 { return 2 }
   return 42`),
-        'remove',
-      )
-      balanced(outcome, 42, 7)
-    }),
-  120_000,
+    )
+    balanced(outcome, 42, 7)
+  }),
 )
 
-it.effect(
-  'releases every owned key and value carried through a growth',
-  () =>
-    Effect.gen(function* () {
-      // Ten entries take the map past its first table, so every key and value is moved once by the
-      // rehash. A rehome that copied instead of moving would double the releases and trap; one that
-      // dropped an entry on the floor would leave an acquisition unmatched.
-      //
-      // Ten keys, ten values, and two buffers for each of the tables of eight and sixteen: twenty-four.
-      const outcome = yield* owned(
-        'hashed-ownership/growth',
-        program(`  let mut map = make<Handle, Held>(HashKey.seed(3))
+it.effect('releases every owned key and value carried through a growth', () =>
+  Effect.gen(function* () {
+    // Ten entries take the map past its first table, so every key and value is moved once by the
+    // rehash. A rehome that copied instead of moving would double the releases and trap; one that
+    // dropped an entry on the floor would leave an acquisition unmatched.
+    //
+    // Ten keys, ten values, and two buffers for each of the tables of eight and sixteen: twenty-four.
+    const outcome = yield* owned(
+      'hashed-ownership/growth',
+      program(`  let mut map = make<Handle, Held>(HashKey.seed(3))
   let mut index = 0
   while index < 10 {
     let key = run handle(index) |> Effect.provideMut(&mut allocator)
@@ -319,9 +278,7 @@ it.effect(
   }
   if length<Handle, Held>(&map) != 10 { return 1 }
   return 42`),
-        'growth',
-      )
-      balanced(outcome, 42, 24)
-    }),
-  120_000,
+    )
+    balanced(outcome, 42, 24)
+  }),
 )

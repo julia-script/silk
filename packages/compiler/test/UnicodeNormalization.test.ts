@@ -1,21 +1,16 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 /**
  * The acceptance criteria of #42's normalization half, asserted on returned values.
  *
- * Every program here returns a number the test checks, on all three engines where parity is the
- * point — the bootstrap evaluator, compiled WebAssembly, and a native binary through clang — so a
- * passing case means the value came back, not that compilation finished.
+ * Every program here returns a number the test checks on the bootstrap evaluator and compiled
+ * WebAssembly, so a passing case means the value came back, not that compilation finished. Native
+ * execution parity is carried by the differential corpus in `DriverNativeAcceptance.test.ts`.
  */
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -23,13 +18,10 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-unicode-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
-
 const diagnosticSummary = (snapshot: Analysis.Snapshot) =>
   Analysis.diagnostics(snapshot).map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`)
 
-/** Runs one program on the evaluator, on compiled wasm, and as a native binary. */
+/** Runs one program on the evaluator and on compiled wasm. */
 const onEveryEngine = (name: string, source: string, expected: number) =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
@@ -47,17 +39,6 @@ const onEveryEngine = (name: string, source: string, expected: number) =>
       expected,
       `${name} on WebAssembly`,
     )
-
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make(name, ascii(source)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, name.replaceAll('/', '-')),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, expected, `${name} on native LLVM: ${run.stderr}`)
   })
 
 /**
@@ -100,11 +81,12 @@ it.effect(
 /**
  * The same scenario asserted the direct way: the two normalized owners compared with each other.
  *
- * This runs on the bootstrap evaluator and on a native binary but not on WebAssembly, because two
- * owned `String` views compared in one expression give the wrong answer there. That defect has
- * nothing to do with normalization — `String.copy("abc")` twice and comparing the two views
- * reproduces it with no Unicode in the program — so it is reported separately rather than worked
- * around silently here.
+ * This runs on the bootstrap evaluator here — and natively through the corpus entry
+ * `unicode-compared-directly` in `DriverNativeAcceptance.test.ts` — but not on WebAssembly,
+ * because two owned `String` views compared in one expression give the wrong answer there. That
+ * defect has nothing to do with normalization — `String.copy("abc")` twice and comparing the two
+ * views reproduces it with no Unicode in the program — so it is reported separately rather than
+ * worked around silently here.
  */
 const comparedDirectly = `import silk.string { String, view }
 import silk.unicode { normalizeNfc }
@@ -122,7 +104,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'compares the two normalized owners directly on the evaluator and on native',
+  'compares the two normalized owners directly on the evaluator',
   () =>
     Effect.gen(function* () {
       const name = 'unicode/compared-directly'
@@ -132,17 +114,6 @@ it.effect(
       assert.strictEqual(evaluated._tag, 'Completed')
       if (evaluated._tag !== 'Completed') return
       assert.strictEqual(evaluated.result.value, 42)
-
-      const compiled = yield* Driver.compile({
-        compilation: { root: SourceFile.make(name, ascii(comparedDirectly)) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'compared-directly'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
     }),
   120_000,
 )

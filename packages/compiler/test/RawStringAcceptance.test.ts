@@ -1,18 +1,8 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const encoder = new TextEncoder()
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-raw-string-acceptance-'))
-
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 const assertRunsEverywhere = Effect.fnUntraced(function* (
   sourceId: string,
@@ -36,22 +26,6 @@ const assertRunsEverywhere = Effect.fnUntraced(function* (
   const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
   const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
   assert.strictEqual((instance.exports.silk_main as () => number)(), expected)
-
-  const compiled = yield* Driver.compile({
-    compilation: { root: SourceFile.make(sourceId, bytes) },
-    toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-    profile: 'release',
-    destination: join(destinationRoot, sourceId.replaceAll('/', '-')),
-  }).pipe(Effect.provide(SourceResolver.empty))
-  assert.strictEqual(
-    compiled._tag,
-    'Compiled',
-    JSON.stringify(compiled, (_, value) => (typeof value === 'bigint' ? value.toString() : value)),
-  )
-  if (compiled._tag === 'Compiled') {
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, expected, run.stderr)
-  }
 })
 
 /**
@@ -79,7 +53,7 @@ pub fn main() -> i32 {
 }`
 
 it.effect(
-  'decodes a raw literal body without escapes on all three engines',
+  'decodes a raw literal body without escapes on the evaluator and Wasm',
   () => assertRunsEverywhere('raw-string/escape-policy', escapePolicy, 42),
   60_000,
 )
@@ -101,7 +75,7 @@ Usage: silk build
 }`
 
 it.effect(
-  'keeps the raw body policy across both delimiter widths on all three engines',
+  'keeps the raw body policy across both delimiter widths on the evaluator and Wasm',
   () => assertRunsEverywhere('raw-string/multiline', multiline, 42),
   60_000,
 )

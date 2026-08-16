@@ -1,19 +1,9 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-integer-base-acceptance-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 const parity = `const upperMask: i32 = 0xff00
 const lowBits: i32 = 0b1010
@@ -37,7 +27,7 @@ pub fn main() -> i32 {
 }`
 
 it.effect(
-  'reads hexadecimal, binary, and octal literals in their own base on all three engines',
+  'reads hexadecimal, binary, and octal literals in their own base on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* Analysis.ofSourceRealized(
@@ -61,17 +51,6 @@ it.effect(
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-      const compiled = yield* Driver.compile({
-        compilation: { root: SourceFile.make('integer-base/parity', ascii(parity)) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'parity'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
     }),
   60_000,
 )

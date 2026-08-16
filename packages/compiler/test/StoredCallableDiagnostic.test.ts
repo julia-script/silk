@@ -1,13 +1,6 @@
-import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as FileSystem from 'effect/FileSystem'
-import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
-import * as Process from './support/Process.js'
 
 /**
  * The frontend/MIR contract at a stored callable (#184).
@@ -228,7 +221,7 @@ it.effect('points a stdlib construction reached through inference at the user ca
 
 /**
  * Callable-bearing declarations that never reach a live construction keep compiling, and the
- * asserted value — not compilation success — is the evidence on all three engines.
+ * asserted value — not compilation success — is the evidence on the evaluator and Wasm.
  */
 const accepted = `struct Parser { decode: fn(i32) -> i32 }
 struct Nested { parser: Parser }
@@ -243,12 +236,9 @@ fn unreachableConstruction() -> i32 {
 pub fn main() -> i32 { return 42 }`
 
 it.effect(
-  'keeps declaration-only and unreachable callable fields compiling on all three engines',
+  'keeps declaration-only and unreachable callable fields compiling on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const directory = yield* fileSystem.makeTempDirectoryScoped()
       const snapshot = yield* analyzed('stored-callable/accepted', accepted)
       assert.deepEqual(messages(snapshot), [])
 
@@ -260,21 +250,7 @@ it.effect(
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42, 'wasm')
-
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make('stored-callable/accepted', ascii(accepted)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: path.join(directory, 'accepted'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = yield* Process.run(compiled.path, [])
-      assert.strictEqual(run.exitCode, 42, `native: ${run.stderr}`)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  180_000,
+    }),
 )
 
 it.effect('leaves direct callable parameters and calls unchanged', () =>

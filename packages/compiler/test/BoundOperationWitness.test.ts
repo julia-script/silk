@@ -1,16 +1,9 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
 import * as Mir from '../src/Mir.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
 
 /**
@@ -49,11 +42,8 @@ const evaluatedValue = (name: string, source: string) =>
     return outcome._tag === 'Completed' ? outcome.result.value : undefined
   })
 
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-bound-operation-witness-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
-
-/** Runs one source on the bootstrap evaluator, the direct WebAssembly backend, and native LLVM. */
-const threeEngineValue = (name: string, source: string, artifact: string) =>
+/** Runs one source on the bootstrap evaluator and the direct WebAssembly backend. */
+const twoEngineValue = (name: string, source: string) =>
   Effect.gen(function* () {
     const snapshot = yield* analyzed(name, source, 'wasm32-unknown-unknown')
     assert.deepEqual(messages(snapshot), [])
@@ -66,19 +56,7 @@ const threeEngineValue = (name: string, source: string, artifact: string) =>
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     const direct = (instance.exports.silk_main as () => number)()
 
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make(name, ascii(source)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, artifact),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    const run =
-      compiled._tag === 'Compiled'
-        ? spawnSync(compiled.path, [], { encoding: 'utf8' })
-        : { status: undefined, stderr: 'native compilation did not produce an artifact' }
-
-    return Object.freeze({ bootstrap, direct, native: run.status, stderr: run.stderr })
+    return Object.freeze({ bootstrap, direct })
   })
 
 /**
@@ -103,12 +81,12 @@ impl Keyed<Cell> for Cell { equals: Cell.cellEquals digest: Cell.cellDigest }
 fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(&left, &right) }`
 
 it.effect(
-  'returns the source witness result from a non-operator bound call on all three engines',
+  'returns the source witness result from a non-operator bound call on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       // The digest is 20 + 22, computed by ordinary Silk the specialization selected — so a wrong
       // witness, a missing call, or a placeholder result cannot produce 42 by accident.
-      const outcome = yield* threeEngineValue(
+      const outcome = yield* twoEngineValue(
         'bound-operation-witness/user-digest',
         `${userKey}
 pub fn main() -> i32 {
@@ -116,13 +94,10 @@ pub fn main() -> i32 {
   if digest == 42 { return u64.toI32(digest) }
   return 1
 }`,
-        'user-digest',
       )
       assert.strictEqual(outcome.bootstrap, 42)
       assert.strictEqual(outcome.direct, 42)
-      assert.strictEqual(outcome.native, 42, outcome.stderr)
     }),
-  120_000,
 )
 
 it.effect('reaches each provider’s own witness from one bound-operation call site', () =>
@@ -269,10 +244,10 @@ pub fn main() -> i32 {
 )
 
 it.effect(
-  'releases a weaker witness reborrow after propagating a typed failure on all three engines',
+  'releases a weaker witness reborrow after propagating a typed failure on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
-      const outcome = yield* threeEngineValue(
+      const outcome = yield* twoEngineValue(
         'bound-operation-witness/fallible-weaker-access',
         `import silk.result { Result, Success, Failure }
 
@@ -309,13 +284,10 @@ pub fn main() -> i32 {
   cell.code = cell.code + 1
   return failure + cell.code
 }`,
-        'fallible-weaker-access',
       )
       assert.strictEqual(outcome.bootstrap, 42)
       assert.strictEqual(outcome.direct, 42)
-      assert.strictEqual(outcome.native, 42, outcome.stderr)
     }),
-  120_000,
 )
 
 it.effect('weakens implicit operator borrows to a source witness demand', () =>

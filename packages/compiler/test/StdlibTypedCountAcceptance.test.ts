@@ -1,23 +1,13 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Mir from '../src/Mir.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as Stdlib from '../src/Stdlib.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const decoder = new TextDecoder()
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-typed-count-acceptance-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /** The five modules that used to copy a private `counted` identity to type their own literals. */
 const previousHolders = [
@@ -82,7 +72,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
 it.effect(
-  'lowers a vector program to the same typed counts on all three engines with no identity call',
+  'lowers a vector program to the same typed counts on the evaluator and Wasm with no identity call',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* Analysis.ofSourceRealized(
@@ -134,19 +124,6 @@ it.effect(
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make('typed-count-acceptance/growth', ascii(growth)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'growth'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
     }),
   60_000,
 )

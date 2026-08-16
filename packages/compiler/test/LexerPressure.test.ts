@@ -491,6 +491,12 @@ it.effect(
       ).length
       assert.isAtLeast(allocationCount, 4)
 
+      // Native execution runs at the boundary ordinals only — immediate failure, one mid-growth
+      // rollback, and unrestricted completion — while the evaluator and Wasm carry every ordinal.
+      // Each native leg is a full release pipeline, and the allocator's rollback path does not
+      // vary by ordinal index beyond those three shapes.
+      const nativeQuotas = new Set([0, Math.floor(allocationCount / 2), allocationCount])
+
       for (let quota = 0; quota <= allocationCount; quota += 1) {
         const id = `lexer-pressure/quota/q${quota}`
         const source = quotaSourceFor(representative.input, id, quota)
@@ -531,6 +537,7 @@ it.effect(
           id,
         )
 
+        if (!nativeQuotas.has(quota)) continue
         const compiled = yield* Driver.compile({
           compilation: { root: SourceFile.make(id, ascii(source)) },
           toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),

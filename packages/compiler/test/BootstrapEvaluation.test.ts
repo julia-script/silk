@@ -5,8 +5,10 @@ import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as Mir from '../src/Mir.js'
 import { corpus } from './support/corpus.js'
 
-const ascii = (value: string): Uint8Array =>
-  Uint8Array.from(value, (character) => character.charCodeAt(0))
+// UTF-8, not charCodeAt: corpus programs may carry non-ASCII literals, and for ASCII sources the
+// bytes are identical.
+const encoder = new TextEncoder()
+const ascii = (value: string): Uint8Array => encoder.encode(value)
 
 const evaluateSource = (
   text: string,

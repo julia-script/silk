@@ -113,15 +113,44 @@ export const makeDiskArtifactCache = (directory: string): ArtifactCache => {
 
 const processArtifactCache = new Map<string, Uint8Array>()
 
-/** The process-local artifact cache used when a toolchain pins none of its own. */
-export const defaultArtifactCache = (): ArtifactCache =>
-  Object.freeze({
+/**
+ * The artifact cache used when a toolchain pins none of its own: the durable disk cache under
+ * `SILK_NATIVE_CACHE_DIR` when that is set, otherwise process-local memory. The variable is how
+ * test runs and CI share compiled artifacts across processes without threading a cache through
+ * every call site.
+ */
+export const defaultArtifactCache = (): ArtifactCache => {
+  const directory = process.env.SILK_NATIVE_CACHE_DIR
+  if (directory !== undefined && directory !== '') return makeDiskArtifactCache(directory)
+  return Object.freeze({
     _tag: 'ArtifactCache',
     get: (key: string) => processArtifactCache.get(key),
     set: (key: string, bytes: Uint8Array) => {
       processArtifactCache.set(key, Uint8Array.from(bytes))
     },
   })
+}
+
+const clangVersions = new Map<string, string>()
+
+/**
+ * The first line of `clang --version`, memoized per path. The cache key needs the version, not
+ * just the path: a durable cache outlives a toolchain upgrade installed at the same location.
+ * A failed probe contributes the empty string — the path still participates in the key.
+ */
+const clangVersionOf = (clang: string): string => {
+  const cached = clangVersions.get(clang)
+  if (cached !== undefined) return cached
+  let version = ''
+  try {
+    const probe = spawnSync(clang, ['--version'], { encoding: 'utf8' })
+    version = probe.status === 0 ? (probe.stdout.split('\n', 1)[0] ?? '') : ''
+  } catch {
+    version = ''
+  }
+  clangVersions.set(clang, version)
+  return version
+}
 
 /**
  * Derives the cache identity of a finished artifact. Every input that can change the emitted
@@ -143,6 +172,8 @@ export const artifactCacheKey = (
   digest.update(profile)
   digest.update('\0')
   digest.update(toolchain.clang)
+  digest.update('\0')
+  digest.update(clangVersionOf(toolchain.clang))
   digest.update('\0')
   digest.update(shimSource)
   digest.update('\0')

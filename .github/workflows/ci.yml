@@ -20,6 +20,20 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # Cache keys end in github.sha so every run saves a fresh cache; restore-keys
+      # fall back to the newest cache whose lockfile/config hash still matches.
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
+            turbo-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/silk-effect/native
+          key: silk-native-${{ runner.os }}-${{ github.sha }}
+          restore-keys: silk-native-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm release:candidate
