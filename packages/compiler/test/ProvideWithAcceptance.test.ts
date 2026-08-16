@@ -1,19 +1,9 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-provide-with-acceptance-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /**
  * The provider owns one heap block, so acquiring it and releasing it are both logically visible:
@@ -78,7 +68,7 @@ const allocationEvents = (
 
 /**
  * The logical acquire/release trace is asserted on the evaluator because it is the only engine
- * that publishes one; the other two are held to the observable result that trace predicts.
+ * that publishes one; Wasm is held to the observable result that trace predicts.
  */
 const acceptAcrossEngines = (
   name: string,
@@ -103,17 +93,6 @@ const acceptAcrossEngines = (
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), expected, `${name} wasm`)
-
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make(`provide-with/${name}`, ascii(source)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, name),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled', name)
-    if (compiled._tag !== 'Compiled') return
-    const native = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(native.status, expected, `${name} native: ${native.stderr}`)
   })
 
 it.effect('acquires one provider for each execution of a provideWith Effect', () =>

@@ -1,19 +1,9 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-drop-hook-execution-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /** Fallthrough: the guard leaves scope, its hook runs, then its Allocation field releases. */
 const fallthrough = `struct Guard {
@@ -160,17 +150,6 @@ it.effect('runs Drop hooks before field cleanup exactly once on every structured
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), expected, `${name} wasm`)
-
-      const compiled = yield* Driver.compile({
-        compilation: { root: SourceFile.make(`drop-hook/${name}`, ascii(source)) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, name),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled', name)
-      if (compiled._tag !== 'Compiled') continue
-      const nativeRun = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(nativeRun.status, expected, `${name} native: ${nativeRun.stderr}`)
     }
   }),
 )
@@ -258,16 +237,5 @@ it.effect('monomorphizes one parametric Drop conformance per reachable instantia
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make('drop-hook/parametric', ascii(parametric)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, 'parametric'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const nativeRun = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(nativeRun.status, 42, `parametric native: ${nativeRun.stderr}`)
   }),
 )

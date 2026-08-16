@@ -911,6 +911,129 @@ pub fn main() -> i32 {
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
+  // folded from EffectRuntime.test.ts: Effect.retry gives every attempt fresh locals while the
+  // exclusive capture persists, and the third attempt's count is the exit (3, not 42).
+  {
+    name: 'effect-retry-captures',
+    source: `struct Problem { code: i32 }
+effect fn retrying() -> i32 ! Problem {
+  let mut counter = 0
+  let work = effect {
+    counter = counter + 1
+    if counter < 3 { fail Problem { code: counter } }
+    return counter
+  }
+  let retried = move work |> Effect.retry(2)
+  return run retried
+}
+effect fn recover(problem: Problem) -> i32 { return 99 }
+pub fn main() -> i32 {
+  let handled = retrying() |> Effect.catch(recover)
+  return run handled
+}`,
+    expected: { _tag: 'Completes', result: 3 },
+  },
+  // folded from EffectSuspensionComposition.test.ts: a suspended source inside Effect.retry fails
+  // every attempt, and the recovery answers with the failure exit (7).
+  {
+    name: 'suspension-retry-failure',
+    source: `struct Problem { code: i32 }
+effect fn attempt() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
+  let observed = run Effect.suspend(effect { return 1 })
+  fail Problem { code: observed }
+}
+effect fn recover(error: Problem | OutOfMemory) -> i32 { return 7 }
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  return run Effect.catch(
+    attempt() |> Effect.retry(2) |> Effect.provideMut(&mut allocator),
+    recover
+  )
+}`,
+    expected: { _tag: 'Completes', result: 7 },
+  },
+  // folded from StoredCallableRuntime.test.ts: an uncalled stored callable owning a Drop guard is
+  // cleaned exactly once when a typed failure exits the frame.
+  {
+    name: 'stored-callable-cleanup-typed-failure',
+    source: `struct Guard {
+  tag: i32
+  storage: Allocation
+}
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    return ()
+  }
+}
+struct Holder<F: once fn(i32) -> i32> { step: F }
+fn consume(value: i32, guard: Guard) -> i32 { return value + guard.tag }
+fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[i32; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let allocation = run recipe
+  let guard = Guard { tag: 2, storage: move allocation }
+  let holder = Holder { step: consume(move guard) }
+  fail OutOfMemory {}
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // folded from DropHookExecution.test.ts: a guard live at a failing run releases through its hook
+  // before the typed failure propagates to the recovery (exit 7).
+  {
+    name: 'drop-hook-failure-propagation',
+    source: `struct Guard {
+  tag: i32
+  storage: Allocation
+}
+
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () { return () }
+}
+
+struct ExhaustedAllocator { tag: i32 }
+
+effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+  fail OutOfMemory {}
+}
+
+impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.allocate }
+
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut empty = ExhaustedAllocator { tag: 0 }
+  let layout = Layout.of<[i32; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let allocation = run recipe
+  let guard = Guard { tag: 5, storage: move allocation }
+  let second = Layout.of<[i32; 2]>()
+  let refused = Allocator.allocate(move second) |> Effect.provideMut(&mut empty)
+  let never = run refused
+  drop never
+  return 42
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+
+pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 7 },
+  },
+  // folded from OpaqueRepresentationEngines.test.ts: opaque callable returns keep their hidden
+  // concrete identity, so two captures of the same shape stay distinct.
+  {
+    name: 'opaque-callable',
+    source: `fn add(left: i32, right: i32) -> i32 { return left + right }
+fn make(value: i32) -> some<F: fn(i32) -> i32> F { return add(value) }
+pub fn main() -> i32 {
+  let first = make(40)
+  let second = make(1)
+  return first(1) + second(0)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // The float math conformance programs join the corpus so the native differential compiles and
   // runs each one, which is the third engine behind the evaluator and direct WebAssembly.
   ...floatMathPrograms.map((program) => ({

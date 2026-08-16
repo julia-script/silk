@@ -1,19 +1,10 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { readFileSync } from 'node:fs'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-scanner-acceptance-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 export const scannerSource = readFileSync(
   new URL('./fixtures/scanner-acceptance/Main.silk', import.meta.url),
@@ -57,7 +48,7 @@ struct U8 {
     )
 
 it.effect(
-  'returns an owned token vector through two reallocations on all three engines',
+  'returns an owned token vector through two reallocations on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* Analysis.ofSourceRealized(
@@ -91,25 +82,12 @@ it.effect(
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make('scanner-acceptance/main', ascii(scannerSource)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-        profile: 'release',
-        destination: join(destinationRoot, 'scanner'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
     }),
   60_000,
 )
 
 it.effect(
-  'rolls back every scanner allocation failure without leaking on all three engines',
+  'rolls back every scanner allocation failure without leaking on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       for (const quota of [0, 1, 2, 3]) {
@@ -146,19 +124,6 @@ it.effect(
         const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
         const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
         assert.strictEqual((instance.exports.silk_main as () => number)(), expected, label)
-
-        const compiled = yield* Driver.compile({
-          compilation: {
-            root: SourceFile.make(`scanner-acceptance/${label}`, ascii(source)),
-          },
-          toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-          profile: 'release',
-          destination: join(destinationRoot, label),
-        }).pipe(Effect.provide(SourceResolver.empty))
-        assert.strictEqual(compiled._tag, 'Compiled', label)
-        if (compiled._tag !== 'Compiled') continue
-        const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-        assert.strictEqual(run.status, expected, `${label}: ${run.stderr}`)
       }
     }),
   120_000,

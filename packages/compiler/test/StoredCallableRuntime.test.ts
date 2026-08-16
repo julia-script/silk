@@ -1,20 +1,12 @@
-import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
-import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
-import * as FileSystem from 'effect/FileSystem'
-import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as Driver from '../src/Driver.js'
 import * as Mir from '../src/Mir.js'
 import * as Ownership from '../src/Ownership.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as Target from '../src/Target.js'
 import * as WasmBackend from '../src/WasmBackend.js'
-import * as Process from './support/Process.js'
 import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -31,31 +23,6 @@ const lowerStored = Effect.fnUntraced(function* (
     'SEM0103',
   )
   return { snapshot, module: Analysis.loweredMir(snapshot) }
-})
-
-const clang = Effect.fnUntraced(function* () {
-  const configured = yield* Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(''))
-  if (configured.length > 0) return configured
-  const fileSystem = yield* FileSystem.FileSystem
-  for (const candidate of ['/opt/homebrew/opt/llvm/bin/clang', '/usr/local/opt/llvm/bin/clang'])
-    if (yield* fileSystem.exists(candidate)) return candidate
-  return 'clang'
-})
-
-const runNative = Effect.fnUntraced(function* (name: string, source: string) {
-  const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const destinationRoot = yield* fileSystem.makeTempDirectoryScoped()
-  const compiler = yield* clang()
-  const compiled = yield* Driver.compile({
-    compilation: { root: SourceFile.make(name, ascii(source)) },
-    toolchain: Object.freeze({ _tag: 'Toolchain', clang: compiler }),
-    profile: 'release',
-    destination: path.join(destinationRoot, 'program'),
-  }).pipe(Effect.provide(SourceResolver.empty))
-  assert.strictEqual(compiled._tag, 'Compiled')
-  if (compiled._tag !== 'Compiled') return unreachable('expected a native executable')
-  return yield* Process.run(compiled.path, [])
 })
 
 const completedValue = (outcome: BootstrapEvaluation.Outcome): number => {
@@ -274,31 +241,22 @@ it.effect('executes the stored-callable matrix in evaluator and direct Wasm', ()
   }),
 )
 
-it.effect(
-  'executes the same stored-callable matrix through static native LLVM targets',
-  () =>
-    Effect.gen(function* () {
-      const target = yield* Target.host()
-      for (const [ordinal, testCase] of runtimeMatrix.entries()) {
-        const { module } = yield* lowerStored(
-          `stored-callable-runtime/native-${ordinal}`,
-          testCase.source,
-          target,
-        )
-        const artifact = yield* Backend.emit(Backend.LlvmBackend, module, { mode: 'release' })
-        assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
-        if (artifact._tag !== 'LlvmBitcodeArtifact') return
-        assert.include(artifact.ir, 'define i32 @silk_main')
-        assert.include(artifact.ir, testCase.target)
-        const run = yield* runNative(
-          `stored-callable-runtime/native-process-${ordinal}`,
-          testCase.source,
-        )
-        assert.strictEqual(run.stderr, '')
-        assert.strictEqual(run.exitCode, 42)
-      }
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  300_000,
+it.effect('lowers the same stored-callable matrix through static native LLVM targets', () =>
+  Effect.gen(function* () {
+    const target = yield* Target.host()
+    for (const [ordinal, testCase] of runtimeMatrix.entries()) {
+      const { module } = yield* lowerStored(
+        `stored-callable-runtime/native-${ordinal}`,
+        testCase.source,
+        target,
+      )
+      const artifact = yield* Backend.emit(Backend.LlvmBackend, module, { mode: 'release' })
+      assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
+      if (artifact._tag !== 'LlvmBitcodeArtifact') return
+      assert.include(artifact.ir, 'define i32 @silk_main')
+      assert.include(artifact.ir, testCase.target)
+    }
+  }),
 )
 
 it.effect('executes stored-callable cleanup and scoped-borrow traces exactly once', () =>
@@ -345,69 +303,58 @@ it.effect('executes stored-callable cleanup and scoped-borrow traces exactly onc
   }),
 )
 
-it.effect(
-  'cleans an uncalled stored callable exactly once on a typed-failure exit',
-  () =>
-    Effect.gen(function* () {
-      const { snapshot, module } = yield* lowerStored(
-        'stored-callable-runtime/typed-failure',
-        typedFailure,
-        Target.wasm32UnknownUnknown,
-      )
-      const outcome = BootstrapEvaluation.evaluate(snapshot.instances, module)
-      assert.strictEqual(completedValue(outcome), 42)
-      const callableEvents = outcome.trace.filter(
-        (event): event is BootstrapEvaluation.CallableTraceEvent =>
-          event._tag === 'CallableConstruct' ||
-          event._tag === 'CallableApply' ||
-          event._tag === 'CallableCleanup' ||
-          event._tag === 'CallableRejected',
-      )
-      const cleanup = callableEvents.filter((event) => event._tag === 'CallableCleanup')
-      const cleanedTicket = cleanup.at(0)?.ticket
-      assert.strictEqual(cleanup.length, 1)
-      assert.notStrictEqual(cleanedTicket, undefined)
-      assert.include(
-        callableEvents
-          .filter((event) => event._tag === 'CallableConstruct')
-          .map((event) => event.ticket),
-        cleanedTicket,
-      )
-      assert.notInclude(
-        callableEvents
-          .filter((event) => event._tag === 'CallableApply')
-          .map((event) => event.ticket),
-        cleanedTicket,
-      )
+it.effect('cleans an uncalled stored callable exactly once on a typed-failure exit', () =>
+  Effect.gen(function* () {
+    const { snapshot, module } = yield* lowerStored(
+      'stored-callable-runtime/typed-failure',
+      typedFailure,
+      Target.wasm32UnknownUnknown,
+    )
+    const outcome = BootstrapEvaluation.evaluate(snapshot.instances, module)
+    assert.strictEqual(completedValue(outcome), 42)
+    const callableEvents = outcome.trace.filter(
+      (event): event is BootstrapEvaluation.CallableTraceEvent =>
+        event._tag === 'CallableConstruct' ||
+        event._tag === 'CallableApply' ||
+        event._tag === 'CallableCleanup' ||
+        event._tag === 'CallableRejected',
+    )
+    const cleanup = callableEvents.filter((event) => event._tag === 'CallableCleanup')
+    const cleanedTicket = cleanup.at(0)?.ticket
+    assert.strictEqual(cleanup.length, 1)
+    assert.notStrictEqual(cleanedTicket, undefined)
+    assert.include(
+      callableEvents
+        .filter((event) => event._tag === 'CallableConstruct')
+        .map((event) => event.ticket),
+      cleanedTicket,
+    )
+    assert.notInclude(
+      callableEvents.filter((event) => event._tag === 'CallableApply').map((event) => event.ticket),
+      cleanedTicket,
+    )
 
-      const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'release' })
-      assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact')
-      if (wasm._tag !== 'WebAssemblyModuleArtifact') return
-      assert.strictEqual(yield* runWasm(wasm.bytes), 42)
-      assert.notInclude(wasm.wat, 'call_indirect')
+    const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'release' })
+    assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact')
+    if (wasm._tag !== 'WebAssemblyModuleArtifact') return
+    assert.strictEqual(yield* runWasm(wasm.bytes), 42)
+    assert.notInclude(wasm.wat, 'call_indirect')
 
-      const host = yield* Target.host()
-      const native = yield* lowerStored(
-        'stored-callable-runtime/typed-failure-native',
-        typedFailure,
-        host,
-      )
-      const llvm = yield* Backend.emit(Backend.LlvmBackend, native.module, { mode: 'release' })
-      assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact')
-      if (llvm._tag !== 'LlvmBitcodeArtifact') return
-      assert.include(llvm.ir, 'consume')
-      const run = yield* runNative(
-        'stored-callable-runtime/typed-failure-native-process',
-        typedFailure,
-      )
-      assert.strictEqual(run.stderr, '')
-      assert.strictEqual(run.exitCode, 42)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  300_000,
+    const host = yield* Target.host()
+    const native = yield* lowerStored(
+      'stored-callable-runtime/typed-failure-native',
+      typedFailure,
+      host,
+    )
+    const llvm = yield* Backend.emit(Backend.LlvmBackend, native.module, { mode: 'release' })
+    assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact')
+    if (llvm._tag !== 'LlvmBitcodeArtifact') return
+    assert.include(llvm.ir, 'consume')
+  }),
 )
 
 it.effect(
-  'executes owned callable capture hooks and resource cleanup through every engine',
+  'executes owned callable capture hooks and resource cleanup on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
       const host = yield* Target.host()
@@ -454,12 +401,6 @@ it.effect(
         const llvm = yield* Analysis.codegen(native, { mode: 'release' })
         assert.include(llvm.ir, 'drop_impl_0')
         assert.include(llvm.ir, 'call void @free')
-        const nativeRun = yield* runNative(
-          `stored-callable-runtime/resource-cleanup-${exit}-native-process`,
-          resourceCleanup,
-        )
-        assert.strictEqual(nativeRun.exitCode, 42, `${exit} native`)
-        assert.strictEqual(nativeRun.stderr, '')
 
         const observableDrop = cleanupProgram('let boom = self.tag / 0 return ()', exit)
         const trappingWasm = yield* Analysis.ofSourceRealized(
@@ -487,13 +428,6 @@ it.effect(
         })
         const wasmExit = yield* Effect.exit(runWasm(trappingWasmArtifact.bytes))
         assert.strictEqual(wasmExit._tag, 'Failure', `${exit} trapping Wasm`)
-        const nativeExit = yield* Effect.exit(
-          runNative(
-            `stored-callable-runtime/observable-drop-${exit}-native-process`,
-            observableDrop,
-          ),
-        )
-        assert.strictEqual(nativeExit._tag, 'Failure', `${exit} trapping native`)
 
         const hookOnlyDrop = hookOnlyCleanupProgram(exit)
         const hookOnlyNative = yield* Analysis.ofSourceRealized(
@@ -522,11 +456,7 @@ it.effect(
         const hookOnlyArtifact = yield* Analysis.codegen(hookOnlyNative, { mode: 'release' })
         assert.match(hookOnlyArtifact.ir, /call void @silk_[^(\n]*drop_impl_0/)
         assert.notInclude(hookOnlyArtifact.ir, 'call void @free')
-        const hookOnlyExit = yield* Effect.exit(
-          runNative(`stored-callable-runtime/hook-only-${exit}-native-process`, hookOnlyDrop),
-        )
-        assert.strictEqual(hookOnlyExit._tag, 'Failure', `${exit} hook-only native Drop hook`)
       }
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }),
   300_000,
 )

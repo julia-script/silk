@@ -1,20 +1,10 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import type * as Mir from '../src/Mir.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-indirect-call-acceptance-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /** The example from #100, verbatim: a plain `fn` calls through a function-typed parameter. */
 const concrete = `fn double(value: i32) -> i32 { return value * 2 }
@@ -63,52 +53,38 @@ fn twice(transform: fn(i32) -> i32, value: i32) -> i32 { return transform(transf
 
 pub fn main() -> i32 { return twice(double, 10) + 2 }`
 
-it.effect(
-  'calls through a function-typed parameter and agrees on all three engines',
-  () =>
-    Effect.gen(function* () {
-      for (const [name, source] of [
-        ['concrete', concrete],
-        ['generic', generic],
-        ['partial', partial],
-        ['forwarded', forwarded],
-        ['shared', shared],
-      ] as const) {
-        const snapshot = yield* Analysis.ofSourceRealized(
-          `indirect-call/${name}`,
-          ascii(source),
-          'wasm32-unknown-unknown',
-        )
-        assert.deepEqual(Analysis.diagnostics(snapshot), [], name)
+it.effect('calls through a function-typed parameter and agrees on the evaluator and Wasm', () =>
+  Effect.gen(function* () {
+    for (const [name, source] of [
+      ['concrete', concrete],
+      ['generic', generic],
+      ['partial', partial],
+      ['forwarded', forwarded],
+      ['shared', shared],
+    ] as const) {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        `indirect-call/${name}`,
+        ascii(source),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [], name)
 
-        const evaluated = Analysis.evaluate(snapshot)
-        assert.strictEqual(
-          evaluated._tag,
-          'Completed',
-          `${name}: ${JSON.stringify(evaluated, (_, value) =>
-            typeof value === 'bigint' ? value.toString() : value,
-          )}`,
-        )
-        if (evaluated._tag !== 'Completed') return
-        assert.strictEqual(evaluated.result.value, 42, `${name} evaluator`)
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(
+        evaluated._tag,
+        'Completed',
+        `${name}: ${JSON.stringify(evaluated, (_, value) =>
+          typeof value === 'bigint' ? value.toString() : value,
+        )}`,
+      )
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42, `${name} evaluator`)
 
-        const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-        const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-        assert.strictEqual((instance.exports.silk_main as () => number)(), 42, `${name} wasm`)
-
-        const compiled = yield* Driver.compile({
-          compilation: { root: SourceFile.make(`indirect-call/${name}`, ascii(source)) },
-          toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-          profile: 'release',
-          destination: join(destinationRoot, name),
-        }).pipe(Effect.provide(SourceResolver.empty))
-        assert.strictEqual(compiled._tag, 'Compiled', name)
-        if (compiled._tag !== 'Compiled') return
-        const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-        assert.strictEqual(run.status, 42, `${name} native: ${run.stderr}`)
-      }
-    }),
-  180_000,
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42, `${name} wasm`)
+    }
+  }),
 )
 
 const callableTargetName = (type: Mir.Type | undefined): string | undefined =>

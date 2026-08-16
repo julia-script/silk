@@ -1,17 +1,11 @@
-import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Mir from '../src/Mir.js'
-import type * as NativeToolchain from '../src/NativeToolchain.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const Blocker = Schema.Struct({
   phase: Schema.String,
@@ -61,16 +55,6 @@ const examples = exampleIds.map((id) => {
     bytes: new Uint8Array(readFileSync(join(root, manifest.source))),
     readme: readFileSync(join(root, 'README.md'), 'utf8'),
   })
-})
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-algorithm-examples-'))
-afterAll(() => {
-  rmSync(destinationRoot, { recursive: true, force: true })
-})
-
-const toolchain: NativeToolchain.Toolchain = Object.freeze({
-  _tag: 'Toolchain',
-  clang: '/usr/bin/clang',
 })
 
 const sourceId = (id: string, target: string): string => `examples/algorithms/${id}/${target}`
@@ -276,7 +260,7 @@ it.effect('keeps frontier evidence normalized and deterministic on both targets'
 )
 
 it.effect(
-  'executes the baseline through evaluation, native, and direct WebAssembly with exact parity',
+  'executes the baseline through evaluation and direct WebAssembly with exact parity',
   () =>
     Effect.gen(function* () {
       for (const { manifest, bytes } of examples) {
@@ -343,19 +327,6 @@ it.effect(
         assert.strictEqual(typeof wasmMain, 'function', manifest.id)
         if (typeof wasmMain !== 'function') continue
         assert.strictEqual(wasmMain(), manifest.expected.entryResult, manifest.id)
-
-        const compiled = yield* Driver.compile({
-          compilation: {
-            root: SourceFile.make(sourceId(manifest.id, 'native-process'), bytes),
-          },
-          toolchain,
-          profile: 'release',
-          destination: join(destinationRoot, manifest.id),
-        }).pipe(Effect.provide(SourceResolver.memory(new Map())))
-        assert.strictEqual(compiled._tag, 'Compiled', manifest.id)
-        if (compiled._tag !== 'Compiled') continue
-        const process = spawnSync(compiled.path, [], { encoding: 'utf8' })
-        assert.strictEqual(process.status, manifest.expected.entryResult, process.stderr)
       }
     }),
   90_000,

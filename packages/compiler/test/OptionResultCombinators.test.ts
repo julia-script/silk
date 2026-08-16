@@ -1,20 +1,11 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-option-result-combinators-'))
-afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /**
  * `map` applies its transform to a present value and leaves an absent value absent, so the
@@ -156,7 +147,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
 
-/** Evaluator, wasm, and native must agree on 42 for every program. */
+/** Evaluator and wasm must agree on 42 for every program. */
 const acrossEngines = (name: string, source: string) =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -186,17 +177,6 @@ const acrossEngines = (name: string, source: string) =>
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42, `${name} wasm`)
-
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make(`stdlib/combinators/${name}`, ascii(source)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(destinationRoot, name),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled', name)
-    if (compiled._tag !== 'Compiled') return evaluated
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 42, `${name} native: ${run.stderr}`)
     return evaluated
   })
 

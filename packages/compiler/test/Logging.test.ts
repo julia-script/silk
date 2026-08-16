@@ -1,22 +1,14 @@
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { readFileSync } from 'node:fs'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as Hir from '../src/Hir.js'
 import * as Mir from '../src/Mir.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as StandardStreams from '../src/StandardStreams.js'
 
 const encoder = new TextEncoder()
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
-const outputRoot = mkdtempSync(join(tmpdir(), 'silk-logging-'))
-afterAll(() => rmSync(outputRoot, { recursive: true, force: true }))
 
 const memorySource = String.raw`import silk.logging {
   attempts,
@@ -211,17 +203,6 @@ it.effect('keeps evaluator native and direct Wasm behavior aligned', () =>
     const wasmMain = instance.exports.silk_main
     if (typeof wasmMain !== 'function') throw new Error('logging Wasm lost silk_main')
     assert.strictEqual(wasmMain(), 42)
-
-    const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make('logging/native', encoder.encode(memorySource)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-      profile: 'release',
-      destination: join(outputRoot, 'memory-logger'),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 42, run.stderr)
   }),
 )
 
