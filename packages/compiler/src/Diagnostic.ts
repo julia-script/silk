@@ -1252,16 +1252,22 @@ export const unexpectedTokens = (
       ? 'invalid token'
       : Token.describe(firstUnexpected)
   const expectations = Object.freeze([...expected])
-  const message =
-    context === 'syntax'
-      ? `Unexpected ${encountered}; expected ${expectations[0] ?? 'valid syntax'}`
-      : `Unexpected ${encountered} while parsing ${context === 'statement' ? 'a statement' : `a ${context}`}`
+  const expectation = expectations[0]
   return Object.freeze({
     _tag: 'Diagnostic',
     phase: 'parser',
     code: unexpectedTokensCode,
     severity: 'error',
-    message,
+    // Each branch is one complete template, so the generated diagnostic catalog pins every wording
+    // this code can report rather than a fragment with the choice buried in an interpolation.
+    message:
+      context === 'syntax'
+        ? expectation === undefined
+          ? `Unexpected ${encountered}; expected valid syntax`
+          : `Unexpected ${encountered}; expected ${expectation}`
+        : context === 'statement'
+          ? `Unexpected ${encountered} while parsing a statement`
+          : `Unexpected ${encountered} while parsing a ${context}`,
     reason: Object.freeze({
       _tag: 'UnexpectedTokens',
       unexpected: Object.freeze([...unexpected]),
@@ -2753,7 +2759,11 @@ const contractRowInferenceMessage = (problem: ContractRowInferenceProblem): stri
     case 'AmbiguousFailureRemainder':
       return `Failure row remainder is ambiguous across ${problem.parameters.join(', ')}`
     case 'AbsentRequirementMember':
-      return `Requirement row does not contain ${problem.access === 'Exclusive' ? '&mut ' : '&'}${problem.capability}@${problem.role}`
+      // Two complete templates rather than one with the access marker interpolated, so the
+      // generated diagnostic catalog pins both wordings this problem can report.
+      return problem.access === 'Exclusive'
+        ? `Requirement row does not contain &mut ${problem.capability}@${problem.role}`
+        : `Requirement row does not contain &${problem.capability}@${problem.role}`
     case 'IncompatibleRequirementRole':
       return `Requirement ${problem.capability} has role ${problem.actual.join(' or ')}, expected ${problem.expected}`
     case 'IncompatibleRequirementAccess':

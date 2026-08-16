@@ -39,7 +39,7 @@ There are 151 codes in total.
 | Code | Meaning | Reported as |
 | --- | --- | --- |
 | `PAR0001` | Stable code for one required token that is absent at its insertion position. | `Expected <describeexpected>` |
-| `PAR0002` | Stable code for one maximal region of unexpected concrete tokens. |  |
+| `PAR0002` | Stable code for one maximal region of unexpected concrete tokens. | `Unexpected <encountered>; expected valid syntax`<br>`Unexpected <encountered>; expected <expectation>`<br>`Unexpected <encountered> while parsing a statement`<br>`Unexpected <encountered> while parsing a <context>` |
 | `PAR0003` | Stable code for a primary-expression template start reserved for future support. | `Template syntax is reserved but not implemented` |
 | `PAR0004` | Stable code for one wholly absent required return statement. | `Expected return statement` |
 
@@ -109,7 +109,7 @@ There are 151 codes in total.
 | `SEM0051` |  | `<target> expects <expected> type argument<expected1s>, received <actual>` |
 | `SEM0052` |  | `Cannot infer all type arguments for <target> from supplied values` |
 | `SEM0053` |  | `Recursive specialization changes type arguments from <caller> to <target>` |
-| `SEM0054` | Stable code for a borrowed slice type outside a direct ordinary-function parameter. |  |
+| `SEM0054` | Stable code for a borrowed slice type outside a direct ordinary-function parameter. | `A slice must be the complete type of an ordinary function parameter`<br>`A slice cannot appear in a <position> type` |
 | `SEM0055` |  | `A slice borrow is only valid as an immediate ordinary-call argument` |
 | `SEM0056` |  | `A slice borrow requires a direct stable array binding or slice parameter` |
 | `SEM0057` |  | `Exclusive borrowing requires mutable binding <spelling>` |
@@ -143,12 +143,12 @@ There are 151 codes in total.
 | `SEM0086` | Stable code for a typed constant whose type or literal is outside the constant contract. | `Invalid constant: <detail>` |
 | `SEM0087` | Stable code for an expression statement whose result cannot be intentionally ignored. | `Expression statement produces <actual>, but only () or never may be ignored` |
 | `SEM0088` | Stable code for using a generic binder in a value, failure-row, or requirement-row position of another kind. | `Generic parameter <spelling> has kind <actual>, expected <expected>` |
-| `SEM0089` | Stable code for a failure or requirement row that cannot be finitely decomposed. |  |
+| `SEM0089` | Stable code for a failure or requirement row that cannot be finitely decomposed. | `Failure row does not contain selected member <member>`<br>`Failure row remainder is ambiguous across <join>`<br>`Requirement row does not contain &mut <capability>@<role>`<br>`Requirement row does not contain &<capability>@<role>`<br>`Requirement <capability> has role <joinor>, expected <expected>`<br>`Requirement <capability>@<role> has access <joinor>, expected <expected>`<br>`Requirement row remainder is ambiguous across <join>`<br>`Failure row specialization is not finite and concrete`<br>`Requirement row specialization is not finite and concrete` |
 | `SEM0090` | Stable code for storage, bodies, or defaults inside a source service contract. | `Invalid service declaration: <detail>` |
 | `SEM0091` |  | `A returned slice must belong to an ordinary function with exactly one borrowed parameter; an exclusive result requires an exclusive parameter` |
 | `SEM0092` |  | `The returned slice does not originate from the function's single borrowed parameter` |
 | `SEM0093` | Stable code for one reachable intrinsic unavailable on the requested execution target. | `<operation> is unavailable for <target>` |
-| `SEM0094` | Stable code for wrapping the already-borrowed string view in another reference or slice. |  |
+| `SEM0094` | Stable code for wrapping the already-borrowed string view in another reference or slice. | `` `string` is already a borrowed immutable view and cannot be referenced again ``<br>`` `string` cannot be the element of another borrowed slice view `` |
 | `SEM0095` | Stable code for a float literal spelling no floating-point value can represent. | `Invalid float literal: <spelling>` |
 | `SEM0096` | Stable code for an effect site or a move inside the conditional right operand of `&&` or `\|\|`. | `The right operand of <operator> must be pure, found <detail>` |
 | `SEM0097` | Stable code for a bound operation call whose receiver names more than one bounded parameter. | `<spelling> is ambiguous across bounded type parameters <join>` |
@@ -157,7 +157,7 @@ There are 151 codes in total.
 | `SEM0100` | Stable code for an explicit type argument contradicting the type its value arguments imply. | `Type argument <parameter> of <target> is <written>, but the supplied values imply <implied>` |
 | `SEM0101` | Stable code for a bound operation whose selected witness has no lowering. | `<spelling> has no witness that can be lowered for <provider>` |
 | `SEM0102` | Stable code for selecting a suspending provider to allocate continuation storage. | `Allocator <provider> cannot provide continuation storage because <implementation> can suspend` |
-| `SEM0103` | Stable code for constructing an aggregate that stores a bare callable value. |  |
+| `SEM0103` | Stable code for constructing an aggregate that stores a bare callable value. | `Cannot construct <aggregate>: <site> retains the static identity of <callable>, but represented callable storage has no supported runtime layout`<br>`Cannot construct <aggregate>: <site> would store the callable <callable>, whose environment layout depends on a hidden concrete identity that <aggregate> does not carry` |
 | `SEM0104` | Stable code for the first struct initializer that contradicts an inferred representation. | `Representation <parameter> was inferred as <expected>, but this initializer uses <actual>` |
 | `SEM0105` | Stable code for the first exact representation that diverges at a static value join. | `Cannot join <expected> with <actual>; consume each represented value inside its branch before joining` |
 | `SEM0106` | Stable code for a representation argument whose contract cannot satisfy its required bound. | `Representation <parameter> requires <required>, but the supplied bound <actual> is not admissible` |
