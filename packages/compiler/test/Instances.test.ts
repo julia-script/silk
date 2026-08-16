@@ -412,8 +412,10 @@ pub fn main() -> i32 { return (run work()) |> Intrinsic.i32Add(1) }`,
       const second = Analysis.loweredMir(yield* snapshot(source))
       assert.deepEqual(Mir.verify(first), [])
       assert.deepEqual(Mir.verify(second), [])
-      assert.strictEqual(Mir.encode(first), Mir.encode(second))
-      assert.include(Mir.encode(first), 'apply-callable')
+      const encoded = Mir.encode(first)
+      assert.strictEqual(encoded, Mir.encode(second))
+      assert.include(encoded, 'apply-callable')
+      if (source === sources.at(0)) assert.strictEqual(encoded, golden('generic.mir.txt'))
     }
   }),
 )
@@ -507,6 +509,7 @@ it.effect('discovers calls and lowers nested matches as structured acyclic opera
     assert.strictEqual(matches.at(0)?.arms.at(0)?.selected.operations.at(0)?._tag, 'Match')
     assert.strictEqual(matches.at(0)?.decisions.at(0)?.member.name, 'Box')
     assert.strictEqual(matches.at(1)?.decisions.at(0)?.member.name, 'Token')
+    assert.strictEqual(Mir.encode(mir), golden('match.mir.txt'))
     assert.strictEqual(
       Mir.encode(mir),
       Mir.encode(Analysis.loweredMir(yield* snapshot(nestedMatchSource))),

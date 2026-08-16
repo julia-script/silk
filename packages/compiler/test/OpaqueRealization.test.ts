@@ -59,6 +59,11 @@ pub fn make(value: i32) -> some<F: fn(i32) -> i32> F { return add(value) }`,
       [],
     )
     const argument = opaqueArgument(self, module, 'make')
+    // Pins the family key encoding byte-for-byte; a key change must be deliberate.
+    assert.strictEqual(
+      Type.opaqueFamilyKey(argument.family),
+      '12:OpaqueFamily37:8:Producer18:opaque/realization4:make1:0',
+    )
     const definition = OpaqueRealization.catalogOf(self).definitions.get(
       Type.opaqueFamilyKey(argument.family),
     )

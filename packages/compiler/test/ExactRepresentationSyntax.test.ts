@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as RepresentationField from '../src/RepresentationField.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
 import * as DeclaredTypeSyntax from './support/DeclaredTypeSyntax.js'
@@ -132,6 +133,63 @@ pub fn selected() -> typeof(id<i32>) { return 0 }`,
     const found = declaration(self, 'app/Main', 'selected')
     assert.strictEqual(found?.returnType._tag, 'Resolved')
     assert.notInclude(codes(self), 'SEM0108')
+  }),
+)
+
+const identitySource = `struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
+struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
+pub fn main() -> i32 {
+  let mappers = Mappers { first: i32.add(1), second: i32.add(1) }
+  let deferred = Deferred { first: effect { return 1 }, second: effect { return 1 } }
+  return 0
+}`
+const shiftedIdentitySource = `// Moving source trivia must not rename executable sites.
+
+struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
+struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
+pub fn main() -> i32 {
+  // Same-shaped sites remain distinct while retaining their structural ordinals.
+  let mappers = Mappers { first: i32.add(1), second: i32.add(1) }
+  let deferred = Deferred { first: effect { return 1 }, second: effect { return 1 } }
+  return 0
+}`
+
+const identityFacts = (snapshot: Analysis.FrontendSnapshot) => {
+  const main = Analysis.rootAnalysis(snapshot).functions.find(
+    (fact) => fact.declaration.name._tag === 'Present' && fact.declaration.name.spelling === 'main',
+  )
+  const instances = (main?.statements ?? []).flatMap((statement) =>
+    statement._tag === 'BindStatement' &&
+    statement.binding.inferredType._tag === 'Available' &&
+    Type.isNominal(statement.binding.inferredType.type)
+      ? [statement.binding.inferredType.type]
+      : [],
+  )
+  return instances.flatMap((instance) => {
+    const resolutions = RepresentationField.resolveFields(snapshot.index, [instance])
+    return RepresentationField.plansOf(snapshot.index, instance).map((plan) => {
+      const resolution = RepresentationField.lookup(resolutions, instance, plan.id)
+      return {
+        nominal: Type.key(instance),
+        field: RepresentationField.key(instance, plan.id),
+        argument:
+          resolution?._tag === 'ResolvedRepresentationField'
+            ? Type.genericArgumentKey(resolution.argument)
+            : '',
+      }
+    })
+  })
+}
+
+it.effect('keeps executable identity keys stable while source trivia shifts', () =>
+  Effect.gen(function* () {
+    const module = 'exact-representation/identity-stability'
+    const baseline = yield* Analysis.ofSource(module, encoder.encode(identitySource))
+    const shifted = yield* Analysis.ofSource(module, encoder.encode(shiftedIdentitySource))
+    const facts = identityFacts(baseline)
+    assert.strictEqual(facts.length, 4)
+    assert.strictEqual(new Set(facts.map((fact) => fact.argument)).size, 4)
+    assert.deepEqual(identityFacts(shifted), facts)
   }),
 )
 

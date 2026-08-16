@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -13,6 +13,8 @@ import * as SourceResolver from '../src/SourceResolver.js'
 import * as StandardStreams from '../src/StandardStreams.js'
 
 const encoder = new TextEncoder()
+const golden = (name: string): string =>
+  readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 const outputRoot = mkdtempSync(join(tmpdir(), 'silk-logging-'))
 afterAll(() => rmSync(outputRoot, { recursive: true, force: true }))
 
@@ -57,10 +59,10 @@ it.effect('dispatches complete ordered messages through an ordinary source Logge
 
     const hir = Analysis.hirOf(self, 'silk/effects')
     assert.include(hir === undefined ? '' : Hir.encode(hir), 'service-call silk/logging.Logger.log')
+    const lowered = Analysis.loweredMir(self)
+    assert.strictEqual(Mir.encode(lowered), golden('logging.mir.txt'))
     assert.isFalse(
-      Analysis.loweredMir(self)
-        .functions.flatMap(Mir.operations)
-        .some((operation) => operation._tag.includes('Log')),
+      lowered.functions.flatMap(Mir.operations).some((operation) => operation._tag.includes('Log')),
     )
   }),
 )

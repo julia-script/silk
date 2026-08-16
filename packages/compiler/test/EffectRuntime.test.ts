@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -15,6 +15,9 @@ import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const golden = (name: string): string =>
+  readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
 const source = `struct Problem { code: i32 }
 effect fn risky<T>(value: T, selector: i32) -> T ! Problem {
@@ -437,6 +440,7 @@ it.effect('keeps callable Effect mapping in evaluator, LLVM, and Wasm parity', (
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main
 
+    assert.strictEqual(Mir.encode(Analysis.loweredMir(native)), golden('effect.mir.txt'))
     assert.strictEqual(logical._tag, 'Completed')
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42)
     assert.include(llvm.ir, '@silk_silk_i32_add')
