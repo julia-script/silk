@@ -10,6 +10,7 @@ import * as PlatformError from 'effect/PlatformError'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
+import * as CallableFieldRealization from '../src/CallableFieldRealization.js'
 import * as ContinuationLayout from '../src/ContinuationLayout.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
@@ -247,6 +248,39 @@ const storedRunner = (module: Mir.Module, label: string) => {
   return unreachable(`expected one ${label} stored Effect run`)
 }
 
+const invalidationArtifact = Effect.fnUntraced(function* (
+  name: string,
+  source: string,
+  host: Target.Target,
+) {
+  const wasmLowering = yield* lowerStored(name, source, Target.wasm32UnknownUnknown)
+  const wasm = yield* Backend.emit(WasmBackend.WasmBackend, wasmLowering.module, {
+    mode: 'debug',
+  })
+  assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact', name)
+  if (wasm._tag !== 'WebAssemblyModuleArtifact')
+    return unreachable(`expected ${name} WebAssembly artifact`)
+
+  const nativeLowering = yield* lowerStored(name, source, host)
+  const llvm = yield* emitLlvm(nativeLowering.module, name)
+  const realization = storedRunner(wasmLowering.module, name).realization
+  assert.isTrue(
+    CallableFieldRealization.equals(
+      realization,
+      storedRunner(nativeLowering.module, name).realization,
+    ),
+    `${name} realization must be target-neutral`,
+  )
+
+  return Object.freeze({
+    realization,
+    layout: Layout.encode(wasmLowering.module.layout),
+    mir: Mir.encode(wasmLowering.module),
+    wasm: wasm.wat,
+    llvm: llvm.ir,
+  })
+})
+
 /**
  * Asserts the run operation carries exactly the realization's contract rows.
  *
@@ -410,6 +444,129 @@ const runtimeMatrix = [
   { name: 'provided', source: provided, result: 42, access: 'Take' },
 ] as const
 
+const invalidationMatrix: ReadonlyArray<{
+  readonly name: string
+  readonly before: string
+  readonly after: string
+  readonly assertRealizationChanged: (
+    before: CallableFieldRealization.EffectRealization,
+    after: CallableFieldRealization.EffectRealization,
+  ) => void
+}> = [
+  {
+    name: 'capture-shape',
+    before: `struct Deferred<F: Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let left = 40
+  let right = 2
+  let deferred = Deferred { operation: effect { return left } }
+  return run deferred.operation
+}`,
+    after: `struct Deferred<F: Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let left = 40
+  let right = 2
+  let deferred = Deferred { operation: effect { return left + right } }
+  return run deferred.operation
+}`,
+    assertRealizationChanged: (before, after) =>
+      assert.notDeepEqual(before.environment, after.environment, 'capture shape'),
+  },
+  {
+    name: 'runner-target',
+    before: `struct Deferred<F: Effect<i32>> { operation: F }
+effect fn first(value: i32) -> i32 { return value + 1 }
+effect fn second(value: i32) -> i32 { return value + 1 }
+pub fn main() -> i32 {
+  let deferred = Deferred { operation: first(41) }
+  return run deferred.operation
+}`,
+    after: `struct Deferred<F: Effect<i32>> { operation: F }
+effect fn first(value: i32) -> i32 { return value + 1 }
+effect fn second(value: i32) -> i32 { return value + 1 }
+pub fn main() -> i32 {
+  let deferred = Deferred { operation: second(41) }
+  return run deferred.operation
+}`,
+    assertRealizationChanged: (before, after) =>
+      assert.notDeepEqual(before.runner, after.runner, 'runner target'),
+  },
+  {
+    name: 'run-access',
+    before: `struct Deferred<F: once Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let value = 42
+  let deferred = Deferred { operation: effect { return value } }
+  return run deferred.operation
+}`,
+    after: `struct Deferred<F: once Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let mut value = 41
+  let mut deferred = Deferred { operation: effect {
+    value = value + 1
+    return value
+  } }
+  return run deferred.operation
+}`,
+    assertRealizationChanged: (before, after) =>
+      assert.notStrictEqual(before.access, after.access, 'run access'),
+  },
+  {
+    name: 'cleanup',
+    before: `struct Deferred<F: once Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let value = 42
+  let deferred = Deferred { operation: effect { return value } }
+  return run deferred.operation
+}`,
+    after: `struct Token { value: i32 storage: Allocation }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Deferred<F: once Effect<i32>> { operation: F }
+fn consume(token: Token) -> i32 { return token.value }
+effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
+  let storage = run Allocator.allocate(Layout.of<i32>())
+  let token = Token { value: 42, storage: move storage }
+  let deferred = Deferred { operation: effect { return consume(move token) } }
+  return run deferred.operation
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
+}`,
+    assertRealizationChanged: (before, after) =>
+      assert.notDeepEqual(before.cleanup, after.cleanup, 'cleanup'),
+  },
+  {
+    name: 'suspendability',
+    before: `struct Deferred<F: once Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let deferred = Deferred { operation: effect { return 42 } }
+  return run deferred.operation
+}`,
+    after: `struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
+fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
+  operation: F
+) -> Deferred<A, E, R, F> {
+  return Deferred<A, E, R> { operation: move operation }
+}
+effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator {
+  return run Effect.suspend(effect { return 42 })
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
+  let deferred = defer(delayed())
+  return run deferred.operation
+}
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
+}`,
+    assertRealizationChanged: (before, after) =>
+      assert.notStrictEqual(before.suspendable, after.suspendable, 'suspendability'),
+  },
+]
+
 layer(NodeServices.layer)('stored Effect engine parity', (it) => {
   it.effect(
     'executes stored Effects with identical results and runner identity in every engine',
@@ -496,6 +653,30 @@ layer(NodeServices.layer)('stored Effect engine parity', (it) => {
           }
         }
       }).pipe(Effect.scoped),
+    180_000,
+  )
+
+  it.effect(
+    'invalidates layouts and emitted code for every stored Effect realization dependency',
+    () =>
+      Effect.gen(function* () {
+        const host = yield* Target.host()
+        for (const testCase of invalidationMatrix) {
+          const moduleName = `stored-effect-invalidation/${testCase.name}`
+          const before = yield* invalidationArtifact(moduleName, testCase.before, host)
+          const after = yield* invalidationArtifact(moduleName, testCase.after, host)
+
+          assert.isFalse(
+            CallableFieldRealization.equals(before.realization, after.realization),
+            `${testCase.name} realization invalidation`,
+          )
+          testCase.assertRealizationChanged(before.realization, after.realization)
+          assert.notStrictEqual(before.layout, after.layout, `${testCase.name} layout`)
+          assert.notStrictEqual(before.mir, after.mir, `${testCase.name} MIR`)
+          assert.notStrictEqual(before.wasm, after.wasm, `${testCase.name} Wasm`)
+          assert.notStrictEqual(before.llvm, after.llvm, `${testCase.name} LLVM`)
+        }
+      }),
     180_000,
   )
 
