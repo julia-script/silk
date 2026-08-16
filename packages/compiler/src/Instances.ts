@@ -640,8 +640,8 @@ export const representedNominals = (
 
 /**
  * The shared realization index for every reachable represented executable field. Effect entries
- * remain semantic specialization facts until later phases explicitly consume them; the SEM0107
- * construction fence therefore stays active.
+ * remain semantic specialization facts until a concrete nominal instance proves every entry
+ * supported; unsupported storage paths retain the SEM0107 construction fence.
  */
 export const callableFieldRealizations = (
   self: Discovery,
