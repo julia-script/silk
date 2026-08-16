@@ -12,11 +12,11 @@
 
 ## 3. Native legs fold into the corpus (spec: bootstrap-compiler-driver)
 
-- [ ] 3.1 Inventory the ~100 `Driver.compile` sites in feature files; classify each against the design D2 allowlist (target-specific stays, exit-code parity folds)
-- [ ] 3.2 Move each foldable program into `test/support/corpus.ts` and delete its standalone native leg, one commit per file family (RuntimeSlice, StoredCallable, String, EffectSuspension wasm-dupes, trivial-syntax acceptance files, ConditionalConformance)
-- [ ] 3.3 Delete whole-file duplicates (`RuntimeSliceNative.test.ts`, `RuntimeSliceAcceptance` engine dupes, wasm-leg repeats) where the identical program remains covered
-- [ ] 3.4 Downgrade link-only tests (`StoredCallableRuntime`, `StoredCallableDiagnostic`, `OpaqueRepresentationEngines`): assert `Analysis.codegen` + existing `opt -passes=verify`, keep one retained link test
-- [ ] 3.5 Run `DriverNativeAcceptance` and confirm every folded program executes and agrees; confirm corpus runtime grew by ~0.8s per added program, not more
+- [x] 3.1 Inventory the ~100 `Driver.compile` sites in feature files; classify each against the design D2 allowlist (target-specific stays, exit-code parity folds)
+- [x] 3.2 Move each foldable program into `test/support/corpus.ts` and delete its standalone native leg, one commit per file family (RuntimeSlice, StoredCallable, String, EffectSuspension wasm-dupes, trivial-syntax acceptance files, ConditionalConformance)
+- [x] 3.3 Delete whole-file duplicates (`RuntimeSliceNative.test.ts`, `RuntimeSliceAcceptance` engine dupes, wasm-leg repeats) where the identical program remains covered
+- [x] 3.4 Downgrade link-only tests (`StoredCallableRuntime`, `StoredCallableDiagnostic`, `OpaqueRepresentationEngines`): assert `Analysis.codegen` + existing `opt -passes=verify`, keep one retained link test
+- [x] 3.5 Run `DriverNativeAcceptance` and confirm every folded program executes and agrees; confirm corpus runtime grew by ~0.8s per added program, not more
 
 ## 4. Pressure-sweep tiering (spec: bootstrap-language-pressure-programs)
 
@@ -37,16 +37,16 @@
 - [x] 6.1 Make `defaultArtifactCache()` in `packages/compiler/src/NativeToolchain.ts` return `makeDiskArtifactCache(SILK_NATIVE_CACHE_DIR)` when the variable is set; add clang version to the cache key; recompile on corrupt/missing entries
 - [x] 6.2 Add a test: two child processes with the same cache dir — second compile produces a byte-identical artifact without invoking clang (assert via a counting wrapper or phase report)
 - [x] 6.3 Correct the `packages/compiler/vitest.config.ts` comment (key includes clang identity, not merely "Clang version"); clear the stale pre-refactor `~/.cache/silk-effect/native` contents note in the PR
-- [ ] 6.4 Full compiler suite twice back-to-back; second run shows clang-phase time near zero in phase reports
+- [x] 6.4 Full compiler suite twice back-to-back; second run shows clang-phase time near zero in phase reports
 
 ## 7. CI and worktree caches
 
 - [x] 7.1 Add `actions/cache` for `.turbo` (key: lockfile + turbo config hash, with restore-keys prefix fallback) and for the native cache dir in `.github/workflows/ci.yml`
 - [x] 7.2 In `scripts/turbo.mjs`, set `TURBO_CACHE_DIR` to the main checkout's shared cache when running under `.claude/worktrees/*`
-- [ ] 7.3 Verify: push a no-op commit, confirm CI test tasks replay from turbo cache; run `pnpm test` in a fresh worktree, confirm cache hits
+- [x] 7.3 Verify: push a no-op commit, confirm CI test tasks replay from turbo cache; run `pnpm test` in a fresh worktree, confirm cache hits
 
 ## 8. AGENTS.md rules and close-out
 
 - [x] 8.1 Add the "Keep tests cheap" section to AGENTS.md: cheapest-tier proof obligation, corpus-first native coverage with the D2 allowlist, no per-feature determinism tests, no timing/byte-count assertions, one Analysis snapshot per program per file, prefer corpus/table cases over new files
-- [ ] 8.2 Re-run the reporter baseline from 1.1, diff against `baseline.md`, record the before/after totals in the change
-- [ ] 8.3 Confirm target met (compiler-suite CPU down ≥35%); if short, consult the follow-up list (snapshot sharing, stdlib memoization) rather than re-adding scope here
+- [x] 8.2 Re-run the reporter baseline from 1.1, diff against `baseline.md`, record the before/after totals in the change
+- [x] 8.3 Confirm target met (compiler-suite CPU down ≥35%); if short, consult the follow-up list (snapshot sharing, stdlib memoization) rather than re-adding scope here
