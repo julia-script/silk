@@ -102,6 +102,49 @@ const typeParameter = (name: string): TypeParameter => Object.freeze({ name })
 
 const valueParameter = (name: string, type: string): ValueParameter => Object.freeze({ name, type })
 
+const upperInitial = (value: string): string =>
+  `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
+
+const intrinsicSpelling = (family: string, operation: string): string => {
+  if (Scalar.isSpelling(family)) return `${family}${upperInitial(operation)}`
+  if (family === 'Effect' && operation === 'suspendEffect') return 'suspendEffect'
+  if (family === 'Effect' && operation === 'bindRequirement') return 'bindRequirement'
+  if (family === 'Place' && operation === 'replace') return 'replace'
+  if (family === 'Storage' && operation === 'acquire') return 'systemAllocationAcquire'
+  if (family === 'Host' && operation === 'write') return 'standardStreamWrite'
+  if (family === 'Os') return `os${upperInitial(operation)}`
+  return `${family.slice(0, 1).toLowerCase()}${family.slice(1)}${upperInitial(operation)}`
+}
+
+const admission = (family: string): AdmissionCategory => {
+  if (Scalar.isSpelling(family)) return 'Scalar'
+  if (family === 'Effect') return 'Effect'
+  if (family === 'Host' || family === 'Storage' || family === 'Os') return 'Platform'
+  if (family === 'Layout' || family === 'string') return 'Representation'
+  if (family === 'RawBuffer' || family === 'Slot') return 'Ownership'
+  return 'Language'
+}
+
+/** The canonical standard-library consumer of one OS boundary operation. */
+const osConsumer = (spelling: string): string => {
+  if (spelling === 'standardInputRead') return 'silk/os-standard-input.read'
+  if (spelling === 'processExecute') return 'silk/os-child-process.execute'
+  if (spelling === 'processCapture') return 'silk/os-child-process.capture'
+  if (spelling.startsWith('host'))
+    return `silk/os-host-input.${spelling.slice(4, 5).toLowerCase()}${spelling.slice(5)}`
+  return `silk/os-filesystem.${spelling}`
+}
+
+const consumer = (family: string, operation: string): string => {
+  if (Scalar.isSpelling(family)) return `silk/${family}.${operation}`
+  if (family === 'Effect') return `silk/effects.${operation}`
+  if (family === 'Storage') return 'silk/core.allocate'
+  if (family === 'Host') return 'silk/core.writeAll'
+  if (family === 'Os') return osConsumer(operation)
+  if (family === 'Place') return 'language:place-replacement'
+  return `silk/${family.replaceAll(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}.${operation}`
+}
+
 const builtin = (options: {
   readonly actor: string
   readonly name: string
@@ -115,16 +158,30 @@ const builtin = (options: {
   readonly unsafe?: boolean
   readonly targets?: ReadonlyArray<ExecutionTarget>
   readonly returnedBorrowParameter?: number
-}): Operation =>
-  Object.freeze({
+}): Operation => {
+  const spelling = intrinsicSpelling(options.actor, options.name)
+  return Object.freeze({
     _tag: 'IntrinsicOperation',
-    id: operationId(options.actor, options.name),
-    spelling: options.name,
+    id: operationId('Intrinsic', spelling),
+    spelling,
     typeParameters: Object.freeze((options.typeParameters ?? []).map(typeParameter)),
     parameters: Object.freeze(Array.from(options.parameters)),
     result: options.result,
     unsafe: options.unsafe ?? false,
+    admission: admission(options.actor),
+    consumer: consumer(options.actor, options.name),
     targets: normalizeExecutionTargets(options.targets ?? executionTargets),
+    ...(options.unsafe && (options.actor === 'RawBuffer' || options.actor === 'Slot')
+      ? {
+          invariant:
+            options.actor === 'RawBuffer'
+              ? 'caller proves raw-buffer bounds, ownership, and initializedness required by the operation'
+              : 'caller proves the selected slot is in bounds and has the initializedness state required by the operation',
+        }
+      : {}),
+    ...(options.actor === 'Host' && options.name === 'write'
+      ? { hostImport: 'silk_standard_stream_write_v1' }
+      : {}),
     ...(options.returnedBorrowParameter === undefined
       ? {}
       : { returnedBorrowParameter: options.returnedBorrowParameter }),
@@ -136,6 +193,7 @@ const builtin = (options: {
       result: options.semanticResult,
     }),
   })
+}
 
 const effect = (options: {
   readonly name: string
@@ -143,18 +201,22 @@ const effect = (options: {
   readonly typeParameters: ReadonlyArray<string>
   readonly parameters: ReadonlyArray<ValueParameter>
   readonly result: string
-}): Operation =>
-  Object.freeze({
+}): Operation => {
+  const spelling = intrinsicSpelling('Effect', options.name)
+  return Object.freeze({
     _tag: 'IntrinsicOperation',
-    id: operationId('Effect', options.name),
-    spelling: options.name,
+    id: operationId('Intrinsic', spelling),
+    spelling,
     typeParameters: Object.freeze(options.typeParameters.map(typeParameter)),
     parameters: Object.freeze(Array.from(options.parameters)),
     result: options.result,
     unsafe: false,
+    admission: admission('Effect'),
+    consumer: consumer('Effect', options.name),
     targets: executionTargets,
     rule: Object.freeze({ _tag: 'EffectRule', operation: options.operation }),
   })
+}
 
 const actor = (
   spelling: string,
@@ -247,137 +309,234 @@ const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Op
   })
 }
 
-const scalarActor = (scalar: Scalar.Scalar): Actor =>
-  actor(
-    scalar.spelling,
-    'Type',
-    scalar.operations.map((operation) => scalarOperation(scalar, operation)),
-  )
+const scalarOperations = (scalar: Scalar.Scalar): ReadonlyArray<Operation> =>
+  scalar.operations.map((operation) => scalarOperation(scalar, operation))
 
-const stringOperations = actor(
-  'string',
-  'Type',
-  Object.freeze([
-    Object.freeze({
-      ...builtin({
-        actor: 'string',
-        name: 'fromUtf8Unchecked',
-        operation: 'StringFromUtf8Unchecked',
-        parameters: Object.freeze([valueParameter('bytes', '&[u8]')]),
-        semanticParameters: Object.freeze([byteSlice]),
-        result: 'string',
-        semanticResult: Type.string,
-        unsafe: true,
-        returnedBorrowParameter: 0,
-      }),
-      invariant:
-        'bytes remain live and immutable for the returned view lifetime and contain complete valid UTF-8',
-    }),
-    builtin({
+const stringOperations = Object.freeze([
+  Object.freeze({
+    ...builtin({
       actor: 'string',
-      name: 'utf8Bytes',
-      operation: 'StringUtf8Bytes',
-      parameters: Object.freeze([valueParameter('value', 'string')]),
-      semanticParameters: Object.freeze([Type.string]),
-      result: '&[u8]',
-      semanticResult: byteSlice,
+      name: 'fromUtf8Unchecked',
+      operation: 'StringFromUtf8Unchecked',
+      parameters: Object.freeze([valueParameter('bytes', '&[u8]')]),
+      semanticParameters: Object.freeze([byteSlice]),
+      result: 'string',
+      semanticResult: Type.string,
+      unsafe: true,
       returnedBorrowParameter: 0,
     }),
-    builtin({
-      actor: 'string',
-      name: 'byteLength',
-      operation: 'StringByteLength',
-      parameters: Object.freeze([valueParameter('value', 'string')]),
-      semanticParameters: Object.freeze([Type.string]),
-      result: 'usize',
-      semanticResult: 'usize',
-    }),
-    builtin({
-      actor: 'string',
-      name: 'equalsExact',
-      operation: 'StringEqualsExact',
-      parameters: Object.freeze([
-        valueParameter('left', 'string'),
-        valueParameter('right', 'string'),
-      ]),
-      semanticParameters: Object.freeze([Type.string, Type.string]),
-      result: 'bool',
-      semanticResult: 'bool',
-    }),
-  ]),
-)
+    invariant:
+      'bytes remain live and immutable for the returned view lifetime and contain complete valid UTF-8',
+  }),
+  builtin({
+    actor: 'string',
+    name: 'utf8Bytes',
+    operation: 'StringUtf8Bytes',
+    parameters: Object.freeze([valueParameter('value', 'string')]),
+    semanticParameters: Object.freeze([Type.string]),
+    result: '&[u8]',
+    semanticResult: byteSlice,
+    returnedBorrowParameter: 0,
+  }),
+  builtin({
+    actor: 'string',
+    name: 'byteLength',
+    operation: 'StringByteLength',
+    parameters: Object.freeze([valueParameter('value', 'string')]),
+    semanticParameters: Object.freeze([Type.string]),
+    result: 'usize',
+    semanticResult: 'usize',
+  }),
+  builtin({
+    actor: 'string',
+    name: 'equalsExact',
+    operation: 'StringEqualsExact',
+    parameters: Object.freeze([
+      valueParameter('left', 'string'),
+      valueParameter('right', 'string'),
+    ]),
+    semanticParameters: Object.freeze([Type.string, Type.string]),
+    result: 'bool',
+    semanticResult: 'bool',
+  }),
+])
 
 const stringActor = actor('string', 'Type', Object.freeze([]))
 
-const legacyActors = Object.freeze([
-  ...Scalar.all().map(scalarActor),
-  stringOperations,
-  actor('OsHandle', 'Type', Object.freeze([])),
-  actor(
-    'Os',
-    'Namespace',
-    Object.freeze([
+const replaceOperation: Operation = Object.freeze({
+  _tag: 'IntrinsicOperation',
+  id: operationId('Intrinsic', 'replace'),
+  spelling: 'replace',
+  typeParameters: Object.freeze([typeParameter('T')]),
+  parameters: Object.freeze([valueParameter('place', '&mut T'), valueParameter('value', 'T')]),
+  result: 'T',
+  unsafe: false,
+  admission: admission('Place'),
+  consumer: consumer('Place', 'replace'),
+  targets: executionTargets,
+  rule: Object.freeze({ _tag: 'PlaceRule', operation: 'Replace' }),
+})
+
+const intrinsicOperations = Object.freeze([
+  ...Scalar.all().flatMap(scalarOperations),
+  ...stringOperations,
+  ...Object.freeze([
+    osBuiltin({
+      name: 'fileOpen',
+      operation: 'OsFileOpen',
+      parameters: Object.freeze([
+        valueParameter('root', '&[u8]'),
+        valueParameter('path', '&[u8]'),
+        valueParameter('mode', 'i32'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([byteSlice, byteSlice, 'i32', mutableI32, mutableU32]),
+      result: 'Effect<Option<OsHandle>>',
+      semanticResult: Type.option(Type.osHandle),
+      invariant:
+        'root is an absolute native path; path is normalized provider-absolute; outputs are initialized; traversal rejects symlinks and namespace escape',
+    }),
+    osBuiltin({
+      name: 'fileRead',
+      operation: 'OsFileRead',
+      parameters: Object.freeze([
+        valueParameter('handle', '&mut OsHandle'),
+        valueParameter('output', '&mut [u8]'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([
+        mutableHandle,
+        Type.slice('Exclusive', 'u8'),
+        mutableI32,
+        mutableU32,
+      ]),
+      result: 'Effect<Option<usize>>',
+      semanticResult: Type.option('usize'),
+      invariant:
+        'handle is a live file; output is initialized writable storage; success reports the exact transferred byte count',
+    }),
+    osBuiltin({
+      name: 'fileWrite',
+      operation: 'OsFileWrite',
+      parameters: Object.freeze([
+        valueParameter('handle', '&mut OsHandle'),
+        valueParameter('input', '&[u8]'),
+        valueParameter('offset', 'usize'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([
+        mutableHandle,
+        byteSlice,
+        'usize',
+        mutableI32,
+        mutableU32,
+      ]),
+      result: 'Effect<Option<usize>>',
+      semanticResult: Type.option('usize'),
+      invariant:
+        'handle is a live file; input is initialized; success reports the exact transferred byte count and may be partial',
+    }),
+    osBuiltin({
+      name: 'directoryOpen',
+      operation: 'OsDirectoryOpen',
+      parameters: Object.freeze([
+        valueParameter('root', '&[u8]'),
+        valueParameter('path', '&[u8]'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([byteSlice, byteSlice, mutableI32, mutableU32]),
+      result: 'Effect<Option<OsHandle>>',
+      semanticResult: Type.option(Type.osHandle),
+      invariant: 'root and path satisfy confined traversal and outputs are initialized',
+    }),
+    osBuiltin({
+      name: 'directoryNext',
+      operation: 'OsDirectoryNext',
+      parameters: Object.freeze([
+        valueParameter('handle', '&mut OsHandle'),
+        valueParameter('output', '&mut [u8]'),
+        valueParameter('kind', '&mut i32'),
+        valueParameter('requiredCapacity', '&mut usize'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([
+        mutableHandle,
+        Type.slice('Exclusive', 'u8'),
+        mutableI32,
+        mutableUsize,
+        mutableI32,
+        mutableU32,
+      ]),
+      result: 'Effect<Option<usize>>',
+      semanticResult: Type.option('usize'),
+      invariant:
+        'handle is a live directory; buffer-too-small does not advance and reports required capacity; zero means end',
+    }),
+    osBuiltin({
+      name: 'pathInspect',
+      operation: 'OsPathInspect',
+      parameters: Object.freeze([
+        valueParameter('root', '&[u8]'),
+        valueParameter('path', '&[u8]'),
+        valueParameter('kind', '&mut i32'),
+        valueParameter('byteLength', '&mut usize'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([
+        byteSlice,
+        byteSlice,
+        mutableI32,
+        mutableUsize,
+        mutableI32,
+        mutableU32,
+      ]),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
+      invariant:
+        'root and path satisfy confined traversal; kind and byteLength outputs are initialized',
+    }),
+    osBuiltin({
+      name: 'directoryCreateUnique',
+      operation: 'OsDirectoryCreateUnique',
+      parameters: Object.freeze([
+        valueParameter('root', '&[u8]'),
+        valueParameter('parent', '&[u8]'),
+        valueParameter('prefix', '&[u8]'),
+        valueParameter('output', '&mut [u8]'),
+        valueParameter('requiredCapacity', '&mut usize'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([
+        byteSlice,
+        byteSlice,
+        byteSlice,
+        Type.slice('Exclusive', 'u8'),
+        mutableUsize,
+        mutableI32,
+        mutableU32,
+      ]),
+      result: 'Effect<Option<usize>>',
+      semanticResult: Type.option('usize'),
+      invariant:
+        'root and parent satisfy confined traversal; prefix is one valid final component fragment; the provider chooses the unique suffix, creates exactly one directory no other caller holds, and writes its complete final component name; buffer-too-small creates nothing and reports required capacity',
+    }),
+    ...(
+      [
+        ['directoryCreate', 'OsDirectoryCreate'],
+        ['fileRemove', 'OsFileRemove'],
+        ['directoryRemove', 'OsDirectoryRemove'],
+      ] as const
+    ).map(([name, operation]) =>
       osBuiltin({
-        name: 'fileOpen',
-        operation: 'OsFileOpen',
-        parameters: Object.freeze([
-          valueParameter('root', '&[u8]'),
-          valueParameter('path', '&[u8]'),
-          valueParameter('mode', 'i32'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([byteSlice, byteSlice, 'i32', mutableI32, mutableU32]),
-        result: 'Effect<Option<OsHandle>>',
-        semanticResult: Type.option(Type.osHandle),
-        invariant:
-          'root is an absolute native path; path is normalized provider-absolute; outputs are initialized; traversal rejects symlinks and namespace escape',
-      }),
-      osBuiltin({
-        name: 'fileRead',
-        operation: 'OsFileRead',
-        parameters: Object.freeze([
-          valueParameter('handle', '&mut OsHandle'),
-          valueParameter('output', '&mut [u8]'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([
-          mutableHandle,
-          Type.slice('Exclusive', 'u8'),
-          mutableI32,
-          mutableU32,
-        ]),
-        result: 'Effect<Option<usize>>',
-        semanticResult: Type.option('usize'),
-        invariant:
-          'handle is a live file; output is initialized writable storage; success reports the exact transferred byte count',
-      }),
-      osBuiltin({
-        name: 'fileWrite',
-        operation: 'OsFileWrite',
-        parameters: Object.freeze([
-          valueParameter('handle', '&mut OsHandle'),
-          valueParameter('input', '&[u8]'),
-          valueParameter('offset', 'usize'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([
-          mutableHandle,
-          byteSlice,
-          'usize',
-          mutableI32,
-          mutableU32,
-        ]),
-        result: 'Effect<Option<usize>>',
-        semanticResult: Type.option('usize'),
-        invariant:
-          'handle is a live file; input is initialized; success reports the exact transferred byte count and may be partial',
-      }),
-      osBuiltin({
-        name: 'directoryOpen',
-        operation: 'OsDirectoryOpen',
+        name,
+        operation,
         parameters: Object.freeze([
           valueParameter('root', '&[u8]'),
           valueParameter('path', '&[u8]'),
@@ -385,682 +544,466 @@ const legacyActors = Object.freeze([
           valueParameter('nativeCode', '&mut u32'),
         ]),
         semanticParameters: Object.freeze([byteSlice, byteSlice, mutableI32, mutableU32]),
-        result: 'Effect<Option<OsHandle>>',
-        semanticResult: Type.option(Type.osHandle),
-        invariant: 'root and path satisfy confined traversal and outputs are initialized',
-      }),
-      osBuiltin({
-        name: 'directoryNext',
-        operation: 'OsDirectoryNext',
-        parameters: Object.freeze([
-          valueParameter('handle', '&mut OsHandle'),
-          valueParameter('output', '&mut [u8]'),
-          valueParameter('kind', '&mut i32'),
-          valueParameter('requiredCapacity', '&mut usize'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([
-          mutableHandle,
-          Type.slice('Exclusive', 'u8'),
-          mutableI32,
-          mutableUsize,
-          mutableI32,
-          mutableU32,
-        ]),
-        result: 'Effect<Option<usize>>',
-        semanticResult: Type.option('usize'),
-        invariant:
-          'handle is a live directory; buffer-too-small does not advance and reports required capacity; zero means end',
-      }),
-      osBuiltin({
-        name: 'pathInspect',
-        operation: 'OsPathInspect',
-        parameters: Object.freeze([
-          valueParameter('root', '&[u8]'),
-          valueParameter('path', '&[u8]'),
-          valueParameter('kind', '&mut i32'),
-          valueParameter('byteLength', '&mut usize'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([
-          byteSlice,
-          byteSlice,
-          mutableI32,
-          mutableUsize,
-          mutableI32,
-          mutableU32,
-        ]),
         result: 'Effect<bool>',
         semanticResult: 'bool',
-        invariant:
-          'root and path satisfy confined traversal; kind and byteLength outputs are initialized',
+        invariant: 'root and path satisfy confined traversal and failure outputs are initialized',
       }),
-      osBuiltin({
-        name: 'directoryCreateUnique',
-        operation: 'OsDirectoryCreateUnique',
-        parameters: Object.freeze([
-          valueParameter('root', '&[u8]'),
-          valueParameter('parent', '&[u8]'),
-          valueParameter('prefix', '&[u8]'),
-          valueParameter('output', '&mut [u8]'),
-          valueParameter('requiredCapacity', '&mut usize'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([
-          byteSlice,
-          byteSlice,
-          byteSlice,
-          Type.slice('Exclusive', 'u8'),
-          mutableUsize,
-          mutableI32,
-          mutableU32,
-        ]),
-        result: 'Effect<Option<usize>>',
-        semanticResult: Type.option('usize'),
-        invariant:
-          'root and parent satisfy confined traversal; prefix is one valid final component fragment; the provider chooses the unique suffix, creates exactly one directory no other caller holds, and writes its complete final component name; buffer-too-small creates nothing and reports required capacity',
-      }),
-      ...(
-        [
-          ['directoryCreate', 'OsDirectoryCreate'],
-          ['fileRemove', 'OsFileRemove'],
-          ['directoryRemove', 'OsDirectoryRemove'],
-        ] as const
-      ).map(([name, operation]) =>
-        osBuiltin({
-          name,
-          operation,
-          parameters: Object.freeze([
-            valueParameter('root', '&[u8]'),
-            valueParameter('path', '&[u8]'),
-            valueParameter('reason', '&mut i32'),
-            valueParameter('nativeCode', '&mut u32'),
-          ]),
-          semanticParameters: Object.freeze([byteSlice, byteSlice, mutableI32, mutableU32]),
-          result: 'Effect<bool>',
-          semanticResult: 'bool',
-          invariant: 'root and path satisfy confined traversal and failure outputs are initialized',
-        }),
+    ),
+    osBuiltin({
+      name: 'handleClose',
+      operation: 'OsHandleClose',
+      parameters: Object.freeze([
+        valueParameter('handle', 'OsHandle'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([Type.osHandle, mutableI32, mutableU32]),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
+      invariant:
+        'consumes exactly one live file or directory handle whether close succeeds or fails',
+    }),
+    osBuiltin({
+      name: 'standardInputRead',
+      operation: 'OsStandardInputRead',
+      parameters: Object.freeze([
+        valueParameter('output', '&mut [u8]'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([Type.slice('Exclusive', 'u8'), mutableI32, mutableU32]),
+      result: 'Effect<Option<usize>>',
+      semanticResult: Type.option('usize'),
+      invariant:
+        'output is initialized writable storage; success reports the exact transferred byte count and zero means end of input',
+    }),
+    osBuiltin({
+      name: 'processExecute',
+      operation: 'OsProcessExecute',
+      parameters: Object.freeze([
+        valueParameter('program', '&[u8]'),
+        valueParameter('arguments', '&[u8]'),
+        valueParameter('environment', '&[u8]'),
+        valueParameter('workingDirectory', '&[u8]'),
+        valueParameter('status', '&mut i32'),
+        valueParameter('code', '&mut i32'),
+        valueParameter('outputLength', '&mut usize'),
+        valueParameter('errorLength', '&mut usize'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([
+        byteSlice,
+        byteSlice,
+        byteSlice,
+        byteSlice,
+        mutableI32,
+        mutableI32,
+        mutableUsize,
+        mutableUsize,
+        mutableI32,
+        mutableU32,
+      ]),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
+      invariant:
+        'arguments and environment are NUL-terminated entry blocks and an empty workingDirectory inherits the caller directory; the child never interprets a shell and reads closed standard input; success retains exactly one capture until the next execute and reports its exact lengths with status zero for exit and one for signal',
+    }),
+    osBuiltin({
+      name: 'processCapture',
+      operation: 'OsProcessCapture',
+      parameters: Object.freeze([
+        valueParameter('stream', 'i32'),
+        valueParameter('offset', 'usize'),
+        valueParameter('output', '&mut [u8]'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([
+        'i32',
+        'usize',
+        Type.slice('Exclusive', 'u8'),
+        mutableI32,
+        mutableU32,
+      ]),
+      result: 'Effect<Option<usize>>',
+      semanticResult: Type.option('usize'),
+      invariant:
+        'stream selects zero for standard output or one for standard error, offset is within the retained capture of the immediately preceding execute, and output is initialized writable storage',
+    }),
+    osBuiltin({
+      name: 'hostArgumentCount',
+      operation: 'OsHostArgumentCount',
+      parameters: Object.freeze([
+        valueParameter('count', '&mut usize'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([mutableUsize, mutableI32, mutableU32]),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
+      invariant: 'count output is initialized and reports the received argument count on success',
+    }),
+    osBuiltin({
+      name: 'hostArgument',
+      operation: 'OsHostArgument',
+      parameters: Object.freeze([
+        valueParameter('index', 'usize'),
+        valueParameter('output', '&mut [u8]'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([
+        'usize',
+        Type.slice('Exclusive', 'u8'),
+        mutableI32,
+        mutableU32,
+      ]),
+      result: 'Effect<Option<usize>>',
+      semanticResult: Type.option('usize'),
+      invariant:
+        'output is initialized writable storage; success reports the complete argument byte length and copies the prefix that fits, and absence reports the not-found reason',
+    }),
+    osBuiltin({
+      name: 'hostVariable',
+      operation: 'OsHostVariable',
+      parameters: Object.freeze([
+        valueParameter('name', '&[u8]'),
+        valueParameter('output', '&mut [u8]'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([
+        byteSlice,
+        Type.slice('Exclusive', 'u8'),
+        mutableI32,
+        mutableU32,
+      ]),
+      result: 'Effect<Option<usize>>',
+      semanticResult: Type.option('usize'),
+      invariant:
+        'output is initialized writable storage; success reports the complete value byte length and copies the prefix that fits, and an unset name reports the not-found reason',
+    }),
+    osBuiltin({
+      name: 'hostWorkingDirectory',
+      operation: 'OsHostWorkingDirectory',
+      parameters: Object.freeze([
+        valueParameter('output', '&mut [u8]'),
+        valueParameter('reason', '&mut i32'),
+        valueParameter('nativeCode', '&mut u32'),
+      ]),
+      semanticParameters: Object.freeze([Type.slice('Exclusive', 'u8'), mutableI32, mutableU32]),
+      result: 'Effect<Option<usize>>',
+      semanticResult: Type.option('usize'),
+      invariant:
+        'output is initialized writable storage; success reports the complete working-directory byte length and copies the prefix that fits',
+    }),
+  ]),
+  ...Object.freeze([
+    builtin({
+      actor: 'Layout',
+      name: 'of',
+      operation: 'LayoutOf',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([]),
+      semanticParameters: Object.freeze([]),
+      result: 'Layout',
+      semanticResult: Type.layout,
+    }),
+  ]),
+  ...Object.freeze([
+    builtin({
+      actor: 'Storage',
+      name: 'acquire',
+      operation: 'StorageAcquire',
+      parameters: Object.freeze([valueParameter('layout', 'Layout')]),
+      semanticParameters: Object.freeze([Type.layout]),
+      result: 'Effect<Allocation ! OutOfMemory>',
+      semanticResult: Type.effect(
+        Type.allocation,
+        Object.freeze([Type.outOfMemory]),
+        undefined,
+        Object.freeze([]),
       ),
-      osBuiltin({
-        name: 'handleClose',
-        operation: 'OsHandleClose',
-        parameters: Object.freeze([
-          valueParameter('handle', 'OsHandle'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([Type.osHandle, mutableI32, mutableU32]),
-        result: 'Effect<bool>',
-        semanticResult: 'bool',
-        invariant:
-          'consumes exactly one live file or directory handle whether close succeeds or fails',
-      }),
-      osBuiltin({
-        name: 'standardInputRead',
-        operation: 'OsStandardInputRead',
-        parameters: Object.freeze([
-          valueParameter('output', '&mut [u8]'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([Type.slice('Exclusive', 'u8'), mutableI32, mutableU32]),
-        result: 'Effect<Option<usize>>',
-        semanticResult: Type.option('usize'),
-        invariant:
-          'output is initialized writable storage; success reports the exact transferred byte count and zero means end of input',
-      }),
-      osBuiltin({
-        name: 'processExecute',
-        operation: 'OsProcessExecute',
-        parameters: Object.freeze([
-          valueParameter('program', '&[u8]'),
-          valueParameter('arguments', '&[u8]'),
-          valueParameter('environment', '&[u8]'),
-          valueParameter('workingDirectory', '&[u8]'),
-          valueParameter('status', '&mut i32'),
-          valueParameter('code', '&mut i32'),
-          valueParameter('outputLength', '&mut usize'),
-          valueParameter('errorLength', '&mut usize'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([
-          byteSlice,
-          byteSlice,
-          byteSlice,
-          byteSlice,
-          mutableI32,
-          mutableI32,
-          mutableUsize,
-          mutableUsize,
-          mutableI32,
-          mutableU32,
-        ]),
-        result: 'Effect<bool>',
-        semanticResult: 'bool',
-        invariant:
-          'arguments and environment are NUL-terminated entry blocks and an empty workingDirectory inherits the caller directory; the child never interprets a shell and reads closed standard input; success retains exactly one capture until the next execute and reports its exact lengths with status zero for exit and one for signal',
-      }),
-      osBuiltin({
-        name: 'processCapture',
-        operation: 'OsProcessCapture',
-        parameters: Object.freeze([
-          valueParameter('stream', 'i32'),
-          valueParameter('offset', 'usize'),
-          valueParameter('output', '&mut [u8]'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([
-          'i32',
-          'usize',
-          Type.slice('Exclusive', 'u8'),
-          mutableI32,
-          mutableU32,
-        ]),
-        result: 'Effect<Option<usize>>',
-        semanticResult: Type.option('usize'),
-        invariant:
-          'stream selects zero for standard output or one for standard error, offset is within the retained capture of the immediately preceding execute, and output is initialized writable storage',
-      }),
-      osBuiltin({
-        name: 'hostArgumentCount',
-        operation: 'OsHostArgumentCount',
-        parameters: Object.freeze([
-          valueParameter('count', '&mut usize'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([mutableUsize, mutableI32, mutableU32]),
-        result: 'Effect<bool>',
-        semanticResult: 'bool',
-        invariant: 'count output is initialized and reports the received argument count on success',
-      }),
-      osBuiltin({
-        name: 'hostArgument',
-        operation: 'OsHostArgument',
-        parameters: Object.freeze([
-          valueParameter('index', 'usize'),
-          valueParameter('output', '&mut [u8]'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([
-          'usize',
-          Type.slice('Exclusive', 'u8'),
-          mutableI32,
-          mutableU32,
-        ]),
-        result: 'Effect<Option<usize>>',
-        semanticResult: Type.option('usize'),
-        invariant:
-          'output is initialized writable storage; success reports the complete argument byte length and copies the prefix that fits, and absence reports the not-found reason',
-      }),
-      osBuiltin({
-        name: 'hostVariable',
-        operation: 'OsHostVariable',
-        parameters: Object.freeze([
-          valueParameter('name', '&[u8]'),
-          valueParameter('output', '&mut [u8]'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([
-          byteSlice,
-          Type.slice('Exclusive', 'u8'),
-          mutableI32,
-          mutableU32,
-        ]),
-        result: 'Effect<Option<usize>>',
-        semanticResult: Type.option('usize'),
-        invariant:
-          'output is initialized writable storage; success reports the complete value byte length and copies the prefix that fits, and an unset name reports the not-found reason',
-      }),
-      osBuiltin({
-        name: 'hostWorkingDirectory',
-        operation: 'OsHostWorkingDirectory',
-        parameters: Object.freeze([
-          valueParameter('output', '&mut [u8]'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([Type.slice('Exclusive', 'u8'), mutableI32, mutableU32]),
-        result: 'Effect<Option<usize>>',
-        semanticResult: Type.option('usize'),
-        invariant:
-          'output is initialized writable storage; success reports the complete working-directory byte length and copies the prefix that fits',
-      }),
-    ]),
-  ),
-  actor(
-    'Layout',
-    'Type',
-    Object.freeze([
-      builtin({
-        actor: 'Layout',
-        name: 'of',
-        operation: 'LayoutOf',
-        typeParameters: Object.freeze(['T']),
-        semanticTypeParameters: rawTypeParameters,
-        parameters: Object.freeze([]),
-        semanticParameters: Object.freeze([]),
-        result: 'Layout',
-        semanticResult: Type.layout,
-      }),
-    ]),
-  ),
-  actor(
-    'Storage',
-    'Namespace',
-    Object.freeze([
-      builtin({
-        actor: 'Storage',
-        name: 'acquire',
-        operation: 'StorageAcquire',
-        parameters: Object.freeze([valueParameter('layout', 'Layout')]),
-        semanticParameters: Object.freeze([Type.layout]),
-        result: 'Effect<Allocation ! OutOfMemory>',
-        semanticResult: Type.effect(
-          Type.allocation,
-          Object.freeze([Type.outOfMemory]),
-          undefined,
-          Object.freeze([]),
-        ),
-      }),
-    ]),
-  ),
-  actor(
-    'Host',
-    'Namespace',
-    Object.freeze([
-      builtin({
-        actor: 'Host',
-        name: 'write',
-        operation: 'HostWrite',
-        parameters: Object.freeze([
-          valueParameter('destination', 'bool'),
-          valueParameter('bytes', '&[u8]'),
-        ]),
-        semanticParameters: Object.freeze(['bool', Type.slice('Shared', 'u8')]),
-        result: 'Effect<() ! StreamWriteFailure>',
-        semanticResult: Type.effect(
-          Type.unit,
-          Object.freeze([Type.streamWriteFailure]),
-          undefined,
-          Object.freeze([]),
-        ),
-      }),
-    ]),
-  ),
-  actor('Report', 'Type', Object.freeze([])),
-  actor(
-    'RawBuffer',
-    'Type',
-    Object.freeze([
-      builtin({
-        actor: 'RawBuffer',
-        name: 'from',
-        operation: 'RawBufferFrom',
-        typeParameters: Object.freeze(['T']),
-        semanticTypeParameters: rawTypeParameters,
-        parameters: Object.freeze([
-          valueParameter('allocation', 'Allocation'),
-          valueParameter('count', 'usize'),
-        ]),
-        semanticParameters: Object.freeze([Type.allocation, 'usize']),
-        result: 'RawBuffer<T>',
-        semanticResult: Type.rawBuffer(rawElement),
-        unsafe: true,
-      }),
-      builtin({
-        actor: 'RawBuffer',
-        name: 'view',
-        operation: 'RawBufferView',
-        typeParameters: Object.freeze(['T']),
-        semanticTypeParameters: rawTypeParameters,
-        parameters: Object.freeze([
-          valueParameter('buffer', '&RawBuffer<T>'),
-          valueParameter('offset', 'usize'),
-          valueParameter('length', 'usize'),
-        ]),
-        semanticParameters: Object.freeze([
-          Type.reference('Shared', Type.rawBuffer(rawElement)),
-          'usize',
-          'usize',
-        ]),
-        result: '&[T]',
-        semanticResult: Type.slice('Shared', rawElement),
-        unsafe: true,
-        returnedBorrowParameter: 0,
-      }),
-      builtin({
-        actor: 'RawBuffer',
-        name: 'viewMut',
-        operation: 'RawBufferViewMut',
-        typeParameters: Object.freeze(['T']),
-        semanticTypeParameters: rawTypeParameters,
-        parameters: Object.freeze([
-          valueParameter('buffer', '&mut RawBuffer<T>'),
-          valueParameter('offset', 'usize'),
-          valueParameter('length', 'usize'),
-        ]),
-        semanticParameters: Object.freeze([
-          Type.reference('Exclusive', Type.rawBuffer(rawElement)),
-          'usize',
-          'usize',
-        ]),
-        result: '&mut [T]',
-        semanticResult: Type.slice('Exclusive', rawElement),
-        unsafe: true,
-        returnedBorrowParameter: 0,
-      }),
-      builtin({
-        actor: 'RawBuffer',
-        name: 'slot',
-        operation: 'RawBufferSlot',
-        typeParameters: Object.freeze(['T']),
-        semanticTypeParameters: rawTypeParameters,
-        parameters: Object.freeze([
-          valueParameter('buffer', '&mut RawBuffer<T>'),
-          valueParameter('index', 'usize'),
-        ]),
-        semanticParameters: Object.freeze([
-          Type.reference('Exclusive', Type.rawBuffer(rawElement)),
-          'usize',
-        ]),
-        result: 'Slot<T>',
-        semanticResult: Type.slot(rawElement),
-        unsafe: true,
-      }),
-      builtin({
-        actor: 'RawBuffer',
-        name: 'count',
-        operation: 'RawBufferCount',
-        typeParameters: Object.freeze(['T']),
-        semanticTypeParameters: rawTypeParameters,
-        parameters: Object.freeze([valueParameter('buffer', '&RawBuffer<T>')]),
-        semanticParameters: Object.freeze([Type.reference('Shared', Type.rawBuffer(rawElement))]),
-        result: 'usize',
-        semanticResult: 'usize',
-      }),
-      builtin({
-        actor: 'RawBuffer',
-        name: 'read',
-        operation: 'RawBufferRead',
-        typeParameters: Object.freeze(['T']),
-        semanticTypeParameters: rawTypeParameters,
-        parameters: Object.freeze([
-          valueParameter('buffer', '&RawBuffer<T>'),
-          valueParameter('index', 'usize'),
-        ]),
-        semanticParameters: Object.freeze([
-          Type.reference('Shared', Type.rawBuffer(rawElement)),
-          'usize',
-        ]),
-        result: 'T',
-        semanticResult: rawElement,
-        unsafe: true,
-      }),
-      builtin({
-        actor: 'RawBuffer',
-        name: 'copy',
-        operation: 'RawBufferCopy',
-        typeParameters: Object.freeze(['T']),
-        semanticTypeParameters: rawTypeParameters,
-        parameters: Object.freeze([
-          valueParameter('destination', '&mut RawBuffer<T>'),
-          valueParameter('destinationOffset', 'usize'),
-          valueParameter('source', '&[T]'),
-          valueParameter('length', 'usize'),
-        ]),
-        semanticParameters: Object.freeze([
-          Type.reference('Exclusive', Type.rawBuffer(rawElement)),
-          'usize',
-          Type.slice('Shared', rawElement),
-          'usize',
-        ]),
-        result: '()',
-        semanticResult: Type.unit,
-        unsafe: true,
-      }),
-      builtin({
-        actor: 'RawBuffer',
-        name: 'fill',
-        operation: 'RawBufferFill',
-        parameters: Object.freeze([
-          valueParameter('buffer', '&mut RawBuffer<u8>'),
-          valueParameter('offset', 'usize'),
-          valueParameter('length', 'usize'),
-          valueParameter('value', 'u8'),
-        ]),
-        semanticParameters: Object.freeze([
-          Type.reference('Exclusive', Type.rawBuffer('u8')),
-          'usize',
-          'usize',
-          'u8',
-        ]),
-        result: '()',
-        semanticResult: Type.unit,
-        unsafe: true,
-      }),
-    ]),
-  ),
-  actor(
-    'Slot',
-    'Type',
-    Object.freeze([
-      builtin({
-        actor: 'Slot',
-        name: 'write',
-        operation: 'SlotWrite',
-        typeParameters: Object.freeze(['T']),
-        semanticTypeParameters: rawTypeParameters,
-        parameters: Object.freeze([
-          valueParameter('slot', 'Slot<T>'),
-          valueParameter('value', 'T'),
-        ]),
-        semanticParameters: Object.freeze([Type.slot(rawElement), rawElement]),
-        result: '()',
-        semanticResult: Type.unit,
-        unsafe: true,
-      }),
-      builtin({
-        actor: 'Slot',
-        name: 'take',
-        operation: 'SlotTake',
-        typeParameters: Object.freeze(['T']),
-        semanticTypeParameters: rawTypeParameters,
-        parameters: Object.freeze([valueParameter('slot', 'Slot<T>')]),
-        semanticParameters: Object.freeze([Type.slot(rawElement)]),
-        result: 'T',
-        semanticResult: rawElement,
-        unsafe: true,
-      }),
-      builtin({
-        actor: 'Slot',
-        name: 'copy',
-        operation: 'SlotCopy',
-        typeParameters: Object.freeze(['T']),
-        semanticTypeParameters: rawTypeParameters,
-        parameters: Object.freeze([valueParameter('slot', 'Slot<T>')]),
-        semanticParameters: Object.freeze([Type.slot(rawElement)]),
-        result: 'T',
-        semanticResult: rawElement,
-        unsafe: true,
-      }),
-      builtin({
-        actor: 'Slot',
-        name: 'drop',
-        operation: 'SlotDrop',
-        typeParameters: Object.freeze(['T']),
-        semanticTypeParameters: rawTypeParameters,
-        parameters: Object.freeze([valueParameter('slot', 'Slot<T>')]),
-        semanticParameters: Object.freeze([Type.slot(rawElement)]),
-        result: '()',
-        semanticResult: Type.unit,
-        unsafe: true,
-      }),
-    ]),
-  ),
-  actor(
-    'Effect',
-    'Namespace',
-    Object.freeze([
-      builtin({
-        actor: 'Effect',
-        name: 'suspendEffect',
-        operation: 'EffectSuspend',
-        typeParameters: Object.freeze(['A', '!E', '?R']),
-        semanticTypeParameters: suspensionTypeParameters,
-        parameters: Object.freeze([valueParameter('deferred', 'once Effect<A ! E ? R>')]),
-        semanticParameters: Object.freeze([
-          Type.effect(
-            suspensionSuccess,
-            Object.freeze([]),
-            'Take',
-            Object.freeze([]),
-            Object.freeze([suspensionFailure]),
-            Object.freeze([suspensionRequirement]),
-          ),
-        ]),
-        result: 'Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
-        semanticResult: Type.effect(
+    }),
+  ]),
+  ...Object.freeze([
+    builtin({
+      actor: 'Host',
+      name: 'write',
+      operation: 'HostWrite',
+      parameters: Object.freeze([
+        valueParameter('destination', 'bool'),
+        valueParameter('bytes', '&[u8]'),
+      ]),
+      semanticParameters: Object.freeze(['bool', Type.slice('Shared', 'u8')]),
+      result: 'Effect<() ! StreamWriteFailure>',
+      semanticResult: Type.effect(
+        Type.unit,
+        Object.freeze([Type.streamWriteFailure]),
+        undefined,
+        Object.freeze([]),
+      ),
+    }),
+  ]),
+  ...Object.freeze([
+    builtin({
+      actor: 'RawBuffer',
+      name: 'from',
+      operation: 'RawBufferFrom',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('allocation', 'Allocation'),
+        valueParameter('count', 'usize'),
+      ]),
+      semanticParameters: Object.freeze([Type.allocation, 'usize']),
+      result: 'RawBuffer<T>',
+      semanticResult: Type.rawBuffer(rawElement),
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'RawBuffer',
+      name: 'view',
+      operation: 'RawBufferView',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('buffer', '&RawBuffer<T>'),
+        valueParameter('offset', 'usize'),
+        valueParameter('length', 'usize'),
+      ]),
+      semanticParameters: Object.freeze([
+        Type.reference('Shared', Type.rawBuffer(rawElement)),
+        'usize',
+        'usize',
+      ]),
+      result: '&[T]',
+      semanticResult: Type.slice('Shared', rawElement),
+      unsafe: true,
+      returnedBorrowParameter: 0,
+    }),
+    builtin({
+      actor: 'RawBuffer',
+      name: 'viewMut',
+      operation: 'RawBufferViewMut',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('buffer', '&mut RawBuffer<T>'),
+        valueParameter('offset', 'usize'),
+        valueParameter('length', 'usize'),
+      ]),
+      semanticParameters: Object.freeze([
+        Type.reference('Exclusive', Type.rawBuffer(rawElement)),
+        'usize',
+        'usize',
+      ]),
+      result: '&mut [T]',
+      semanticResult: Type.slice('Exclusive', rawElement),
+      unsafe: true,
+      returnedBorrowParameter: 0,
+    }),
+    builtin({
+      actor: 'RawBuffer',
+      name: 'slot',
+      operation: 'RawBufferSlot',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('buffer', '&mut RawBuffer<T>'),
+        valueParameter('index', 'usize'),
+      ]),
+      semanticParameters: Object.freeze([
+        Type.reference('Exclusive', Type.rawBuffer(rawElement)),
+        'usize',
+      ]),
+      result: 'Slot<T>',
+      semanticResult: Type.slot(rawElement),
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'RawBuffer',
+      name: 'count',
+      operation: 'RawBufferCount',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([valueParameter('buffer', '&RawBuffer<T>')]),
+      semanticParameters: Object.freeze([Type.reference('Shared', Type.rawBuffer(rawElement))]),
+      result: 'usize',
+      semanticResult: 'usize',
+    }),
+    builtin({
+      actor: 'RawBuffer',
+      name: 'read',
+      operation: 'RawBufferRead',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('buffer', '&RawBuffer<T>'),
+        valueParameter('index', 'usize'),
+      ]),
+      semanticParameters: Object.freeze([
+        Type.reference('Shared', Type.rawBuffer(rawElement)),
+        'usize',
+      ]),
+      result: 'T',
+      semanticResult: rawElement,
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'RawBuffer',
+      name: 'copy',
+      operation: 'RawBufferCopy',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('destination', '&mut RawBuffer<T>'),
+        valueParameter('destinationOffset', 'usize'),
+        valueParameter('source', '&[T]'),
+        valueParameter('length', 'usize'),
+      ]),
+      semanticParameters: Object.freeze([
+        Type.reference('Exclusive', Type.rawBuffer(rawElement)),
+        'usize',
+        Type.slice('Shared', rawElement),
+        'usize',
+      ]),
+      result: '()',
+      semanticResult: Type.unit,
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'RawBuffer',
+      name: 'fill',
+      operation: 'RawBufferFill',
+      parameters: Object.freeze([
+        valueParameter('buffer', '&mut RawBuffer<u8>'),
+        valueParameter('offset', 'usize'),
+        valueParameter('length', 'usize'),
+        valueParameter('value', 'u8'),
+      ]),
+      semanticParameters: Object.freeze([
+        Type.reference('Exclusive', Type.rawBuffer('u8')),
+        'usize',
+        'usize',
+        'u8',
+      ]),
+      result: '()',
+      semanticResult: Type.unit,
+      unsafe: true,
+    }),
+  ]),
+  ...Object.freeze([
+    builtin({
+      actor: 'Slot',
+      name: 'write',
+      operation: 'SlotWrite',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([valueParameter('slot', 'Slot<T>'), valueParameter('value', 'T')]),
+      semanticParameters: Object.freeze([Type.slot(rawElement), rawElement]),
+      result: '()',
+      semanticResult: Type.unit,
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'Slot',
+      name: 'take',
+      operation: 'SlotTake',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([valueParameter('slot', 'Slot<T>')]),
+      semanticParameters: Object.freeze([Type.slot(rawElement)]),
+      result: 'T',
+      semanticResult: rawElement,
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'Slot',
+      name: 'copy',
+      operation: 'SlotCopy',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([valueParameter('slot', 'Slot<T>')]),
+      semanticParameters: Object.freeze([Type.slot(rawElement)]),
+      result: 'T',
+      semanticResult: rawElement,
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'Slot',
+      name: 'drop',
+      operation: 'SlotDrop',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([valueParameter('slot', 'Slot<T>')]),
+      semanticParameters: Object.freeze([Type.slot(rawElement)]),
+      result: '()',
+      semanticResult: Type.unit,
+      unsafe: true,
+    }),
+  ]),
+  ...Object.freeze([
+    builtin({
+      actor: 'Effect',
+      name: 'suspendEffect',
+      operation: 'EffectSuspend',
+      typeParameters: Object.freeze(['A', '!E', '?R']),
+      semanticTypeParameters: suspensionTypeParameters,
+      parameters: Object.freeze([valueParameter('deferred', 'once Effect<A ! E ? R>')]),
+      semanticParameters: Object.freeze([
+        Type.effect(
           suspensionSuccess,
-          Object.freeze([Type.outOfMemory]),
+          Object.freeze([]),
           'Take',
-          Object.freeze([
-            Object.freeze({
-              capability: Type.allocator,
-              role: 'DefaultRole',
-              access: 'Exclusive',
-            }),
-          ]),
+          Object.freeze([]),
           Object.freeze([suspensionFailure]),
           Object.freeze([suspensionRequirement]),
         ),
-      }),
-      effect({
-        name: 'result',
-        operation: 'Result',
-        typeParameters: Object.freeze([]),
-        parameters: Object.freeze([valueParameter('protected', 'Effect<A ! E ? R>')]),
-        result: 'Effect<Result<A, Row<!E>> ? R>',
-      }),
-      effect({
-        name: 'bindRequirement',
-        operation: 'BindRequirement',
-        typeParameters: Object.freeze([]),
-        parameters: Object.freeze([
-          valueParameter('protected', 'Effect<A ! E ? Selected | Rest>'),
-          valueParameter('provider', '&Provider'),
+      ]),
+      result: 'Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
+      semanticResult: Type.effect(
+        suspensionSuccess,
+        Object.freeze([Type.outOfMemory]),
+        'Take',
+        Object.freeze([
+          Object.freeze({
+            capability: Type.allocator,
+            role: 'DefaultRole',
+            access: 'Exclusive',
+          }),
         ]),
-        result: 'Effect<A ! E ? Rest>',
-      }),
-    ]),
-  ),
-  actor(
-    'Place',
-    'Namespace',
-    Object.freeze([
-      Object.freeze({
-        _tag: 'IntrinsicOperation',
-        id: operationId('Place', 'replace'),
-        spelling: 'replace',
-        typeParameters: Object.freeze([typeParameter('T')]),
-        parameters: Object.freeze([
-          valueParameter('place', '&mut T'),
-          valueParameter('value', 'T'),
-        ]),
-        result: 'T',
-        unsafe: false,
-        targets: executionTargets,
-        rule: Object.freeze({ _tag: 'PlaceRule', operation: 'Replace' }),
-      }),
-    ]),
-  ),
+        Object.freeze([suspensionFailure]),
+        Object.freeze([suspensionRequirement]),
+      ),
+    }),
+    effect({
+      name: 'result',
+      operation: 'Result',
+      typeParameters: Object.freeze([]),
+      parameters: Object.freeze([valueParameter('protected', 'Effect<A ! E ? R>')]),
+      result: 'Effect<Result<A, Row<!E>> ? R>',
+    }),
+    effect({
+      name: 'bindRequirement',
+      operation: 'BindRequirement',
+      typeParameters: Object.freeze([]),
+      parameters: Object.freeze([
+        valueParameter('protected', 'Effect<A ! E ? Selected | Rest>'),
+        valueParameter('provider', '&Provider'),
+      ]),
+      result: 'Effect<A ! E ? Rest>',
+    }),
+  ]),
+  replaceOperation,
 ])
 
-const upperInitial = (value: string): string =>
-  `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
-
-const flatSpelling = (actor_: string, operation: string): string => {
-  if (Scalar.isSpelling(actor_)) return `${actor_}${upperInitial(operation)}`
-  if (actor_ === 'Effect' && operation === 'suspendEffect') return 'suspendEffect'
-  if (actor_ === 'Effect' && operation === 'bindRequirement') return 'bindRequirement'
-  if (actor_ === 'Place' && operation === 'replace') return 'replace'
-  if (actor_ === 'Storage' && operation === 'acquire') return 'systemAllocationAcquire'
-  if (actor_ === 'Host' && operation === 'write') return 'standardStreamWrite'
-  if (actor_ === 'Os') return `os${upperInitial(operation)}`
-  return `${actor_.slice(0, 1).toLowerCase()}${actor_.slice(1)}${upperInitial(operation)}`
-}
-
-/** The canonical standard-library consumer of one OS boundary operation. */
-const osConsumer = (spelling: string): string => {
-  if (spelling === 'standardInputRead') return 'silk/os-standard-input.read'
-  if (spelling === 'processExecute') return 'silk/os-child-process.execute'
-  if (spelling === 'processCapture') return 'silk/os-child-process.capture'
-  if (spelling.startsWith('host'))
-    return `silk/os-host-input.${spelling.slice(4, 5).toLowerCase()}${spelling.slice(5)}`
-  return `silk/os-filesystem.${spelling}`
-}
-
-const flatOperations = Object.freeze(
-  legacyActors.flatMap((actor_) =>
-    actor_.operations.map((operation) => {
-      const spelling = flatSpelling(actor_.spelling, operation.spelling)
-      const admission: AdmissionCategory = Scalar.isSpelling(actor_.spelling)
-        ? 'Scalar'
-        : actor_.spelling === 'Effect'
-          ? 'Effect'
-          : actor_.spelling === 'Host' || actor_.spelling === 'Storage' || actor_.spelling === 'Os'
-            ? 'Platform'
-            : actor_.spelling === 'Layout' || actor_.spelling === 'string'
-              ? 'Representation'
-              : actor_.spelling === 'RawBuffer' || actor_.spelling === 'Slot'
-                ? 'Ownership'
-                : 'Language'
-      const consumer = Scalar.isSpelling(actor_.spelling)
-        ? `silk/${actor_.spelling}.${operation.spelling}`
-        : actor_.spelling === 'Effect'
-          ? `silk/effects.${operation.spelling}`
-          : actor_.spelling === 'Storage'
-            ? 'silk/core.allocate'
-            : actor_.spelling === 'Host'
-              ? 'silk/core.writeAll'
-              : actor_.spelling === 'Os'
-                ? osConsumer(operation.spelling)
-                : actor_.spelling === 'Place'
-                  ? 'language:place-replacement'
-                  : `silk/${actor_.spelling.replaceAll(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}.${operation.spelling}`
-      return Object.freeze({
-        ...operation,
-        id: operationId('Intrinsic', spelling),
-        spelling,
-        admission,
-        consumer,
-        targets: operation.targets,
-        ...(operation.unsafe && operation.invariant === undefined
-          ? {
-              invariant:
-                actor_.spelling === 'RawBuffer'
-                  ? 'caller proves raw-buffer bounds, ownership, and initializedness required by the operation'
-                  : 'caller proves the selected slot is in bounds and has the initializedness state required by the operation',
-            }
-          : {}),
-        ...(operation.invariant === undefined ? {} : { invariant: operation.invariant }),
-        ...(actor_.spelling === 'Host' && operation.spelling === 'write'
-          ? { hostImport: 'silk_standard_stream_write_v1' }
-          : {}),
-      })
-    }),
-  ),
-)
-
-const operations = Object.freeze([stringActor, actor('Intrinsic', 'Namespace', flatOperations)])
+const operations = Object.freeze([
+  stringActor,
+  actor('Intrinsic', 'Namespace', intrinsicOperations),
+])
 
 /** Every intrinsic actor in stable presentation and completion order. */
 export const all = (): ReadonlyArray<Actor> => operations
@@ -1080,7 +1023,7 @@ export const findOperation = (actor_: string, spelling: string): Operation | und
 
 /** Finds one sealed operation by its canonical compiler identity. */
 export const findOperationById = (id: OperationId): Operation | undefined =>
-  flatOperations.find(
+  intrinsicOperations.find(
     (candidate) => candidate.id.actor === id.actor && candidate.id.name === id.name,
   )
 
@@ -1105,7 +1048,7 @@ export interface InventoryEntry {
 /** Publishes the closed intrinsic inventory used by verification and release review. */
 export const inventory = (): ReadonlyArray<InventoryEntry> =>
   Object.freeze(
-    flatOperations.map((operation) => {
+    intrinsicOperations.map((operation) => {
       if (
         operation.admission === undefined ||
         operation.consumer === undefined ||
