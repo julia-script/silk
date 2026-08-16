@@ -25,7 +25,7 @@ enabling change was merged, synchronized, and archived.
   `OpaqueRepresentationEngines.test.ts`, and the opaque cases in `SemanticInvalidation.test.ts`.
 - Complete witnesses and conditional proof search: `BoundOperationWitness.test.ts`,
   `CompleteInterfaceContractsFixtures.test.ts`, and `ConditionalConformanceFixtures.test.ts`.
-- Static-tree bounded spike: `StaticCompositionCharacterization.test.ts` generates left-associated
+- Static-tree bounded spike: `StaticCompositionCharacterization.bench.ts` generates left-associated
   and balanced trees at 1, 8, 32, 64, and 128 leaves in two fresh processes. The checked-in
   characterization report records its deterministic structural gates and empirical backend costs.
 
