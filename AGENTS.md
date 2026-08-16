@@ -1,11 +1,19 @@
 # Silk Effect agent instructions
 
-## Project stage
+## Green-field policy
 
-This project is either unreleased or undergoing a quiet alpha review. Attempts to preserve backward
-compatibility are forbidden at this stage. Do not create technical debt or compromise a better
-implementation to remain compatible with the current API. Breaking any API is not only allowed but
-encouraged when it advances the project toward an eventual stable version we can be confident in.
+Treat this entire repository as a green-field project until this rule is explicitly removed. No
+current or historical API, behavior, data format, build artifact, or internal representation is a
+compatibility contract.
+
+- Always implement the clean design intended for the eventual stable release, and update every
+  caller, test, fixture, and document in the same change.
+- Delete superseded code. Do not retain compatibility shims, adapters, aliases, fallbacks,
+  migrations, deprecated entry points, dual paths, or code selected only for old behavior.
+- Do not introduce technical debt to stage a transition. A change is incomplete while the obsolete
+  path remains or its cleanup is deferred to a future task.
+- Prefer a breaking change over a compromised design. Existing usage inside this repository is a
+  migration target to update, not a reason to preserve the old shape.
 
 These conventions apply to the entire repository. The current `effect-patterns` skill is the
 authoritative source for Effect architecture. When this file and that skill differ, follow the
