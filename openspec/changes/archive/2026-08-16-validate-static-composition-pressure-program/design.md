@@ -33,19 +33,27 @@ The fixture's actors are pressure vocabulary only. Add a renamed equivalent cont
 MIR, and backend artifacts for forbidden actor-name branches. The compiler may know only sealed
 intrinsics, never standard-library declarations by spelling.
 
-### Require differential engine traces
+### Require differential engine evidence
 
 Run success, help, selection failure, decode failure, uncalled cleanup, called cleanup, and suspended
-Effect cases through evaluator, LLVM, and direct Wasm. Compare result/failure fingerprints, handler
-counts, selected direct target, and cleanup trace. Inspect Wasm for zero tables and `call_indirect`.
+Effect cases through evaluator, LLVM, and direct Wasm. The evaluator provides the detailed handler,
+failure, suspension, and cleanup trace contract. Native and Wasm execution must match its observable
+result or failure. Native runtime parity and trapping cleanup witnesses live in the shared driver
+corpus rather than a feature-local compile loop; emitted Wasm artifacts prove the selected direct
+target and cleanup path. Inspect Wasm for zero tables and `call_indirect`.
 
 ### Characterize two static-tree shapes
 
-Generate left-associated and balanced trees at 1, 8, 32, 64, and 128 leaves. Record canonical byte
-size, semantic/representation/instance/layout/MIR counts, phase time, peak heap, native text/data, and
-Wasm bytes twice in fresh processes. Counts and artifacts are hard deterministic gates; timing,
-memory, and size trends establish the first measured baseline. Any unexplained superlinear semantic
-growth fails and returns to implementation analysis.
+Generate left-associated and balanced command trees at 1, 8, 32, 64, and 128 distinct leaves, with
+per-leaf transforms and one normalized application-action union. Record canonical byte size,
+semantic/representation/instance/layout/MIR counts, phase time, phase-boundary heap samples, LLVM
+bitcode bytes, and Wasm bytes twice in fresh processes. Counts and artifacts are hard deterministic
+gates; timing, memory, and size trends establish the first measured baseline. Any unexplained
+superlinear semantic growth fails and returns to implementation analysis.
+
+This characterization is an opt-in benchmark, not a default correctness test. The checked-in report
+and a deliberate benchmark run carry the empirical evidence without adding fresh-process and
+performance-count work to `pnpm check`.
 
 ### Keep evidence failures scoped
 
@@ -66,7 +74,7 @@ dictionaries, allocation, or actor-specific compiler privilege.
 
 1. Land only after every prerequisite change is complete and its fences are correctly narrowed.
 2. Add and format the executable fixture plus renamed control.
-3. Add cross-engine trace and structural artifact assertions.
+3. Add evaluator trace and cross-engine result plus structural artifact assertions.
 4. Add generated growth inputs and checked-in baseline report.
 5. Run the complete release matrix and classify every finding.
 
