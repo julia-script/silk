@@ -30,7 +30,7 @@
 - [x] 5.1 Trim `SynchronousEffectCost.test.ts` to its structural normalization assertions (spec: entry structure only, no byte/branch/timing counts)
 - [x] 5.2 Delete `OccurrencePerformance.test.ts`
 - [ ] 5.3 Replace exact diagnostic-message-string assertions with code+span assertions in the 12 affected files (catalog gates wording via `documentation:check`)
-- [ ] 5.4 Prune the ~8–10 `EditorIntelligence.test.ts` cases duplicated by `DeclarationIndex.test.ts`
+- [x] 5.4 Prune the ~8–10 `EditorIntelligence.test.ts` cases duplicated by `DeclarationIndex.test.ts`
 
 ## 6. Native artifact disk cache (spec: bootstrap-native-toolchain)
 

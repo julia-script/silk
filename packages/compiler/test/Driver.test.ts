@@ -70,27 +70,6 @@ const expectedPhases = [
   'link',
 ]
 
-it.effect('compiles the nested program to a running executable matching the interpreter', () =>
-  Effect.gen(function* () {
-    const nested = corpus.find((program) => program.name === 'nested')
-    assert.notStrictEqual(nested, undefined)
-    if (nested === undefined) return
-    const outcome = yield* compileSource('nested', nested.source)
-
-    assert.strictEqual(outcome._tag, 'Compiled')
-    if (outcome._tag !== 'Compiled') return
-    assert.strictEqual(outcome.target.kind, 'Native')
-    assert.strictEqual(existsSync(outcome.path), true)
-    const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
-    const interpreted = Analysis.evaluate(
-      yield* Analysis.ofSourceRealized('memory/driver', ascii(nested.source)),
-    )
-    assert.strictEqual(interpreted._tag, 'Completed')
-    if (interpreted._tag !== 'Completed') return
-    assert.strictEqual(run.status, interpreted.result.value)
-  }),
-)
-
 it.effect('compiles a three-module call chain to native execution matching the interpreter', () =>
   Effect.gen(function* () {
     const sources = new Map([

@@ -1,7 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Intrinsic from '../src/Intrinsic.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as Presentation from '../src/Presentation.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -9,7 +8,6 @@ import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
 import {
   allocatorSource,
-  effectHandlerSource,
   nestedBindingSource,
   recoveredMemberSource,
 } from './support/editorCorpus.js'
@@ -65,31 +63,6 @@ it.effect('indexes allocator tokens as source binding, actor, and function ident
           : Analysis.occurrencePresentation(snapshot, 'main', operation)?.text,
         'pub fn make() -> SystemAllocator',
       )
-      return undefined
-    }),
-  ),
-)
-
-it.effect('presents effect function declarations and references identically', () =>
-  Analysis.ofSourceRealized('main', encoder.encode(effectHandlerSource)).pipe(
-    Effect.map((snapshot) => {
-      const source = new TextDecoder().decode(
-        SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
-      )
-      const declaration = occurrenceAt(snapshot, source, 'recover')
-      const reference = occurrenceAt(snapshot, source, 'recover', 1)
-      assert.isDefined(declaration)
-      assert.isDefined(reference)
-      const declared =
-        declaration === undefined
-          ? undefined
-          : Analysis.occurrencePresentation(snapshot, 'main', declaration)
-      const referenced =
-        reference === undefined
-          ? undefined
-          : Analysis.occurrencePresentation(snapshot, 'main', reference)
-      assert.strictEqual(declared?.text, 'effect fn recover(error: OutOfMemory) -> i32')
-      assert.deepEqual(referenced, declared)
       return undefined
     }),
   ),
@@ -184,26 +157,6 @@ pub fn main() -> i32 { return recover(Problem { code: 41 }) }
           Analysis.documentationAt(snapshot, 'main', source.indexOf('code:')),
         ),
         '/// Numeric problem code.',
-      )
-      return undefined
-    }),
-  )
-})
-
-it.effect('answers a canonical declaration document through a cross-module reference', () => {
-  const root = `import lib { recover }
-pub fn main() -> i32 { return recover(1) }`
-  const library = `/// Library recovery.
-pub fn recover(value: i32) -> i32 { return value }`
-  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
-    Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
-    Effect.map((snapshot) => {
-      assert.strictEqual(
-        documentationText(
-          snapshot,
-          Analysis.documentationAt(snapshot, 'main', root.lastIndexOf('recover')),
-        ),
-        '/// Library recovery.',
       )
       return undefined
     }),
@@ -480,32 +433,6 @@ pub fn main() -> i32 { return 42 }`
     }),
   )
 })
-
-it.effect('indexes declaration and nominal type reference locations', () =>
-  Analysis.ofSourceRealized(
-    'main',
-    encoder.encode(`struct Problem {}
-fn recover(error: Problem) -> i32 { return 0 }
-pub fn main() -> i32 { return recover(0) }`),
-  ).pipe(
-    Effect.map((snapshot) => {
-      const source = new TextDecoder().decode(
-        SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
-      )
-      const declaration = occurrenceAt(snapshot, source, 'Problem')
-      const typeReference = occurrenceAt(snapshot, source, 'Problem', 1)
-      const functionReference = occurrenceAt(snapshot, source, 'recover', 1)
-      assert.strictEqual(declaration?.role, 'Declaration')
-      assert.strictEqual(typeReference?.role, 'Type')
-      assert.strictEqual(typeReference?.declaration?.selectionSpan.start, source.indexOf('Problem'))
-      assert.strictEqual(
-        functionReference?.declaration?.selectionSpan.start,
-        source.indexOf('recover'),
-      )
-      return undefined
-    }),
-  ),
-)
 
 it.effect('answers deterministic inferred hints and recovered completions', () =>
   Analysis.ofSourceRealized('main', encoder.encode(recoveredMemberSource)).pipe(
@@ -815,72 +742,6 @@ fn damaged( -> {`
   })
 })
 
-it.effect('indexes and completes source-backed Effect provision operations', () => {
-  const source = `struct Clock {}
-effect fn read() -> i32 ? &Clock { return 42 }
-pub fn main() -> i32 {
-  let clock = Clock {}
-  let recipe = read() |> Effect.provide(&clock)
-  return run recipe
-}`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
-    Effect.map((snapshot) => {
-      const qualifier = occurrenceAt(snapshot, source, 'Effect')
-      const operation = occurrenceAt(snapshot, source, 'provide')
-      assert.strictEqual(qualifier?.role, 'Actor')
-      assert.isUndefined(qualifier?.declaration)
-      assert.strictEqual(operation?.role, 'Value')
-      assert.strictEqual(operation?.declaration?.module, 'silk/effects')
-      assert.include(
-        operation === undefined
-          ? ''
-          : (Analysis.occurrencePresentation(snapshot, 'main', operation)?.text ?? ''),
-        'effect fn provide',
-      )
-
-      const offset = source.lastIndexOf('Effect.provide') + 'Effect.'.length
-      const completion = Analysis.completionAt(snapshot, 'main', offset)
-      assert.include(completion?.candidates.map((candidate) => candidate.label) ?? [], 'provide')
-      assert.include(
-        completion?.candidates.map((candidate) => candidate.label) ?? [],
-        'provideWith',
-      )
-      return undefined
-    }),
-  )
-})
-
-it.effect('links provideMut to visible standard-library source', () => {
-  const source = `struct Clock {}
-effect fn read() -> i32 ? &mut Clock { return 42 }
-pub fn main() -> i32 {
-  let mut clock = Clock {}
-  let recipe = read() |> Effect.provideMut(&mut clock)
-  return run recipe
-}`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
-    Effect.map((snapshot) => {
-      const operation = occurrenceAt(snapshot, source, 'provideMut')
-      assert.strictEqual(operation?.role, 'Value')
-      assert.strictEqual(operation?.declaration?.module, 'silk/effects')
-      assert.strictEqual(
-        documentationText(
-          snapshot,
-          Analysis.documentationAt(snapshot, 'main', source.indexOf('provideMut')),
-        ),
-        '/// Satisfies one typed service requirement with an existing exclusive provider.',
-      )
-      assert.include(
-        operation === undefined
-          ? ''
-          : (Analysis.occurrencePresentation(snapshot, 'main', operation)?.text ?? ''),
-        'effect fn provideMut',
-      )
-      return undefined
-    }),
-  )
-})
-
 it.effect('preserves ambiguous, missing, namespace, and type completion contexts', () =>
   Effect.gen(function* () {
     // Two bindings the module wrote itself still collide, and an ambiguous qualifier offers nothing.
@@ -1022,23 +883,6 @@ fn identity<T>(value: ) -> i32 { return 0 }`
     assert.notInclude(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'true')
   }),
 )
-
-it('keeps the intrinsic catalog identities and ordering stable', () => {
-  const first = Intrinsic.all()
-  const second = Intrinsic.all()
-  assert.deepEqual(second, first)
-  const identities = first.flatMap((actor) =>
-    actor.operations.map((operation) => `${operation.id.actor}.${operation.id.name}`),
-  )
-  assert.strictEqual(new Set(identities).size, identities.length)
-  assert.isTrue(
-    first.every((actor) =>
-      actor.operations.every((operation) =>
-        Intrinsic.signature(operation).includes(operation.spelling),
-      ),
-    ),
-  )
-})
 
 it.effect('presents and completes the sealed suspension intrinsic with its exact rows', () => {
   const source = `pub fn main() -> i32 {
