@@ -243,6 +243,7 @@ describe('preset catalog', () => {
         'effects',
         'allocation',
         'callables',
+        'interfaces',
       ]),
     )
   })

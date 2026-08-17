@@ -2782,6 +2782,322 @@ pub fn main() -> i32 {
 }
 `,
   ),
+  // ---- interfaces ----------------------------------------------------------------------
+  // Interfaces are compile-time contracts: a witness is selected during specialization, and no
+  // preset here creates a provider slot or a runtime dispatch. Most of these declare their own
+  // interface rather than importing one, so the whole contract is visible in the program. The two
+  // stdlib presets are kept for the one thing a declared interface cannot show: an operation whose
+  // name an operator spells, reached through that operator rather than through the bound.
+  one(
+    'interfaces',
+    'ok · Declared interface over two providers',
+    `interface Area<T> {
+  fn area(value: &T) -> i32
+}
+
+pub struct Square {
+  pub side: i32
+}
+
+pub struct Rect {
+  pub width: i32
+  pub height: i32
+}
+
+fn squareArea(value: &Square) -> i32 {
+  return value.side * value.side
+}
+
+fn rectArea(value: &Rect) -> i32 {
+  return value.width * value.height
+}
+
+impl Area<Square> for Square {
+  area: Square.squareArea
+}
+
+impl Area<Rect> for Rect {
+  area: Rect.rectArea
+}
+
+fn measure<T: Area>(value: &T) -> i32 {
+  return Area.area(value)
+}
+
+pub fn main() -> i32 {
+  let square = Square {side: 5}
+  let rect = Rect {width: 3, height: 4}
+  return measure<Square>(&square) + measure<Rect>(&rect) + 5
+}
+`,
+  ),
+  // Two operations, neither of which any operator spells, so both are reached by naming the bound.
+  one(
+    'interfaces',
+    'ok · Declared two-operation contract',
+    `interface Span<T> {
+  fn start(self: &T) -> i32
+  fn end(self: &T) -> i32
+}
+
+pub struct Range {
+  pub from: i32
+  pub to: i32
+}
+
+fn rangeStart(self: &Range) -> i32 {
+  return self.from
+}
+
+fn rangeEnd(self: &Range) -> i32 {
+  return self.to
+}
+
+impl Span<Range> for Range {
+  start: Range.rangeStart
+  end: Range.rangeEnd
+}
+
+fn width<T: Span>(self: &T) -> i32 {
+  return Span.end(self) - Span.start(self)
+}
+
+pub fn main() -> i32 {
+  let range = Range {from: 8, to: 50}
+  return width<Range>(&range)
+}
+`,
+  ),
+  // The full contract: an effectful operation binding ordinary, failure-row, and requirement-row
+  // arguments, dispatched through the bound and run under a provided requirement. `decodeWith`
+  // runs the bound call explicitly rather than returning it: tail propagation of a bound-dispatched
+  // effectful operation lowers to invalid MIR (#226). Keep the explicit `run` until that is fixed.
+  one(
+    'interfaces',
+    'ok · Effectful contract with failure and requirement rows',
+    `pub struct DecodeError {}
+
+pub struct Schema {
+  pub offset: i32
+}
+
+struct Clock {}
+
+interface Decoder<S, Arguments, A, !E, ?R> {
+  effect fn decode(self: &S, encoded: Arguments) -> A ! E ? R
+}
+
+effect fn schemaDecode(self: &Schema, encoded: i32) -> i32
+! DecodeError
+? &Clock {
+  if encoded < 0 {
+    fail move DecodeError {}
+  }
+  return encoded + self.offset
+}
+
+impl Decoder<Schema, i32, i32 ! DecodeError ? &Clock> for Schema {
+  decode: Schema.schemaDecode
+}
+
+effect fn acquireClock() -> Clock {
+  return Clock {}
+}
+
+effect fn recover(problem: DecodeError) -> i32 {
+  return 0
+}
+
+effect fn decodeWith<T: Decoder<T, i32, i32 ! DecodeError ? &Clock>>(schema: &T, encoded: i32) -> i32
+! DecodeError
+? &Clock {
+  let value = run Decoder.decode(schema, encoded)
+  return value
+}
+
+pub fn main() -> i32 {
+  let schema = Schema {offset: 2}
+  let recipe = decodeWith<Schema>(&schema, 40)
+    |> Effect.provideWith(acquireClock())
+    |> Effect.catchAll(recover)
+  return run recipe
+}
+`,
+  ),
+  // A witness may name a function of the provider's own actor, not only an `Intrinsic.*` path,
+  // which is what lets a declared type — rather than only the twelve scalars — order itself.
+  one(
+    'interfaces',
+    'ok · User type witnesses Order',
+    `import silk.order {Order}
+
+pub struct Priority {
+  pub rank: i32
+}
+
+fn priorityLessThan(left: &Priority, right: &Priority) -> bool {
+  return left.rank < right.rank
+}
+
+impl Order<Priority> for Priority {
+  lessThan: Priority.priorityLessThan
+}
+
+fn smaller<T: Order>(left: T, right: T) -> bool {
+  return left < right
+}
+
+pub fn main() -> i32 {
+  let low = Priority {rank: 1}
+  let high = Priority {rank: 9}
+  if smaller(move low, move high) {
+    return 42
+  }
+  return 0
+}
+`,
+  ),
+  // `equals` is reachable through the operator that spells it; `hash` is reachable only by naming
+  // the bound. Both operations are called here in the one body that declares the bound, because a
+  // bound is not carried into a nested generic call.
+  one(
+    'interfaces',
+    'ok · Two-operation bound through its own name',
+    `import silk.hash {HashKey, HashSeed, mix, seed}
+
+pub struct Word {
+  pub value: u64
+}
+
+fn wordEquals(left: &Word, right: &Word) -> bool {
+  return left.value == right.value
+}
+
+fn wordHash(value: &Word, key: &HashSeed) -> u64 {
+  return mix(key, value.value)
+}
+
+impl HashKey<Word> for Word {
+  equals: Word.wordEquals
+  hash: Word.wordHash
+}
+
+fn agree<T: HashKey>(left: &T, right: &T, key: &HashSeed) -> bool {
+  if HashKey.equals(left, right) {
+    return HashKey.hash(left, key) == HashKey.hash(right, key)
+  }
+  return false
+}
+
+pub fn main() -> i32 {
+  let key = seed(7)
+  let left = Word {value: 3}
+  let right = Word {value: 3}
+  if agree(&left, &right, &key) {
+    return 42
+  }
+  return 0
+}
+`,
+  ),
+  // A conformance that holds only when its inner provider conforms. Proof search descends to the
+  // base witness and terminates because each required provider is a strict structural subterm.
+  one(
+    'interfaces',
+    'ok · Conditional conformance over a wrapper',
+    `interface Describe<T> {
+  fn size(value: &T) -> i32
+}
+
+pub struct Leaf {
+  pub width: i32
+}
+
+pub struct Labelled<T> {
+  pub inner: T
+  pub tag: i32
+}
+
+fn leafSize(value: &Leaf) -> i32 {
+  return value.width
+}
+
+impl Describe<Leaf> for Leaf {
+  size: Leaf.leafSize
+}
+
+fn labelledSize<T: Describe>(value: &Labelled<T>) -> i32 {
+  return Describe.size(&value.inner) + value.tag
+}
+
+impl<T: Describe<T>> Describe<Labelled<T>> for Labelled<T> {
+  size: Labelled.labelledSize
+}
+
+fn measure<T: Describe>(value: &T) -> i32 {
+  return Describe.size(value)
+}
+
+pub fn main() -> i32 {
+  let nested = Labelled<Labelled<Leaf>> {
+    inner: Labelled<Leaf> {inner: Leaf {width: 30}, tag: 10},
+    tag: 2,
+  }
+  return measure<Labelled<Labelled<Leaf>>>(&nested)
+}
+`,
+  ),
+  // A source witness observes its operands through a shared borrow, so a witness that demands
+  // exclusive access cannot satisfy an operation the generic caller only promises to share.
+  one(
+    'interfaces',
+    'fail · Witness demands a stronger receiver',
+    `interface Reader<T> {
+  fn read(self: &T) -> i32
+}
+
+pub struct Cursor {
+  pub position: i32
+}
+
+fn cursorRead(self: &mut Cursor) -> i32 {
+  self.position = self.position + 1
+  return self.position
+}
+
+impl Reader<Cursor> for Cursor {
+  read: Cursor.cursorRead
+}
+
+pub fn main() -> i32 {
+  return 42
+}
+`,
+  ),
+  // A witness is admitted on complete coverage, so a conformance that maps only part of a
+  // two-operation contract is rejected — and the unmapped operation is named.
+  one(
+    'interfaces',
+    'fail · Witness misses a contract operation',
+    `import silk.hash {HashKey}
+
+pub struct Tag {
+  pub value: u64
+}
+
+fn tagEquals(left: &Tag, right: &Tag) -> bool {
+  return left.value == right.value
+}
+
+impl HashKey<Tag> for Tag {
+  equals: Tag.tagEquals
+}
+
+pub fn main() -> i32 {
+  return 42
+}
+`,
+  ),
 ]
 
 /** Presets in catalog order, grouped by phase, for the picker. */
