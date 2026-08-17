@@ -1046,8 +1046,6 @@ const printNode = (
           FormatDocument.text(' '),
         ),
       )
-    case 'RoleExpression':
-      return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
     case 'UnitExpression':
     case 'IntegerLiteralExpression':
     case 'FloatingLiteralExpression':

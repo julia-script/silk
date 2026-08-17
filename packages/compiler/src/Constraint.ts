@@ -1,5 +1,7 @@
+import * as FiniteRow from './FiniteRow.js'
 import * as Canonical from './internal/Canonical.js'
 import * as RowAlgebra from './RowAlgebra.js'
+import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 export type ProviderMode = 'Shared' | 'Exclusive' | 'Take'
@@ -34,7 +36,7 @@ export type Constraint = NominalMember | FailureSubset | RequirementSubset | Pro
 
 export interface Occurrence {
   readonly constraint: Constraint
-  readonly origin: RowAlgebra.SourceOrigin
+  readonly origin: SourceSpan.SourceSpan
 }
 
 export type WitnessOrigin =
@@ -215,6 +217,67 @@ export const requirementSelectionEvidence = (
     providerMode: wanted.mode,
   })
 
+/**
+ * Proves a fully concrete membership/subset wanted without declaration-index services.
+ * Provider selection remains in ProviderSelection because it needs a conformance oracle.
+ */
+export const proveStructural = (
+  self: NominalMember | FailureSubset | RequirementSubset,
+):
+  | Exclude<ConstraintEvidence, { readonly _tag: 'Assumed' | 'RequirementSelection' }>
+  | undefined => {
+  switch (self._tag) {
+    case 'NominalMemberConstraint': {
+      const source = RowAlgebra.concretize(Type.failureRowPolicy(), self.source)
+      if (
+        !Type.isNominal(self.selected) ||
+        !Type.isRuntimeConcrete(self.selected) ||
+        source._tag !== 'Concrete' ||
+        source.row.members.some((member) => !Type.isRuntimeConcrete(member)) ||
+        !FiniteRow.has(Type.failureRowPolicy().finite, source.row, self.selected)
+      )
+        return undefined
+      return Object.freeze({ _tag: 'Member', selected: self.selected, source: self.source })
+    }
+    case 'FailureSubsetConstraint': {
+      const selected = RowAlgebra.concretize(Type.failureRowPolicy(), self.selected)
+      const source = RowAlgebra.concretize(Type.failureRowPolicy(), self.source)
+      if (
+        selected._tag !== 'Concrete' ||
+        source._tag !== 'Concrete' ||
+        selected.row.members.some((member) => !Type.isRuntimeConcrete(member)) ||
+        source.row.members.some((member) => !Type.isRuntimeConcrete(member)) ||
+        !FiniteRow.isSubset(Type.failureRowPolicy().finite, selected.row, source.row)
+      )
+        return undefined
+      return Object.freeze({
+        _tag: 'FailureSubset',
+        selected: self.selected,
+        source: self.source,
+      })
+    }
+    case 'RequirementSubsetConstraint': {
+      const selected = RowAlgebra.concretize(Type.requirementRowPolicy(), self.selected)
+      const source = RowAlgebra.concretize(Type.requirementRowPolicy(), self.source)
+      if (
+        selected._tag !== 'Concrete' ||
+        source._tag !== 'Concrete' ||
+        selected.row.members.some(
+          (requirement) => !Type.isRuntimeConcrete(requirement.capability),
+        ) ||
+        source.row.members.some((requirement) => !Type.isRuntimeConcrete(requirement.capability)) ||
+        !FiniteRow.isSubset(Type.requirementRowPolicy().finite, selected.row, source.row)
+      )
+        return undefined
+      return Object.freeze({
+        _tag: 'RequirementSubset',
+        selected: self.selected,
+        source: self.source,
+      })
+    }
+  }
+}
+
 /** Applies only independently established substitutions; constraint solving never inverts rows. */
 export const substitute = (self: Constraint, substitution: Type.Substitution): Constraint => {
   switch (self._tag) {
@@ -240,4 +303,176 @@ export const substitute = (self: Constraint, substitution: Type.Substitution): C
         Type.substituteRequirementsRow(self.source, substitution),
       )
   }
+}
+
+const specializeFailureRow = (
+  row: Type.FailureRow,
+  specializeType: (type: Type.Type) => Type.Type,
+): Type.FailureRow =>
+  RowAlgebra.mapConcreteMembers(Type.failureRowPolicy(), row, (failure) => {
+    const specialized = specializeType(failure)
+    return Type.isNominal(specialized) ? specialized : failure
+  })
+
+const specializeRequirementRow = (
+  row: Type.RequirementsRow,
+  specializeType: (type: Type.Type) => Type.Type,
+): Type.RequirementsRow =>
+  RowAlgebra.mapConcreteMembers(Type.requirementRowPolicy(), row, (requirement) => {
+    const capability = specializeType(requirement.capability)
+    return Object.freeze({
+      ...requirement,
+      capability:
+        Type.isNominal(capability) || Type.isParameter(capability)
+          ? capability
+          : requirement.capability,
+    })
+  })
+
+const specializeConstraintExecutableOwner = (
+  self: Constraint,
+  specializeType: (type: Type.Type) => Type.Type,
+): Constraint => {
+  switch (self._tag) {
+    case 'NominalMemberConstraint':
+      return nominalMember(
+        specializeType(self.selected),
+        specializeFailureRow(self.source, specializeType),
+      )
+    case 'FailureSubsetConstraint':
+      return failureSubset(
+        specializeFailureRow(self.selected, specializeType),
+        specializeFailureRow(self.source, specializeType),
+      )
+    case 'RequirementSubsetConstraint':
+      return requirementSubset(
+        specializeRequirementRow(self.selected, specializeType),
+        specializeRequirementRow(self.source, specializeType),
+      )
+    case 'ProviderSelectionConstraint':
+      return providerSelection(
+        self.mode,
+        specializeType(self.provider),
+        specializeRequirementRow(self.selected, specializeType),
+        specializeRequirementRow(self.source, specializeType),
+      )
+  }
+}
+
+/** Specializes every executable-owner identity retained by one nested callable schema. */
+export const specializeCallableSchemaExecutableOwner: Type.CallableSchemaOwnerSpecializer = (
+  schema,
+  specializeType,
+  specializeArgument,
+) => {
+  const constraints = schema.constraints.map((constraint) =>
+    specializeConstraintExecutableOwner(constraint, specializeType),
+  )
+  const specializeSubstitution = (substitution: Type.Substitution): Type.Substitution =>
+    new Map(
+      [...substitution.entries()].map(([parameter, argument]) => [
+        parameter,
+        specializeArgument(argument),
+      ]),
+    )
+  const specializeMatch = (match: ProviderMatch): ProviderMatch =>
+    match._tag === 'Identity'
+      ? match
+      : Object.freeze({
+          _tag: 'Conformance',
+          witness: Object.freeze({
+            origin: match.witness.origin,
+            typeArguments: Object.freeze(match.witness.typeArguments.map(specializeArgument)),
+          }),
+        })
+  const evidence = schema.evidence.map((proof): ConstraintEvidence => {
+    switch (proof._tag) {
+      case 'Assumed':
+        return assumed(
+          specializeConstraintExecutableOwner(proof.wanted, specializeType),
+          specializeSubstitution(proof.substitution),
+        )
+      case 'Member': {
+        const selected = specializeType(proof.selected)
+        return Type.isNominal(selected)
+          ? Object.freeze({
+              _tag: 'Member',
+              selected,
+              source: specializeFailureRow(proof.source, specializeType),
+            })
+          : proof
+      }
+      case 'FailureSubset':
+        return Object.freeze({
+          _tag: 'FailureSubset',
+          selected: specializeFailureRow(proof.selected, specializeType),
+          source: specializeFailureRow(proof.source, specializeType),
+        })
+      case 'RequirementSubset':
+        return Object.freeze({
+          _tag: 'RequirementSubset',
+          selected: specializeRequirementRow(proof.selected, specializeType),
+          source: specializeRequirementRow(proof.source, specializeType),
+        })
+      case 'RequirementSelection': {
+        const wanted = specializeConstraintExecutableOwner(proof.wanted, specializeType)
+        const selectedCapability = specializeType(proof.selected.capability)
+        const provider = specializeType(proof.provider)
+        if (
+          wanted._tag !== 'ProviderSelectionConstraint' ||
+          (!Type.isNominal(selectedCapability) && !Type.isParameter(selectedCapability))
+        )
+          return proof
+        return Object.freeze({
+          _tag: 'RequirementSelection',
+          wantedKey: key(wanted),
+          wanted,
+          selected: Object.freeze({ ...proof.selected, capability: selectedCapability }),
+          provider,
+          providerMatch: specializeMatch(proof.providerMatch),
+          providerMode: proof.providerMode,
+        })
+      }
+    }
+    return proof
+  })
+  const contractConstraints = schema.contract.constraints.map((constraint) =>
+    specializeConstraintExecutableOwner(constraint, specializeType),
+  )
+  const contract = Object.freeze({
+    ...schema.contract,
+    parameters: Object.freeze(
+      schema.contract.parameters.map((parameter) =>
+        Object.freeze({ ...parameter, type: specializeType(parameter.type) }),
+      ),
+    ),
+    result: specializeType(schema.contract.result),
+    constraints: Object.freeze(contractConstraints),
+  })
+  const contractKey = Canonical.record('CallableContract', [
+    contract.functionKind,
+    Canonical.array(contract.binders.map(Type.key)),
+    Canonical.array(
+      contract.parameters.map((parameter) =>
+        Canonical.record('Parameter', [parameter.mode, Type.key(parameter.type)]),
+      ),
+    ),
+    Type.key(contract.result),
+    Canonical.array(contract.constraints.map(key)),
+    Canonical.array(
+      contract.captures.map((capture) =>
+        Canonical.record('Capture', [`${capture.parameter}`, `${capture.capture}`]),
+      ),
+    ),
+  ])
+  return Object.freeze({
+    ...schema,
+    contract,
+    constraints: Object.freeze(constraints),
+    evidence: Object.freeze(evidence),
+    substitution: specializeSubstitution(schema.substitution),
+    contractKey,
+    constraintKeys: Object.freeze(constraints.map(key)),
+    evidenceKeys: Object.freeze(evidence.map(evidenceKey)),
+  })
 }

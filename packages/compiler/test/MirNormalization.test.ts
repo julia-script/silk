@@ -203,6 +203,43 @@ pub fn main() -> i32 {
       allOperations(reifiedProgram).some((operation) => operation._tag === 'ReifyEffect'),
       Mir.encode(reifiedProgram),
     )
+    const reify = allOperations(reifiedProgram).find(
+      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'ReifyEffect' }> =>
+        operation._tag === 'ReifyEffect',
+    )
+    const allocate = allOperations(reifiedProgram).find(
+      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'Allocate' }> =>
+        operation._tag === 'Allocate',
+    )
+    assert.isDefined(reify)
+    assert.isDefined(allocate)
+    if (reify === undefined || allocate === undefined) return
+    for (const failureTag of [0, -1, Number.MAX_SAFE_INTEGER + 1]) {
+      const forged = structuredClone(reifiedProgram)
+      const operation = allOperations(forged).find((candidate) => candidate._tag === 'Allocate')
+      assert.isDefined(operation)
+      if (operation === undefined) return
+      Reflect.set(operation, 'failureTag', failureTag)
+      assert.include(
+        Mir.verify(forged).map((violation) => violation.rule),
+        'InvalidAllocationOperation',
+      )
+    }
+    for (const field of ['successTag', 'failureTag'] as const) {
+      for (const tag of [-1, reify.resultUnion.members.length, Number.MAX_SAFE_INTEGER + 1]) {
+        const forged = structuredClone(reifiedProgram)
+        const operation = allOperations(forged).find(
+          (candidate) => candidate._tag === 'ReifyEffect',
+        )
+        assert.isDefined(operation)
+        if (operation === undefined) return
+        Reflect.set(operation, field, tag)
+        assert.include(
+          Mir.verify(forged).map((violation) => violation.rule),
+          'InvalidEffectOperation',
+        )
+      }
+    }
     assert.isTrue(
       allOperations(entryProgram).some((operation) => operation._tag === 'CloseEffectEntry'),
       Mir.encode(entryProgram),

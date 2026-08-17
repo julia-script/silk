@@ -544,7 +544,6 @@ const expectCallRightParenthesis = (
 
 function parseArgumentList(initial: State, reservedForEnclosingCalls: number): NodeResult {
   const leftParenthesis = expect(initial, 'LeftParenthesis', [
-    'At',
     ...expressionStarts,
     'RightParenthesis',
     'RightBrace',
@@ -567,17 +566,7 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
   ) {
-    const argument =
-      kind === 'At'
-        ? (() => {
-            const at = expect(state, 'At', ['Identifier', 'Comma', 'RightParenthesis'])
-            const name = expect(at.state, 'Identifier', ['Comma', 'RightParenthesis'])
-            return Object.freeze({
-              state: name.state,
-              node: syntaxNode(name.state, 'RoleExpression', [...at.elements, ...name.elements]),
-            })
-          })()
-        : parseExpression(state, reservedForEnclosingCalls + 1, 'Identifier')
+    const argument = parseExpression(state, reservedForEnclosingCalls + 1, 'Identifier')
     children = Object.freeze([...children, argument.node])
     state = argument.state
     kind = nextSignificantKind(state)
@@ -593,7 +582,6 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
       break
 
     const comma = expect(state, 'Comma', [
-      'At',
       ...expressionStarts,
       'RightParenthesis',
       'RightBrace',

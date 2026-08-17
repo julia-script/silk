@@ -3,7 +3,6 @@ import * as Constraint from './Constraint.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
-import * as FiniteRow from './FiniteRow.js'
 import * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Ownership from './Ownership.js'
@@ -77,6 +76,7 @@ const specializeInstanceType = (
       declaration: owner.declaration,
       typeArguments: owner.typeArguments,
     }),
+    Constraint.specializeCallableSchemaExecutableOwner,
   )
 
 /** One concrete hidden callable-section construction reachable from an instance. */
@@ -115,6 +115,13 @@ export interface EffectInstance {
     readonly type: Type.Type
     readonly effectIdentity?: string
     readonly callableIdentity?: Type.CallableIdentityArgument
+    /** Exact selected demand represented by this provider capture, when it binds a requirement. */
+    readonly providedRequirement?: {
+      readonly capability: Type.Nominal
+      readonly role: string
+      readonly requirementAccess: Type.Requirement['access']
+      readonly providerAccess: 'Shared' | 'Exclusive' | 'Take'
+    }
   }>
   readonly type: Type.Effect
   readonly suspendable: boolean
@@ -127,16 +134,15 @@ export interface CallInstance {
   readonly span: Hir.Expression['span']
   readonly target: InstanceKey
   readonly resultEffect?: string
+  /** Parameter whose Effect is reified by an exact source forwarding wrapper. */
+  readonly effectResultParameter?: number
 }
 
 /** One exact sealed intrinsic call retained by executable instance closure. */
 export interface IntrinsicCall {
   readonly _tag: 'ReachableIntrinsicCall'
   readonly operation: Intrinsic.OperationId
-  /** Static intrinsic site retained for inventory and direct-call fallback. */
   readonly span: Hir.Expression['span']
-  /** Outermost source applications that made this dependency reachable. */
-  readonly origins: ReadonlyArray<Hir.Expression['span']>
 }
 
 /** One normalized reportable failure retained by an effectful user entry. */
@@ -272,7 +278,6 @@ const forwardedRequirementBinding = (
   if (
     binding?._tag !== 'Bind' ||
     binding.initializer._tag !== 'EffectBindRequirement' ||
-    binding.initializer.provider.selectionAccess !== 'Exclusive' ||
     binding.initializer.protected._tag !== 'Move' ||
     binding.initializer.protected.subject._tag !== 'ParameterReference' ||
     binding.initializer.protected.subject.parameter.ordinal !== 0 ||
@@ -766,63 +771,6 @@ const compareIntrinsicCalls = (left: IntrinsicCall, right: IntrinsicCall): numbe
   left.span.start - right.span.start ||
   left.span.end - right.span.end
 
-const compareOrigins = (left: Hir.Expression['span'], right: Hir.Expression['span']): number =>
-  left.sourceId.localeCompare(right.sourceId) || left.start - right.start || left.end - right.end
-
-const originKey = (span: Hir.Expression['span']): string =>
-  `${span.sourceId}\u0000${span.start}\u0000${span.end}`
-
-/**
- * Propagates the first source-call edge through the reachable call graph. The entry instance is a
- * sentinel with no incoming edge; every first call out of it starts an origin, and nested wrapper
- * calls preserve that origin. Deduplicated targets union origins to a fixed point.
- */
-const instanceOrigins = (
-  calls: ReadonlyArray<CallInstance>,
-  entry: Entry,
-): ReadonlyMap<string, ReadonlyArray<Hir.Expression['span']>> => {
-  if (entry._tag !== 'Resolved') return new Map()
-  const entryKey = keyText(entry.key)
-  const reached = new Set<string>([entryKey])
-  const origins = new Map<string, Map<string, Hir.Expression['span']>>()
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const call of calls) {
-      const ownerKey = keyText(call.owner)
-      if (!reached.has(ownerKey)) continue
-      const targetKey = keyText(call.target)
-      if (targetKey === entryKey) continue
-      const inherited = origins.get(ownerKey)
-      const additions =
-        inherited === undefined || inherited.size === 0
-          ? Object.freeze([call.span])
-          : Object.freeze([...inherited.values()])
-      let targetOrigins = origins.get(targetKey)
-      if (targetOrigins === undefined) {
-        targetOrigins = new Map()
-        origins.set(targetKey, targetOrigins)
-      }
-      if (!reached.has(targetKey)) {
-        reached.add(targetKey)
-        changed = true
-      }
-      for (const origin of additions) {
-        const identity = originKey(origin)
-        if (targetOrigins.has(identity)) continue
-        targetOrigins.set(identity, origin)
-        changed = true
-      }
-    }
-  }
-  return new Map(
-    [...origins.entries()].map(([identity, values]) => [
-      identity,
-      Object.freeze([...values.values()].sort(compareOrigins)),
-    ]),
-  )
-}
-
 /**
  * Collects the canonical intrinsic identities retained by reachable function instances.
  *
@@ -832,11 +780,8 @@ const instanceOrigins = (
  */
 const reachableIntrinsics = (
   instances: ReadonlyArray<Instance>,
-  entry: Entry,
-  callEdges: ReadonlyArray<CallInstance>,
   index: DeclarationIndex.Index,
 ): ReadonlyArray<IntrinsicCall> => {
-  const originsByInstance = instanceOrigins(callEdges, entry)
   const retained = new Map<string, IntrinsicCall>()
   for (const instance of instances) {
     for (const statement of instance.function.statements) {
@@ -868,19 +813,12 @@ const reachableIntrinsics = (
           if (operation === undefined) continue
           const span = expression.span
           const key = `${Intrinsic.operationText(operation)}\u0000${span.sourceId}\u0000${span.start}\u0000${span.end}`
-          const origins = originsByInstance.get(keyText(instance.key)) ?? Object.freeze([span])
-          const previous = retained.get(key)
-          const mergedOrigins = new Map<string, Hir.Expression['span']>(
-            (previous?.origins ?? []).map((origin) => [originKey(origin), origin]),
-          )
-          for (const origin of origins) mergedOrigins.set(originKey(origin), origin)
           retained.set(
             key,
             Object.freeze({
               _tag: 'ReachableIntrinsicCall',
               operation,
               span,
-              origins: Object.freeze([...mergedOrigins.values()].sort(compareOrigins)),
             }),
           )
         }
@@ -945,76 +883,41 @@ export const keyText = (key: InstanceKey): string =>
 
 const concreteConstraintEvidence = (
   wanted: Constraint.Constraint,
-  origin: RowAlgebra.SourceOrigin,
+  origin: SourceSpan.SourceSpan,
   index: DeclarationIndex.Index,
 ): ReadonlyArray<ConcreteEvidence> | undefined => {
-  switch (wanted._tag) {
-    case 'NominalMemberConstraint': {
-      const source = RowAlgebra.concretize(Type.failureRowPolicy(), wanted.source)
-      if (
-        !Type.isNominal(wanted.selected) ||
-        source._tag !== 'Concrete' ||
-        !FiniteRow.has(Type.failureRowPolicy().finite, source.row, wanted.selected)
-      )
-        return undefined
-      return Object.freeze([
-        Object.freeze({ _tag: 'Member', selected: wanted.selected, source: wanted.source }),
-      ])
-    }
-    case 'FailureSubsetConstraint': {
-      const selected = RowAlgebra.concretize(Type.failureRowPolicy(), wanted.selected)
-      const source = RowAlgebra.concretize(Type.failureRowPolicy(), wanted.source)
-      if (
-        selected._tag !== 'Concrete' ||
-        source._tag !== 'Concrete' ||
-        !FiniteRow.isSubset(Type.failureRowPolicy().finite, selected.row, source.row)
-      )
-        return undefined
-      return Object.freeze([
-        Object.freeze({
-          _tag: 'FailureSubset',
-          selected: wanted.selected,
-          source: wanted.source,
-        }),
-      ])
-    }
-    case 'RequirementSubsetConstraint': {
-      const selected = RowAlgebra.concretize(Type.requirementRowPolicy(), wanted.selected)
-      const source = RowAlgebra.concretize(Type.requirementRowPolicy(), wanted.source)
-      if (
-        selected._tag !== 'Concrete' ||
-        source._tag !== 'Concrete' ||
-        !FiniteRow.isSubset(Type.requirementRowPolicy().finite, selected.row, source.row)
-      )
-        return undefined
-      return Object.freeze([
-        Object.freeze({
-          _tag: 'RequirementSubset',
-          selected: wanted.selected,
-          source: wanted.source,
-        }),
-      ])
-    }
-    case 'ProviderSelectionConstraint': {
-      if (!Type.isConcrete(wanted.provider)) return undefined
-      const solved = ProviderSelection.solve({
-        relations: Object.freeze([Object.freeze({ wanted, origins: Object.freeze([origin]) })]),
-        selected: wanted.selected,
-        responsible: origin,
-        oracle: Object.freeze({
-          match: (provider: Type.Type, capability: Type.Nominal) =>
-            DeclarationIndex.providerMatch(index, provider, capability),
-        }),
-      })
-      return solved._tag === 'Selected' ? solved.evidence : undefined
-    }
+  if (wanted._tag !== 'ProviderSelectionConstraint') {
+    const proof = Constraint.proveStructural(wanted)
+    return proof === undefined ? undefined : Object.freeze([proof])
   }
+  const selected = RowAlgebra.concretize(Type.requirementRowPolicy(), wanted.selected)
+  const source = RowAlgebra.concretize(Type.requirementRowPolicy(), wanted.source)
+  if (
+    !Type.isRuntimeConcrete(wanted.provider) ||
+    selected._tag !== 'Concrete' ||
+    source._tag !== 'Concrete' ||
+    selected.row.members.some((requirement) => !Type.isRuntimeConcrete(requirement.capability)) ||
+    source.row.members.some((requirement) => !Type.isRuntimeConcrete(requirement.capability))
+  )
+    return undefined
+  const solved = ProviderSelection.solve({
+    relations: Object.freeze([
+      Object.freeze<ProviderSelection.Relation>({ wanted, origins: [origin] }),
+    ]),
+    selected: wanted.selected,
+    responsible: origin,
+    oracle: Object.freeze({
+      match: (provider: Type.Type, capability: Type.Nominal) =>
+        DeclarationIndex.providerMatch(index, provider, capability),
+    }),
+  })
+  return solved._tag === 'Selected' ? solved.evidence : undefined
 }
 
 const specializeEvidence = (
   evidence: Constraint.ConstraintEvidence,
   substitution: Type.Substitution,
-  origin: RowAlgebra.SourceOrigin,
+  origin: SourceSpan.SourceSpan,
   index: DeclarationIndex.Index,
 ): ReadonlyArray<ConcreteEvidence> | undefined => {
   if (evidence._tag === 'Assumed') {
@@ -1055,7 +958,7 @@ const hirEvidence = (
   fn: Hir.HirFunction,
 ): ReadonlyArray<{
   readonly evidence: Constraint.ConstraintEvidence
-  readonly origin: RowAlgebra.SourceOrigin
+  readonly origin: SourceSpan.SourceSpan
 }> =>
   Object.freeze(
     fn.statements
@@ -1082,7 +985,10 @@ export const specialize = (
     Type.substitute(parameter, substitution),
   )
   const result = Type.substitute(fn.contract.result, substitution)
-  if (parameters.some((parameter) => !Type.isConcrete(parameter)) || !Type.isConcrete(result))
+  if (
+    parameters.some((parameter) => !Type.isRuntimeConcrete(parameter)) ||
+    !Type.isRuntimeConcrete(result)
+  )
     return undefined
 
   const failureRow =
@@ -1095,9 +1001,15 @@ export const specialize = (
       : Type.substituteRequirementsRow(fn.contract.requirementRow, substitution)
   if (
     (failureRow !== undefined &&
-      RowAlgebra.concretize(Type.failureRowPolicy(), failureRow)._tag !== 'Concrete') ||
+      (RowAlgebra.concretize(Type.failureRowPolicy(), failureRow)._tag !== 'Concrete' ||
+        RowAlgebra.concreteMembers(Type.failureRowPolicy(), failureRow).some(
+          (member) => !Type.isRuntimeConcrete(member),
+        ))) ||
     (requirementRow !== undefined &&
-      RowAlgebra.concretize(Type.requirementRowPolicy(), requirementRow)._tag !== 'Concrete')
+      (RowAlgebra.concretize(Type.requirementRowPolicy(), requirementRow)._tag !== 'Concrete' ||
+        RowAlgebra.concreteMembers(Type.requirementRowPolicy(), requirementRow).some(
+          (requirement) => !Type.isRuntimeConcrete(requirement.capability),
+        )))
   )
     return undefined
 
@@ -1632,6 +1544,58 @@ export const parameterCallableIdentity = (
  * dictionary for its quantified contract. Only exact expression identity is forwarded: branches,
  * computed callables, opaque declarations, and recursion stop the proof.
  */
+const forwardedCallableParameter = (
+  fn: Hir.HirFunction,
+  results: ReadonlyMap<string, Elaboration.Result>,
+  resolving: ReadonlySet<string> = new Set(),
+): number | undefined => {
+  const key_ =
+    fn.declaration.canonical._tag === 'Canonical'
+      ? `${fn.declaration.canonical.id.module}\u0000${fn.declaration.canonical.id.name}`
+      : undefined
+  if (key_ === undefined || resolving.has(key_) || fn.contract._tag !== 'Contract') return undefined
+  const leading = fn.statements.slice(0, -1)
+  const returned = fn.statements.at(-1)
+  if (
+    fn.contract.parameters.length !== 1 ||
+    returned?._tag !== 'Return' ||
+    leading.some((statement) => statement._tag !== 'Bind')
+  )
+    return undefined
+  const forwardedBindings = new Set<number>()
+  const next = new Set(resolving).add(key_)
+  const expression = (
+    current: Hir.Expression,
+    bindings: ReadonlySet<number> = new Set(),
+  ): number | undefined => {
+    if (current._tag === 'Move') return expression(current.subject, bindings)
+    if (current._tag === 'ParameterReference') return current.parameter.ordinal
+    if (current._tag === 'BindingReference') {
+      const ordinal = current.binding.ordinal
+      if (bindings.has(ordinal)) return undefined
+      const binding = leading.find(
+        (statement) => statement._tag === 'Bind' && statement.binding.ordinal === ordinal,
+      )
+      if (binding?._tag !== 'Bind') return undefined
+      forwardedBindings.add(ordinal)
+      return expression(binding.initializer, new Set(bindings).add(ordinal))
+    }
+    if (current._tag !== 'Call') return undefined
+    const target = targetFunction(results, current.target)
+    const forwarded =
+      target === undefined ? undefined : forwardedCallableParameter(target, results, next)
+    const argument = forwarded === undefined ? undefined : current.arguments.at(forwarded)
+    return argument === undefined ? undefined : expression(argument, bindings)
+  }
+  const forwarded = expression(returned.expression)
+  return forwarded === undefined ||
+    leading.some(
+      (statement) => statement._tag !== 'Bind' || !forwardedBindings.has(statement.binding.ordinal),
+    )
+    ? undefined
+    : forwarded
+}
+
 const staticallyForwardedCallable = (
   expression: Hir.Expression,
   fn: Hir.HirFunction,
@@ -1655,15 +1619,18 @@ const staticallyForwardedCallable = (
   const identity = `${expression.target.module}\u0000${expression.target.name}`
   if (resolving.has(identity)) return undefined
   const target = targetFunction(results, expression.target)
-  const returned = target === undefined ? undefined : returnedExpression(target)
-  if (target === undefined || returned === undefined) return undefined
-  return staticallyForwardedCallable(
-    returned,
-    target,
-    results,
-    expression.arguments,
-    new Set([...resolving, identity]),
-  )
+  const forwarded =
+    target === undefined ? undefined : forwardedCallableParameter(target, results, resolving)
+  const argument = forwarded === undefined ? undefined : expression.arguments.at(forwarded)
+  return argument === undefined
+    ? undefined
+    : staticallyForwardedCallable(
+        argument,
+        fn,
+        results,
+        arguments_,
+        new Set([...resolving, identity]),
+      )
 }
 
 const callableOriginOf = (
@@ -1802,7 +1769,16 @@ const targetKeyOfCallableApply = (
   for (const ordinal of effectParameterOrdinals(target, targetSubstitution)) {
     const argument = callableApplicationArgument(expression, ordinal)
     const identity = argument === undefined ? undefined : effectOriginOf(argument, context)
-    if (identity === undefined) return undefined
+    if (identity === undefined) {
+      if (
+        forwardedRequirementBinding(target) !== undefined ||
+        (forwardedEffectResultParameter(target) === ordinal &&
+          argument !== undefined &&
+          requirementBoundEffectRecipe(argument, context))
+      )
+        continue
+      return undefined
+    }
     hiddenArguments.push(Type.effectIdentityArgument(identity))
   }
   for (const ordinal of callableParameterOrdinals(target, targetSubstitution)) {
@@ -1832,6 +1808,46 @@ function returnedExpression(fn: Hir.HirFunction): Hir.Expression | undefined {
   return terminal?._tag === 'Return' ? terminal.expression : undefined
 }
 
+const forwardedEffectResultParameter = (target: Hir.HirFunction): number | undefined => {
+  const returned = target.statements.at(-1)
+  if (target.statements.length !== 1 || returned?._tag !== 'Return') return undefined
+  const block = returned.expression
+  const completed = block._tag === 'EffectBlock' ? block.statements.at(-1) : undefined
+  const run = completed?._tag === 'Return' ? completed.expression : undefined
+  const result = run?._tag === 'Run' ? run.subject : undefined
+  const protected_ = result?._tag === 'EffectResult' ? result.protected : undefined
+  const parameter = protected_?._tag === 'Move' ? protected_.subject : protected_
+  return block._tag === 'EffectBlock' &&
+    block.statements.length === 1 &&
+    parameter?._tag === 'ParameterReference'
+    ? parameter.parameter.ordinal
+    : undefined
+}
+
+const requirementBoundEffectRecipe = (
+  expression: Hir.Expression,
+  context: EffectOriginContext,
+  resolving: ReadonlySet<number> = new Set(),
+): boolean => {
+  if (expression._tag === 'Move')
+    return requirementBoundEffectRecipe(expression.subject, context, resolving)
+  if (expression._tag === 'UnionConvert')
+    return requirementBoundEffectRecipe(expression.source, context, resolving)
+  if (expression._tag === 'BindingReference') {
+    const ordinal = expression.binding.ordinal
+    if (resolving.has(ordinal)) return false
+    const initializer = callableBindings(context.fn).get(ordinal)
+    return (
+      initializer !== undefined &&
+      requirementBoundEffectRecipe(initializer, context, new Set(resolving).add(ordinal))
+    )
+  }
+  if (expression._tag === 'EffectBindRequirement') return true
+  if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return false
+  const target = targetFunction(context.results, expression.target)
+  return target !== undefined && forwardedRequirementBinding(target) !== undefined
+}
+
 const targetKeyOfCall = (
   expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
   context: EffectOriginContext,
@@ -1854,7 +1870,13 @@ const targetKeyOfCall = (
       // An exact requirement-forwarding wrapper is specialized into its protected recipe before
       // lowering. Compiler recipes therefore do not need a reified Effect identity merely to
       // make the concrete provider specialization discoverable.
-      if (forwardedRequirementBinding(target) !== undefined) continue
+      if (
+        forwardedRequirementBinding(target) !== undefined ||
+        (forwardedEffectResultParameter(target) === ordinal &&
+          argument !== undefined &&
+          requirementBoundEffectRecipe(argument, context))
+      )
+        continue
       return undefined
     }
     hiddenArguments.push(Type.effectIdentityArgument(identity))
@@ -1951,6 +1973,11 @@ const effectOriginOf = (
     }
   }
   if (expression._tag === 'EffectBlock') return effectIdentity(context.owner, expression.site)
+  if (expression._tag === 'EffectCatch')
+    return effectIdentity(
+      context.owner,
+      Hir.effectCatchSite(context.fn.declaration.id, context.owner.declaration, expression.span),
+    )
   if (
     (expression._tag === 'BoundOperationCall' || expression._tag === 'BuiltinCall') &&
     expression.witnessEffectSite !== undefined
@@ -1981,7 +2008,9 @@ const effectOriginOf = (
         Type.isNominal(capability) &&
         Type.equals(capability, service) &&
         binding.provider.role === expression.role &&
-        (expression.access === 'Shared' || binding.provider.selectionAccess === 'Exclusive')
+        (expression.access === 'Shared' ||
+          binding.provider.selectionAccess === 'Exclusive' ||
+          binding.provider.selectionAccess === 'Take')
       )
     })
     const witness =
@@ -2085,6 +2114,7 @@ const directCallInstances = (
         const targetFn = targetFunction(results, target.declaration)
         if (targetFn === undefined) return []
         const resultEffect = resultEffectIdentity(targetFn, target, results, index)
+        const reifiedParameter = forwardedEffectResultParameter(targetFn)
         return [
           Object.freeze({
             _tag: 'CallInstance',
@@ -2092,6 +2122,7 @@ const directCallInstances = (
             span: expression.span,
             target,
             ...(resultEffect === undefined ? {} : { resultEffect }),
+            ...(reifiedParameter === undefined ? {} : { effectResultParameter: reifiedParameter }),
           }),
         ]
       }
@@ -2104,6 +2135,7 @@ const directCallInstances = (
       const targetFn = target === undefined ? undefined : targetFunction(results, expression.target)
       if (target === undefined || targetFn === undefined) return []
       const resultEffect = resultEffectIdentity(targetFn, target, results, index)
+      const reifiedParameter = forwardedEffectResultParameter(targetFn)
       return [
         Object.freeze({
           _tag: 'CallInstance',
@@ -2111,6 +2143,7 @@ const directCallInstances = (
           span: expression.span,
           target,
           ...(resultEffect === undefined ? {} : { resultEffect }),
+          ...(reifiedParameter === undefined ? {} : { effectResultParameter: reifiedParameter }),
         }),
       ]
     })
@@ -2182,11 +2215,13 @@ const callableCallTargets = (
   for (const expression of callableExpressions(fn)) {
     const value =
       expression._tag === 'CallableApply'
-        ? callableValue(expression.callee, bindings)
+        ? (callableValue(expression.callee, bindings) ??
+          staticallyForwardedCallable(expression.callee, fn, results))
         : expression._tag === 'FunctionItem' || expression._tag === 'CallableSection'
           ? expression
           : undefined
-    if (value === undefined) continue
+    if (value === undefined || (value._tag !== 'FunctionItem' && value._tag !== 'CallableSection'))
+      continue
     const declaration = declarationTarget(value.target)
     if (declaration === undefined) continue
     const substitution =
@@ -2257,7 +2292,9 @@ const concreteCallables = (
     if (seen.has(site)) continue
     seen.add(site)
     const applications = expressions.flatMap((expression) =>
-      expression._tag === 'CallableApply' && callableValue(expression.callee, bindings) === section
+      expression._tag === 'CallableApply' &&
+      (callableValue(expression.callee, bindings) ??
+        staticallyForwardedCallable(expression.callee, fn, results)) === section
         ? [expression]
         : [],
     )
@@ -2282,11 +2319,11 @@ const concreteCallables = (
       )
       if (
         !Type.isCallable(type) ||
-        !Type.isConcrete(type) ||
+        !Type.isRuntimeConcrete(type) ||
         arguments_ === undefined ||
-        arguments_.some((argument) => !Type.isConcreteGenericArgument(argument)) ||
+        arguments_.some((argument) => !Type.isRuntimeConcreteGenericArgument(argument)) ||
         captureTypes.length !== section.captures.length ||
-        captureTypes.some((capture) => !Type.isConcrete(capture))
+        captureTypes.some((capture) => !Type.isRuntimeConcrete(capture))
       ) {
         continue
       }
@@ -2347,9 +2384,28 @@ const concreteEffects = (
     const blocks = callableExpressions(instance.function).flatMap((expression) =>
       expression._tag === 'EffectBlock' ? [expression] : [],
     )
+    const forwardedProvider = forwardedRequirementBinding(instance.function)
+    const forwardedSelected =
+      forwardedProvider === undefined
+        ? undefined
+        : selectedRequirement(forwardedProvider, instance.substitution)
+    const forwardedCapability = forwardedSelected?.capability
+    const forwardedRequirement =
+      forwardedProvider !== undefined &&
+      forwardedSelected !== undefined &&
+      forwardedCapability !== undefined &&
+      Type.isNominal(forwardedCapability)
+        ? Object.freeze({
+            parameter: forwardedProvider.provider.parameter?.ordinal,
+            capability: forwardedCapability,
+            role: forwardedSelected.role,
+            requirementAccess: forwardedSelected.access,
+            providerAccess: forwardedProvider.provider.selectionAccess,
+          })
+        : undefined
     for (const block of blocks) {
       const type = specializeInstanceType(block.type, instance.key, [instance.substitution])
-      if (!Type.isEffect(type) || !Type.isConcrete(type)) continue
+      if (!Type.isEffect(type) || !Type.isRuntimeConcrete(type)) continue
       const captures = block.captures.flatMap((capture, ordinal) => {
         const source = capture.binding === undefined ? 'Parameter' : 'Binding'
         const sourceOrdinal = capture.binding?.ordinal ?? capture.parameter?.ordinal
@@ -2371,7 +2427,7 @@ const concreteEffects = (
         const specialized = specializeInstanceType(sourceType, instance.key, [
           instance.substitution,
         ])
-        if (!Type.isConcrete(specialized)) return []
+        if (!Type.isRuntimeConcrete(specialized)) return []
         const capturedEffectIdentity = Type.isEffect(specialized)
           ? source === 'Parameter'
             ? parameterEffectIdentity(instance.function, instance.key, sourceOrdinal)
@@ -2399,6 +2455,16 @@ const concreteEffects = (
             ...(capturedCallableIdentity === undefined
               ? {}
               : { callableIdentity: capturedCallableIdentity }),
+            ...(forwardedRequirement?.parameter === sourceOrdinal && source === 'Parameter'
+              ? {
+                  providedRequirement: Object.freeze({
+                    capability: forwardedRequirement.capability,
+                    role: forwardedRequirement.role,
+                    requirementAccess: forwardedRequirement.requirementAccess,
+                    providerAccess: forwardedRequirement.providerAccess,
+                  }),
+                }
+              : {}),
           }),
         ]
       })
@@ -2415,6 +2481,68 @@ const concreteEffects = (
           runner: Hir.effectRunnerId(instance.key.declaration, block.site),
           typeArguments: Object.freeze([...instance.key.typeArguments]),
           captures: Object.freeze(captures),
+          type,
+          suspendable: suspendableEffects.has(identity),
+        }),
+      )
+    }
+    const catches = callableExpressions(instance.function).flatMap((expression) =>
+      expression._tag === 'EffectCatch' ? [expression] : [],
+    )
+    for (const catch_ of catches) {
+      if (catch_.protected._tag === 'Unavailable' || catch_.handler._tag === 'Unavailable') continue
+      const type = specializeInstanceType(catch_.type, instance.key, [instance.substitution])
+      const protectedType = specializeInstanceType(catch_.protected.type, instance.key, [
+        instance.substitution,
+      ])
+      const handlerType = specializeInstanceType(catch_.handler.type, instance.key, [
+        instance.substitution,
+      ])
+      const protectedIdentity = effectOriginOf(catch_.protected, context)
+      const handlerIdentity = callableOriginOf(catch_.handler, context)
+      if (
+        !Type.isEffect(type) ||
+        !Type.isRuntimeConcrete(type) ||
+        !Type.isEffect(protectedType) ||
+        !Type.isCallable(handlerType) ||
+        protectedIdentity === undefined ||
+        handlerIdentity === undefined
+      )
+        continue
+      const site = Hir.effectCatchSite(
+        instance.function.declaration.id,
+        instance.key.declaration,
+        catch_.span,
+      )
+      const identity = effectIdentity(instance.key, site)
+      effects.set(
+        identity,
+        Object.freeze({
+          _tag: 'EffectInstance',
+          representationIdentity: Hir.effectRepresentationIdentity(site),
+          identity,
+          owner: instance.key,
+          site,
+          runner: Hir.effectRunnerId(instance.key.declaration, site),
+          typeArguments: Object.freeze([...instance.key.typeArguments]),
+          captures: Object.freeze([
+            Object.freeze({
+              ordinal: 0,
+              source: 'Binding' as const,
+              sourceOrdinal: 0,
+              access: 'Take' as const,
+              type: protectedType,
+              effectIdentity: protectedIdentity,
+            }),
+            Object.freeze({
+              ordinal: 1,
+              source: 'Binding' as const,
+              sourceOrdinal: 1,
+              access: 'Take' as const,
+              type: handlerType,
+              callableIdentity: handlerIdentity,
+            }),
+          ]),
           type,
           suspendable: suspendableEffects.has(identity),
         }),
@@ -2560,7 +2688,9 @@ const suspensionGraph = (
             Type.isNominal(capability) &&
             Type.equals(capability, service) &&
             binding.provider.role === expression.role &&
-            (expression.access === 'Shared' || binding.provider.selectionAccess === 'Exclusive')
+            (expression.access === 'Shared' ||
+              binding.provider.selectionAccess === 'Exclusive' ||
+              binding.provider.selectionAccess === 'Take')
           )
         })
         const witness =
@@ -2614,6 +2744,45 @@ const suspensionGraph = (
         const identity = effectIdentity(instance.key, expression.site)
         effectIdentities.add(identity)
         scanStatements(expression.statements, effectNode(identity))
+        return
+      }
+      if (expression._tag === 'EffectCatch') {
+        const site = Hir.effectCatchSite(
+          instance.function.declaration.id,
+          instance.key.declaration,
+          expression.span,
+        )
+        const identity = effectIdentity(instance.key, site)
+        const catchExecution = effectNode(identity)
+        effectIdentities.add(identity)
+        for (const target of executionTargets(expression.protected))
+          addDependency(catchExecution, target)
+        const handler = callableOriginOf(expression.handler, context)
+        if (handler?.target._tag === 'Declaration') {
+          const declaration: DeclarationIndex.CanonicalId = Object.freeze({
+            _tag: 'CanonicalDeclarationId',
+            module: handler.target.module,
+            name: handler.target.name,
+          })
+          const target = targetFunction(results, declaration)
+          const targetKey =
+            target === undefined
+              ? undefined
+              : keyOf(
+                  declaration,
+                  target.contract,
+                  target.declaration.typeParameters.map((parameter) => parameter.type),
+                  handler.typeArguments,
+                )
+          const handlerEffect =
+            target === undefined || targetKey === undefined
+              ? undefined
+              : resultEffectIdentity(target, targetKey, results, index)
+          if (handlerEffect !== undefined) addDependency(catchExecution, effectNode(handlerEffect))
+          else if (targetKey !== undefined) addDependency(catchExecution, instanceNode(targetKey))
+        }
+        scanExpression(expression.protected, catchExecution)
+        scanExpression(expression.handler, catchExecution)
         return
       }
       if (expression._tag === 'Call') {
@@ -2700,12 +2869,17 @@ export const continuationAllocatorViolations = (
       resolving: new Set(),
     }
     for (const binding of requirementBindings(instance.function)) {
-      const capability = selectedRequirement(binding, instance.substitution)?.capability
+      const selected = selectedRequirement(binding, instance.substitution)
+      const capability = selected?.capability
       const provider = Type.substitute(binding.provider.providerType, instance.substitution)
       if (
         capability === undefined ||
         !Type.isNominal(capability) ||
         !Type.equals(capability, Type.allocator) ||
+        selected?.role !== 'DefaultRole' ||
+        selected.access !== 'Exclusive' ||
+        (binding.provider.selectionAccess !== 'Exclusive' &&
+          binding.provider.selectionAccess !== 'Take') ||
         !Type.isNominal(provider)
       )
         continue
@@ -3031,7 +3205,7 @@ export const discover = (
     callables: Object.freeze([...recordedCallables.values()]),
     effects: concreteEffects(instances, new Set(suspendableEffectIdentities), results, index),
     calls: callInstances,
-    intrinsics: reachableIntrinsics(instances, entry, callInstances, index),
+    intrinsics: reachableIntrinsics(instances, index),
     suspendableExecutions: Object.freeze(
       instances
         .filter((instance) => suspendable.has(instanceNode(instance.key)))

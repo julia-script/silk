@@ -170,14 +170,8 @@ it.effect(
                 slots: Object.freeze([
                   Object.freeze({
                     ...firstSlot,
-                    access: Object.freeze({
-                      _tag: 'BorrowedDependency' as const,
-                      access: 'Shared' as const,
-                      root: firstSlot.local,
-                      loan: Object.freeze({
-                        _tag: 'BorrowedLocal' as const,
-                        local: firstSlot.local,
-                      }),
+                    type: Object.freeze({
+                      _tag: firstSlot.type._tag === 'bool' ? 'i32' : 'bool',
                     }),
                   }),
                   ...descriptor.layout.slots.slice(1),
@@ -268,6 +262,36 @@ it.effect(
       assert.isTrue(
         hasRule(replaceSuspensionRegion(program, owner, relay, badOutcome), 'InvalidSuspension'),
       )
+
+      assert.strictEqual(relay.completion._tag, 'Propagate')
+      if (relay.completion._tag === 'Propagate') {
+        const firstMapping = relay.completion.failureMappings.at(0)
+        assert.isDefined(firstMapping)
+        if (firstMapping === undefined) return
+        for (const [field, tag] of [
+          ['source', 0],
+          ['source', Number.MAX_SAFE_INTEGER + 1],
+          ['target', 0],
+          ['target', Number.MAX_SAFE_INTEGER + 1],
+        ] as const) {
+          const badMapping = Object.freeze({
+            ...relay,
+            completion: Object.freeze({
+              ...relay.completion,
+              failureMappings: Object.freeze([
+                Object.freeze({ ...firstMapping, [field]: tag }),
+                ...relay.completion.failureMappings.slice(1),
+              ]),
+            }),
+          })
+          assert.isTrue(
+            hasRule(
+              replaceSuspensionRegion(program, owner, relay, badMapping),
+              'InvalidSuspension',
+            ),
+          )
+        }
+      }
 
       const differentOwner = program.functions.find((fn) => fn !== owner)
       assert.isDefined(differentOwner)

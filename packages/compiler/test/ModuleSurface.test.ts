@@ -1,13 +1,71 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as CallableContract from '../src/CallableContract.js'
+import * as Constraint from '../src/Constraint.js'
 import * as ModuleSurface from '../src/ModuleSurface.js'
+import * as RowAlgebra from '../src/RowAlgebra.js'
+import * as SourceSpan from '../src/SourceSpan.js'
+import * as Type from '../src/Type.js'
+import { unreachable } from './support/raise.js'
 
 const encoder = new TextEncoder()
 
 const surface = Effect.fnUntraced(function* (source: string) {
   const analysis = yield* Analysis.ofSource('surface/Main', encoder.encode(source))
   return analysis.surfaces.get('surface/Main') ?? assert.fail('missing module surface')
+})
+
+const firstSubstitution = (value: unknown): ReadonlyArray<unknown> | undefined => {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = firstSubstitution(entry)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  if (typeof value !== 'object' || value === null) return undefined
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === 'substitution' && Array.isArray(entry)) return entry
+    const found = firstSubstitution(entry)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+const replaceRecordField = (value: unknown, key: string, replacement: unknown): unknown =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? Object.fromEntries(
+        Object.entries(value).map(([field, entry]) => [field, field === key ? replacement : entry]),
+      )
+    : unreachable(`expected a record with ${key}`)
+
+const recordField = (value: unknown, key: string): unknown =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? Object.entries(value).find(([field]) => field === key)?.[1]
+    : undefined
+
+const forgeFirstSubstitution = Effect.fnUntraced(function* (
+  encoded: string,
+  transform: (entries: ReadonlyArray<unknown>) => ReadonlyArray<unknown>,
+) {
+  return yield* Effect.try(() => {
+    let replaced = false
+    const rewrite = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(rewrite)
+      if (typeof value !== 'object' || value === null) return value
+      return Object.fromEntries(
+        Object.entries(value).map(([key, entry]) => {
+          if (key !== 'substitution' || !Array.isArray(entry) || replaced)
+            return [key, rewrite(entry)]
+          replaced = true
+          return [key, transform(entry)]
+        }),
+      )
+    }
+    const forged = JSON.stringify(rewrite(JSON.parse(encoded)))
+    return replaced ? forged : unreachable('expected a serialized substitution')
+  })
 })
 
 it.effect('compares independently allocated equal facts exactly', () =>
@@ -71,11 +129,14 @@ it.effect('keeps string distinct from an immutable byte view in module surfaces'
 
     assert.strictEqual(ModuleSurface.equals(text, bytes), false)
     assert.include(text.canonical, 'string')
-    assert.include(bytes.canonical, 'slice:Shared<builtin:u8>')
+    assert.include(
+      bytes.canonical,
+      '{"tag":"Slice","access":"Shared","element":{"tag":"Atom","value":"u8"}}',
+    )
     // Pins the canonical surface encoding byte-for-byte; an encoding change must be deliberate.
     assert.strictEqual(
       text.canonical,
-      '13:ModuleSurface12:surface/Main650:5:Array639:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public8:Ordinary7:5:Array11:6:Number1:1103:5:Array93:9:Parameter11:6:Number1:021:11:PresentName5:value41:12:ResolvedType14:4:Type6:string7:5:False24:11:PresentName8:identity41:12:ResolvedType14:4:Type6:string7:5:False6:4:None133:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array137:14:RequirementRow6:4:True7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array',
+      '13:ModuleSurface12:surface/Main703:5:Array692:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public8:Ordinary7:5:Array11:6:Number1:1130:5:Array119:9:Parameter11:6:Number1:021:11:PresentName5:value67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False24:11:PresentName8:identity67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False6:4:None133:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array137:14:RequirementRow6:4:True7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array',
     )
   }),
 )
@@ -111,5 +172,1047 @@ impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }`)
 impl Drop for Guard { fn drop(self: &mut Guard) -> () { unsafe { return () } } }`)
 
     assert.strictEqual(ModuleSurface.equals(first, second), true)
+  }),
+)
+
+it.effect('round-trips constrained callable schemas without source origins', () =>
+  Effect.gen(function* () {
+    const owner = { module: 'surface/Main', name: 'provide' }
+    const selectedParameter = Type.parameter(owner, 0, 'S', 'RequirementRow')
+    const providerParameter = Type.parameter(owner, 1, 'P')
+    const sourceParameter = Type.parameter(owner, 2, 'R', 'RequirementRow')
+    const selected = RowAlgebra.parameter<
+      Type.Requirement,
+      Type.Parameter,
+      Type.RequirementMemberShape
+    >(selectedParameter)
+    const source = RowAlgebra.parameter<
+      Type.Requirement,
+      Type.Parameter,
+      Type.RequirementMemberShape
+    >(sourceParameter)
+    const wanted = Constraint.providerSelection('Exclusive', providerParameter, selected, source)
+    const logger = Type.nominal('silk/logging', 'Logger')
+    const provider = Type.nominal('surface/Logger', 'Provider')
+    const requirement: Type.Requirement = {
+      capability: logger,
+      role: 'DefaultRole',
+      access: 'Exclusive',
+    }
+    const selectedRequirements = RowAlgebra.concrete(Type.requirementRowPolicy(), [requirement])
+    const concreteWanted = Constraint.providerSelection(
+      'Exclusive',
+      provider,
+      selectedRequirements,
+      selectedRequirements,
+    )
+    const evidence = Constraint.requirementSelectionEvidence(concreteWanted, requirement, {
+      _tag: 'Conformance',
+      witness: {
+        origin: {
+          _tag: 'SourceWitness',
+          declaration: { module: 'surface/Logger', name: 'loggerConformance' },
+        },
+        typeArguments: [provider, Type.requirementRowArgument([requirement])],
+      },
+    })
+    const assumed = Constraint.assumed(wanted, new Map())
+    const contract = CallableContract.make({
+      functionKind: 'Effect',
+      binders: [selectedParameter, providerParameter, sourceParameter],
+      parameters: [
+        {
+          type: Type.effectWithRows(
+            Type.unit,
+            RowAlgebra.concrete(Type.failureRowPolicy(), []),
+            'Take',
+            source,
+          ),
+          mode: 'Take',
+        },
+        { type: Type.reference('Exclusive', providerParameter), mode: 'Exclusive' },
+      ],
+      result: Type.effectWithRows(
+        Type.unit,
+        RowAlgebra.concrete(Type.failureRowPolicy(), []),
+        'Take',
+        RowAlgebra.without(Type.requirementRowPolicy(), source, selected),
+      ),
+      constraints: [wanted],
+    })
+    const callable = Type.callable(
+      [contract.parameters.at(0)?.type ?? 'never'],
+      contract.result,
+      'Exclusive',
+      {
+        contract,
+        binders: contract.binders,
+        constraints: contract.constraints,
+        evidence: [assumed],
+        substitution: new Map([[Type.key(providerParameter), provider]]),
+        contractKey: CallableContract.key(contract),
+        constraintKeys: [Constraint.key(wanted)],
+        evidenceKeys: [Constraint.evidenceKey(assumed)],
+        origins: [
+          SourceSpan.fromOffsets('surface/Main', 20, 40) ??
+            unreachable('expected a valid source span'),
+        ],
+      },
+    )
+
+    const decoded = yield* ModuleSurface.decodeSemanticType(
+      ModuleSurface.encodeSemanticType(callable),
+    )
+    assert.strictEqual(Type.key(decoded), Type.key(callable))
+    assert.isTrue(Type.isCallable(decoded))
+    if (!Type.isCallable(decoded)) return
+    assert.deepEqual(decoded.schema?.origins, [])
+    assert.deepEqual(decoded.schema?.constraintKeys, callable.schema?.constraintKeys)
+    assert.deepEqual(decoded.schema?.evidenceKeys, callable.schema?.evidenceKeys)
+    const decodedConstraint = yield* ModuleSurface.decodeConstraint(
+      ModuleSurface.encodeConstraint(wanted),
+    )
+    assert.strictEqual(Constraint.key(decodedConstraint), Constraint.key(wanted))
+    assert.strictEqual(
+      decoded.schema?.constraints.at(0) === undefined
+        ? undefined
+        : Constraint.key(decoded.schema.constraints.at(0) ?? wanted),
+      Constraint.key(wanted),
+    )
+    assert.strictEqual(
+      decoded.schema?.evidence.at(0) === undefined
+        ? undefined
+        : Constraint.evidenceKey(decoded.schema.evidence.at(0) ?? assumed),
+      Constraint.evidenceKey(assumed),
+    )
+    const decodedEvidence = yield* ModuleSurface.decodeConstraintEvidence(
+      ModuleSurface.encodeConstraintEvidence(evidence),
+    )
+    assert.strictEqual(Constraint.evidenceKey(decodedEvidence), Constraint.evidenceKey(evidence))
+    const identityWanted = Constraint.providerSelection(
+      'Exclusive',
+      logger,
+      selectedRequirements,
+      selectedRequirements,
+    )
+    const identityEvidence = Constraint.requirementSelectionEvidence(identityWanted, requirement, {
+      _tag: 'Identity',
+    })
+    const decodedIdentityEvidence = yield* ModuleSurface.decodeConstraintEvidence(
+      ModuleSurface.encodeConstraintEvidence(identityEvidence),
+    )
+    assert.strictEqual(
+      Constraint.evidenceKey(decodedIdentityEvidence),
+      Constraint.evidenceKey(identityEvidence),
+    )
+    assert.include(Type.encode(decoded.result), 'Without<R, S>')
+  }),
+)
+
+it.effect('validates canonical substitutions against their local parameter scope', () =>
+  Effect.gen(function* () {
+    const owner = { module: 'surface/Substitution', name: 'callable' }
+    const first = Type.parameter(owner, 0, 'First')
+    const second = Type.parameter(owner, 1, 'Second')
+    const contract = CallableContract.make({
+      functionKind: 'Function',
+      binders: [first, second],
+      parameters: [{ type: 'i32', mode: 'Value' }],
+      result: 'i32',
+    })
+    const substitution: Type.Substitution = new Map([
+      [Type.key(first), 'i32'],
+      [Type.key(second), 'bool'],
+    ])
+    const schema: Type.CallableSchema = {
+      contract,
+      binders: contract.binders,
+      constraints: contract.constraints,
+      evidence: [],
+      substitution,
+      contractKey: CallableContract.key(contract),
+      constraintKeys: [],
+      evidenceKeys: [],
+      origins: [],
+    }
+    const callable = Type.callable(['i32'], 'i32', 'Shared', schema)
+    const callableEncoding = ModuleSurface.encodeSemanticType(callable)
+    const decodedCallable = yield* ModuleSurface.decodeSemanticType(callableEncoding)
+    assert.strictEqual(Type.key(decodedCallable), Type.key(callable))
+    assert.strictEqual(ModuleSurface.encodeSemanticType(decodedCallable), callableEncoding)
+    const residual = Type.callable(['i32'], 'i32', 'Shared', {
+      ...schema,
+      substitution: new Map<string, Type.GenericArgument>([[Type.key(first), 'i32']]),
+    })
+    const decodedResidual = yield* ModuleSurface.decodeSemanticType(
+      ModuleSurface.encodeSemanticType(residual),
+    )
+    assert.strictEqual(Type.key(decodedResidual), Type.key(residual))
+
+    const origin =
+      SourceSpan.fromOffsets('surface/Substitution', 0, 1) ??
+      unreachable('expected substitution source span')
+    const wanted = Constraint.nominalMember(
+      first,
+      RowAlgebra.singleton(Type.failureRowPolicy(), Type.failureMemberShape(second), origin),
+    )
+    const assumed = Constraint.assumed(wanted, substitution)
+    const assumedEncoding = ModuleSurface.encodeConstraintEvidence(assumed)
+    const decodedAssumed = yield* ModuleSurface.decodeConstraintEvidence(assumedEncoding)
+    assert.strictEqual(Constraint.evidenceKey(decodedAssumed), Constraint.evidenceKey(assumed))
+    assert.strictEqual(ModuleSurface.encodeConstraintEvidence(decodedAssumed), assumedEncoding)
+
+    const rowParameter = Type.parameter(
+      { module: 'surface/Substitution', name: 'rowCallable' },
+      0,
+      'Failures',
+      'FailureRow',
+    )
+    const rowContract = CallableContract.make({
+      functionKind: 'Function',
+      binders: [rowParameter],
+      parameters: [{ type: 'i32', mode: 'Value' }],
+      result: 'i32',
+    })
+    const rowSubstitution: Type.Substitution = new Map([
+      [Type.key(rowParameter), Type.failureRowArgument([])],
+    ])
+    const rowCallable = Type.callable(['i32'], 'i32', 'Shared', {
+      contract: rowContract,
+      binders: rowContract.binders,
+      constraints: [],
+      evidence: [],
+      substitution: rowSubstitution,
+      contractKey: CallableContract.key(rowContract),
+      constraintKeys: [],
+      evidenceKeys: [],
+      origins: [],
+    })
+    const rowEncoding = ModuleSurface.encodeSemanticType(rowCallable)
+    const parsedRow = yield* Effect.try(() => JSON.parse(rowEncoding))
+    const rowEntry =
+      firstSubstitution(parsedRow)?.at(0) ?? unreachable('expected row substitution entry')
+    const wrongKindArgument =
+      recordField(rowEntry, 'argument') ?? unreachable('expected row substitution argument')
+
+    const mutations: ReadonlyArray<
+      readonly [string, string, (entries: ReadonlyArray<unknown>) => ReadonlyArray<unknown>]
+    > = [
+      [
+        'duplicate',
+        'duplicate parameter',
+        (entries) => [
+          ...entries,
+          entries.at(-1) ?? unreachable('expected substitution entry to duplicate'),
+        ],
+      ],
+      ['reversed', 'canonical order', (entries) => [...entries].reverse()],
+      [
+        'unknown',
+        'unknown parameter',
+        (entries) => [
+          replaceRecordField(
+            entries.at(0) ?? unreachable('expected substitution entry to rename'),
+            'parameter',
+            '',
+          ),
+          ...entries.slice(1),
+        ],
+      ],
+      [
+        'wrong-kind',
+        'wrong kind',
+        (entries) => [
+          replaceRecordField(
+            entries.at(0) ?? unreachable('expected substitution entry to damage'),
+            'argument',
+            wrongKindArgument,
+          ),
+          ...entries.slice(1),
+        ],
+      ],
+    ]
+
+    for (const [context, detail, mutate] of mutations) {
+      const forgedCallable = yield* forgeFirstSubstitution(callableEncoding, mutate)
+      const callableFailure = yield* Effect.flip(ModuleSurface.decodeSemanticType(forgedCallable))
+      assert.instanceOf(callableFailure, ModuleSurface.ModuleSurfaceDecodeError, context)
+      assert.include(callableFailure.reason.detail, detail, context)
+
+      const forgedAssumed = yield* forgeFirstSubstitution(assumedEncoding, mutate)
+      const assumedFailure = yield* Effect.flip(
+        ModuleSurface.decodeConstraintEvidence(forgedAssumed),
+      )
+      assert.instanceOf(assumedFailure, ModuleSurface.ModuleSurfaceDecodeError, context)
+      assert.include(assumedFailure.reason.detail, detail, context)
+    }
+  }),
+)
+
+it.effect('round-trips substitutions independently through nested callable scopes', () =>
+  Effect.gen(function* () {
+    const innerParameter = Type.parameter({ module: 'surface/Nested', name: 'inner' }, 0, 'Inner')
+    const innerContract = CallableContract.make({
+      functionKind: 'Function',
+      binders: [innerParameter],
+      parameters: [{ type: innerParameter, mode: 'Value' }],
+      result: innerParameter,
+    })
+    const inner = Type.callable(['i32'], 'i32', 'Shared', {
+      contract: innerContract,
+      binders: innerContract.binders,
+      constraints: [],
+      evidence: [],
+      substitution: new Map<string, Type.GenericArgument>([[Type.key(innerParameter), 'i32']]),
+      contractKey: CallableContract.key(innerContract),
+      constraintKeys: [],
+      evidenceKeys: [],
+      origins: [],
+    })
+    const outerParameter = Type.parameter({ module: 'surface/Nested', name: 'outer' }, 0, 'Outer')
+    const outerContract = CallableContract.make({
+      functionKind: 'Function',
+      binders: [outerParameter],
+      parameters: [{ type: inner, mode: 'Value' }],
+      result: outerParameter,
+    })
+    const outerSchema: Type.CallableSchema = {
+      contract: outerContract,
+      binders: outerContract.binders,
+      constraints: [],
+      evidence: [],
+      substitution: new Map<string, Type.GenericArgument>([[Type.key(outerParameter), 'bool']]),
+      contractKey: CallableContract.key(outerContract),
+      constraintKeys: [],
+      evidenceKeys: [],
+      origins: [],
+    }
+    const outer = Type.callable([inner], 'bool', 'Take', outerSchema)
+
+    const decoded = yield* ModuleSurface.decodeSemanticType(ModuleSurface.encodeSemanticType(outer))
+    assert.strictEqual(Type.key(decoded), Type.key(outer))
+    assert.strictEqual(
+      ModuleSurface.encodeSemanticType(decoded),
+      ModuleSurface.encodeSemanticType(outer),
+    )
+
+    const leakedNestedBinder = Type.callable([inner], 'bool', 'Take', {
+      ...outerSchema,
+      substitution: new Map<string, Type.GenericArgument>([
+        [Type.key(innerParameter), 'i32'],
+        [Type.key(outerParameter), 'bool'],
+      ]),
+    })
+    const failure = yield* Effect.flip(
+      ModuleSurface.decodeSemanticType(ModuleSurface.encodeSemanticType(leakedNestedBinder)),
+    )
+    assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError)
+    assert.include(failure.reason.detail, 'unknown parameter')
+  }),
+)
+
+it.effect('rejects forged failure and requirement member-obligation branding', () =>
+  Effect.gen(function* () {
+    const owner = { module: 'surface/Obligations', name: 'effect' }
+    const failureParameter = Type.parameter(owner, 0, 'Failure')
+    const capabilityParameter = Type.parameter(owner, 1, 'Capability')
+    const origin =
+      SourceSpan.fromOffsets('surface/Obligations', 0, 1) ??
+      unreachable('expected a valid source span')
+    const failureMember = Type.failureMemberShape(failureParameter)
+    const requirementMember = Type.requirementMemberShape(capabilityParameter, 'Exclusive', 'Audit')
+    const failureRow = RowAlgebra.singleton(Type.failureRowPolicy(), failureMember, origin)
+    const requirementRow = RowAlgebra.singleton(
+      Type.requirementRowPolicy(),
+      requirementMember,
+      origin,
+    )
+    const encoded = ModuleSurface.encodeSemanticType(
+      Type.effectWithRows('i32', failureRow, 'Take', requirementRow),
+    )
+    const failureKey = Type.failureRowPolicy().memberWellFormedKey(failureMember)
+    const requirementKey = Type.requirementRowPolicy().memberWellFormedKey(requirementMember)
+
+    for (const key of [failureKey, requirementKey]) {
+      const forged = encoded.replace(
+        `"key":${JSON.stringify(key)}`,
+        `"key":${JSON.stringify(`forged:${key}`)}`,
+      )
+      assert.notStrictEqual(forged, encoded)
+      const failure = yield* Effect.flip(ModuleSurface.decodeSemanticType(forged))
+      assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError)
+      assert.strictEqual(failure.reason._tag, 'InvalidEncoding')
+    }
+  }),
+)
+
+it.effect('rejects parameter kinds and builtin operations forged into incompatible slots', () =>
+  Effect.gen(function* () {
+    const owner = { module: 'surface/InvalidSlots', name: 'decode' }
+    const origin =
+      SourceSpan.fromOffsets('surface/InvalidSlots', 0, 1) ??
+      unreachable('expected a valid source span')
+    const noFailures = RowAlgebra.concrete(Type.failureRowPolicy(), [])
+    const noRequirements = RowAlgebra.concrete(Type.requirementRowPolicy(), [])
+    const valueParameter = Type.parameter(owner, 0, 'Value')
+    const failureParameter = Type.parameter(owner, 1, 'Failure', 'FailureRow')
+    const requirementParameter = Type.parameter(owner, 2, 'Requirements', 'RequirementRow')
+    const callable = Type.callable([], Type.unit)
+    const effect = Type.effect(Type.unit, [])
+    const invalidFailureMember = Type.failureMemberShape(failureParameter)
+    const invalidRequirementMember = Type.requirementMemberShape(
+      requirementParameter,
+      'Exclusive',
+      'Audit',
+    )
+    const builtinIdentity = Type.callableIdentityArgument('surface.invalid-builtin', {
+      _tag: 'Builtin',
+      actor: 'i32',
+      operation: 'Add',
+      intrinsic: { actor: 'i32', name: 'add' },
+    })
+    const malformed: ReadonlyArray<readonly [string, string]> = [
+      [
+        'failure whole-row parameter',
+        ModuleSurface.encodeSemanticType(
+          Type.effectWithRows(
+            Type.unit,
+            RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(
+              valueParameter,
+            ),
+            'Take',
+            noRequirements,
+          ),
+        ),
+      ],
+      [
+        'requirement whole-row parameter',
+        ModuleSurface.encodeSemanticType(
+          Type.effectWithRows(
+            Type.unit,
+            noFailures,
+            'Take',
+            RowAlgebra.parameter<Type.Requirement, Type.Parameter, Type.RequirementMemberShape>(
+              valueParameter,
+            ),
+          ),
+        ),
+      ],
+      [
+        'failure lifted-member parameter',
+        ModuleSurface.encodeSemanticType(
+          Type.effectWithRows(
+            Type.unit,
+            RowAlgebra.singleton(Type.failureRowPolicy(), invalidFailureMember, origin),
+            'Take',
+            noRequirements,
+          ),
+        ),
+      ],
+      [
+        'requirement lifted-member parameter',
+        ModuleSurface.encodeSemanticType(
+          Type.effectWithRows(
+            Type.unit,
+            noFailures,
+            'Take',
+            RowAlgebra.singleton(Type.requirementRowPolicy(), invalidRequirementMember, origin),
+          ),
+        ),
+      ],
+      ['ordinary value parameter', ModuleSurface.encodeSemanticType(failureParameter)],
+      [
+        'representation parameter argument',
+        ModuleSurface.encodeSemanticType(
+          Type.nominal('surface/InvalidSlots', 'Holder', [
+            Type.representationParameterArgument(valueParameter),
+          ]),
+        ),
+      ],
+      [
+        'representation parameter bound',
+        ModuleSurface.encodeSemanticType(
+          Type.nominal('surface/InvalidSlots', 'Holder', [
+            Type.representationParameterArgument(
+              Type.parameter(owner, 3, 'Mismatched', 'CallableRepresentation', effect),
+            ),
+          ]),
+        ),
+      ],
+      [
+        'exact representation identity',
+        ModuleSurface.encodeSemanticType(
+          Type.nominal('surface/InvalidSlots', 'Holder', [
+            Type.exactRepresentationArgument(
+              Type.effectIdentityArgument('surface.invalid-effect'),
+              callable,
+            ),
+          ]),
+        ),
+      ],
+      [
+        'builtin operation',
+        ModuleSurface.encodeSemanticType(
+          Type.nominal('surface/InvalidSlots', 'Holder', [builtinIdentity]),
+        ).replace('"operation":"Add"', '"operation":"DefinitelyNotAnOperation"'),
+      ],
+      ['negative fixed-array length', ModuleSurface.encodeSemanticType(Type.fixedArray('i32', -1))],
+    ]
+
+    for (const [context, encoded] of malformed) {
+      const failure = yield* Effect.flip(ModuleSurface.decodeSemanticType(encoded))
+      assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError, context)
+      assert.strictEqual(failure.operation, 'ModuleSurface.decodeSemanticType', context)
+      assert.strictEqual(failure.reason._tag, 'InvalidEncoding', context)
+    }
+
+    assert.strictEqual(Type.isBuiltinOperation('Add'), true)
+    assert.strictEqual(Type.isBuiltinOperation('EffectSuspend'), true)
+    assert.strictEqual(Type.isBuiltinOperation('DefinitelyNotAnOperation'), false)
+  }),
+)
+
+it.effect('rejects negative semantic ordinals in every serialized identity family', () =>
+  Effect.gen(function* () {
+    const owner = { module: 'surface/InvalidOrdinals', name: 'decode' }
+    const callable = Type.callable([], Type.unit)
+    const callableIdentity = (site: Type.CallableEnvironmentSite): Type.Type =>
+      Type.nominal('surface/InvalidOrdinals', 'Holder', [
+        Type.callableIdentityArgument(
+          'surface.invalid-ordinal',
+          {
+            _tag: 'Declaration',
+            module: 'surface/InvalidOrdinals',
+            name: 'callable',
+          },
+          [],
+          Type.callableEnvironmentIdentity(site, {
+            declaration: owner,
+            typeArguments: [],
+          }),
+        ),
+      ])
+    const malformed: ReadonlyArray<readonly [string, Type.Type]> = [
+      ['generic parameter', Type.parameter(owner, -1, 'Value')],
+      [
+        'declared callable environment site',
+        callableIdentity(Type.callableEnvironmentSite(owner, 0, -1)),
+      ],
+      [
+        'recovered callable environment function',
+        callableIdentity(Type.callableEnvironmentSite(undefined, -1, 0)),
+      ],
+      [
+        'recovered callable environment site',
+        callableIdentity(Type.callableEnvironmentSite(undefined, 0, -1)),
+      ],
+      [
+        'opaque representation binder',
+        Type.nominal('surface/InvalidOrdinals', 'Holder', [
+          Type.opaqueRepresentationArgument(
+            {
+              _tag: 'OpaqueFamilyKey',
+              producer: owner,
+              binderOrdinal: -1,
+            },
+            callable,
+            [],
+          ),
+        ]),
+      ],
+    ]
+
+    for (const [context, value] of malformed) {
+      const failure = yield* Effect.flip(
+        ModuleSurface.decodeSemanticType(ModuleSurface.encodeSemanticType(value)),
+      )
+      assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError, context)
+      assert.strictEqual(failure.operation, 'ModuleSurface.decodeSemanticType', context)
+      assert.strictEqual(failure.reason._tag, 'InvalidEncoding', context)
+    }
+  }),
+)
+
+it.effect('round-trips callable and Effect representation slots with matching kinds', () =>
+  Effect.gen(function* () {
+    const owner = { module: 'surface/RepresentationSlots', name: 'decode' }
+    const callable = Type.callable([], Type.unit)
+    const effect = Type.effect(Type.unit, [])
+    const values: ReadonlyArray<Type.Type> = [
+      Type.nominal('surface/RepresentationSlots', 'OpenCallable', [
+        Type.representationParameterArgument(
+          Type.parameter(owner, 0, 'F', 'CallableRepresentation', callable),
+        ),
+      ]),
+      Type.nominal('surface/RepresentationSlots', 'OpenEffect', [
+        Type.representationParameterArgument(
+          Type.parameter(owner, 1, 'E', 'EffectRepresentation', effect),
+        ),
+      ]),
+      Type.nominal('surface/RepresentationSlots', 'ExactCallable', [
+        Type.exactRepresentationArgument(
+          Type.callableIdentityArgument('surface.callable', {
+            _tag: 'Declaration',
+            module: 'surface/RepresentationSlots',
+            name: 'callable',
+          }),
+          callable,
+        ),
+      ]),
+      Type.nominal('surface/RepresentationSlots', 'ExactEffect', [
+        Type.exactRepresentationArgument(Type.effectIdentityArgument('surface.effect'), effect),
+      ]),
+    ]
+
+    for (const value of values) {
+      const decoded = yield* ModuleSurface.decodeSemanticType(
+        ModuleSurface.encodeSemanticType(value),
+      )
+      assert.strictEqual(Type.key(decoded), Type.key(value))
+    }
+  }),
+)
+
+it.effect('canonicalizes finite collisions, union order, and reducible Without encodings', () =>
+  Effect.gen(function* () {
+    const nominal = (name: string) => ({
+      tag: 'Nominal',
+      module: 'surface/CanonicalRows',
+      name,
+      arguments: [],
+    })
+    const concrete = (members: ReadonlyArray<unknown>) => ({
+      tag: 'Concrete',
+      members,
+    })
+    const row = (expression: unknown) => ({ tag: 'Row', expression, obligations: [] })
+    const effect = (failureRow: unknown, requirementRow: unknown) =>
+      JSON.stringify({
+        tag: 'Effect',
+        success: { tag: 'Atom', value: 'i32' },
+        failureRow,
+        requirementRow,
+        access: 'Take',
+      })
+    const first = Type.nominal('surface/CanonicalRows', 'First')
+    const second = Type.nominal('surface/CanonicalRows', 'Second')
+    const clock = Type.nominal('surface/CanonicalRows', 'Clock')
+    const logger = Type.nominal('surface/CanonicalRows', 'Logger')
+    const noFailures = RowAlgebra.concrete(Type.failureRowPolicy(), [])
+    const noRequirements = RowAlgebra.concrete(Type.requirementRowPolicy(), [])
+    const encodedNoRequirements = row(concrete([]))
+
+    const decodedUnion = yield* ModuleSurface.decodeSemanticType(
+      effect(
+        row({
+          tag: 'Union',
+          operands: [
+            concrete([nominal('Second')]),
+            {
+              tag: 'Union',
+              operands: [concrete([nominal('First')]), concrete([nominal('Second')]), concrete([])],
+            },
+          ],
+        }),
+        encodedNoRequirements,
+      ),
+    )
+    const unionEffect = Type.isEffect(decodedUnion)
+      ? decodedUnion
+      : unreachable('expected a decoded Effect')
+    assert.strictEqual(
+      Type.key(unionEffect),
+      Type.key(
+        Type.effectWithRows(
+          'i32',
+          RowAlgebra.concrete(Type.failureRowPolicy(), [first, second]),
+          'Take',
+          noRequirements,
+        ),
+      ),
+    )
+
+    const decodedRequirements = yield* ModuleSurface.decodeSemanticType(
+      effect(
+        row(concrete([])),
+        row(
+          concrete([
+            {
+              tag: 'Requirement',
+              capability: nominal('Logger'),
+              role: 'DefaultRole',
+              access: 'Exclusive',
+            },
+            {
+              tag: 'Requirement',
+              capability: nominal('Clock'),
+              role: 'DefaultRole',
+              access: 'Shared',
+            },
+            {
+              tag: 'Requirement',
+              capability: nominal('Clock'),
+              role: 'DefaultRole',
+              access: 'Exclusive',
+            },
+          ]),
+        ),
+      ),
+    )
+    const requirementEffect = Type.isEffect(decodedRequirements)
+      ? decodedRequirements
+      : unreachable('expected a decoded Effect')
+    const expectedRequirements = RowAlgebra.concrete(Type.requirementRowPolicy(), [
+      { capability: clock, role: 'DefaultRole', access: 'Exclusive' },
+      { capability: logger, role: 'DefaultRole', access: 'Exclusive' },
+    ])
+    assert.strictEqual(
+      Type.key(requirementEffect),
+      Type.key(Type.effectWithRows('i32', noFailures, 'Take', expectedRequirements)),
+    )
+
+    const decodedWithout = yield* ModuleSurface.decodeSemanticType(
+      effect(
+        row({
+          tag: 'Without',
+          source: concrete([nominal('Second'), nominal('First'), nominal('First')]),
+          selected: concrete([nominal('First')]),
+        }),
+        encodedNoRequirements,
+      ),
+    )
+    const withoutEffect = Type.isEffect(decodedWithout)
+      ? decodedWithout
+      : unreachable('expected a decoded Effect')
+    assert.strictEqual(
+      Type.key(withoutEffect),
+      Type.key(
+        Type.effectWithRows(
+          'i32',
+          RowAlgebra.concrete(Type.failureRowPolicy(), [second]),
+          'Take',
+          noRequirements,
+        ),
+      ),
+    )
+  }),
+)
+
+it.effect('round-trips distinct witness identities and provider matches', () =>
+  Effect.gen(function* () {
+    const declaration = {
+      _tag: 'SourceWitness' as const,
+      declaration: { module: 'surface/Provider', name: 'conditional' },
+    }
+    const first: Constraint.WitnessIdentity = {
+      origin: declaration,
+      typeArguments: ['i32'],
+    }
+    const second: Constraint.WitnessIdentity = {
+      origin: declaration,
+      typeArguments: ['bool'],
+    }
+    const intrinsic: Constraint.WitnessIdentity = {
+      origin: { _tag: 'IntrinsicWitness', operation: 'surface/Provider.conditional' },
+      typeArguments: ['i32'],
+    }
+    const decodedFirst = yield* ModuleSurface.decodeWitnessIdentity(
+      ModuleSurface.encodeWitnessIdentity(first),
+    )
+    const decodedSecond = yield* ModuleSurface.decodeWitnessIdentity(
+      ModuleSurface.encodeWitnessIdentity(second),
+    )
+
+    assert.strictEqual(Constraint.witnessKey(decodedFirst), Constraint.witnessKey(first))
+    assert.strictEqual(Constraint.witnessKey(decodedSecond), Constraint.witnessKey(second))
+    assert.notStrictEqual(Constraint.witnessKey(decodedFirst), Constraint.witnessKey(decodedSecond))
+    const decodedIntrinsic = yield* ModuleSurface.decodeWitnessIdentity(
+      ModuleSurface.encodeWitnessIdentity(intrinsic),
+    )
+    assert.strictEqual(Constraint.witnessKey(decodedIntrinsic), Constraint.witnessKey(intrinsic))
+    assert.notStrictEqual(
+      Constraint.witnessKey(decodedFirst),
+      Constraint.witnessKey(decodedIntrinsic),
+    )
+
+    for (const match of [
+      { _tag: 'Identity' as const },
+      { _tag: 'Conformance' as const, witness: first },
+    ]) {
+      const decoded = yield* ModuleSurface.decodeProviderMatch(
+        ModuleSurface.encodeProviderMatch(match),
+      )
+      assert.strictEqual(Constraint.providerMatchKey(decoded), Constraint.providerMatchKey(match))
+    }
+  }),
+)
+
+it.effect('rejects forged callable-schema brands and structural evidence', () =>
+  Effect.gen(function* () {
+    const owner = { module: 'surface/Forged', name: 'section' }
+    const selectedParameter = Type.parameter(owner, 0, 'S', 'FailureRow')
+    const sourceParameter = Type.parameter(owner, 1, 'R', 'FailureRow')
+    const selected = RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(
+      selectedParameter,
+    )
+    const source = RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(
+      sourceParameter,
+    )
+    const wanted = Constraint.failureSubset(selected, source)
+    const evidence = Constraint.assumed(wanted, new Map())
+    const contract = CallableContract.make({
+      functionKind: 'Function',
+      binders: [selectedParameter, sourceParameter],
+      parameters: [
+        { type: 'i32', mode: 'Value' },
+        { type: 'bool', mode: 'Value' },
+      ],
+      result: 'i32',
+      constraints: [wanted],
+    })
+    const schema: Type.CallableSchema = {
+      contract,
+      binders: contract.binders,
+      constraints: contract.constraints,
+      evidence: [evidence],
+      substitution: new Map(),
+      contractKey: CallableContract.key(contract),
+      constraintKeys: contract.constraints.map(Constraint.key),
+      evidenceKeys: [Constraint.evidenceKey(evidence)],
+      origins: [],
+    }
+    const callable = Type.callable(['i32', 'bool'], 'i32', 'Shared', schema)
+    const encoded = ModuleSurface.encodeSemanticType(callable)
+    const forgeries = [
+      encoded.replace(
+        `"contractKey":${JSON.stringify(callable.schema?.contractKey)}`,
+        '"contractKey":"forged-contract"',
+      ),
+      encoded.replace(
+        `"constraintKeys":${JSON.stringify(callable.schema?.constraintKeys)}`,
+        '"constraintKeys":["forged-constraint"]',
+      ),
+      encoded.replace(
+        `"evidenceKeys":${JSON.stringify(callable.schema?.evidenceKeys)}`,
+        '"evidenceKeys":["forged-evidence"]',
+      ),
+      encoded.replace(
+        '"result":{"tag":"Atom","value":"i32"}',
+        '"result":{"tag":"Atom","value":"bool"}',
+      ),
+      encoded.replace(
+        '"parameters":[{"tag":"Atom","value":"i32"},{"tag":"Atom","value":"bool"}]',
+        '"parameters":[{"tag":"Atom","value":"bool"}]',
+      ),
+    ]
+    for (const forged of forgeries) {
+      assert.notStrictEqual(forged, encoded)
+      const failure = yield* Effect.flip(ModuleSurface.decodeSemanticType(forged))
+      assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError)
+      assert.strictEqual(failure.reason._tag, 'InvalidEncoding')
+    }
+    const partial = Type.callable(['i32'], 'i32', 'Take', schema)
+    const decodedPartial = yield* ModuleSurface.decodeSemanticType(
+      ModuleSurface.encodeSemanticType(partial),
+    )
+    assert.strictEqual(Type.key(decodedPartial), Type.key(partial))
+
+    const selectedFailure = Type.nominal('surface/Forged', 'SelectedFailure')
+    const otherFailure = Type.nominal('surface/Forged', 'OtherFailure')
+    const selectedFailures = RowAlgebra.concrete(Type.failureRowPolicy(), [selectedFailure])
+    const otherFailures = RowAlgebra.concrete(Type.failureRowPolicy(), [otherFailure])
+    const capability = Type.nominal('surface/Forged', 'Capability')
+    const requirement: Type.Requirement = {
+      capability,
+      role: 'DefaultRole',
+      access: 'Exclusive',
+    }
+    const selectedRequirements = RowAlgebra.concrete(Type.requirementRowPolicy(), [requirement])
+    const noRequirements = RowAlgebra.concrete(Type.requirementRowPolicy(), [])
+    const validEvidence: ReadonlyArray<Constraint.ConstraintEvidence> = [
+      { _tag: 'Member', selected: selectedFailure, source: selectedFailures },
+      {
+        _tag: 'FailureSubset',
+        selected: selectedFailures,
+        source: RowAlgebra.concrete(Type.failureRowPolicy(), [selectedFailure, otherFailure]),
+      },
+      {
+        _tag: 'RequirementSubset',
+        selected: selectedRequirements,
+        source: selectedRequirements,
+      },
+    ]
+    for (const proof of validEvidence) {
+      const decoded = yield* ModuleSurface.decodeConstraintEvidence(
+        ModuleSurface.encodeConstraintEvidence(proof),
+      )
+      assert.strictEqual(Constraint.evidenceKey(decoded), Constraint.evidenceKey(proof))
+    }
+    const falseEvidence: ReadonlyArray<Constraint.ConstraintEvidence> = [
+      { _tag: 'Member', selected: selectedFailure, source: otherFailures },
+      { _tag: 'FailureSubset', selected: selectedFailures, source: otherFailures },
+      { _tag: 'RequirementSubset', selected: selectedRequirements, source: noRequirements },
+    ]
+    for (const forged of falseEvidence) {
+      const failure = yield* Effect.flip(
+        ModuleSurface.decodeConstraintEvidence(ModuleSurface.encodeConstraintEvidence(forged)),
+      )
+      assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError)
+      assert.strictEqual(failure.reason._tag, 'InvalidEncoding')
+    }
+
+    const provider = Type.nominal('surface/Forged', 'Provider')
+    const unavailableInner = Type.nominal('surface/Forged', 'Inner', [
+      Type.unavailableGenericArgument('Value', 'unresolved nested surface argument'),
+    ])
+    const unavailableProvider = Type.nominal('surface/Forged', 'Provider', [unavailableInner])
+    const unavailableCapability = Type.nominal('surface/Forged', 'UnavailableCapability', [
+      unavailableInner,
+    ])
+    const otherCapability = Type.nominal('surface/Forged', 'OtherCapability')
+    const otherRequirement: Type.Requirement = {
+      capability: otherCapability,
+      role: 'DefaultRole',
+      access: 'Exclusive',
+    }
+    const otherRequirements = RowAlgebra.concrete(Type.requirementRowPolicy(), [otherRequirement])
+    const providerMatch: Constraint.ProviderMatch = {
+      _tag: 'Conformance',
+      witness: {
+        origin: {
+          _tag: 'SourceWitness',
+          declaration: { module: 'surface/Forged', name: 'providerConformance' },
+        },
+        typeArguments: [],
+      },
+    }
+    const unavailableWitness: Constraint.WitnessIdentity = {
+      origin: {
+        _tag: 'SourceWitness',
+        declaration: { module: 'surface/Forged', name: 'unavailableConformance' },
+      },
+      typeArguments: [unavailableInner],
+    }
+    const witnessFailure = yield* Effect.flip(
+      ModuleSurface.decodeWitnessIdentity(ModuleSurface.encodeWitnessIdentity(unavailableWitness)),
+    )
+    assert.instanceOf(witnessFailure, ModuleSurface.ModuleSurfaceDecodeError)
+    assert.strictEqual(witnessFailure.reason._tag, 'InvalidEncoding')
+    const selectedWanted = Constraint.providerSelection(
+      'Exclusive',
+      provider,
+      selectedRequirements,
+      selectedRequirements,
+    )
+    const sharedWanted = Constraint.providerSelection(
+      'Shared',
+      capability,
+      selectedRequirements,
+      selectedRequirements,
+    )
+    const missingSourceWanted = Constraint.providerSelection(
+      'Exclusive',
+      provider,
+      selectedRequirements,
+      noRequirements,
+    )
+    const multipleSelectedWanted = Constraint.providerSelection(
+      'Exclusive',
+      provider,
+      RowAlgebra.union(Type.requirementRowPolicy(), selectedRequirements, otherRequirements),
+      RowAlgebra.union(Type.requirementRowPolicy(), selectedRequirements, otherRequirements),
+    )
+    const unavailableRequirement: Type.Requirement = {
+      capability: unavailableCapability,
+      role: 'DefaultRole',
+      access: 'Exclusive',
+    }
+    const unavailableRequirements = RowAlgebra.concrete(Type.requirementRowPolicy(), [
+      unavailableRequirement,
+    ])
+    const sourceWithUnavailable = RowAlgebra.union(
+      Type.requirementRowPolicy(),
+      selectedRequirements,
+      unavailableRequirements,
+    )
+    const forgedSelections: ReadonlyArray<Constraint.ConstraintEvidence> = [
+      Constraint.requirementSelectionEvidence(selectedWanted, otherRequirement, providerMatch),
+      Constraint.requirementSelectionEvidence(selectedWanted, requirement, { _tag: 'Identity' }),
+      Constraint.requirementSelectionEvidence(
+        Constraint.providerSelection(
+          'Exclusive',
+          capability,
+          selectedRequirements,
+          selectedRequirements,
+        ),
+        requirement,
+        providerMatch,
+      ),
+      Constraint.requirementSelectionEvidence(sharedWanted, requirement, { _tag: 'Identity' }),
+      Constraint.requirementSelectionEvidence(missingSourceWanted, requirement, providerMatch),
+      Constraint.requirementSelectionEvidence(multipleSelectedWanted, requirement, providerMatch),
+      Constraint.requirementSelectionEvidence(
+        Constraint.providerSelection(
+          'Exclusive',
+          unavailableProvider,
+          selectedRequirements,
+          selectedRequirements,
+        ),
+        requirement,
+        providerMatch,
+      ),
+      Constraint.requirementSelectionEvidence(
+        Constraint.providerSelection(
+          'Exclusive',
+          provider,
+          selectedRequirements,
+          sourceWithUnavailable,
+        ),
+        requirement,
+        providerMatch,
+      ),
+      Constraint.requirementSelectionEvidence(selectedWanted, requirement, {
+        _tag: 'Conformance',
+        witness: unavailableWitness,
+      }),
+    ]
+    for (const forged of forgedSelections) {
+      const failure = yield* Effect.flip(
+        ModuleSurface.decodeConstraintEvidence(ModuleSurface.encodeConstraintEvidence(forged)),
+      )
+      assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError)
+      assert.strictEqual(failure.reason._tag, 'InvalidEncoding')
+    }
+  }),
+)
+
+it.effect('rejects malformed semantic encodings through the typed boundary', () =>
+  Effect.gen(function* () {
+    const cases: ReadonlyArray<
+      readonly [
+        ModuleSurface.DecodeOperation,
+        Effect.Effect<unknown, ModuleSurface.ModuleSurfaceDecodeError>,
+      ]
+    > = [
+      ['ModuleSurface.decodeSemanticType', ModuleSurface.decodeSemanticType('{')],
+      ['ModuleSurface.decodeConstraint', ModuleSurface.decodeConstraint('{')],
+      ['ModuleSurface.decodeConstraintEvidence', ModuleSurface.decodeConstraintEvidence('{')],
+      ['ModuleSurface.decodeWitnessIdentity', ModuleSurface.decodeWitnessIdentity('{')],
+      ['ModuleSurface.decodeProviderMatch', ModuleSurface.decodeProviderMatch('{')],
+    ]
+
+    for (const [operation, decoding] of cases) {
+      const failure = yield* Effect.flip(decoding)
+      assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError)
+      assert.strictEqual(failure.operation, operation)
+      assert.strictEqual(failure.reason._tag, 'InvalidEncoding')
+    }
+
+    const structuredFailure = yield* Effect.flip(
+      ModuleSurface.decodeSemanticType('{"tag":"UnknownType"}'),
+    )
+    assert.instanceOf(structuredFailure, ModuleSurface.ModuleSurfaceDecodeError)
+    assert.strictEqual(structuredFailure.operation, 'ModuleSurface.decodeSemanticType')
+    assert.strictEqual(structuredFailure.reason._tag, 'InvalidEncoding')
   }),
 )

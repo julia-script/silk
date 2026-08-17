@@ -832,7 +832,9 @@ const substituteFailureRowFact = (
       Type.failureRowParameters(rows).length === 0 &&
       members.every(
         (member) =>
-          member._tag === 'Resolved' && Type.isNominal(member.type) && Type.isConcrete(member.type),
+          member._tag === 'Resolved' &&
+          Type.isNominal(member.type) &&
+          Type.isRuntimeConcrete(member.type),
       ),
   })
 }
@@ -862,7 +864,8 @@ const substituteRequirementRowFact = (
       entries.every(
         (entry) =>
           entry.capability._tag === 'Resolved' &&
-          (Type.isNominal(entry.capability.type) ||
+          ((Type.isNominal(entry.capability.type) &&
+            Type.isRuntimeConcrete(entry.capability.type)) ||
             (Type.isParameter(entry.capability.type) && entry.capability.type.kind === 'Value')),
       ),
   })
@@ -3682,7 +3685,7 @@ const resolveExactRepresentation = (
   const concrete = supplied.filter(
     (argument): argument is Type.GenericArgument => argument !== undefined,
   )
-  const concreteCount = concrete.filter(Type.isConcreteGenericArgument).length
+  const concreteCount = concrete.filter(Type.isRuntimeConcreteGenericArgument).length
   if (concreteCount !== concrete.length)
     return reject(open(declaration.typeParameters.length, concreteCount), declaration)
   const substitution = Type.substitution(
@@ -5073,7 +5076,7 @@ const resolveFailureRow = (
     if (
       member._tag !== 'Resolved' ||
       !Type.isNominal(member.type) ||
-      !Type.isConcrete(member.type)
+      !Type.isRuntimeConcrete(member.type)
     ) {
       available = false
       if (member._tag === 'Resolved')
@@ -7237,7 +7240,7 @@ const inferredTargetArguments = (
       Type.substituteGenericArgument(argument, headerSubstitution),
     ),
   )
-  return arguments_.every(Type.isConcreteGenericArgument) ? arguments_ : undefined
+  return arguments_.every(Type.isRuntimeConcreteGenericArgument) ? arguments_ : undefined
 }
 
 /**

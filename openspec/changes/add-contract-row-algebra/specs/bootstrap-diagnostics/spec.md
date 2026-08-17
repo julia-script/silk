@@ -6,13 +6,13 @@ The generated diagnostic catalog SHALL contain distinct identities and structure
 kind mismatch, invalid singleton member, exact-access mismatch, checked absence, underconstrained
 row computation, provider no-match, joint provider-selection conflict, provider ambiguity,
 selected-row cardinality, conformance ambiguity, invalid conformance, cyclic substitution,
-analysis-only availability, and non-concrete specialization.
+and non-concrete specialization.
 
 Provider conflict and ambiguity payloads SHALL be span-free semantic data containing canonical
 constraint/member keys and candidate sets. Primary and ordered secondary source origins SHALL live
 in a separate diagnostic-location record and SHALL NOT affect diagnostic identity, payload equality,
 or source/intrinsic parity. Precedence SHALL be syntax/kind, structural inference/underconstraint,
-checked constraint failure, specialization non-concreteness, availability, then the existing
+checked constraint failure, specialization non-concreteness, then the existing
 run-boundary `SEM0071` for an already concrete Effect.
 
 #### Scenario: Report provider ambiguity deterministically

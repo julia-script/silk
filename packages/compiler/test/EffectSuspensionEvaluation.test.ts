@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import type * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
+import { storedCatchAllocatorSuspension } from './support/storedCatchAllocatorSuspension.js'
 
 const encoder = new TextEncoder()
 
@@ -131,6 +132,16 @@ pub fn main() -> i32 {
       outcome.trace.filter((event) => event._tag === 'ContinuationRelease'),
       outcome.trace.filter((event) => event._tag === 'ContinuationAcquire').length,
     )
+  }),
+)
+
+it.effect('preserves an outer allocator through a stored catch wrapper', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluate(storedCatchAllocatorSuspension)
+    assert.strictEqual(outcome._tag, 'Completed', inspect(outcome))
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42)
+    assert.isAbove(outcome.trace.filter((event) => event._tag === 'ContinuationRequest').length, 0)
   }),
 )
 

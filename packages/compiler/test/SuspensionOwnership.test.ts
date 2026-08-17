@@ -132,8 +132,13 @@ it.effect('classifies exact post-normalization MIR locals across relay', () =>
       owned.prefixRollbacks.at(-1)?.frameDrops.map((release) => release.local.ordinal),
       [...affineLocals].reverse(),
     )
-    assert.lengthOf(borrowed.allocationRefusal.loanEnds, 1)
-    assert.lengthOf(borrowed.failure.loanEnds, 1)
+    // The user borrow and the exclusive continuation allocator are both retained dependencies.
+    assert.lengthOf(
+      borrowed.slots.filter((slot) => slot.access._tag === 'BorrowedDependency'),
+      2,
+    )
+    assert.lengthOf(borrowed.allocationRefusal.loanEnds, 2)
+    assert.lengthOf(borrowed.failure.loanEnds, 2)
     assert.lengthOf(borrowed.success.loanEnds, 0)
     assert.deepEqual(
       branched.slots

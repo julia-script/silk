@@ -131,6 +131,40 @@ fn apply<T>(marker: T, value: i32) -> i32 {
 }
 pub fn main() -> i32 { return apply<i32>(0, 20) + apply<bool>(true, 20) }`
 
+const borrowedCallableLoopExits = `struct Cell { value: i32 }
+fn read(value: i32, cell: &Cell) -> i32 { return value + cell.value }
+fn returnInside(flag: bool, cell: &Cell) -> i32 {
+  let step = read(cell)
+  while flag { return step(0) }
+  return 0
+}
+fn exitLoop(flag: bool, cell: &Cell) -> i32 {
+  let step = read(cell)
+  while flag { break }
+  return step(0)
+}
+fn continueLoop(cell: &Cell) -> i32 {
+  let step = read(cell)
+  let mut count = 0
+  while count < 1 {
+    count = count + 1
+    continue
+  }
+  return step(0)
+}
+fn repeatLoop(cell: &Cell) -> i32 {
+  let step = read(cell)
+  let mut count = 0
+  while count < 1 { count = count + 1 }
+  return step(0)
+}
+pub fn main() -> i32 {
+  let cell = Cell { value: 42 }
+  return returnInside(true, &cell) + returnInside(false, &cell)
+    + exitLoop(true, &cell) + exitLoop(false, &cell)
+    + continueLoop(&cell) + repeatLoop(&cell)
+}`
+
 type CleanupExit = 'uncalled' | 'consuming' | 'moved' | 'typed-failure'
 
 const cleanupProgram = (dropBody: string, exit: CleanupExit) => `struct Guard {
@@ -300,6 +334,27 @@ it.effect('executes stored-callable cleanup and scoped-borrow traces exactly onc
         'CallableRejected',
       )
     }
+  }),
+)
+
+it.effect('ends a borrowed callable loan on every terminal and loop-exit path', () =>
+  Effect.gen(function* () {
+    const { snapshot, module } = yield* lowerStored(
+      'stored-callable-runtime/borrowed-loop-exits',
+      borrowedCallableLoopExits,
+      Target.wasm32UnknownUnknown,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(Mir.verify(module), [])
+    assert.strictEqual(
+      completedValue(BootstrapEvaluation.evaluate(snapshot.instances, module)),
+      210,
+    )
+
+    const wasm = yield* Backend.emit(WasmBackend.WasmBackend, module, { mode: 'release' })
+    assert.strictEqual(wasm._tag, 'WebAssemblyModuleArtifact')
+    if (wasm._tag !== 'WebAssemblyModuleArtifact') return
+    assert.strictEqual(yield* runWasm(wasm.bytes), 210)
   }),
 )
 

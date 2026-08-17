@@ -58,7 +58,6 @@ export type NodeKind =
   | 'FailStatement'
   | 'DropStatement'
   | 'UnsafeStatement'
-  | 'RoleExpression'
   | 'IntegerLiteralExpression'
   | 'FloatingLiteralExpression'
   | 'StaticTextLiteralExpression'

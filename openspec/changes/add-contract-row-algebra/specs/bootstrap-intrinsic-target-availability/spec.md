@@ -1,28 +1,27 @@
 ## ADDED Requirements
 
-### Requirement: Analysis-only intrinsic availability is reachability-gated and target-independent
+### Requirement: Selective catch is executable on every supported target
 
-Intrinsic availability SHALL be represented as `Executable(nonEmptyTargets)` or
-`AnalysisOnly(diagnosticIdentity)`. After reachable-instance discovery and before layout, MIR, or
-lowering, a target-independent gate SHALL report every reachable `AnalysisOnly` dependency. An
-unreachable dependency SHALL produce no availability diagnostic.
+`Intrinsic.catchFailure` SHALL belong to the ordinary executable intrinsic inventory for the
+evaluator, WebAssembly, and native targets. A valid direct or wrapped selective-catch dependency
+SHALL pass target availability and reach the same specialized MIR semantics on every supported
+target. No catch-specific `AnalysisOnly` state or `SEM0098` availability diagnostic SHALL remain.
 
-Reachability SHALL carry an ordered set keyed by static source edge, intrinsic operation, and
-diagnostic identity, independent of owner specialization. Wrapper expansion SHALL retain the
-outermost incoming user application as origin; a direct intrinsic call SHALL use its own edge.
-Invalid syntax, kind, inference, or constraint diagnostics SHALL suppress dependent availability.
+Target availability SHALL remain derived from the canonical intrinsic operation rather than from
+standard-library wrapper spelling. Invalid syntax, kind, inference, or constraint diagnostics SHALL
+prevent invalid calls from reaching target selection or lowering.
 
-#### Scenario: Report a reachable wrapper locally
+#### Scenario: Admit a reachable wrapper on every target
 
-- **WHEN** a reachable ordinary wrapper expands to `AnalysisOnly(SEM0098)`
-- **THEN** availability reports `SEM0098` at each distinct originating user application in canonical source order
+- **WHEN** a reachable ordinary `Effect.catch` wrapper expands to `Intrinsic.catchFailure`
+- **THEN** evaluator, WebAssembly, and native target selection all admit the dependency
 
-#### Scenario: Ignore unreachable direct and wrapped dependencies
+#### Scenario: Admit the direct intrinsic on every target
 
-- **WHEN** direct and wrapped analysis-only calls occur only in unreachable declarations
-- **THEN** reachable discovery admits neither call to the availability gate
+- **WHEN** a valid reachable call names `Intrinsic.catchFailure` directly
+- **THEN** it has the same executable target set as the ordinary wrapper
 
-#### Scenario: Preserve origins across instance deduplication
+#### Scenario: Reject invalid calls before target selection
 
-- **WHEN** two source applications reach one deduplicated instance containing an analysis-only dependency
-- **THEN** one diagnostic is emitted for each distinct origin edge and repeated dependency paths from one edge are deduplicated
+- **WHEN** selective catch has invalid syntax, generic kinds, inference, or singleton membership
+- **THEN** the corresponding semantic diagnostic is reported and no catch-specific availability diagnostic is emitted

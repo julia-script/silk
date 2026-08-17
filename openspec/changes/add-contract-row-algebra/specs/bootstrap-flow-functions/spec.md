@@ -14,21 +14,21 @@ remains an ordinary generic call. A generic declaration MAY retain open `S` as a
 member parameter with assumed membership evidence. At each complete application, whether inferred
 or explicit, `S in E` SHALL require `S` to resolve to exactly one concrete nominal failure type;
 `never`, a structural or multi-member union, and a non-failure value SHALL fail this ordinary
-checked constraint before intrinsic availability.
+checked constraint before lowering.
 The whole-row `Effect.catch` alias SHALL be removed; whole-row recovery SHALL use
 `Effect.catchAll`. Singleton `Effect.catch` SHALL be an ordinary wrapper over sealed
 `Intrinsic.catchFailure`, whose callable contract carries the same checked membership and
-`Without` result and whose availability is target-independent `AnalysisOnly(SEM0098)`.
+`Without` result and which is executable on the evaluator, WebAssembly, and native targets.
 Neither standard-library name recognition nor a separate intrinsic typing rule MAY determine the
 residual.
 
-A reachable, otherwise valid direct or wrapped singleton-catch application SHALL report `SEM0098`
-at the originating user application span immediately after reachable instance discovery and before
-layout, MIR, or lowering. An unreachable application SHALL not report target availability. A
-syntax, kind, inference, or membership failure SHALL take precedence and suppress `SEM0098` for
-that invalid call. Elaboration and intrinsic post-contract hooks SHALL NOT emit availability
-diagnostics. This change adds neither multi-member dispatch nor evaluator/backend execution
-support.
+A valid direct or wrapped singleton-catch application SHALL lower and execute on every supported
+target. The protected Effect and handler operands SHALL be formed in ordinary call-evaluation order,
+the protected Effect SHALL run exactly once, success SHALL bypass the handler, a selected failure
+SHALL invoke the handler with its payload, and a nonselected failure SHALL propagate in the residual
+row unchanged. Evaluator, WebAssembly, and native execution SHALL agree on results, failure tags,
+and cleanup order. A syntax, kind, inference, or membership failure SHALL take precedence and prevent
+MIR construction. This change adds no multi-member selector or runtime row dictionary.
 
 #### Scenario: Type singleton catch through a pipeline
 
@@ -53,37 +53,37 @@ support.
 #### Scenario: Reject absent selected failure
 
 - **WHEN** `Effect.catch<Problem>` protects a concrete failure row that does not contain `Problem`
-- **THEN** analysis reports the failed membership constraint at the call without also reporting `SEM0098`
+- **THEN** analysis reports the failed membership constraint at the call before any runtime dispatch is constructed
 
-#### Scenario: Reject reachable singleton catch on current targets
+#### Scenario: Execute a selected failure on every target
 
-- **WHEN** an otherwise valid `Effect.catch<Problem>` application is executable-reachable
-- **THEN** availability reports `SEM0098` at that wrapper application rather than at the standard-library body
+- **WHEN** an executable `Effect.catch<Problem>` protects an Effect that fails with `Problem`
+- **THEN** the evaluator, WebAssembly, and native targets invoke the handler once with the selected payload and produce the same result
 
-#### Scenario: Ignore unreachable singleton catch availability
+#### Scenario: Bypass the handler on success
 
-- **WHEN** an otherwise valid `Effect.catch<Problem>` appears only in an unreachable declaration
-- **THEN** analysis records its semantic contract but emits no `SEM0098`
+- **WHEN** the protected Effect succeeds
+- **THEN** selective catch returns that success without invoking the handler
 
-#### Scenario: Ignore an unreachable direct analysis-only intrinsic
+#### Scenario: Propagate a nonselected failure
 
-- **WHEN** an otherwise valid `Intrinsic.catchFailure<Problem>` call appears only in an unreachable declaration
-- **THEN** reachable instance discovery does not admit it to the post-discovery availability gate and no `SEM0098` is emitted
+- **WHEN** the protected Effect fails with a member other than the selected nominal type
+- **THEN** the payload propagates under the corresponding residual-row tag without invoking the handler
 
-#### Scenario: Diagnose a direct analysis-only intrinsic call locally
+#### Scenario: Execute the sealed primitive directly
 
-- **WHEN** an otherwise valid executable-reachable `Intrinsic.catchFailure<Problem>` call is written directly
-- **THEN** availability reports `SEM0098` at that direct intrinsic application with the same structured reason as the wrapper call
+- **WHEN** a valid `Intrinsic.catchFailure<Problem>` call is executable-reachable
+- **THEN** it uses the same specialized dispatch and produces the same outcome as the ordinary `Effect.catch<Problem>` wrapper
 
-#### Scenario: Preserve origins through a nested wrapper
+#### Scenario: Preserve behavior through a nested wrapper
 
 - **WHEN** a user-defined wrapper chain reaches singleton catch and the outer wrapper is called from one reachable source application
-- **THEN** post-discovery availability reports one `SEM0098` at that outermost application rather than at an intermediate wrapper body
+- **THEN** specialization and lowering preserve the selected member, residual row, and handler behavior through the complete wrapper chain
 
-#### Scenario: Diagnose every distinct call to one deduplicated instance
+#### Scenario: Share one specialized implementation safely
 
 - **WHEN** two reachable source applications specialize to one deduplicated wrapper instance containing singleton catch
-- **THEN** post-discovery availability emits one `SEM0098` per distinct originating call edge in canonical source order and does not duplicate either diagnostic for repeated dependency paths
+- **THEN** both call sites execute through the deduplicated concrete instance without conflating their runtime payloads or outcomes
 
 #### Scenario: Migrate whole-row catch to catchAll
 

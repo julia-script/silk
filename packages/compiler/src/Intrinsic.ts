@@ -3,6 +3,7 @@ import * as Constraint from './Constraint.js'
 import type * as Hir from './Hir.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Scalar from './Scalar.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 /** Stable identity of one compiler-provided actor with no source declaration. */
@@ -54,24 +55,6 @@ export const normalizeExecutionTargets = (
 ): ReadonlyArray<ExecutionTarget> =>
   Object.freeze(executionTargets.filter((target) => targets.includes(target)))
 
-/** Whether a sealed operation has runtime support or exists only for semantic analysis. */
-export type Availability =
-  | {
-      readonly _tag: 'Executable'
-      readonly targets: ReadonlyArray<ExecutionTarget>
-    }
-  | {
-      readonly _tag: 'AnalysisOnly'
-      readonly diagnostic: 'SEM0098'
-      readonly construct: string
-    }
-
-const executable = (targets: ReadonlyArray<ExecutionTarget>): Availability =>
-  Object.freeze({ _tag: 'Executable', targets: normalizeExecutionTargets(targets) })
-
-const analysisOnly = (diagnostic: 'SEM0098', construct: string): Availability =>
-  Object.freeze({ _tag: 'AnalysisOnly', diagnostic, construct })
-
 /** The elaboration rule selected by an intrinsic operation identity. */
 export type Rule =
   | {
@@ -104,7 +87,7 @@ export interface Operation {
   readonly unsafe: boolean
   readonly admission?: AdmissionCategory
   readonly consumer?: string
-  readonly availability: Availability
+  readonly targets: ReadonlyArray<ExecutionTarget>
   readonly invariant?: string
   readonly hostImport?: string
   readonly returnedBorrowParameter?: number
@@ -198,7 +181,7 @@ const builtin = (options: {
     unsafe: options.unsafe ?? false,
     admission: admission(options.actor),
     consumer: consumer(options.actor, options.name),
-    availability: executable(options.targets ?? executionTargets),
+    targets: normalizeExecutionTargets(options.targets ?? executionTargets),
     ...(options.unsafe && (options.actor === 'RawBuffer' || options.actor === 'Slot')
       ? {
           invariant:
@@ -241,7 +224,7 @@ const effect = (options: {
     unsafe: false,
     admission: admission('Effect'),
     consumer: consumer('Effect', options.name),
-    availability: executable(executionTargets),
+    targets: executionTargets,
     rule: Object.freeze({
       _tag: 'EffectRule',
       operation: options.operation,
@@ -257,7 +240,7 @@ const contractEffect = (options: {
   readonly contract: CallableContract.CallableContract
   readonly post: Extract<Rule, { readonly _tag: 'ContractRule' }>['post']
   readonly providerMode?: Constraint.ProviderMode
-  readonly availability?: Availability
+  readonly targets?: ReadonlyArray<ExecutionTarget>
 }): Operation => {
   const spelling = intrinsicSpelling('Effect', options.name)
   return Object.freeze({
@@ -270,7 +253,7 @@ const contractEffect = (options: {
     unsafe: false,
     admission: admission('Effect'),
     consumer: consumer('Effect', options.name),
-    availability: options.availability ?? executable(executionTargets),
+    targets: normalizeExecutionTargets(options.targets ?? executionTargets),
     rule: Object.freeze({
       _tag: 'ContractRule',
       contract: options.contract,
@@ -395,10 +378,15 @@ const catchHandlerRequirementRow = RowAlgebra.parameter<
   Type.Parameter,
   Type.RequirementMemberShape
 >(catchHandlerRequirements)
+const intrinsicContractOrigin = (() => {
+  const span = SourceSpan.fromOffsets('$intrinsic-contract', 0, 0)
+  if (span === undefined) throw new RangeError('intrinsic contract span is invalid')
+  return span
+})()
 const catchSelectedRow = RowAlgebra.singleton(
   Type.failureRowPolicy(),
   Type.failureMemberShape(catchSelected),
-  Object.freeze({ sourceId: '', start: 0, end: 0 }),
+  intrinsicContractOrigin,
 )
 const catchContract = CallableContract.make({
   functionKind: 'Effect',
@@ -574,7 +562,7 @@ const replaceOperation: Operation = Object.freeze({
   unsafe: false,
   admission: admission('Place'),
   consumer: consumer('Place', 'replace'),
-  availability: executable(executionTargets),
+  targets: executionTargets,
   rule: Object.freeze({ _tag: 'PlaceRule', operation: 'Replace' }),
 })
 
@@ -1226,7 +1214,6 @@ const intrinsicOperations = Object.freeze([
     contractEffect({
       name: 'catchFailure',
       post: 'CatchFailure',
-      availability: analysisOnly('SEM0098', 'Member-selective Effect.catch'),
       typeParameters: Object.freeze(['S', 'A', '!E', '!F', '?R', '?Q']),
       parameters: Object.freeze([
         valueParameter('protected', 'once Effect<A ! E ? R>'),
@@ -1280,7 +1267,7 @@ export interface InventoryEntry {
   readonly hir: string
   readonly mir: string
   readonly evaluator: string
-  readonly availability: Availability
+  readonly targets: ReadonlyArray<ExecutionTarget>
   readonly hostImport?: string
 }
 
@@ -1290,17 +1277,14 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
     intrinsicOperations.map((operation) => {
       if (operation.admission === undefined || operation.consumer === undefined)
         throw new RangeError(`Intrinsic ${operation.spelling} is missing admission metadata`)
-      if (operation.availability._tag === 'Executable') {
-        const targets = operation.availability.targets
-        if (targets.length === 0)
-          throw new RangeError(`Intrinsic ${operation.spelling} has no execution target`)
-        const normalizedTargets = normalizeExecutionTargets(targets)
-        if (
-          normalizedTargets.length !== targets.length ||
-          normalizedTargets.some((target, index) => targets.at(index) !== target)
-        )
-          throw new RangeError(`Intrinsic ${operation.spelling} has non-normalized target metadata`)
-      }
+      if (operation.targets.length === 0)
+        throw new RangeError(`Intrinsic ${operation.spelling} has no execution target`)
+      const normalizedTargets = normalizeExecutionTargets(operation.targets)
+      if (
+        normalizedTargets.length !== operation.targets.length ||
+        normalizedTargets.some((target, index) => operation.targets.at(index) !== target)
+      )
+        throw new RangeError(`Intrinsic ${operation.spelling} has non-normalized target metadata`)
       const identity =
         operation.rule._tag === 'BuiltinRule'
           ? operation.rule.operation
@@ -1319,7 +1303,7 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
         hir: identity,
         mir: identity,
         evaluator: identity,
-        availability: operation.availability,
+        targets: operation.targets,
         ...(operation.hostImport === undefined ? {} : { hostImport: operation.hostImport }),
       })
     }),

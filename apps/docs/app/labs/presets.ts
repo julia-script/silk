@@ -292,7 +292,7 @@ effect fn read() -> i32
 pub fn main() -> i32 {
   let clock = Clock {}
   let pending = read()
-    |> Intrinsic.bindRequirement(&clock, @Primary)
+    |> Intrinsic.bindRequirement<&Clock@Primary>(&clock)
   return run pending
 }
 `,

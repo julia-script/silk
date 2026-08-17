@@ -359,6 +359,23 @@ it('parses Effect.retry in direct and pipeline insertion forms', () => {
   )
 })
 
+it('rejects the removed bare role-selector argument without retaining role syntax', () => {
+  const source = `fn main() -> i32 {
+  let selected = work() |> Effect.provideMut(&mut provider, @Audit)
+  return 0
+}
+fn after() -> i32 { return 42 }`
+  const result = parseText('memory://removed-role-selector.silk', source)
+  const errors = errorNodes(result.root)
+
+  assert.isAbove(result.parserDiagnostics.length, 0)
+  assert.isTrue(
+    errors.some((error) => SyntaxTree.tokens(error).some((token) => token.kind === 'At')),
+  )
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 2)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('parses explicit drop as a statement without making the block terminal', () => {
   const result = parseText(
     'memory://drop-statement.silk',

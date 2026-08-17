@@ -189,7 +189,10 @@ pub fn main() -> i32 {
     assert.strictEqual(realization.suspendable, true)
     assert.strictEqual(realization.runner.module, 'effect-field/suspending')
     assert.strictEqual(realization.runner.name, 'main$effect$0')
-    assert.strictEqual(realization.runnerArguments.every(Type.isConcreteGenericArgument), true)
+    assert.strictEqual(
+      realization.runnerArguments.every(Type.isRuntimeConcreteGenericArgument),
+      true,
+    )
     assert.deepEqual(realization.rows.failures, [])
     assert.deepEqual(realization.rows.requirements, [])
     assert.deepEqual(realization.environment, [])

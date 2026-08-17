@@ -392,14 +392,14 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
       .map((entry) => ({
         operation: entry.operation,
         signature: entry.signature,
-        availability: entry.availability,
+        targets: entry.targets,
       })),
     [
       {
         operation: 'Intrinsic.suspendEffect',
         signature:
           'fn Intrinsic.suspendEffect<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
-        availability: { _tag: 'Executable', targets: ['Evaluator', 'LLVM', 'Wasm'] },
+        targets: ['Evaluator', 'LLVM', 'Wasm'],
       },
     ],
   )

@@ -23,38 +23,6 @@ const operations = (): ReadonlyArray<Intrinsic.Operation> =>
 
 const operationKey = (id: Intrinsic.OperationId): string => Intrinsic.operationText(id)
 
-const originKey = (
-  call: Instances.IntrinsicCall,
-  origin: Instances.IntrinsicCall['span'],
-): string =>
-  `${origin.sourceId}\u0000${origin.start}\u0000${origin.end}\u0000${operationKey(call.operation)}`
-
-/** Reports target-independent analysis-only dependencies retained by instance discovery. */
-export const analysisOnlyDiagnostics = (
-  calls: ReadonlyArray<Instances.IntrinsicCall>,
-  catalog: ReadonlyArray<Intrinsic.Operation> = operations(),
-): ReadonlyArray<Diagnostic.Diagnostic> => {
-  const byIdentity = new Map(catalog.map((operation) => [operationKey(operation.id), operation]))
-  const diagnostics = new Map<string, Diagnostic.Diagnostic>()
-  for (const call of calls) {
-    const operation = byIdentity.get(operationKey(call.operation))
-    if (operation === undefined)
-      throw new RangeError(
-        `Executable closure retained unknown intrinsic ${operationKey(call.operation)}`,
-      )
-    if (operation.availability._tag !== 'AnalysisOnly') continue
-    for (const origin of call.origins) {
-      const key = `${originKey(call, origin)}\u0000${operation.availability.diagnostic}`
-      if (!diagnostics.has(key))
-        diagnostics.set(
-          key,
-          Diagnostic.analysisOnlyConstruct(operation.availability.construct, origin),
-        )
-    }
-  }
-  return Diagnostic.merge([...diagnostics.values()])
-}
-
 /** Maps the explicit backend choice to the matching intrinsic execution surface. */
 export const backendTarget = (backend: 'llvm' | 'wasm'): Intrinsic.ExecutionTarget =>
   backend === 'llvm' ? 'LLVM' : 'Wasm'
@@ -76,9 +44,8 @@ export const select = (
     const operation = byIdentity.get(key)
     if (operation === undefined)
       throw new RangeError(`Executable closure retained unknown intrinsic ${key}`)
-    if (operation.availability._tag === 'AnalysisOnly') continue
     retained.set(key, operation.id)
-    if (!operation.availability.targets.includes(target) && !unavailable.has(key))
+    if (!operation.targets.includes(target) && !unavailable.has(key))
       unavailable.set(key, Diagnostic.intrinsicTargetUnavailable(key, target, call.span))
   }
   if (unavailable.size > 0)

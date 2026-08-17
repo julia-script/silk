@@ -219,6 +219,9 @@ export interface EffectEnvironmentField {
   readonly representation: 'Value' | 'Borrow' | 'Callable'
   readonly effectIdentity?: string
   readonly callableIdentity?: Type.CallableIdentityArgument
+  readonly providedRequirement?: NonNullable<
+    CallableFieldRealization.EffectEnvironmentSlot['providedRequirement']
+  >
 }
 
 /** One realized Effect slot after target placement inside its enclosing nominal field. */
@@ -409,6 +412,22 @@ export interface CallingShape {
   readonly laneCount: number
   /** Materialized only when a consumer explicitly requests physical lanes. */
   readonly lanes: ReadonlyArray<CallingLane>
+}
+
+/** One member-specific lane transfer between two failure payload carriers. */
+export interface FailurePayloadLane {
+  readonly sourceOrdinal: number
+  readonly source: CallingLane
+  readonly member: CallingLane
+  readonly targetOrdinal: number
+  readonly target: CallingLane
+}
+
+/** The exact lanes occupied by one failure member while it moves between carrier rows. */
+export interface FailurePayloadRepacking {
+  readonly member: Type.Nominal
+  readonly targetPayloadLanes: ReadonlyArray<CallingLane>
+  readonly lanes: ReadonlyArray<FailurePayloadLane>
 }
 
 /** One deterministic explanation of malformed layout facts. */
@@ -746,6 +765,9 @@ export const catalog = (
           ...(slot.callableIdentity === undefined
             ? {}
             : { callableIdentity: slot.callableIdentity }),
+          ...(slot.providedRequirement === undefined
+            ? {}
+            : { providedRequirement: slot.providedRequirement }),
         }),
       )
       cursor = offset + size
@@ -1244,7 +1266,7 @@ export const catalog = (
 
   const referenced = new Map<string, DeclarationIndex.SemanticType>()
   const addReferenced = (type: DeclarationIndex.SemanticType): void => {
-    if (!Type.isConcrete(type)) return
+    if (!Type.isRuntimeConcrete(type)) return
     referenced.set(Type.key(type), type)
     if (Type.isFixedArray(type)) addReferenced(type.element)
     if (Type.isSlice(type)) addReferenced(type.element)
@@ -1305,9 +1327,17 @@ export const catalog = (
         if (child._tag !== 'Unavailable') addReferenced(Type.substitute(child.type, substitution))
       }
       for (const child of Hir.expressionTree(expression)) {
-        if (child._tag !== 'BuiltinCall') continue
-        for (const argument of child.typeArguments)
-          addReferenced(Type.substitute(argument, substitution))
+        if (child._tag === 'BuiltinCall') {
+          for (const argument of child.typeArguments)
+            addReferenced(Type.substitute(argument, substitution))
+        }
+        if (child._tag === 'EffectCatch' && child.protected._tag !== 'Unavailable') {
+          const protected_ = Type.substitute(child.protected.type, substitution)
+          if (Type.isEffect(protected_))
+            addReferenced(
+              Type.result(protected_.success, Type.failureValue(Type.failureMembers(protected_))),
+            )
+        }
       }
     }
     for (const statement of instance.function.statements) {
@@ -1424,6 +1454,21 @@ const addExpressionTypes = (
   if (expression._tag === 'Run') addExpressionTypes(types, expression.subject, substitution)
   if (expression._tag === 'EffectBindRequirement')
     addExpressionTypes(types, expression.protected, substitution)
+  if (expression._tag === 'EffectCatch') {
+    types.set(Type.key('never'), 'never')
+    addExpressionTypes(types, expression.protected, substitution)
+    addExpressionTypes(types, expression.handler, substitution)
+    if (expression.protected._tag !== 'Unavailable') {
+      const protected_ = Type.substitute(expression.protected.type, substitution)
+      if (Type.isEffect(protected_)) {
+        const reified = Type.result(
+          protected_.success,
+          Type.failureValue(Type.failureMembers(protected_)),
+        )
+        types.set(Type.key(reified), reified)
+      }
+    }
+  }
   if (expression._tag === 'Match') {
     addExpressionTypes(types, expression.scrutinee, substitution)
     for (const member of expression.members) {
@@ -1555,7 +1600,42 @@ const effectEnvironments = (
           (expression): expression is Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }> =>
             expression._tag === 'EffectBlock',
         )
-      for (const block of blocks) {
+      const catchSites = instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .flatMap((expression) =>
+          expression._tag !== 'EffectCatch'
+            ? []
+            : [
+                Object.freeze({
+                  site: Hir.effectCatchSite(
+                    instance.function.declaration.id,
+                    instance.key.declaration,
+                    expression.span,
+                  ),
+                  type: expression.type,
+                  captures: Object.freeze([
+                    Object.freeze({
+                      access: 'Take' as const,
+                      binding: undefined,
+                      parameter: undefined,
+                    }),
+                    Object.freeze({
+                      access: 'Take' as const,
+                      binding: undefined,
+                      parameter: undefined,
+                    }),
+                  ]),
+                }),
+              ],
+        )
+      const effectSites = Object.freeze([
+        ...blocks.map((block) =>
+          Object.freeze({ site: block.site, type: block.type, captures: block.captures }),
+        ),
+        ...catchSites,
+      ])
+      for (const block of effectSites) {
         const structuralEffect = Type.substitute(block.type, instance.substitution)
         if (!Type.isEffect(structuralEffect)) continue
         const effectInstance = discovery.effects.find(
@@ -1577,13 +1657,14 @@ const effectEnvironments = (
           const ordinal =
             realized?.sourceOrdinal ?? capture.binding?.ordinal ?? capture.parameter?.ordinal
           const type =
-            capture.binding === undefined
+            realized?.type ??
+            (capture.binding === undefined
               ? instance.function.contract._tag === 'Contract' && ordinal !== undefined
                 ? instance.function.contract.parameters.at(ordinal)
                 : undefined
               : ordinal === undefined
                 ? undefined
-                : bindingTypes.get(ordinal)
+                : bindingTypes.get(ordinal))
           if (ordinal === undefined || type === undefined) {
             unavailable = `capture ${source.toLowerCase()} has no concrete type`
             break
@@ -1702,6 +1783,9 @@ const effectEnvironments = (
               ...(capturedCallableIdentity === undefined
                 ? {}
                 : { callableIdentity: capturedCallableIdentity }),
+              ...(realized?.providedRequirement === undefined
+                ? {}
+                : { providedRequirement: realized.providedRequirement }),
             }),
           )
           cursor = offset + size
@@ -2067,7 +2151,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const literals = usizeLiteralVerdicts(self.target, discovery, self.usizeConstants)
   const shaped = new Map(orderedEntries.map((entry) => [Type.key(entry.type), entry.type] as const))
   for (const type of reached.values()) {
-    if (Type.isConcrete(type) && (Type.isEffect(type) || Type.isNever(type)))
+    if (Type.isRuntimeConcrete(type) && (Type.isEffect(type) || Type.isNever(type)))
       shaped.set(Type.key(type), type)
   }
   const shapeTypes = Object.freeze([...shaped.values()].sort(Type.compare))
@@ -2376,7 +2460,9 @@ const shapeNode = (
       Array.from({ length: payloadLaneCount }, (_, slot): Type.Builtin => {
         const candidates = members.flatMap((member) => {
           const lane = materializeLanes(member.shape).at(slot)
-          return lane !== undefined && typeof lane.type === 'string' ? [lane.type] : []
+          if (lane === undefined) return []
+          const candidate: Type.Builtin = typeof lane.type === 'string' ? lane.type : 'usize'
+          return [candidate]
         })
         return (
           candidates
@@ -2422,7 +2508,9 @@ const shapeNode = (
       Array.from({ length: payloadLaneCount }, (_, slot): Type.Builtin => {
         const candidates = variants.flatMap((variant) => {
           const lane = materializeLanes(variant).at(slot)
-          return lane !== undefined && typeof lane.type === 'string' ? [lane.type] : []
+          if (lane === undefined) return []
+          const candidate: Type.Builtin = typeof lane.type === 'string' ? lane.type : 'usize'
+          return [candidate]
         })
         return (
           candidates
@@ -2628,6 +2716,58 @@ export const callingShape = (
   type: DeclarationIndex.SemanticType,
 ): CallingShape | undefined =>
   self.callingShapes.find((candidate) => Type.equals(candidate.type, type))
+
+/**
+ * Plans the bit-exact movement of one nominal failure payload between two tagged carriers.
+ *
+ * Carrier slots are deliberately not treated as the member's value type: a row containing an
+ * `f64` member can make the slot wider than an `i32` member which occupies that same slot. The
+ * member lane is therefore retained as the normalization point between the source and target
+ * carriers, and lanes outside this member's shape are omitted so consumers zero-fill them.
+ */
+export const failurePayloadRepacking = (
+  self: Plan,
+  sourceType: DeclarationIndex.SemanticType,
+  sourceTag: number,
+  targetType: Type.Effect,
+  targetTag: number,
+): FailurePayloadRepacking | undefined => {
+  const sourceMember = Type.failureCarrierMember(
+    sourceType,
+    sourceTag,
+    Type.isEffect(sourceType) ? 'OneBased' : 'ZeroBased',
+  )
+  const targetMember = Type.failureCarrierMember(targetType, targetTag, 'OneBased')
+  if (sourceMember === undefined || targetMember === undefined) return undefined
+  const sourceShape = callingShape(self, sourceType)
+  const targetShape = callingShape(self, targetType)
+  if (sourceShape === undefined || targetShape?.tree._tag !== 'OutcomeShape') return undefined
+  if (!Type.equals(sourceMember, targetMember)) return undefined
+  const memberShape = callingShape(self, sourceMember)
+  if (memberShape === undefined) return undefined
+  const sourceOffset = Type.isNominal(sourceType) ? 0 : 1
+  const targetPayloadLanes = Object.freeze(targetShape.lanes.slice(1))
+  const lanes: Array<FailurePayloadLane> = []
+  for (const [ordinal, member] of memberShape.lanes.entries()) {
+    const source = sourceShape.lanes.at(sourceOffset + ordinal)
+    const target = targetPayloadLanes.at(ordinal)
+    if (source === undefined || target === undefined) return undefined
+    lanes.push(
+      Object.freeze({
+        sourceOrdinal: sourceOffset + ordinal,
+        source,
+        member,
+        targetOrdinal: ordinal,
+        target,
+      }),
+    )
+  }
+  return Object.freeze({
+    member: sourceMember,
+    targetPayloadLanes,
+    lanes: Object.freeze(lanes),
+  })
+}
 
 /** Resolves one canonical callable-environment identity in this target's runtime plan. */
 export const callableEnvironmentByIdentity = (
@@ -3292,7 +3432,9 @@ const verifyEntry = (
     cleanupHook !== undefined &&
     (cleanupHook.hook.module.length === 0 ||
       cleanupHook.hook.name.length === 0 ||
-      cleanupHook.typeArguments.some((argument) => !Type.isConcreteGenericArgument(argument)))
+      cleanupHook.typeArguments.some(
+        (argument) => !Type.isRuntimeConcreteGenericArgument(argument),
+      ))
   ) {
     violations.push(
       invalid(

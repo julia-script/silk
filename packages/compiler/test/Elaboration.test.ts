@@ -63,6 +63,7 @@ import {
 } from './fixtures/BootstrapSemanticFixture.js'
 import { elaborate } from './support/elaborate.js'
 import { raise } from './support/raise.js'
+import * as WasmMain from './support/WasmMain.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -481,6 +482,58 @@ pub fn main() -> i32 {
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+  }),
+)
+
+it.effect('executes an owned Copy provider binding', () =>
+  Effect.gen(function* () {
+    const source = `struct Clock { tick: i32 }
+effect fn read() -> i32 ? &mut Clock { return 42 }
+pub fn main() -> i32 {
+  let clock = Clock { tick: 0 }
+  return run Intrinsic.bindRequirementOwned(read(), move clock)
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'effect/bind-owned-copy',
+      new TextEncoder().encode(source),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    assert.strictEqual(
+      yield* WasmMain.invoke(artifact.bytes, 'Elaboration.invokeOwnedCopyProviderWasm'),
+      42,
+    )
+  }),
+)
+
+it.effect('executes an owned affine provider binding once', () =>
+  Effect.gen(function* () {
+    const source = `struct Clock { label: string }
+effect fn read() -> i32 ? &mut Clock { return 42 }
+pub fn main() -> i32 {
+  let clock = Clock { label: "owned" }
+  return run Intrinsic.bindRequirementOwned(read(), move clock)
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'effect/bind-owned-affine',
+      new TextEncoder().encode(source),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    assert.strictEqual(
+      yield* WasmMain.invoke(artifact.bytes, 'Elaboration.invokeOwnedAffineProviderWasm'),
+      42,
+    )
   }),
 )
 

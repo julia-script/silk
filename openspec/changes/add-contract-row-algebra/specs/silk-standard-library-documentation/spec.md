@@ -11,7 +11,7 @@ still subtracts the exact stored access.
 Effect reference pages SHALL document selected-row-first generic calls, shared/exclusive/owned
 binding, conformance-based provider matches, ambiguity diagnostics, partial application, acquisition
 cleanup, singleton `catch`, and executable whole-row `catchAll`. Examples SHALL compile or carry an
-explicit analysis-only diagnostic expectation.
+explicit diagnostic expectation for an intentionally invalid call.
 
 #### Scenario: Document the Logger and Clock regression
 
@@ -23,7 +23,7 @@ explicit analysis-only diagnostic expectation.
 - **WHEN** readers view contract-row algebra
 - **THEN** examples cover singleton, absent-member no-op, exact access mismatch, and set-to-set `Without`
 
-#### Scenario: Document catch availability honestly
+#### Scenario: Document executable selective catch honestly
 
 - **WHEN** readers view selective `Effect.catch`
-- **THEN** the reference explains its singleton typing contract, current `SEM0098` analysis-only availability, and use of `catchAll` for executable whole-row recovery
+- **THEN** the reference explains its singleton typing contract, executable evaluator/WebAssembly/native behavior, and use of `catchAll` for whole-row recovery

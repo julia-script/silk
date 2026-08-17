@@ -1,9 +1,11 @@
+import type * as CallableContract from './CallableContract.js'
 import type * as Constraint from './Constraint.js'
 import * as FiniteRow from './FiniteRow.js'
 import * as Canonical from './internal/Canonical.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Scalar from './Scalar.js'
+import * as SourceSpan from './SourceSpan.js'
 
 /** The built-in scalar types implemented by the current executable bootstrap surface. */
 export type Builtin = Scalar.Spelling
@@ -81,6 +83,7 @@ export type CallableMode = 'Shared' | 'Exclusive' | 'Take'
  * Origins are diagnostic provenance and deliberately do not participate in semantic identity.
  */
 export interface CallableSchema {
+  readonly contract: CallableContract.CallableContract
   readonly binders: ReadonlyArray<Parameter>
   readonly constraints: ReadonlyArray<Constraint.Constraint>
   readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
@@ -88,8 +91,19 @@ export interface CallableSchema {
   readonly contractKey: string
   readonly constraintKeys: ReadonlyArray<string>
   readonly evidenceKeys: ReadonlyArray<string>
-  readonly origins: ReadonlyArray<RowAlgebra.SourceOrigin>
+  readonly origins: ReadonlyArray<SourceSpan.SourceSpan>
 }
+
+/**
+ * Lets the constraint layer specialize schema-owned metadata without introducing a Type ->
+ * Constraint runtime cycle. Both callbacks are the same recursive owner-specialization walk used
+ * for the callable's ordinary parameter and result types.
+ */
+export type CallableSchemaOwnerSpecializer = (
+  schema: CallableSchema,
+  specializeType: (type: Type) => Type,
+  specializeArgument: (argument: GenericArgument) => GenericArgument,
+) => CallableSchema
 
 /** One canonical structural callable contract independent of its hidden concrete environment. */
 export interface Callable {
@@ -180,47 +194,58 @@ export interface CallableIdentityArgument {
   readonly environment?: CallableEnvironmentIdentity
 }
 
+const nonScalarBuiltinOperations = Object.freeze([
+  'LayoutOf',
+  'EffectSuspend',
+  'StorageAcquire',
+  'HostWrite',
+  'RawBufferFrom',
+  'RawBufferSlot',
+  'RawBufferCount',
+  'RawBufferRead',
+  'RawBufferView',
+  'RawBufferViewMut',
+  'RawBufferCopy',
+  'RawBufferFill',
+  'SlotWrite',
+  'SlotTake',
+  'SlotCopy',
+  'SlotDrop',
+  'StringFromUtf8Unchecked',
+  'StringUtf8Bytes',
+  'StringByteLength',
+  'StringEqualsExact',
+  'OsFileOpen',
+  'OsFileRead',
+  'OsFileWrite',
+  'OsDirectoryOpen',
+  'OsDirectoryNext',
+  'OsPathInspect',
+  'OsDirectoryCreate',
+  'OsDirectoryCreateUnique',
+  'OsFileRemove',
+  'OsDirectoryRemove',
+  'OsHandleClose',
+  'OsStandardInputRead',
+  'OsProcessExecute',
+  'OsProcessCapture',
+  'OsHostArgumentCount',
+  'OsHostArgument',
+  'OsHostVariable',
+  'OsHostWorkingDirectory',
+] as const)
+
 /** The closed operation vocabulary shared by semantic callable identities and HIR targets. */
-export type BuiltinOperation =
-  | Scalar.OperationCode
-  | 'LayoutOf'
-  | 'EffectSuspend'
-  | 'StorageAcquire'
-  | 'HostWrite'
-  | 'RawBufferFrom'
-  | 'RawBufferSlot'
-  | 'RawBufferCount'
-  | 'RawBufferRead'
-  | 'RawBufferView'
-  | 'RawBufferViewMut'
-  | 'RawBufferCopy'
-  | 'RawBufferFill'
-  | 'SlotWrite'
-  | 'SlotTake'
-  | 'SlotCopy'
-  | 'SlotDrop'
-  | 'StringFromUtf8Unchecked'
-  | 'StringUtf8Bytes'
-  | 'StringByteLength'
-  | 'StringEqualsExact'
-  | 'OsFileOpen'
-  | 'OsFileRead'
-  | 'OsFileWrite'
-  | 'OsDirectoryOpen'
-  | 'OsDirectoryNext'
-  | 'OsPathInspect'
-  | 'OsDirectoryCreate'
-  | 'OsDirectoryCreateUnique'
-  | 'OsFileRemove'
-  | 'OsDirectoryRemove'
-  | 'OsHandleClose'
-  | 'OsStandardInputRead'
-  | 'OsProcessExecute'
-  | 'OsProcessCapture'
-  | 'OsHostArgumentCount'
-  | 'OsHostArgument'
-  | 'OsHostVariable'
-  | 'OsHostWorkingDirectory'
+export type BuiltinOperation = Scalar.OperationCode | (typeof nonScalarBuiltinOperations)[number]
+
+const builtinOperations: ReadonlySet<string> = new Set([
+  ...Scalar.all().flatMap((scalar) => scalar.operations.map((operation) => operation.code)),
+  ...nonScalarBuiltinOperations,
+])
+
+/** Tests whether external text names one operation from the closed builtin vocabulary. */
+export const isBuiltinOperation = (value: string): value is BuiltinOperation =>
+  builtinOperations.has(value)
 
 /** A structural contract that may bound one statically known executable representation. */
 export type RepresentationBound = Callable | Effect
@@ -348,6 +373,9 @@ export interface StructuralUnion {
   readonly members: ReadonlyArray<Nominal>
   readonly [structuralUnionBrand]: true
 }
+
+/** The tag convention used by one concrete runtime carrier representation. */
+export type FailureCarrierTagPolicy = 'ZeroBased' | 'OneBased'
 
 /** The closed semantic type vocabulary accepted by declaration analysis. */
 export type Type =
@@ -552,11 +580,11 @@ export const callable = (
         }),
   })
 
-const implicitRowOrigin: RowAlgebra.SourceOrigin = Object.freeze({
-  sourceId: '',
-  start: 0,
-  end: 0,
-})
+const implicitRowOrigin: SourceSpan.SourceSpan = (() => {
+  const span = SourceSpan.fromOffsets('$implicit-row', 0, 0)
+  if (span === undefined) throw new RangeError('implicit row span is invalid')
+  return span
+})()
 
 /** Constructs one normalized compiler-private lazy effect contract. */
 export const effect = (
@@ -650,6 +678,7 @@ export function failureRowPolicy(): RowAlgebra.Policy<
       memberKey: key,
       merge: (left: Nominal) => left,
     }),
+    concreteMemberMaySpecialize: typeMaySpecialize,
     rowParameterKey: key,
     symbolicMemberKey: (member: FailureMemberShape) => key(member.parameter),
     symbolicMemberParameters: (member: FailureMemberShape) => Object.freeze([member.parameter]),
@@ -669,6 +698,7 @@ export function requirementRowPolicy(): RowAlgebra.Policy<
 > {
   return Object.freeze({
     finite: RequirementRow.policy<Nominal | Parameter>(key),
+    concreteMemberMaySpecialize: (member: Requirement) => typeMaySpecialize(member.capability),
     rowParameterKey: key,
     symbolicMemberKey: (member: RequirementMemberShape) =>
       Canonical.record('RequirementMemberShape', [
@@ -776,6 +806,36 @@ export const failureMembers = (self: Effect | FailureRowArgument): ReadonlyArray
     failureRowPolicy(),
     self._tag === 'EffectType' ? self.failureRow : self.row,
   )
+
+const isConcreteFailureCarrierMember = (self: Nominal): boolean => isRuntimeConcrete(self)
+
+/** Selects one nominal member while enforcing the carrier's explicit runtime tag convention. */
+export const failureCarrierMember = (
+  self: Type,
+  tag: number,
+  policy: FailureCarrierTagPolicy,
+): Nominal | undefined => {
+  if (!Number.isSafeInteger(tag)) return undefined
+  const ordinal = policy === 'ZeroBased' ? tag : tag - 1
+  if (ordinal < 0) return undefined
+  if (isNominal(self))
+    return policy === 'ZeroBased' && ordinal === 0 && isConcreteFailureCarrierMember(self)
+      ? self
+      : undefined
+  if (isUnion(self))
+    return policy === 'ZeroBased' && self.members.every(isConcreteFailureCarrierMember)
+      ? self.members.at(ordinal)
+      : undefined
+  if (isEffect(self)) {
+    if (policy !== 'OneBased' || !isRuntimeConcrete(self)) return undefined
+    const failures = RowAlgebra.concretize(failureRowPolicy(), self.failureRow)
+    return failures._tag === 'Concrete' &&
+      failures.row.members.every(isConcreteFailureCarrierMember)
+      ? failures.row.members.at(ordinal)
+      : undefined
+  }
+  return undefined
+}
 
 /** Whole-row parameters projected from one symbolic failure row. */
 export const failureRowParameters = (self: Effect | FailureRowArgument): ReadonlyArray<Parameter> =>
@@ -1837,6 +1897,75 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
       for (const parameter_ of [...parameters_.rows, ...parameters_.members]) visitType(parameter_)
     }
   }
+  const visitFailureRow = (row: FailureRow): void => {
+    for (const failure of RowAlgebra.concreteMembers(failureRowPolicy(), row)) visitType(failure)
+    const parameters_ = RowAlgebra.parameters(failureRowPolicy(), row)
+    for (const parameter_ of [...parameters_.rows, ...parameters_.members]) visitType(parameter_)
+  }
+  const visitRequirementRow = (row: RequirementsRow): void => {
+    for (const requirement of RowAlgebra.concreteMembers(requirementRowPolicy(), row))
+      visitType(requirement.capability)
+    const parameters_ = RowAlgebra.parameters(requirementRowPolicy(), row)
+    for (const parameter_ of [...parameters_.rows, ...parameters_.members]) visitType(parameter_)
+  }
+  const visitConstraint = (constraint: Constraint.Constraint): void => {
+    switch (constraint._tag) {
+      case 'NominalMemberConstraint':
+        visitType(constraint.selected)
+        visitFailureRow(constraint.source)
+        break
+      case 'FailureSubsetConstraint':
+        visitFailureRow(constraint.selected)
+        visitFailureRow(constraint.source)
+        break
+      case 'RequirementSubsetConstraint':
+        visitRequirementRow(constraint.selected)
+        visitRequirementRow(constraint.source)
+        break
+      case 'ProviderSelectionConstraint':
+        visitType(constraint.provider)
+        visitRequirementRow(constraint.selected)
+        visitRequirementRow(constraint.source)
+        break
+    }
+  }
+  const visitEvidence = (evidence: Constraint.ConstraintEvidence): void => {
+    switch (evidence._tag) {
+      case 'Assumed':
+        visitConstraint(evidence.wanted)
+        for (const argument of evidence.substitution.values()) visitArgument(argument)
+        break
+      case 'Member':
+        visitType(evidence.selected)
+        visitFailureRow(evidence.source)
+        break
+      case 'FailureSubset':
+        visitFailureRow(evidence.selected)
+        visitFailureRow(evidence.source)
+        break
+      case 'RequirementSubset':
+        visitRequirementRow(evidence.selected)
+        visitRequirementRow(evidence.source)
+        break
+      case 'RequirementSelection':
+        visitConstraint(evidence.wanted)
+        visitType(evidence.selected.capability)
+        visitType(evidence.provider)
+        if (evidence.providerMatch._tag === 'Conformance')
+          for (const argument of evidence.providerMatch.witness.typeArguments)
+            visitArgument(argument)
+        break
+    }
+  }
+  const visitContract = (contract: CallableContract.CallableContract): void => {
+    for (const binder of contract.binders) {
+      visitType(binder)
+      if (binder.representationBound !== undefined) visitType(binder.representationBound)
+    }
+    for (const parameter_ of contract.parameters) visitType(parameter_.type)
+    visitType(contract.result)
+    for (const constraint of contract.constraints) visitConstraint(constraint)
+  }
   const visitType = (type: Type): void => {
     append(visitor.type?.(type))
     if (isNominal(type)) {
@@ -1846,24 +1975,20 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
     else if (isCallable(type)) {
       for (const parameter_ of type.parameters) visitType(parameter_)
       visitType(type.result)
+      if (type.schema !== undefined) {
+        visitContract(type.schema.contract)
+        for (const binder of type.schema.binders) {
+          visitType(binder)
+          if (binder.representationBound !== undefined) visitType(binder.representationBound)
+        }
+        for (const constraint of type.schema.constraints) visitConstraint(constraint)
+        for (const evidence of type.schema.evidence) visitEvidence(evidence)
+        for (const argument of type.schema.substitution.values()) visitArgument(argument)
+      }
     } else if (isEffect(type)) {
       visitType(type.success)
-      for (const failure of RowAlgebra.concreteMembers(failureRowPolicy(), type.failureRow))
-        visitType(failure)
-      const failureParameters = RowAlgebra.parameters(failureRowPolicy(), type.failureRow)
-      for (const parameter_ of [...failureParameters.rows, ...failureParameters.members])
-        visitType(parameter_)
-      for (const requirement of RowAlgebra.concreteMembers(
-        requirementRowPolicy(),
-        type.requirementRow,
-      ))
-        visitType(requirement.capability)
-      const requirementParameters = RowAlgebra.parameters(
-        requirementRowPolicy(),
-        type.requirementRow,
-      )
-      for (const parameter_ of [...requirementParameters.rows, ...requirementParameters.members])
-        visitType(parameter_)
+      visitFailureRow(type.failureRow)
+      visitRequirementRow(type.requirementRow)
     } else if (isRepresented(type)) {
       visitArgument(type.representation.argument)
       visitType(type.contract)
@@ -1874,6 +1999,16 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
   visitType(self)
   return Object.freeze(found)
 }
+
+const typeMaySpecialize = (self: Type): boolean =>
+  parameters(self).length > 0 ||
+  fold(self, {
+    argument: (argument) =>
+      (isEffectIdentityArgument(argument) && argument.owner !== undefined) ||
+      (isCallableIdentityArgument(argument) && argument.environment !== undefined)
+        ? true
+        : undefined,
+  }).length > 0
 
 /** Returns every opaque family instance nested in one semantic type. */
 export const opaqueRepresentationArguments = (
@@ -2017,30 +2152,168 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
 /** Tests whether a type contains no open generic parameters. */
 export const isConcrete = (self: Type): boolean => parameters(self).length === 0
 
-/** Tests whether an erased generic argument contains no open value or row parameters. */
-export const isConcreteGenericArgument = (self: GenericArgument): boolean =>
-  isUnavailableGenericArgument(self)
-    ? false
-    : isRepresentationParameterArgument(self)
-      ? false
-      : isOpaqueRepresentationArgument(self)
-        ? isConcrete(self.contract) && self.arguments.every(isConcreteGenericArgument)
-        : isExactRepresentationArgument(self)
-          ? isConcrete(self.contract) && isConcreteGenericArgument(self.identity)
-          : isEffectIdentityArgument(self)
-            ? (self.owner?.typeArguments.every(isConcreteGenericArgument) ?? true)
-            : isCallableIdentityArgument(self)
-              ? self.typeArguments.every(isConcreteGenericArgument) &&
-                (self.environment?.owner.typeArguments.every(isConcreteGenericArgument) ?? true)
-              : isFailureRowArgument(self)
-                ? RowAlgebra.concretize(failureRowPolicy(), self.row)._tag === 'Concrete' &&
-                  failureMembers(self).every(isConcrete)
-                : isRequirementRowArgument(self)
-                  ? RowAlgebra.concretize(requirementRowPolicy(), self.row)._tag === 'Concrete' &&
-                    requirementMembers(self).every((requirement) =>
-                      isConcrete(requirement.capability),
-                    )
-                  : isConcrete(self)
+const runtimeAvailableFailureRow = (self: FailureRow): boolean => {
+  const concrete = RowAlgebra.concretize(failureRowPolicy(), self)
+  const parameters_ = RowAlgebra.parameters(failureRowPolicy(), self)
+  return (
+    concrete._tag === 'Concrete' &&
+    concrete.row.members.every(runtimeAvailable) &&
+    parameters_.rows.every(runtimeAvailable) &&
+    parameters_.members.every(runtimeAvailable)
+  )
+}
+
+const runtimeAvailableRequirementRow = (self: RequirementsRow): boolean => {
+  const concrete = RowAlgebra.concretize(requirementRowPolicy(), self)
+  const parameters_ = RowAlgebra.parameters(requirementRowPolicy(), self)
+  return (
+    concrete._tag === 'Concrete' &&
+    concrete.row.members.every((requirement) => runtimeAvailable(requirement.capability)) &&
+    parameters_.rows.every(runtimeAvailable) &&
+    parameters_.members.every(runtimeAvailable)
+  )
+}
+
+const runtimeAvailableGenericArgument = (self: GenericArgument): boolean => {
+  if (isUnavailableGenericArgument(self)) return false
+  if (isRepresentationParameterArgument(self)) return true
+  if (isOpaqueRepresentationArgument(self))
+    return runtimeAvailable(self.contract) && self.arguments.every(runtimeAvailableGenericArgument)
+  if (isExactRepresentationArgument(self))
+    return runtimeAvailable(self.contract) && runtimeAvailableGenericArgument(self.identity)
+  if (isEffectIdentityArgument(self))
+    return self.owner?.typeArguments.every(runtimeAvailableGenericArgument) ?? true
+  if (isCallableIdentityArgument(self))
+    return (
+      self.typeArguments.every(runtimeAvailableGenericArgument) &&
+      (self.environment?.owner.typeArguments.every(runtimeAvailableGenericArgument) ?? true)
+    )
+  if (isFailureRowArgument(self)) return runtimeAvailableFailureRow(self.row)
+  if (isRequirementRowArgument(self)) return runtimeAvailableRequirementRow(self.row)
+  return runtimeAvailable(self)
+}
+
+const runtimeAvailableConstraint = (constraint: Constraint.Constraint): boolean => {
+  switch (constraint._tag) {
+    case 'NominalMemberConstraint':
+      return runtimeAvailable(constraint.selected) && runtimeAvailableFailureRow(constraint.source)
+    case 'FailureSubsetConstraint':
+      return (
+        runtimeAvailableFailureRow(constraint.selected) &&
+        runtimeAvailableFailureRow(constraint.source)
+      )
+    case 'RequirementSubsetConstraint':
+      return (
+        runtimeAvailableRequirementRow(constraint.selected) &&
+        runtimeAvailableRequirementRow(constraint.source)
+      )
+    case 'ProviderSelectionConstraint':
+      return (
+        runtimeAvailable(constraint.provider) &&
+        runtimeAvailableRequirementRow(constraint.selected) &&
+        runtimeAvailableRequirementRow(constraint.source)
+      )
+  }
+}
+
+const runtimeAvailableEvidence = (evidence: Constraint.ConstraintEvidence): boolean => {
+  switch (evidence._tag) {
+    case 'Assumed':
+      return (
+        runtimeAvailableConstraint(evidence.wanted) &&
+        [...evidence.substitution.values()].every(runtimeAvailableGenericArgument)
+      )
+    case 'Member':
+      return runtimeAvailable(evidence.selected) && runtimeAvailableFailureRow(evidence.source)
+    case 'FailureSubset':
+      return (
+        runtimeAvailableFailureRow(evidence.selected) && runtimeAvailableFailureRow(evidence.source)
+      )
+    case 'RequirementSubset':
+      return (
+        runtimeAvailableRequirementRow(evidence.selected) &&
+        runtimeAvailableRequirementRow(evidence.source)
+      )
+    case 'RequirementSelection':
+      return (
+        runtimeAvailableConstraint(evidence.wanted) &&
+        runtimeAvailable(evidence.selected.capability) &&
+        runtimeAvailable(evidence.provider) &&
+        (evidence.providerMatch._tag === 'Conformance'
+          ? evidence.providerMatch.witness.typeArguments.every(runtimeAvailableGenericArgument)
+          : true)
+      )
+  }
+}
+
+function runtimeAvailable(self: Type): boolean {
+  if (typeof self === 'string' || isParameter(self)) return true
+  if (isFailureProjection(self)) return false
+  if (isNominal(self)) return self.arguments.every(runtimeAvailableGenericArgument)
+  if (isFixedArray(self) || isSlice(self)) return runtimeAvailable(self.element)
+  if (isReference(self)) return runtimeAvailable(self.target)
+  if (isCallable(self))
+    return (
+      self.parameters.every(runtimeAvailable) &&
+      runtimeAvailable(self.result) &&
+      (self.schema === undefined ||
+        (self.schema.binders.every(runtimeAvailable) &&
+          runtimeAvailable(self.schema.contract.result) &&
+          self.schema.contract.parameters.every((parameter) => runtimeAvailable(parameter.type)) &&
+          self.schema.contract.binders.every(runtimeAvailable) &&
+          self.schema.contract.constraints.every(runtimeAvailableConstraint) &&
+          self.schema.constraints.every(runtimeAvailableConstraint) &&
+          self.schema.evidence.every(runtimeAvailableEvidence) &&
+          [...self.schema.substitution.values()].every(runtimeAvailableGenericArgument)))
+    )
+  if (isEffect(self))
+    return (
+      runtimeAvailable(self.success) &&
+      runtimeAvailableFailureRow(self.failureRow) &&
+      runtimeAvailableRequirementRow(self.requirementRow)
+    )
+  if (isRepresented(self))
+    return (
+      self.representation.admissibility._tag !== 'Unavailable' &&
+      runtimeAvailable(self.contract) &&
+      runtimeAvailable(self.representation.requiredBound) &&
+      runtimeAvailableGenericArgument(self.representation.argument)
+    )
+  return self.members.every(runtimeAvailable)
+}
+
+/** Tests whether a type is closed, fully available, and safe to expose to runtime consumers. */
+export const isRuntimeConcrete = (self: Type): boolean => isConcrete(self) && runtimeAvailable(self)
+
+const isClosedGenericArgument = (self: GenericArgument): boolean => {
+  if (isUnavailableGenericArgument(self) || isRepresentationParameterArgument(self)) return false
+  if (isOpaqueRepresentationArgument(self))
+    return isConcrete(self.contract) && self.arguments.every(isClosedGenericArgument)
+  if (isExactRepresentationArgument(self))
+    return isConcrete(self.contract) && isClosedGenericArgument(self.identity)
+  if (isEffectIdentityArgument(self))
+    return self.owner?.typeArguments.every(isClosedGenericArgument) ?? true
+  if (isCallableIdentityArgument(self))
+    return (
+      self.typeArguments.every(isClosedGenericArgument) &&
+      (self.environment?.owner.typeArguments.every(isClosedGenericArgument) ?? true)
+    )
+  if (isFailureRowArgument(self))
+    return (
+      RowAlgebra.concretize(failureRowPolicy(), self.row)._tag === 'Concrete' &&
+      failureMembers(self).every(isConcrete)
+    )
+  if (isRequirementRowArgument(self))
+    return (
+      RowAlgebra.concretize(requirementRowPolicy(), self.row)._tag === 'Concrete' &&
+      requirementMembers(self).every((requirement) => isConcrete(requirement.capability))
+    )
+  return isConcrete(self)
+}
+
+/** Tests whether one erased argument is fully closed and contains no unavailable recovery value. */
+export const isRuntimeConcreteGenericArgument = (self: GenericArgument): boolean =>
+  isClosedGenericArgument(self) && runtimeAvailableGenericArgument(self)
 
 /** Tests whether a type contains a lexical borrow at any depth. */
 export const containsBorrow = (self: Type): boolean => {
@@ -2396,6 +2669,7 @@ const sameExecutableOwnerDeclaration = (
 export const specializeExecutableOwner = (
   self: Type,
   owner: ExecutableSpecializationOwner,
+  specializeSchema?: CallableSchemaOwnerSpecializer,
 ): Type => {
   const specializeOwner = (
     current: ExecutableSpecializationOwner,
@@ -2477,28 +2751,32 @@ export const specializeExecutableOwner = (
         type.parameters.map(specializeType),
         specializeType(type.result),
         type.mode,
-        type.schema,
+        type.schema === undefined
+          ? undefined
+          : (specializeSchema?.(type.schema, specializeType, specializeArgument) ?? type.schema),
       )
     if (isEffect(type))
-      return effect(
+      return effectWithRows(
         specializeType(type.success),
-        failureMembers(type).map((failure) => {
+        RowAlgebra.mapConcreteMembers(failureRowPolicy(), type.failureRow, (failure) => {
           const specialized = specializeType(failure)
           return isNominal(specialized) ? specialized : failure
         }),
         type.access,
-        requirementMembers(type).map((requirement) => {
-          const capability = specializeType(requirement.capability)
-          return Object.freeze({
-            ...requirement,
-            capability:
-              isNominal(capability) || isParameter(capability)
-                ? capability
-                : requirement.capability,
-          })
-        }),
-        failureRowParameters(type),
-        requirementRowParameters(type),
+        RowAlgebra.mapConcreteMembers(
+          requirementRowPolicy(),
+          type.requirementRow,
+          (requirement) => {
+            const capability = specializeType(requirement.capability)
+            return Object.freeze({
+              ...requirement,
+              capability:
+                isNominal(capability) || isParameter(capability)
+                  ? capability
+                  : requirement.capability,
+            })
+          },
+        ),
       )
     if (isRepresented(type)) {
       const contract = specializeType(type.contract)

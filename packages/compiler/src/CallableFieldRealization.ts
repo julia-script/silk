@@ -95,6 +95,9 @@ export interface EffectEnvironmentSlot {
   readonly type: Type.Type
   readonly effectIdentity?: string
   readonly callableIdentity?: Type.CallableIdentityArgument
+  readonly providedRequirement?: NonNullable<
+    Instances.EffectInstance['captures'][number]['providedRequirement']
+  >
   readonly owned: boolean
   readonly borrowed: boolean
 }
@@ -260,6 +263,9 @@ const effectEnvironmentSlot = (
     ...(capture.callableIdentity === undefined
       ? {}
       : { callableIdentity: capture.callableIdentity }),
+    ...(capture.providedRequirement === undefined
+      ? {}
+      : { providedRequirement: capture.providedRequirement }),
     owned: ownedAccess(capture.access),
     borrowed: borrowedAccess(capture.access),
   })
@@ -506,7 +512,7 @@ const realizeEffectField = (
       resolution.instance,
       Object.freeze({ _tag: 'NonEffectBound' }),
     )
-  if (!Type.isConcrete(contract))
+  if (!Type.isRuntimeConcrete(contract))
     return unsupported(
       resolution.id,
       resolution.instance,
@@ -740,6 +746,18 @@ const equalsEffectEnvironment = (
         (slot.callableIdentity !== undefined &&
           candidate.callableIdentity !== undefined &&
           Type.equalsGenericArgument(slot.callableIdentity, candidate.callableIdentity))) &&
+      ((slot.providedRequirement === undefined && candidate.providedRequirement === undefined) ||
+        (slot.providedRequirement !== undefined &&
+          candidate.providedRequirement !== undefined &&
+          Type.equals(
+            slot.providedRequirement.capability,
+            candidate.providedRequirement.capability,
+          ) &&
+          slot.providedRequirement.role === candidate.providedRequirement.role &&
+          slot.providedRequirement.requirementAccess ===
+            candidate.providedRequirement.requirementAccess &&
+          slot.providedRequirement.providerAccess ===
+            candidate.providedRequirement.providerAccess)) &&
       slot.owned === candidate.owned &&
       slot.borrowed === candidate.borrowed
     )

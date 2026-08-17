@@ -110,7 +110,7 @@ MemberTerm<Member, MemberParameter>
 
 NormalizedRow = {
   expression: Row,
-  memberWellFormed: OrderedMap<MemberWellFormedKey, OrderedSet<SourceOrigin>>
+  memberWellFormed: OrderedMap<MemberWellFormedKey, OrderedSet<SourceSpan>>
 }
 ```
 
@@ -275,10 +275,10 @@ The solver then intersects complete key sets to a fixed point before interpretin
 
    ```text
    ProviderDiagnosticLocations = {
-     primary: SourceOrigin,
+     primary: SourceSpan,
      relations: CanonicalList<{
        constraintKey,
-       origins: CanonicalList<SourceOrigin>
+       origins: CanonicalList<SourceSpan>
      }>
    }
    ```
@@ -526,49 +526,33 @@ where S in E
 Here `S in E` is the common kind-directed singleton-membership constraint. It retains an open
 lifted member parameter plus assumed evidence in the generic declaration, then rejects `never`,
 structural or multi-member unions, and non-nominal values at a complete application before
-intrinsic availability. The old
+lowering. The old
 whole-row `Effect.catch` alias is removed; executable whole-row recovery remains `Effect.catchAll`.
 Every handwritten whole-row call, fixture, corpus program, and document migrates accordingly;
 singleton calls may retain omitted type arguments and infer `S` normally.
 
-Selective dispatch is the sealed `Intrinsic.catchFailure` operation with the same binder order,
-parameters, constraints, and result as the wrapper above. `Intrinsic.Operation` replaces its
-always-nonempty target list with:
-
-```text
-IntrinsicAvailability
-  = Executable(nonEmptyTargets)
-  | AnalysisOnly(diagnosticIdentity)
-```
-
-`catchFailure` is target-independent `AnalysisOnly(SEM0098)`. Its operation hook consumes
+Selective dispatch is the sealed executable `Intrinsic.catchFailure` operation with the same binder
+order, parameters, constraints, and result as the wrapper above. Its post-contract hook consumes
 membership proof and constructs generic dispatch HIR without filtering or reconstructing the
-failure row. No evaluator/backend lowering is added in this change.
+failure row. Specialization fixes the protected failure row and selected nominal member before MIR.
 
-Reachable instance discovery records an ordered set of originating source call edges while
-expanding an ordinary or user-defined wrapper chain into its intrinsic dependency. Instance
-deduplication unions rather than discards these origins. An origin key is
-`(sourceId, start, end, intrinsicOperation, diagnosticIdentity)`, independent of owner-instance specialization. The
-chain recursively retains its outermost incoming source edge; an intrinsic call's own edge is used
-only when that direct call is itself the origin. Immediately after discovery, a
-target-independent availability gate diagnoses every reachable `AnalysisOnly` dependency before layout, MIR, or
-lowering; target-specific `Executable` selection remains in the target availability path. A
-reachable `Effect.catch` therefore attributes `SEM0098` to the user's wrapper application; a
-reachable direct intrinsic call uses its own span; an unreachable wrapper or direct call emits
-nothing. For each distinct reachable origin edge the gate emits one diagnostic at the outermost
-user-written application that entered that analysis-only dependency chain, ordered by canonical
-source location; two call sites reaching one deduplicated instance therefore receive two stable
-diagnostics, while repeated dependency paths from the same call edge do not duplicate one. Invalid
-syntax, kind, inference, or membership fails before availability and suppresses the dependent
-`SEM0098`. Elaboration and intrinsic post-contract hooks are structurally unable to emit
-availability diagnostics, and `Effect.catch` is never recognized by standard-library spelling.
+Lowering evaluates the protected Effect and handler operands in ordinary call-evaluation order,
+runs the protected Effect exactly once, and branches on its reified outcome. Success uses tag `0`
+and bypasses the handler. A failure tag equal to the selected member's normalized zero-based ordinal
+plus one invokes the handler with that payload; every other failure is remapped into the residual row
+without changing its payload. Handler failures
+join the residual row according to the already-specialized result contract. The evaluator,
+WebAssembly, and native backends consume this same backend-neutral MIR, so selective recovery has one
+observable result and cleanup order on every supported execution target. Invalid syntax, kind,
+inference, or membership is rejected before MIR construction. `Effect.catch` is never recognized by
+standard-library spelling.
 
 ### 8. Make diagnostics stable and phase-specific
 
 The generated diagnostic catalog gains distinct semantic identities for row kind mismatch, invalid
 nominal singleton selection, exact membership access mismatch, checked absence, underconstrained row computation, provider no-match,
 joint provider-selection conflict, provider ambiguity, selected-row cardinality, conformance ambiguity, invalid conformance, cyclic
-substitution, analysis-only intrinsic availability, and non-concrete specialization. Provider
+substitution, and non-concrete specialization. Provider
 ambiguity carries canonically ordered common access-capability-role candidates plus an ordered
 record of each relation's full candidate set. Source origins live only in a separate ordered
 diagnostic-location record. Equivalent source and intrinsic contracts use the same identity and
@@ -579,15 +563,6 @@ Diagnostic precedence is syntax/kind error, structural inference or underconstra
 constraint failure, then specialization non-concreteness. `SEM0071` remains only the later run-boundary
 diagnostic for an already concrete Effect. Implementation assigns catalog codes before tests, and
 tests assert those codes and spans rather than wording.
-
-### 9. Add the remaining capability deltas before implementation
-
-The current OpenSpec update workflow permits edits only to existing delta files. Before applying
-the change, artifact continuation must add dedicated deltas for syntax and formatting, semantic
-facts and module surfaces, intrinsic inventory/admission, diagnostics, HIR, instances, MIR, Silk
-stdlib, and standard-library documentation. Those deltas must expose the grammar, stable semantic
-facts, single-contract intrinsic boundary, evidence lifecycle, and concrete-only downstream
-contracts described here rather than leaving them as task-only implementation detail.
 
 ## Risks / Trade-offs
 
@@ -612,18 +587,18 @@ contracts described here rather than leaving them as task-only implementation de
 
 ## Migration Plan
 
-1. Add all deferred capability deltas and pass strict OpenSpec validation before implementation.
-2. Add regressions and implement deterministic keyed finite rows plus the requirement access matrix.
-3. Add forward-only `RowAlgebra`, migrate Type/declaration representation, and define symbolic keys.
-4. Add syntax, facts, formatting, presentation, and diagnostics.
-5. Add `CallableContract`, given/wanted solving, evidence, constrained-callable metadata, and the
+1. Add regressions and implement deterministic keyed finite rows plus the requirement access matrix.
+2. Add forward-only `RowAlgebra`, migrate Type/declaration representation, and define symbolic keys.
+3. Add syntax, facts, formatting, presentation, and diagnostics.
+4. Add `CallableContract`, given/wanted solving, evidence, constrained-callable metadata, and the
    injected provider-conformance oracle.
-6. Route all fixed-mode requirement-binding intrinsics through common call analysis, delete the
+5. Route all fixed-mode requirement-binding intrinsics through common call analysis, delete the
    early typing path, and retain only proof-consuming HIR hooks.
-7. Add the instance concretization frontier and migrate every row-dependent consumer.
-8. Rewrite public binding/provision/acquisition and singleton catch in ordinary Silk, removing
-   standard-library name recognition and intrinsic-only role selection.
-9. Regenerate compiler/stdlib/docs artifacts and run the complete release verification sequence.
+6. Add the instance concretization frontier and migrate every row-dependent consumer.
+7. Rewrite public binding/provision/acquisition and singleton catch in ordinary Silk, remove
+   standard-library name recognition and intrinsic-only role selection, and lower selective catch
+   through evaluator, WebAssembly, and native execution.
+8. Regenerate compiler/stdlib/docs artifacts and run the complete release verification sequence.
 
 The repository is unreleased, so there is no compatibility bridge. Rollback reverts the compiler,
 stdlib, generated surfaces, and delta specs as one unit; mixing new syntax with legacy row storage or

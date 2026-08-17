@@ -604,7 +604,6 @@ export const realize = (
   const baseDiagnostics = Diagnostic.merge(
     self.diagnostics,
     instanceViolationDiagnostics(self, instances),
-    IntrinsicAvailability.analysisOnlyDiagnostics(instances.intrinsics),
   )
   const specializationError =
     specializationInvalid || Diagnostic.hasGenericSpecializationErrors(baseDiagnostics)
@@ -623,16 +622,7 @@ export const realize = (
             'Target-dependent phases are unavailable while a reachable construction stores an unsupported executable representation',
         })
       : undefined
-  const availabilityError =
-    specializationError === undefined &&
-    instanceFenceError === undefined &&
-    Diagnostic.hasErrors(IntrinsicAvailability.analysisOnlyDiagnostics(instances.intrinsics))
-      ? new AnalysisUnavailable({
-          operation: 'Analysis.realize',
-          message: 'Target-dependent phases are unavailable for an analysis-only dependency',
-        })
-      : undefined
-  const realizationError = specializationError ?? instanceFenceError ?? availabilityError
+  const realizationError = specializationError ?? instanceFenceError
   const targetLayout = measured(
     report,
     'target-layout',
@@ -737,7 +727,6 @@ export const prepare = (
   const diagnostics = Diagnostic.merge(
     self.diagnostics,
     instanceViolationDiagnostics(self, discovery),
-    IntrinsicAvailability.analysisOnlyDiagnostics(discovery.intrinsics),
   )
   if (Diagnostic.hasErrors(diagnostics))
     return Object.freeze({

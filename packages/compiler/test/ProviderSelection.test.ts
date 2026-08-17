@@ -4,7 +4,9 @@ import * as Diagnostic from '../src/Diagnostic.js'
 import * as ProviderSelection from '../src/ProviderSelection.js'
 import * as RequirementRow from '../src/RequirementRow.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
+import * as SourceSpan from '../src/SourceSpan.js'
 import * as Type from '../src/Type.js'
+import { unreachable } from './support/raise.js'
 
 const provider = Type.nominal('work', 'Provider')
 const capability = (name: string): Type.Nominal => Type.nominal('work', name)
@@ -26,11 +28,9 @@ const selected = RowAlgebra.parameter<
   Type.Parameter,
   Type.RequirementMemberShape
 >(selectedParameter)
-const origin = (start: number): RowAlgebra.SourceOrigin => ({
-  sourceId: 'main',
-  start,
-  end: start + 1,
-})
+const origin = (start: number): SourceSpan.SourceSpan =>
+  SourceSpan.fromOffsets('main', start, start + 1) ?? unreachable('expected a valid source span')
+const applicationOrigin = origin(0)
 const relation = (
   names: ReadonlyArray<string>,
   start: number,
@@ -65,11 +65,31 @@ const oracle = (
 
 const memberKey = RequirementRow.policy<Type.Nominal | Type.Parameter>(Type.key).memberKey
 
+it('rejects an empty relation set as an internal invariant violation', () => {
+  assert.throws(
+    () =>
+      ProviderSelection.solve({
+        relations: [],
+        responsible: applicationOrigin,
+        oracle: oracle(),
+      }),
+    RangeError,
+  )
+})
+
 it('intersects complete candidate maps before selecting a late common member', () => {
   const first = relation(['A', 'B', 'C'], 20)
   const second = relation(['C'], 10)
-  const solved = ProviderSelection.solve({ relations: [first, second], oracle: oracle() })
-  const permuted = ProviderSelection.solve({ relations: [second, first], oracle: oracle() })
+  const solved = ProviderSelection.solve({
+    relations: [first, second],
+    responsible: applicationOrigin,
+    oracle: oracle(),
+  })
+  const permuted = ProviderSelection.solve({
+    relations: [second, first],
+    responsible: applicationOrigin,
+    oracle: oracle(),
+  })
 
   assert.strictEqual(solved._tag, 'Selected')
   assert.strictEqual(permuted._tag, 'Selected')
@@ -92,13 +112,14 @@ it('reports every empty relation before irrelevant surviving statuses', () => {
   })
   const solved = ProviderSelection.solve({
     relations: [relation(['A'], 30), relation(['B'], 10), relation(['C'], 20)],
+    responsible: applicationOrigin,
     oracle: noMatch,
   })
 
   assert.strictEqual(solved._tag, 'Rejected')
   if (solved._tag === 'Rejected')
     assert.deepEqual(
-      solved.diagnostics.map((diagnostic) => diagnostic._tag),
+      solved.diagnostics.map((diagnostic) => diagnostic.problem._tag),
       ['ProviderNoMatch', 'ProviderNoMatch'],
     )
   if (solved._tag === 'Rejected')
@@ -119,12 +140,12 @@ it('separates span-free conflict payloads from local ordered locations', () => {
   assert.strictEqual(solved._tag, 'Rejected')
   if (solved._tag === 'Rejected') {
     const diagnostic = solved.diagnostics.at(0)
-    assert.strictEqual(diagnostic?._tag, 'JointSelectionConflict')
-    if (diagnostic?._tag === 'JointSelectionConflict') {
+    assert.strictEqual(diagnostic?.problem._tag, 'JointSelectionConflict')
+    if (diagnostic?.problem._tag === 'JointSelectionConflict') {
       assert.strictEqual(Diagnostic.providerSelection(diagnostic).code, 'SEM0124')
       assert.strictEqual(diagnostic.locations.primary, responsible)
       assert.deepEqual(
-        diagnostic.payload.relations.map((entry) => entry.fullCandidateKeySet),
+        diagnostic.problem.payload.relations.map((entry) => entry.fullCandidateKeySet),
         [[memberKey(requirement('A'))], [memberKey(requirement('B'))]],
       )
       assert.deepEqual(
@@ -145,15 +166,15 @@ it('reports common ambiguity plus each unequal full relation candidate set', () 
   assert.strictEqual(solved._tag, 'Rejected')
   if (solved._tag === 'Rejected') {
     const diagnostic = solved.diagnostics.at(0)
-    assert.strictEqual(diagnostic?._tag, 'ProviderAmbiguity')
-    if (diagnostic?._tag === 'ProviderAmbiguity') {
+    assert.strictEqual(diagnostic?.problem._tag, 'ProviderAmbiguity')
+    if (diagnostic?.problem._tag === 'ProviderAmbiguity') {
       assert.strictEqual(Diagnostic.providerSelection(diagnostic).code, 'SEM0125')
-      assert.deepEqual(diagnostic.payload.survivingCandidates, [
+      assert.deepEqual(diagnostic.problem.payload.survivingCandidates, [
         memberKey(requirement('A')),
         memberKey(requirement('B')),
       ])
       assert.deepEqual(
-        diagnostic.payload.relations.map((entry) => entry.fullCandidateKeySet),
+        diagnostic.problem.payload.relations.map((entry) => entry.fullCandidateKeySet),
         [
           [memberKey(requirement('A')), memberKey(requirement('B')), memberKey(requirement('C'))],
           [memberKey(requirement('A')), memberKey(requirement('B')), memberKey(requirement('D'))],
@@ -166,6 +187,7 @@ it('reports common ambiguity plus each unequal full relation candidate set', () 
 it('discards eliminated bad statuses but diagnoses surviving ambiguous and invalid matches', () => {
   const eliminated = ProviderSelection.solve({
     relations: [relation(['A', 'C'], 10), relation(['C'], 20)],
+    responsible: applicationOrigin,
     oracle: oracle({
       A: { _tag: 'Ambiguous', witnesses: [witness('First'), witness('Second')] },
     }),
@@ -178,12 +200,13 @@ it('discards eliminated bad statuses but diagnoses surviving ambiguous and inval
   ] satisfies ReadonlyArray<Constraint.ConformanceOutcome>) {
     const surviving = ProviderSelection.solve({
       relations: [relation(['C', 'D'], 10), relation(['C'], 20)],
+      responsible: applicationOrigin,
       oracle: oracle({ C: outcome }),
     })
     assert.strictEqual(surviving._tag, 'Rejected')
     if (surviving._tag === 'Rejected')
       assert.deepEqual(
-        surviving.diagnostics.map((diagnostic) => diagnostic._tag),
+        surviving.diagnostics.map((diagnostic) => diagnostic.problem._tag),
         outcome._tag === 'Ambiguous'
           ? ['ConformanceAmbiguity', 'ConformanceAmbiguity']
           : ['InvalidConformance', 'InvalidConformance'],
@@ -205,7 +228,11 @@ it('coalesces duplicate wanted keys and canonicalizes occurrence origins', () =>
   assert.strictEqual(grouped.length, 1)
   assert.deepEqual(grouped.at(0)?.origins, [origin(10), origin(20), origin(30)])
 
-  const solved = ProviderSelection.solve({ relations: grouped, oracle: oracle() })
+  const solved = ProviderSelection.solve({
+    relations: grouped,
+    responsible: applicationOrigin,
+    oracle: oracle(),
+  })
   assert.strictEqual(solved._tag, 'Selected')
   if (solved._tag === 'Selected') assert.strictEqual(solved.evidence.length, 1)
 })
@@ -215,16 +242,19 @@ it('checks explicit selector cardinality and exact stored access before matching
   const empty = ProviderSelection.solve({
     relations: [base],
     selected: row([]),
+    responsible: applicationOrigin,
     oracle: oracle(),
   })
   const multiple = ProviderSelection.solve({
     relations: [base],
     selected: row([requirement('A'), requirement('B')]),
+    responsible: applicationOrigin,
     oracle: oracle(),
   })
   const accessMismatch = ProviderSelection.solve({
     relations: [base],
     selected: row([requirement('A', 'Shared')]),
+    responsible: applicationOrigin,
     oracle: oracle(),
   })
 
@@ -232,7 +262,7 @@ it('checks explicit selector cardinality and exact stored access before matching
     assert.strictEqual(result._tag, 'Rejected')
     if (result._tag !== 'Rejected') continue
     const diagnostic = result.diagnostics.at(0)
-    assert.strictEqual(diagnostic?._tag, 'SelectedRowCardinality')
+    assert.strictEqual(diagnostic?.problem._tag, 'SelectedRowCardinality')
     assert.strictEqual(
       diagnostic === undefined ? undefined : Diagnostic.providerSelection(diagnostic).code,
       'SEM0126',
@@ -240,7 +270,7 @@ it('checks explicit selector cardinality and exact stored access before matching
   }
   assert.strictEqual(accessMismatch._tag, 'Rejected')
   if (accessMismatch._tag === 'Rejected')
-    assert.strictEqual(accessMismatch.diagnostics.at(0)?._tag, 'ProviderNoMatch')
+    assert.strictEqual(accessMismatch.diagnostics.at(0)?.problem._tag, 'ProviderNoMatch')
 })
 
 it('distinguishes exact provider identity from unique conformance evidence', () => {
@@ -248,10 +278,12 @@ it('distinguishes exact provider identity from unique conformance evidence', () 
   const exactWanted = Constraint.providerSelection('Shared', provider, selected, row([exactMember]))
   const exact = ProviderSelection.solve({
     relations: [{ wanted: exactWanted, origins: [origin(10)] }],
+    responsible: applicationOrigin,
     oracle: oracle(),
   })
   const conformance = ProviderSelection.solve({
     relations: [relation(['A'], 10)],
+    responsible: applicationOrigin,
     oracle: oracle(),
   })
 

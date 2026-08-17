@@ -552,7 +552,7 @@ export const terminationFailures = (self: ConformanceHead): ReadonlyArray<Termin
           if (ordinal === providerOrdinal) continue
           const required = requirement.capability.arguments.at(ordinal)
           if (required === undefined) continue
-          if (!Type.isConcreteGenericArgument(declared)) continue
+          if (!Type.isRuntimeConcreteGenericArgument(declared)) continue
           if (Type.genericArgumentKey(declared) === Type.genericArgumentKey(required)) continue
           failures.push(
             Object.freeze({

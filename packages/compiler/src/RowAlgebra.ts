@@ -1,12 +1,6 @@
 import * as FiniteRow from './FiniteRow.js'
 import * as Canonical from './internal/Canonical.js'
-
-/** A diagnostic-only source location. It never participates in row identity. */
-export interface SourceOrigin {
-  readonly sourceId: string
-  readonly start: number
-  readonly end: number
-}
+import * as SourceSpan from './SourceSpan.js'
 
 export type MemberSubstitution<Member, SymbolicMember> =
   | { readonly _tag: 'Residual'; readonly member: SymbolicMember }
@@ -16,6 +10,8 @@ export type MemberSubstitution<Member, SymbolicMember> =
 /** Domain behavior for one kind-preserving symbolic row algebra. */
 export interface Policy<Member, RowParameter, SymbolicMember, MemberParameter> {
   readonly finite: FiniteRow.Policy<Member>
+  /** Whether later substitution or executable-owner specialization may change this member's key. */
+  readonly concreteMemberMaySpecialize: (member: Member) => boolean
   readonly rowParameterKey: (parameter: RowParameter) => string
   readonly symbolicMemberKey: (member: SymbolicMember) => string
   readonly symbolicMemberParameters: (member: SymbolicMember) => ReadonlyArray<MemberParameter>
@@ -41,7 +37,7 @@ export type Expression<Member, RowParameter, SymbolicMember> =
 export interface MemberWellFormed<SymbolicMember> {
   readonly key: string
   readonly member: SymbolicMember
-  readonly origins: ReadonlyArray<SourceOrigin>
+  readonly origins: ReadonlyArray<SourceSpan.SourceSpan>
 }
 
 /** A symbolic row plus retained member-domain obligations erased by safe simplification. */
@@ -58,12 +54,12 @@ export interface Substitution<Member, RowParameter, SymbolicMember> {
 export interface InvalidMemberSpecialization {
   readonly key: string
   readonly reason: string
-  readonly origins: ReadonlyArray<SourceOrigin>
+  readonly origins: ReadonlyArray<SourceSpan.SourceSpan>
 }
 
 export interface DiagnosticLocations {
-  readonly primary: SourceOrigin
-  readonly secondary: ReadonlyArray<SourceOrigin>
+  readonly primary: SourceSpan.SourceSpan
+  readonly secondary: ReadonlyArray<SourceSpan.SourceSpan>
 }
 
 export type SubstitutionResult<Member, RowParameter, SymbolicMember> =
@@ -80,15 +76,9 @@ export type Concretization<Member> =
 const compareText = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0
 
-const originKey = (origin: SourceOrigin): string =>
-  Canonical.record('SourceOrigin', [origin.sourceId, `${origin.start}`, `${origin.end}`])
-
-const canonicalOrigins = (origins: Iterable<SourceOrigin>): ReadonlyArray<SourceOrigin> =>
-  Object.freeze(
-    [...new Map([...origins].map((origin) => [originKey(origin), origin])).values()].sort(
-      (left, right) => compareText(originKey(left), originKey(right)),
-    ),
-  )
+const canonicalOrigins = (
+  origins: Iterable<SourceSpan.SourceSpan>,
+): ReadonlyArray<SourceSpan.SourceSpan> => SourceSpan.canonicalize(origins)
 
 const mergeObligations = <SymbolicMember>(
   obligations: Iterable<MemberWellFormed<SymbolicMember>>,
@@ -111,15 +101,15 @@ const mergeObligations = <SymbolicMember>(
 /** Selects one deterministic primary and ordered secondary locations for an obligation failure. */
 export const diagnosticLocations = <SymbolicMember>(
   obligation: MemberWellFormed<SymbolicMember>,
-  responsible?: SourceOrigin,
+  responsible?: SourceSpan.SourceSpan,
 ): DiagnosticLocations | undefined => {
   const origins = canonicalOrigins(obligation.origins)
   const primary = responsible ?? origins.at(0)
   if (primary === undefined) return undefined
-  const primaryKey = originKey(primary)
+  const primaryKey = SourceSpan.key(primary)
   return Object.freeze({
     primary,
-    secondary: Object.freeze(origins.filter((origin) => originKey(origin) !== primaryKey)),
+    secondary: Object.freeze(origins.filter((origin) => SourceSpan.key(origin) !== primaryKey)),
   })
 }
 
@@ -180,7 +170,7 @@ export const parameter = <Member, RowParameter, SymbolicMember>(
 export const singleton = <Member, RowParameter, SymbolicMember, MemberParameter>(
   policy: Policy<Member, RowParameter, SymbolicMember, MemberParameter>,
   member: SymbolicMember,
-  origin: SourceOrigin,
+  origin: SourceSpan.SourceSpan,
 ): Row<Member, RowParameter, SymbolicMember> => {
   const key = policy.memberWellFormedKey(member)
   const expression: Expression<Member, RowParameter, SymbolicMember> = Object.freeze({
@@ -253,7 +243,13 @@ export const without = <Member, RowParameter, SymbolicMember, MemberParameter>(
     return Object.freeze({ expression: source.expression, memberWellFormed: obligations })
   if (selected.expression._tag === 'Concrete' && selected.expression.row.members.length === 0)
     return Object.freeze({ expression: source.expression, memberWellFormed: obligations })
-  if (source.expression._tag === 'Concrete' && selected.expression._tag === 'Concrete')
+  if (
+    source.expression._tag === 'Concrete' &&
+    selected.expression._tag === 'Concrete' &&
+    ![...source.expression.row.members, ...selected.expression.row.members].some(
+      policy.concreteMemberMaySpecialize,
+    )
+  )
     return Object.freeze({
       expression: concreteExpression(
         FiniteRow.difference(policy.finite, source.expression.row, selected.expression.row),
@@ -430,25 +426,25 @@ export const mapConcreteMembers = <Member, RowParameter, SymbolicMember, MemberP
 ): Row<Member, RowParameter, SymbolicMember> => {
   const visit = (
     expression: Expression<Member, RowParameter, SymbolicMember>,
-  ): Expression<Member, RowParameter, SymbolicMember> => {
+  ): Row<Member, RowParameter, SymbolicMember> => {
     switch (expression._tag) {
       case 'Concrete':
-        return concreteExpression(FiniteRow.make(policy.finite, expression.row.members.map(map)))
+        return concrete(policy, expression.row.members.map(map))
       case 'RowParameter':
       case 'Singleton':
-        return expression
-      case 'Union':
-        return normalizeUnionExpression(policy, expression.operands.map(visit))
+        return Object.freeze({ expression, memberWellFormed: Object.freeze([]) })
+      case 'Union': {
+        let result = concrete<Member, RowParameter, SymbolicMember, MemberParameter>(policy, [])
+        for (const operand of expression.operands) result = union(policy, result, visit(operand))
+        return result
+      }
       case 'Without':
-        return Object.freeze({
-          _tag: 'Without',
-          source: visit(expression.source),
-          selected: visit(expression.selected),
-        })
+        return without(policy, visit(expression.source), visit(expression.selected))
     }
   }
+  const mapped = visit(self.expression)
   return Object.freeze({
-    expression: visit(self.expression),
+    expression: mapped.expression,
     memberWellFormed: self.memberWellFormed,
   })
 }
@@ -572,8 +568,24 @@ export const encode = <Member, RowParameter, SymbolicMember, MemberParameter>(
         return rowParameter(expression.parameter)
       case 'Singleton':
         return symbolicMember(expression.member)
-      case 'Union':
-        return expression.operands.map(visit).join(' | ')
+      case 'Union': {
+        const rank = (operand: Expression<Member, RowParameter, SymbolicMember>): number =>
+          operand._tag === 'Concrete'
+            ? 0
+            : operand._tag === 'Singleton'
+              ? 1
+              : operand._tag === 'RowParameter'
+                ? 2
+                : 3
+        return expression.operands
+          .map((operand, ordinal) => ({ operand, ordinal }))
+          .sort(
+            (left, right) =>
+              rank(left.operand) - rank(right.operand) || left.ordinal - right.ordinal,
+          )
+          .map(({ operand }) => visit(operand))
+          .join(' | ')
+      }
       case 'Without':
         return `Without<${visit(expression.source)}, ${visit(expression.selected)}>`
     }

@@ -58,6 +58,10 @@
       "types": "./dist/CallableFieldRealization.d.ts",
       "import": "./dist/CallableFieldRealization.js"
     },
+    "./CallableContract": {
+      "types": "./dist/CallableContract.d.ts",
+      "import": "./dist/CallableContract.js"
+    },
     "./Completion": {
       "types": "./dist/Completion.d.ts",
       "import": "./dist/Completion.js"
@@ -69,6 +73,18 @@
     "./ProjectAnalysis": {
       "types": "./dist/ProjectAnalysis.d.ts",
       "import": "./dist/ProjectAnalysis.js"
+    },
+    "./ProviderSelection": {
+      "types": "./dist/ProviderSelection.d.ts",
+      "import": "./dist/ProviderSelection.js"
+    },
+    "./RequirementRow": {
+      "types": "./dist/RequirementRow.d.ts",
+      "import": "./dist/RequirementRow.js"
+    },
+    "./RowAlgebra": {
+      "types": "./dist/RowAlgebra.d.ts",
+      "import": "./dist/RowAlgebra.js"
     },
     "./RepresentationField": {
       "types": "./dist/RepresentationField.d.ts",
@@ -130,6 +146,10 @@
       "types": "./dist/ConformanceHead.d.ts",
       "import": "./dist/ConformanceHead.js"
     },
+    "./Constraint": {
+      "types": "./dist/Constraint.d.ts",
+      "import": "./dist/Constraint.js"
+    },
     "./DeclarationIndex": {
       "types": "./dist/DeclarationIndex.d.ts",
       "import": "./dist/DeclarationIndex.js"
@@ -157,6 +177,10 @@
     "./IntrinsicAvailability": {
       "types": "./dist/IntrinsicAvailability.d.ts",
       "import": "./dist/IntrinsicAvailability.js"
+    },
+    "./FiniteRow": {
+      "types": "./dist/FiniteRow.d.ts",
+      "import": "./dist/FiniteRow.js"
     },
     "./InterfaceWitnessCompatibility": {
       "types": "./dist/InterfaceWitnessCompatibility.d.ts",

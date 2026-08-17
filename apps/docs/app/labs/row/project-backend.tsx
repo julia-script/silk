@@ -788,6 +788,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = effect outcome tag ${operation.tag} payload ${localText(operation.source)}`
     case 'PackEffectFailureUnion':
       return `${localText(operation.destination)} = effect failure union ${localText(operation.source)} · ${operation.mappings.map((mapping) => `${mapping.source}→${mapping.target}`).join(', ')}`
+    case 'PropagateEffectFailure':
+      return `propagate effect failure ${localText(operation.source)} · ${operation.tagMappings.map((mapping) => `${mapping.source}→${mapping.target}`).join(', ')}`
     case 'UnpackEffectSuccess':
       return `${localText(operation.destination)} = effect success ${localText(operation.source)}`
     case 'RunEffect':

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Mir from '../src/Mir.js'
+import * as Type from '../src/Type.js'
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
@@ -18,6 +19,48 @@ it('verifies the hand-built samples clean', () => {
   for (const sample of Mir.samples()) {
     assert.deepEqual(Mir.verify(sample), [])
   }
+})
+
+it('rejects nested unavailable values at the monomorphic MIR frontier', () => {
+  const [straight] = Mir.samples()
+  const sample = straight ?? raise('expected sample')
+  const fn = sample.functions.at(0) ?? raise('expected sample function')
+  const unavailable = Type.nominal('sample://unavailable.silk', 'Outer', [
+    Type.nominal('sample://unavailable.silk', 'Inner', [
+      Type.unavailableGenericArgument('Value', 'unresolved MIR argument'),
+    ]),
+  ])
+  const unavailableLocal: Mir.Module = {
+    ...sample,
+    functions: [
+      {
+        ...fn,
+        localTypes: [...fn.localTypes, { _tag: 'Nominal', type: unavailable }],
+      },
+    ],
+  }
+  assert.include(
+    Mir.verify(unavailableLocal).map((violation) => violation.rule),
+    'InvalidInstance',
+  )
+
+  const unavailableInstance = {
+    ...fn.instance,
+    typeArguments: [unavailable],
+  }
+  const unavailableIdentity: Mir.Module = {
+    ...sample,
+    entry: {
+      _tag: 'OrdinaryEntry',
+      target: unavailableInstance,
+      machine: unavailableInstance,
+    },
+    functions: [{ ...fn, instance: unavailableInstance }],
+  }
+  assert.include(
+    Mir.verify(unavailableIdentity).map((violation) => violation.rule),
+    'InvalidInstance',
+  )
 })
 
 it('reports broken graphs deterministically as data', () => {
@@ -124,6 +167,82 @@ it('rejects repeat and exit ports that name no lexical loop owner', () => {
 
   assert.include(
     Mir.verify(invalid).map((violation) => violation.rule),
+    'InvalidLoopTarget',
+  )
+})
+
+it('requires every yield to be one uniquely owned loop condition', () => {
+  const [, branching] = Mir.samples()
+  const sample = branching ?? raise('expected branching sample')
+  const fn = sample.functions.at(0) ?? raise('expected sample function')
+  const returned = operationRegion(fn.regions.at(1))
+  const provenance = returned.outcome.provenance
+  const region = (ordinal: number): Mir.RegionId => ({ _tag: 'Region', ordinal })
+  const loop = (ordinal: number): Mir.LoopId => ({ _tag: 'Loop', ordinal })
+  const loop0 = loop(0)
+  const condition: Mir.OperationRegion = {
+    _tag: 'OperationRegion',
+    id: region(1),
+    ownerLoop: loop0,
+    operations: [],
+    outcome: { _tag: 'Yield', provenance },
+  }
+  const body: Mir.OperationRegion = {
+    _tag: 'OperationRegion',
+    id: region(2),
+    ownerLoop: loop0,
+    operations: [],
+    outcome: { _tag: 'Exit', loop: loop0, provenance },
+  }
+  const following: Mir.OperationRegion = { ...returned, id: region(3) }
+  const owner: Mir.LoopRegion = {
+    _tag: 'LoopRegion',
+    id: region(0),
+    loop: loop0,
+    condition: condition.id,
+    conditionValue: { _tag: 'Local', ordinal: 0 },
+    body: body.id,
+    following: following.id,
+    provenance,
+  }
+  const withRegions = (regions: ReadonlyArray<Mir.Region>): Mir.Module => ({
+    ...sample,
+    functions: [{ ...fn, entry: owner.id, regions }],
+  })
+  const valid = withRegions([owner, condition, body, following])
+  assert.deepEqual(Mir.verify(valid), [])
+
+  const unownedYield = withRegions([
+    owner,
+    condition,
+    { ...body, outcome: { _tag: 'Yield', provenance } },
+    following,
+  ])
+  assert.include(
+    Mir.verify(unownedYield).map((violation) => violation.rule),
+    'InvalidLoopTarget',
+  )
+
+  const nonYieldCondition = withRegions([
+    owner,
+    { ...condition, outcome: { _tag: 'Exit', loop: loop0, provenance } },
+    body,
+    following,
+  ])
+  assert.include(
+    Mir.verify(nonYieldCondition).map((violation) => violation.rule),
+    'InvalidLoopTarget',
+  )
+
+  const sharedCondition: Mir.LoopRegion = {
+    ...owner,
+    id: region(4),
+    loop: loop(1),
+  }
+  assert.include(
+    Mir.verify(withRegions([owner, condition, body, following, sharedCondition])).map(
+      (violation) => violation.rule,
+    ),
     'InvalidLoopTarget',
   )
 })

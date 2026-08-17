@@ -626,6 +626,23 @@ no continuation capture. An effect is a **typed, lazy computation value** with t
 
 Rows are optional and independent, and multi-member rows are written with `|`.
 
+Rows have deterministic finite algebra. Failure rows are sets under nominal identity. Requirement
+rows are keyed by capability and role and store either shared or exclusive access. Union joins a
+shared/exclusive collision to the stronger exclusive entry, while membership, subset, intersection,
+and difference compare the stored access exactly. Provider compatibility is separate: an exclusive
+provider can satisfy a shared demand, but selection returns the original shared member before
+subtraction.
+
+`Without<R, S>` is available in failure- and requirement-row positions. It is forward-computed after
+both operands are independently known; it never infers an unknown operand backwards from an expected
+remainder. Difference is total and supports whole rows:
+
+- `Without<First | Second | Third, First | Third>` is `Second`.
+- `Without<First | Second, Other>` is still `First | Second` because an absent member is a no-op.
+- `Without<&mut Logger, &Logger>` is still `&mut Logger` because shared and exclusive stored access
+  do not match.
+- `Without<&mut Clock | &mut Logger, &mut Logger>` is `&mut Clock`.
+
 ### 5.2 Constructing and running
 
 An `effect fn` and an `effect { ... }` block both construct a computation **without entering the
@@ -672,13 +689,13 @@ propagation is a compile error rather than a runtime surprise.
 
 ### 5.4 Handling is library code
 
-The compiler owns three primitives at this seam: one that runs a layer and reifies its outcome
-as `Result<A, Row<!E>>` data, one that removes a single capability-role entry, and one that removes a
-single failure-row member. The third is a deliberate, explained exception to the rule that handling
-is library code — see "Why `catch<E>` is not ordinary Silk" below.
+The compiler owns three sealed primitives at this seam: one that runs a layer and reifies its outcome
+as `Result<A, Row<!E>>` data, one that binds a single capability-role entry, and one that dispatches a
+single selected failure-row member. Their contracts use the same generic row algebra and checked
+constraints as ordinary source declarations.
 
 Everything else — `map`, `mapError`, `flatMap`, `flatten`, `tap`, `catchAll`, `retry`, `ensuring`,
-`zip`, `zip3`, `provide`, `provideMut`, `provideWith`, and `catch` in its whole-row form — is
+`zip`, `zip3`, `provide`, `provideMut`, `provideWith`, and the singleton `catch` wrapper — is
 ordinary Silk source in `effects.silk`. The compiler must not infer their meaning from a name or an
 origin, so a user-defined equivalent gets identical treatment with no registration.
 
@@ -686,60 +703,34 @@ Recovery is therefore just reify, `match`, and re-raise or return. Because a fai
 `Row<!E>` — ordinary value data projected to a structural union — a handler can match on it like any
 other value.
 
-`Effect.catch` has two forms, distinguished by whether a member is selected:
+Selective and whole-row recovery have distinct names and contracts:
 
 ```
 Effect.catchAll(protected, handler)    // whole-row recovery
 Effect.catch<E>(protected, handler)    // member-selective: recovers E, propagates the rest
 ```
 
-Without a selector it is ordinary Silk in `effects.silk`, taking a handler over the whole reified
-row `Row<!E>`, discarding the failure row `!E` and replacing it with the handler's own `!F`. With a
-selector it is the third compiler primitive: the handler takes the selected member alone, runs only
-for that member, contributes its own failures to the result row, and every nonmatching member
-propagates unchanged as the residual.
+`Effect.catchAll` takes a handler over the whole reified row `Row<!E>`, discards `!E` in full, and
+replaces it with the handler's own `!F`. `Effect.catch<S>` places the nominal selector first, checks
+`S in E`, gives the handler a value of `S`, and computes `Without<E, S> | F`. Omitting `<S>` infers it
+from the handler's nominal input; it does not select a removed whole-row overload.
 
-#### Why `catch<E>` is not ordinary Silk
+#### Why singleton catch has a sealed dispatch primitive
 
-The failure row cannot express what the requirement row already can. A requirement row admits a type
-parameter as a member — `Requirement.capability` is `Nominal | Parameter` — which is exactly how
-`provide<C>` removes one entry and keeps the rest open. A failure row does not: `Type.Effect.failures`
-is `ReadonlyArray<Nominal>`, so a member is always a concrete nominal and can never be a parameter a
-signature could solve for.
-
-That asymmetry has two consequences, and together they make a Silk `catch<E>` unwritable rather than
-merely awkward. There is no value type for a partially-open row, so the residual has no type a
-signature could declare or a binding could hold; and `match` has no residual binder, so a body that
-handled one member could not name the rest in order to re-raise them. The compiler computes the split
-and the residual instead, which is the same thing it already does for requirement rows.
-
-This is recorded as an exception, not a widening. The rule that the compiler must not infer meaning
-from a name or an origin is unchanged for every other operation at this seam. The path back to two
-primitives is row-polymorphic values — admitting a parameter as a failure-row member, solving member
-and residual together, and adding an open union value type with a residual binder — after which
-`catch<E>` becomes ordinary library code like everything around it.
+Row algebra can state the generic result, but ordinary Silk pattern matching still has no residual
+binder that can split one runtime failure value into “selected payload” versus “the same payload under
+the residual row.” `Intrinsic.catchFailure` is the minimal target-neutral dispatch operation. It
+consumes the already-proved membership and concrete specialized rows; it does not infer `S`, filter a
+row, or reconstruct the result type.
 
 #### What ships today
 
-Analysis of `Effect.catch<E>` is complete: it validates the selector against the protected row,
-rejects a selector the protected Effect cannot fail with and an open protected row, checks the
-handler against the selected member, computes the residual, and types the result as the residual
-unioned with the handler's failures. The four rows are recorded as semantic facts — protected,
-selected, handler, residual.
-
-No execution surface lowers the residual dispatch yet, and writing the selector form says so.
-Semantic analysis reports [`SEM0098`](./diagnostics.md) — *`<construct>` is analysis-only: it
-type-checks, but no engine lowers it yet, so a program that uses it cannot be built* — as an error
-spanning the `Effect.catch<E>(…)` call. The diagnostic is raised after the seam has typed the
-expression and does not suppress any of it: the result type, the residual row, and the four semantic
-facts are all still produced, so tooling reports selective recovery correctly while the build stops
-on a source diagnostic rather than on a MIR violation inside the standard library.
-
-Whole-row `Effect.catch` — the form without a selector — and `Effect.catchAll` are untouched by this
-and execute exactly as before.
-
-Until that lowering lands, executable selective recovery is done by hand: reify with `Effect.result`,
-`match` the row, and re-raise the members you do not handle.
+`Effect.catch<S>` is executable on the evaluator, WebAssembly, and native targets. The protected
+Effect and handler are formed in ordinary call-evaluation order, then the protected Effect runs once.
+Success bypasses the handler. A failure whose tag names `S` invokes the handler exactly once; every
+other failure keeps its payload and is remapped into the residual row. All targets share that
+specialized MIR behavior and cleanup order. Invalid selectors (`never`, a union, a non-nominal type,
+or a nominal absent from `E`) are rejected during semantic analysis before lowering.
 
 `Effect.ensuring` is the cleanup counterpart: it runs a finalizer after the protected Effect
 completes either way, then hands on the original success value or the original typed failure
@@ -777,6 +768,37 @@ every remaining one. Provision accepts any provider with a valid conformance; no
 consults a closed list of service names. `provideWith` acquires inside its own body, so each
 execution — including a retry — gets a fresh provider, and it reifies the inner computation to a
 result first so that a typed failure arrives as data before the provider is released.
+
+Provider modes are fixed and source-visible: `provide` selects through a shared borrow,
+`provideMut` through an exclusive borrow, and `bindRequirementOwned` by taking ownership. Shared
+providers select only shared demands; exclusive and owned providers may satisfy shared or exclusive
+demands. In every case selection returns the exact stored member, including its role and access,
+before `Without` removes it. If one provider matches several entries, the call is ambiguous unless
+the complete selected row is supplied as the first generic argument. A partially applied provider
+section retains that selection obligation until a statically visible Effect application completes
+it.
+
+Here `StdoutLogger` conforms to `Logger`. The explicit selected row removes `&mut Logger` while
+preserving `&mut Clock`, independently of canonical row order:
+
+```silk
+import silk.effects as Effect
+import silk.logging { Logger, LogError, StdoutLogger }
+
+service Clock {
+  effect fn tick() -> i32 ? &mut Clock
+}
+
+effect fn read() -> i32 ! LogError ? &mut Clock | &mut Logger {
+  run Effect.log("Reading clock")
+  return run Clock.tick()
+}
+
+effect fn withLogger() -> i32 ! LogError ? &mut Clock {
+  let mut logger = StdoutLogger.stdout()
+  return run Effect.provideMut<&mut Logger>(read(), &mut logger)
+}
+```
 
 ### 5.6 Entry points
 

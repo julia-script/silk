@@ -5,7 +5,6 @@ import * as ConformanceGoal from './ConformanceGoal.js'
 import * as Constraint from './Constraint.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
-import * as FiniteRow from './FiniteRow.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -4263,13 +4262,13 @@ interface ConstraintSolveResult {
 
 const constraintOrigins = (
   callable: SourceCallable | undefined,
-): ReadonlyArray<RowAlgebra.SourceOrigin> =>
+): ReadonlyArray<SourceSpan.SourceSpan> =>
   Object.freeze(callable?.constraints.map((constraint) => constraint.syntax.span) ?? [])
 
 /** Solves provider relations only after arguments have independently established their operands. */
 const solveCallableConstraints = (
   constraints: ReadonlyArray<Constraint.Constraint>,
-  origins: ReadonlyArray<RowAlgebra.SourceOrigin>,
+  origins: ReadonlyArray<SourceSpan.SourceSpan>,
   initial: Type.Substitution,
   caller: DeclarationFact | undefined,
   resolution: ResolutionContext,
@@ -4290,78 +4289,24 @@ const solveCallableConstraints = (
       evidence.push(Constraint.assumed(wanted, substitution))
       continue
     }
-    if (wanted._tag === 'NominalMemberConstraint') {
-      const source = RowAlgebra.concretize(Type.failureRowPolicy(), wanted.source)
-      if (!Type.isNominal(wanted.selected) || source._tag !== 'Concrete') {
-        diagnostics.push(
-          Diagnostic.invalidEffectHandler('failure membership remains underconstrained', span),
-        )
-        continue
-      }
-      if (!FiniteRow.has(Type.failureRowPolicy().finite, source.row, wanted.selected)) {
-        diagnostics.push(
-          Diagnostic.invalidEffectHandler(
-            `selected failure ${Type.encode(wanted.selected)} is absent`,
+    if (wanted._tag === 'ProviderSelectionConstraint') continue
+    const proof = Constraint.proveStructural(wanted)
+    if (proof !== undefined) {
+      evidence.push(proof)
+      continue
+    }
+    diagnostics.push(
+      wanted._tag === 'RequirementSubsetConstraint'
+        ? Diagnostic.invalidEffectProvision(
+            'selected requirement row is not an exact subset of the source row',
+            span,
+          )
+        : Diagnostic.invalidEffectHandler(
+            wanted._tag === 'NominalMemberConstraint'
+              ? 'selected failure is absent or remains underconstrained'
+              : 'selected failure row is not an exact subset of the source row',
             span,
           ),
-        )
-        continue
-      }
-      evidence.push(
-        Object.freeze({
-          _tag: 'Member' as const,
-          selected: wanted.selected,
-          source: wanted.source,
-        }),
-      )
-      continue
-    }
-    if (wanted._tag === 'FailureSubsetConstraint') {
-      const selected = RowAlgebra.concretize(Type.failureRowPolicy(), wanted.selected)
-      const source = RowAlgebra.concretize(Type.failureRowPolicy(), wanted.source)
-      if (
-        selected._tag !== 'Concrete' ||
-        source._tag !== 'Concrete' ||
-        !FiniteRow.isSubset(Type.failureRowPolicy().finite, selected.row, source.row)
-      ) {
-        diagnostics.push(
-          Diagnostic.invalidEffectHandler(
-            'selected failure row is not an exact subset of the source row',
-            span,
-          ),
-        )
-        continue
-      }
-      evidence.push(
-        Object.freeze({
-          _tag: 'FailureSubset' as const,
-          selected: wanted.selected,
-          source: wanted.source,
-        }),
-      )
-      continue
-    }
-    const selected = RowAlgebra.concretize(Type.requirementRowPolicy(), wanted.selected)
-    const source = RowAlgebra.concretize(Type.requirementRowPolicy(), wanted.source)
-    if (
-      selected._tag !== 'Concrete' ||
-      source._tag !== 'Concrete' ||
-      !FiniteRow.isSubset(Type.requirementRowPolicy().finite, selected.row, source.row)
-    ) {
-      diagnostics.push(
-        Diagnostic.invalidEffectProvision(
-          'selected requirement row is not an exact subset of the source row',
-          span,
-        ),
-      )
-      continue
-    }
-    evidence.push(
-      Object.freeze({
-        _tag: 'RequirementSubset' as const,
-        selected: wanted.selected,
-        source: wanted.source,
-      }),
     )
   }
   const providers = constraints.flatMap((constraint, ordinal) =>
@@ -4395,9 +4340,9 @@ const solveCallableConstraints = (
     const relations = wanted.flatMap((constraint, ordinal) =>
       constraint._tag === 'ProviderSelectionConstraint'
         ? [
-            Object.freeze({
+            Object.freeze<ProviderSelection.Relation>({
               wanted: constraint,
-              origins: Object.freeze([origins.at(group.at(ordinal)?.ordinal ?? 0) ?? span]),
+              origins: [origins.at(group.at(ordinal)?.ordinal ?? 0) ?? span],
             }),
           ]
         : [],
@@ -4423,10 +4368,12 @@ const solveCallableConstraints = (
           Type.requirementRowArgument([solved.member]),
         )
     }
-    for (const [ordinal, selectedEvidence] of solved.evidence.entries()) {
-      const finalWanted = group.at(ordinal)?.constraint
+    for (const selectedEvidence of solved.evidence) {
+      const solvedWanted = wanted.find(
+        (candidate) => Constraint.key(candidate) === selectedEvidence.wantedKey,
+      )
       const specialized =
-        finalWanted === undefined ? undefined : Constraint.substitute(finalWanted, substitution)
+        solvedWanted === undefined ? undefined : Constraint.substitute(solvedWanted, substitution)
       if (specialized?._tag === 'ProviderSelectionConstraint')
         evidence.push(
           Constraint.requirementSelectionEvidence(
@@ -5030,6 +4977,7 @@ const callableTypeOfReference = (reference: CallReferenceFact): Type.Callable | 
     contract === undefined || contract.constraints.length === 0
       ? undefined
       : Object.freeze({
+          contract,
           binders: contract.binders,
           constraints: contract.constraints,
           evidence: Object.freeze([]),
@@ -5571,6 +5519,7 @@ const sectionCallableType = (
     contract.constraints.length === 0
       ? undefined
       : Object.freeze({
+          contract,
           binders: contract.binders,
           constraints: contract.constraints,
           evidence: Object.freeze([]),
@@ -10622,6 +10571,166 @@ export const visitStatementFacts = (
   }
 }
 
+const constrainedCallableSchema = (expression: ExpressionFact): Type.CallableSchema | undefined => {
+  if (expression.type._tag !== 'Available' || !Type.isCallable(expression.type.type))
+    return undefined
+  const schema = expression.type.type.schema
+  return schema !== undefined &&
+    (schema.binders.length > 0 || schema.constraints.length > 0 || schema.evidence.length > 0)
+    ? schema
+    : undefined
+}
+
+const canonicalFunctionKey = (declaration: DeclarationFact): string | undefined =>
+  declaration.canonical._tag === 'Canonical'
+    ? `${declaration.canonical.id.module}\u0000${declaration.canonical.id.name}`
+    : undefined
+
+/**
+ * Proves that one ordinary source function is a compile-time-only whole-value relay. Only lexical
+ * binds followed by one return qualify: admitting any other statement would erase observable work
+ * when lowering replaces the chain by its originating callable recipe.
+ */
+const forwardedCallableParameter = (
+  fn: FunctionFact,
+  functions: ReadonlyMap<string, FunctionFact>,
+  resolvingFunctions: ReadonlySet<string> = new Set(),
+): number | undefined => {
+  const key_ = canonicalFunctionKey(fn.declaration)
+  if (key_ === undefined || resolvingFunctions.has(key_)) return undefined
+  const leading = fn.statements.slice(0, -1)
+  const terminal = fn.statements.at(-1)
+  if (
+    fn.declaration.parameters.length !== 1 ||
+    terminal?._tag !== 'ReturnStatement' ||
+    leading.some((statement) => statement._tag !== 'BindStatement')
+  )
+    return undefined
+  const resolving = new Set(resolvingFunctions).add(key_)
+  const forwardedBindings = new Set<number>()
+  const expression = (
+    current: ExpressionFact,
+    bindings: ReadonlySet<number> = new Set(),
+  ): number | undefined => {
+    if (current._tag === 'Grouped' || current._tag === 'Move')
+      return expression(current._tag === 'Grouped' ? current.expression : current.subject, bindings)
+    if (current._tag === 'Identifier') {
+      if (current.reference._tag === 'Resolved') return current.reference.parameter.id.ordinal
+      if (current.reference._tag !== 'ResolvedBinding') return undefined
+      const ordinal = current.reference.binding.id.ordinal
+      if (bindings.has(ordinal)) return undefined
+      forwardedBindings.add(ordinal)
+      return expression(current.reference.binding.initializer, new Set(bindings).add(ordinal))
+    }
+    if (current._tag !== 'Call' || current.reference._tag !== 'Resolved') return undefined
+    const targetKey = canonicalFunctionKey(current.reference.declaration)
+    const target = targetKey === undefined ? undefined : functions.get(targetKey)
+    const forwarded =
+      target === undefined ? undefined : forwardedCallableParameter(target, functions, resolving)
+    const argument =
+      forwarded === undefined
+        ? undefined
+        : current.mappings.find((mapping) => mapping.parameter.id.ordinal === forwarded)?.argument
+    return argument === undefined ? undefined : expression(argument.expression, bindings)
+  }
+  const forwarded = expression(terminal.expression)
+  return forwarded === undefined ||
+    leading.some(
+      (statement) =>
+        statement._tag !== 'BindStatement' || !forwardedBindings.has(statement.binding.id.ordinal),
+    )
+    ? undefined
+    : forwarded
+}
+
+const constrainedCallableEscapeDiagnostics = (
+  functions: ReadonlyArray<FunctionFact>,
+): ReadonlyArray<Diagnostic.Diagnostic> => {
+  const byCanonical = new Map(
+    functions.flatMap((fn) => {
+      const key_ = canonicalFunctionKey(fn.declaration)
+      return key_ === undefined ? [] : [[key_, fn] as const]
+    }),
+  )
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const seen = new Set<string>()
+  const reject = (expression: ExpressionFact): void => {
+    const span = expression.syntax.span
+    const key_ = `${span.sourceId}:${span.start}:${span.end}`
+    if (seen.has(key_)) return
+    seen.add(key_)
+    diagnostics.push(Diagnostic.nonConcreteSpecialization('constrained callable', span))
+  }
+  for (const fn of functions) {
+    visitStatementFacts(fn.statements, {
+      statement: (statement) => {
+        if (
+          (statement._tag === 'ReturnStatement' || statement._tag === 'WriteStatement') &&
+          constrainedCallableSchema(
+            statement._tag === 'ReturnStatement' ? statement.expression : statement.value,
+          ) !== undefined
+        )
+          reject(statement._tag === 'ReturnStatement' ? statement.expression : statement.value)
+      },
+      expression: (expression) => {
+        if (expression._tag === 'StructLiteral') {
+          for (const initializer of expression.initializers)
+            if (constrainedCallableSchema(initializer.expression) !== undefined)
+              reject(initializer.expression)
+          return
+        }
+        if (expression._tag === 'ArrayLiteral') {
+          for (const element of expression.elements)
+            if (constrainedCallableSchema(element.expression) !== undefined)
+              reject(element.expression)
+          return
+        }
+        if (expression._tag === 'CallableSection') {
+          for (const capture of expression.captures)
+            if (constrainedCallableSchema(capture.expression) !== undefined)
+              reject(capture.expression)
+          return
+        }
+        if (expression._tag === 'EffectBlock') {
+          for (const capture of expression.captures) {
+            const captured =
+              capture.reference._tag === 'BindingFact' ? capture.reference.initializer : undefined
+            if (captured !== undefined && constrainedCallableSchema(captured) !== undefined)
+              reject(captured)
+          }
+          return
+        }
+        if (expression._tag === 'Match' && constrainedCallableSchema(expression) !== undefined) {
+          reject(expression)
+          return
+        }
+        if (expression._tag === 'CallableApply') {
+          for (const argument of expression.arguments)
+            if (constrainedCallableSchema(argument.expression) !== undefined)
+              reject(argument.expression)
+          return
+        }
+        if (expression._tag !== 'Call') return
+        const targetKey =
+          expression.reference._tag === 'Resolved'
+            ? canonicalFunctionKey(expression.reference.declaration)
+            : undefined
+        const target = targetKey === undefined ? undefined : byCanonical.get(targetKey)
+        const forwarded =
+          target === undefined ? undefined : forwardedCallableParameter(target, byCanonical)
+        let relayed = false
+        for (const mapping of expression.mappings) {
+          if (constrainedCallableSchema(mapping.argument.expression) === undefined) continue
+          if (mapping.parameter.id.ordinal === forwarded) relayed = true
+          else reject(mapping.argument.expression)
+        }
+        if (constrainedCallableSchema(expression) !== undefined && !relayed) reject(expression)
+      },
+    })
+  }
+  return Object.freeze(diagnostics)
+}
+
 const lexicalScopesOf = (
   source: SourceFile.SourceFile,
   functions: ReadonlyArray<FunctionFact>,
@@ -10749,7 +10858,10 @@ export const elaborateModule = (input: Input): Result => {
     ...headers.diagnostics,
     ...constantDiagnostics,
     ...analyzed.flatMap((result) => result.diagnostics),
+    ...constrainedCallableEscapeDiagnostics(functions),
   ].sort(compareDiagnostics)
+  const erasedIntrinsicSection = (expression: ExpressionFact): boolean =>
+    callableSectionOf(expression)?.reference._tag === 'ResolvedIntrinsicContract'
   const hirStatements = (
     facts: ReadonlyArray<StatementFact>,
     resultType?: SemanticType,
@@ -10759,9 +10871,9 @@ export const elaborateModule = (input: Input): Result => {
         .filter(
           (statement) =>
             !(
-              statement._tag === 'BindStatement' &&
-              statement.binding.initializer._tag === 'CallableSection' &&
-              statement.binding.initializer.reference._tag === 'ResolvedIntrinsicContract'
+              (statement._tag === 'BindStatement' &&
+                erasedIntrinsicSection(statement.binding.initializer)) ||
+              (statement._tag === 'DropStatement' && erasedIntrinsicSection(statement.expression))
             ),
         )
         .map((statement): Hir.Statement => {

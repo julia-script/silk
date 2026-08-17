@@ -4,9 +4,10 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
-import type * as Mir from '../src/Mir.js'
+import * as Mir from '../src/Mir.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 import { corpus } from './support/corpus.js'
+import * as WasmMain from './support/WasmMain.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -72,6 +73,88 @@ it.effect('emits an instantiable module whose entry is exported as silk_main', (
     assert.strictEqual(artifact.backend, 'wasm')
     assert.deepEqual(Array.from(artifact.bytes.slice(0, 8)), [0, 97, 115, 109, 1, 0, 0, 0])
     assert.match(artifact.wat, /\(export "silk_main"/)
+  }),
+)
+
+it.effect('does not transfer borrow roots through a plain aggregate call result', () =>
+  Effect.gen(function* () {
+    const source = `struct Cell { value: i32 }
+struct Token { value: i32 }
+fn touch(cell: &mut Cell) -> Token {
+  cell.value = 2
+  return Token { value: 0 }
+}
+fn consume(token: Token) -> i32 { return token.value }
+pub fn main() -> i32 {
+  let mut cell = Cell { value: 1 }
+  let token = touch(&mut cell)
+  cell.value = 5
+  let ignored = consume(move token)
+  return cell.value + ignored
+}`
+    const snapshot = yield* snapshotOf(source)
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed', evaluated._tag)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 5)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    assert.strictEqual(yield* WasmMain.invoke(wasm.bytes, 'WasmBackend.invokePlainAggregate'), 5)
+  }),
+)
+
+it.effect('preserves borrow roots carried by returned Effect environment lanes', () =>
+  Effect.gen(function* () {
+    const source = `struct Token { value: i32 }
+service Counter { effect fn read(token: &mut Token) -> i32 ? &mut Counter }
+struct Cell { value: i32 }
+effect fn read(self: &mut Cell, token: &mut Token) -> i32 {
+  self.value = self.value + 1
+  return self.value + token.value
+}
+impl Counter for Cell { read: Cell.read }
+effect fn request(token: &mut Token) -> i32 ? &mut Counter {
+  return run Counter.read(move token)
+}
+pub fn main() -> i32 {
+  let mut token = Token { value: 0 }
+  let mut cell = Cell { value: 41 }
+  let pending = Effect.provideMut(request(&mut token), &mut cell)
+  return run move pending
+}`
+    const snapshot = yield* snapshotOf(source)
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const module = Analysis.loweredMir(snapshot)
+    assert.deepEqual(Mir.verify(module), [])
+    assert.isTrue(
+      module.functions.some((fn) =>
+        Mir.operations(fn).some(
+          (operation) =>
+            operation._tag === 'WritePlace' &&
+            fn.localTypes.at(operation.root.ordinal)?._tag === 'Reference',
+        ),
+      ),
+    )
+    assert.isTrue(
+      module.functions.some((fn) =>
+        fn.localTypes.some(
+          (type) =>
+            type._tag === 'EffectValue' &&
+            type.environment.fields.some(
+              (field) => typeof field.type !== 'string' && field.type._tag === 'ReferenceType',
+            ),
+        ),
+      ),
+    )
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed', evaluated._tag)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    assert.strictEqual(yield* WasmMain.invoke(wasm.bytes, 'WasmBackend.invokeBorrowedEffect'), 42)
   }),
 )
 

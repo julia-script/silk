@@ -35,6 +35,17 @@ const resumeOf = (
   path: Mir.ResumePointId['path'],
 ): Mir.ResumePointId => Object.freeze({ _tag: 'ResumePointId', point, path })
 
+const isContinuationAllocator = (provider: {
+  readonly capability: Type.Nominal
+  readonly role: string
+  readonly requirementAccess: Type.Requirement['access']
+  readonly access: 'Shared' | 'Exclusive' | 'Take'
+}): boolean =>
+  Type.equals(provider.capability, Type.allocator) &&
+  provider.role === 'DefaultRole' &&
+  provider.requirementAccess === 'Exclusive' &&
+  (provider.access === 'Exclusive' || provider.access === 'Take')
+
 const operationArguments = (
   operation: Extract<
     Mir.Operation,
@@ -63,24 +74,45 @@ const runnerOf = (
   functions: ReadonlyArray<Mir.MirFunction> = [],
 ): Mir.SuspensionRunner => {
   const arguments_ = operation === undefined ? [] : operationArguments(operation)
-  const runtimeProviders = runner.providers.filter(
-    (provider) =>
-      provider.witness?._tag === 'SourceConformanceWitness' && provider.access !== 'Take',
+  const operationProviders = operation?._tag === 'RunEffectValue' ? operation.providers : []
+  const providersWithRuntimeSelections = Object.freeze([
+    ...operationProviders,
+    ...runner.providers.filter(
+      (provider) =>
+        !operationProviders.some(
+          (selected) =>
+            provider.role === selected.role &&
+            provider.requirementAccess === selected.requirementAccess &&
+            Type.equals(provider.capability, selected.capability),
+        ),
+    ),
+  ])
+  const runtimeProviders = providersWithRuntimeSelections.filter(
+    (provider) => provider.witness?._tag === 'SourceConformanceWitness',
   )
   const argumentOffset = Math.max(0, arguments_.length - runtimeProviders.length)
   let runtimeOrdinal = 0
-  const providers: ReadonlyArray<Mir.SuspensionProviderArgument> = runner.providers.map(
-    (provider) => {
-      const hasRuntimeArgument =
-        provider.witness?._tag === 'SourceConformanceWitness' && provider.access !== 'Take'
+  const providers: ReadonlyArray<Mir.SuspensionProviderArgument> =
+    providersWithRuntimeSelections.map((provider) => {
+      const hasRuntimeArgument = provider.witness?._tag === 'SourceConformanceWitness'
+      const selected =
+        operation?._tag === 'RunEffectValue'
+          ? operation.providers.find(
+              (candidate) =>
+                candidate.role === provider.role &&
+                candidate.requirementAccess === provider.requirementAccess &&
+                candidate.access === provider.access &&
+                Type.equals(candidate.capability, provider.capability) &&
+                Type.equals(candidate.providerType, provider.providerType),
+            )
+          : undefined
       const argument = hasRuntimeArgument
-        ? arguments_.at(argumentOffset + runtimeOrdinal)
+        ? operation?._tag === 'RunEffectValue'
+          ? selected?.argument
+          : arguments_.at(argumentOffset + runtimeOrdinal)
         : undefined
       if (hasRuntimeArgument) runtimeOrdinal += 1
-      const continuationAllocator =
-        provider.capability.module === 'silk/core' &&
-        provider.capability.name === 'Allocator' &&
-        provider.access === 'Exclusive'
+      const continuationAllocator = isContinuationAllocator(provider)
       const witness =
         provider.witness ??
         DeclarationIndex.witness(index, provider.providerType, provider.capability)
@@ -92,8 +124,7 @@ const runnerOf = (
           ? (['ChildRequirement', 'ContinuationAllocator'] as const)
           : (['ChildRequirement'] as const),
       })
-    },
-  )
+    })
   const declaration =
     operation === undefined
       ? runner.declaration
@@ -147,6 +178,7 @@ const continuationAllocatorOf = (
       ? Type.requirementMembers(fn.result.type).find(
           (requirement) =>
             requirement.access === 'Exclusive' &&
+            requirement.role === 'DefaultRole' &&
             Type.equals(requirement.capability, Type.allocator),
         )
       : undefined
@@ -182,16 +214,11 @@ const continuationAllocatorOf = (
     if (visited.has(identity)) return undefined
     const nextVisited = new Set(visited).add(identity)
     let lane = baseLane
-    let selected: { readonly lane: number; readonly providerType: Type.Nominal } | undefined
+    // A provider already bound inside a captured Effect is semantically part of that Effect. It
+    // outranks unrelated Allocator-conforming captures in an enclosing wrapper, regardless of
+    // capture order. This is what keeps non-default Allocator roles from competing with the hidden
+    // DefaultRole continuation provider.
     for (const field of environment.fields) {
-      if (
-        Type.isReference(field.type) &&
-        field.type.access === 'Exclusive' &&
-        Type.isNominal(field.type.target) &&
-        DeclarationIndex.witness(index, field.type.target, Type.allocator) !== undefined
-      ) {
-        selected = Object.freeze({ lane, providerType: field.type.target })
-      }
       if (field.effectIdentity !== undefined) {
         const nested = program.layout.effectEnvironments.find(
           (candidate) =>
@@ -200,15 +227,37 @@ const continuationAllocatorOf = (
         )
         if (nested?._tag === 'EffectEnvironment') {
           const nestedSelected = allocatorInEnvironment(nested, lane, nextVisited)
-          if (nestedSelected !== undefined) selected = nestedSelected
+          if (nestedSelected !== undefined) return nestedSelected
         }
       }
       lane += fieldLaneCount(field)
     }
-    return selected
+    lane = baseLane
+    for (const field of environment.fields) {
+      if (
+        field.providedRequirement !== undefined &&
+        Type.equals(field.providedRequirement.capability, Type.allocator) &&
+        field.providedRequirement.role === 'DefaultRole' &&
+        field.providedRequirement.requirementAccess === 'Exclusive' &&
+        (field.providedRequirement.providerAccess === 'Exclusive' ||
+          field.providedRequirement.providerAccess === 'Take') &&
+        Type.isReference(field.type) &&
+        field.type.access === 'Exclusive' &&
+        Type.isNominal(field.type.target)
+      )
+        return Object.freeze({ lane, providerType: field.type.target })
+      lane += fieldLaneCount(field)
+    }
+    return undefined
   }
-  const selected = candidates
-    .flatMap((local) => {
+  interface AllocatorCandidate {
+    readonly local: Mir.LocalId
+    readonly lane: number
+    readonly providerType: Type.Nominal
+    readonly nested: boolean
+  }
+  const selectedCandidates: ReadonlyArray<AllocatorCandidate> = candidates.flatMap(
+    (local): ReadonlyArray<AllocatorCandidate> => {
       const type = fn.localTypes.at(local.ordinal)
       if (
         type?._tag === 'Reference' &&
@@ -216,21 +265,47 @@ const continuationAllocatorOf = (
         Type.isNominal(type.type.target) &&
         DeclarationIndex.witness(index, type.type.target, Type.allocator) !== undefined
       )
-        return [Object.freeze({ local, lane: 0, providerType: type.type.target })]
+        return [Object.freeze({ local, lane: 0, providerType: type.type.target, nested: false })]
       if (
         type?._tag === 'EffectBorrow' &&
         type.access === 'Exclusive' &&
         Type.isNominal(type.type) &&
         DeclarationIndex.witness(index, type.type, Type.allocator) !== undefined
       )
-        return [Object.freeze({ local, lane: 0, providerType: type.type })]
+        return [Object.freeze({ local, lane: 0, providerType: type.type, nested: false })]
       if (type?._tag !== 'EffectValue') return []
       const projection = allocatorInEnvironment(type.environment)
       return projection === undefined
         ? []
-        : [Object.freeze({ local, lane: projection.lane, providerType: projection.providerType })]
-    })
-    .at(-1)
+        : [
+            Object.freeze({
+              local,
+              lane: projection.lane,
+              providerType: projection.providerType,
+              nested: true,
+            }),
+          ]
+    },
+  )
+  const parameterizedProviders =
+    fn.effectRunner?.providers.filter(
+      (provider) => provider.witness._tag === 'SourceConformanceWitness',
+    ) ?? []
+  const exactProviderOrdinal = parameterizedProviders.findIndex(isContinuationAllocator)
+  const exactParameterOrdinal =
+    exactProviderOrdinal < 0
+      ? undefined
+      : fn.parameterCount - parameterizedProviders.length + exactProviderOrdinal
+  const exactParameter =
+    exactParameterOrdinal === undefined
+      ? undefined
+      : selectedCandidates.find(
+          (candidate) => !candidate.nested && candidate.local.ordinal === exactParameterOrdinal,
+        )
+  const selected =
+    exactParameter ??
+    selectedCandidates.findLast((candidate) => candidate.nested) ??
+    (declaredRequirement === undefined ? undefined : selectedCandidates.at(-1))
   if (selected === undefined) return undefined
   const providerType = selected.providerType
   const witness = DeclarationIndex.witness(index, providerType, Type.allocator)
@@ -238,7 +313,8 @@ const continuationAllocatorOf = (
   return Object.freeze({
     capability: Type.allocator,
     providerType,
-    role: declaredRequirement?.role ?? 'DefaultRole',
+    role: 'DefaultRole',
+    requirementAccess: 'Exclusive',
     access: 'Exclusive',
     argument: selected.local,
     ...(selected.lane === 0 ? {} : { argumentLane: selected.lane }),
@@ -343,7 +419,7 @@ const regionsOf = (
           deferred.providers.find(
             (provider) =>
               provider.purposes.length === 2 &&
-              provider.access === 'Exclusive' &&
+              isContinuationAllocator(provider) &&
               provider.argument !== undefined,
           ) ??
           continuationAllocatorOf(
@@ -370,7 +446,13 @@ const regionsOf = (
         ]
       }
       const outcome = region.outcome
-      const candidate = located.find((entry) => sameSpan(entry.operation, outcome))
+      const candidate = located.find(
+        (entry) =>
+          sameSpan(entry.operation, outcome) &&
+          (outcome.completion._tag === 'Reify'
+            ? entry.operation._tag === 'ReifyEffect'
+            : entry.operation._tag !== 'ReifyEffect'),
+      )
       if (candidate === undefined) return []
       const plan = ownership.plans.find(
         (candidatePlan) =>
@@ -387,7 +469,9 @@ const regionsOf = (
         ) ?? continuationAllocatorOf(program, fn, index)
       const runner =
         continuationAllocator === undefined ||
-        selectedRunner.providers.some((provider) => provider.purposes.length === 2)
+        selectedRunner.providers.some(
+          (provider) => provider.purposes.length === 2 && isContinuationAllocator(provider),
+        )
           ? selectedRunner
           : Object.freeze({
               ...selectedRunner,

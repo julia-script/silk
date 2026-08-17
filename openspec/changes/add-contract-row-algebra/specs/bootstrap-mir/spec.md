@@ -8,9 +8,9 @@ parameters, symbolic members, `Without`, member-well-formedness obligations, ass
 provider candidate selection, or constraint entailment.
 
 Concrete requirement binding SHALL lower from the exact selected stored member and provider match
-already present in specialized HIR. Analysis-only intrinsics SHALL be rejected by the post-discovery
-availability gate and SHALL never reach MIR. MIR verification and encoding SHALL remain
-deterministic and backend-neutral.
+already present in specialized HIR. Selective failure handling SHALL lower from the concrete
+protected row, selected nominal member, handler contract, and residual result row already present in
+specialized HIR. MIR verification and encoding SHALL remain deterministic and backend-neutral.
 
 #### Scenario: Lower an exact concrete requirement binding
 
@@ -22,7 +22,7 @@ deterministic and backend-neutral.
 - **WHEN** a lowering request contains a residual row expression or assumed proof
 - **THEN** MIR construction reports a compiler invariant violation rather than encoding symbolic state
 
-#### Scenario: Exclude analysis-only catch from MIR
+#### Scenario: Lower executable selective catch
 
-- **WHEN** a reachable selective catch depends on `AnalysisOnly(SEM0098)`
-- **THEN** availability diagnoses it before any MIR operation is constructed
+- **WHEN** a reachable selective catch has a concrete protected row and selected nominal member
+- **THEN** MIR runs the protected Effect once, bypasses the handler on success, invokes it for the selected failure tag, and remaps every other failure into the residual row

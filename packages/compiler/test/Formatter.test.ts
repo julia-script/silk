@@ -87,6 +87,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'BorrowExpression',
   'BreakStatement',
   'CallExpression',
+  'CallTypeArgumentList',
   'ConditionalStatement',
   'ContinueStatement',
   'ConstantDeclaration',
@@ -119,13 +120,13 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'CallableType',
   'ExactRepresentationType',
   'PrefixExpression',
+  'ReferenceType',
   'Requirement',
   'RequirementRow',
   'PatternField',
   'ReturnStatement',
   'RunExpression',
   'ReturnType',
-  'RoleExpression',
   'RestPattern',
   'SliceType',
   'SourceFile',
@@ -853,7 +854,7 @@ fn execute(problem: Token) -> i32 {
   let local = effect { return 2 }
   drop local
   let pending = delayed(move problem)
-  let timed = timed() |> End.provide(&local, @Clock)
+  let timed = timed() |> End.provide<&End@Clock>(&local)
   return run pending
 }
 fn selected() -> typeof(helper) {

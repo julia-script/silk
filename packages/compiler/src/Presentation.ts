@@ -3,6 +3,7 @@ import type * as Elaboration from './Elaboration.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as IntrinsicCatalog from './Intrinsic.js'
 import type * as NameResolution from './NameResolution.js'
+import * as RowAlgebra from './RowAlgebra.js'
 import * as Type from './Type.js'
 
 interface Base {
@@ -39,24 +40,42 @@ export type Presentation =
 const declaredType = (fact: DeclarationIndex.DeclaredTypeFact): string =>
   fact._tag === 'Unavailable' ? '_' : fact.spelling
 
-const failureRow = (fact: DeclarationIndex.FailureRowFact): string =>
-  fact.members.length === 0 && fact.parameters.length === 0
-    ? ''
-    : ` ! ${[
-        ...fact.members.map(declaredType),
-        ...fact.parameters.map((parameter) => parameter.name),
-      ].join(' | ')}`
+const rowExpression = (fact: DeclarationIndex.RowExpressionFact): string => {
+  switch (fact._tag) {
+    case 'EmptyRowExpression':
+      return ''
+    case 'RowParameterExpression':
+      return fact.parameter.name
+    case 'FailureMemberExpression':
+      return declaredType(fact.member)
+    case 'RequirementMemberExpression':
+      return `${fact.access === 'Exclusive' ? '&mut ' : '&'}${declaredType(fact.capability)}${fact.role === 'DefaultRole' ? '' : `@${fact.role}`}`
+    case 'UnionRowExpression':
+      return fact.operands.map(rowExpression).join(' | ')
+    case 'WithoutRowExpression':
+      return `Without<${rowExpression(fact.source)}, ${rowExpression(fact.selected)}>`
+    case 'UnavailableRowExpression':
+      return '_'
+  }
+}
 
-const requirementRow = (fact: DeclarationIndex.RequirementRowFact): string =>
-  fact.entries.length === 0 && fact.parameters.length === 0
-    ? ''
-    : ` ? ${[
-        ...fact.entries.map(
-          (entry) =>
-            `${entry.access === 'Exclusive' ? '&mut ' : '&'}${declaredType(entry.capability)}${entry.role === 'DefaultRole' ? '' : `@${entry.role}`}`,
-        ),
-        ...fact.parameters.map((parameter) => parameter.name),
-      ].join(' | ')}`
+const failureRow = (fact: DeclarationIndex.FailureRowFact): string => {
+  const row = rowExpression(fact.expression)
+  return row.length === 0 ? '' : ` ! ${row}`
+}
+
+const requirementRow = (fact: DeclarationIndex.RequirementRowFact): string => {
+  const row = rowExpression(fact.expression)
+  return row.length === 0 ? '' : ` ? ${row}`
+}
+
+const constraint = (fact: DeclarationIndex.ConstraintFact): string =>
+  fact._tag === 'MembershipConstraint'
+    ? `${rowExpression(fact.selected)} in ${rowExpression(fact.source)}`
+    : `${fact.mode === 'Exclusive' ? '&mut ' : fact.mode === 'Shared' ? '&' : ''}${declaredType(fact.provider)} provides ${rowExpression(fact.selected)} from ${rowExpression(fact.source)}`
+
+const constraints = (facts: ReadonlyArray<DeclarationIndex.ConstraintFact>): string =>
+  facts.length === 0 ? '' : ` where ${facts.map(constraint).join(', ')}`
 
 const typeParameterName = (parameter: DeclarationIndex.TypeParameterFact): string => {
   const name = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
@@ -82,7 +101,7 @@ export const functionDeclaration = (self: DeclarationIndex.DeclarationFact): Pre
     _tag: 'FunctionPresentation',
     name,
     functionKind: self.functionKind,
-    text: `${visibility}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}`,
+    text: `${visibility}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}`,
   })
 }
 
@@ -135,7 +154,7 @@ export const serviceOperation = (self: DeclarationIndex.ServiceOperationFact): P
   return Object.freeze({
     _tag: 'ServiceOperationPresentation',
     name,
-    text: `${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}`,
+    text: `${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}`,
   })
 }
 
@@ -237,20 +256,24 @@ export const type = (
     return `${mode}fn(${self.parameters.map((entry) => type(entry, module, scope)).join(', ')}) -> ${type(self.result, module, scope)}`
   }
   if (Type.isEffect(self)) {
-    const failureMembers = [
-      ...Type.failureMembers(self).map((failure) => type(failure, module, scope)),
-      ...Type.failureRowParameters(self).map((parameter_) => parameter_.name),
-    ]
-    const failures = failureMembers.length === 0 ? '' : ` ! ${failureMembers.join(' | ')}`
-    const requirementMembers = [
-      ...Type.requirementMembers(self).map(
-        (requirement) =>
-          `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
-      ),
-      ...Type.requirementRowParameters(self).map((parameter_) => parameter_.name),
-    ]
-    const requirements =
-      requirementMembers.length === 0 ? '' : ` ? ${requirementMembers.join(' | ')}`
+    const failureText = RowAlgebra.encode(
+      Type.failureRowPolicy(),
+      self.failureRow,
+      (failure) => type(failure, module, scope),
+      (parameter_) => parameter_.name,
+      (member) => member.parameter.name,
+    )
+    const failures = failureText.length === 0 ? '' : ` ! ${failureText}`
+    const requirementText = RowAlgebra.encode(
+      Type.requirementRowPolicy(),
+      self.requirementRow,
+      (requirement) =>
+        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+      (parameter_) => parameter_.name,
+      (member) =>
+        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === 'DefaultRole' ? '' : `@${member.role}`}`,
+    )
+    const requirements = requirementText.length === 0 ? '' : ` ? ${requirementText}`
     return `Effect<${type(self.success, module, scope)}${failures}${requirements}>`
   }
   if (Type.isRepresented(self)) return type(self.contract, module, scope)
@@ -277,17 +300,24 @@ export const genericArgument = (
               ? `callable@${self.identity}`
               : Type.isFailureRowArgument(self)
                 ? `! ${
-                    Type.failureMembers(self)
-                      .map((failure) => type(failure, module, scope))
-                      .join(' | ') || 'never'
+                    RowAlgebra.encode(
+                      Type.failureRowPolicy(),
+                      self.row,
+                      (failure) => type(failure, module, scope),
+                      (parameter_) => parameter_.name,
+                      (member) => member.parameter.name,
+                    ) || 'never'
                   }`
                 : Type.isRequirementRowArgument(self)
-                  ? `? ${Type.requirementMembers(self)
-                      .map(
-                        (requirement) =>
-                          `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
-                      )
-                      .join(' | ')}`
+                  ? `? ${RowAlgebra.encode(
+                      Type.requirementRowPolicy(),
+                      self.row,
+                      (requirement) =>
+                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+                      (parameter_) => parameter_.name,
+                      (member) =>
+                        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === 'DefaultRole' ? '' : `@${member.role}`}`,
+                    )}`
                   : type(self, module, scope)
 
 export const binding = (

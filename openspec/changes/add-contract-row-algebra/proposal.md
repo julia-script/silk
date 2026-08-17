@@ -34,9 +34,9 @@ intrinsics.
   intrinsic post-contract hook retains only mode-appropriate place validation and HIR construction.
 - Rewrite `Effect.bindRequirement`, `Effect.provide`, `Effect.provideMut`, and acquisition-based
   provision around the whole input row, selected row, and `Without`.
-- Migrate analysis-only singleton-nominal failure handling to a sealed canonical contract with
-  checked membership plus `Without`, eliminating independent row filtering and result-type
-  reconstruction without adding multi-failure dispatch or execution-target support.
+- Migrate singleton-nominal failure handling to a sealed canonical contract with checked membership
+  plus `Without`, eliminating independent row filtering and result-type reconstruction while making
+  the resulting selective dispatch executable on the evaluator, WebAssembly, and native targets.
 - Keep public `Without` syntax scoped to failure-row and requirement-row positions; structural value
   unions share deterministic finite-row infrastructure without gaining a public subtraction form.
 - **BREAKING**: Remove the intrinsic-only role-filtering call form in favor of explicitly selecting
@@ -69,8 +69,8 @@ None.
   deterministically across module boundaries.
 - `bootstrap-intrinsic-boundary`: Derive intrinsic inventory and admission from canonical callable
   contracts and proof-consuming hooks.
-- `bootstrap-intrinsic-target-availability`: Add target-independent, reachability-gated
-  `AnalysisOnly` intrinsic availability with user-call provenance.
+- `bootstrap-intrinsic-target-availability`: Keep selective failure handling in the ordinary
+  executable intrinsic inventory on every supported target, with no temporary availability error.
 - `bootstrap-diagnostics`: Add stable row/constraint diagnostics with span-free semantic payloads
   and separate ordered source locations.
 - `bootstrap-hir`: Carry symbolic row expressions and constraint evidence before specialization.
@@ -84,8 +84,7 @@ None.
 
 The change also affects observable syntax, semantic facts, intrinsic inventory, diagnostics,
 module-surface serialization, specialization, HIR, MIR, formatting, and standard-library
-documentation. Their dedicated delta files must be added at the next OpenSpec artifact-continuation
-step; this update workflow may revise only the two delta files that already exist.
+documentation. Dedicated delta specs define each affected capability in this change.
 
 ## Impact
 
@@ -96,8 +95,8 @@ step; this update workflow may revise only the two delta files that already exis
 - Call analysis: one origin-independent callable contract model, exact given/wanted entailment,
   residual constraints carried by partial callable values, and typed provider-conformance lookup.
 - Intrinsic boundary: inventory rendering and semantic admission derive from the same contract;
-  binding loses its early custom typing path, and analysis-only singleton catch gains explicit
-  availability plus originating-wrapper call provenance.
+  binding loses its early custom typing path, and singleton catch lowers from the same specialized
+  concrete contract on the evaluator, WebAssembly, and native targets.
 - Specialization: symbolic rows and evidence are resolved before dependency discovery, witness
   reachability, layout, row-dependent ownership, or lowering; MIR and backends remain concrete-only.
 - Standard library: binding, provision, acquisition, and exact failure-handling declarations plus

@@ -4,8 +4,13 @@ import * as Constraint from '../src/Constraint.js'
 import * as FiniteRow from '../src/FiniteRow.js'
 import * as RequirementRow from '../src/RequirementRow.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
+import * as SourceSpan from '../src/SourceSpan.js'
 import * as Type from '../src/Type.js'
 import * as TypeCompatibility from '../src/TypeCompatibility.js'
+import { unreachable } from './support/raise.js'
+
+const span = (sourceId: string, start: number, end: number): SourceSpan.SourceSpan =>
+  SourceSpan.fromOffsets(sourceId, start, end) ?? unreachable('expected a valid source span')
 
 it('keeps nominal identity independent of field shape and import spelling', () => {
   const first = Type.nominal('syntax/Tree', 'Node')
@@ -16,6 +21,218 @@ it('keeps nominal identity independent of field shape and import spelling', () =
   assert.strictEqual(Type.equals(first, otherModule), false)
   assert.strictEqual(Type.encode(first), 'syntax/Tree.Node')
   assert.strictEqual(Object.isFrozen(first), true)
+})
+
+it('selects failure-carrier members only under their explicit tag convention', () => {
+  const first = Type.nominal('types/failure-carrier', 'First')
+  const second = Type.nominal('types/failure-carrier', 'Second')
+  const normalized = Type.union([first, second])
+  const union =
+    normalized._tag === 'Normalized' && Type.isUnion(normalized.type)
+      ? normalized.type
+      : unreachable('expected a structural union')
+  const effect = Type.effect('i32', [first, second])
+
+  assert.strictEqual(Type.failureCarrierMember(first, 0, 'ZeroBased'), first)
+  assert.strictEqual(Type.failureCarrierMember(union, 0, 'ZeroBased'), first)
+  assert.strictEqual(Type.failureCarrierMember(union, 1, 'ZeroBased'), second)
+  assert.strictEqual(Type.failureCarrierMember(effect, 1, 'OneBased'), first)
+  assert.strictEqual(Type.failureCarrierMember(effect, 2, 'OneBased'), second)
+  assert.isUndefined(Type.failureCarrierMember(first, 1, 'ZeroBased'))
+  assert.isUndefined(Type.failureCarrierMember(union, 1, 'OneBased'))
+  assert.isUndefined(Type.failureCarrierMember(effect, 0, 'OneBased'))
+  assert.isUndefined(Type.failureCarrierMember(effect, 1, 'ZeroBased'))
+  for (const invalid of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, Number.NaN]) {
+    assert.isUndefined(Type.failureCarrierMember(union, invalid, 'ZeroBased'))
+    assert.isUndefined(Type.failureCarrierMember(effect, invalid, 'OneBased'))
+  }
+})
+
+it('refuses carrier tags whose member order can change after specialization', () => {
+  const owner = Object.freeze({ module: 'types/failure-carrier', name: 'specialize' })
+  const failures = Type.parameter(owner, 0, 'E', 'FailureRow')
+  const member = Type.parameter(owner, 1, 'T')
+  const alpha = Type.nominal('types/failure-carrier', 'Alpha')
+  const zed = Type.nominal('types/failure-carrier', 'Zed')
+  const openEffect = Type.effect('i32', [zed], 'Shared', [], [failures])
+
+  assert.isUndefined(Type.failureCarrierMember(openEffect, 1, 'OneBased'))
+  const specializedEffect = Type.substitute(
+    openEffect,
+    new Map([[Type.key(failures), Type.failureRowArgument([alpha])]]),
+  )
+  const concreteEffect = Type.isEffect(specializedEffect)
+    ? specializedEffect
+    : unreachable('expected a specialized Effect carrier')
+  assert.deepEqual(Type.failureMembers(concreteEffect), [alpha, zed])
+  assert.isTrue(
+    Type.equals(
+      Type.failureCarrierMember(concreteEffect, 1, 'OneBased') ??
+        unreachable('expected first specialized failure'),
+      alpha,
+    ),
+  )
+  assert.isTrue(
+    Type.equals(
+      Type.failureCarrierMember(concreteEffect, 2, 'OneBased') ??
+        unreachable('expected second specialized failure'),
+      zed,
+    ),
+  )
+
+  const genericBox = Type.nominal('types/failure-carrier', 'Box', [member])
+  const concreteBox = Type.nominal('types/failure-carrier', 'Box', ['i32'])
+  const unavailableBox = Type.nominal('types/failure-carrier', 'Box', [
+    Type.unavailableGenericArgument('Value', 'unresolved carrier argument'),
+  ])
+  const unavailableInner = Type.nominal('types/failure-carrier', 'Inner', [
+    Type.unavailableGenericArgument('Value', 'unresolved nested carrier argument'),
+  ])
+  const unavailableOuter = Type.nominal('types/failure-carrier', 'Outer', [unavailableInner])
+  const concreteOuter = Type.nominal('types/failure-carrier', 'Outer', [
+    Type.nominal('types/failure-carrier', 'Inner', ['i32']),
+  ])
+  const normalized = Type.union([genericBox, concreteBox, zed])
+  const openUnion =
+    normalized._tag === 'Normalized' && Type.isUnion(normalized.type)
+      ? normalized.type
+      : unreachable('expected an open structural union')
+  assert.isUndefined(Type.failureCarrierMember(genericBox, 0, 'ZeroBased'))
+  assert.isUndefined(Type.failureCarrierMember(unavailableBox, 0, 'ZeroBased'))
+  assert.isFalse(Type.isRuntimeConcrete(unavailableOuter))
+  assert.isFalse(Type.isRuntimeConcreteGenericArgument(unavailableOuter))
+  assert.isUndefined(Type.failureCarrierMember(unavailableOuter, 0, 'ZeroBased'))
+  assert.isTrue(Type.isRuntimeConcrete(concreteOuter))
+  assert.strictEqual(Type.failureCarrierMember(concreteOuter, 0, 'ZeroBased'), concreteOuter)
+  assert.isUndefined(Type.failureCarrierMember(openUnion, 0, 'ZeroBased'))
+
+  const unavailableEffect = Type.effect(unavailableOuter, [unavailableOuter], 'Shared', [
+    { capability: unavailableOuter, role: 'DefaultRole', access: 'Shared' },
+  ])
+  const unavailableUnionResult = Type.union([unavailableOuter, zed])
+  const unavailableUnion =
+    unavailableUnionResult._tag === 'Normalized' && Type.isUnion(unavailableUnionResult.type)
+      ? unavailableUnionResult.type
+      : unreachable('expected a nested-unavailable structural union')
+  const unavailableCallable = Type.callable([unavailableOuter], unavailableOuter)
+  const unavailableIdentity = Type.effectIdentityArgument('types/failure-carrier.effect', {
+    declaration: owner,
+    typeArguments: [unavailableOuter],
+  })
+  const concreteContract = Type.effect('i32', [])
+  const unavailableRepresentation = Type.represented(
+    concreteContract,
+    concreteContract,
+    Type.exactRepresentationArgument(unavailableIdentity, concreteContract),
+  )
+  assert.isFalse(Type.isRuntimeConcrete(unavailableEffect))
+  assert.isUndefined(Type.failureCarrierMember(unavailableEffect, 1, 'OneBased'))
+  assert.isFalse(Type.isRuntimeConcrete(unavailableUnion))
+  assert.isUndefined(Type.failureCarrierMember(unavailableUnion, 0, 'ZeroBased'))
+  assert.isFalse(Type.isRuntimeConcrete(unavailableCallable))
+  assert.isFalse(Type.isRuntimeConcrete(unavailableRepresentation))
+  assert.isFalse(Type.isRuntimeConcreteGenericArgument(unavailableIdentity))
+  assert.isFalse(Type.isRuntimeConcreteGenericArgument(Type.failureRowArgument([unavailableOuter])))
+  assert.isFalse(
+    Type.isRuntimeConcreteGenericArgument(
+      Type.requirementRowArgument([
+        { capability: unavailableOuter, role: 'DefaultRole', access: 'Shared' },
+      ]),
+    ),
+  )
+  assert.isTrue(
+    Type.isRuntimeConcrete(
+      Type.effect(concreteOuter, [zed], 'Shared', [
+        { capability: concreteOuter, role: 'DefaultRole', access: 'Shared' },
+      ]),
+    ),
+  )
+
+  const specializedUnion = Type.substitute(openUnion, new Map([[Type.key(member), 'i32']]))
+  const concreteUnion = Type.isUnion(specializedUnion)
+    ? specializedUnion
+    : unreachable('expected a specialized structural union carrier')
+  assert.strictEqual(concreteUnion.members.length, 2)
+  assert.isTrue(
+    Type.equals(
+      Type.failureCarrierMember(concreteUnion, 0, 'ZeroBased') ??
+        unreachable('expected first specialized union member'),
+      concreteUnion.members.at(0) ?? unreachable('expected first canonical union member'),
+    ),
+  )
+  assert.isTrue(
+    Type.equals(
+      Type.failureCarrierMember(concreteUnion, 1, 'ZeroBased') ??
+        unreachable('expected second specialized union member'),
+      concreteUnion.members.at(1) ?? unreachable('expected second canonical union member'),
+    ),
+  )
+})
+
+it('specializes executable owners throughout nested callable schemas without capturing binders', () => {
+  const declaration = Object.freeze({ module: 'types/schema-owner', name: 'outer' })
+  const openOwner = Type.parameter(declaration, 0, 'T')
+  const nestedOwner = Object.freeze({ module: 'types/schema-owner', name: 'section' })
+  const nested = Type.parameter(nestedOwner, 0, 'A')
+  const marker = Type.nominal('types/schema-owner', 'Marker')
+  const effect = Type.effect('i32', [])
+  const ownedIdentity = Type.exactRepresentationArgument(
+    Type.effectIdentityArgument('types/schema-owner.effect', {
+      declaration,
+      typeArguments: [openOwner],
+    }),
+    effect,
+  )
+  const provider = Type.nominal('types/schema-owner', 'Provider', [ownedIdentity])
+  const capability = Type.nominal('types/schema-owner', 'Service')
+  const requirements = Type.requirementRowArgument([
+    Object.freeze({ capability, role: 'DefaultRole', access: 'Shared' }),
+  ]).row
+  const constraint = Constraint.providerSelection('Shared', provider, requirements, requirements)
+  const evidence = Constraint.assumed(constraint, new Map([[Type.key(nested), ownedIdentity]]))
+  const contract = CallableContract.make({
+    functionKind: 'Function',
+    binders: [nested],
+    result: 'i32',
+    constraints: [constraint],
+  })
+  const callable = Type.callable([], 'i32', 'Shared', {
+    contract,
+    binders: [nested],
+    constraints: [constraint],
+    evidence: [evidence],
+    substitution: new Map([[Type.key(nested), ownedIdentity]]),
+    contractKey: CallableContract.key(contract),
+    constraintKeys: [Constraint.key(constraint)],
+    evidenceKeys: [Constraint.evidenceKey(evidence)],
+    origins: [span('types/schema-owner', 0, 1)],
+  })
+
+  const specialized = Type.specializeExecutableOwner(
+    callable,
+    Object.freeze({ declaration, typeArguments: [marker] }),
+    Constraint.specializeCallableSchemaExecutableOwner,
+  )
+  assert.isTrue(Type.isCallable(specialized))
+  const specializedCallable = Type.isCallable(specialized)
+    ? specialized
+    : unreachable('expected specialized callable type')
+  const schema = specializedCallable.schema ?? unreachable('expected specialized callable schema')
+  assert.deepEqual(schema.binders, [nested])
+  assert.notStrictEqual(schema.contractKey, callable.schema?.contractKey)
+  assert.deepEqual(schema.constraintKeys, schema.constraints.map(Constraint.key))
+  assert.deepEqual(schema.evidenceKeys, schema.evidence.map(Constraint.evidenceKey))
+  const argument = schema.substitution.get(Type.key(nested))
+  assert.isTrue(argument !== undefined && Type.isExactRepresentationArgument(argument))
+  const exactArgument =
+    argument !== undefined && Type.isExactRepresentationArgument(argument)
+      ? argument
+      : unreachable('expected exact specialized schema substitution')
+  assert.isTrue(Type.isEffectIdentityArgument(exactArgument.identity))
+  const effectIdentity = Type.isEffectIdentityArgument(exactArgument.identity)
+    ? exactArgument.identity
+    : unreachable('expected specialized Effect identity')
+  assert.deepEqual(effectIdentity.owner?.typeArguments, [marker])
 })
 
 it('orders built-in and nominal types by canonical keys', () => {
@@ -280,6 +497,71 @@ it('checks provider compatibility independently from exact stored access', () =>
   assert.strictEqual(RequirementRow.providerCanSelect('Take', 'Exclusive'), true)
 })
 
+it('defers concrete difference until generic member keys finish specializing', () => {
+  const owner = { module: 'work', name: 'difference' }
+  const left = Type.parameter(owner, 0, 'A')
+  const right = Type.parameter(owner, 1, 'B')
+  const problem = (argument: Type.Type): Type.Nominal => Type.nominal('work', 'Problem', [argument])
+  const failurePolicy = Type.failureRowPolicy()
+  const openFailures = RowAlgebra.without(
+    failurePolicy,
+    RowAlgebra.concrete(failurePolicy, [problem(left)]),
+    RowAlgebra.concrete(failurePolicy, [problem(right)]),
+  )
+  assert.strictEqual(openFailures.expression._tag, 'Without')
+
+  const concrete = Type.nominal('work', 'Token')
+  const substitution = new Map([
+    [Type.key(left), concrete],
+    [Type.key(right), concrete],
+  ])
+  const failures = Type.substituteFailureRow(openFailures, substitution)
+  assert.deepEqual(RowAlgebra.concretize(failurePolicy, failures), {
+    _tag: 'Concrete',
+    row: { members: [] },
+  })
+
+  const capability = (argument: Type.Type): Type.Nominal =>
+    Type.nominal('work', 'Capability', [argument])
+  const requirementPolicy = Type.requirementRowPolicy()
+  const requirement = (
+    argument: Type.Type,
+    access: Type.Requirement['access'],
+    role: string,
+  ): Type.Requirement => ({ capability: capability(argument), access, role })
+  const specialize = (
+    source: Type.Requirement,
+    selected: Type.Requirement,
+  ): ReadonlyArray<Type.Requirement> => {
+    const open = RowAlgebra.without(
+      requirementPolicy,
+      RowAlgebra.concrete(requirementPolicy, [source]),
+      RowAlgebra.concrete(requirementPolicy, [selected]),
+    )
+    assert.strictEqual(open.expression._tag, 'Without')
+    const specialized = Type.substituteRequirementsRow(open, substitution)
+    const result = RowAlgebra.concretize(requirementPolicy, specialized)
+    assert.strictEqual(result._tag, 'Concrete')
+    return result._tag === 'Concrete' ? result.row.members : []
+  }
+
+  assert.deepEqual(
+    specialize(requirement(left, 'Exclusive', 'Audit'), requirement(right, 'Exclusive', 'Audit')),
+    [],
+  )
+  assert.deepEqual(
+    specialize(requirement(left, 'Exclusive', 'Audit'), requirement(right, 'Shared', 'Audit')),
+    [requirement(concrete, 'Exclusive', 'Audit')],
+  )
+  assert.deepEqual(
+    specialize(
+      requirement(left, 'Exclusive', 'Audit'),
+      requirement(right, 'Exclusive', 'DefaultRole'),
+    ),
+    [requirement(concrete, 'Exclusive', 'Audit')],
+  )
+})
+
 it('normalizes open row union ACI and retains erased member obligations', () => {
   interface SymbolicMember {
     readonly parameter: string
@@ -291,6 +573,7 @@ it('normalizes open row union ACI and retains erased member obligations', () => 
   }
   const policy: RowAlgebra.Policy<string, string, SymbolicMember, string> = {
     finite,
+    concreteMemberMaySpecialize: () => false,
     rowParameterKey: (parameter) => parameter,
     symbolicMemberKey: (member) => member.parameter,
     symbolicMemberParameters: (member) => [member.parameter],
@@ -298,8 +581,8 @@ it('normalizes open row union ACI and retains erased member obligations', () => 
     memberWellFormedKey: (member) => `FailureMember:${member.parameter}`,
     allowsSetCancellation: true,
   }
-  const firstOrigin = { sourceId: 'main', start: 20, end: 21 }
-  const earlierOrigin = { sourceId: 'main', start: 10, end: 11 }
+  const firstOrigin = span('main', 20, 21)
+  const earlierOrigin = span('main', 10, 11)
   const a = RowAlgebra.parameter<string, string, SymbolicMember>('A')
   const b = RowAlgebra.parameter<string, string, SymbolicMember>('B')
   const s1 = RowAlgebra.singleton(policy, { parameter: 'S' }, firstOrigin)
@@ -321,7 +604,7 @@ it('normalizes open row union ACI and retains erased member obligations', () => 
       primary: earlierOrigin,
       secondary: [firstOrigin],
     })
-    const responsible = { sourceId: 'call', start: 30, end: 31 }
+    const responsible = span('call', 30, 31)
     assert.deepEqual(RowAlgebra.diagnosticLocations(obligation, responsible), {
       primary: responsible,
       secondary: [earlierOrigin, firstOrigin],
@@ -349,6 +632,7 @@ it('substitutes symbolic members residually or concretely and reports invalid si
       memberKey: (member) => member,
       merge: (left) => left,
     },
+    concreteMemberMaySpecialize: () => false,
     rowParameterKey: (parameter) => parameter,
     symbolicMemberKey: (member) => member.parameter,
     symbolicMemberParameters: (member) => [member.parameter],
@@ -356,7 +640,7 @@ it('substitutes symbolic members residually or concretely and reports invalid si
     memberWellFormedKey: (member) => `FailureMember:${member.parameter}`,
     allowsSetCancellation: true,
   }
-  const origin = { sourceId: 'main', start: 4, end: 5 }
+  const origin = span('main', 4, 5)
   const symbolic = RowAlgebra.singleton(policy, { parameter: 'S' }, origin)
   const source = RowAlgebra.union(
     policy,
@@ -427,6 +711,7 @@ it('applies safe cancellation only in domains that opt into set laws', () => {
     allowsSetCancellation: boolean,
   ): RowAlgebra.Policy<string, string, string, string> => ({
     finite,
+    concreteMemberMaySpecialize: () => false,
     rowParameterKey: (parameter) => parameter,
     symbolicMemberKey: (member) => member,
     symbolicMemberParameters: (member) => [member],
@@ -457,7 +742,7 @@ it('keeps failure and fixed-role requirement member parameters domain-specific',
   const s = Type.parameter(owner, 0, 'S')
   const p = Type.parameter(owner, 1, 'P')
   const q = Type.parameter(owner, 2, 'Q')
-  const origin = { sourceId: 'main', start: 8, end: 9 }
+  const origin = span('main', 8, 9)
   const failurePolicy = Type.failureRowPolicy()
   const requirementPolicy = Type.requirementRowPolicy()
   const failure = RowAlgebra.singleton(failurePolicy, Type.failureMemberShape(s), origin)
@@ -609,6 +894,7 @@ it('keys callable contracts and branded constraint evidence without source locat
     Type.effect('never', []),
     'Exclusive',
     {
+      contract,
       binders: contract.binders,
       constraints: contract.constraints,
       evidence: [Constraint.assumed(loggerWanted, new Map())],
@@ -616,7 +902,7 @@ it('keys callable contracts and branded constraint evidence without source locat
       contractKey: CallableContract.key(contract),
       constraintKeys: contract.constraints.map(Constraint.key),
       evidenceKeys: [Constraint.evidenceKey(Constraint.assumed(loggerWanted, new Map()))],
-      origins: [{ sourceId: 'work', start: 10, end: 20 }],
+      origins: [span('work', 10, 20)],
     },
   )
   const movedOrigin = Type.callable(
@@ -625,7 +911,7 @@ it('keys callable contracts and branded constraint evidence without source locat
     quantified.mode,
     quantified.schema === undefined
       ? undefined
-      : { ...quantified.schema, origins: [{ sourceId: 'work', start: 30, end: 40 }] },
+      : { ...quantified.schema, origins: [span('work', 30, 40)] },
   )
   assert.deepEqual(Type.parameters(quantified), [])
   assert.strictEqual(Type.isConcrete(quantified), true)

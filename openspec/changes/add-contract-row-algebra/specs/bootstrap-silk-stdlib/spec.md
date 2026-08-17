@@ -9,7 +9,7 @@ and `Without<R, S>`. Public wrappers SHALL place `S` first and discharge the sam
 from a definitionally equivalent declared given.
 
 Singleton `Effect.catch` SHALL infer or explicitly accept one nominal `S`, require `S in E`, call
-the sealed analysis-only selective primitive, and return `Without<E, S> | F`. Executable whole-row
+the sealed executable selective primitive, and return `Without<E, S> | F`. Whole-row
 recovery SHALL use `Effect.catchAll`; the prior whole-row `catch` alias SHALL not remain. No compiler
 phase SHALL recognize these wrappers by standard-library actor, name, or origin.
 

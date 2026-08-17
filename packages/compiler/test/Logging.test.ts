@@ -8,6 +8,9 @@ import * as Mir from '../src/Mir.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as StandardStreams from '../src/StandardStreams.js'
 import * as Type from '../src/Type.js'
+import { constrainedCallableForwarding } from './support/corpus.js'
+import { unreachable } from './support/raise.js'
+import * as WasmMain from './support/WasmMain.js'
 
 const encoder = new TextEncoder()
 const golden = (name: string): string =>
@@ -260,16 +263,33 @@ pub effect fn main() -> ()
     const directIntrinsic = yield* analyze('Intrinsic.bindRequirementMut(read(), &mut logger)')
     const directPipeline = yield* analyze('(read() |> Intrinsic.bindRequirementMut(&mut logger))')
 
-    const unsatisfied = (self: Analysis.FrontendSnapshot) =>
-      Analysis.rootAnalysis(self)
-        .diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0071')
-        .map((diagnostic) => diagnostic.message)
+    const assertUnsatisfiedClock = (self: Analysis.FrontendSnapshot, body: string): void => {
+      const diagnostics = Analysis.rootAnalysis(self).diagnostics.filter(
+        (diagnostic) => diagnostic.code === 'SEM0071',
+      )
+      assert.strictEqual(diagnostics.length, 1)
+      const diagnostic = diagnostics.at(0) ?? unreachable('expected one SEM0071 diagnostic')
+      assert.deepEqual(diagnostic.reason, {
+        _tag: 'UnhandledEffectRequirements',
+        requirements: ['&mut logging/main.Clock'],
+      })
+      const source = program(body)
+      const run = `run ${body}`
+      const start = source.lastIndexOf(`\n  ${run}`)
+      assert.isAtLeast(start, 0)
+      assert.deepEqual(
+        {
+          sourceId: diagnostic.span.sourceId,
+          start: diagnostic.span.start,
+          end: diagnostic.span.end,
+        },
+        { sourceId: 'logging/main', start, end: start + 3 + run.length },
+      )
+    }
 
-    assert.deepEqual(unsatisfied(publicWrapper), [
-      'Run leaves unsatisfied requirements: &mut logging/main.Clock',
-    ])
-    assert.deepEqual(unsatisfied(publicWrapper), unsatisfied(directIntrinsic))
-    assert.deepEqual(unsatisfied(publicWrapper), unsatisfied(directPipeline))
+    assertUnsatisfiedClock(publicWrapper, 'Effect.provideMut(read(), &mut logger)')
+    assertUnsatisfiedClock(directIntrinsic, 'Intrinsic.bindRequirementMut(read(), &mut logger)')
+    assertUnsatisfiedClock(directPipeline, '(read() |> Intrinsic.bindRequirementMut(&mut logger))')
 
     const executablePipeline = yield* snapshot(`import silk.effects as Effect
 import silk.logging { Logger, LogError }
@@ -341,25 +361,14 @@ pub effect fn main() -> () ! LogError {
   }),
 )
 
-it.effect('carries a provider section through a closed generic forwarding call', () =>
+it.effect('carries a provider section through a multi-hop closed forwarding chain', () =>
   Effect.gen(function* () {
-    const source = `import silk.effects as Effect
-import silk.logging { Logger, LogError }
-
-fn forward<F>(value: F) -> F { return move value }
-
-effect fn program() -> () ! LogError {
-  let mut logger = InMemoryLogger.memory()
-  let mut bind = forward(Effect.provideMut<&mut Logger>(&mut logger))
-  return run bind(Effect.log("forwarded"))
-}
-
-effect fn recover(error: LogError) -> () { return () }
-pub fn main() -> i32 {
-  let completed = run Effect.catchAll(program(), recover)
-  return 42
-}`
-    const frontend = yield* Analysis.ofSource('logging/main', encoder.encode(source))
+    const source = constrainedCallableForwarding
+    const frontend = yield* Analysis.ofSourceRealized(
+      'logging/main',
+      encoder.encode(source),
+      'wasm32-unknown-unknown',
+    )
     assert.deepEqual(Analysis.diagnostics(frontend), [])
     const discovery = Instances.discover(
       'logging/main',
@@ -371,7 +380,162 @@ pub fn main() -> i32 {
     assert.deepEqual(discovery.violations, [])
     assert.include(
       discovery.instances.map((instance) => instance.key.declaration.name),
-      'provideMut',
+      'forwardAgain',
     )
+    const evaluated = Analysis.evaluate(frontend)
+    assert.strictEqual(
+      evaluated._tag,
+      'Completed',
+      evaluated._tag === 'Blocked' ? JSON.stringify(evaluated) : undefined,
+    )
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+
+    const artifact = yield* Analysis.codegenWasm(frontend, { mode: 'release' })
+    assert.strictEqual(yield* WasmMain.invoke(artifact.bytes, 'Logging.invokeForwardingWasm'), 42)
   }),
+)
+
+it.effect('applies direct constrained sections through local move aliases', () =>
+  Effect.gen(function* () {
+    for (const [name, aliases] of [
+      ['single hop', 'let mut bind = move direct'],
+      ['multiple hops', 'let first = move direct\n  let mut bind = move first'],
+    ] as const) {
+      const frontend = yield* snapshot(`import silk.effects as Effect
+import silk.logging { Logger }
+
+effect fn read() -> i32 ? &mut Logger { return 42 }
+
+pub fn main() -> i32 {
+  let mut logger = InMemoryLogger.memory()
+  let direct = Intrinsic.bindRequirementMut<&mut Logger>(&mut logger)
+  ${aliases}
+  return run bind(read())
+}`)
+      assert.deepEqual(Analysis.diagnostics(frontend), [], name)
+      const evaluated = Analysis.evaluate(frontend)
+      assert.strictEqual(
+        evaluated._tag,
+        'Completed',
+        evaluated._tag === 'Blocked' ? `${name}: ${JSON.stringify(evaluated)}` : name,
+      )
+      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42, name)
+      assert.isFalse(
+        Analysis.loweredMir(frontend)
+          .functions.flatMap(Mir.operations)
+          .some((operation) => operation._tag === 'MakeCallable'),
+        name,
+      )
+    }
+  }),
+)
+
+it.effect('rejects a callable relay whose leading binding has observable work', () =>
+  Effect.gen(function* () {
+    const frontend = yield* snapshot(`import silk.effects as Effect
+import silk.logging { Logger }
+
+fn observeThenForward<F>(value: F) -> F {
+  let boom = 1 / 0
+  return move value
+}
+
+effect fn read() -> i32 ? &mut Logger { return 42 }
+
+pub fn main() -> i32 {
+  let mut logger = InMemoryLogger.memory()
+  let bind = observeThenForward(Effect.provideMut<&mut Logger>(&mut logger))
+  return run bind(read())
+}`)
+    assert.include(
+      Analysis.diagnostics(frontend).map((diagnostic) => diagnostic.code),
+      'SEM0122',
+    )
+    assert.strictEqual(frontend.mir._tag, 'Unavailable')
+  }),
+)
+
+it.effect('erases dropped constrained provider sections without materializing a callable', () =>
+  Effect.gen(function* () {
+    for (const [name, bindings] of [
+      ['ordinary wrapper', 'let bind = forward(Effect.provideMut<&mut Logger>(&mut logger))'],
+      ['direct intrinsic', 'let bind = Intrinsic.bindRequirementMut<&mut Logger>(&mut logger)'],
+      [
+        'single-hop direct intrinsic alias',
+        `let direct = Intrinsic.bindRequirementMut<&mut Logger>(&mut logger)
+  let bind = move direct`,
+      ],
+      [
+        'multi-hop direct intrinsic alias',
+        `let direct = Intrinsic.bindRequirementMut<&mut Logger>(&mut logger)
+  let first = move direct
+  let bind = move first`,
+      ],
+    ] as const) {
+      const frontend = yield* snapshot(`import silk.effects as Effect
+import silk.logging { Logger }
+
+fn forward<F>(value: F) -> F { return move value }
+
+pub fn main() -> i32 {
+  let mut logger = InMemoryLogger.memory()
+  ${bindings}
+  drop bind
+  return 42
+}`)
+      assert.deepEqual(Analysis.diagnostics(frontend), [], name)
+      const evaluated = Analysis.evaluate(frontend)
+      assert.strictEqual(evaluated._tag, 'Completed', name)
+      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42, name)
+      const lowered = Analysis.loweredMir(frontend)
+      assert.isFalse(
+        lowered.functions
+          .flatMap(Mir.operations)
+          .some((operation) => operation._tag === 'MakeCallable'),
+        name,
+      )
+    }
+  }),
+)
+
+it.effect(
+  'rejects constrained provider sections at aggregate generic and indirect boundaries',
+  () =>
+    Effect.gen(function* () {
+      const cases = [
+        `fn store<F>(value: F) -> [F; 1] {
+  return [move value]
+}
+pub fn main() -> i32 {
+  let mut logger = InMemoryLogger.memory()
+  let escaped = store(Effect.provideMut<&mut Logger>(&mut logger))
+  return 42
+}`,
+        `fn consume<F>(value: F) -> () { return () }
+pub fn main() -> i32 {
+  let mut logger = InMemoryLogger.memory()
+  let consumed = consume(Effect.provideMut<&mut Logger>(&mut logger))
+  return 42
+}`,
+        `fn invoke<A, !E, ?R, F: fn(once Effect<A ! E ? R>) -> Effect<A ! E>>(operation: F, value: once Effect<A ! E ? R>) -> Effect<A ! E> {
+  return operation(move value)
+}
+pub fn main() -> i32 {
+  let mut logger = InMemoryLogger.memory()
+  let operation = invoke(Effect.provideMut<&mut Logger>(&mut logger), Effect.log("indirect"))
+  return 42
+}`,
+      ]
+      for (const [ordinal, body] of cases.entries()) {
+        const frontend = yield* snapshot(`import silk.effects as Effect
+import silk.logging { Logger, LogError }
+${body}`)
+        assert.include(
+          Analysis.diagnostics(frontend).map((diagnostic) => diagnostic.code),
+          'SEM0122',
+          `case ${ordinal}`,
+        )
+        assert.strictEqual(frontend.mir._tag, 'Unavailable')
+      }
+    }),
 )

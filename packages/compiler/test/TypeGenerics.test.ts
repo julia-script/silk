@@ -17,8 +17,10 @@ import * as Parser from '../src/Parser.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as SourceSpan from '../src/SourceSpan.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
+import { unreachable } from './support/raise.js'
 
 const source = `fn identity<T>(value: T) -> T { return move value }
 pub fn main() -> i32 {
@@ -116,6 +118,18 @@ pub fn main() -> i32 { return 0 }`),
   }),
 )
 
+it.effect('renormalizes concrete difference after generic nominal keys collide', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'generics/without-substitution-collision',
+      new TextEncoder().encode(`struct Problem<T> { value: T }
+effect fn erase<A, B>() -> () ! Without<Problem<A>, Problem<B>> { return () }
+pub effect fn main() -> () { return run erase<i32, i32>() }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
 it('parses declaration parameters and explicit call specialization losslessly', () => {
   const syntax = Parser.parse(Lexer.lex(file))
   const kinds = descendants(syntax.root).map((node) => node.kind)
@@ -187,7 +201,9 @@ it('checks computed rows forward-only without reconstructing their operands', ()
   const selected = Type.parameter(owner, 1, 'S')
   const problem = Type.nominal('generics/ForwardRows', 'Problem')
   const other = Type.nominal('generics/ForwardRows', 'Other')
-  const origin = { sourceId: 'generics/ForwardRows', start: 10, end: 11 }
+  const origin =
+    SourceSpan.fromOffsets('generics/ForwardRows', 10, 11) ??
+    unreachable('expected a valid source span')
   const computed = RowAlgebra.without(
     Type.failureRowPolicy(),
     RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(source),

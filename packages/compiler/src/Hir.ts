@@ -102,6 +102,22 @@ export const sameExecutableSite = (
   right: EffectSiteId | CallableSiteId,
 ): boolean => executableSiteKey(left) === executableSiteKey(right)
 
+/** Stable hidden Effect site for a compiler-backed selective-catch expression. */
+export const effectCatchSite = (
+  function_: DeclarationIndex.DeclarationId,
+  owner: DeclarationIndex.CanonicalId,
+  span: SourceSpan.SourceSpan,
+): EffectSiteId =>
+  Object.freeze({
+    _tag: 'EffectSiteId',
+    function: function_,
+    owner,
+    // Authored/recovered effect-block ordinals occupy the small signed range. Catch sites derive
+    // from byte offsets in a disjoint positive range so their identity is stable across targets.
+    ordinal: 0x40000000 + span.start,
+    span,
+  })
+
 /** Orders executable sites by their stable structural identities. */
 export const compareExecutableSites = (
   left: EffectSiteId | CallableSiteId,

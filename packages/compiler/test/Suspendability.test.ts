@@ -227,6 +227,34 @@ pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
   }),
 )
 
+it.effect('ignores shared non-default Allocator demands for continuation validation', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`${suspendingAllocator}
+
+effect fn work() -> i32 ! OutOfMemory
+? &Allocator@SharedAudit | &Allocator@ExclusiveAudit | &mut Allocator {
+  return run Effect.suspend(effect { return 42 })
+}
+
+${recover}
+pub fn main() -> i32 {
+  let sharedAudit = SuspendingAllocator {}
+  let mut exclusiveAudit = SuspendingAllocator {}
+  let mut allocator = SystemAllocator.make()
+  return run Effect.catchAll(
+    work()
+      |> Effect.provideMut<&mut Allocator>(&mut allocator)
+      |> Effect.provide<&Allocator@SharedAudit>(&sharedAudit)
+      |> Effect.provideMut<&Allocator@ExclusiveAudit>(&mut exclusiveAudit),
+    recover
+  )
+}`)
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(Analysis.mirOf(self)._tag, 'Available')
+  }),
+)
+
 it.effect('checks continuation allocators by exact witness specialization', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`struct Token {}

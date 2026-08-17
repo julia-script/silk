@@ -1,8 +1,8 @@
 import * as Constraint from './Constraint.js'
 import type * as FiniteRow from './FiniteRow.js'
-import * as Canonical from './internal/Canonical.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 export type CandidateStatus =
@@ -10,9 +10,14 @@ export type CandidateStatus =
   | { readonly _tag: 'Ambiguous'; readonly witnesses: ReadonlyArray<Constraint.WitnessIdentity> }
   | { readonly _tag: 'Invalid'; readonly reason: string }
 
+export type NonEmptySourceSpans = readonly [
+  SourceSpan.SourceSpan,
+  ...ReadonlyArray<SourceSpan.SourceSpan>,
+]
+
 export interface Relation {
   readonly wanted: Constraint.ProviderSelection
-  readonly origins: ReadonlyArray<RowAlgebra.SourceOrigin>
+  readonly origins: NonEmptySourceSpans
 }
 
 export interface CandidateRecord {
@@ -23,7 +28,7 @@ export interface CandidateRecord {
 export interface RelationCandidates {
   readonly constraintKey: string
   readonly wanted: Constraint.ProviderSelection
-  readonly origins: ReadonlyArray<RowAlgebra.SourceOrigin>
+  readonly origins: NonEmptySourceSpans
   readonly candidates: ReadonlyMap<string, CandidateRecord>
 }
 
@@ -33,42 +38,37 @@ export interface RelationPayload {
 }
 
 export interface DiagnosticLocations {
-  readonly primary: RowAlgebra.SourceOrigin
+  readonly primary: SourceSpan.SourceSpan
   readonly relations: ReadonlyArray<{
     readonly constraintKey: string
-    readonly origins: ReadonlyArray<RowAlgebra.SourceOrigin>
+    readonly origins: NonEmptySourceSpans
   }>
 }
 
-export type SelectionDiagnostic =
+export type SelectionProblem =
   | {
       readonly _tag: 'SelectedRowCardinality'
       readonly count: number
-      readonly locations: DiagnosticLocations
     }
   | {
       readonly _tag: 'ProviderNoMatch'
       readonly constraintKey: string
-      readonly locations: DiagnosticLocations
     }
   | {
       readonly _tag: 'JointSelectionConflict'
       readonly payload: { readonly relations: ReadonlyArray<RelationPayload> }
-      readonly locations: DiagnosticLocations
     }
   | {
       readonly _tag: 'ConformanceAmbiguity'
       readonly memberKey: string
       readonly constraintKey: string
       readonly witnesses: ReadonlyArray<Constraint.WitnessIdentity>
-      readonly locations: DiagnosticLocations
     }
   | {
       readonly _tag: 'InvalidConformance'
       readonly memberKey: string
       readonly constraintKey: string
       readonly reason: string
-      readonly locations: DiagnosticLocations
     }
   | {
       readonly _tag: 'ProviderAmbiguity'
@@ -76,8 +76,24 @@ export type SelectionDiagnostic =
         readonly survivingCandidates: ReadonlyArray<string>
         readonly relations: ReadonlyArray<RelationPayload>
       }
-      readonly locations: DiagnosticLocations
     }
+
+/** One span-free solver problem paired with diagnostic-only source provenance. */
+export interface SelectionDiagnostic {
+  readonly problem: SelectionProblem
+  readonly locations: DiagnosticLocations
+}
+
+const diagnostic = (
+  problem: SelectionProblem,
+  sourceLocations: DiagnosticLocations,
+): SelectionDiagnostic =>
+  Object.freeze({ problem: Object.freeze(problem), locations: sourceLocations })
+
+export type SelectionDiagnostics = readonly [
+  SelectionDiagnostic,
+  ...ReadonlyArray<SelectionDiagnostic>,
+]
 
 export type Result =
   | {
@@ -87,7 +103,20 @@ export type Result =
         Extract<Constraint.ConstraintEvidence, { readonly _tag: 'RequirementSelection' }>
       >
     }
-  | { readonly _tag: 'Rejected'; readonly diagnostics: ReadonlyArray<SelectionDiagnostic> }
+  | { readonly _tag: 'Rejected'; readonly diagnostics: SelectionDiagnostics }
+
+const rejected = (
+  diagnostics: ReadonlyArray<SelectionDiagnostic>,
+): Extract<Result, { readonly _tag: 'Rejected' }> => {
+  const first = diagnostics.at(0)
+  if (first === undefined)
+    throw new RangeError('Provider selection rejection requires at least one diagnostic')
+  const nonEmptyDiagnostics: SelectionDiagnostics = [first, ...diagnostics.slice(1)]
+  return Object.freeze({
+    _tag: 'Rejected',
+    diagnostics: Object.freeze(nonEmptyDiagnostics),
+  })
+}
 
 export interface ConformanceOracle {
   readonly match: (provider: Type.Type, capability: Type.Nominal) => Constraint.ConformanceOutcome
@@ -96,17 +125,11 @@ export interface ConformanceOracle {
 const compareText = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0
 
-const originKey = (origin: RowAlgebra.SourceOrigin): string =>
-  Canonical.record('SourceOrigin', [origin.sourceId, `${origin.start}`, `${origin.end}`])
-
-const canonicalOrigins = (
-  origins: Iterable<RowAlgebra.SourceOrigin>,
-): ReadonlyArray<RowAlgebra.SourceOrigin> =>
-  Object.freeze(
-    [...new Map([...origins].map((origin) => [originKey(origin), origin])).values()].sort(
-      (left, right) => compareText(originKey(left), originKey(right)),
-    ),
-  )
+const canonicalOrigins = (origins: NonEmptySourceSpans): NonEmptySourceSpans => {
+  const canonical = SourceSpan.canonicalize(origins)
+  const first = canonical.at(0)
+  return first === undefined ? origins : Object.freeze([first, ...canonical.slice(1)])
+}
 
 const policy = RequirementRow.policy<NonNullable<Type.Requirement['capability']>>(Type.key)
 const memberKey = policy.memberKey
@@ -173,11 +196,15 @@ export const groupRelations = (relations: ReadonlyArray<Relation>): ReadonlyArra
   for (const relation of relations) {
     const key = Constraint.key(relation.wanted)
     const existing = grouped.get(key)
+    const origins: NonEmptySourceSpans =
+      existing === undefined
+        ? relation.origins
+        : [existing.origins[0], ...existing.origins.slice(1), ...relation.origins]
     grouped.set(
       key,
       Object.freeze({
         wanted: existing?.wanted ?? relation.wanted,
-        origins: canonicalOrigins([...(existing?.origins ?? []), ...relation.origins]),
+        origins: canonicalOrigins(origins),
       }),
     )
   }
@@ -207,12 +234,10 @@ const payload = (relations: ReadonlyArray<RelationCandidates>): ReadonlyArray<Re
 
 const locations = (
   relations: ReadonlyArray<RelationCandidates>,
-  responsible?: RowAlgebra.SourceOrigin,
+  responsible: SourceSpan.SourceSpan,
 ): DiagnosticLocations => {
-  const first = relations.flatMap((relation) => relation.origins).at(0)
-  const primary = responsible ?? first ?? Object.freeze({ sourceId: '', start: 0, end: 0 })
   return Object.freeze({
-    primary,
+    primary: responsible,
     relations: Object.freeze(
       relations.map((relation) =>
         Object.freeze({
@@ -232,26 +257,31 @@ const selectedFinite = (
   return concrete._tag === 'Concrete' ? concrete.row : undefined
 }
 
+const candidateAt = (relation: RelationCandidates, key: string): CandidateRecord => {
+  const candidate = relation.candidates.get(key)
+  if (candidate === undefined)
+    throw new RangeError(`Provider selection lost candidate ${key} from a surviving relation`)
+  return candidate
+}
+
 /** Solves one conjunctive selected-row variable after all ordinary substitutions are known. */
 export const solve = (options: {
   readonly relations: ReadonlyArray<Relation>
   readonly selected?: Type.RequirementsRow
-  readonly responsible?: RowAlgebra.SourceOrigin
+  readonly responsible: SourceSpan.SourceSpan
   readonly oracle: ConformanceOracle
 }): Result => {
+  if (options.relations.length === 0)
+    throw new RangeError('Provider selection requires at least one relation')
   const maps = candidates(options.relations, options.oracle)
   const selected = selectedFinite(options.selected)
   if (options.selected !== undefined && (selected === undefined || selected.members.length !== 1))
-    return Object.freeze({
-      _tag: 'Rejected',
-      diagnostics: Object.freeze([
-        Object.freeze({
-          _tag: 'SelectedRowCardinality',
-          count: selected?.members.length ?? 0,
-          locations: locations(maps, options.responsible),
-        }),
-      ]),
-    })
+    return rejected([
+      diagnostic(
+        { _tag: 'SelectedRowCardinality', count: selected?.members.length ?? 0 },
+        locations(maps, options.responsible),
+      ),
+    ])
 
   const selectedMember = selected?.members.at(0)
   const considered =
@@ -267,94 +297,92 @@ export const solve = (options: {
         })
   const empty = considered.filter((relation) => relation.candidates.size === 0)
   if (empty.length > 0)
-    return Object.freeze({
-      _tag: 'Rejected',
-      diagnostics: Object.freeze(
-        empty.map((relation) =>
-          Object.freeze({
-            _tag: 'ProviderNoMatch',
-            constraintKey: relation.constraintKey,
-            locations: locations([relation]),
-          }),
+    return rejected(
+      empty.map((relation) =>
+        diagnostic(
+          { _tag: 'ProviderNoMatch', constraintKey: relation.constraintKey },
+          locations([relation], options.responsible),
         ),
       ),
-    })
+    )
 
-  const firstKeys = new Set(considered.at(0)?.candidates.keys() ?? [])
+  const firstRelation = considered.at(0)
+  if (firstRelation === undefined)
+    throw new RangeError('Provider selection lost its first candidate relation')
+  const firstKeys = new Set(firstRelation.candidates.keys())
   const surviving = [...firstKeys]
     .filter((key) => considered.every((relation) => relation.candidates.has(key)))
     .sort(compareText)
   if (surviving.length === 0)
-    return Object.freeze({
-      _tag: 'Rejected',
-      diagnostics: Object.freeze([
-        Object.freeze({
+    return rejected([
+      diagnostic(
+        {
           _tag: 'JointSelectionConflict',
           payload: Object.freeze({ relations: payload(considered) }),
-          locations: locations(considered, options.responsible),
-        }),
-      ]),
-    })
+        },
+        locations(considered, options.responsible),
+      ),
+    ])
 
   const statusDiagnostics: Array<SelectionDiagnostic> = []
   for (const key of surviving)
     for (const relation of considered) {
-      const status = relation.candidates.get(key)?.status
-      if (status?._tag === 'Ambiguous')
+      const status = candidateAt(relation, key).status
+      if (status._tag === 'Ambiguous')
         statusDiagnostics.push(
-          Object.freeze({
-            _tag: 'ConformanceAmbiguity',
-            memberKey: key,
-            constraintKey: relation.constraintKey,
-            witnesses: status.witnesses,
-            locations: locations([relation]),
-          }),
+          diagnostic(
+            {
+              _tag: 'ConformanceAmbiguity',
+              memberKey: key,
+              constraintKey: relation.constraintKey,
+              witnesses: status.witnesses,
+            },
+            locations([relation], options.responsible),
+          ),
         )
-      if (status?._tag === 'Invalid')
+      if (status._tag === 'Invalid')
         statusDiagnostics.push(
-          Object.freeze({
-            _tag: 'InvalidConformance',
-            memberKey: key,
-            constraintKey: relation.constraintKey,
-            reason: status.reason,
-            locations: locations([relation]),
-          }),
+          diagnostic(
+            {
+              _tag: 'InvalidConformance',
+              memberKey: key,
+              constraintKey: relation.constraintKey,
+              reason: status.reason,
+            },
+            locations([relation], options.responsible),
+          ),
         )
     }
-  if (statusDiagnostics.length > 0)
-    return Object.freeze({ _tag: 'Rejected', diagnostics: Object.freeze(statusDiagnostics) })
+  if (statusDiagnostics.length > 0) return rejected(statusDiagnostics)
   if (surviving.length > 1)
-    return Object.freeze({
-      _tag: 'Rejected',
-      diagnostics: Object.freeze([
-        Object.freeze({
+    return rejected([
+      diagnostic(
+        {
           _tag: 'ProviderAmbiguity',
           payload: Object.freeze({
             survivingCandidates: Object.freeze(surviving),
             relations: payload(considered),
           }),
-          locations: locations(considered, options.responsible),
-        }),
-      ]),
-    })
+        },
+        locations(considered, options.responsible),
+      ),
+    ])
 
   const survivingKey = surviving.at(0)
   if (survivingKey === undefined)
-    return Object.freeze({ _tag: 'Rejected', diagnostics: Object.freeze([]) })
-  const first = considered.at(0)?.candidates.get(survivingKey)
-  if (first === undefined)
-    return Object.freeze({ _tag: 'Rejected', diagnostics: Object.freeze([]) })
+    throw new RangeError('Provider selection lost its surviving candidate key')
+  const first = candidateAt(firstRelation, survivingKey)
   const evidence = considered.flatMap((relation) => {
-    const candidate = relation.candidates.get(survivingKey)
-    return candidate?.status._tag === 'Unique'
-      ? [
-          Constraint.requirementSelectionEvidence(
-            relation.wanted,
-            candidate.member,
-            candidate.status.match,
-          ),
-        ]
-      : []
+    const candidate = candidateAt(relation, survivingKey)
+    if (candidate.status._tag !== 'Unique')
+      throw new RangeError('Provider selection retained a non-unique surviving candidate')
+    return [
+      Constraint.requirementSelectionEvidence(
+        relation.wanted,
+        candidate.member,
+        candidate.status.match,
+      ),
+    ]
   })
   return Object.freeze({
     _tag: 'Selected',

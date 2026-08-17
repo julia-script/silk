@@ -615,12 +615,15 @@ pub fn main() -> i32 {
       const requirements = instance.specialization.requirementRow
       if (failures !== undefined)
         assert.strictEqual(
-          Type.isConcreteGenericArgument({ _tag: 'FailureRowArgument', row: failures }),
+          Type.isRuntimeConcreteGenericArgument({ _tag: 'FailureRowArgument', row: failures }),
           true,
         )
       if (requirements !== undefined)
         assert.strictEqual(
-          Type.isConcreteGenericArgument({ _tag: 'RequirementRowArgument', row: requirements }),
+          Type.isRuntimeConcreteGenericArgument({
+            _tag: 'RequirementRowArgument',
+            row: requirements,
+          }),
           true,
         )
     }

@@ -383,19 +383,29 @@ pub fn main() -> i32 {
       suspension.map((region) => region._tag),
       'RunSuspendableEffectRegion',
     )
-    const violations = Mir.verify(module)
-    assert.notInclude(
-      violations.map((violation) => violation.rule),
-      'InvalidEffectOperation',
+    const storedRunner =
+      module.functions.find(
+        (fn) => fn.id.module === 'stored-effect-mir/suspending' && fn.id.name === 'main$effect$0',
+      ) ?? unreachable('expected stored Effect runner')
+    const storedRelay =
+      storedRunner.suspension?.regions.find(
+        (region) => region._tag === 'RunSuspendableEffectRegion',
+      ) ?? unreachable('expected stored Effect suspension relay')
+    const relayTarget =
+      storedRelay.runner.declaration ?? unreachable('expected stored Effect relay target')
+    assert.isTrue(
+      module.functions.some((fn) =>
+        Mir.matchesInstance(fn, relayTarget, storedRelay.runner.typeArguments),
+      ),
+      'the stored Effect relay must target a realized runner in the origin-reachable chain',
     )
-    assert.notInclude(
-      violations.map((violation) => violation.rule),
-      'InvalidSuspension',
+    assert.isTrue(
+      module.functions.some((fn) =>
+        fn.suspension?.regions.some((region) => region._tag === 'SuspendEffectRegion'),
+      ),
+      'the reachable chain must terminate in an explicit suspension origin',
     )
-    assert.deepEqual(
-      violations.map((violation) => violation.rule),
-      ['OrphanSuspensionMachinery'],
-    )
+    assert.deepEqual(Mir.verify(module), [])
     assert.include(Mir.encode(module), 'stored-effect-mir/suspending.main$effect$0')
   }),
 )
