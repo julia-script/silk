@@ -1,0 +1,6 @@
+interface:
+  display_name: "Develop Silk Proposal"
+  short_description: "Develop an example-driven Silk proposal"
+  default_prompt: "Use $develop-silk-proposal to turn my high-level language idea into an evolving example-driven Draft."
+policy:
+  allow_implicit_invocation: true

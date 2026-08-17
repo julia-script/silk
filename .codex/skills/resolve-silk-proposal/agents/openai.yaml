@@ -1,0 +1,6 @@
+interface:
+  display_name: "Resolve Silk Proposal"
+  short_description: "Resolve findings and hand off an SLP"
+  default_prompt: "Use $resolve-silk-proposal to work through these review findings and record the proposal outcome."
+policy:
+  allow_implicit_invocation: false

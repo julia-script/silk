@@ -23,6 +23,15 @@ skill and update this file rather than preserving an older convention.
 
 Follow [ATOM-REACT-STYLEGUIDE.md](ATOM-REACT-STYLEGUIDE.md) for Effect Atom and `@effect/atom-react` code.
 
+Use [proposals/PROCESS.md](proposals/PROCESS.md) for conceptual Silk language and standard-library
+work that must establish whole-language direction before OpenSpec. Develop evolving Drafts with the
+`develop-silk-proposal` skill; invoke `review-silk-proposal`, `resolve-silk-proposal`, or
+`converge-silk-proposal` for fixed adversarial review, human-guided resolution, or autonomous
+review/revision convergence. Create OpenSpec changes only after the author accepts an SLP direction.
+Audit SLP-derived OpenSpec artifacts with `audit-silk-openspec` before implementation, and use
+`audit-silk-implementation` after implementation and before archive to reconcile code, OpenSpec,
+and the accepted SLP without silently changing their authority.
+
 ### Issue tracker
 
 Use the local Markdown tracker. General issues live under `.scratch/<feature>/`; Wayfinder maps
