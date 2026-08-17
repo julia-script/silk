@@ -657,7 +657,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
         {
           phase: 'ownership + cleanup',
           outputs: `${ownership?.functions.length ?? 0} checked functions`,
-          diagnostics: 0,
+          diagnostics: countFor('ownership'),
         },
         {
           phase: 'instance discovery',
@@ -691,9 +691,9 @@ export const views: ReadonlyArray<ViewDefinition> = [
                 ? `${emission.artifact.bitcode.length} bitcode bytes`
                 : `${emission.artifact.bytes.length} WebAssembly bytes`
               : 'emission rejected',
-          diagnostics: 0,
+          diagnostics: countFor('backend'),
         },
-        { phase: 'native toolchain (planned)', outputs: 'object · shim · link', diagnostics: 0 },
+        { phase: 'native toolchain', outputs: 'object · shim · link', diagnostics: 0 },
       ]
 
       const blocked = phases.filter((entry) => entry.diagnostics > 0).length
