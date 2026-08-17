@@ -2785,50 +2785,58 @@ export const callableEnvironmentByIdentity = (
       ),
   )
 
+/** Resolves the Effect environment a capture field's identity names, including success carriers. */
+export const effectEnvironmentByFieldIdentity = (
+  self: Plan,
+  identity: string,
+): Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> | undefined =>
+  self.effectEnvironments.find(
+    (candidate): candidate is Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
+      candidate._tag === 'EffectEnvironment' &&
+      (Instances.effectIdentity(candidate.instance, candidate.site) === identity ||
+        candidate.successEffectIdentity === identity),
+  )
+
+/** Materializes the ABI lanes of one Effect environment capture field. */
+export const effectFieldLanes = (
+  self: Plan,
+  field: EffectEnvironmentField,
+): ReadonlyArray<CallingLane> => {
+  if (field.representation === 'Borrow') {
+    return Object.freeze([
+      Object.freeze({
+        _tag: 'CallingLane' as const,
+        path: Object.freeze([]),
+        type: Object.freeze({
+          _tag: 'Address' as const,
+          element: field.type,
+          bits: self.target.pointerSize === 4 ? 32 : 64,
+        }),
+      }),
+    ])
+  }
+  if (field.callableIdentity !== undefined) {
+    const captured =
+      field.callableIdentity.environment === undefined
+        ? undefined
+        : callableEnvironmentByIdentity(self, field.callableIdentity.environment)
+    return captured?._tag === 'CallableEnvironment'
+      ? callableEnvironmentLanes(self, captured)
+      : Object.freeze([])
+  }
+  if (field.effectIdentity !== undefined) {
+    const captured = effectEnvironmentByFieldIdentity(self, field.effectIdentity)
+    return captured !== undefined ? effectEnvironmentLanes(self, captured) : Object.freeze([])
+  }
+  return callingShape(self, field.type)?.lanes ?? Object.freeze([])
+}
+
 /** Materializes the ABI lanes of one hidden Effect environment separately from its outcome. */
 export const effectEnvironmentLanes = (
   self: Plan,
   environment: Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
 ): ReadonlyArray<CallingLane> =>
-  Object.freeze(
-    environment.fields.flatMap((field): ReadonlyArray<CallingLane> => {
-      if (field.representation === 'Borrow') {
-        return [
-          Object.freeze({
-            _tag: 'CallingLane',
-            path: Object.freeze([]),
-            type: Object.freeze({
-              _tag: 'Address',
-              element: field.type,
-              bits: self.target.pointerSize === 4 ? 32 : 64,
-            }),
-          }),
-        ]
-      }
-      if (field.callableIdentity !== undefined) {
-        const captured =
-          field.callableIdentity.environment === undefined
-            ? undefined
-            : callableEnvironmentByIdentity(self, field.callableIdentity.environment)
-        return captured?._tag === 'CallableEnvironment'
-          ? callableEnvironmentLanes(self, captured)
-          : Object.freeze([])
-      }
-      if (field.effectIdentity !== undefined) {
-        const captured = self.effectEnvironments.find(
-          (candidate) =>
-            candidate._tag === 'EffectEnvironment' &&
-            (Instances.effectIdentity(candidate.instance, candidate.site) ===
-              field.effectIdentity ||
-              candidate.successEffectIdentity === field.effectIdentity),
-        )
-        return captured?._tag === 'EffectEnvironment'
-          ? effectEnvironmentLanes(self, captured)
-          : Object.freeze([])
-      }
-      return callingShape(self, field.type)?.lanes ?? Object.freeze([])
-    }),
-  )
+  Object.freeze(environment.fields.flatMap((field) => effectFieldLanes(self, field)))
 
 /** Materializes the ABI lanes of one hidden callable capture environment. */
 export const callableEnvironmentLanes = (

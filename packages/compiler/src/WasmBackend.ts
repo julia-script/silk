@@ -388,6 +388,17 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
             changed = include(operation.destination, [arm.selected.result]) || changed
           }
           break
+        case 'ConvertUnion':
+        case 'UnpackEffectSuccess':
+          changed = include(operation.destination, [operation.source]) || changed
+          break
+        case 'SlotTake':
+        case 'SlotCopy':
+          changed = include(operation.destination, [operation.slot]) || changed
+          break
+        case 'RawBufferView':
+          changed = include(operation.destination, [operation.buffer]) || changed
+          break
         default:
           break
       }

@@ -793,7 +793,12 @@ const catchHandlerRunner = (
   const catchEffect = context.discovery.effects.find(
     (candidate) => candidate.identity === catchIdentity,
   )
-  const callableIdentity = catchEffect?.captures.at(1)?.callableIdentity
+  // The catch environment always stores [protected effect, handler callable], but the handler is
+  // selected by its callable identity rather than by position so a capture-layout change cannot
+  // silently misclassify the handler as synchronous.
+  const callableIdentity = catchEffect?.captures.find(
+    (capture) => capture.callableIdentity !== undefined,
+  )?.callableIdentity
   const handlerType = Type.substitute(expression.handler.type, context.instance.substitution)
   if (
     callableIdentity?.target._tag !== 'Declaration' ||

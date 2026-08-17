@@ -5427,16 +5427,9 @@ function effectLocalCleanup(
         field.callableIdentity === undefined || !Type.isCallable(field.type)
           ? undefined
           : callableValueByIdentity(fn.layout, field.callableIdentity, field.type)
-      const laneCount =
-        field.representation === 'Borrow'
-          ? 1
-          : callable === undefined
-            ? nested === undefined
-              ? (Layout.callingShape(fn.layout, field.type)?.laneCount ?? 0)
-              : Layout.effectEnvironmentLanes(fn.layout, nested.environment).length
-            : callable.environment === undefined
-              ? 0
-              : Layout.callableEnvironmentLanes(fn.layout, callable.environment).length
+      // Offsets must mirror the runner ABI exactly, so the count comes from the same Layout
+      // helper that materializes the environment lanes for backends.
+      const laneCount = Layout.effectFieldLanes(fn.layout, field).length
       const currentOffset = laneOffset
       laneOffset += laneCount
       const realizationOrdinal =

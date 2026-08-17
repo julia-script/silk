@@ -2216,6 +2216,48 @@ const runtimeAvailableConstraint = (constraint: Constraint.Constraint): boolean 
   }
 }
 
+/** Checks one blueprint constraint after closing it through the schema substitution. */
+const runtimeAvailableConstraintUnder = (
+  constraint: Constraint.Constraint,
+  substitution: Substitution,
+): boolean => {
+  switch (constraint._tag) {
+    case 'NominalMemberConstraint':
+      return runtimeAvailableConstraint(
+        Object.freeze({
+          ...constraint,
+          selected: substitute(constraint.selected, substitution),
+          source: substituteFailureRow(constraint.source, substitution),
+        }),
+      )
+    case 'FailureSubsetConstraint':
+      return runtimeAvailableConstraint(
+        Object.freeze({
+          ...constraint,
+          selected: substituteFailureRow(constraint.selected, substitution),
+          source: substituteFailureRow(constraint.source, substitution),
+        }),
+      )
+    case 'RequirementSubsetConstraint':
+      return runtimeAvailableConstraint(
+        Object.freeze({
+          ...constraint,
+          selected: substituteRequirementsRow(constraint.selected, substitution),
+          source: substituteRequirementsRow(constraint.source, substitution),
+        }),
+      )
+    case 'ProviderSelectionConstraint':
+      return runtimeAvailableConstraint(
+        Object.freeze({
+          ...constraint,
+          provider: substitute(constraint.provider, substitution),
+          selected: substituteRequirementsRow(constraint.selected, substitution),
+          source: substituteRequirementsRow(constraint.source, substitution),
+        }),
+      )
+  }
+}
+
 const runtimeAvailableEvidence = (evidence: Constraint.ConstraintEvidence): boolean => {
   switch (evidence._tag) {
     case 'Assumed':
@@ -2256,13 +2298,15 @@ function runtimeAvailable(self: Type): boolean {
     return (
       self.parameters.every(runtimeAvailable) &&
       runtimeAvailable(self.result) &&
+      // The schema contract is the generic declaration blueprint; its binders, rows, and
+      // constraints are symbolic by construction and close through schema.substitution. Runtime
+      // availability is therefore decided on the substituted constraints, the evidence, and the
+      // substitution itself — never on the raw blueprint.
       (self.schema === undefined ||
         (self.schema.binders.every(runtimeAvailable) &&
-          runtimeAvailable(self.schema.contract.result) &&
-          self.schema.contract.parameters.every((parameter) => runtimeAvailable(parameter.type)) &&
-          self.schema.contract.binders.every(runtimeAvailable) &&
-          self.schema.contract.constraints.every(runtimeAvailableConstraint) &&
-          self.schema.constraints.every(runtimeAvailableConstraint) &&
+          self.schema.constraints.every((constraint) =>
+            runtimeAvailableConstraintUnder(constraint, self.schema?.substitution ?? new Map()),
+          ) &&
           self.schema.evidence.every(runtimeAvailableEvidence) &&
           [...self.schema.substitution.values()].every(runtimeAvailableGenericArgument)))
     )
@@ -2887,8 +2931,18 @@ const inferFailureRowArgument = (
   if (genericArgumentKey(pattern) === genericArgumentKey(actual)) return true
   const substitutedPattern = failureRowArgumentFromRow(substituteFailureRow(pattern.row, inferred))
   if (genericArgumentKey(substitutedPattern) === genericArgumentKey(actual)) return true
-  if (pattern.row.expression._tag === 'RowParameter')
+  if (pattern.row.expression._tag === 'RowParameter') {
+    // Occurs check: E may never bind to a row that still mentions E.
+    if (
+      RowAlgebra.containsRowParameter(
+        failureRowPolicy(),
+        actual.row,
+        pattern.row.expression.parameter,
+      )
+    )
+      return false
     return bindGenericArgument(pattern.row.expression.parameter, actual, inferred, context)
+  }
   if (
     pattern.row.expression._tag === 'Without' ||
     pattern.row.expression._tag === 'Singleton' ||
@@ -2911,6 +2965,8 @@ const inferFailureRowArgument = (
       return (
         failureRowParameters(pattern).length === 1 &&
         parameter_ !== undefined &&
+        // Occurs check: the open remainder may not itself mention the parameter being bound.
+        !failureRowParameters(actual).some((candidate) => key(candidate) === key(parameter_)) &&
         bindGenericArgument(
           parameter_,
           failureRowArgument(remaining, failureRowParameters(actual)),
@@ -2944,8 +3000,18 @@ const inferRequirementRowArgument = (
     substituteRequirementsRow(pattern.row, inferred),
   )
   if (genericArgumentKey(substitutedPattern) === genericArgumentKey(actual)) return true
-  if (pattern.row.expression._tag === 'RowParameter')
+  if (pattern.row.expression._tag === 'RowParameter') {
+    // Occurs check: R may never bind to a row that still mentions R.
+    if (
+      RowAlgebra.containsRowParameter(
+        requirementRowPolicy(),
+        actual.row,
+        pattern.row.expression.parameter,
+      )
+    )
+      return false
     return bindGenericArgument(pattern.row.expression.parameter, actual, inferred, context)
+  }
   if (substitutedPattern.row.expression._tag === 'Union') {
     const rowParameters = substitutedPattern.row.expression.operands.filter(
       (operand): operand is Extract<typeof operand, { readonly _tag: 'RowParameter' }> =>
@@ -2989,6 +3055,9 @@ const inferRequirementRowArgument = (
             }),
           RowAlgebra.concrete(requirementRowPolicy(), []),
         )
+        // Occurs check: the open remainder may not itself mention the parameter being bound.
+        if (RowAlgebra.containsRowParameter(requirementRowPolicy(), remainder, parameter_))
+          return false
         return bindGenericArgument(
           parameter_,
           requirementRowArgumentFromRow(remainder),

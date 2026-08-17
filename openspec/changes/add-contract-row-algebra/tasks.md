@@ -86,8 +86,8 @@
 - [x] 9.3 Regenerate `Stdlib.generated.ts`, intrinsic inventory, module surfaces, standard-library reference pages, language reference material, diagnostic documentation, and affected fixtures.
 - [x] 9.4 Run `pnpm typecheck` and repair all representation/exhaustiveness errors without casts, non-null assertions, or lint suppressions.
 - [x] 9.5 Run `pnpm exec biome check .` and repair formatting or static-analysis failures.
-- [ ] 9.6 Run `pnpm test`, using shared `Analysis` snapshots and the cheapest engine that can falsify each claim.
-- [ ] 9.7 Run `pnpm check`, then `pnpm release:candidate` because compiler/stdlib surfaces change, and report pre-existing failures separately.
+- [x] 9.6 Run `pnpm test`, using shared `Analysis` snapshots and the cheapest engine that can falsify each claim.
+- [x] 9.7 Run `pnpm check`, then `pnpm release:candidate` because compiler/stdlib surfaces change, and report pre-existing failures separately.
 
 ## 10. Post-implementation audit remediation
 
@@ -98,4 +98,4 @@
 - [x] 10.5 Carry constrained callable identity/evidence through closed static forwarding chains into MIR and every execution engine, and reject only opaque or runtime escapes.
 - [x] 10.6 Regenerate accurate signatures and reference documentation for `Without`, constraints, provider selection, executable singleton catch, and the Logger/Clock plus set-to-set examples.
 - [x] 10.7 Add compiler package subpath exports for every new public actor and replace wording assertions or thrown test invariants with structured diagnostics and `unreachable`.
-- [ ] 10.8 Run focused regressions, `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, `pnpm release:candidate`, and strict OpenSpec validation before updating the pull request.
+- [x] 10.8 Run focused regressions, `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, `pnpm release:candidate`, and strict OpenSpec validation before updating the pull request.

@@ -828,13 +828,41 @@ const reachableIntrinsics = (
   return Object.freeze([...retained.values()].sort(compareIntrinsicCalls))
 }
 
+/**
+ * Closes a partial section's binder-owned rows before the type becomes instance identity.
+ *
+ * A constrained partial section is deliberately open in its target contract's own unapplied
+ * binders: its effect rows close only at application, so its surface mentions binder-owned row
+ * parameters that no substitution at a carrying call can ever resolve. Elaboration's constrained
+ * callable escape gate proves such a value only ever reaches a whole-value relay, an application,
+ * or a drop — every other escape is rejected there with its own diagnostic — and the callable
+ * itself is erased onto its hidden identity argument. The instance identity therefore closes the
+ * schema's own row binders to empty rows, exactly the shape the section presents once applied,
+ * so a proven relay is not re-rejected as an unresolved contract row.
+ */
+const carriedSectionArgument = (argument: Type.GenericArgument): Type.GenericArgument => {
+  if (!Type.isTypeArgument(argument)) return argument
+  if (!Type.isCallable(argument) || argument.schema === undefined) return argument
+  if (Type.isRuntimeConcrete(argument)) return argument
+  const closure = new Map<string, Type.GenericArgument>()
+  for (const binder of argument.schema.binders) {
+    if (binder.kind === 'FailureRow') closure.set(Type.key(binder), Type.failureRowArgument([]))
+    else if (binder.kind === 'RequirementRow')
+      closure.set(Type.key(binder), Type.requirementRowArgument([]))
+  }
+  if (closure.size === 0) return argument
+  const closed = Type.substitute(argument, closure)
+  return Type.isRuntimeConcrete(closed) ? closed : argument
+}
+
 const keyOf = (
   declaration: DeclarationIndex.CanonicalId,
   contract: Hir.ContractFact,
   typeParameters: ReadonlyArray<Type.Parameter> = [],
-  typeArguments: ReadonlyArray<Type.GenericArgument> = [],
+  rawTypeArguments: ReadonlyArray<Type.GenericArgument> = [],
 ): InstanceKey =>
   (() => {
+    const typeArguments = rawTypeArguments.map(carriedSectionArgument)
     const substitution = Type.substitution(
       typeParameters,
       typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument)),
@@ -1225,72 +1253,100 @@ const hookCalls = (
  * erased by monomorphizing the target on the argument's hidden concrete identity. A call passing
  * either therefore cannot be specialized on its explicit type arguments alone — the target would
  * be instantiated without the identity, and lowering would drop the parameter it cannot type.
+ *
+ * The judgement runs under the caller instance's substitution: an argument whose declared type is
+ * a bare type parameter is still an Effect or callable value when the caller's own instance bound
+ * that parameter to one, exactly as if the type had been spelled at the call.
  */
 const carriesHiddenIdentity = (
   expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
-): boolean =>
-  Type.isEffect(expression.type) ||
-  expression.arguments.some(
-    (argument) =>
-      argument._tag !== 'Unavailable' &&
-      (Type.isEffect(argument.type) || Type.isCallable(argument.type)),
+  substitution: Type.Substitution,
+): boolean => {
+  const carrier = (type: Type.Type): boolean => {
+    const specialized = Type.substitute(type, substitution)
+    return Type.isEffect(specialized) || Type.isCallable(specialized)
+  }
+  return (
+    Type.isEffect(Type.substitute(expression.type, substitution)) ||
+    expression.arguments.some(
+      (argument) => argument._tag !== 'Unavailable' && carrier(argument.type),
+    )
   )
+}
 
 const callTargets = (
   expression: Hir.Expression,
   index: DeclarationIndex.Index,
+  substitution: Type.Substitution,
 ): ReadonlyArray<CallTarget> => {
-  if (expression._tag === 'Run') return callTargets(expression.subject, index)
-  if (expression._tag === 'EffectResult') return callTargets(expression.protected, index)
+  if (expression._tag === 'Run') return callTargets(expression.subject, index, substitution)
+  if (expression._tag === 'EffectResult')
+    return callTargets(expression.protected, index, substitution)
   if (expression._tag === 'EffectCatch')
-    return [...callTargets(expression.protected, index), ...callTargets(expression.handler, index)]
+    return [
+      ...callTargets(expression.protected, index, substitution),
+      ...callTargets(expression.handler, index, substitution),
+    ]
   if (expression._tag === 'EffectBindRequirement') {
     // A source-declared witness makes provision dispatch to its qualified operation, so the
     // operation is reachable even though no ordinary call names it.
     const witness = expression.provider.witness
-    return [...callTargets(expression.protected, index), ...witnessCallTargets(witness, index)]
+    return [
+      ...callTargets(expression.protected, index, substitution),
+      ...witnessCallTargets(witness, index),
+    ]
   }
-  if (expression._tag === 'Move') return callTargets(expression.subject, index)
-  if (expression._tag === 'RuntimeStringView') return callTargets(expression.source, index)
+  if (expression._tag === 'Move') return callTargets(expression.subject, index, substitution)
+  if (expression._tag === 'RuntimeStringView')
+    return callTargets(expression.source, index, substitution)
   if (expression._tag === 'StringEquality' || expression._tag === 'ShortCircuit') {
-    return [...callTargets(expression.left, index), ...callTargets(expression.right, index)]
+    return [
+      ...callTargets(expression.left, index, substitution),
+      ...callTargets(expression.right, index, substitution),
+    ]
   }
-  if (expression._tag === 'UnionConvert') return callTargets(expression.source, index)
-  if (expression._tag === 'Project') return callTargets(expression.subject, index)
+  if (expression._tag === 'UnionConvert') return callTargets(expression.source, index, substitution)
+  if (expression._tag === 'Project') return callTargets(expression.subject, index, substitution)
   if (expression._tag === 'IndexPlace') {
-    return [...callTargets(expression.subject, index), ...callTargets(expression.index, index)]
+    return [
+      ...callTargets(expression.subject, index, substitution),
+      ...callTargets(expression.index, index, substitution),
+    ]
   }
-  if (expression._tag === 'SliceLength') return callTargets(expression.slice, index)
+  if (expression._tag === 'SliceLength') return callTargets(expression.slice, index, substitution)
   if (expression._tag === 'SliceIndexPlace') {
-    return [...callTargets(expression.slice, index), ...callTargets(expression.index, index)]
+    return [
+      ...callTargets(expression.slice, index, substitution),
+      ...callTargets(expression.index, index, substitution),
+    ]
   }
   if (expression._tag === 'Construct') {
-    return expression.fields.flatMap((field) => callTargets(field.value, index))
+    return expression.fields.flatMap((field) => callTargets(field.value, index, substitution))
   }
   if (expression._tag === 'ArrayConstruct') {
-    return expression.elements.flatMap((element) => callTargets(element, index))
+    return expression.elements.flatMap((element) => callTargets(element, index, substitution))
   }
   if (expression._tag === 'BuiltinCall' || expression._tag === 'BoundOperationCall') {
-    return expression.arguments.flatMap((argument) => callTargets(argument, index))
+    return expression.arguments.flatMap((argument) => callTargets(argument, index, substitution))
   }
   if (expression._tag === 'FunctionItem') return []
   if (expression._tag === 'CallableSection') {
-    return expression.captures.flatMap((capture) => callTargets(capture.value, index))
+    return expression.captures.flatMap((capture) => callTargets(capture.value, index, substitution))
   }
   if (expression._tag === 'CallableApply') {
     return [
-      ...callTargets(expression.callee, index),
-      ...expression.arguments.flatMap((argument) => callTargets(argument, index)),
+      ...callTargets(expression.callee, index, substitution),
+      ...expression.arguments.flatMap((argument) => callTargets(argument, index, substitution)),
     ]
   }
   if (expression._tag === 'Match') {
     return [
-      ...callTargets(expression.scrutinee, index),
+      ...callTargets(expression.scrutinee, index, substitution),
       ...expression.arms.flatMap((arm) =>
         arm.reachable
           ? [
-              ...(arm.guard === undefined ? [] : callTargets(arm.guard, index)),
-              ...callTargets(arm.result, index),
+              ...(arm.guard === undefined ? [] : callTargets(arm.guard, index, substitution)),
+              ...callTargets(arm.result, index, substitution),
             ]
           : [],
       ),
@@ -1298,7 +1354,9 @@ const callTargets = (
   }
   if (expression._tag === 'EffectBlock') {
     return expression.statements.flatMap((statement) =>
-      Hir.statementExpressions(statement).flatMap((child) => callTargets(child, index)),
+      Hir.statementExpressions(statement).flatMap((child) =>
+        callTargets(child, index, substitution),
+      ),
     )
   }
   if (
@@ -1307,9 +1365,11 @@ const callTargets = (
     expression._tag !== 'ServiceEffectConstruct'
   )
     return []
-  const nested = expression.arguments.flatMap((argument) => callTargets(argument, index))
+  const nested = expression.arguments.flatMap((argument) =>
+    callTargets(argument, index, substitution),
+  )
   if (expression._tag === 'ServiceEffectConstruct') return nested
-  return carriesHiddenIdentity(expression)
+  return carriesHiddenIdentity(expression, substitution)
     ? nested
     : [
         Object.freeze({ declaration: expression.target, typeArguments: expression.typeArguments }),
@@ -1320,9 +1380,12 @@ const callTargets = (
 const bodyCallTargets = (
   fn: Hir.HirFunction,
   index: DeclarationIndex.Index,
+  substitution: Type.Substitution,
 ): ReadonlyArray<CallTarget> =>
   fn.statements.flatMap((statement) =>
-    Hir.statementExpressions(statement).flatMap((expression) => callTargets(expression, index)),
+    Hir.statementExpressions(statement).flatMap((expression) =>
+      callTargets(expression, index, substitution),
+    ),
   )
 
 const requirementBindingCallTargets = (
@@ -2130,7 +2193,7 @@ const directCallInstances = (
       // Calls carrying neither an Effect nor a callable value remain on the original
       // finite-specialization path. Resolving them here as well would bypass its
       // polymorphic-recursion guard.
-      if (!carriesHiddenIdentity(expression)) return []
+      if (!carriesHiddenIdentity(expression, substitution)) return []
       const target = targetKeyOfCall(expression, context)
       const targetFn = target === undefined ? undefined : targetFunction(results, expression.target)
       if (target === undefined || targetFn === undefined) return []
@@ -3092,7 +3155,7 @@ export const discover = (
     const identityOfCall = Specialization.key
     const cleanupIdentities = new Set(cleanupTargets.map(identityOfCall))
     const reachableCalls: ReadonlyArray<CallTarget> = [
-      ...bodyCallTargets(fn, index),
+      ...bodyCallTargets(fn, index, substitution),
       ...interfaceWitnessTargets(fn, index, substitution),
       ...requirementBindingCallTargets(fn, substitution, index),
       ...directCalls.map((call) => ({

@@ -172,6 +172,10 @@ export const evidenceKey = (self: ConstraintEvidence): string => {
 }
 
 /** Span-independent semantic constraint identity. */
+const exhaustiveEvidence = (proof: never): never => {
+  throw new RangeError(`Unknown constraint evidence: ${String(proof)}`)
+}
+
 export const key = (self: Constraint): string => {
   switch (self._tag) {
     case 'NominalMemberConstraint':
@@ -434,7 +438,7 @@ export const specializeCallableSchemaExecutableOwner: Type.CallableSchemaOwnerSp
         })
       }
     }
-    return proof
+    return exhaustiveEvidence(proof)
   })
   const contractConstraints = schema.contract.constraints.map((constraint) =>
     specializeConstraintExecutableOwner(constraint, specializeType),

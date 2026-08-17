@@ -4289,7 +4289,8 @@ const solveCallableConstraints = (
       evidence.push(Constraint.assumed(wanted, substitution))
       continue
     }
-    if (wanted._tag === 'ProviderSelectionConstraint') continue
+    if (wanted._tag === 'ProviderSelectionConstraint')
+      throw new RangeError('substitution changed a checked constraint into a provider selection')
     const proof = Constraint.proveStructural(wanted)
     if (proof !== undefined) {
       evidence.push(proof)

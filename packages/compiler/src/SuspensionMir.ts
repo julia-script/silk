@@ -75,16 +75,27 @@ const runnerOf = (
 ): Mir.SuspensionRunner => {
   const arguments_ = operation === undefined ? [] : operationArguments(operation)
   const operationProviders = operation?._tag === 'RunEffectValue' ? operation.providers : []
+  // One selection identity for both the dedup and the argument lookup below — two predicates
+  // here previously let a provider count as "already selected" yet miss its runtime argument.
+  const sameSelection = (
+    left: {
+      readonly role: string
+      readonly requirementAccess: string
+      readonly capability: Type.Type
+    },
+    right: {
+      readonly role: string
+      readonly requirementAccess: string
+      readonly capability: Type.Type
+    },
+  ): boolean =>
+    left.role === right.role &&
+    left.requirementAccess === right.requirementAccess &&
+    Type.equals(left.capability, right.capability)
   const providersWithRuntimeSelections = Object.freeze([
     ...operationProviders,
     ...runner.providers.filter(
-      (provider) =>
-        !operationProviders.some(
-          (selected) =>
-            provider.role === selected.role &&
-            provider.requirementAccess === selected.requirementAccess &&
-            Type.equals(provider.capability, selected.capability),
-        ),
+      (provider) => !operationProviders.some((selected) => sameSelection(provider, selected)),
     ),
   ])
   const runtimeProviders = providersWithRuntimeSelections.filter(
@@ -97,14 +108,7 @@ const runnerOf = (
       const hasRuntimeArgument = provider.witness?._tag === 'SourceConformanceWitness'
       const selected =
         operation?._tag === 'RunEffectValue'
-          ? operation.providers.find(
-              (candidate) =>
-                candidate.role === provider.role &&
-                candidate.requirementAccess === provider.requirementAccess &&
-                candidate.access === provider.access &&
-                Type.equals(candidate.capability, provider.capability) &&
-                Type.equals(candidate.providerType, provider.providerType),
-            )
+          ? operation.providers.find((candidate) => sameSelection(candidate, provider))
           : undefined
       const argument = hasRuntimeArgument
         ? operation?._tag === 'RunEffectValue'
@@ -182,29 +186,8 @@ const continuationAllocatorOf = (
             Type.equals(requirement.capability, Type.allocator),
         )
       : undefined
-  const fieldLaneCount = (field: Layout.EffectEnvironmentField): number => {
-    if (field.representation === 'Borrow') return 1
-    if (field.callableIdentity !== undefined) {
-      const captured =
-        field.callableIdentity.environment === undefined
-          ? undefined
-          : Layout.callableEnvironmentByIdentity(program.layout, field.callableIdentity.environment)
-      return captured?._tag === 'CallableEnvironment'
-        ? Layout.callableEnvironmentLanes(program.layout, captured).length
-        : 0
-    }
-    if (field.effectIdentity !== undefined) {
-      const captured = program.layout.effectEnvironments.find(
-        (candidate) =>
-          candidate._tag === 'EffectEnvironment' &&
-          Instances.effectIdentity(candidate.instance, candidate.site) === field.effectIdentity,
-      )
-      return captured?._tag === 'EffectEnvironment'
-        ? Layout.effectEnvironmentLanes(program.layout, captured).length
-        : 0
-    }
-    return Layout.callingShape(program.layout, field.type)?.lanes.length ?? 0
-  }
+  const fieldLaneCount = (field: Layout.EffectEnvironmentField): number =>
+    Layout.effectFieldLanes(program.layout, field).length
   const allocatorInEnvironment = (
     environment: Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
     baseLane = 0,
@@ -220,12 +203,8 @@ const continuationAllocatorOf = (
     // DefaultRole continuation provider.
     for (const field of environment.fields) {
       if (field.effectIdentity !== undefined) {
-        const nested = program.layout.effectEnvironments.find(
-          (candidate) =>
-            candidate._tag === 'EffectEnvironment' &&
-            Instances.effectIdentity(candidate.instance, candidate.site) === field.effectIdentity,
-        )
-        if (nested?._tag === 'EffectEnvironment') {
+        const nested = Layout.effectEnvironmentByFieldIdentity(program.layout, field.effectIdentity)
+        if (nested !== undefined) {
           const nestedSelected = allocatorInEnvironment(nested, lane, nextVisited)
           if (nestedSelected !== undefined) return nestedSelected
         }
