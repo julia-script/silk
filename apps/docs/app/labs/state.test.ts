@@ -46,8 +46,8 @@ it('a source edit resets the span cursor and evaluation by construction', () => 
   expect(registry.get(cursorAtom)).toBeUndefined()
   expect(registry.get(evaluationAtom)).toBeUndefined()
 
-  registry.set(cursorAtom, { start: 0, end: 3 })
-  expect(registry.get(cursorAtom)).toEqual({ start: 0, end: 3 })
+  registry.set(cursorAtom, { module: 'main', start: 0, end: 3 })
+  expect(registry.get(cursorAtom)).toEqual({ module: 'main', start: 0, end: 3 })
 
   registry.set(modulesAtom, { [registry.get(rootAtom)]: source })
   expect(registry.get(cursorAtom)).toBeUndefined()

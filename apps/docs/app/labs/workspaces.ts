@@ -10,7 +10,7 @@
  * than replacing it.
  */
 
-import type { ViewId } from './registry'
+import type { ViewId } from '@silk-effect/inspector'
 
 /** A pane's slot in the seeded two-row grid. */
 export type Slot = 'a1' | 'a2' | 'b1' | 'b2' | 'c1' | 'c2'

@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * Backend and toolchain facts, as data rather than as markup.
  *
@@ -9,8 +7,8 @@
  * three clang invocations. Both are shapes the row projections consume.
  */
 
-import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
 import type { Backend } from '@silk-effect/compiler'
+import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
 import * as Effect from 'effect/Effect'
 
 const clang = '/usr/bin/clang'

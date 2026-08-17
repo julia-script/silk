@@ -15,6 +15,20 @@ Two parts:
   supports standard dynamic watched-file registration, so no duplicate extension-owned watcher is
   installed.
 
+## Silk Inspector
+
+**Silk: Open Inspector** (command palette) opens one webview panel beside the editor showing a
+compiler-phase view of the active `.silk` file — tokens, concrete tree, HIR, ownership, MIR,
+backend output, the whole pipeline — one view at a time, switched with the in-panel picker. The
+panel follows the active `.silk` editor, refreshes when the language server commits a new
+analysis, and shares a span cursor with the editor: selecting source tints the rows covering it,
+and clicking a row reveals its span (opening the owning module's file when it differs).
+
+All projection happens in the language server (`silk/inspectorView`); the panel renders rows and
+nothing else. Evaluation is explicit — the run button on the evaluation view — and is cleared by
+the next edit. Views that need a runtime realization (layout, MIR, backend, toolchain) are rooted
+at the active file.
+
 ## Which workflow?
 
 | Goal | Use |

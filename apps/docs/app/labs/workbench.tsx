@@ -29,7 +29,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { SilkEditor } from './editor'
 import { PresetPalette } from './preset-palette'
 import { type Preset, presetGroups, presets } from './presets'
-import { type ViewContext, siblingsOf, viewById, views } from './registry'
+import { type ViewContext, siblingsOf, viewById, views } from '@silk-effect/inspector'
 import { EmptyState, RowList } from './row/row'
 import {
   activeModuleAtom,
@@ -112,6 +112,14 @@ function SourceBody() {
   const active = names.includes(activeModule) ? activeModule : (names[0] ?? '')
   const text = modules[active] ?? ''
 
+  // The editor speaks bare byte ranges; the shared cursor is module-qualified, so the active
+  // module is attached here — the one place that knows which module the editor is showing.
+  const onSelect = useCallback(
+    (range: { readonly start: number; readonly end: number }) =>
+      setCursor({ module: active, ...range }),
+    [setCursor, active],
+  )
+
   const activeRef = useRef(active)
   activeRef.current = active
   const onChange = useCallback(
@@ -129,7 +137,7 @@ function SourceBody() {
         module={active}
         cursor={cursor}
         onChange={onChange}
-        onSelect={setCursor}
+        onSelect={onSelect}
         formatRef={formatRef}
         className={shell.editor}
       />
@@ -227,19 +235,19 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
     root: analysisInput.rootModule,
     mode,
     profile,
-    cursor,
-    onSelectSpan: setCursor,
     evaluation,
-    // Evaluation runs the lowered MIR, which is absent when the target did not resolve.
-    onEvaluate: () =>
-      setEvaluation(
-        Analysis.mirOf(snapshot)._tag === 'Available'
-          ? Analysis.evaluate(snapshot, evaluationOptions)
-          : undefined,
-      ),
     filter,
     showTrivia,
   }
+
+  // The registry advertises actions as data; evaluation is the only one, and it runs the lowered
+  // MIR, which is absent when the target did not resolve.
+  const runAction = () =>
+    setEvaluation(
+      Analysis.mirOf(snapshot)._tag === 'Available'
+        ? Analysis.evaluate(snapshot, evaluationOptions)
+        : undefined,
+    )
 
   const isSource = definition.id === 'source'
   const result = isSource ? undefined : definition.project(context)
@@ -304,11 +312,7 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
         ) : null}
 
         {definition.action === undefined ? null : (
-          <button
-            type="button"
-            className={shell.paneToggle}
-            onClick={() => definition.action?.run(context)}
-          >
+          <button type="button" className={shell.paneToggle} onClick={runAction}>
             {definition.action.label}
           </button>
         )}
@@ -335,6 +339,7 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
         <RowList
           rows={result?.rows ?? []}
           cursor={cursor}
+          onPick={setCursor}
           label={`${definition.title} rows`}
         />
       )}

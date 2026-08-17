@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * Module, name, ownership, lowering and backend phases as rows.
  *
@@ -9,10 +7,9 @@
  * returning nothing, which is what keeps a broken pipeline readable.
  */
 
-import { Mir } from '@silk-effect/compiler'
 import type {
-  BootstrapEvaluation,
   Backend,
+  BootstrapEvaluation,
   DeclarationIndex,
   Elaboration,
   Instances,
@@ -21,8 +18,10 @@ import type {
   NameResolution,
   Ownership,
 } from '@silk-effect/compiler'
+import { Mir } from '@silk-effect/compiler'
 import * as Type from '@silk-effect/compiler/Type'
-import type { RowModel, Span } from './row'
+import type { RowModel, Span } from './Row.js'
+import { spanOf as asSpan } from './Row.js'
 
 const typeText = (type: Type.Type): string =>
   typeof type === 'string'
@@ -35,35 +34,27 @@ const typeText = (type: Type.Type): string =>
         }`
       : type._tag === 'TypeParameter'
         ? type.name
-      : type._tag === 'FixedArrayType'
-        ? `Array<${typeText(type.element)}, ${type.length}>`
-      : type._tag === 'SliceType'
-        ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
-        : type._tag === 'EffectType'
-          ? `Effect<${typeText(type.success)}${
-              Type.failureMembers(type).length === 0
-                ? ''
-                : ` ! ${Type.failureMembers(type).map(typeText).join(' | ')}`
-            }> ${type.access.toLowerCase()}`
-          : type._tag === 'CallableType'
-            ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
-            : type._tag === 'ReferenceType'
-              ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
-              : type._tag === 'FailureProjectionType'
-                ? `Row<!${type.parameter.name}>`
-                : type._tag === 'RepresentedType'
-                  ? Type.encode(type)
-                  : type.members.map(typeText).join(' | ')
+        : type._tag === 'FixedArrayType'
+          ? `Array<${typeText(type.element)}, ${type.length}>`
+          : type._tag === 'SliceType'
+            ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
+            : type._tag === 'EffectType'
+              ? `Effect<${typeText(type.success)}${
+                  Type.failureMembers(type).length === 0
+                    ? ''
+                    : ` ! ${Type.failureMembers(type).map(typeText).join(' | ')}`
+                }> ${type.access.toLowerCase()}`
+              : type._tag === 'CallableType'
+                ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
+                : type._tag === 'ReferenceType'
+                  ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
+                  : type._tag === 'FailureProjectionType'
+                    ? `Row<!${type.parameter.name}>`
+                    : type._tag === 'RepresentedType'
+                      ? Type.encode(type)
+                      : type.members.map(typeText).join(' | ')
 
-const asSpan = (span: { readonly start: number; readonly end: number }): Span => ({
-  start: span.start,
-  end: span.end,
-})
-
-export const closureRows = (
-  closure: ModuleClosure.Closure,
-  onPick: (span: Span) => void,
-): ReadonlyArray<RowModel> => {
+export const closureRows = (closure: ModuleClosure.Closure): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   for (const module of closure.modules) {
@@ -77,7 +68,6 @@ export const closureRows = (
       span,
       head: true,
       ...(isRoot ? { tone: 'symbol' as const } : {}),
-      onActivate: () => onPick(span),
     })
     rows.push({
       key: `mod-${module.name}-imports`,
@@ -165,10 +155,7 @@ const conformanceLabel = (conformance: DeclarationIndex.ConformanceFact): string
   return `impl${parameters} ${declaredTypeText(conformance.capability)} for ${declaredTypeText(conformance.provider)}`
 }
 
-export const indexRows = (
-  index: DeclarationIndex.Index,
-  onPick: (span: Span) => void,
-): ReadonlyArray<RowModel> => {
+export const indexRows = (index: DeclarationIndex.Index): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   for (const module of index.modules) {
@@ -199,7 +186,6 @@ export const indexRows = (
         label: memberName(member),
         detail: `${memberSignature(member)}${duplicate ? ' · duplicate' : ''}`,
         span,
-        onActivate: () => onPick(span),
       })
     }
 
@@ -214,7 +200,6 @@ export const indexRows = (
           conformance.operations.length === 1 ? '' : 's'
         }${conformance.hook === undefined ? '' : ' · drop hook'}`,
         span,
-        onActivate: () => onPick(span),
       })
       for (const [ordinal, operation] of conformance.operations.entries()) {
         const operationSpan = asSpan(operation.syntax.span)
@@ -227,7 +212,6 @@ export const indexRows = (
               ? 'unavailable target'
               : operation.target.spelling,
           span: operationSpan,
-          onActivate: () => onPick(operationSpan),
         })
       }
       if (conformance.hook !== undefined) {
@@ -238,7 +222,6 @@ export const indexRows = (
           label: declaredName(conformance.hook.name),
           detail: `${conformance.hook.functionKind.toLowerCase()} drop hook · ${declaredTypeText(conformance.hook.parameterType)}`,
           span: hookSpan,
-          onActivate: () => onPick(hookSpan),
         })
       }
     }
@@ -271,10 +254,7 @@ const bindingSpan = (binding: NameResolution.Binding): Span | undefined => {
   return undefined
 }
 
-export const resolutionRows = (
-  resolution: NameResolution.Resolution,
-  onPick: (span: Span) => void,
-): ReadonlyArray<RowModel> => {
+export const resolutionRows = (resolution: NameResolution.Resolution): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   for (const scope of resolution.modules) {
@@ -295,8 +275,10 @@ export const resolutionRows = (
         depth: 1,
         label: binding.spelling,
         detail: bindingDetail(binding),
-        ...(span === undefined ? {} : { span, onActivate: () => onPick(span) }),
-        ...(binding._tag === 'Unavailable' ? { tone: 'warning' as const, dot: 'warning' as const } : {}),
+        ...(span === undefined ? {} : { span }),
+        ...(binding._tag === 'Unavailable'
+          ? { tone: 'warning' as const, dot: 'warning' as const }
+          : {}),
       })
     }
 
@@ -313,7 +295,6 @@ export const resolutionRows = (
           : `${outcome.bindings.length} binding${outcome.bindings.length === 1 ? '' : 's'}`,
         span,
         ...(unavailable ? { tone: 'warning' as const } : {}),
-        onActivate: () => onPick(span),
       })
     }
   }
@@ -370,10 +351,7 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
   }
 }
 
-export const ownershipRows = (
-  facts: Ownership.ModuleOwnership,
-  onPick: (span: Span) => void,
-): ReadonlyArray<RowModel> => {
+export const ownershipRows = (facts: Ownership.ModuleOwnership): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   for (const fn of facts.functions) {
@@ -389,7 +367,6 @@ export const ownershipRows = (
       span,
       head: true,
       ...(fn.verdict._tag === 'Satisfied' ? {} : { tone: 'warning' as const }),
-      onActivate: () => onPick(span),
     })
 
     for (const [ordinal, binding] of fn.bindings.entries()) {
@@ -400,7 +377,6 @@ export const ownershipRows = (
         label: binding.name ?? '∅',
         detail: `${bindingSiteText(binding)} · ${binding.mutability.toLowerCase()} · ${binding.category._tag.toLowerCase()} · live [${binding.liveFrom.start}, ${binding.liveTo.end})${binding.movedAt === undefined ? '' : ' · moved'}`,
         span: bindSpan,
-        onActivate: () => onPick(bindSpan),
       })
     }
 
@@ -419,13 +395,11 @@ export const ownershipRows = (
             ? 'no releases'
             : exit.releases
                 .map(
-                  (release) =>
-                    `${release.binding.name ?? '∅'} (${cleanupText(release.cleanup)})`,
+                  (release) => `${release.binding.name ?? '∅'} (${cleanupText(release.cleanup)})`,
                 )
                 .join(', ')
         }`,
         span: exitSpan,
-        onActivate: () => onPick(exitSpan),
       })
     }
 
@@ -439,7 +413,6 @@ export const ownershipRows = (
         label: `loan #${loan.id.ordinal} · ${loan.access.toLowerCase()}`,
         detail: `${loanSiteText(loan.root)} · ${loan.origin}${loan.parent === undefined ? '' : ` · parent ${loanSiteText(loan.parent)} suspended`} · r${loan.startRegion.ordinal} → r${loan.endRegion.ordinal}`,
         span: loanSpan,
-        onActivate: () => onPick(loanSpan),
       })
     }
 
@@ -453,7 +426,6 @@ export const ownershipRows = (
         label: `callable · ${callable.mode.toLowerCase()}`,
         detail: `${callable.slots.length} slot${callable.slots.length === 1 ? '' : 's'} · retained ${callable.retainedDependencies.join(', ') || 'none'} · drop ${callable.dropOrder.map((ordinal) => `#${ordinal}`).join(' → ') || 'none'}`,
         span: callableSpan,
-        onActivate: () => onPick(callableSpan),
       })
       for (const slot of callable.slots) {
         rows.push({
@@ -462,7 +434,6 @@ export const ownershipRows = (
           label: `slot #${slot.ordinal} → parameter #${slot.parameterOrdinal}`,
           detail: `${slot.access.toLowerCase()} · ${slot.type === undefined ? 'unavailable type' : typeText(slot.type)} · ${cleanupText(slot.cleanup)}`,
           span: callableSpan,
-          onActivate: () => onPick(callableSpan),
         })
       }
     }
@@ -475,7 +446,6 @@ export const ownershipRows = (
         label: `replace through parameter #${replacement.root.ordinal}`,
         detail: `${typeText(replacement.type)} · ${cleanupText(replacement.displacedCleanup)} · r${replacement.region.ordinal}`,
         span: replacementSpan,
-        onActivate: () => onPick(replacementSpan),
       })
     }
 
@@ -489,7 +459,6 @@ export const ownershipRows = (
         detail: `${point.compatible ? 'compatible' : 'incompatible'} · ${point.iterations} step${point.iterations === 1 ? '' : 's'} · ${point.repeating.length} repeating path${point.repeating.length === 1 ? '' : 's'}`,
         span: loopSpan,
         ...(point.compatible ? {} : { tone: 'warning' as const }),
-        onActivate: () => onPick(loopSpan),
       })
     }
 
@@ -502,7 +471,6 @@ export const ownershipRows = (
         label: `match ${match.access.toLowerCase()}`,
         detail: `${match.arms.length} arm${match.arms.length === 1 ? '' : 's'} · arm-local lifetime`,
         span: matchSpan,
-        onActivate: () => onPick(matchSpan),
       })
       for (const arm of match.arms) {
         const cleanup = arm.cleanup
@@ -514,7 +482,6 @@ export const ownershipRows = (
           label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : typeText(arm.member)}`,
           detail: `${arm.provisionalGuard ? 'provisional guard' : 'direct selection'} · ${arm.bindings.length} binding${arm.bindings.length === 1 ? '' : 's'} · cleanup ${cleanup || 'none'}`,
           span: matchSpan,
-          onActivate: () => onPick(matchSpan),
         })
       }
     }
@@ -523,10 +490,7 @@ export const ownershipRows = (
   return rows
 }
 
-export const instanceRows = (
-  discovery: Instances.Discovery,
-  onPick: (span: Span) => void,
-): ReadonlyArray<RowModel> => {
+export const instanceRows = (discovery: Instances.Discovery): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = [
     {
       key: 'entry',
@@ -559,7 +523,6 @@ export const instanceRows = (
       }`,
       detail: `${instance.substitution.size} substitution${instance.substitution.size === 1 ? '' : 's'} · instantiated once`,
       span,
-      onActivate: () => onPick(span),
     })
   }
 
@@ -573,13 +536,12 @@ export const instanceRows = (
       label: `callable ${callable.target._tag === 'DeclarationCallableTarget' ? callable.target.declaration.name : `${callable.target.actor}.${callable.target.operation}`}`,
       detail: `${typeText(callable.type)} · ${callable.mode.toLowerCase()} · ${callable.captures.map((capture) => `#${capture.ordinal}:${capture.access.toLowerCase()} ${typeText(capture.type)}`).join(', ') || 'no captures'}`,
       span,
-      onActivate: () => onPick(span),
     })
   }
 
   for (const [ordinal, violation] of discovery.violations.entries()) {
     const caller = discovery.instances.find((instance) => instance.key === violation.caller)
-    const span = asSpan(caller?.function.declaration.syntax.span ?? { start: 0, end: 0 })
+    const span = caller === undefined ? undefined : asSpan(caller.function.declaration.syntax.span)
     rows.push({
       key: `inst-violation-${ordinal}`,
       depth: 1,
@@ -587,8 +549,7 @@ export const instanceRows = (
       tone: 'warning',
       label: 'polymorphic recursion',
       detail: `${violation.target.declaration.name}<${violation.target.typeArguments.map(Type.encodeGenericArgument).join(', ')}> changes an ancestor specialization`,
-      span,
-      onActivate: () => onPick(span),
+      ...(span === undefined ? {} : { span }),
     })
   }
 
@@ -719,10 +680,10 @@ const placeText = (root: Mir.LocalId, selectors: ReadonlyArray<Mir.PlaceSelector
         : selector._tag === 'SliceElementSelector'
           ? `[${localText(selector.index)} · ${selector.access.toLowerCase()} slice]`
           : `[${
-            selector.index._tag === 'Proven'
-              ? selector.index.value
-              : localText(selector.index.local)
-          }/${selector.length}]`,
+              selector.index._tag === 'Proven'
+                ? selector.index.value
+                : localText(selector.index.local)
+            }/${selector.length}]`,
     )
     .join('')}`
 
@@ -824,12 +785,6 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = match ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}`
     case 'ShortCircuit':
       return `${localText(operation.destination)} = ${operation.operator === 'And' ? '&&' : '||'} ${localText(operation.left)}`
-    case 'ValidateLayout':
-      return `${localText(operation.destination)} = validate layout ${localText(operation.bytes)} bytes, align ${localText(operation.alignment)}`
-    case 'RepeatLayout':
-      return `${localText(operation.destination)} = repeat layout ${localText(operation.layout)} × ${localText(operation.count)}`
-    case 'Allocate':
-      return `${localText(operation.destination)} = allocate ${localText(operation.layout)} ! ${operation.failure.name}`
     case 'HostWrite':
       return `${localText(operation.destination)} = write all ${localText(operation.bytes)} to stream ${localText(operation.stream)} ! ${operation.failure.name}`
     case 'OsCall':
@@ -897,10 +852,7 @@ const regionDetail = (region: Mir.Region): string => {
   }
 }
 
-export const mirRows = (
-  module: Mir.Module,
-  onPick: (span: Span) => void,
-): ReadonlyArray<RowModel> => {
+export const mirRows = (module: Mir.Module): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   for (const fn of module.functions) {
@@ -942,7 +894,6 @@ export const mirRows = (
           label: operationLabel(operation),
           detail: operation.provenance.generated ? 'generated' : operation._tag.toLowerCase(),
           span,
-          onActivate: () => onPick(span),
         })
         if (operation._tag === 'Match') {
           for (const decision of operation.decisions) {
@@ -950,7 +901,9 @@ export const mirRows = (
               key: `${fnKey}-r${region.id.ordinal}-${ordinal}-decision-${typeText(decision.member)}`,
               depth: 3,
               label: `decision ${typeText(decision.member)}`,
-              detail: decision.candidates.map((candidate) => `arm #${candidate.ordinal}`).join(' → '),
+              detail: decision.candidates
+                .map((candidate) => `arm #${candidate.ordinal}`)
+                .join(' → '),
             })
           }
           for (const arm of operation.arms) {
@@ -961,7 +914,6 @@ export const mirRows = (
               label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : typeText(arm.member)}`,
               detail: `${arm.guard === undefined ? 'selected' : `guard ${localText(arm.guard.result)}`} · result ${localText(arm.selected.result)} → ${localText(operation.destination)} · cleanup ${arm.selected.cleanup.length}`,
               span: armSpan,
-              onActivate: () => onPick(armSpan),
             })
             for (const binding of arm.bindings) {
               const bindingSpan = asSpan(binding.provenance.span)
@@ -971,7 +923,6 @@ export const mirRows = (
                 label: `${localText(binding.destination)} = payload ${binding.path.map((field) => `#${field.ordinal}`).join('.')}`,
                 detail: `${binding.access.toLowerCase()} · ${typeText(Mir.semanticType(binding.type))}`,
                 span: bindingSpan,
-                onActivate: () => onPick(bindingSpan),
               })
             }
           }
@@ -986,7 +937,6 @@ export const mirRows = (
           label: outcomeLabel(region.outcome),
           detail: 'outcome',
           span,
-          onActivate: () => onPick(span),
         })
       } else {
         const span = asSpan(region.provenance.span)
@@ -999,7 +949,6 @@ export const mirRows = (
               : `condition r${region.condition.ordinal} · body r${region.body.ordinal} · following r${region.following.ordinal}`,
           detail: 'structural edges',
           span,
-          onActivate: () => onPick(span),
         })
       }
     }
@@ -1024,7 +973,6 @@ export const backendTextRows = (ir: string): ReadonlyArray<RowModel> =>
 /** Backend-local jumps/branches with canonical region and source provenance kept visible. */
 export const backendControlRows = (
   control: ReadonlyArray<Backend.ControlProvenance>,
-  onPick: (span: Span) => void,
 ): ReadonlyArray<RowModel> => [
   {
     key: 'backend-control',
@@ -1040,7 +988,6 @@ export const backendControlRows = (
       label: `${entry.construct} · r${entry.region.ordinal}`,
       detail: `${entry.targets.map((target) => `r${target.ordinal}`).join(', ') || 'terminal'}${entry.loop === undefined ? '' : ` · loop${entry.loop.ordinal}`}`,
       span,
-      onActivate: () => onPick(span),
     }
   }),
 ]
@@ -1073,37 +1020,37 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
         ? `${value.value.toString()}${value.type}`
         : value._tag === 'CharacterValue'
           ? `U+${value.value.toString(16).toUpperCase().padStart(4, '0')}`
-        : value._tag === 'FloatValue'
-          ? `${value.type}(bits=0x${value.bits.toString(16)})`
-    : value._tag === 'ArrayValue'
-      ? `${typeText(value.type)} [${value.elements.map(valueText).join(', ')}]`
-      : value._tag === 'SliceValue'
-        ? `slice cell f${value.frame}.c${value.cell} [${value.base}..${value.base + value.length})`
-        : value._tag === 'StaticViewValue'
-          ? `static ${value.data} · ${value.length} bytes`
-        : value._tag === 'StringValue'
-          ? `${JSON.stringify(new TextDecoder().decode(Uint8Array.from(value.bytes)))} · ${value.byteLength} UTF-8 bytes · ${value.storage._tag}`
-      : value._tag === 'UnionValue'
-        ? `${typeText(value.type)} <${typeText(value.member)} ${valueText(value.payload)}>`
-      : value._tag === 'EffectOutcomeValue'
-        ? `${typeText(value.type)} tag=${value.tag} payload=${valueText(value.payload)}`
-        : value._tag === 'EffectBorrowValue'
-          ? `${value.access.toLowerCase()} borrow f${value.frame}.c${value.cell}`
-          : value._tag === 'EffectValue'
-            ? `${typeText(value.type)} recipe ${value.runner.name}`
-            : value._tag === 'CallableBorrowValue'
-              ? `${value.access.toLowerCase()} callable borrow f${value.frame}.c${value.cell}`
-              : value._tag === 'CallableValue'
-                ? `${typeText(value.type)} callable #${value.ticket} · ${value.captures.length} capture${value.captures.length === 1 ? '' : 's'}`
-            : value._tag === 'AllocationValue'
-              ? `${typeText(value.type)} ticket=${value.ticket} · ${value.bytes.toString()} bytes · align ${value.alignment.toString()}`
-            : value._tag === 'RawBufferValue'
-              ? `${typeText(value.type)} ticket=${value.ticket} · ${value.count.toString()} × ${typeText(value.element)} · stride ${value.stride}`
-            : value._tag === 'SlotValue'
-              ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
-            : value._tag === 'ReferenceValue'
-              ? `borrow f${value.frame}.c${value.cell}`
-              : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+          : value._tag === 'FloatValue'
+            ? `${value.type}(bits=0x${value.bits.toString(16)})`
+            : value._tag === 'ArrayValue'
+              ? `${typeText(value.type)} [${value.elements.map(valueText).join(', ')}]`
+              : value._tag === 'SliceValue'
+                ? `slice cell f${value.frame}.c${value.cell} [${value.base}..${value.base + value.length})`
+                : value._tag === 'StaticViewValue'
+                  ? `static ${value.data} · ${value.length} bytes`
+                  : value._tag === 'StringValue'
+                    ? `${JSON.stringify(new TextDecoder().decode(Uint8Array.from(value.bytes)))} · ${value.byteLength} UTF-8 bytes · ${value.storage._tag}`
+                    : value._tag === 'UnionValue'
+                      ? `${typeText(value.type)} <${typeText(value.member)} ${valueText(value.payload)}>`
+                      : value._tag === 'EffectOutcomeValue'
+                        ? `${typeText(value.type)} tag=${value.tag} payload=${valueText(value.payload)}`
+                        : value._tag === 'EffectBorrowValue'
+                          ? `${value.access.toLowerCase()} borrow f${value.frame}.c${value.cell}`
+                          : value._tag === 'EffectValue'
+                            ? `${typeText(value.type)} recipe ${value.runner.name}`
+                            : value._tag === 'CallableBorrowValue'
+                              ? `${value.access.toLowerCase()} callable borrow f${value.frame}.c${value.cell}`
+                              : value._tag === 'CallableValue'
+                                ? `${typeText(value.type)} callable #${value.ticket} · ${value.captures.length} capture${value.captures.length === 1 ? '' : 's'}`
+                                : value._tag === 'AllocationValue'
+                                  ? `${typeText(value.type)} ticket=${value.ticket} · ${value.bytes.toString()} bytes · align ${value.alignment.toString()}`
+                                  : value._tag === 'RawBufferValue'
+                                    ? `${typeText(value.type)} ticket=${value.ticket} · ${value.count.toString()} × ${typeText(value.element)} · stride ${value.stride}`
+                                    : value._tag === 'SlotValue'
+                                      ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
+                                      : value._tag === 'ReferenceValue'
+                                        ? `borrow f${value.frame}.c${value.cell}`
+                                        : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
@@ -1347,7 +1294,6 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
 
 export const evaluationRows = (
   outcome: BootstrapEvaluation.Outcome | undefined,
-  onPick: (span: Span) => void,
 ): ReadonlyArray<RowModel> => {
   if (outcome === undefined) {
     return [
@@ -1368,7 +1314,6 @@ export const evaluationRows = (
       label: traceLabel(event),
       detail: event._tag.toLowerCase(),
       span,
-      onActivate: () => onPick(span),
     }
   })
 
@@ -1417,7 +1362,6 @@ export const structValueRows = (
   projections: ReadonlyArray<Elaboration.FieldProjectionExpressionFact>,
   shapes: ReadonlyArray<Layout.CallingShape>,
   evaluation: BootstrapEvaluation.Outcome | undefined,
-  onPick: (span: Span) => void,
 ): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
@@ -1434,13 +1378,13 @@ export const structValueRows = (
       key,
       depth: 1,
       dot: literal.target._tag === 'Resolved' ? 'symbol' : 'warning',
-      label: literal.target._tag === 'Resolved' ? typeText(literal.target.type) : 'unavailable target',
+      label:
+        literal.target._tag === 'Resolved' ? typeText(literal.target.type) : 'unavailable target',
       detail: literal.authorized ? 'module-owned' : 'not authorized',
       span,
       ...(literal.target._tag === 'Resolved' && literal.authorized
         ? {}
         : { tone: 'warning' as const }),
-      onActivate: () => onPick(span),
     })
     rows.push({
       key: `${key}-source`,
@@ -1478,7 +1422,6 @@ export const structValueRows = (
       }`,
       detail: projection.state._tag.toLowerCase(),
       span,
-      onActivate: () => onPick(span),
     })
   }
 
@@ -1494,16 +1437,14 @@ export const structValueRows = (
       depth: 1,
       label: typeText(shape.type),
       detail:
-        shape.lanes
-          .map((lane) => `${lane.type}:${selectorPathText(lane.path)}`)
-          .join(', ') || 'zero runtime lanes',
+        shape.lanes.map((lane) => `${lane.type}:${selectorPathText(lane.path)}`).join(', ') ||
+        'zero runtime lanes',
     })
   }
 
   const aggregateEvents =
     evaluation?.trace.filter(
-      (event) =>
-        event._tag === 'Construct' || event._tag === 'Project' || event._tag === 'Cleanup',
+      (event) => event._tag === 'Construct' || event._tag === 'Project' || event._tag === 'Cleanup',
     ) ?? []
   rows.push({
     key: 'events',
@@ -1528,7 +1469,6 @@ export const structValueRows = (
             ? `${typeText(event.type)}.#${event.field.ordinal}`
             : `local _${event.local}`,
       span,
-      onActivate: () => onPick(span),
     })
   }
 
@@ -1560,7 +1500,6 @@ export const arrayValueRows = (
   layouts: ReadonlyArray<Layout.Entry>,
   shapes: ReadonlyArray<Layout.CallingShape>,
   evaluation: BootstrapEvaluation.Outcome | undefined,
-  onPick: (span: Span) => void,
 ): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = [
     {
@@ -1603,7 +1542,6 @@ export const arrayValueRows = (
       detail: `${literal.length} element${literal.length === 1 ? '' : 's'} · ${literal.state._tag}`,
       span,
       ...(literal.state._tag === 'Complete' ? {} : { tone: 'warning' as const }),
-      onActivate: () => onPick(span),
     })
     for (const element of literal.elements) {
       const elementSpan = asSpan(element.syntax.span)
@@ -1616,7 +1554,6 @@ export const arrayValueRows = (
         ...(element.compatibility._tag === 'Compatible'
           ? {}
           : { dot: 'warning' as const, tone: 'warning' as const }),
-        onActivate: () => onPick(elementSpan),
       })
     }
   }
@@ -1645,7 +1582,6 @@ export const arrayValueRows = (
       }`,
       span,
       ...(projection.bounds._tag === 'Invalid' ? { tone: 'warning' as const } : {}),
-      onActivate: () => onPick(span),
     })
   }
 
@@ -1682,7 +1618,8 @@ export const arrayValueRows = (
   rows.push({
     key: 'array-events',
     label: 'evaluation events',
-    detail: evaluation === undefined ? 'run evaluation to inspect values and checks' : `${events.length}`,
+    detail:
+      evaluation === undefined ? 'run evaluation to inspect values and checks' : `${events.length}`,
     head: true,
   })
   for (const [ordinal, event] of events.entries()) {
@@ -1694,7 +1631,6 @@ export const arrayValueRows = (
       label: traceLabel(event),
       detail: event._tag,
       span,
-      onActivate: () => onPick(span),
     })
   }
 

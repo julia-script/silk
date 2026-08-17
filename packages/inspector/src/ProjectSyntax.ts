@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * Syntax and semantics phases, projected into the shared row grammar.
  *
@@ -8,11 +6,12 @@
  * has to say. It also makes each phase testable without rendering anything.
  */
 
-import { Diagnostic, SyntaxTree } from '@silk-effect/compiler'
 import type { Elaboration, Hir, SyntaxFile } from '@silk-effect/compiler'
+import { Diagnostic, SyntaxTree } from '@silk-effect/compiler'
 import * as Type from '@silk-effect/compiler/Type'
-import type { FlowModel } from './flow-model'
-import type { RowModel, RowTone, Span } from './row'
+import type { FlowModel } from './FlowModel.js'
+import type { RowModel, RowTone, Span } from './Row.js'
+import { spanOf as asSpan } from './Row.js'
 
 const decoder = new TextDecoder()
 
@@ -50,14 +49,8 @@ export const isTrivia = (kind: string): boolean => TRIVIA.has(kind)
 const sliceOf = (source: SyntaxFile.SyntaxFile['source'], span: Span): string =>
   decoder.decode(Uint8Array.from(source.bytes.slice(span.start, span.end)))
 
-const spanOf = (element: { readonly span: Span }): Span => ({
-  start: element.span.start,
-  end: element.span.end,
-})
-
 export const tokenRows = (
   syntax: SyntaxFile.SyntaxFile,
-  onPick: (span: Span) => void,
   showTrivia: boolean,
   filter: string,
 ): ReadonlyArray<RowModel> => {
@@ -71,7 +64,7 @@ export const tokenRows = (
       .filter(({ token }) => (showTrivia ? true : !isTrivia(token.kind)))
       .filter(({ token }) => needle === '' || token.kind.toLowerCase().includes(needle))
       .map(({ token, index }) => {
-        const span = spanOf(token)
+        const span = asSpan(token.span)
         return {
           key: `${token.kind}-${span.start}-${index}`,
           lead: index + 1,
@@ -79,7 +72,6 @@ export const tokenRows = (
           label: token.kind,
           detail: JSON.stringify(sliceOf(syntax.source, span)),
           span,
-          onActivate: () => onPick(span),
         }
       })
   )
@@ -94,7 +86,6 @@ export const tokenRows = (
  */
 export const treeRows = (
   syntax: SyntaxFile.SyntaxFile,
-  onPick: (span: Span) => void,
   showTrivia: boolean,
   filter: string,
 ): ReadonlyArray<RowModel> => {
@@ -103,7 +94,7 @@ export const treeRows = (
 
   const walk = (element: SyntaxTree.Element, depth: number, path: string): void => {
     if (SyntaxTree.isNode(element)) {
-      const span = spanOf(element)
+      const span = asSpan(element.span)
       rows.push({
         key: `${path}-${element.kind}-${span.start}`,
         depth,
@@ -112,15 +103,16 @@ export const treeRows = (
         label: element.kind,
         span,
         head: depth === 0,
-        onActivate: () => onPick(span),
       })
-      element.children.forEach((child, index) => walk(child, depth + 1, `${path}.${index}`))
+      element.children.forEach((child, index) => {
+        walk(child, depth + 1, `${path}.${index}`)
+      })
       return
     }
 
     if (SyntaxTree.isToken(element)) {
       if (!showTrivia && isTrivia(element.kind)) return
-      const span = spanOf(element)
+      const span = asSpan(element.span)
       rows.push({
         key: `${path}-${element.kind}-${span.start}`,
         depth,
@@ -128,12 +120,11 @@ export const treeRows = (
         label: element.kind,
         detail: JSON.stringify(sliceOf(syntax.source, span)),
         span,
-        onActivate: () => onPick(span),
       })
       return
     }
 
-    const span = spanOf(element)
+    const span = asSpan(element.span)
     rows.push({
       key: `${path}-missing-${span.start}`,
       depth,
@@ -142,7 +133,6 @@ export const treeRows = (
       detail: 'missing — inserted by recovery',
       span,
       tone: 'warning',
-      onActivate: () => onPick(span),
     })
   }
 
@@ -164,16 +154,11 @@ export const treeRows = (
   return rows.filter((_, index) => kept.has(index))
 }
 
-const hirSpan = (span: { readonly start: number; readonly end: number }): Span => ({
-  start: span.start,
-  end: span.end,
-})
-
 /** Contract types are `Type.Type`, so a struct parameter or result is an object, not a string. */
 export const hirContract = (contract: Hir.ContractFact): string =>
   contract._tag === 'Contract'
     ? `${contract.functionKind === 'Effect' ? 'effect ' : ''}(${contract.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(contract.result)}${
-      contract.functionKind === 'Effect'
+        contract.functionKind === 'Effect'
           ? ` ! ${
               contract.failureRow === undefined
                 ? 'empty'
@@ -207,25 +192,25 @@ const hirTypeText = (type: Type.Type): string =>
         }`
       : type._tag === 'TypeParameter'
         ? type.name
-      : type._tag === 'FixedArrayType'
-        ? `Array<${hirTypeText(type.element)}, ${type.length}>`
-      : type._tag === 'SliceType'
-        ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${hirTypeText(type.element)}]`
-        : type._tag === 'EffectType'
-          ? `Effect<${hirTypeText(type.success)}${
-              Type.failureMembers(type).length === 0
-                ? ''
-                : ` ! ${Type.failureMembers(type).map(hirTypeText).join(' | ')}`
-            }> ${type.access.toLowerCase()}`
-          : type._tag === 'CallableType'
-            ? `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
-            : type._tag === 'ReferenceType'
-              ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${hirTypeText(type.target)}`
-              : type._tag === 'FailureProjectionType'
-                ? `Row<!${type.parameter.name}>`
-                : type._tag === 'RepresentedType'
-                  ? Type.encode(type)
-                  : type.members.map(hirTypeText).join(' | ')
+        : type._tag === 'FixedArrayType'
+          ? `Array<${hirTypeText(type.element)}, ${type.length}>`
+          : type._tag === 'SliceType'
+            ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${hirTypeText(type.element)}]`
+            : type._tag === 'EffectType'
+              ? `Effect<${hirTypeText(type.success)}${
+                  Type.failureMembers(type).length === 0
+                    ? ''
+                    : ` ! ${Type.failureMembers(type).map(hirTypeText).join(' | ')}`
+                }> ${type.access.toLowerCase()}`
+              : type._tag === 'CallableType'
+                ? `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
+                : type._tag === 'ReferenceType'
+                  ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${hirTypeText(type.target)}`
+                  : type._tag === 'FailureProjectionType'
+                    ? `Row<!${type.parameter.name}>`
+                    : type._tag === 'RepresentedType'
+                      ? Type.encode(type)
+                      : type.members.map(hirTypeText).join(' | ')
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {
@@ -293,14 +278,11 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
   }
 }
 
-export const hirRows = (
-  hir: Hir.Module,
-  onPick: (span: Span) => void,
-): ReadonlyArray<RowModel> => {
+export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   const expression = (node: Hir.Expression, depth: number, path: string): void => {
-    const span = hirSpan(node.span)
+    const span = asSpan(node.span)
     rows.push({
       key: `${path}-${node._tag}-${span.start}`,
       depth,
@@ -309,26 +291,25 @@ export const hirRows = (
       detail: node._tag === 'Unavailable' ? 'unavailable' : `: ${hirTypeText(node.type)}`,
       span,
       ...(node._tag === 'Unavailable' ? { tone: 'warning' as const } : {}),
-      onActivate: () => onPick(span),
     })
     if (node._tag === 'Call' || node._tag === 'EffectConstruct' || node._tag === 'BuiltinCall') {
-      node.arguments.forEach((argument, index) =>
-        expression(argument, depth + 1, `${path}.${index}`),
-      )
+      node.arguments.forEach((argument, index) => {
+        expression(argument, depth + 1, `${path}.${index}`)
+      })
     }
     if (node._tag === 'Move' || node._tag === 'Project' || node._tag === 'Run') {
       expression(node.subject, depth + 1, `${path}.s`)
     }
     if (node._tag === 'CallableSection') {
-      node.captures.forEach((capture) =>
-        expression(capture.value, depth + 1, `${path}.capture${capture.ordinal}`),
-      )
+      node.captures.forEach((capture) => {
+        expression(capture.value, depth + 1, `${path}.capture${capture.ordinal}`)
+      })
     }
     if (node._tag === 'CallableApply') {
       expression(node.callee, depth + 1, `${path}.callee`)
-      node.arguments.forEach((argument, index) =>
-        expression(argument, depth + 1, `${path}.argument${index}`),
-      )
+      node.arguments.forEach((argument, index) => {
+        expression(argument, depth + 1, `${path}.argument${index}`)
+      })
     }
     if (node._tag === 'EffectResult' || node._tag === 'EffectBindRequirement') {
       expression(node.protected, depth + 1, `${path}.protected`)
@@ -348,26 +329,25 @@ export const hirRows = (
     if (node._tag === 'Construct') {
       // Canonical storage order, one child per field — the reordering from source order is the
       // struct-values pane's story; here the construct is just a typed expression tree.
-      node.fields.forEach(({ field, value }) =>
-        expression(value, depth + 1, `${path}.f${field.ordinal}`),
-      )
+      node.fields.forEach(({ field, value }) => {
+        expression(value, depth + 1, `${path}.f${field.ordinal}`)
+      })
     }
     if (node._tag === 'ArrayConstruct') {
-      node.elements.forEach((element, index) =>
-        expression(element, depth + 1, `${path}.e${index}`),
-      )
+      node.elements.forEach((element, index) => {
+        expression(element, depth + 1, `${path}.e${index}`)
+      })
     }
     if (node._tag === 'Match') {
       expression(node.scrutinee, depth + 1, `${path}.scrutinee`)
       node.arms.forEach((arm) => {
-        const armSpan = hirSpan(arm.span)
+        const armSpan = asSpan(arm.span)
         rows.push({
           key: `${path}.arm${arm.id.ordinal}`,
           depth: depth + 1,
           label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : hirTypeText(arm.member)}`,
           detail: `${arm.guard === undefined ? 'selected directly' : 'guarded'} · ${arm.bindings.length} binding${arm.bindings.length === 1 ? '' : 's'} · ${arm.before.map(hirTypeText).join(' | ') || 'empty'} → ${arm.after.map(hirTypeText).join(' | ') || 'empty'}`,
           span: armSpan,
-          onActivate: () => onPick(armSpan),
         })
         if (arm.guard !== undefined) {
           expression(arm.guard, depth + 2, `${path}.arm${arm.id.ordinal}.guard`)
@@ -378,7 +358,7 @@ export const hirRows = (
   }
 
   const statement = (node: Hir.Statement, depth: number, path: string): void => {
-    const span = hirSpan(node.span)
+    const span = asSpan(node.span)
     if (node._tag === 'Bind') {
       rows.push({
         key: `${path}-bind-${span.start}`,
@@ -386,7 +366,6 @@ export const hirRows = (
         label: `bind ${node.mutability.toLowerCase()} b${node.binding.ordinal} ${node.name ?? '∅'}`,
         detail: `r${node.region.ordinal}`,
         span,
-        onActivate: () => onPick(span),
       })
       expression(node.initializer, depth + 1, `${path}.i`)
       return
@@ -397,11 +376,14 @@ export const hirRows = (
         depth,
         label: 'if',
         span,
-        onActivate: () => onPick(span),
       })
       expression(node.condition, depth + 1, `${path}.c`)
-      node.taken.forEach((inner, index) => statement(inner, depth + 1, `${path}.t${index}`))
-      node.otherwise.forEach((inner, index) => statement(inner, depth + 1, `${path}.e${index}`))
+      node.taken.forEach((inner, index) => {
+        statement(inner, depth + 1, `${path}.t${index}`)
+      })
+      node.otherwise.forEach((inner, index) => {
+        statement(inner, depth + 1, `${path}.e${index}`)
+      })
       return
     }
     if (node._tag === 'Write') {
@@ -421,7 +403,6 @@ export const hirRows = (
           .join('')}`,
         detail: `r${node.region.ordinal}`,
         span,
-        onActivate: () => onPick(span),
       })
       for (const [index, selector] of node.place.selectors.entries()) {
         if (selector._tag === 'Index' || selector._tag === 'SliceIndex')
@@ -437,10 +418,11 @@ export const hirRows = (
         label: `while loop${node.loop.ordinal}`,
         detail: `r${node.region.ordinal}${node.parent === undefined ? '' : ` · parent loop${node.parent.ordinal}`}`,
         span,
-        onActivate: () => onPick(span),
       })
       expression(node.condition, depth + 1, `${path}.c`)
-      node.body.forEach((inner, index) => statement(inner, depth + 1, `${path}.b${index}`))
+      node.body.forEach((inner, index) => {
+        statement(inner, depth + 1, `${path}.b${index}`)
+      })
       return
     }
     if (node._tag === 'Break' || node._tag === 'Continue') {
@@ -450,7 +432,6 @@ export const hirRows = (
         label: `${node._tag.toLowerCase()} loop${node.target.ordinal}`,
         detail: `r${node.region.ordinal}`,
         span,
-        onActivate: () => onPick(span),
       })
       return
     }
@@ -462,7 +443,6 @@ export const hirRows = (
         detail: `r${node.region.ordinal}`,
         span,
         tone: 'warning',
-        onActivate: () => onPick(span),
       })
       expression(node.expression, depth + 1, `${path}.f`)
       return
@@ -474,9 +454,10 @@ export const hirRows = (
         label: 'unsafe',
         detail: `r${node.region.ordinal}`,
         span,
-        onActivate: () => onPick(span),
       })
-      node.statements.forEach((inner, index) => statement(inner, depth + 1, `${path}.u${index}`))
+      node.statements.forEach((inner, index) => {
+        statement(inner, depth + 1, `${path}.u${index}`)
+      })
       return
     }
     if (node._tag === 'UnavailableStatement') {
@@ -487,7 +468,6 @@ export const hirRows = (
         detail: `r${node.region.ordinal}`,
         span,
         tone: 'warning',
-        onActivate: () => onPick(span),
       })
       return
     }
@@ -497,22 +477,22 @@ export const hirRows = (
       label: 'return',
       detail: `r${node.region.ordinal}`,
       span,
-      onActivate: () => onPick(span),
     })
     expression(node.expression, depth + 1, `${path}.r`)
   }
 
   hir.functions.forEach((fn, index) => {
-    const span = hirSpan(fn.declaration.syntax.span)
+    const span = asSpan(fn.declaration.syntax.span)
     rows.push({
       key: `fn-${index}`,
       label: `fn#${fn.declaration.id.ordinal} ${hirIdentity(fn.declaration)}`,
       detail: hirContract(fn.contract),
       span,
       head: true,
-      onActivate: () => onPick(span),
     })
-    fn.statements.forEach((node, statementIndex) => statement(node, 1, `fn${index}.${statementIndex}`))
+    fn.statements.forEach((node, statementIndex) => {
+      statement(node, 1, `fn${index}.${statementIndex}`)
+    })
   })
 
   return rows
@@ -534,17 +514,14 @@ const severityTone = (severity: Diagnostic.Diagnostic['severity']): RowTone =>
  * node they start from — an edge is a fact the elaborator produced, and it can be unavailable on
  * its own.
  */
-export const flowRows = (
-  flow: FlowModel,
-  onPick: (span: Span) => void,
-): ReadonlyArray<RowModel> => {
+export const flowRows = (flow: FlowModel): ReadonlyArray<RowModel> => {
   if (flow.status === 'Empty') return []
 
   const stateTone = (state: string): RowTone | undefined =>
     state === 'Unavailable' ? 'warning' : undefined
 
   return flow.groups.flatMap((group) => {
-    const groupSpan: Span = { start: group.span.start, end: group.span.end }
+    const groupSpan: Span = asSpan(group.span)
     const rows: Array<RowModel> = [
       {
         key: `flow-${group.id}`,
@@ -558,12 +535,11 @@ export const flowRows = (
         ...(stateTone(group.state) === undefined
           ? {}
           : { tone: stateTone(group.state) as RowTone }),
-        onActivate: () => onPick(groupSpan),
       },
     ]
 
     for (const node of flow.nodes.filter((candidate) => candidate.groupId === group.id)) {
-      const span: Span = { start: node.span.start, end: node.span.end }
+      const span: Span = asSpan(node.span)
       rows.push({
         key: `flow-${node.id}`,
         depth: Math.min(group.depth, 3) + 1,
@@ -574,12 +550,11 @@ export const flowRows = (
         }`,
         span,
         ...(stateTone(node.state) === undefined ? {} : { tone: stateTone(node.state) as RowTone }),
-        onActivate: () => onPick(span),
       })
     }
 
     for (const edge of flow.edges.filter((candidate) => candidate.groupId === group.id)) {
-      const span: Span = { start: edge.span.start, end: edge.span.end }
+      const span: Span = asSpan(edge.span)
       rows.push({
         key: `flow-${edge.id}`,
         depth: Math.min(group.depth, 3) + 1,
@@ -587,7 +562,6 @@ export const flowRows = (
         detail: edge.state,
         span,
         ...(stateTone(edge.state) === undefined ? {} : { tone: stateTone(edge.state) as RowTone }),
-        onActivate: () => onPick(span),
       })
     }
 
@@ -603,7 +577,6 @@ export const flowRows = (
  */
 export const diagnosticRows = (
   entries: ReadonlyArray<DiagnosticEntry>,
-  onPick: (span: Span) => void,
 ): ReadonlyArray<RowModel> => {
   if (entries.length === 0) {
     return [
@@ -619,7 +592,7 @@ export const diagnosticRows = (
 
   return entries.flatMap((entry, index) => {
     const diagnostic = entry.diagnostic
-    const span: Span = { start: diagnostic.span.start, end: diagnostic.span.end }
+    const span: Span = asSpan(diagnostic.span)
     const tone = severityTone(diagnostic.severity)
     const rows: Array<RowModel> = [
       {
@@ -629,7 +602,6 @@ export const diagnosticRows = (
         detail: diagnostic.message,
         span,
         tone,
-        onActivate: () => onPick(span),
       },
     ]
 
@@ -643,9 +615,8 @@ export const diagnosticRows = (
         depth: 1,
         label: `caused by ${cause.code}`,
         detail: origin?.diagnostic.message ?? diagnostic.phase,
-        span: { start: cause.span.start, end: cause.span.end },
+        span: asSpan(cause.span),
         tone,
-        onActivate: () => onPick({ start: cause.span.start, end: cause.span.end }),
       })
     }
 

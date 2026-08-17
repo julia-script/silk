@@ -20,8 +20,8 @@ import * as LspDocument from '@silk-effect/lsp/Document'
 import * as Effect from 'effect/Effect'
 import { type MutableRefObject, useEffect, useMemo, useRef } from 'react'
 import { createRoot } from 'react-dom/client'
+import type { Span } from '@silk-effect/inspector'
 import * as Hover from './Hover'
-import type { Span } from './row/row'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -140,7 +140,8 @@ export function SilkEditor(props: {
   readonly module: string
   readonly cursor?: Span | undefined
   readonly onChange: (value: string) => void
-  readonly onSelect: (span: Span) => void
+  /** Byte ranges only — the caller attaches the module, which it knows and the editor does not. */
+  readonly onSelect: (range: { readonly start: number; readonly end: number }) => void
   /** Receives the format command, so a control outside the editor can trigger it. */
   readonly formatRef?: MutableRefObject<(() => boolean) | null>
   readonly className?: string
@@ -317,8 +318,11 @@ export function SilkEditor(props: {
     )
   }, [session])
 
-  // Reflect the shared span cursor, scrolling to it only when it came from another pane.
-  const cursor = props.cursor
+  // Reflect the shared span cursor, scrolling to it only when it came from another pane. A cursor
+  // in a different module draws nothing here — its offsets belong to another file's bytes.
+  const cursor = props.cursor !== undefined && props.cursor.module === props.module
+    ? props.cursor
+    : undefined
   useEffect(() => {
     const view = viewRef.current
     if (view === null) return

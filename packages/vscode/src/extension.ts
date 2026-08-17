@@ -5,6 +5,7 @@
  */
 import * as vscode from 'vscode'
 import { LanguageClient, TransportKind } from 'vscode-languageclient/node'
+import { registerInspector } from './inspector'
 
 let client: LanguageClient | undefined
 
@@ -25,6 +26,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('silk.restartLanguageServer', () => client?.restart()),
   )
+  registerInspector(context, () => client)
   void client.start()
 }
 

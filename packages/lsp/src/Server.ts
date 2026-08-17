@@ -16,6 +16,7 @@ import {
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import * as Document from './Document.js'
+import * as Inspection from './Inspection.js'
 import * as ProjectSession from './ProjectSession.js'
 import * as Workspace from './Workspace.js'
 
@@ -110,6 +111,15 @@ export const start = (): void => {
               ),
             ],
           }),
+        )
+        // Rides the same publish an analysis commit already makes, so an open inspector view
+        // learns it is stale exactly when diagnostics do.
+        yield* Effect.promise(() =>
+          connection.sendNotification(Inspection.invalidatedNotification, {
+            workspace: session.document.workspace,
+            uri: session.document.uri,
+            version: session.document.version,
+          } satisfies Inspection.InvalidatedParameters),
         )
       }),
     })
@@ -431,6 +441,29 @@ export const start = (): void => {
     update.catch((error) => {
       connection.console.error(`silk-lsp failed to process watched files: ${String(error)}`)
     })
+  })
+
+  connection.onRequest(Inspection.viewsRequest, () => ({ views: Inspection.descriptors }))
+
+  connection.onRequest(Inspection.viewRequest, async (parameters: Inspection.ViewParameters) => {
+    const session = await acquire(parameters.uri)
+    if (Option.isNone(session)) {
+      return new ResponseError<void>(
+        LSPErrorCodes.RequestFailed,
+        `No discovered Silk project contains ${parameters.uri}`,
+      )
+    }
+    try {
+      const projected = Inspection.project(session.value, parameters)
+      return projected._tag === 'UnknownView'
+        ? new ResponseError<void>(LSPErrorCodes.RequestFailed, projected.message)
+        : projected
+    } catch (error) {
+      return new ResponseError<void>(
+        LSPErrorCodes.RequestFailed,
+        `Inspector projection failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
   })
 
   connection.onShutdown(async () => {

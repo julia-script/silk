@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * What a pane can show.
  *
@@ -12,9 +10,10 @@
  * `1 err`) and optional one-line fact strip, and only the view knows them.
  */
 
-import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
 import type { BootstrapEvaluation, ToolchainPlan as ToolchainPlanNs } from '@silk-effect/compiler'
-import { backendEmission, execute, toolchainCommands } from './panels'
+import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
+import { projectDataFlow } from './FlowModel.js'
+import { backendEmission, execute, toolchainCommands } from './Panels.js'
 import {
   arrayValueRows,
   backendControlRows,
@@ -32,8 +31,7 @@ import {
   structValueRows,
   symbolRows,
   toolchainRows,
-} from './row/project-backend'
-import { projectDataFlow } from './row/flow-model'
+} from './ProjectBackend.js'
 import {
   diagnosticCounts,
   diagnosticEntries,
@@ -42,8 +40,8 @@ import {
   hirRows,
   tokenRows,
   treeRows,
-} from './row/project-syntax'
-import type { RowModel, Span } from './row/row'
+} from './ProjectSyntax.js'
+import type { RowModel } from './Row.js'
 
 export type ViewId =
   | 'source'
@@ -70,7 +68,7 @@ export type ViewId =
 /** One cell of a pane's optional 19px fact strip. */
 export interface Fact {
   readonly text: string
-  readonly tone?: 'symbol' | 'ok' | 'warning' | 'muted'
+  readonly tone?: 'symbol' | 'ok' | 'warning' | 'muted' | undefined
 }
 
 /** Everything a view needs to render. Built once per source edit and shared by every pane. */
@@ -83,21 +81,11 @@ export interface ViewContext {
   readonly mode: 'release' | 'debug'
   readonly profile: ToolchainPlanNs.OptimizationProfile
   /**
-   * The workbench-level span cursor: one byte range, shared by every pane.
-   *
-   * This absorbed the old `selectedDiagnostic` and `selectedFlowId`. Those were three different
-   * ways of saying "the thing being looked at", which meant selecting a diagnostic told the HIR
-   * pane nothing. A byte range is the one currency every phase already speaks, so a click in any
-   * pane is legible in all of them.
-   */
-  readonly cursor: Span | undefined
-  readonly onSelectSpan: (span: Span | undefined) => void
-  /**
    * Evaluation is an explicit action, never implied by editing: the green semantic layer states
-   * what the program means, and only an actual run may claim what it does.
+   * what the program means, and only an actual run may claim what it does. The consumer runs it
+   * (when its surface's run action fires) and hands the outcome in here.
    */
   readonly evaluation: BootstrapEvaluation.Outcome | undefined
-  readonly onEvaluate: () => void
   /** Pane-local view state, keyed by pane id — the CST filter and trivia toggle live here. */
   readonly filter: string
   readonly showTrivia: boolean
@@ -107,10 +95,10 @@ export interface ViewContext {
 export interface ViewResult {
   readonly rows: ReadonlyArray<RowModel>
   /** Right-aligned in the pane header: `39/48`, `2 fn`, `1 err`. */
-  readonly meta?: string
-  readonly facts?: ReadonlyArray<Fact>
+  readonly meta?: string | undefined
+  readonly facts?: ReadonlyArray<Fact> | undefined
   /** Set when the phase produced nothing, and says which phase broke and why. */
-  readonly unavailable?: string
+  readonly unavailable?: string | undefined
 }
 
 export interface ViewDefinition {
@@ -123,12 +111,13 @@ export interface ViewDefinition {
   readonly group: string
   readonly hasFilter?: boolean
   /**
-   * Views that need an explicit action get a header button for it.
+   * Views that need an explicit action advertise it here; the consumer renders the control and
+   * performs the action itself (rows are data, so the registry cannot carry a callback).
    *
    * Evaluation is the only one: the semantic phases state what the program *means* and are safe
    * to recompute on every keystroke, but only an actual run may claim what it *does*.
    */
-  readonly action?: { readonly label: string; readonly run: (context: ViewContext) => void }
+  readonly action?: { readonly label: string }
   readonly project: (context: ViewContext) => ViewResult
 }
 
@@ -152,9 +141,9 @@ export const views: ReadonlyArray<ViewDefinition> = [
     tag: 'TOK',
     group: 'syntax',
     hasFilter: true,
-    project: ({ snapshot, onSelectSpan, showTrivia, filter }) => {
+    project: ({ snapshot, showTrivia, filter }) => {
       const syntax = Analysis.rootAnalysis(snapshot).syntax
-      const rows = tokenRows(syntax, (span) => onSelectSpan(span), showTrivia, filter)
+      const rows = tokenRows(syntax, showTrivia, filter)
       return { rows, meta: `${rows.length}/${syntax.tokens.length}` }
     },
   },
@@ -165,13 +154,76 @@ export const views: ReadonlyArray<ViewDefinition> = [
     tag: 'CST',
     group: 'syntax',
     hasFilter: true,
-    project: ({ snapshot, onSelectSpan, showTrivia, filter }) => {
+    project: ({ snapshot, showTrivia, filter }) => {
       const syntax = Analysis.rootAnalysis(snapshot).syntax
-      const rows = treeRows(syntax, (span) => onSelectSpan(span), showTrivia, filter)
+      const rows = treeRows(syntax, showTrivia, filter)
       const missing = rows.filter((row) => row.dot === 'missing').length
       return {
         rows,
         meta: missing === 0 ? `${rows.length}` : `${rows.length} · ${missing} missing`,
+      }
+    },
+  },
+  {
+    id: 'closure',
+    title: 'Module closure',
+    phase: 'modules',
+    tag: 'MOD',
+    group: 'modules',
+    project: ({ snapshot }) => {
+      const closure = snapshot.closure
+      return {
+        rows: closureRows(closure),
+        meta: `${closure.modules.length} mod`,
+      }
+    },
+  },
+  {
+    id: 'index',
+    title: 'Declaration index',
+    phase: 'headers',
+    tag: 'IDX',
+    group: 'modules',
+    project: ({ snapshot }) => {
+      const index = Analysis.declarationIndex(snapshot)
+      const declarations = index.modules.reduce((total, module) => total + module.members.length, 0)
+      return {
+        rows: indexRows(index),
+        meta: `${declarations} decl`,
+      }
+    },
+  },
+  {
+    id: 'resolution',
+    title: 'Name resolution',
+    phase: 'names',
+    tag: 'NAM',
+    group: 'names',
+    project: ({ snapshot }) => {
+      const resolution = Analysis.nameResolution(snapshot)
+      const bindings = resolution.modules.reduce((total, scope) => total + scope.bindings.length, 0)
+      return {
+        rows: resolutionRows(resolution),
+        meta: `${bindings} bind`,
+      }
+    },
+  },
+  {
+    id: 'hir',
+    title: 'Typed HIR',
+    phase: 'elaboration',
+    tag: 'HIR',
+    group: 'semantics',
+    project: ({ snapshot }) => {
+      const hir = Analysis.rootAnalysis(snapshot).hir
+      const conversions = Analysis.hirUnionConversionsOf(snapshot, snapshot.closure.rootModule)
+      return {
+        rows: hirRows(hir),
+        facts:
+          conversions.length === 0
+            ? undefined
+            : [{ text: `${conversions.length} union conversion`, tone: 'symbol' }],
+        meta: `${hir.functions.length} fn${conversions.length === 0 ? '' : ` · ${conversions.length} union`}`,
       }
     },
   },
@@ -186,109 +238,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
      * binds to which parameter, and what a run actually computed for each. The evaluated overlay
      * is layered on when a run has happened, so the same rows read as semantics-only until then.
      */
-    project: ({ snapshot, evaluation, onSelectSpan }) => {
+    project: ({ snapshot, evaluation }) => {
       const flow = projectDataFlow(Analysis.rootAnalysis(snapshot), evaluation)
       if (flow.status === 'Empty') {
         return { rows: noRows, unavailable: `No value path — ${flow.summary}` }
       }
       return {
-        rows: flowRows(flow, (span) => onSelectSpan(span)),
+        rows: flowRows(flow),
         meta: `${flow.status.toLowerCase()} · ${flow.mode.toLowerCase()}`,
-      }
-    },
-  },
-  {
-    id: 'evaluation',
-    title: 'Bootstrap evaluation',
-    phase: 'interpretation',
-    tag: 'EVA',
-    group: 'semantics',
-    action: { label: 'run', run: ({ onEvaluate }) => onEvaluate() },
-    project: ({ evaluation, onSelectSpan }) => {
-      const rows = evaluationRows(evaluation, (span) => onSelectSpan(span))
-      if (evaluation === undefined) return { rows, meta: 'not run' }
-      const facts: ReadonlyArray<Fact> =
-        evaluation._tag === 'Completed'
-          ? [
-              { text: 'Completed', tone: 'ok' },
-              { text: `${evaluation.entry.name}() → ${evaluation.result.value}` },
-              { text: `${evaluation.trace.length} steps`, tone: 'muted' },
-            ]
-          : evaluation._tag === 'UnhandledFailure'
-            ? [
-                { text: 'Unhandled failure', tone: 'warning' },
-                { text: `${evaluation.report} · tag ${evaluation.tag}`, tone: 'muted' },
-              ]
-            : [
-                { text: 'Blocked', tone: 'warning' },
-                { text: evaluation.reason._tag, tone: 'muted' },
-              ]
-      return { rows, facts, meta: `${evaluation.trace.length} steps` }
-    },
-  },
-  {
-    id: 'closure',
-    title: 'Module closure',
-    phase: 'modules',
-    tag: 'MOD',
-    group: 'modules',
-    project: ({ snapshot, onSelectSpan }) => {
-      const closure = snapshot.closure
-      return {
-        rows: closureRows(closure, (span) => onSelectSpan(span)),
-        meta: `${closure.modules.length} mod`,
-      }
-    },
-  },
-  {
-    id: 'index',
-    title: 'Declaration index',
-    phase: 'headers',
-    tag: 'IDX',
-    group: 'modules',
-    project: ({ snapshot, onSelectSpan }) => {
-      const index = Analysis.declarationIndex(snapshot)
-      const declarations = index.modules.reduce((total, module) => total + module.members.length, 0)
-      return {
-        rows: indexRows(index, (span) => onSelectSpan(span)),
-        meta: `${declarations} decl`,
-      }
-    },
-  },
-  {
-    id: 'resolution',
-    title: 'Name resolution',
-    phase: 'names',
-    tag: 'NAM',
-    group: 'names',
-    project: ({ snapshot, onSelectSpan }) => {
-      const resolution = Analysis.nameResolution(snapshot)
-      const bindings = resolution.modules.reduce(
-        (total, scope) => total + scope.bindings.length,
-        0,
-      )
-      return {
-        rows: resolutionRows(resolution, (span) => onSelectSpan(span)),
-        meta: `${bindings} bind`,
-      }
-    },
-  },
-  {
-    id: 'hir',
-    title: 'Typed HIR',
-    phase: 'elaboration',
-    tag: 'HIR',
-    group: 'semantics',
-    project: ({ snapshot, onSelectSpan }) => {
-      const hir = Analysis.rootAnalysis(snapshot).hir
-      const conversions = Analysis.hirUnionConversionsOf(snapshot, snapshot.closure.rootModule)
-      return {
-        rows: hirRows(hir, (span) => onSelectSpan(span)),
-        facts:
-          conversions.length === 0
-            ? undefined
-            : [{ text: `${conversions.length} union conversion`, tone: 'symbol' }],
-        meta: `${hir.functions.length} fn${conversions.length === 0 ? '' : ` · ${conversions.length} union`}`,
       }
     },
   },
@@ -303,15 +260,13 @@ export const views: ReadonlyArray<ViewDefinition> = [
      * the projection chain, the compiler-owned scalar calling shapes, and — after a run — the
      * Construct/Project/Cleanup events that realized them.
      */
-    project: ({ snapshot, root, evaluation, onSelectSpan }) => {
+    project: ({ snapshot, root, evaluation }) => {
       const literals = Analysis.structLiteralsOf(snapshot, root)
       const projections = Analysis.fieldProjectionsOf(snapshot, root)
       const layout = Analysis.layoutOf(snapshot)
       const shapes = layout._tag === 'Available' ? layout.value.callingShapes : []
       return {
-        rows: structValueRows(literals, projections, shapes, evaluation, (span) =>
-          onSelectSpan(span),
-        ),
+        rows: structValueRows(literals, projections, shapes, evaluation),
         meta: `${literals.length} lit · ${projections.length} proj`,
       }
     },
@@ -322,7 +277,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
     phase: 'elaboration + layout + evaluation',
     tag: 'ARR',
     group: 'semantics',
-    project: ({ snapshot, root, evaluation, onSelectSpan }) => {
+    project: ({ snapshot, root, evaluation }) => {
       const types = Analysis.fixedArrayTypesOf(snapshot, root)
       const literals = Analysis.arrayLiteralsOf(snapshot, root)
       const projections = Analysis.indexProjectionsOf(snapshot, root)
@@ -334,7 +289,6 @@ export const views: ReadonlyArray<ViewDefinition> = [
           Analysis.repeatedLayoutsOf(snapshot),
           Analysis.arrayCallingShapesOf(snapshot),
           evaluation,
-          (span) => onSelectSpan(span),
         ),
         meta: `${literals.length} lit · ${projections.length} index`,
       }
@@ -346,7 +300,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
     phase: 'ownership',
     tag: 'OWN',
     group: 'semantics',
-    project: ({ snapshot, onSelectSpan }) => {
+    project: ({ snapshot }) => {
       const facts = Analysis.ownershipOf(snapshot, snapshot.closure.rootModule)
       if (facts === undefined) {
         return {
@@ -357,7 +311,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const matches = Analysis.ownershipMatchesOf(snapshot, snapshot.closure.rootModule)
       const loans = facts.functions.reduce((total, fn) => total + fn.loans.length, 0)
       return {
-        rows: ownershipRows(facts, (span) => onSelectSpan(span)),
+        rows: ownershipRows(facts),
         facts:
           matches.length === 0 && loans === 0
             ? undefined
@@ -379,10 +333,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
     phase: 'discovery',
     tag: 'INS',
     group: 'discovery',
-    project: ({ snapshot, onSelectSpan }) => {
+    project: ({ snapshot }) => {
       const discovery = Analysis.instancesOf(snapshot)
       return {
-        rows: instanceRows(discovery, (span) => onSelectSpan(span)),
+        rows: instanceRows(discovery),
         meta: `${discovery.instances.length} inst`,
       }
     },
@@ -434,7 +388,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
     group: 'backend',
     // Lowering is target-aware, so MIR is absent whenever the target did not resolve; the pane
     // says which failure it was rather than rendering an empty graph.
-    project: ({ snapshot, onSelectSpan }) => {
+    project: ({ snapshot }) => {
       const mir = Analysis.mirOf(snapshot)
       if (mir._tag !== 'Available') {
         return { rows: noRows, unavailable: `MIR unavailable — ${mir.error.message}` }
@@ -446,7 +400,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const normalized = normalization.filter((verdict) => verdict._tag === 'Normalized')
       const rejected = normalization.length - normalized.length
       return {
-        rows: mirRows(mir.value, (span) => onSelectSpan(span)),
+        rows: mirRows(mir.value),
         facts:
           conversions.length === 0 && matches.length === 0 && normalization.length === 0
             ? undefined
@@ -459,7 +413,12 @@ export const views: ReadonlyArray<ViewDefinition> = [
                   : [{ text: `${conversions.length} ConvertUnion`, tone: 'symbol' as const }]),
                 ...(normalized.length === 0
                   ? []
-                  : [{ text: `${normalized.length} Effect normalization`, tone: 'symbol' as const }]),
+                  : [
+                      {
+                        text: `${normalized.length} Effect normalization`,
+                        tone: 'symbol' as const,
+                      },
+                    ]),
                 ...(rejected === 0
                   ? []
                   : [{ text: `${rejected} normalization guard`, tone: 'warning' as const }]),
@@ -469,12 +428,42 @@ export const views: ReadonlyArray<ViewDefinition> = [
     },
   },
   {
+    id: 'evaluation',
+    title: 'Bootstrap evaluation',
+    phase: 'interpretation',
+    tag: 'EVA',
+    group: 'semantics',
+    // After MIR in pipeline order: the bootstrap interpreter runs the lowered program.
+    action: { label: 'run' },
+    project: ({ evaluation }) => {
+      const rows = evaluationRows(evaluation)
+      if (evaluation === undefined) return { rows, meta: 'not run' }
+      const facts: ReadonlyArray<Fact> =
+        evaluation._tag === 'Completed'
+          ? [
+              { text: 'Completed', tone: 'ok' },
+              { text: `${evaluation.entry.name}() → ${evaluation.result.value}` },
+              { text: `${evaluation.trace.length} steps`, tone: 'muted' },
+            ]
+          : evaluation._tag === 'UnhandledFailure'
+            ? [
+                { text: 'Unhandled failure', tone: 'warning' },
+                { text: `${evaluation.report} · tag ${evaluation.tag}`, tone: 'muted' },
+              ]
+            : [
+                { text: 'Blocked', tone: 'warning' },
+                { text: evaluation.reason._tag, tone: 'muted' },
+              ]
+      return { rows, facts, meta: `${evaluation.trace.length} steps` }
+    },
+  },
+  {
     id: 'backend',
     title: 'Backend output',
     phase: 'backend',
     tag: 'IR',
     group: 'backend',
-    project: ({ snapshot, mode, onSelectSpan }) => {
+    project: ({ snapshot, mode }) => {
       const emission = backendEmission(snapshot, mode)
       if (emission._tag === 'Rejected') {
         return {
@@ -483,10 +472,8 @@ export const views: ReadonlyArray<ViewDefinition> = [
           unavailable: `Emission rejected — ${emission.message}`,
         }
       }
-      const target = Analysis.targetOf(snapshot)
       const artifact = emission.artifact
-      const bytes =
-        artifact._tag === 'LlvmBitcodeArtifact' ? artifact.bitcode : artifact.bytes
+      const bytes = artifact._tag === 'LlvmBitcodeArtifact' ? artifact.bitcode : artifact.bytes
       const text = artifact._tag === 'LlvmBitcodeArtifact' ? artifact.ir : artifact.wat
 
       // Only a WebAssembly module can be run right here, so the execute-and-compare check is a
@@ -556,7 +543,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
         rows: [
           ...symbolRows(artifact.symbols),
           ...executionRows,
-          ...backendControlRows(artifact.control, (span) => onSelectSpan(span)),
+          ...backendControlRows(artifact.control),
           ...backendTextRows(text),
           ...(runnable ? hexRows(bytes) : []),
         ],
@@ -573,7 +560,12 @@ export const views: ReadonlyArray<ViewDefinition> = [
           },
           ...(execution === undefined
             ? []
-            : [{ text: agrees ? 'runs · agrees' : 'runs · disagrees', tone: agrees ? 'ok' : 'warning' } as Fact]),
+            : [
+                {
+                  text: agrees ? 'runs · agrees' : 'runs · disagrees',
+                  tone: agrees ? 'ok' : 'warning',
+                } as Fact,
+              ]),
         ],
         meta: `${bytes.length} B`,
       }
@@ -709,7 +701,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
     phase: 'all phases',
     tag: 'DX',
     group: 'all',
-    project: ({ snapshot, onSelectSpan }) => {
+    project: ({ snapshot }) => {
       const analysis = Analysis.rootAnalysis(snapshot)
       const entries = diagnosticEntries(
         analysis.syntax.lexicalDiagnostics,
@@ -718,7 +710,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
       )
       const counts = diagnosticCounts(entries)
       return {
-        rows: diagnosticRows(entries, (span) => onSelectSpan(span)),
+        rows: diagnosticRows(entries),
         meta: counts.errors === 0 ? 'clean' : `${counts.errors} err`,
       }
     },
@@ -741,4 +733,6 @@ export const viewById = (id: string): ViewDefinition | undefined =>
 
 /** Sibling phases offered as one-click tabs in a pane header. */
 export const siblingsOf = (view: ViewDefinition): ReadonlyArray<ViewDefinition> =>
-  views.filter((candidate) => candidate.group === view.group && candidate.id !== view.id).slice(0, 2)
+  views
+    .filter((candidate) => candidate.group === view.group && candidate.id !== view.id)
+    .slice(0, 2)

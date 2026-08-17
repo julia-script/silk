@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs'
 import * as Snapshot from './snapshot'
 import { describe, expect, it } from 'vitest'
 import { presets } from './presets'
-import { viewById } from './registry'
-import type { ViewContext } from './registry'
+import { viewById } from '@silk-effect/inspector'
+import type { ViewContext } from '@silk-effect/inspector'
 
 const encoder = new TextEncoder()
 
@@ -90,10 +90,7 @@ const acceptanceContext = (
   root: preset.root,
   mode: 'release',
   profile: 'release',
-  cursor: undefined,
-  onSelectSpan: () => undefined,
   evaluation: Analysis.evaluate(snapshot),
-  onEvaluate: () => undefined,
   filter: '',
   showTrivia: false,
 })
@@ -140,10 +137,7 @@ describe('preset catalog', () => {
           root: preset.root,
           mode: 'release',
           profile: 'release',
-          cursor: undefined,
-          onSelectSpan: () => undefined,
           evaluation: undefined,
-          onEvaluate: () => undefined,
           filter: '',
           showTrivia: false,
         })

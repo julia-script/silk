@@ -15,9 +15,9 @@ import type { BootstrapEvaluation, Target } from '@silk-effect/compiler'
 import * as Schema from 'effect/Schema'
 import { KeyValueStore } from 'effect/unstable/persistence'
 import { AsyncResult, Atom } from 'effect/unstable/reactivity'
+import type { Span } from '@silk-effect/inspector'
+import { diagnosticCounts, diagnosticEntries, hirContract } from '@silk-effect/inspector'
 import { presets } from './presets'
-import { diagnosticCounts, diagnosticEntries, hirContract } from './row/project-syntax'
-import type { Span } from './row/row'
 import * as Snapshot from './snapshot'
 import { seededWorkspaces, type Workspace, workspaceStorageKey } from './workspaces'
 
@@ -121,7 +121,7 @@ export const trailAtom = Atom.make((get): ReadonlyArray<TrailCell> => {
   const cursor = get(cursorAtom)
   if (cursor === undefined) return []
   const input = get(analysisInputAtom)
-  const source = input.modules[input.rootModule] ?? ''
+  const source = input.modules[cursor.module] ?? ''
   const analysis = get(analysisAtom)
   const snapshot = get(snapshotAtom)
 
@@ -130,16 +130,23 @@ export const trailAtom = Atom.make((get): ReadonlyArray<TrailCell> => {
     { phase: 'src', value: slice.trim() === '' ? '—' : slice.trim() },
   ]
 
-  const token = analysis.syntax.tokens.find(
-    (candidate) => candidate.span.start <= cursor.start && candidate.span.end >= cursor.end,
-  )
+  // The syntax and HIR cells read the root module's analysis, so a cursor in another module
+  // has no construct there — the same offsets in a different file are a different construct.
+  const inRoot = cursor.module === input.rootModule
+  const token = inRoot
+    ? analysis.syntax.tokens.find(
+        (candidate) => candidate.span.start <= cursor.start && candidate.span.end >= cursor.end,
+      )
+    : undefined
   cells.push({ phase: 'cst', value: token?.kind ?? 'no token', missing: token === undefined })
 
-  const fn = analysis.hir.functions.find(
-    (candidate) =>
-      candidate.declaration.syntax.span.start <= cursor.start &&
-      candidate.declaration.syntax.span.end >= cursor.end,
-  )
+  const fn = inRoot
+    ? analysis.hir.functions.find(
+        (candidate) =>
+          candidate.declaration.syntax.span.start <= cursor.start &&
+          candidate.declaration.syntax.span.end >= cursor.end,
+      )
+    : undefined
   cells.push({
     phase: 'hir',
     value:
@@ -157,6 +164,7 @@ export const trailAtom = Atom.make((get): ReadonlyArray<TrailCell> => {
         ? (mir.value.functions.find((candidate) =>
             Mir.operations(candidate).some(
               (operation) =>
+                operation.provenance.span.sourceId === cursor.module &&
                 operation.provenance.span.start <= cursor.start &&
                 operation.provenance.span.end >= cursor.end,
             ),
