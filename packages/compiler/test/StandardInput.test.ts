@@ -86,7 +86,7 @@ it.effect('reads a known byte sequence from a test provider and reports its coun
 
 effect fn recover(error: StreamReadFailure) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`),
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
@@ -112,7 +112,7 @@ it.effect('reports the end of input as data rather than a typed failure', () =>
 // A recovery branch that survives proves the drained read never entered the failure channel.
 effect fn recover(error: StreamReadFailure) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`),
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
@@ -143,7 +143,7 @@ it.effect('reports the true committed count of a partial read, not the buffer le
 
 effect fn recover(error: StreamReadFailure) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`),
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
@@ -164,7 +164,7 @@ it.effect('routes a provider error into the typed failure channel', () =>
 
 effect fn recover(error: StreamReadFailure) -> i32 { return 42 }
 
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`),
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
@@ -188,7 +188,7 @@ effect fn program() -> i32 ! StreamReadFailure {
 
 effect fn recover(error: StreamReadFailure) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
 it.effect('drains the native provider through the OS intrinsic host boundary', () =>
   Effect.gen(function* () {

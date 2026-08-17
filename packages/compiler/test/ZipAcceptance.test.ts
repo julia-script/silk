@@ -37,7 +37,7 @@ effect fn exhausted(error: OutOfMemory) -> Clock ! Problem { fail Problem { code
 
 /// One owner, acquired and released inside whichever body runs this.
 effect fn acquireClock() -> Clock ! Problem {
-  return run Effect.catch(openClock(), exhausted)
+  return run Effect.catchAll(openClock(), exhausted)
 }
 
 /// One acquire/release pair, then 40.
@@ -93,7 +93,7 @@ const zipping = `${prelude}
 
 pub fn main() -> i32 {
   let zipped = Effect.zip(firstStep(), secondStep()) |> Effect.map(combinePair)
-  return run Effect.catch(move zipped, recover)
+  return run Effect.catchAll(move zipped, recover)
 }`
 
 /** The first operand fails, so the second never runs and contributes no events. */
@@ -101,7 +101,7 @@ const zipShortCircuiting = `${prelude}
 
 pub fn main() -> i32 {
   let zipped = Effect.zip(failingStep(), secondStep()) |> Effect.map(combinePair)
-  return run Effect.catch(move zipped, recover)
+  return run Effect.catchAll(move zipped, recover)
 }`
 
 /** The second operand fails, so the pair's own construction never happens either. */
@@ -109,7 +109,7 @@ const zipFailingSecond = `${prelude}
 
 pub fn main() -> i32 {
   let zipped = Effect.zip(firstStep(), failingStep()) |> Effect.map(combinePair)
-  return run Effect.catch(move zipped, recover)
+  return run Effect.catchAll(move zipped, recover)
 }`
 
 /** All three operands succeed, in declaration order. */
@@ -117,7 +117,7 @@ const zipping3 = `${prelude}
 
 pub fn main() -> i32 {
   let zipped = Effect.zip3(firstStep(), secondStep(), thirdStep()) |> Effect.map(combineTriple)
-  return run Effect.catch(move zipped, recover)
+  return run Effect.catchAll(move zipped, recover)
 }`
 
 /** The middle operand fails, so the third never runs. */
@@ -125,7 +125,7 @@ const zip3ShortCircuiting = `${prelude}
 
 pub fn main() -> i32 {
   let zipped = Effect.zip3(firstStep(), failingStep(), thirdStep()) |> Effect.map(combineTriple)
-  return run Effect.catch(move zipped, recover)
+  return run Effect.catchAll(move zipped, recover)
 }`
 
 /** The piped form resolves to the same declaration and produces the same result. */
@@ -133,7 +133,7 @@ const zipPiped = `${prelude}
 
 pub fn main() -> i32 {
   let zipped = firstStep() |> Effect.zip(secondStep()) |> Effect.map(combinePair)
-  return run Effect.catch(move zipped, recover)
+  return run Effect.catchAll(move zipped, recover)
 }`
 
 /** Distinct failure rows and distinct requirement rows on each operand, so both unions show. */

@@ -28,7 +28,7 @@ effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(program() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(program() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 it.effect('executes suspension through the heap activation machine', () =>
@@ -88,7 +88,7 @@ effect fn maybe(shouldSuspend: bool) -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(maybe(false) |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(maybe(false) |> Effect.provideMut(&mut allocator), recover)
 }`)
     assert.strictEqual(outcome._tag, 'Completed', inspect(outcome))
     if (outcome._tag !== 'Completed') return
@@ -113,7 +113,7 @@ effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(delayed() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(delayed() |> Effect.provideMut(&mut allocator), recover)
 }`)
     assert.strictEqual(outcome._tag, 'Completed', inspect(outcome))
     if (outcome._tag !== 'Completed') return
@@ -147,7 +147,7 @@ effect fn level${depth}() -> i32 ! OutOfMemory ? &mut Allocator { return 0 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(level0() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(level0() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const recursiveSelf = `effect fn count(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
@@ -159,7 +159,7 @@ const recursiveSelf = `effect fn count(value: i32) -> i32 ! OutOfMemory ? &mut A
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(count(1200) |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(count(1200) |> Effect.provideMut(&mut allocator), recover)
 }`
 
 it.effect('keeps suspended parents in deterministic logical CallDepth', () =>
@@ -170,8 +170,8 @@ it.effect('keeps suspended parents in deterministic logical CallDepth', () =>
     assert.strictEqual(blocked.reason._tag, 'EvaluationLimit')
     if (blocked.reason._tag !== 'EvaluationLimit') return
     assert.strictEqual(blocked.reason.kind, 'CallDepth')
-    assert.strictEqual(blocked.reason.count, 12)
-    assert.lengthOf(blocked.reason.activeFrames, 12)
+    assert.strictEqual(blocked.reason.count, 13)
+    assert.lengthOf(blocked.reason.activeFrames, 13)
 
     const completed = yield* evaluate(recursive, { maxCallDepth: 256, maxSteps: 100_000 })
     assert.strictEqual(completed._tag, 'Completed', inspect(completed))

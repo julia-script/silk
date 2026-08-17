@@ -16,6 +16,14 @@ const snapshot = (text: string, target = 'aarch64-apple-darwin') =>
 const catalog = (): ReadonlyArray<Intrinsic.Operation> =>
   Intrinsic.all().flatMap((actor) => actor.operations)
 
+const catchPreamble = `import silk.effects as Effect
+pub struct Problem {}
+pub struct Other {}
+effect fn risky() -> i32 ! Problem { fail Problem {} }
+effect fn riskyOther() -> i32 ! Other { fail Other {} }
+effect fn recover(problem: Problem) -> i32 { return 42 }
+`
+
 it.effect('keeps loaded but unreachable intrinsic calls out of executable closure', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(source, 'wasm32-unknown-unknown')
@@ -105,7 +113,10 @@ it.effect(
       if (operation === undefined) throw new Error('expected Intrinsic.i32Add')
       const restricted = Object.freeze({
         ...operation,
-        targets: Object.freeze(['Evaluator', 'LLVM'] as const),
+        availability: Object.freeze({
+          _tag: 'Executable' as const,
+          targets: Object.freeze(['Evaluator', 'LLVM'] as const),
+        }),
       })
       const fixtureCatalog = catalog().map((candidate) =>
         Intrinsic.operationText(candidate.id) === Intrinsic.operationText(operation.id)
@@ -147,10 +158,155 @@ it('requires normalized target metadata in every sealed inventory entry', () => 
   assert.deepEqual(Intrinsic.executionTargets, ['Evaluator', 'LLVM', 'Wasm'])
   assert.isTrue(
     Intrinsic.inventory().every((entry) => {
+      if (entry.operation === 'Intrinsic.catchFailure')
+        return (
+          entry.availability._tag === 'AnalysisOnly' && entry.availability.diagnostic === 'SEM0098'
+        )
       const expected = entry.operation.startsWith('Intrinsic.os')
         ? ['Evaluator', 'LLVM']
         : Intrinsic.executionTargets
-      return JSON.stringify(entry.targets) === JSON.stringify(expected)
+      return (
+        entry.availability._tag === 'Executable' &&
+        JSON.stringify(entry.availability.targets) === JSON.stringify(expected)
+      )
     }),
   )
 })
+
+it.effect('retains analysis-only dependencies only after executable reachability', () =>
+  Effect.gen(function* () {
+    const direct = 'Intrinsic.catchFailure<Problem>(risky(), recover)'
+    const unreachable = yield* snapshot(`${catchPreamble}
+fn inspect() -> once Effect<i32> { return ${direct} }
+pub fn main() -> i32 { return 0 }`)
+    assert.deepEqual(Analysis.diagnostics(unreachable), [])
+    assert.isFalse(
+      unreachable.instances.intrinsics.some(
+        (call) => Intrinsic.operationText(call.operation) === 'Intrinsic.catchFailure',
+      ),
+    )
+    const unreachableWrapper = yield* snapshot(`${catchPreamble}
+effect fn inspect() -> i32 {
+  return run Effect.catch<Problem>(risky(), recover)
+}
+pub fn main() -> i32 { return 0 }`)
+    assert.deepEqual(Analysis.diagnostics(unreachableWrapper), [])
+    assert.isFalse(
+      unreachableWrapper.instances.intrinsics.some(
+        (call) => Intrinsic.operationText(call.operation) === 'Intrinsic.catchFailure',
+      ),
+    )
+
+    const text = `${catchPreamble}
+pub fn main() -> i32 { return run ${direct} }`
+    const reachable = yield* snapshot(text)
+    const diagnostic = Analysis.diagnostics(reachable).find(
+      (candidate) => candidate.code === 'SEM0098',
+    )
+    assert.deepEqual(diagnostic?.reason, {
+      _tag: 'AnalysisOnlyConstruct',
+      construct: 'Member-selective Effect.catch',
+    })
+    assert.strictEqual(diagnostic?.span.start, text.indexOf(direct) - 1)
+    assert.strictEqual(diagnostic?.span.end, text.indexOf(direct) + direct.length)
+  }),
+)
+
+it.effect('attributes nested and deduplicated wrapper dependencies to each outer source edge', () =>
+  Effect.gen(function* () {
+    const first = 'outer()'
+    const second = 'outer()'
+    const text = `${catchPreamble}
+effect fn selective() -> i32 {
+  return run Effect.catch<Problem>(risky(), recover)
+}
+effect fn outer() -> i32 { return run selective() }
+pub fn main() -> i32 {
+  let left = run ${first}
+  let right = run ${second}
+  return left + right
+}`
+    const self = yield* snapshot(text)
+    const diagnostics = Analysis.diagnostics(self).filter(
+      (diagnostic) => diagnostic.code === 'SEM0098',
+    )
+    const mainStart = text.indexOf('pub fn main')
+    const firstStart = text.indexOf(first, mainStart)
+    const secondStart = text.indexOf(second, firstStart + first.length)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        reason: diagnostic.reason,
+        start: diagnostic.span.start,
+        end: diagnostic.span.end,
+      })),
+      [firstStart, secondStart].map((start) => ({
+        code: 'SEM0098' as const,
+        reason: {
+          _tag: 'AnalysisOnlyConstruct' as const,
+          construct: 'Member-selective Effect.catch',
+        },
+        start: start - 1,
+        end: start + first.length,
+      })),
+    )
+    assert.strictEqual(
+      self.instances.intrinsics.filter(
+        (call) => Intrinsic.operationText(call.operation) === 'Intrinsic.catchFailure',
+      ).length,
+      1,
+    )
+  }),
+)
+
+it.effect('reports analysis-only availability independently of the selected execution target', () =>
+  Effect.gen(function* () {
+    const text = `${catchPreamble}
+pub fn main() -> i32 {
+  return run Effect.catch<Problem>(risky(), recover)
+}`
+    const results = yield* Effect.forEach(
+      [
+        'aarch64-apple-darwin',
+        'aarch64-unknown-linux-gnu',
+        'x86_64-unknown-linux-gnu',
+        'wasm32-unknown-unknown',
+      ],
+      (target) => snapshot(text, target),
+    )
+    const firstResult = results.at(0)
+    if (firstResult === undefined) throw new Error('expected one target result')
+    const expected = Analysis.diagnostics(firstResult).map((diagnostic) => ({
+      code: diagnostic.code,
+      reason: diagnostic.reason,
+      span: diagnostic.span,
+    }))
+    assert.deepEqual(
+      results.map((result) =>
+        Analysis.diagnostics(result).map((diagnostic) => ({
+          code: diagnostic.code,
+          reason: diagnostic.reason,
+          span: diagnostic.span,
+        })),
+      ),
+      Array.from({ length: results.length }, () => expected),
+    )
+  }),
+)
+
+it.effect('lets invalid-call diagnostics win before analysis-only availability', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`${catchPreamble}
+pub fn main() -> i32 {
+  return run Effect.catch<Problem>(riskyOther(), recover)
+}`)
+    assert.include(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      'SEM0067',
+    )
+    assert.notInclude(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      'SEM0098',
+    )
+  }),
+)

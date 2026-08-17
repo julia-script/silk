@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 120 |
+| `SEM` | Semantic | 127 |
 | `OWN` | Ownership | 15 |
 | `LAY` | Layout | 1 |
 
-There are 151 codes in total.
+There are 158 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -176,6 +176,13 @@ There are 151 codes in total.
 | `SEM0119` | Stable code for two conformance heads that may name one provider under one interface. | `<head> may overlap <other>` |
 | `SEM0120` | Stable code for a conformance requirement that does not descend toward a base witness. | `<head> declares a requirement that does not descend` |
 | `SEM0121` | Stable code for a concrete specialization whose conditional requirements cannot be proved. | `<goal> cannot be proved: <detail>` |
+| `SEM0122` | Stable code for a complete application that reaches the instance frontier with open rows or evidence. | `<declaration> reaches a complete application with unresolved contract rows or evidence` |
+| `SEM0123` | Stable code for a provider that matches no member of its concrete source requirement row. |  |
+| `SEM0124` | Stable code for provider relations sharing a selector but retaining disjoint candidate sets. |  |
+| `SEM0125` | Stable code for provider selection that retains more than one common requirement member. |  |
+| `SEM0126` | Stable code for an explicitly or independently selected row that is not exactly one member. |  |
+| `SEM0127` | Stable code for a surviving provider candidate with more than one conformance witness. |  |
+| `SEM0128` | Stable code for a surviving provider candidate whose conformance mapping is invalid. |  |
 
 ## Ownership (`OWN`)
 

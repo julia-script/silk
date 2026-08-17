@@ -144,7 +144,7 @@ const continuationAllocatorOf = (
 ): (Mir.SuspensionProviderArgument & { readonly argument: Mir.LocalId }) | undefined => {
   const declaredRequirement =
     fn.result._tag === 'EffectOutcome'
-      ? fn.result.type.requirements.find(
+      ? Type.requirementMembers(fn.result.type).find(
           (requirement) =>
             requirement.access === 'Exclusive' &&
             Type.equals(requirement.capability, Type.allocator),

@@ -16,7 +16,7 @@ effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(program() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(program() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const analyze = (source = suspended) =>
@@ -116,7 +116,7 @@ effect fn outer() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(outer() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(outer() |> Effect.provideMut(&mut allocator), recover)
 }`)
       const program = Analysis.loweredMir(self)
       assert.deepEqual(Analysis.diagnostics(self), [])

@@ -213,7 +213,7 @@ pub effect fn catchAll<A, !E, !F, ?R, ?S>(
   }
 }
 
-/// Recovers one selected typed failure, or the whole row when no member is selected.
+/// Recovers one selected typed failure.
 ///
 /// # Details
 ///
@@ -221,21 +221,18 @@ pub effect fn catchAll<A, !E, !F, ?R, ?S>(
 /// only for that member, its own failures join the result row, and every nonmatching member of
 /// the protected row propagates unchanged as the residual. Success bypasses the handler.
 ///
-/// The residual row — the protected row minus the selected member — is computed by the compiler,
-/// because no source-level type can spell it. That makes the selector form a compiler primitive
-/// rather than ordinary Silk; see `reference.md` §5.4.
-///
-/// Without a selector, `Effect.catch(protected, handler)` recovers the whole row and is the alias
-/// for `catchAll` that this declaration provides.
+/// The residual row is expressed by ordinary row algebra and the runtime dispatch remains a sealed
+/// analysis-only primitive until engines implement it.
 ///
 /// The selector form is analyzed but not yet executable: no engine lowers the residual dispatch,
 /// so writing it reports `SEM0098` at the call and the program does not build. The whole-row form
 /// is unaffected.
-pub effect fn catch<A, !E, !F, ?R, ?S>(
+pub effect fn catch<S, A, !E, !F, ?R, ?Q>(
   self: once Effect<A ! E ? R>,
-  onFailure: once fn(Row<!E>) -> Effect<A ! F ? S>
-) -> A ! F ? R | S {
-  return run catchAll(move self, move onFailure)
+  onFailure: once fn(S) -> Effect<A ! F ? Q>
+) -> A ! Without<E, S> | F ? R | Q
+where S in E {
+  return run Intrinsic.catchFailure<S>(move self, move onFailure)
 }
 
 /// Runs a finalizer after the Effect completes, whatever its outcome, and preserves that outcome.
@@ -336,37 +333,61 @@ pub effect fn retry<A, !E, ?R>(
 }
 
 /// Satisfies one typed service requirement with an existing provider.
-pub effect fn bindRequirement<A, C, P, !E, ?R>(
-  self: once Effect<A ! E ? &C | R>,
+pub effect fn bindRequirement<?S, A, P, !E, ?R>(
+  self: once Effect<A ! E ? R>,
   provider: &P
-) -> A ! E ? R {
-  let bound = Intrinsic.bindRequirement(move self, provider)
+) -> A ! E ? Without<R, S>
+where &P provides S from R {
+  let bound = Intrinsic.bindRequirement<S>(move self, provider)
+  return run bound
+}
+
+/// Satisfies one exclusive typed service requirement with an existing provider.
+pub effect fn bindRequirementMut<?S, A, P, !E, ?R>(
+  self: once Effect<A ! E ? R>,
+  provider: &mut P
+) -> A ! E ? Without<R, S>
+where &mut P provides S from R {
+  let bound = Intrinsic.bindRequirementMut<S>(move self, provider)
+  return run bound
+}
+
+/// Satisfies one typed service requirement by taking ownership of its provider.
+pub effect fn bindRequirementOwned<?S, A, P, !E, ?R>(
+  self: once Effect<A ! E ? R>,
+  provider: P
+) -> A ! E ? Without<R, S>
+where P provides S from R {
+  let bound = Intrinsic.bindRequirementOwned<S>(move self, move provider)
   return run bound
 }
 
 /// Satisfies one typed service requirement with an existing provider.
-pub effect fn provide<A, C, P, !E, ?R>(
-  self: once Effect<A ! E ? &C | R>,
+pub effect fn provide<?S, A, P, !E, ?R>(
+  self: once Effect<A ! E ? R>,
   provider: &P
-) -> A ! E ? R {
-  return run bindRequirement(move self, provider)
+) -> A ! E ? Without<R, S>
+where &P provides S from R {
+  return run bindRequirement<S>(move self, provider)
 }
 
 /// Satisfies one typed service requirement with an existing exclusive provider.
-pub effect fn provideMut<A, C, P, !E, ?R>(
-  self: once Effect<A ! E ? &mut C | R>,
+pub effect fn provideMut<?S, A, P, !E, ?R>(
+  self: once Effect<A ! E ? R>,
   provider: &mut P
-) -> A ! E ? R {
-  let bound = Intrinsic.bindRequirement(move self, provider)
+) -> A ! E ? Without<R, S>
+where &mut P provides S from R {
+  let bound = Intrinsic.bindRequirementMut<S>(move self, provider)
   return run bound
 }
 
-effect fn acquireProvider<A, C, !E, !F, ?R, ?S>(
-  self: once Effect<A ! E ? &mut C | R>,
-  acquire: Effect<C ! F ? S>
-) -> Result<A, Row<!E>> ! F ? R | S {
+effect fn acquireProvider<?S, A, P, !E, !F, ?R, ?Q>(
+  self: once Effect<A ! E ? R>,
+  acquire: Effect<P ! F ? Q>
+) -> Result<A, Row<!E>> ! F ? Without<R, S> | Q
+where &mut P provides S from R {
   let mut provider = run acquire
-  let bound = Intrinsic.bindRequirement(result(move self), &mut provider)
+  let bound = Intrinsic.bindRequirementMut<S>(result(move self), &mut provider)
   return run bound
 }
 
@@ -380,11 +401,12 @@ effect fn acquireProvider<A, C, !E, !F, ?R, ?S>(
 /// typed failure then reaches this body as data rather than as a propagation that would leave
 /// the frame — and the acquired provider — behind. The failure is re-raised only after the
 /// provider is gone, so a recovering caller never observes it.
-pub effect fn provideWith<A, C, !E, !F, ?R, ?S>(
-  self: once Effect<A ! E ? &mut C | R>,
-  acquire: Effect<C ! F ? S>
-) -> A ! E | F ? R | S {
-  let completed = run acquireProvider(move self, acquire)
+pub effect fn provideWith<?S, A, P, !E, !F, ?R, ?Q>(
+  self: once Effect<A ! E ? R>,
+  acquire: Effect<P ! F ? Q>
+) -> A ! E | F ? Without<R, S> | Q
+where &mut P provides S from R {
+  let completed = run acquireProvider<S>(move self, acquire)
   return match move completed {
     Result<A, Row<!E>> { value: outcome } => match move outcome {
       Success<A> { value: success } => move success

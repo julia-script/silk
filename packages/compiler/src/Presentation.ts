@@ -238,16 +238,16 @@ export const type = (
   }
   if (Type.isEffect(self)) {
     const failureMembers = [
-      ...self.failures.map((failure) => type(failure, module, scope)),
-      ...self.failureParameters.map((parameter_) => parameter_.name),
+      ...Type.failureMembers(self).map((failure) => type(failure, module, scope)),
+      ...Type.failureRowParameters(self).map((parameter_) => parameter_.name),
     ]
     const failures = failureMembers.length === 0 ? '' : ` ! ${failureMembers.join(' | ')}`
     const requirementMembers = [
-      ...self.requirements.map(
+      ...Type.requirementMembers(self).map(
         (requirement) =>
           `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
       ),
-      ...self.requirementParameters.map((parameter_) => parameter_.name),
+      ...Type.requirementRowParameters(self).map((parameter_) => parameter_.name),
     ]
     const requirements =
       requirementMembers.length === 0 ? '' : ` ? ${requirementMembers.join(' | ')}`
@@ -276,9 +276,13 @@ export const genericArgument = (
             : Type.isCallableIdentityArgument(self)
               ? `callable@${self.identity}`
               : Type.isFailureRowArgument(self)
-                ? `! ${self.failures.map((failure) => type(failure, module, scope)).join(' | ') || 'never'}`
+                ? `! ${
+                    Type.failureMembers(self)
+                      .map((failure) => type(failure, module, scope))
+                      .join(' | ') || 'never'
+                  }`
                 : Type.isRequirementRowArgument(self)
-                  ? `? ${self.requirements
+                  ? `? ${Type.requirementMembers(self)
                       .map(
                         (requirement) =>
                           `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,

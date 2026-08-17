@@ -85,7 +85,7 @@ fn recover(problem: Problem) -> Problem { return move problem }
 effect fn succeed() -> i32 ! Problem { return 41 }
 effect fn handle(problem: Problem) -> i32 { return problem.code }
 pub fn main() -> i32 {
-  return run succeed() |> Effect.mapBoth(addOne, recover) |> Effect.catch(handle)
+  return run succeed() |> Effect.mapBoth(addOne, recover) |> Effect.catchAll(handle)
 }`,
   },
   {
@@ -111,7 +111,7 @@ effect fn recover(problem: OtherProblem) -> i32 { return problem.code + 1 }
 pub fn main() -> i32 {
   return run failValue()
     |> Effect.mapBoth(keep, translate)
-    |> Effect.catch(recover)
+    |> Effect.catchAll(recover)
 }`,
   },
   {
@@ -198,7 +198,7 @@ effect fn program() -> i32 ! OutOfMemory {
   return consume(move payload)
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 42 }
-pub fn main() -> i32 { return run program() |> Effect.catch(recover) }`,
+pub fn main() -> i32 { return run program() |> Effect.catchAll(recover) }`,
   },
   {
     id: 'affine-effect',
@@ -219,7 +219,7 @@ effect fn program() -> i32 ! OutOfMemory {
   return run produce() |> Effect.map(consume)
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 42 }
-pub fn main() -> i32 { return run program() |> Effect.catch(recover) }`,
+pub fn main() -> i32 { return run program() |> Effect.catchAll(recover) }`,
   },
   {
     id: 'trap-imperative',

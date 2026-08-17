@@ -3573,7 +3573,7 @@ const emitOperation = (
         ...writePayload(outcomeSlots.slice(1, 1 + successLaneCount), resultPayload),
       ]
       const failure =
-        operation.outcomeType.type.failures.length === 0
+        SilkType.failureMembers(operation.outcomeType.type).length === 0
           ? [Instr.op('unreachable')]
           : [
               Instr.i32Const(operation.failureTag),
@@ -4842,7 +4842,7 @@ const emitBody = (
   ): ReadonlyArray<Instr.Instr> => {
     if (suspensionRuntime === undefined) return [Instr.op('unreachable')]
     if (fn.result._tag !== 'EffectOutcome') return [Instr.op('unreachable')]
-    const failure = fn.result.type.failures.findIndex(
+    const failure = SilkType.failureMembers(fn.result.type).findIndex(
       (member) => member.module === 'silk/core' && member.name === 'OutOfMemory',
     )
     if (failure < 0) return [Instr.op('unreachable')]

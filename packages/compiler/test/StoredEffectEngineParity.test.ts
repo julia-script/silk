@@ -24,6 +24,7 @@ import * as StandardStreams from '../src/StandardStreams.js'
 import * as SuspensionMir from '../src/SuspensionMir.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
 import * as Target from '../src/Target.js'
+import * as Type from '../src/Type.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 import * as Process from './support/Process.js'
 import { unreachable } from './support/raise.js'
@@ -281,12 +282,12 @@ const assertExactRows = (module: Mir.Module, label: string): void => {
     `${label} runner arguments`,
   )
   assert.deepEqual(
-    operation.outcomeType.type.failures,
+    Type.failureMembers(operation.outcomeType.type),
     realization.rows.failures,
     `${label} failure rows`,
   )
   assert.deepEqual(
-    operation.outcomeType.type.requirements,
+    Type.requirementMembers(operation.outcomeType.type),
     realization.rows.requirements,
     `${label} requirement rows`,
   )
@@ -403,7 +404,7 @@ effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const provided = `service Counter { effect fn get() -> i32 ? &Counter }
@@ -583,14 +584,14 @@ effect fn drive() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
   let mut index = 0
   let mut total = 0
   while index < ${count} {
-    total = total + run Effect.catch(cycle(), recover)
+    total = total + run Effect.catchAll(cycle(), recover)
     index = index + 1
   }
   return total
 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  let total = run Effect.catch(drive() |> Effect.provideMut(&mut allocator), recover)
+  let total = run Effect.catchAll(drive() |> Effect.provideMut(&mut allocator), recover)
   if total == ${count * 42} { return 42 }
   return 1
 }`
@@ -634,7 +635,7 @@ effect fn build() -> i32 ! ${failures} {
   let deferred = defer(${construct})
   ${runLine}
 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
   }
 
   it.effect(
@@ -733,7 +734,7 @@ effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
   it.effect(
@@ -893,7 +894,7 @@ effect fn drive() -> i32 ! OutOfMemory ? &mut Allocator {
 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(drive() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(drive() |> Effect.provideMut(&mut allocator), recover)
 }`
 
   const suspendCycles = (count: number): string => `${cleanupSurface()}
@@ -914,7 +915,7 @@ effect fn drive() -> i32 ! OutOfMemory ? &mut Allocator {
 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  let total = run Effect.catch(drive() |> Effect.provideMut(&mut allocator), recover)
+  let total = run Effect.catchAll(drive() |> Effect.provideMut(&mut allocator), recover)
   if total == ${count * 42} { return 42 }
   return 1
 }`

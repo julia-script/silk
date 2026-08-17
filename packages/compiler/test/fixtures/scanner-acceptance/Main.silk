@@ -85,5 +85,5 @@ effect fn recover(error: OutOfMemory) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(), recover)
+  return run Effect.catchAll(build(), recover)
 }

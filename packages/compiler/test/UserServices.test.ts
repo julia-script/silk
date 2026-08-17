@@ -230,8 +230,8 @@ pub fn main() -> i32 {
   let left = Fixed { value: 4 }
   let right = Fixed { value: 2 }
   let selected = total()
-    |> Intrinsic.bindRequirement(&left, @Left)
-    |> Intrinsic.bindRequirement(&right, @Right)
+    |> Intrinsic.bindRequirement<&Values@Left>(&left)
+    |> Intrinsic.bindRequirement<&Values@Right>(&right)
   return run selected
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])

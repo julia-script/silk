@@ -238,7 +238,7 @@ fn runCase(value: i32) -> i32 {
   let opaque = makeTransform(1)
   let exact = exactTransform()
   let clock = FixedClock {}
-  let complete = run Effect.catch(
+  let complete = run Effect.catchAll(
     pendingComplete<NumberSchema>(&leftSchema.source)
       |> Effect.provide(&clock),
     recoverDecode,
@@ -286,8 +286,8 @@ effect fn dispatch(
   return match move request {
     RunRequest {value} => runCase(value)
     HelpRequest {} => helpCase()
-    SelectionFailureRequest {} => run Effect.catch(selectionFailure(), recoverSelection)
-    DecodeFailureRequest {} => run Effect.catch(decodeFailure(), recoverDecode)
+    SelectionFailureRequest {} => run Effect.catchAll(selectionFailure(), recoverSelection)
+    DecodeFailureRequest {} => run Effect.catchAll(decodeFailure(), recoverDecode)
     UncalledCleanupRequest {value} => run uncalledCleanupCase(value)
     CalledCleanupRequest {value} => run calledCleanupCase(value)
     SuspensionRequest {value} => run suspensionCase(value)
@@ -300,7 +300,7 @@ effect fn recoverOutOfMemory(error: OutOfMemory) -> i32 {
 
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(
+  return run Effect.catchAll(
     dispatch(selectSuccess())
       |> Effect.provideMut(&mut allocator),
     recoverOutOfMemory,

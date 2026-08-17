@@ -80,18 +80,18 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
     const targetRank = target.access === 'Shared' ? 0 : target.access === 'Exclusive' ? 1 : 2
     const sameOutputs =
       Type.equals(source.success, target.success) &&
-      source.failures.length === target.failures.length &&
-      source.failures.every((failure, index) =>
-        Type.equals(failure, target.failures.at(index) ?? 'never'),
+      Type.failureMembers(source).length === Type.failureMembers(target).length &&
+      Type.failureMembers(source).every((failure, index) =>
+        Type.equals(failure, Type.failureMembers(target).at(index) ?? 'never'),
       ) &&
-      source.failureParameters.length === target.failureParameters.length &&
-      source.failureParameters.every((parameter, index) =>
-        Type.equals(parameter, target.failureParameters.at(index) ?? 'never'),
+      Type.failureRowParameters(source).length === Type.failureRowParameters(target).length &&
+      Type.failureRowParameters(source).every((parameter, index) =>
+        Type.equals(parameter, Type.failureRowParameters(target).at(index) ?? 'never'),
       )
     const compatibleRequirements =
-      source.requirements.length === target.requirements.length &&
-      source.requirements.every((requirement, index) => {
-        const expected = target.requirements.at(index)
+      Type.requirementMembers(source).length === Type.requirementMembers(target).length &&
+      Type.requirementMembers(source).every((requirement, index) => {
+        const expected = Type.requirementMembers(target).at(index)
         return (
           expected !== undefined &&
           Type.equals(requirement.capability, expected.capability) &&
@@ -99,9 +99,10 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
           (requirement.access === expected.access || expected.access === 'Exclusive')
         )
       }) &&
-      source.requirementParameters.length === target.requirementParameters.length &&
-      source.requirementParameters.every((parameter, index) =>
-        Type.equals(parameter, target.requirementParameters.at(index) ?? 'never'),
+      Type.requirementRowParameters(source).length ===
+        Type.requirementRowParameters(target).length &&
+      Type.requirementRowParameters(source).every((parameter, index) =>
+        Type.equals(parameter, Type.requirementRowParameters(target).at(index) ?? 'never'),
       )
     if (sourceRank <= targetRank && sameOutputs && compatibleRequirements)
       return Object.freeze({ _tag: 'EffectAccess', source, target })

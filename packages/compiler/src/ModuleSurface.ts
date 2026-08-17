@@ -1,7 +1,9 @@
 import * as Fn from 'effect/Function'
 import * as ConformanceHead from './ConformanceHead.js'
+import * as ContractConstraint from './Constraint.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Canonical from './internal/Canonical.js'
+import * as RowAlgebra from './RowAlgebra.js'
 import * as Type from './Type.js'
 
 /**
@@ -187,12 +189,56 @@ const parameter = (value: DeclarationIndex.ParameterFact): string =>
     declaredType(value.declaredType),
   ])
 
+const rowExpression = (value: DeclarationIndex.RowExpressionFact): string => {
+  switch (value._tag) {
+    case 'EmptyRowExpression':
+      return record('EmptyRowExpression')
+    case 'RowParameterExpression':
+      return record('RowParameterExpression', [type(value.parameter)])
+    case 'FailureMemberExpression':
+      return record('FailureMemberExpression', [declaredType(value.member)])
+    case 'RequirementMemberExpression':
+      return record('RequirementMemberExpression', [
+        declaredType(value.capability),
+        value.access,
+        value.role,
+      ])
+    case 'UnionRowExpression':
+      return record('UnionRowExpression', [array(value.operands.map(rowExpression))])
+    case 'WithoutRowExpression':
+      return record('WithoutRowExpression', [
+        rowExpression(value.source),
+        rowExpression(value.selected),
+      ])
+    case 'UnavailableRowExpression':
+      return record('UnavailableRowExpression')
+    default:
+      return exhaustive(value)
+  }
+}
+
+const constraint = (value: DeclarationIndex.ConstraintFact): string =>
+  value._tag === 'MembershipConstraint'
+    ? record('MembershipConstraint', [
+        value.domain,
+        rowExpression(value.selected),
+        rowExpression(value.source),
+      ])
+    : record('ProviderConstraint', [
+        value.mode,
+        declaredType(value.provider),
+        rowExpression(value.selected),
+        rowExpression(value.source),
+      ])
+
 const failureRow = (value: DeclarationIndex.FailureRowFact): string =>
   record('FailureRow', [
     boolean(value.available),
     array(value.members.map(declaredType)),
     array(value.parameters.map(type)),
     array(value.failures.map(type)),
+    rowExpression(value.expression),
+    RowAlgebra.key(Type.failureRowPolicy(), value.row),
   ])
 
 const requirementRow = (value: DeclarationIndex.RequirementRowFact): string =>
@@ -203,6 +249,8 @@ const requirementRow = (value: DeclarationIndex.RequirementRowFact): string =>
         record('RequirementEntry', [declaredType(entry.capability), entry.role, entry.access]),
       ),
     ),
+    rowExpression(value.expression),
+    RowAlgebra.key(Type.requirementRowPolicy(), value.row),
     array(value.parameters.map(type)),
     array(
       value.requirements.map((requirement) =>
@@ -233,6 +281,8 @@ const interfaceOperationContract = (
     declaredType(value.success),
     failureRow(value.failureRow),
     requirementRow(value.requirementRow),
+    array(value.declaration.constraints.map(constraint)),
+    array(value.declaration.constraintContracts.map(ContractConstraint.key)),
     value.receiverAccess,
   ])
 
@@ -248,6 +298,8 @@ const interfaceOperationApplication = (
     declaredType(value.success),
     failureRow(value.failureRow),
     requirementRow(value.requirementRow),
+    array(value.declaration.constraints.map(constraint)),
+    array(value.declaration.constraintContracts.map(ContractConstraint.key)),
     value.receiverAccess,
   ])
 
@@ -292,6 +344,8 @@ const declaration = (value: DeclarationIndex.DeclarationFact): string =>
     optional(opaqueResult(value.opaqueResult)),
     failureRow(value.failureRow),
     requirementRow(value.requirementRow),
+    array(value.constraints.map(constraint)),
+    array(value.constraintContracts.map(ContractConstraint.key)),
   ])
 
 const fieldState = (value: DeclarationIndex.FieldState): string => {
@@ -358,6 +412,8 @@ const serviceOperation = (value: DeclarationIndex.ServiceOperationFact): string 
     optional(opaqueResult(value.opaqueResult)),
     failureRow(value.failureRow),
     requirementRow(value.requirementRow),
+    array(value.constraints.map(constraint)),
+    array(value.constraintContracts.map(ContractConstraint.key)),
   ])
 
 const service = (value: DeclarationIndex.ServiceFact | DeclarationIndex.InterfaceFact): string =>

@@ -16,7 +16,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let pending = program() |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move pending, recover)
+  return run Effect.catchAll(move pending, recover)
 }`
 
 const snapshot = (input = source) =>

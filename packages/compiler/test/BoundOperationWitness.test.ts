@@ -408,7 +408,9 @@ pub fn main() -> i32 {
     )
     assert.strictEqual(runner?.result._tag, 'EffectOutcome')
     if (runner?.result._tag !== 'EffectOutcome') return
-    assert.deepEqual(runner.result.type.failures.map(Type.encode), [`${module}.Problem`])
+    assert.deepEqual(Type.failureMembers(runner.result.type).map(Type.encode), [
+      `${module}.Problem`,
+    ])
     const operations = Mir.operations(runner)
     assert.strictEqual(
       operations.filter(
@@ -447,13 +449,15 @@ pub fn main() -> i32 {
     if (normalizedRunner !== undefined) {
       assert.strictEqual(normalizedRunner.result._tag, 'EffectOutcome')
       if (normalizedRunner.result._tag !== 'EffectOutcome') return
-      assert.deepEqual(normalizedRunner.result.type.failures.map(Type.encode), [
+      assert.deepEqual(Type.failureMembers(normalizedRunner.result.type).map(Type.encode), [
         `${module}.Problem`,
       ])
     } else {
       assert.strictEqual(staticRun?._tag, 'RunStaticEffect')
       if (staticRun?._tag !== 'RunStaticEffect') return
-      assert.deepEqual(staticRun.outcomeType.type.failures.map(Type.encode), [`${module}.Problem`])
+      assert.deepEqual(Type.failureMembers(staticRun.outcomeType.type).map(Type.encode), [
+        `${module}.Problem`,
+      ])
     }
 
     const outcome = Analysis.evaluate(normalized)
@@ -553,7 +557,7 @@ pub fn main() -> i32 {
     assert.isTrue(Type.isEffect(pending.contract.result))
     if (!Type.isEffect(pending.contract.result)) return
     assert.deepEqual(
-      pending.contract.result.requirements.map((requirement) => ({
+      Type.requirementMembers(pending.contract.result).map((requirement) => ({
         capability: Type.encode(requirement.capability),
         access: requirement.access,
       })),

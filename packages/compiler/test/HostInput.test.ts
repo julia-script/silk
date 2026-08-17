@@ -195,7 +195,7 @@ it.effect('returns the command-line arguments in the order the process received 
 
 effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`),
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
@@ -231,7 +231,7 @@ it.effect('reports an argument past the end and an unset variable as absence, no
 // A recovery branch that survives proves absence never entered the failure channel.
 effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`),
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
@@ -268,7 +268,7 @@ it.effect('keeps a value that is not valid UTF-8 readable as its exact bytes', (
 
 effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`),
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
@@ -288,7 +288,7 @@ it.effect('routes an in-source provider error into the typed failure channel', (
 
 effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 42 }
 
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`),
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
@@ -331,7 +331,7 @@ const nativeProgram = nativeSource(`effect fn program() -> i32 ! HostInputFailur
 
 effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`)
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
 
 const nativeHost = () =>
   HostInput.memory({
@@ -383,7 +383,7 @@ it.effect('copies a value longer than the provider buffer completely', () =>
 
 effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`),
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const host = HostInput.memory({ arguments: [long] })
@@ -525,7 +525,7 @@ it.effect(
 
 effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 9 }
 
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`)
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
       const compiled = yield* Driver.compile({
         compilation: { root: SourceFile.make('host-input/native', encoder.encode(source)) },
         toolchain: Object.freeze({ _tag: 'Toolchain', clang }),

@@ -294,7 +294,7 @@ it.effect('releases a stored callable on a typed-failure exit', () =>
   return 42
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
     const facts = snapshot.ownership.get(module) ?? unreachable('expected ownership facts')
     const build =

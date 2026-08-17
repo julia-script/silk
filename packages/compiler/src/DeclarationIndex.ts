@@ -1,6 +1,8 @@
 import * as Option from 'effect/Option'
+import * as CallableContract from './CallableContract.js'
 import * as ConformanceGoal from './ConformanceGoal.js'
 import * as ConformanceHead from './ConformanceHead.js'
+import * as Constraint from './Constraint.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.js'
 import * as InterfaceWitnessInference from './InterfaceWitnessInference.js'
@@ -10,6 +12,7 @@ import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
+import * as RowAlgebra from './RowAlgebra.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Specialization from './Specialization.js'
@@ -288,6 +291,56 @@ export interface UnionSourceFact {
 
 export type ReturnTypeFact = DeclaredTypeFact
 
+/** Source-shaped row syntax retained before module resolution and symbolic normalization. */
+export type RowExpressionFact =
+  | { readonly _tag: 'EmptyRowExpression' }
+  | {
+      readonly _tag: 'RowParameterExpression'
+      readonly parameter: Type.Parameter
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'FailureMemberExpression'
+      readonly member: DeclaredTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'RequirementMemberExpression'
+      readonly capability: DeclaredTypeFact
+      readonly access: Type.Requirement['access']
+      readonly role: string
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'UnionRowExpression'
+      readonly operands: ReadonlyArray<RowExpressionFact>
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'WithoutRowExpression'
+      readonly source: RowExpressionFact
+      readonly selected: RowExpressionFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | { readonly _tag: 'UnavailableRowExpression'; readonly syntax: SyntaxTree.Node }
+
+export type ConstraintFact =
+  | {
+      readonly _tag: 'MembershipConstraint'
+      readonly domain: 'Failure' | 'Requirement' | 'Unavailable'
+      readonly selected: RowExpressionFact
+      readonly source: RowExpressionFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'ProviderConstraint'
+      readonly mode: 'Shared' | 'Exclusive' | 'Take'
+      readonly provider: DeclaredTypeFact
+      readonly selected: RowExpressionFact
+      readonly source: RowExpressionFact
+      readonly syntax: SyntaxTree.Node
+    }
+
 /** A source-retained and canonically normalized effect failure row. */
 export interface FailureRowFact {
   readonly _tag: 'FailureRow'
@@ -296,6 +349,8 @@ export interface FailureRowFact {
   readonly failures: ReadonlyArray<Type.Nominal>
   readonly syntax?: SyntaxTree.Node
   readonly available: boolean
+  readonly expression: RowExpressionFact
+  readonly row: Type.FailureRow
 }
 
 /** A source-retained and canonically normalized Effect capability requirement row. */
@@ -311,6 +366,8 @@ export interface RequirementRowFact {
   readonly requirements: ReadonlyArray<Type.Requirement>
   readonly syntax?: SyntaxTree.Node
   readonly available: boolean
+  readonly expression: RowExpressionFact
+  readonly row: Type.RequirementsRow
 }
 
 /** One ordered parameter declaration with exact concrete provenance. */
@@ -337,6 +394,8 @@ export interface DeclarationFact {
   readonly opaqueResult?: OpaqueResultFact
   readonly failureRow: FailureRowFact
   readonly requirementRow: RequirementRowFact
+  readonly constraints: ReadonlyArray<ConstraintFact>
+  readonly constraintContracts: ReadonlyArray<Constraint.Constraint>
   readonly syntax: SyntaxTree.Node
 }
 
@@ -499,7 +558,50 @@ export interface ServiceOperationFact {
   readonly opaqueResult?: OpaqueResultFact
   readonly failureRow: FailureRowFact
   readonly requirementRow: RequirementRowFact
+  readonly constraints: ReadonlyArray<ConstraintFact>
+  readonly constraintContracts: ReadonlyArray<Constraint.Constraint>
   readonly syntax: SyntaxTree.Node
+}
+
+const contractParameterMode = (type: Type.Type): CallableContract.ParameterMode => {
+  if (Type.isReference(type)) return type.access
+  if (Type.isEffect(type)) return type.access === 'Take' ? 'Take' : type.access
+  return 'Value'
+}
+
+/** Adapts a resolved source callable to the same contract consumed by sealed intrinsics. */
+export const callableContract = (
+  declaration: DeclarationFact | ServiceOperationFact,
+  enclosingTypeParameters: ReadonlyArray<TypeParameterFact> = Object.freeze([]),
+): CallableContract.CallableContract => {
+  const success = declaration.returnType._tag === 'Resolved' ? declaration.returnType.type : 'never'
+  const result =
+    declaration.functionKind === 'Effect'
+      ? Type.effectWithRows(
+          success,
+          declaration.failureRow.row,
+          'Shared',
+          declaration.requirementRow.row,
+        )
+      : success
+  return CallableContract.make({
+    functionKind: declaration.functionKind === 'Effect' ? 'Effect' : 'Function',
+    binders: [...enclosingTypeParameters, ...declaration.typeParameters].map(
+      (parameter) => parameter.type,
+    ),
+    parameters: declaration.parameters.flatMap((parameter) =>
+      parameter.declaredType._tag === 'Resolved'
+        ? [
+            Object.freeze({
+              type: parameter.declaredType.type,
+              mode: contractParameterMode(parameter.declaredType.type),
+            }),
+          ]
+        : [],
+    ),
+    result,
+    constraints: declaration.constraintContracts,
+  })
 }
 
 /** The literal ownership promised by one source interface operand. */
@@ -652,6 +754,65 @@ const substituteDeclaredTypeFact = (
   return Object.freeze({ ...fact, type, spelling: Type.encode(type) })
 }
 
+const substituteRowExpressionFact = (
+  fact: RowExpressionFact,
+  substitution: Type.Substitution,
+): RowExpressionFact => {
+  switch (fact._tag) {
+    case 'EmptyRowExpression':
+    case 'RowParameterExpression':
+    case 'UnavailableRowExpression':
+      return fact
+    case 'FailureMemberExpression':
+      return Object.freeze({
+        ...fact,
+        member: substituteDeclaredTypeFact(fact.member, substitution),
+      })
+    case 'RequirementMemberExpression':
+      return Object.freeze({
+        ...fact,
+        capability: substituteDeclaredTypeFact(fact.capability, substitution),
+      })
+    case 'UnionRowExpression':
+      return Object.freeze({
+        ...fact,
+        operands: Object.freeze(
+          fact.operands.map((operand) => substituteRowExpressionFact(operand, substitution)),
+        ),
+      })
+    case 'WithoutRowExpression':
+      return Object.freeze({
+        ...fact,
+        source: substituteRowExpressionFact(fact.source, substitution),
+        selected: substituteRowExpressionFact(fact.selected, substitution),
+      })
+  }
+}
+
+const failureRowFromEffect = (effect: Type.Effect): Type.FailureRow =>
+  Type.failureRowParameters(effect).reduce<Type.FailureRow>(
+    (row, parameter) =>
+      RowAlgebra.union(
+        Type.failureRowPolicy(),
+        row,
+        RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(parameter),
+      ),
+    RowAlgebra.concrete(Type.failureRowPolicy(), Type.failureMembers(effect)),
+  )
+
+const requirementRowFromEffect = (effect: Type.Effect): Type.RequirementsRow =>
+  Type.requirementRowParameters(effect).reduce<Type.RequirementsRow>(
+    (row, parameter) =>
+      RowAlgebra.union(
+        Type.requirementRowPolicy(),
+        row,
+        RowAlgebra.parameter<Type.Requirement, Type.Parameter, Type.RequirementMemberShape>(
+          parameter,
+        ),
+      ),
+    RowAlgebra.concrete(Type.requirementRowPolicy(), Type.requirementMembers(effect)),
+  )
+
 const substituteFailureRowFact = (
   fact: FailureRowFact,
   substitution: Type.Substitution,
@@ -663,10 +824,12 @@ const substituteFailureRowFact = (
   return Object.freeze({
     ...fact,
     members,
-    parameters: rows.failureParameters,
-    failures: rows.failures,
+    expression: substituteRowExpressionFact(fact.expression, substitution),
+    row: failureRowFromEffect(rows),
+    parameters: Type.failureRowParameters(rows),
+    failures: Type.failureMembers(rows),
     available:
-      rows.failureParameters.length === 0 &&
+      Type.failureRowParameters(rows).length === 0 &&
       members.every(
         (member) =>
           member._tag === 'Resolved' && Type.isNominal(member.type) && Type.isConcrete(member.type),
@@ -690,10 +853,12 @@ const substituteRequirementRowFact = (
   return Object.freeze({
     ...fact,
     entries,
-    parameters: rows.requirementParameters,
-    requirements: rows.requirements,
+    expression: substituteRowExpressionFact(fact.expression, substitution),
+    row: requirementRowFromEffect(rows),
+    parameters: Type.requirementRowParameters(rows),
+    requirements: Type.requirementMembers(rows),
     available:
-      rows.requirementParameters.length === 0 &&
+      Type.requirementRowParameters(rows).length === 0 &&
       entries.every(
         (entry) =>
           entry.capability._tag === 'Resolved' &&
@@ -1717,6 +1882,36 @@ export const analyzeDeclaredType = (
             }
             return []
           }) ?? []
+      const rowParameterComponents: ReadonlyArray<DeclaredTypeFact> = Object.freeze(
+        [
+          ...failureNodes.flatMap(
+            (path): ReadonlyArray<readonly [SyntaxTree.Node, Type.Parameter]> => {
+              const parameter = parameterAtTypePath(source, path, typeParameters)
+              return parameter?.kind === 'FailureRow' ? [[path, parameter]] : []
+            },
+          ),
+          ...(SyntaxTree.directNode(list, 'RequirementRow')?.children.flatMap(
+            (element): ReadonlyArray<readonly [SyntaxTree.Node, Type.Parameter]> => {
+              if (!SyntaxTree.isNode(element) || element.kind !== 'TypePath') return []
+              const parameter = parameterAtTypePath(source, element, typeParameters)
+              return parameter?.kind === 'RequirementRow' ? [[element, parameter]] : []
+            },
+          ) ?? []),
+        ].flatMap(([path, parameter]): ReadonlyArray<DeclaredTypeFact> => {
+          const token = SyntaxTree.directToken(path, 'Identifier')
+          return token === undefined
+            ? []
+            : [
+                Object.freeze({
+                  _tag: 'Resolved' as const,
+                  type: parameter,
+                  spelling: spelling(source, token),
+                  token,
+                  syntax: path,
+                }),
+              ]
+        }),
+      )
       const diagnostics = [
         ...rowDiagnostics,
         ...arguments_.flatMap((argument) => argument.diagnostics),
@@ -1777,6 +1972,7 @@ export const analyzeDeclaredType = (
               ...arguments_.map((argument) => argument.fact),
               ...failures.map((failure) => failure.fact),
               ...requirements.map((requirement) => requirement.capability.fact),
+              ...rowParameterComponents,
             ]),
           }),
           diagnostics: Object.freeze(diagnostics),
@@ -2418,6 +2614,147 @@ const parameterAtTypePath = (
     : undefined
 }
 
+const collectFailureRowExpression = (
+  source: SourceFile.SourceFile,
+  syntax: SyntaxTree.Node,
+  typeParameters: ReadonlyMap<string, Type.Parameter>,
+): {
+  readonly fact: RowExpressionFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  if (syntax.kind === 'RowWithout') {
+    const operands = syntax.children.filter((element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element),
+    )
+    const left = operands.at(0)
+    const right = operands.at(1)
+    if (left === undefined || right === undefined)
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
+        diagnostics: Object.freeze([]),
+      })
+    const sourceRow = collectFailureRowExpression(source, left, typeParameters)
+    const selected = collectFailureRowExpression(source, right, typeParameters)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'WithoutRowExpression',
+        source: sourceRow.fact,
+        selected: selected.fact,
+        syntax,
+      }),
+      diagnostics: Object.freeze([...sourceRow.diagnostics, ...selected.diagnostics]),
+    })
+  }
+  if (syntax.kind === 'UnionType') {
+    const collected = syntax.children
+      .filter((element): element is SyntaxTree.Node => SyntaxTree.isNode(element))
+      .map((operand) => collectFailureRowExpression(source, operand, typeParameters))
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'UnionRowExpression',
+        operands: Object.freeze(collected.map((operand) => operand.fact)),
+        syntax,
+      }),
+      diagnostics: Object.freeze(collected.flatMap((operand) => operand.diagnostics)),
+    })
+  }
+  const parameter = parameterAtTypePath(source, syntax, typeParameters)
+  if (parameter?.kind === 'FailureRow')
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'RowParameterExpression', parameter, syntax }),
+      diagnostics: Object.freeze([]),
+    })
+  if (!isDeclaredTypeNode(syntax))
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
+      diagnostics: Object.freeze([]),
+    })
+  const analyzed = analyzeDeclaredType(source, syntax, typeParameters)
+  return Object.freeze({
+    fact: Object.freeze({ _tag: 'FailureMemberExpression', member: analyzed.fact, syntax }),
+    diagnostics: analyzed.diagnostics,
+  })
+}
+
+const collectRequirementRowExpression = (
+  source: SourceFile.SourceFile,
+  syntax: SyntaxTree.Node,
+  typeParameters: ReadonlyMap<string, Type.Parameter>,
+): {
+  readonly fact: RowExpressionFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  if (syntax.kind === 'RowWithout') {
+    const operands = syntax.children.filter((element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element),
+    )
+    const left = operands.at(0)
+    const right = operands.at(1)
+    if (left === undefined || right === undefined)
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
+        diagnostics: Object.freeze([]),
+      })
+    const sourceRow = collectRequirementRowExpression(source, left, typeParameters)
+    const selected = collectRequirementRowExpression(source, right, typeParameters)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'WithoutRowExpression',
+        source: sourceRow.fact,
+        selected: selected.fact,
+        syntax,
+      }),
+      diagnostics: Object.freeze([...sourceRow.diagnostics, ...selected.diagnostics]),
+    })
+  }
+  if (syntax.kind === 'UnionType') {
+    const collected = syntax.children
+      .filter((element): element is SyntaxTree.Node => SyntaxTree.isNode(element))
+      .map((operand) => collectRequirementRowExpression(source, operand, typeParameters))
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'UnionRowExpression',
+        operands: Object.freeze(collected.map((operand) => operand.fact)),
+        syntax,
+      }),
+      diagnostics: Object.freeze(collected.flatMap((operand) => operand.diagnostics)),
+    })
+  }
+  const parameter = parameterAtTypePath(source, syntax, typeParameters)
+  if (parameter?.kind === 'RequirementRow')
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'RowParameterExpression', parameter, syntax }),
+      diagnostics: Object.freeze([]),
+    })
+  if (syntax.kind !== 'Requirement' && syntax.kind !== 'ReferenceType')
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
+      diagnostics: Object.freeze([]),
+    })
+  const capabilitySyntax = syntax.children.find(isDeclaredTypeNode)
+  if (capabilitySyntax === undefined)
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
+      diagnostics: Object.freeze([]),
+    })
+  const analyzed = analyzeDeclaredType(source, capabilitySyntax, typeParameters)
+  const roleToken = SyntaxTree.directToken(syntax, 'Identifier')
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'RequirementMemberExpression',
+      capability: analyzed.fact,
+      access: SyntaxTree.directToken(syntax, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive',
+      role: roleToken === undefined ? 'DefaultRole' : spelling(source, roleToken),
+      syntax,
+    }),
+    diagnostics: analyzed.diagnostics,
+  })
+}
+
+const emptyRowExpression: RowExpressionFact = Object.freeze({ _tag: 'EmptyRowExpression' })
+const emptyFailureRow = RowAlgebra.concrete(Type.failureRowPolicy(), [])
+const emptyRequirementRow = RowAlgebra.concrete(Type.requirementRowPolicy(), [])
+
 const collectFailureRow = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -2435,15 +2772,39 @@ const collectFailureRow = (
         parameters: Object.freeze([]),
         failures: Object.freeze([]),
         available: true,
+        expression: emptyRowExpression,
+        row: emptyFailureRow,
       }),
       diagnostics: Object.freeze([]),
     })
-  const declared = declaredTypeNode(syntax)
+  const declared = syntax.children.find((element): element is SyntaxTree.Node =>
+    SyntaxTree.isNode(element),
+  )
+  if (declared === undefined)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'FailureRow',
+        members: Object.freeze([]),
+        parameters: Object.freeze([]),
+        failures: Object.freeze([]),
+        syntax,
+        available: false,
+        expression: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
+        row: emptyFailureRow,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  const expression = collectFailureRowExpression(source, declared, typeParameters)
   const syntaxMembers =
     declared.kind === 'UnionType'
       ? declared.children.filter(isDeclaredTypeNode)
-      : Object.freeze([declared])
+      : isDeclaredTypeNode(declared)
+        ? Object.freeze([declared])
+        : Object.freeze([])
   const parameters: Array<Type.Parameter> = []
+  // The legacy member facts remain the single diagnostic owner while the row
+  // expression is retained as the semantic shape. Reporting both would emit
+  // the same kind/type error twice for one source member.
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const members = syntaxMembers.flatMap((member): ReadonlyArray<DeclaredTypeFact> => {
     const parameter = parameterAtTypePath(source, member, typeParameters)
@@ -2476,6 +2837,8 @@ const collectFailureRow = (
       failures: Object.freeze([]),
       syntax,
       available: false,
+      expression: expression.fact,
+      row: emptyFailureRow,
     }),
     diagnostics: Object.freeze(diagnostics),
   })
@@ -2498,10 +2861,31 @@ const collectRequirementRow = (
         parameters: Object.freeze([]),
         requirements: Object.freeze([]),
         available: true,
+        expression: emptyRowExpression,
+        row: emptyRequirementRow,
       }),
       diagnostics: Object.freeze([]),
     })
   const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const rowNodes = syntax.children.filter((element): element is SyntaxTree.Node =>
+    SyntaxTree.isNode(element),
+  )
+  const expressions = rowNodes.map((member) =>
+    collectRequirementRowExpression(source, member, typeParameters),
+  )
+  // Entry collection below owns source diagnostics. The expression facts are
+  // structural and must not duplicate the same diagnostic occurrence.
+  const expression = expressions.reduce<RowExpressionFact>(
+    (left, right) =>
+      left._tag === 'EmptyRowExpression'
+        ? right.fact
+        : Object.freeze({
+            _tag: 'UnionRowExpression',
+            operands: Object.freeze([left, right.fact]),
+            syntax,
+          }),
+    emptyRowExpression,
+  )
   const entries = SyntaxTree.directNodes(syntax, 'Requirement').map((requirement) => {
     const capabilitySyntax = requirement.children.find(isDeclaredTypeNode)
     const analyzed =
@@ -2552,9 +2936,110 @@ const collectRequirementRow = (
       requirements: Object.freeze([]),
       syntax,
       available: false,
+      expression,
+      row: emptyRequirementRow,
     }),
     diagnostics: Object.freeze(diagnostics),
   })
+}
+
+const nestedNodes = (syntax: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
+  syntax.children.flatMap(
+    (element): ReadonlyArray<SyntaxTree.Node> =>
+      SyntaxTree.isNode(element) ? [element, ...nestedNodes(element)] : [],
+  )
+
+const constraintDomain = (
+  source: SourceFile.SourceFile,
+  syntax: SyntaxTree.Node,
+  typeParameters: ReadonlyMap<string, Type.Parameter>,
+): 'Failure' | 'Requirement' | 'Unavailable' => {
+  for (const path of [syntax, ...nestedNodes(syntax)]) {
+    const parameter = parameterAtTypePath(source, path, typeParameters)
+    if (parameter?.kind === 'FailureRow') return 'Failure'
+    if (parameter?.kind === 'RequirementRow') return 'Requirement'
+  }
+  return 'Unavailable'
+}
+
+const collectConstraints = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  typeParameters: ReadonlyMap<string, Type.Parameter>,
+): {
+  readonly facts: ReadonlyArray<ConstraintFact>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const where = SyntaxTree.directNode(node, 'WhereClause')
+  if (where === undefined)
+    return Object.freeze({ facts: Object.freeze([]), diagnostics: Object.freeze([]) })
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const facts = where.children.flatMap((element): ReadonlyArray<ConstraintFact> => {
+    if (!SyntaxTree.isNode(element)) return []
+    const operands = element.children.filter((child): child is SyntaxTree.Node =>
+      SyntaxTree.isNode(child),
+    )
+    if (element.kind === 'MembershipConstraint') {
+      const selectedSyntax = operands.at(0)
+      const sourceSyntax = operands.at(1)
+      if (selectedSyntax === undefined || sourceSyntax === undefined) return []
+      const domain = constraintDomain(source, sourceSyntax, typeParameters)
+      const selected =
+        domain === 'Requirement'
+          ? collectRequirementRowExpression(source, selectedSyntax, typeParameters)
+          : collectFailureRowExpression(source, selectedSyntax, typeParameters)
+      const sourceRow =
+        domain === 'Requirement'
+          ? collectRequirementRowExpression(source, sourceSyntax, typeParameters)
+          : collectFailureRowExpression(source, sourceSyntax, typeParameters)
+      diagnostics.push(...selected.diagnostics, ...sourceRow.diagnostics)
+      return [
+        Object.freeze({
+          _tag: 'MembershipConstraint',
+          domain,
+          selected: selected.fact,
+          source: sourceRow.fact,
+          syntax: element,
+        }),
+      ]
+    }
+    if (element.kind !== 'ProviderConstraint') return []
+    const providerSyntax = operands.at(0)
+    const selectedSyntax = operands.at(1)
+    const sourceSyntax = operands.at(2)
+    if (providerSyntax === undefined || selectedSyntax === undefined || sourceSyntax === undefined)
+      return []
+    const providerTypeSyntax =
+      providerSyntax.kind === 'ReferenceType'
+        ? providerSyntax.children.find(isDeclaredTypeNode)
+        : providerSyntax
+    const provider =
+      providerTypeSyntax === undefined
+        ? Object.freeze({
+            fact: Object.freeze({ _tag: 'Unavailable' as const, syntax: providerSyntax }),
+            diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
+          })
+        : analyzeDeclaredType(source, providerTypeSyntax, typeParameters)
+    const selected = collectRequirementRowExpression(source, selectedSyntax, typeParameters)
+    const sourceRow = collectRequirementRowExpression(source, sourceSyntax, typeParameters)
+    diagnostics.push(...provider.diagnostics, ...selected.diagnostics, ...sourceRow.diagnostics)
+    return [
+      Object.freeze({
+        _tag: 'ProviderConstraint',
+        mode:
+          providerSyntax.kind !== 'ReferenceType'
+            ? 'Take'
+            : SyntaxTree.directToken(providerSyntax, 'MutKeyword') === undefined
+              ? 'Shared'
+              : 'Exclusive',
+        provider: provider.fact,
+        selected: selected.fact,
+        source: sourceRow.fact,
+        syntax: element,
+      }),
+    ]
+  })
+  return Object.freeze({ facts: Object.freeze(facts), diagnostics: Object.freeze(diagnostics) })
 }
 
 const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
@@ -2891,6 +3376,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
                 )
           const failureRow = collectFailureRow(source, operation, environment)
           const requirementRow = collectRequirementRow(source, operation, environment)
+          const constraints = collectConstraints(source, operation, environment)
           const body = SyntaxTree.directNode(operation, 'Block')
           const parameterFacts = Object.freeze(parameters.map((parameter) => parameter.fact))
           diagnostics.push(
@@ -2899,6 +3385,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
             ...returnType.diagnostics,
             ...failureRow.diagnostics,
             ...requirementRow.diagnostics,
+            ...constraints.diagnostics,
           )
           if (body !== undefined)
             diagnostics.push(
@@ -2930,6 +3417,8 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
               : { opaqueResult: returnType.opaqueResult }),
             failureRow: failureRow.fact,
             requirementRow: requirementRow.fact,
+            constraints: constraints.facts,
+            constraintContracts: Object.freeze([]),
             syntax: operation,
           })
         },
@@ -2995,6 +3484,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       SyntaxTree.directToken(node, 'EffectKeyword') === undefined ? 'Ordinary' : 'Effect'
     const failureRow = collectFailureRow(source, node, typeParameters.environment)
     const requirementRow = collectRequirementRow(source, node, typeParameters.environment)
+    const constraints = collectConstraints(source, node, typeParameters.environment)
     const facts = Object.freeze(parameters.map((parameter) => parameter.fact))
     diagnostics.push(
       ...parameters.flatMap((parameter) => parameter.diagnostics),
@@ -3002,6 +3492,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       ...returnType.diagnostics,
       ...failureRow.diagnostics,
       ...requirementRow.diagnostics,
+      ...constraints.diagnostics,
     )
     if (functionKind === 'Ordinary' && failureRow.fact.syntax !== undefined)
       diagnostics.push(Diagnostic.failureRowOnOrdinary(failureRow.fact.syntax.span))
@@ -3019,6 +3510,8 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       ...(returnType.opaqueResult === undefined ? {} : { opaqueResult: returnType.opaqueResult }),
       failureRow: failureRow.fact,
       requirementRow: requirementRow.fact,
+      constraints: constraints.facts,
+      constraintContracts: Object.freeze([]),
       syntax: node,
     })
   })
@@ -3073,6 +3566,8 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         returnType: returnType.fact,
         failureRow: hook.failureRow,
         requirementRow: hook.requirementRow,
+        constraints: Object.freeze([]),
+        constraintContracts: Object.freeze([]),
         syntax: node,
       }),
     ]
@@ -4246,10 +4741,10 @@ const interfaceWitnessCompatibility = (
       functionKind: implementation.functionKind,
       operands: Object.freeze(witnessOperands),
       success: Type.substitute(implementation.returnType.type, substitution),
-      failures: witnessRows.failures,
-      failureParameters: witnessRows.failureParameters,
-      requirements: witnessRows.requirements,
-      requirementParameters: witnessRows.requirementParameters,
+      failures: Type.failureMembers(witnessRows),
+      failureParameters: Type.failureRowParameters(witnessRows),
+      requirements: Type.requirementMembers(witnessRows),
+      requirementParameters: Type.requirementRowParameters(witnessRows),
     }),
   )
 }
@@ -4344,6 +4839,215 @@ export const resolveTypeFact = (
     index.modules,
   )
 
+const resolveRowExpressionFact = (
+  module: string,
+  fact: RowExpressionFact,
+  resolvers: ResolutionSeams.ResolutionSeams,
+  modules: ReadonlyArray<ModuleHeaders>,
+): {
+  readonly fact: RowExpressionFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  switch (fact._tag) {
+    case 'EmptyRowExpression':
+    case 'RowParameterExpression':
+    case 'UnavailableRowExpression':
+      return Object.freeze({ fact, diagnostics: Object.freeze([]) })
+    case 'FailureMemberExpression': {
+      const member = resolveDeclaredType(module, fact.member, resolvers, modules)
+      return Object.freeze({
+        fact: Object.freeze({ ...fact, member: member.fact }),
+        diagnostics: member.diagnostics,
+      })
+    }
+    case 'RequirementMemberExpression': {
+      const capability = resolveDeclaredType(module, fact.capability, resolvers, modules)
+      return Object.freeze({
+        fact: Object.freeze({ ...fact, capability: capability.fact }),
+        diagnostics: capability.diagnostics,
+      })
+    }
+    case 'UnionRowExpression': {
+      const operands = fact.operands.map((operand) =>
+        resolveRowExpressionFact(module, operand, resolvers, modules),
+      )
+      return Object.freeze({
+        fact: Object.freeze({
+          ...fact,
+          operands: Object.freeze(operands.map((operand) => operand.fact)),
+        }),
+        diagnostics: Object.freeze(operands.flatMap((operand) => operand.diagnostics)),
+      })
+    }
+    case 'WithoutRowExpression': {
+      const source = resolveRowExpressionFact(module, fact.source, resolvers, modules)
+      const selected = resolveRowExpressionFact(module, fact.selected, resolvers, modules)
+      return Object.freeze({
+        fact: Object.freeze({ ...fact, source: source.fact, selected: selected.fact }),
+        diagnostics: Object.freeze([...source.diagnostics, ...selected.diagnostics]),
+      })
+    }
+  }
+}
+
+const resolveConstraintFacts = (
+  module: string,
+  constraints: ReadonlyArray<ConstraintFact>,
+  resolvers: ResolutionSeams.ResolutionSeams,
+  modules: ReadonlyArray<ModuleHeaders>,
+): {
+  readonly facts: ReadonlyArray<ConstraintFact>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const facts = constraints.map((constraint): ConstraintFact => {
+    const selected = resolveRowExpressionFact(module, constraint.selected, resolvers, modules)
+    const source = resolveRowExpressionFact(module, constraint.source, resolvers, modules)
+    diagnostics.push(...selected.diagnostics, ...source.diagnostics)
+    if (constraint._tag === 'MembershipConstraint')
+      return Object.freeze({ ...constraint, selected: selected.fact, source: source.fact })
+    const provider = resolveDeclaredType(module, constraint.provider, resolvers, modules)
+    diagnostics.push(...provider.diagnostics)
+    return Object.freeze({
+      ...constraint,
+      provider: provider.fact,
+      selected: selected.fact,
+      source: source.fact,
+    })
+  })
+  return Object.freeze({ facts: Object.freeze(facts), diagnostics: Object.freeze(diagnostics) })
+}
+
+const semanticFailureRow = (fact: RowExpressionFact): Type.FailureRow => {
+  switch (fact._tag) {
+    case 'EmptyRowExpression':
+    case 'RequirementMemberExpression':
+    case 'UnavailableRowExpression':
+      return RowAlgebra.concrete(Type.failureRowPolicy(), [])
+    case 'RowParameterExpression':
+      return fact.parameter.kind === 'FailureRow'
+        ? RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(
+            fact.parameter,
+          )
+        : RowAlgebra.concrete(Type.failureRowPolicy(), [])
+    case 'FailureMemberExpression':
+      if (fact.member._tag !== 'Resolved') return RowAlgebra.concrete(Type.failureRowPolicy(), [])
+      if (Type.isNominal(fact.member.type))
+        return RowAlgebra.concrete(Type.failureRowPolicy(), [fact.member.type])
+      if (Type.isParameter(fact.member.type) && fact.member.type.kind === 'Value')
+        return RowAlgebra.singleton(
+          Type.failureRowPolicy(),
+          Type.failureMemberShape(fact.member.type),
+          fact.syntax.span,
+        )
+      return RowAlgebra.concrete(Type.failureRowPolicy(), [])
+    case 'UnionRowExpression':
+      return fact.operands.reduce<Type.FailureRow>(
+        (row, operand) =>
+          RowAlgebra.union(Type.failureRowPolicy(), row, semanticFailureRow(operand)),
+        RowAlgebra.concrete(Type.failureRowPolicy(), []),
+      )
+    case 'WithoutRowExpression':
+      return RowAlgebra.without(
+        Type.failureRowPolicy(),
+        semanticFailureRow(fact.source),
+        semanticFailureRow(fact.selected),
+      )
+  }
+}
+
+const semanticRequirementRow = (fact: RowExpressionFact): Type.RequirementsRow => {
+  switch (fact._tag) {
+    case 'EmptyRowExpression':
+    case 'FailureMemberExpression':
+    case 'UnavailableRowExpression':
+      return RowAlgebra.concrete(Type.requirementRowPolicy(), [])
+    case 'RowParameterExpression':
+      return fact.parameter.kind === 'RequirementRow'
+        ? RowAlgebra.parameter<Type.Requirement, Type.Parameter, Type.RequirementMemberShape>(
+            fact.parameter,
+          )
+        : RowAlgebra.concrete(Type.requirementRowPolicy(), [])
+    case 'RequirementMemberExpression':
+      if (fact.capability._tag !== 'Resolved')
+        return RowAlgebra.concrete(Type.requirementRowPolicy(), [])
+      if (Type.isNominal(fact.capability.type))
+        return RowAlgebra.concrete(Type.requirementRowPolicy(), [
+          Object.freeze({
+            capability: fact.capability.type,
+            access: fact.access,
+            role: fact.role,
+          }),
+        ])
+      if (Type.isParameter(fact.capability.type) && fact.capability.type.kind === 'Value')
+        return RowAlgebra.singleton(
+          Type.requirementRowPolicy(),
+          Type.requirementMemberShape(fact.capability.type, fact.access, fact.role),
+          fact.syntax.span,
+        )
+      return RowAlgebra.concrete(Type.requirementRowPolicy(), [])
+    case 'UnionRowExpression':
+      return fact.operands.reduce<Type.RequirementsRow>(
+        (row, operand) =>
+          RowAlgebra.union(Type.requirementRowPolicy(), row, semanticRequirementRow(operand)),
+        RowAlgebra.concrete(Type.requirementRowPolicy(), []),
+      )
+    case 'WithoutRowExpression':
+      return RowAlgebra.without(
+        Type.requirementRowPolicy(),
+        semanticRequirementRow(fact.source),
+        semanticRequirementRow(fact.selected),
+      )
+  }
+}
+
+const semanticConstraints = (
+  constraints: ReadonlyArray<ConstraintFact>,
+): ReadonlyArray<Constraint.Constraint> =>
+  Object.freeze(
+    constraints.flatMap((constraint): ReadonlyArray<Constraint.Constraint> => {
+      if (constraint._tag === 'ProviderConstraint') {
+        if (constraint.provider._tag !== 'Resolved') return []
+        const provider = Type.isReference(constraint.provider.type)
+          ? constraint.provider.type.target
+          : constraint.provider.type
+        return [
+          Constraint.providerSelection(
+            constraint.mode,
+            provider,
+            semanticRequirementRow(constraint.selected),
+            semanticRequirementRow(constraint.source),
+          ),
+        ]
+      }
+      if (constraint.domain === 'Requirement')
+        return [
+          Constraint.requirementSubset(
+            semanticRequirementRow(constraint.selected),
+            semanticRequirementRow(constraint.source),
+          ),
+        ]
+      if (
+        constraint.selected._tag === 'FailureMemberExpression' &&
+        constraint.selected.member._tag === 'Resolved' &&
+        Type.isParameter(constraint.selected.member.type) &&
+        constraint.selected.member.type.kind === 'Value'
+      )
+        return [
+          Constraint.nominalMember(
+            constraint.selected.member.type,
+            semanticFailureRow(constraint.source),
+          ),
+        ]
+      return [
+        Constraint.failureSubset(
+          semanticFailureRow(constraint.selected),
+          semanticFailureRow(constraint.source),
+        ),
+      ]
+    }),
+  )
+
 const resolveFailureRow = (
   module: string,
   row: FailureRowFact,
@@ -4355,6 +5059,9 @@ const resolveFailureRow = (
 } => {
   if (row.syntax === undefined) return Object.freeze({ fact: row, diagnostics: Object.freeze([]) })
   const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const expression = resolveRowExpressionFact(module, row.expression, resolvers, modules)
+  // Legacy member facts and the symbolic expression share the same source nodes. Resolve the
+  // expression for semantic shape, while the member pass below remains the single diagnostic owner.
   const members = row.members.map((member) => {
     const resolved = resolveDeclaredType(module, member, resolvers, modules)
     diagnostics.push(...resolved.diagnostics)
@@ -4382,6 +5089,8 @@ const resolveFailureRow = (
       ...row,
       members: Object.freeze(members),
       failures: Object.freeze([...failures.values()].sort(Type.compare)),
+      expression: expression.fact,
+      row: semanticFailureRow(expression.fact),
       available,
     }),
     diagnostics: Object.freeze(diagnostics),
@@ -4399,6 +5108,8 @@ const resolveRequirementRow = (
 } => {
   if (row.syntax === undefined) return Object.freeze({ fact: row, diagnostics: Object.freeze([]) })
   const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const expression = resolveRowExpressionFact(module, row.expression, resolvers, modules)
+  // The entry pass below owns diagnostics for these same source nodes.
   const entries = row.entries.map((entry) => {
     const capability = resolveDeclaredType(module, entry.capability, resolvers, modules)
     diagnostics.push(...capability.diagnostics)
@@ -4427,12 +5138,14 @@ const resolveRequirementRow = (
         )
     }
   }
-  const normalized = Type.effect('never', [], 'Shared', requirements).requirements
+  const normalized = Type.requirementMembers(Type.effect('never', [], 'Shared', requirements))
   return Object.freeze({
     fact: Object.freeze({
       ...row,
       entries: Object.freeze(entries),
       requirements: normalized,
+      expression: expression.fact,
+      row: semanticRequirementRow(expression.fact),
       available,
     }),
     diagnostics: Object.freeze(diagnostics),
@@ -4525,8 +5238,8 @@ const inlineReach = (
     }
     if (Type.isEffect(type)) {
       descend(type.success)
-      for (const failure of type.failures) descend(failure)
-      for (const requirement of type.requirements) descend(requirement.capability)
+      for (const failure of Type.failureMembers(type)) descend(failure)
+      for (const requirement of Type.requirementMembers(type)) descend(requirement.capability)
       return
     }
     if (Type.isUnion(type)) for (const member of type.members) descend(member)
@@ -4790,6 +5503,13 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           self.modules,
         )
         diagnostics.push(...requirementRow.diagnostics)
+        const constraints = resolveConstraintFacts(
+          module.module,
+          member.constraints,
+          resolvers,
+          self.modules,
+        )
+        diagnostics.push(...constraints.diagnostics)
         return Object.freeze({
           ...member,
           typeParameters: resolvedTypeParameters,
@@ -4798,6 +5518,8 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           ...(result.opaqueResult === undefined ? {} : { opaqueResult: result.opaqueResult }),
           failureRow: failureRow.fact,
           requirementRow: requirementRow.fact,
+          constraints: constraints.facts,
+          constraintContracts: semanticConstraints(constraints.facts),
         })
       }
       if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
@@ -4874,10 +5596,17 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             resolvers,
             self.modules,
           )
+          const constraints = resolveConstraintFacts(
+            module.module,
+            operation.constraints,
+            resolvers,
+            self.modules,
+          )
           diagnostics.push(
             ...resolvedResult.diagnostics,
             ...failureRow.diagnostics,
             ...requirementRow.diagnostics,
+            ...constraints.diagnostics,
           )
           return Object.freeze({
             ...operation,
@@ -4887,6 +5616,8 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             ...(result.opaqueResult === undefined ? {} : { opaqueResult: result.opaqueResult }),
             failureRow: failureRow.fact,
             requirementRow: requirementRow.fact,
+            constraints: constraints.facts,
+            constraintContracts: semanticConstraints(constraints.facts),
           })
         })
         const completed = Object.freeze({
@@ -5730,21 +6461,23 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           const validFailures =
             Type.isEffect(implementationRows) &&
             Type.isEffect(contractRows) &&
-            implementationRows.failures.every((failure) =>
-              contractRows.failures.some((allowed) => Type.equals(failure, allowed)),
+            Type.failureMembers(implementationRows).every((failure) =>
+              Type.failureMembers(contractRows).some((allowed) => Type.equals(failure, allowed)),
             ) &&
-            implementationRows.failureParameters.every((parameter) =>
-              contractRows.failureParameters.some((allowed) => Type.equals(parameter, allowed)),
+            Type.failureRowParameters(implementationRows).every((parameter) =>
+              Type.failureRowParameters(contractRows).some((allowed) =>
+                Type.equals(parameter, allowed),
+              ),
             )
           const contractRequirements = !Type.isEffect(contractRows)
             ? []
-            : contractRows.requirements.filter(
+            : Type.requirementMembers(contractRows).filter(
                 (requirement) => !Type.equals(requirement.capability, capability),
               )
           const validRequirements =
             Type.isEffect(implementationRows) &&
             Type.isEffect(contractRows) &&
-            implementationRows.requirements.every((requirement) =>
+            Type.requirementMembers(implementationRows).every((requirement) =>
               contractRequirements.some(
                 (allowed) =>
                   Type.equals(requirement.capability, allowed.capability) &&
@@ -5752,12 +6485,14 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
                   (requirement.access === 'Shared' || allowed.access === 'Exclusive'),
               ),
             ) &&
-            implementationRows.requirementParameters.every((parameter) =>
-              contractRows.requirementParameters.some((allowed) => Type.equals(parameter, allowed)),
+            Type.requirementRowParameters(implementationRows).every((parameter) =>
+              Type.requirementRowParameters(contractRows).some((allowed) =>
+                Type.equals(parameter, allowed),
+              ),
             )
           const contractSelf = !Type.isEffect(contractRows)
             ? undefined
-            : contractRows.requirements.find((requirement) =>
+            : Type.requirementMembers(contractRows).find((requirement) =>
                 Type.equals(requirement.capability, capability),
               )
           const validSelfAccess =
@@ -6682,6 +7417,93 @@ export const witness = (
     : undefined
 }
 
+/** Adapts declaration-owned witnesses into the neutral constraint-solver result domain. */
+export const providerMatch = (
+  self: Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+): Constraint.ConformanceOutcome => {
+  const proof = prove(self, provider, capability)
+  if (proof._tag === 'Unproved') {
+    if (proof.failure._tag === 'MissingWitness') return Object.freeze({ _tag: 'NoMatch' })
+    if (proof.failure._tag === 'AmbiguousWitness') {
+      const goal = ConformanceGoal.make(capability, provider)
+      return Object.freeze({
+        _tag: 'Ambiguous',
+        witnesses: Object.freeze(
+          conformanceCandidates(self, goal).map((candidate) =>
+            Object.freeze({
+              origin: Object.freeze({
+                _tag: 'SourceWitness' as const,
+                declaration: Object.freeze({
+                  module: candidate.module,
+                  name: `conformance#${candidate.conformance.ordinal}`,
+                }),
+              }),
+              typeArguments: Object.freeze(
+                candidate.conformance.typeParameters
+                  .filter((parameter) => parameter.duplicateOf === undefined)
+                  .map(
+                    (parameter) =>
+                      candidate.substitution.get(Type.key(parameter.type)) ?? parameter.type,
+                  ),
+              ),
+            }),
+          ),
+        ),
+      })
+    }
+    return Object.freeze({
+      _tag: 'Invalid',
+      reason:
+        proof.failure._tag === 'UnavailableWitness'
+          ? proof.failure.reason
+          : 'conformance selection reached an active cycle',
+    })
+  }
+  const selected = witness(self, provider, capability)
+  if (selected === undefined)
+    return Object.freeze({
+      _tag: 'Invalid',
+      reason: 'the selected conformance does not provide a complete service implementation',
+    })
+  if (selected._tag === 'IdentityConformanceWitness')
+    return Object.freeze({
+      _tag: 'Unique',
+      match: Object.freeze({ _tag: 'Identity' }),
+    })
+  if (selected._tag === 'IntrinsicConformanceWitness')
+    return Object.freeze({
+      _tag: 'Unique',
+      match: Object.freeze({
+        _tag: 'Conformance',
+        witness: Object.freeze({
+          origin: Object.freeze({
+            _tag: 'IntrinsicWitness',
+            operation: `${Type.key(selected.provider)}=>${Type.key(selected.capability)}`,
+          }),
+          typeArguments: Object.freeze([]),
+        }),
+      }),
+    })
+  return Object.freeze({
+    _tag: 'Unique',
+    match: Object.freeze({
+      _tag: 'Conformance',
+      witness: Object.freeze({
+        origin: Object.freeze({
+          _tag: 'SourceWitness',
+          declaration: Object.freeze({
+            module: selected.module,
+            name: `conformance#${selected.ordinal}`,
+          }),
+        }),
+        typeArguments: selected.typeArguments,
+      }),
+    }),
+  })
+}
+
 /** Selects one mapped source implementation from a declaration-shaped witness. */
 export const witnessOperation = (
   self: Extract<ConformanceWitness, { readonly _tag: 'SourceConformanceWitness' }>,
@@ -6838,7 +7660,7 @@ export const containsLexicalBorrow = (
   if (Type.isEffect(type))
     return (
       containsLexicalBorrow(self, type.success, seen) ||
-      type.failures.some((failure) => containsLexicalBorrow(self, failure, seen))
+      Type.failureMembers(type).some((failure) => containsLexicalBorrow(self, failure, seen))
     )
   if (!Type.isNominal(type)) return false
   const key = Type.key(type)

@@ -11,7 +11,7 @@ const successSource = `effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(delayed() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(delayed() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const retainedStateSource = `effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator {
@@ -21,7 +21,7 @@ const retainedStateSource = `effect fn delayed() -> i32 ! OutOfMemory ? &mut All
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(delayed() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(delayed() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const typedFailureSource = `struct Problem { code: i32 }
@@ -33,7 +33,7 @@ effect fn delayed() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
 effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  let handled = delayed() |> Effect.catch(recover)
+  let handled = delayed() |> Effect.catchAll(recover)
   return run (move handled |> Effect.provideMut(&mut allocator))
 }`
 
@@ -48,7 +48,7 @@ const recursiveSource = (
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  let answer = run Effect.catch(count(${depth}) |> Effect.provideMut(&mut allocator), recover)
+  let answer = run Effect.catchAll(count(${depth}) |> Effect.provideMut(&mut allocator), recover)
   if answer == ${depth} { return 42 }
   return 2
 }`

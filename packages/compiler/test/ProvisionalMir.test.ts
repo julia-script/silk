@@ -31,7 +31,7 @@ effect fn delayed(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let pending = delayed(42) |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move pending, recover)
+  return run Effect.catchAll(move pending, recover)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const provisional = available(self)
@@ -70,7 +70,7 @@ effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let pending = program() |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move pending, recover)
+  return run Effect.catchAll(move pending, recover)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const provisional = available(self)
@@ -103,7 +103,7 @@ pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let selected = read() |> Effect.provide(&provider)
   let complete = move selected |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move complete, recover)
+  return run Effect.catchAll(move complete, recover)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const provisional = available(self)
@@ -202,10 +202,10 @@ effect fn recoverOwner(error: OutOfMemory) -> Owner { return Owner { value: 0 } 
 pub fn main() -> i32 {
   let mut scalarAllocator = SystemAllocator.make()
   let scalar = delayed<i32>(1) |> Effect.provideMut(&mut scalarAllocator)
-  let scalarValue = run Effect.catch(move scalar, recoverScalar)
+  let scalarValue = run Effect.catchAll(move scalar, recoverScalar)
   let mut ownerAllocator = SystemAllocator.make()
   let owner = delayed<Owner>(Owner { value: 2 }) |> Effect.provideMut(&mut ownerAllocator)
-  let ownerValue = run Effect.catch(move owner, recoverOwner)
+  let ownerValue = run Effect.catchAll(move owner, recoverOwner)
   return scalarValue + ownerValue.value
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])

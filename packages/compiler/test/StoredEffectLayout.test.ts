@@ -85,7 +85,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 effect fn delayed() -> i32 {
   let mut allocator = SystemAllocator.make()
   let provided = Effect.suspend(effect { return 42 }) |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move provided, recover)
+  return run Effect.catchAll(move provided, recover)
 }
 pub fn main() -> i32 {
   let deferred = Deferred { operation: effect { return run delayed() } }
@@ -100,11 +100,11 @@ pub fn main() -> i32 {
     assert.strictEqual(represented.representation.realization.suspendable, true)
     assert.deepEqual(
       represented.representation.realization.rows.failures.map(Type.encode),
-      represented.representation.realization.contract.failures.map(Type.encode),
+      Type.failureMembers(represented.representation.realization.contract).map(Type.encode),
     )
     assert.deepEqual(
       represented.representation.realization.rows.requirements,
-      represented.representation.realization.contract.requirements,
+      Type.requirementMembers(represented.representation.realization.contract),
     )
     const shape =
       plan.callingShapes.find((candidate) => Type.equals(candidate.type, represented.type)) ??

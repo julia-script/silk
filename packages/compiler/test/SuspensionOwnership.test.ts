@@ -55,17 +55,17 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut scalarAllocator = SystemAllocator.make()
   let scalarPending = scalar() |> Effect.provideMut(&mut scalarAllocator)
-  let scalarValue = run Effect.catch(move scalarPending, recover)
+  let scalarValue = run Effect.catchAll(move scalarPending, recover)
   let mut ownedAllocator = SystemAllocator.make()
   let ownedPending = owned() |> Effect.provideMut(&mut ownedAllocator)
-  let ownedValue = run Effect.catch(move ownedPending, recover)
+  let ownedValue = run Effect.catchAll(move ownedPending, recover)
   let mut owner = Owner { value: 20 }
   let mut borrowedAllocator = SystemAllocator.make()
   let borrowedPending = borrowed(&mut owner) |> Effect.provideMut(&mut borrowedAllocator)
-  let borrowedValue = run Effect.catch(move borrowedPending, recover)
+  let borrowedValue = run Effect.catchAll(move borrowedPending, recover)
   let mut branchedAllocator = SystemAllocator.make()
   let branchedPending = branched(true, 30, 12) |> Effect.provideMut(&mut branchedAllocator)
-  let branchedValue = run Effect.catch(move branchedPending, recover)
+  let branchedValue = run Effect.catchAll(move branchedPending, recover)
   return scalarValue + ownedValue + borrowedValue + branchedValue
 }`
 

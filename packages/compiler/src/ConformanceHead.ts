@@ -335,10 +335,11 @@ const isOpenArgument = (self: Type.GenericArgument): boolean =>
         : Type.isCallableIdentityArgument(self)
           ? self.typeArguments.some(isOpenArgument)
           : Type.isFailureRowArgument(self)
-            ? self.parameters.length > 0 || self.failures.some((f) => Type.parameters(f).length > 0)
+            ? Type.failureRowParameters(self).length > 0 ||
+              Type.failureMembers(self).some((f) => Type.parameters(f).length > 0)
             : Type.isRequirementRowArgument(self)
-              ? self.parameters.length > 0 ||
-                self.requirements.some((r) => Type.parameters(r.capability).length > 0)
+              ? Type.requirementRowParameters(self).length > 0 ||
+                Type.requirementMembers(self).some((r) => Type.parameters(r.capability).length > 0)
               : false)
 
 const unifyArgument = (
@@ -360,9 +361,9 @@ const unifyArgument = (
   }
   if (Type.isRequirementRowArgument(left) && Type.isRequirementRowArgument(right)) {
     if (isOpenArgument(left) || isOpenArgument(right)) return true
-    if (left.requirements.length !== right.requirements.length) return false
-    return left.requirements.every((requirement, ordinal) => {
-      const opposing = right.requirements.at(ordinal)
+    if (Type.requirementMembers(left).length !== Type.requirementMembers(right).length) return false
+    return Type.requirementMembers(left).every((requirement, ordinal) => {
+      const opposing = Type.requirementMembers(right).at(ordinal)
       // Exclusive requirements accept a shared actual requirement. Therefore access differences
       // cannot prove two closed rows disjoint: both patterns may select the shared form.
       return (
@@ -426,13 +427,19 @@ const unify = (
     return (
       unify(left.success, right.success, bindings) &&
       unifyArgument(
-        Type.failureRowArgument(left.failures, left.failureParameters),
-        Type.failureRowArgument(right.failures, right.failureParameters),
+        Type.failureRowArgument(Type.failureMembers(left), Type.failureRowParameters(left)),
+        Type.failureRowArgument(Type.failureMembers(right), Type.failureRowParameters(right)),
         bindings,
       ) &&
       unifyArgument(
-        Type.requirementRowArgument(left.requirements, left.requirementParameters),
-        Type.requirementRowArgument(right.requirements, right.requirementParameters),
+        Type.requirementRowArgument(
+          Type.requirementMembers(left),
+          Type.requirementRowParameters(left),
+        ),
+        Type.requirementRowArgument(
+          Type.requirementMembers(right),
+          Type.requirementRowParameters(right),
+        ),
         bindings,
       )
     )

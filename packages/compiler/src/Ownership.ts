@@ -915,7 +915,13 @@ const checkExpression = (
             ? Object.freeze({ _tag: 'Parameter', parameter: expression.provider.parameter })
             : undefined
       if (site !== undefined)
-        checkUse(state, live, site, expression.provider.span, expression.provider.access === 'Take')
+        checkUse(
+          state,
+          live,
+          site,
+          expression.provider.span,
+          expression.provider.captureAccess === 'Take',
+        )
       return
     }
     case 'Run': {
@@ -1150,8 +1156,8 @@ const fallibleRunSites = (
     typeof subjectType === 'object' &&
     subjectType !== null &&
     (subjectType as { readonly _tag?: string })._tag === 'EffectType' &&
-    ((subjectType as Type.Effect).failures.length > 0 ||
-      (subjectType as Type.Effect).failureParameters.length > 0)
+    (Type.failureMembers(subjectType as Type.Effect).length > 0 ||
+      Type.failureRowParameters(subjectType as Type.Effect).length > 0)
   return fallible ? [expression, ...nested] : nested
 }
 
@@ -1864,7 +1870,12 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
       case 'EffectBindRequirement': {
         inspect(expression.protected, region, active, 'Read', delayedEnd)
         const provider = expression.provider
-        if (provider === undefined || provider.access === 'Take') return
+        if (
+          provider === undefined ||
+          provider.captureAccess === 'Copy' ||
+          provider.captureAccess === 'Take'
+        )
+          return
         const root: BindingSite =
           provider.reference._tag === 'BindingFact'
             ? Object.freeze({ _tag: 'Let', binding: provider.reference.id })
@@ -1872,13 +1883,13 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         const conflict = active.find(
           (loan) =>
             sameSite(loan.root, root) &&
-            (loan.access === 'Exclusive' || provider.access === 'Exclusive'),
+            (loan.access === 'Exclusive' || provider.captureAccess === 'Exclusive'),
         )
         if (conflict !== undefined)
           diagnostics.push(
             Diagnostic.conflictingSliceLoan(
               conflict.access,
-              provider.access,
+              provider.captureAccess,
               conflict.startSpan,
               provider.span,
             ),
@@ -1893,7 +1904,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
               ordinal: 0,
             }),
             root,
-            access: provider.access,
+            access: provider.captureAccess,
             origin: 'EffectCapture',
             suspendsParent: false,
             startRegion: region,

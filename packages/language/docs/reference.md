@@ -689,7 +689,7 @@ other value.
 `Effect.catch` has two forms, distinguished by whether a member is selected:
 
 ```
-Effect.catch(protected, handler)       // whole-row: the alias for Effect.catchAll
+Effect.catchAll(protected, handler)    // whole-row recovery
 Effect.catch<E>(protected, handler)    // member-selective: recovers E, propagates the rest
 ```
 
@@ -750,7 +750,7 @@ against the cleanup it wraps.
 
 The finalizer is typed `Effect<() ! never ? S>`. It cannot fail, so there is no second outcome to
 reconcile with the one being preserved, and the failure row of the wrapped Effect is untouched. A
-release that can fail is recovered into that contract first — `Effect.catch(release(), ignore)` —
+release that can fail is recovered into that contract first — `Effect.catchAll(release(), ignore)` —
 which leaves the decision about what a failed release means with the caller. A trap is not an
 outcome: it bypasses the finalizer exactly as it bypasses `catch` and every `Drop` hook.
 

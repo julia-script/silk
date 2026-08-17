@@ -173,6 +173,34 @@ impl Logger for Console { enabled: Console.enabled log: Console.log }`,
   }),
 )
 
+it.effect('adapts provider lookup into neutral source evidence without emitting diagnostics', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `service Clock { effect fn read() -> i32 ? &Clock }
+struct SystemClock {}
+effect fn readClock(self: &SystemClock) -> i32 { return 42 }
+impl Clock for SystemClock { read: SystemClock.readClock }
+pub fn main() -> i32 { return 0 }`,
+      ],
+    ])
+    const result = DeclarationIndex.providerMatch(
+      index,
+      Type.nominal('root', 'SystemClock'),
+      Type.nominal('root', 'Clock'),
+    )
+
+    assert.strictEqual(result._tag, 'Unique')
+    if (result._tag === 'Unique') {
+      assert.strictEqual(result.match._tag, 'Conformance')
+      if (result.match._tag === 'Conformance')
+        assert.strictEqual(result.match.witness.origin._tag, 'SourceWitness')
+    }
+    assert.deepEqual(index.diagnostics, [])
+  }),
+)
+
 it.effect('rejects incomplete and stronger source service operation mappings', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
@@ -435,8 +463,8 @@ it.effect('indexes value, failure-row, and requirement-row binders as distinct k
     ) {
       assert.deepEqual(
         [parameterEffect.type, returnEffect.type].map((effect) => ({
-          failures: effect.failureParameters.map((parameter) => parameter.name),
-          requirements: effect.requirementParameters.map((parameter) => parameter.name),
+          failures: Type.failureRowParameters(effect).map((parameter) => parameter.name),
+          requirements: Type.requirementRowParameters(effect).map((parameter) => parameter.name),
         })),
         [
           { failures: ['E'], requirements: ['R'] },
@@ -597,11 +625,11 @@ effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator@Scratch { retur
     assert.isTrue(laterType !== undefined && Type.isEffect(laterType))
     if (laterType === undefined || !Type.isEffect(laterType)) return
     assert.deepEqual(
-      laterType.failures.map((failure) => failure.name),
+      Type.failureMembers(laterType).map((failure) => failure.name),
       ['Problem'],
     )
     assert.deepEqual(
-      laterType.requirements.map((requirement) => ({
+      Type.requirementMembers(laterType).map((requirement) => ({
         capability: requirement.capability.name,
         role: requirement.role,
         access: requirement.access,
@@ -611,7 +639,7 @@ effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator@Scratch { retur
         { capability: 'FileSystem', role: 'DefaultRole', access: 'Shared' },
       ],
     )
-    assert.deepEqual(work?.requirementRow.requirements, laterType.requirements)
+    assert.deepEqual(work?.requirementRow.requirements, Type.requirementMembers(laterType))
   }),
 )
 

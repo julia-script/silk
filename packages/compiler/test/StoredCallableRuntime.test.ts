@@ -163,7 +163,7 @@ effect fn build() -> i32 ! OutOfMemory {
   }
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 42 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const hookOnlyCleanupProgram = (exit: CleanupExit) => `struct Guard<F: once fn(i32) -> i32> {
   tag: i32
@@ -195,7 +195,7 @@ effect fn build() -> i32 ! OutOfMemory {
   }
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 42 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const cleanupExits = ['uncalled', 'consuming', 'moved', 'typed-failure'] as const
 
@@ -205,7 +205,7 @@ const typedFailure = `${takeDeclarations}effect fn build() -> i32 ! OutOfMemory 
   fail OutOfMemory {}
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 42 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const runtimeMatrix = [
   { source: named, target: 'decode' },

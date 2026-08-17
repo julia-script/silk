@@ -409,12 +409,12 @@ const providersOf = (
   if (expression._tag === 'UnionConvert') return providersOf(expression.source, context)
   if (expression._tag === 'EffectResult') return providersOf(expression.protected, context)
   if (expression._tag !== 'EffectBindRequirement') return []
-  const capability = Type.substitute(expression.provider.capability, context.instance.substitution)
-  const providerType = Type.substitute(
-    expression.provider.providerType,
-    context.instance.substitution,
-  )
-  if (!Type.isNominal(capability) || !Type.isNominal(providerType))
+  const proof = Instances.requirementSelection(context.instance, expression.provider)
+  if (proof === undefined) return providersOf(expression.protected, context)
+  const selected = proof.selected
+  const capability = selected.capability
+  const providerType = proof.provider
+  if (capability === undefined || !Type.isNominal(capability) || !Type.isNominal(providerType))
     return providersOf(expression.protected, context)
   const witness =
     expression.provider.witness ?? DeclarationIndex.witness(context.index, providerType, capability)
@@ -423,8 +423,8 @@ const providersOf = (
     Object.freeze({
       capability,
       providerType,
-      role: expression.provider.role,
-      access: expression.provider.access,
+      role: selected.role,
+      access: expression.provider.selectionAccess,
       ...(witness === undefined ? {} : { witness }),
     }),
   ])
@@ -565,7 +565,7 @@ const reifyPolicy = (
   result: Type.Type,
   context: BuildContext,
 ): Extract<CompletionPolicy, { readonly _tag: 'Reify' }> | undefined => {
-  const failureValueType = Type.failureValue(outcome.failures)
+  const failureValueType = Type.failureValue(Type.failureMembers(outcome))
   const successType = Type.resultSuccess(outcome.success)
   const failureType = Type.resultFailure(failureValueType)
   const union = Type.union([successType, failureType])
@@ -716,7 +716,7 @@ const controlsOf = (
                   _tag: 'Propagate' as const,
                   outcome: runner.outcome,
                   failureMappings: Object.freeze(
-                    runner.outcome.failures.map((_failure, source) =>
+                    Type.failureMembers(runner.outcome).map((_failure, source) =>
                       Object.freeze({ source: source + 1, target: source + 1 }),
                     ),
                   ),

@@ -71,16 +71,16 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)
-  let prepared = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(createDirectoriesRecursively(&parent), &mut fs),
+  let prepared = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(createDirectoriesRecursively(&parent), &mut fs),
     &mut allocator
   )
-  let first = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(temporaryDirectory(&parent, "silk-build-"), &mut fs),
+  let first = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(temporaryDirectory(&parent, "silk-build-"), &mut fs),
     &mut allocator
   )
-  let second = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(temporaryDirectory(&parent, "silk-build-"), &mut fs),
+  let second = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(temporaryDirectory(&parent, "silk-build-"), &mut fs),
     &mut allocator
   )
 
@@ -88,19 +88,19 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
   if pathView(&first.path) == pathView(&second.path) { return 1 }
 
   // The made directory is there.
-  if run Intrinsic.bindRequirement(exists(&first.path), &mut fs) {} else { return 2 }
+  if run Intrinsic.bindRequirementMut(exists(&first.path), &mut fs) {} else { return 2 }
 
   // The artifact a caller keeps: written to a durable path outside the scope before it releases.
   let payload = [u8.toU8(1), u8.toU8(2), u8.toU8(3)]
   let durable = run pathJoin(&parent, "promoted.bin") |> Effect.provideMut(&mut allocator)
-  let promoted = run Intrinsic.bindRequirement(FileSystem.writeFile(&durable, &payload), &mut fs)
+  let promoted = run Intrinsic.bindRequirementMut(FileSystem.writeFile(&durable, &payload), &mut fs)
 
-  let released = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(release(move first), &mut fs),
+  let released = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(release(move first), &mut fs),
     &mut allocator
   )
-  let releasedSecond = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(release(move second), &mut fs),
+  let releasedSecond = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(release(move second), &mut fs),
     &mut allocator
   )
   return 42
@@ -119,8 +119,8 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let target = run pathMake("/tree") |> Effect.provideMut(&mut allocator)
-  let removed = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(removeDirectoryRecursively(&target), &mut fs),
+  let removed = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(removeDirectoryRecursively(&target), &mut fs),
     &mut allocator
   )
   return 42
@@ -140,31 +140,31 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/many") |> Effect.provideMut(&mut allocator)
-  let prepared = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(createDirectoriesRecursively(&parent), &mut fs),
+  let prepared = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(createDirectoriesRecursively(&parent), &mut fs),
     &mut allocator
   )
   let payload = [u8.toU8(1), u8.toU8(2), u8.toU8(3)]
 ${[0, 1, 2]
   .map(
-    (index) => `  let scope${index} = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(temporaryDirectory(&parent, "silk-many${index}-"), &mut fs),
+    (index) => `  let scope${index} = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(temporaryDirectory(&parent, "silk-many${index}-"), &mut fs),
     &mut allocator
   )
   let nested${index} = run pathJoin(&scope${index}.path, "nested") |> Effect.provideMut(&mut allocator)
-  let madeNested${index} = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(createDirectoriesRecursively(&nested${index}), &mut fs),
+  let madeNested${index} = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(createDirectoriesRecursively(&nested${index}), &mut fs),
     &mut allocator
   )
   let file${index} = run pathJoin(&nested${index}, "payload.bin") |> Effect.provideMut(&mut allocator)
-  let wrote${index} = run Intrinsic.bindRequirement(FileSystem.writeFile(&file${index}, &payload), &mut fs)
-  if run Intrinsic.bindRequirement(exists(&scope${index}.path), &mut fs) {} else { return ${index + 1} }`,
+  let wrote${index} = run Intrinsic.bindRequirementMut(FileSystem.writeFile(&file${index}, &payload), &mut fs)
+  if run Intrinsic.bindRequirementMut(exists(&scope${index}.path), &mut fs) {} else { return ${index + 1} }`,
   )
   .join('\n')}
 ${[0, 1, 2]
   .map(
-    (index) => `  let released${index} = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(release(move scope${index}), &mut fs),
+    (index) => `  let released${index} = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(release(move scope${index}), &mut fs),
     &mut allocator
   )`,
   )
@@ -185,15 +185,15 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)
-  let scope = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(temporaryDirectory(&parent, "silk-"), &mut fs),
+  let scope = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(temporaryDirectory(&parent, "silk-"), &mut fs),
     &mut allocator
   )
   if pathView(&scope.path) != "/scopes/silk-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
     return 1
   }
-  let released = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(release(move scope), &mut fs),
+  let released = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(release(move scope), &mut fs),
     &mut allocator
   )
   return 42

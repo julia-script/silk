@@ -4808,7 +4808,9 @@ function* executeFunction(
                     ]),
                   })
                 : (() => {
-                    const failure = operation.outcomeType.type.failures.at(outcome.tag - 1)
+                    const failure = Type.failureMembers(operation.outcomeType.type).at(
+                      outcome.tag - 1,
+                    )
                     if (failure === undefined || outcome.payload._tag !== 'AggregateValue')
                       throw new RangeError('MIR Effect result has an invalid failure tag')
                     const failureValue: Value = Type.isUnion(operation.failureValueType)
@@ -5533,7 +5535,7 @@ const executeMachine = (
         const innermost = rollbackPending.at(0)
         const failureOutcome =
           innermost?.relay?.descriptor.runner.outcome ?? context.step.origin.deferred.outcome
-        const failureTag = failureOutcome.failures.findIndex(
+        const failureTag = Type.failureMembers(failureOutcome).findIndex(
           (member) => member.module === 'silk/core' && member.name === 'OutOfMemory',
         )
         if (failureTag < 0)

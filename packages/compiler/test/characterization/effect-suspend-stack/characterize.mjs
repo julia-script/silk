@@ -150,7 +150,7 @@ effect fn dropOnly() -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 2 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(${shape === 'box-build' ? 'buildOnly()' : shape === 'box-walk' ? 'walkOnly()' : 'dropOnly()'}, recover)
+  return run Effect.catchAll(${shape === 'box-build' ? 'buildOnly()' : shape === 'box-walk' ? 'walkOnly()' : 'dropOnly()'}, recover)
 }`
 
 const source = shape === 'scalar-non-tail' ? scalarSource : boxSource

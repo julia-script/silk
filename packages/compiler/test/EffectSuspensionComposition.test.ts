@@ -13,7 +13,7 @@ effect fn mapped() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(mapped() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(mapped() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const flatMapSource = `effect fn selected(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
@@ -26,7 +26,7 @@ effect fn chained() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(chained() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(chained() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const recoverySource = `struct Problem { code: i32 }
@@ -37,7 +37,7 @@ effect fn protected() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
 effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(protected() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(protected() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const retrySource = `struct Problem { code: i32 }
@@ -48,7 +48,7 @@ effect fn attempt() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
 effect fn recover(error: Problem | OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(
+  return run Effect.catchAll(
     attempt() |> Effect.retry(2) |> Effect.provideMut(&mut allocator),
     recover
   )
@@ -67,7 +67,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let fixed = Fixed { value: 42 }
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(
+  return run Effect.catchAll(
     provided() |> Effect.provide(&fixed) |> Effect.provideMut(&mut allocator),
     recover
   )
@@ -86,7 +86,7 @@ effect fn odd(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(even(20) |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(even(20) |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const allocatorRefusalSource = `struct ExhaustedAllocator { tag: i32 }
@@ -101,7 +101,7 @@ effect fn protected() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = ExhaustedAllocator { tag: 0 }
-  return run Effect.catch(protected() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(protected() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const laterAllocatorRefusalSource = `struct QuotaAllocator { remaining: i32 }
@@ -126,7 +126,7 @@ effect fn protected() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = QuotaAllocator { remaining: 2 }
-  return run Effect.catch(protected() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(protected() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const cleanupSource = (failAtBase: boolean): string => `struct Problem { code: i32 }
@@ -145,7 +145,7 @@ effect fn descend(value: i32) -> i32 ! Problem | OutOfMemory ? &mut Allocator {
 effect fn recover(error: Problem | OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(descend(3) |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(descend(3) |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const trapSource = `struct Guard { storage: Allocation }
@@ -159,7 +159,7 @@ effect fn protected() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(protected() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(protected() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const runAll = Effect.fnUntraced(function* (name: string, source: string, expected: number) {

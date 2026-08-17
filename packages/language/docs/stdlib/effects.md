@@ -25,7 +25,7 @@ and therefore adds explicit [`OutOfMemory`](./core.md#declaration-73696c6b2f636f
 
 Import as `Effect` with `import silk.effects`.
 
-Public declarations: 23.
+Public declarations: 25.
 
 <a id="declaration-73696c6b2f656666656374733a3a6c6f67"></a>
 
@@ -250,10 +250,10 @@ handler. Use `catch<E>` to recover a single member and leave the rest propagatin
 ## `catch`
 
 ```silk
-pub effect fn catch<A, !E, !F, ?R, ?S>(self: once Effect<A ! E ? R>, onFailure: once fn(Row<! E>) -> Effect<A ! F ? S>) -> A ! F ? R | S
+pub effect fn catch<S, A, !E, !F, ?R, ?Q>(self: once Effect<A ! E ? R>, onFailure: once fn(S) -> Effect<A ! F ? Q>) -> A ! F ? R | Q
 ```
 
-Recovers one selected typed failure, or the whole row when no member is selected.
+Recovers one selected typed failure.
 
 ### Details
 
@@ -261,12 +261,8 @@ Recovers one selected typed failure, or the whole row when no member is selected
 only for that member, its own failures join the result row, and every nonmatching member of
 the protected row propagates unchanged as the residual. Success bypasses the handler.
 
-The residual row — the protected row minus the selected member — is computed by the compiler,
-because no source-level type can spell it. That makes the selector form a compiler primitive
-rather than ordinary Silk; see `reference.md` §5.4.
-
-Without a selector, `Effect.catch(protected, handler)` recovers the whole row and is the alias
-for `catchAll` that this declaration provides.
+The residual row is expressed by ordinary row algebra and the runtime dispatch remains a sealed
+analysis-only primitive until engines implement it.
 
 The selector form is analyzed but not yet executable: no engine lowers the residual dispatch,
 so writing it reports `SEM0098` at the call and the program does not build. The whole-row form
@@ -343,17 +339,37 @@ Repeats a reusable Effect after typed failure up to the requested count.
 ## `bindRequirement`
 
 ```silk
-pub effect fn bindRequirement<A, C, P, !E, ?R>(self: once Effect<A ! E ? &C | R>, provider: &P) -> A ! E ? R
+pub effect fn bindRequirement<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: &P) -> A ! E
 ```
 
 Satisfies one typed service requirement with an existing provider.
+
+<a id="declaration-73696c6b2f656666656374733a3a62696e64526571756972656d656e744d7574"></a>
+
+## `bindRequirementMut`
+
+```silk
+pub effect fn bindRequirementMut<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A ! E
+```
+
+Satisfies one exclusive typed service requirement with an existing provider.
+
+<a id="declaration-73696c6b2f656666656374733a3a62696e64526571756972656d656e744f776e6564"></a>
+
+## `bindRequirementOwned`
+
+```silk
+pub effect fn bindRequirementOwned<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: P) -> A ! E
+```
+
+Satisfies one typed service requirement by taking ownership of its provider.
 
 <a id="declaration-73696c6b2f656666656374733a3a70726f76696465"></a>
 
 ## `provide`
 
 ```silk
-pub effect fn provide<A, C, P, !E, ?R>(self: once Effect<A ! E ? &C | R>, provider: &P) -> A ! E ? R
+pub effect fn provide<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: &P) -> A ! E
 ```
 
 Satisfies one typed service requirement with an existing provider.
@@ -363,7 +379,7 @@ Satisfies one typed service requirement with an existing provider.
 ## `provideMut`
 
 ```silk
-pub effect fn provideMut<A, C, P, !E, ?R>(self: once Effect<A ! E ? &mut C | R>, provider: &mut P) -> A ! E ? R
+pub effect fn provideMut<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A ! E
 ```
 
 Satisfies one typed service requirement with an existing exclusive provider.
@@ -373,7 +389,7 @@ Satisfies one typed service requirement with an existing exclusive provider.
 ## `provideWith`
 
 ```silk
-pub effect fn provideWith<A, C, !E, !F, ?R, ?S>(self: once Effect<A ! E ? &mut C | R>, acquire: Effect<C ! F ? S>) -> A ! E | F ? R | S
+pub effect fn provideWith<?S, A, P, !E, !F, ?R, ?Q>(self: once Effect<A ! E ? R>, acquire: Effect<P ! F ? Q>) -> A ! E | F
 ```
 
 Acquires and lexically provides one typed service requirement.

@@ -134,7 +134,7 @@ struct HandlerProblem {}
 effect fn risky() -> i32 ! First { fail move First {} }
 effect fn recover(problem: First) -> i32 ! HandlerProblem { fail move HandlerProblem {} }
 effect fn outer() -> i32 ! HandlerProblem {
-  let recipe = risky() |> Effect.catch(recover)
+  let recipe = risky() |> Effect.catchAll(recover)
   return run recipe
 }`,
     )
@@ -144,7 +144,9 @@ effect fn outer() -> i32 ! HandlerProblem {
     const recipe = outer?.bindings.at(0)?.inferredType
     assert.strictEqual(recipe?._tag, 'Available')
     if (recipe?._tag !== 'Available' || !Type.isEffect(recipe.type)) return
-    assert.deepEqual(recipe.type.failures.map(Type.encode), ['effect/catch-algebra.HandlerProblem'])
+    assert.deepEqual(Type.failureMembers(recipe.type).map(Type.encode), [
+      'effect/catch-algebra.HandlerProblem',
+    ])
   }),
 )
 
@@ -324,12 +326,12 @@ fn main() -> i32 {
           ? logged.binding.initializer.type.type
           : undefined
       assert.strictEqual(
-        type !== undefined && Type.isEffect(type) ? type.requirements.length : 0,
+        type !== undefined && Type.isEffect(type) ? Type.requirementMembers(type).length : 0,
         1,
       )
       assert.strictEqual(
         type !== undefined && Type.isEffect(type)
-          ? Type.encode(type.requirements.at(0)?.capability ?? 'never')
+          ? Type.encode(Type.requirementMembers(type).at(0)?.capability ?? 'never')
           : undefined,
         'effect/logger-tap.TapLogger',
       )
@@ -373,7 +375,7 @@ effect fn work() -> i32 ? &Clock@Left | &Clock@Right { return 42 }
 fn main() -> i32 {
   let left = Clock {}
   let right = Clock {}
-  let recipe = work() |> Intrinsic.bindRequirement(&left, @Left) |> Intrinsic.bindRequirement(&right, @Right)
+  let recipe = work() |> Intrinsic.bindRequirement<&Clock@Left>(&left) |> Intrinsic.bindRequirement<&Clock@Right>(&right)
   return run recipe
 }`,
   )
@@ -395,7 +397,7 @@ fn main() -> i32 {
 
     assert.include(
       result.diagnostics.map((diagnostic) => diagnostic.code),
-      'SEM0089',
+      'SEM0125',
     )
   }),
 )
@@ -414,8 +416,30 @@ fn main() -> i32 {
 
   assert.include(
     result.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0074',
+    'SEM0123',
   )
+})
+
+it('keeps stored access separate from exclusive provider selection and capture access', () => {
+  const result = analyzeText(
+    'effect://exclusive-provider-shared-requirement',
+    `struct Clock {}
+effect fn read() -> i32 ? &Clock { return 42 }
+fn main() -> i32 {
+  let mut clock = Clock {}
+  let recipe = read() |> Intrinsic.bindRequirementMut(&mut clock)
+  return 0
+}`,
+  )
+  const statement = result.hir.functions.at(1)?.statements.at(1)
+  const binding = statement?._tag === 'Bind' ? statement.initializer : undefined
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(binding?._tag, 'EffectBindRequirement')
+  if (binding?._tag !== 'EffectBindRequirement') return
+  assert.strictEqual(Hir.selectedRequirement(binding.provider, new Map())?.access, 'Shared')
+  assert.strictEqual(binding.provider.selectionAccess, 'Exclusive')
+  assert.strictEqual(binding.provider.captureAccess, 'Exclusive')
 })
 
 it.effect('rejects a concrete provideMut provider without the required capability', () =>
@@ -434,7 +458,7 @@ pub fn main() -> i32 {
 
     assert.include(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      'SEM0074',
+      'SEM0123',
     )
     assert.strictEqual(Analysis.mirOf(snapshot)._tag, 'Unavailable')
   }),
@@ -460,24 +484,57 @@ pub fn main() -> i32 {
   }),
 )
 
-it('owns a moved provider in a take-once Effect wrapper', () => {
+it('copies a moved Copy provider into a repeatable owned-binding wrapper', () => {
   const result = analyzeText(
     'effect://moved-provider',
     `struct Clock {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
 fn main() -> i32 {
   let clock = Clock {}
-  let recipe = read() |> Intrinsic.bindRequirement(move clock)
+  let recipe = read() |> Intrinsic.bindRequirementOwned(move clock)
   return 0
 }`,
   )
   const main = result.functions.at(1)
   const recipe = main?.bindings.at(1)?.initializer
+  const statement = result.hir.functions.at(1)?.statements.at(1)
+  const binding = statement?._tag === 'Bind' ? statement.initializer : undefined
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(recipe?.type._tag, 'Available')
+  if (recipe?.type._tag !== 'Available' || !Type.isEffect(recipe.type.type)) return
+  assert.strictEqual(recipe.type.type.access, 'Shared')
+  assert.strictEqual(binding?._tag, 'EffectBindRequirement')
+  if (binding?._tag !== 'EffectBindRequirement') return
+  assert.strictEqual(binding.provider.selectionAccess, 'Take')
+  assert.strictEqual(binding.provider.captureAccess, 'Copy')
+})
+
+it('takes a moved affine provider into a take-once owned-binding wrapper', () => {
+  const result = analyzeText(
+    'effect://moved-affine-provider',
+    `struct Token { action: once fn() -> i32 }
+struct Clock { token: Token }
+fn tick() -> i32 { return 1 }
+effect fn read() -> i32 ? &mut Clock { return 42 }
+fn main() -> i32 {
+  let clock = Clock { token: Token { action: tick } }
+  let recipe = read() |> Intrinsic.bindRequirementOwned(move clock)
+  return 0
+}`,
+  )
+  const recipe = result.functions.at(2)?.bindings.at(1)?.initializer
+  const statement = result.hir.functions.at(2)?.statements.at(1)
+  const binding = statement?._tag === 'Bind' ? statement.initializer : undefined
 
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(recipe?.type._tag, 'Available')
   if (recipe?.type._tag !== 'Available' || !Type.isEffect(recipe.type.type)) return
   assert.strictEqual(recipe.type.type.access, 'Take')
+  assert.strictEqual(binding?._tag, 'EffectBindRequirement')
+  if (binding?._tag !== 'EffectBindRequirement') return
+  assert.strictEqual(binding.provider.selectionAccess, 'Take')
+  assert.strictEqual(binding.provider.captureAccess, 'Take')
 })
 
 it.effect('keeps per-run provider acquisition distinct and composes its contract', () =>
@@ -505,8 +562,10 @@ fn main() -> i32 {
     )
     assert.strictEqual(recipe?.type._tag, 'Available')
     if (recipe?.type._tag !== 'Available' || !Type.isEffect(recipe.type.type)) return
-    assert.deepEqual(recipe.type.type.failures.map(Type.encode), ['effect/provide-with.OpenError'])
-    assert.deepEqual(recipe.type.type.requirements, [])
+    assert.deepEqual(Type.failureMembers(recipe.type.type).map(Type.encode), [
+      'effect/provide-with.OpenError',
+    ])
+    assert.deepEqual(Type.requirementMembers(recipe.type.type), [])
   }),
 )
 
@@ -529,9 +588,11 @@ fn main() -> i32 {
     assert.strictEqual(allocation?._tag, 'Resolved')
     if (allocation?._tag !== 'Resolved' || !Type.isEffect(allocation.type)) return
     assert.ok(Type.equals(allocation.type.success, Type.allocation))
-    assert.deepEqual(allocation.type.failures.map(Type.encode), ['silk/core.OutOfMemory'])
+    assert.deepEqual(Type.failureMembers(allocation.type).map(Type.encode), [
+      'silk/core.OutOfMemory',
+    ])
     assert.deepEqual(
-      allocation.type.requirements.map((requirement) => ({
+      Type.requirementMembers(allocation.type).map((requirement) => ({
         capability: Type.encode(requirement.capability),
         role: requirement.role,
         access: requirement.access,
@@ -592,7 +653,7 @@ struct Other {}
 effect fn risky() -> i32 ! Problem { fail move Problem {} }
 effect fn wrong(problem: Other) -> bool { return true }
 fn main() -> i32 {
-  let recipe = Effect.catch(risky(), wrong)
+  let recipe = Effect.catchAll(risky(), wrong)
   return 0
 }`,
     )
@@ -829,6 +890,7 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
     actualCount: 1,
     typeArguments: [],
     substitution: new Map(),
+    evidence: [],
   })
   assert.deepEqual(
     twoCall.arguments.map((argument) => argument.id.ordinal),
@@ -847,6 +909,7 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
     actualCount: 2,
     typeArguments: [],
     substitution: new Map(),
+    evidence: [],
   })
   assert.strictEqual(Object.isFrozen(oneCall.arguments), true)
   assert.strictEqual(Object.isFrozen(firstArgument), true)
@@ -930,8 +993,8 @@ it('propagates an unresolved inner target only to dependent outer facts', () => 
   assert.strictEqual(outer.mappings.length, 1)
   assert.strictEqual(outer.contract._tag, 'Unavailable')
   if (outer.contract._tag !== 'Unavailable') return
-  assert.strictEqual(outer.contract.reason._tag, 'UnavailableMappedType')
-  assert.deepEqual(outer.type, { _tag: 'Available', type: 'i32' })
+  assert.strictEqual(outer.contract.reason._tag, 'UnavailableBuiltinArgument')
+  assert.deepEqual(outer.type, { _tag: 'Unavailable' })
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0004'],
@@ -946,8 +1009,8 @@ it('diagnoses an incompatible inner call exactly once without inventing an outer
   assert.strictEqual(inner._tag, 'Call')
   if (inner._tag !== 'Call') return
   assert.strictEqual(inner.contract._tag, 'ArityMismatch')
-  assert.deepEqual(inner.type, { _tag: 'Available', type: 'i32' })
-  assert.strictEqual(outer.contract._tag, 'Compatible')
+  assert.deepEqual(inner.type, { _tag: 'Unavailable' })
+  assert.strictEqual(outer.contract._tag, 'Unavailable')
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0078'],
@@ -990,7 +1053,7 @@ it('keeps damaged nested syntax parser-owned while retaining recursive facts', (
   assert.strictEqual(call.mappings.length, 1)
   assert.strictEqual(call.contract._tag, 'Unavailable')
   if (call.contract._tag !== 'Unavailable') return
-  assert.strictEqual(call.contract.reason._tag, 'UnavailableMappedType')
+  assert.strictEqual(call.contract.reason._tag, 'UnavailableBuiltinArgument')
   assert.deepEqual(
     result.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0002'],
@@ -1047,8 +1110,8 @@ it('forms the one leading section and still diagnoses deeper arity mismatches', 
     actualCount: 2,
   })
   assert.strictEqual(manyCall.mappings.length, 1)
-  assert.deepEqual(manyFunction.returnCompatibility, { _tag: 'Compatible' })
-  assert.deepEqual(manyCall.type, { _tag: 'Available', type: 'i32' })
+  assert.deepEqual(manyFunction.returnCompatibility, { _tag: 'Unavailable' })
+  assert.deepEqual(manyCall.type, { _tag: 'Unavailable' })
   assert.deepEqual(tooFew.diagnostics, [])
   assert.deepEqual(
     tooMany.diagnostics.map((diagnostic) => diagnostic.code),

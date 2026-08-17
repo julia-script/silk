@@ -2046,7 +2046,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               }
               const failure =
                 entry.fn.result._tag === 'EffectOutcome'
-                  ? entry.fn.result.type.failures.findIndex(
+                  ? SilkType.failureMembers(entry.fn.result.type).findIndex(
                       (member) => member.module === 'silk/core' && member.name === 'OutOfMemory',
                     )
                   : -1
@@ -7307,7 +7307,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   )
                   yield* FunctionBody.branch(body, followingBlock)
                   yield* LlvmBlock.setInsertionPoint(body, failureBlock)
-                  if (operation.outcomeType.type.failures.length === 0) {
+                  if (SilkType.failureMembers(operation.outcomeType.type).length === 0) {
                     if (trapBlock === undefined)
                       trapBlock = yield* LlvmBlock.make(body, 'effect_result_invalid_tag')
                     yield* FunctionBody.branch(body, trapBlock)

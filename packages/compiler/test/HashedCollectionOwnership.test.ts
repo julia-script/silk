@@ -103,7 +103,7 @@ ${body}
 
 effect fn recover(error: OutOfMemory) -> i32 { return 99 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const allocationEvents = (
   run: ReturnType<typeof Analysis.evaluate>,

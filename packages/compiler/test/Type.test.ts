@@ -1,4 +1,9 @@
 import { assert, it } from '@effect/vitest'
+import * as CallableContract from '../src/CallableContract.js'
+import * as Constraint from '../src/Constraint.js'
+import * as FiniteRow from '../src/FiniteRow.js'
+import * as RequirementRow from '../src/RequirementRow.js'
+import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as Type from '../src/Type.js'
 import * as TypeCompatibility from '../src/TypeCompatibility.js'
 
@@ -164,5 +169,492 @@ it('canonicalizes callable contracts and orders invocation guarantees', () => {
   assert.strictEqual(
     TypeCompatibility.isCompatible(TypeCompatibility.check(once, exclusive)),
     false,
+  )
+})
+
+it('normalizes finite rows and applies total exact set operations deterministically', () => {
+  const policy: FiniteRow.Policy<string> = {
+    collisionKey: (member) => member,
+    memberKey: (member) => member,
+    merge: (left) => left,
+  }
+  const first = FiniteRow.make(policy, ['C', 'A', 'B', 'A'])
+  const permuted = FiniteRow.make(policy, ['B', 'C', 'A'])
+  const selected = FiniteRow.make(policy, ['C', 'missing', 'A'])
+
+  assert.deepEqual(first.members, ['A', 'B', 'C'])
+  assert.strictEqual(FiniteRow.equals(policy, first, permuted), true)
+  assert.strictEqual(FiniteRow.key(policy, first), FiniteRow.key(policy, permuted))
+  assert.deepEqual(FiniteRow.intersection(policy, first, selected).members, ['A', 'C'])
+  assert.deepEqual(FiniteRow.difference(policy, first, selected).members, ['B'])
+  assert.deepEqual(
+    FiniteRow.difference(policy, first, FiniteRow.make(policy, ['missing'])).members,
+    ['A', 'B', 'C'],
+  )
+  assert.strictEqual(FiniteRow.isSubset(policy, FiniteRow.make(policy, ['A', 'C']), first), true)
+  assert.strictEqual(
+    FiniteRow.encode(policy, first, (member) => member),
+    'A | B | C',
+  )
+})
+
+it('keeps requirement union joins separate from exact membership and difference', () => {
+  type Capability = 'Clock' | 'Logger'
+  type Member = RequirementRow.Member<Capability>
+  const policy = RequirementRow.policy<Capability>((capability) => capability)
+  const member = (
+    capability: Capability,
+    access: RequirementRow.Access,
+    role = 'Default',
+  ): Member => ({ capability, access, role })
+
+  for (const [left, right, expected] of [
+    ['Shared', 'Shared', 'Shared'],
+    ['Shared', 'Exclusive', 'Exclusive'],
+    ['Exclusive', 'Shared', 'Exclusive'],
+    ['Exclusive', 'Exclusive', 'Exclusive'],
+  ] as const) {
+    const united = FiniteRow.union(
+      policy,
+      FiniteRow.make(policy, [member('Logger', left)]),
+      FiniteRow.make(policy, [member('Logger', right)]),
+    )
+    assert.strictEqual(united.members.at(0)?.access, expected)
+  }
+
+  const shared = FiniteRow.make(policy, [member('Logger', 'Shared')])
+  const exclusive = FiniteRow.make(policy, [member('Logger', 'Exclusive')])
+  assert.strictEqual(FiniteRow.has(policy, shared, member('Logger', 'Shared')), true)
+  assert.strictEqual(FiniteRow.has(policy, shared, member('Logger', 'Exclusive')), false)
+  assert.strictEqual(FiniteRow.has(policy, exclusive, member('Logger', 'Shared')), false)
+  assert.strictEqual(FiniteRow.has(policy, exclusive, member('Logger', 'Exclusive')), true)
+  assert.deepEqual(FiniteRow.intersection(policy, shared, exclusive).members, [])
+  assert.deepEqual(FiniteRow.intersection(policy, exclusive, shared).members, [])
+  assert.deepEqual(FiniteRow.intersection(policy, shared, shared).members, shared.members)
+  assert.deepEqual(FiniteRow.intersection(policy, exclusive, exclusive).members, exclusive.members)
+  assert.strictEqual(FiniteRow.isSubset(policy, shared, exclusive), false)
+  assert.strictEqual(FiniteRow.isSubset(policy, exclusive, shared), false)
+  assert.strictEqual(FiniteRow.isSubset(policy, shared, shared), true)
+  assert.strictEqual(FiniteRow.isSubset(policy, exclusive, exclusive), true)
+  assert.deepEqual(FiniteRow.difference(policy, shared, exclusive).members, shared.members)
+  assert.deepEqual(FiniteRow.difference(policy, exclusive, shared).members, exclusive.members)
+  assert.deepEqual(FiniteRow.difference(policy, shared, shared).members, [])
+  assert.deepEqual(FiniteRow.difference(policy, exclusive, exclusive).members, [])
+
+  const collisions = FiniteRow.make(policy, [
+    member('Logger', 'Shared'),
+    member('Logger', 'Exclusive'),
+    member('Clock', 'Shared'),
+    member('Logger', 'Shared', 'Audit'),
+  ])
+  assert.deepEqual(collisions.members, [
+    member('Clock', 'Shared'),
+    member('Logger', 'Shared', 'Audit'),
+    member('Logger', 'Exclusive'),
+  ])
+})
+
+it('renormalizes requirement collisions introduced by substitution', () => {
+  const owner = { module: 'work', name: 'provide' }
+  const capability = Type.parameter(owner, 0, 'P')
+  const logger = Type.nominal('silk/logging', 'Logger')
+  const contract = Type.effect('never', [], 'Shared', [
+    { capability, role: 'Default', access: 'Shared' },
+    { capability: logger, role: 'Default', access: 'Exclusive' },
+  ])
+  const substituted = Type.substitute(contract, new Map([[Type.key(capability), logger]]))
+
+  assert.strictEqual(Type.isEffect(substituted), true)
+  if (Type.isEffect(substituted))
+    assert.deepEqual(Type.requirementMembers(substituted), [
+      { capability: logger, role: 'Default', access: 'Exclusive' },
+    ])
+})
+
+it('checks provider compatibility independently from exact stored access', () => {
+  assert.strictEqual(RequirementRow.providerCanSelect('Shared', 'Shared'), true)
+  assert.strictEqual(RequirementRow.providerCanSelect('Shared', 'Exclusive'), false)
+  assert.strictEqual(RequirementRow.providerCanSelect('Exclusive', 'Shared'), true)
+  assert.strictEqual(RequirementRow.providerCanSelect('Exclusive', 'Exclusive'), true)
+  assert.strictEqual(RequirementRow.providerCanSelect('Take', 'Shared'), true)
+  assert.strictEqual(RequirementRow.providerCanSelect('Take', 'Exclusive'), true)
+})
+
+it('normalizes open row union ACI and retains erased member obligations', () => {
+  interface SymbolicMember {
+    readonly parameter: string
+  }
+  const finite: FiniteRow.Policy<string> = {
+    collisionKey: (member) => member,
+    memberKey: (member) => member,
+    merge: (left) => left,
+  }
+  const policy: RowAlgebra.Policy<string, string, SymbolicMember, string> = {
+    finite,
+    rowParameterKey: (parameter) => parameter,
+    symbolicMemberKey: (member) => member.parameter,
+    symbolicMemberParameters: (member) => [member.parameter],
+    memberParameterKey: (parameter) => parameter,
+    memberWellFormedKey: (member) => `FailureMember:${member.parameter}`,
+    allowsSetCancellation: true,
+  }
+  const firstOrigin = { sourceId: 'main', start: 20, end: 21 }
+  const earlierOrigin = { sourceId: 'main', start: 10, end: 11 }
+  const a = RowAlgebra.parameter<string, string, SymbolicMember>('A')
+  const b = RowAlgebra.parameter<string, string, SymbolicMember>('B')
+  const s1 = RowAlgebra.singleton(policy, { parameter: 'S' }, firstOrigin)
+  const s2 = RowAlgebra.singleton(policy, { parameter: 'S' }, earlierOrigin)
+  const left = RowAlgebra.union(policy, RowAlgebra.union(policy, a, b), s1)
+  const right = RowAlgebra.union(policy, s2, RowAlgebra.union(policy, b, a))
+
+  assert.strictEqual(RowAlgebra.equals(policy, left, right), true)
+  assert.strictEqual(RowAlgebra.key(policy, left), RowAlgebra.key(policy, right))
+  assert.deepEqual(right.memberWellFormed.at(0)?.origins, [earlierOrigin])
+
+  const repeated = RowAlgebra.union(policy, left, s2)
+  assert.deepEqual(repeated.memberWellFormed.at(0)?.origins, [earlierOrigin, firstOrigin])
+  assert.strictEqual(RowAlgebra.key(policy, repeated), RowAlgebra.key(policy, left))
+  const obligation = repeated.memberWellFormed.at(0)
+  assert.isDefined(obligation)
+  if (obligation !== undefined) {
+    assert.deepEqual(RowAlgebra.diagnosticLocations(obligation), {
+      primary: earlierOrigin,
+      secondary: [firstOrigin],
+    })
+    const responsible = { sourceId: 'call', start: 30, end: 31 }
+    assert.deepEqual(RowAlgebra.diagnosticLocations(obligation, responsible), {
+      primary: responsible,
+      secondary: [earlierOrigin, firstOrigin],
+    })
+  }
+
+  const erased = RowAlgebra.without(policy, s1, s2)
+  assert.strictEqual(
+    RowAlgebra.encode(policy, erased, String, String, (member) => member.parameter),
+    '',
+  )
+  assert.deepEqual(RowAlgebra.parameters(policy, erased), { rows: [], members: ['S'] })
+  assert.strictEqual(RowAlgebra.concretize(policy, erased)._tag, 'Residual')
+  const emptyLeft = RowAlgebra.without(policy, RowAlgebra.concrete(policy, []), s1)
+  assert.deepEqual(RowAlgebra.parameters(policy, emptyLeft), { rows: [], members: ['S'] })
+})
+
+it('substitutes symbolic members residually or concretely and reports invalid singleton domains', () => {
+  interface SymbolicMember {
+    readonly parameter: string
+  }
+  const policy: RowAlgebra.Policy<string, string, SymbolicMember, string> = {
+    finite: {
+      collisionKey: (member) => member,
+      memberKey: (member) => member,
+      merge: (left) => left,
+    },
+    rowParameterKey: (parameter) => parameter,
+    symbolicMemberKey: (member) => member.parameter,
+    symbolicMemberParameters: (member) => [member.parameter],
+    memberParameterKey: (parameter) => parameter,
+    memberWellFormedKey: (member) => `FailureMember:${member.parameter}`,
+    allowsSetCancellation: true,
+  }
+  const origin = { sourceId: 'main', start: 4, end: 5 }
+  const symbolic = RowAlgebra.singleton(policy, { parameter: 'S' }, origin)
+  const source = RowAlgebra.union(
+    policy,
+    RowAlgebra.parameter<string, string, SymbolicMember>('E'),
+    symbolic,
+  )
+  const expression = RowAlgebra.without(policy, source, symbolic)
+  const noRows = () => undefined
+
+  const residual = RowAlgebra.substitute(policy, expression, {
+    row: noRows,
+    member: (member) => ({
+      _tag: 'Residual',
+      member: { parameter: `${member.parameter}2` },
+    }),
+  })
+  assert.strictEqual(residual._tag, 'Substituted')
+  if (residual._tag === 'Substituted')
+    assert.deepEqual(RowAlgebra.parameters(policy, residual.row), {
+      rows: ['E'],
+      members: ['S2'],
+    })
+
+  const concrete = RowAlgebra.substitute(policy, expression, {
+    row: (parameter) =>
+      parameter === 'E' ? RowAlgebra.concrete(policy, ['Problem', 'Other']) : undefined,
+    member: () => ({ _tag: 'Concrete', member: 'Problem' }),
+  })
+  assert.strictEqual(concrete._tag, 'Substituted')
+  if (concrete._tag === 'Substituted') {
+    const finite = RowAlgebra.concretize(policy, concrete.row)
+    assert.strictEqual(finite._tag, 'Concrete')
+    if (finite._tag === 'Concrete') assert.deepEqual(finite.row.members, ['Other'])
+
+    const distinctOpen = RowAlgebra.parameter<string, string, SymbolicMember>('OnlyOther')
+    const sameConcrete = RowAlgebra.substitute(policy, distinctOpen, {
+      row: () => RowAlgebra.concrete(policy, ['Other']),
+      member: (member) => ({ _tag: 'Residual', member }),
+    })
+    assert.strictEqual(sameConcrete._tag, 'Substituted')
+    if (sameConcrete._tag === 'Substituted')
+      assert.strictEqual(RowAlgebra.equals(policy, concrete.row, sameConcrete.row), true)
+  }
+
+  const invalid = RowAlgebra.substitute(policy, expression, {
+    row: noRows,
+    member: () => ({ _tag: 'InvalidSingleton', reason: 'expected one nominal failure' }),
+  })
+  assert.deepEqual(invalid, {
+    _tag: 'InvalidMembers',
+    invalid: [
+      {
+        key: 'FailureMember:S',
+        reason: 'expected one nominal failure',
+        origins: [origin],
+      },
+    ],
+  })
+})
+
+it('applies safe cancellation only in domains that opt into set laws', () => {
+  const finite: FiniteRow.Policy<string> = {
+    collisionKey: (member) => member,
+    memberKey: (member) => member,
+    merge: (left) => left,
+  }
+  const makePolicy = (
+    allowsSetCancellation: boolean,
+  ): RowAlgebra.Policy<string, string, string, string> => ({
+    finite,
+    rowParameterKey: (parameter) => parameter,
+    symbolicMemberKey: (member) => member,
+    symbolicMemberParameters: (member) => [member],
+    memberParameterKey: (parameter) => parameter,
+    memberWellFormedKey: (member) => member,
+    allowsSetCancellation,
+  })
+  const setPolicy = makePolicy(true)
+  const accessPolicy = makePolicy(false)
+  const a = RowAlgebra.parameter<string, string, string>('A')
+  const b = RowAlgebra.parameter<string, string, string>('B')
+  const source = RowAlgebra.union(setPolicy, a, b)
+  const cancelled = RowAlgebra.without(setPolicy, source, a)
+  const retained = RowAlgebra.without(accessPolicy, source, a)
+
+  assert.strictEqual(
+    RowAlgebra.encode(setPolicy, cancelled, String, String, String),
+    'Without<B, A>',
+  )
+  assert.strictEqual(
+    RowAlgebra.encode(accessPolicy, retained, String, String, String),
+    'Without<A | B, A>',
+  )
+})
+
+it('keeps failure and fixed-role requirement member parameters domain-specific', () => {
+  const owner = { module: 'work', name: 'generic' }
+  const s = Type.parameter(owner, 0, 'S')
+  const p = Type.parameter(owner, 1, 'P')
+  const q = Type.parameter(owner, 2, 'Q')
+  const origin = { sourceId: 'main', start: 8, end: 9 }
+  const failurePolicy = Type.failureRowPolicy()
+  const requirementPolicy = Type.requirementRowPolicy()
+  const failure = RowAlgebra.singleton(failurePolicy, Type.failureMemberShape(s), origin)
+  const requirement = RowAlgebra.singleton(
+    requirementPolicy,
+    Type.requirementMemberShape(p, 'Exclusive', 'Audit'),
+    origin,
+  )
+
+  assert.deepEqual(RowAlgebra.parameters(failurePolicy, failure), {
+    rows: [],
+    members: [s],
+  })
+  assert.deepEqual(RowAlgebra.parameters(requirementPolicy, requirement), {
+    rows: [],
+    members: [p],
+  })
+  assert.strictEqual(
+    RowAlgebra.encode(
+      requirementPolicy,
+      requirement,
+      (member) => `${member.access}:${Type.encode(member.capability)}@${member.role}`,
+      Type.encode,
+      (member) => `${member.access}:${member.capability.name}@${member.role}`,
+    ),
+    'Exclusive:P@Audit',
+  )
+
+  const residual = RowAlgebra.substitute(requirementPolicy, requirement, {
+    row: () => undefined,
+    member: (member) => ({
+      _tag: 'Residual',
+      member: Type.requirementMemberShape(q, member.access, member.role),
+    }),
+  })
+  assert.strictEqual(residual._tag, 'Substituted')
+  if (residual._tag === 'Substituted')
+    assert.deepEqual(RowAlgebra.parameters(requirementPolicy, residual.row), {
+      rows: [],
+      members: [q],
+    })
+
+  const logger = Type.nominal('silk/logging', 'Logger')
+  const concreteRequirement = RowAlgebra.substitute(requirementPolicy, requirement, {
+    row: () => undefined,
+    member: (member) => ({
+      _tag: 'Concrete',
+      member: { capability: logger, access: member.access, role: member.role },
+    }),
+  })
+  assert.strictEqual(concreteRequirement._tag, 'Substituted')
+  if (concreteRequirement._tag === 'Substituted') {
+    const finite = RowAlgebra.concretize(requirementPolicy, concreteRequirement.row)
+    assert.strictEqual(finite._tag, 'Concrete')
+    if (finite._tag === 'Concrete')
+      assert.deepEqual(finite.row.members, [
+        { capability: logger, access: 'Exclusive', role: 'Audit' },
+      ])
+  }
+
+  const invalid = RowAlgebra.substitute(requirementPolicy, requirement, {
+    row: () => undefined,
+    member: () => ({
+      _tag: 'InvalidSingleton',
+      reason: 'requirement capability must specialize to a service nominal',
+    }),
+  })
+  assert.strictEqual(invalid._tag, 'InvalidMembers')
+
+  const invalidFailure = RowAlgebra.substitute(failurePolicy, failure, {
+    row: () => undefined,
+    member: () => ({
+      _tag: 'InvalidSingleton',
+      reason: 'failure member specialized to a union',
+    }),
+  })
+  assert.strictEqual(invalidFailure._tag, 'InvalidMembers')
+})
+
+it('keys callable contracts and branded constraint evidence without source locations', () => {
+  const owner = { module: 'work', name: 'provide' }
+  const selectedParameter = Type.parameter(owner, 0, 'S', 'RequirementRow')
+  const providerParameter = Type.parameter(owner, 1, 'P')
+  const logger = Type.nominal('silk/logging', 'Logger')
+  const clock = Type.nominal('work', 'Clock')
+  const loggerRequirement: Type.Requirement = {
+    capability: logger,
+    role: 'Default',
+    access: 'Exclusive',
+  }
+  const selected = RowAlgebra.parameter<
+    Type.Requirement,
+    Type.Parameter,
+    Type.RequirementMemberShape
+  >(selectedParameter)
+  const loggerSource = RowAlgebra.concrete(Type.requirementRowPolicy(), [loggerRequirement])
+  const clockSource = RowAlgebra.concrete(Type.requirementRowPolicy(), [
+    { capability: clock, role: 'Default', access: 'Exclusive' },
+  ])
+  const loggerWanted = Constraint.providerSelection(
+    'Exclusive',
+    providerParameter,
+    selected,
+    loggerSource,
+  )
+  const clockWanted = Constraint.providerSelection(
+    'Exclusive',
+    providerParameter,
+    selected,
+    clockSource,
+  )
+  const loggerEvidence = Constraint.requirementSelectionEvidence(loggerWanted, loggerRequirement, {
+    _tag: 'Identity',
+  })
+  const clockEvidence = Constraint.requirementSelectionEvidence(
+    clockWanted,
+    { capability: clock, role: 'Default', access: 'Exclusive' },
+    { _tag: 'Identity' },
+  )
+
+  assert.notStrictEqual(Constraint.key(loggerWanted), Constraint.key(clockWanted))
+  assert.notStrictEqual(loggerEvidence.wantedKey, clockEvidence.wantedKey)
+  assert.notStrictEqual(
+    Constraint.evidenceKey(loggerEvidence),
+    Constraint.evidenceKey(clockEvidence),
+  )
+  assert.strictEqual(
+    Constraint.evidenceKey(loggerEvidence),
+    Constraint.evidenceKey(
+      Constraint.requirementSelectionEvidence(loggerWanted, loggerRequirement, {
+        _tag: 'Identity',
+      }),
+    ),
+  )
+
+  const contract = CallableContract.make({
+    functionKind: 'Effect',
+    binders: [selectedParameter, providerParameter],
+    parameters: [{ type: Type.reference('Exclusive', providerParameter), mode: 'Exclusive' }],
+    result: Type.effect('never', []),
+    constraints: [loggerWanted],
+    captures: [{ parameter: 0, capture: 0 }],
+  })
+  assert.strictEqual(CallableContract.key(contract), CallableContract.key(contract))
+  assert.strictEqual(Object.isFrozen(contract), true)
+
+  const quantified = Type.callable(
+    [Type.reference('Exclusive', providerParameter)],
+    Type.effect('never', []),
+    'Exclusive',
+    {
+      binders: contract.binders,
+      constraints: contract.constraints,
+      evidence: [Constraint.assumed(loggerWanted, new Map())],
+      substitution: new Map(),
+      contractKey: CallableContract.key(contract),
+      constraintKeys: contract.constraints.map(Constraint.key),
+      evidenceKeys: [Constraint.evidenceKey(Constraint.assumed(loggerWanted, new Map()))],
+      origins: [{ sourceId: 'work', start: 10, end: 20 }],
+    },
+  )
+  const movedOrigin = Type.callable(
+    quantified.parameters,
+    quantified.result,
+    quantified.mode,
+    quantified.schema === undefined
+      ? undefined
+      : { ...quantified.schema, origins: [{ sourceId: 'work', start: 30, end: 40 }] },
+  )
+  assert.deepEqual(Type.parameters(quantified), [])
+  assert.strictEqual(Type.isConcrete(quantified), true)
+  assert.strictEqual(Type.key(quantified), Type.key(movedOrigin))
+  assert.notStrictEqual(
+    Type.key(quantified),
+    Type.key(Type.callable(quantified.parameters, quantified.result, quantified.mode)),
+  )
+})
+
+it('keeps neutral witness identity specialization-complete and origin-distinct', () => {
+  const declaration = { module: 'work', name: 'loggerWitness' }
+  const sourceI32: Constraint.WitnessIdentity = {
+    origin: { _tag: 'SourceWitness', declaration },
+    typeArguments: ['i32'],
+  }
+  const sourceBool: Constraint.WitnessIdentity = {
+    origin: { _tag: 'SourceWitness', declaration },
+    typeArguments: ['bool'],
+  }
+  const intrinsic: Constraint.WitnessIdentity = {
+    origin: { _tag: 'IntrinsicWitness', operation: 'work.loggerWitness' },
+    typeArguments: ['i32'],
+  }
+
+  assert.notStrictEqual(Constraint.witnessKey(sourceI32), Constraint.witnessKey(sourceBool))
+  assert.notStrictEqual(Constraint.witnessKey(sourceI32), Constraint.witnessKey(intrinsic))
+  assert.notStrictEqual(
+    Constraint.providerMatchKey({ _tag: 'Identity' }),
+    Constraint.providerMatchKey({ _tag: 'Conformance', witness: sourceI32 }),
   )
 })

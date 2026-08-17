@@ -173,8 +173,14 @@ const hirSpan = (span: { readonly start: number; readonly end: number }): Span =
 export const hirContract = (contract: Hir.ContractFact): string =>
   contract._tag === 'Contract'
     ? `${contract.functionKind === 'Effect' ? 'effect ' : ''}(${contract.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(contract.result)}${
-        contract.functionKind === 'Effect'
-          ? ` ! ${contract.failures?.map(hirTypeText).join(' | ') || 'empty'}`
+      contract.functionKind === 'Effect'
+          ? ` ! ${
+              contract.failureRow === undefined
+                ? 'empty'
+                : Type.failureMembers(Type.failureRowArgumentFromRow(contract.failureRow))
+                    .map(hirTypeText)
+                    .join(' | ') || 'empty'
+            }`
           : ''
       }`
     : 'contract unavailable'
@@ -207,9 +213,9 @@ const hirTypeText = (type: Type.Type): string =>
         ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${hirTypeText(type.element)}]`
         : type._tag === 'EffectType'
           ? `Effect<${hirTypeText(type.success)}${
-              type.failures.length === 0
+              Type.failureMembers(type).length === 0
                 ? ''
-                : ` ! ${type.failures.map(hirTypeText).join(' | ')}`
+                : ` ! ${Type.failureMembers(type).map(hirTypeText).join(' | ')}`
             }> ${type.access.toLowerCase()}`
           : type._tag === 'CallableType'
             ? `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
@@ -277,7 +283,9 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
     case 'EffectResult':
       return 'materialize effect result'
     case 'EffectBindRequirement':
-      return `bind ${hirTypeText(expression.provider.capability)}@${expression.provider.role}`
+      return expression.provider.capability === undefined
+        ? 'bind selected requirement'
+        : `bind ${hirTypeText(expression.provider.capability)}@${expression.provider.role ?? 'DefaultRole'}`
     case 'BuiltinCall':
       return `builtin i32.${expression.operation}`
     default:

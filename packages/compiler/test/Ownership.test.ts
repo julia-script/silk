@@ -375,11 +375,13 @@ pub fn main() -> i32 {
 it('moves an owned provider into a take-once Effect wrapper', () => {
   const facts = check(
     'ownership://moved-provider.silk',
-    `struct Clock { tick: i32 }
+    `struct Token { action: once fn() -> i32 }
+struct Clock { token: Token }
+fn tick() -> i32 { return 1 }
 effect fn read() -> i32 ? &mut Clock { return 42 }
 pub fn main() -> i32 {
-  let clock = Clock { tick: 0 }
-  let recipe = read() |> Intrinsic.bindRequirement(move clock)
+  let clock = Clock { token: Token { action: tick } }
+  let recipe = read() |> Intrinsic.bindRequirementOwned(move clock)
   let first = run recipe
   return first + run recipe
 }`,
@@ -389,7 +391,23 @@ pub fn main() -> i32 {
     facts.diagnostics.map((diagnostic) => diagnostic.code),
     'OWN0001',
   )
-  assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Violation')
+  assert.strictEqual(facts.functions.at(2)?.verdict._tag, 'Violation')
+})
+
+it('copies an owned Copy provider so its bound Effect remains repeatable', () => {
+  const facts = check(
+    'ownership://copied-provider.silk',
+    `struct Clock { tick: i32 }
+effect fn read() -> i32 ? &mut Clock { return 42 }
+pub fn main() -> i32 {
+  let clock = Clock { tick: 0 }
+  let recipe = read() |> Intrinsic.bindRequirementOwned(move clock)
+  return (run recipe) + (run recipe)
+}`,
+  )
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Satisfied')
 })
 
 it('allows an owner to change after the borrowed recipe has finished its last run', () => {
@@ -590,9 +608,9 @@ effect fn next(self: &mut Provider) -> i32 { return self.value }
 impl Counter for Provider { next: Provider.next }
 effect fn readTwice(provider: Provider) -> i32 {
   let mut allocator = move provider
-  let firstRecipe = Counter.next() |> Intrinsic.bindRequirement(&mut allocator)
+  let firstRecipe = Counter.next() |> Intrinsic.bindRequirementMut(&mut allocator)
   let first = run firstRecipe
-  let secondRecipe = Counter.next() |> Intrinsic.bindRequirement(&mut allocator)
+  let secondRecipe = Counter.next() |> Intrinsic.bindRequirementMut(&mut allocator)
   let second = run secondRecipe
   return first + second
 }
@@ -648,7 +666,7 @@ effect fn store() -> i32 ! Problem {
   return 1
 }
 effect fn recover(error: Problem) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
   )
   assert.deepEqual(
     doubled.diagnostics.map((diagnostic) => diagnostic.code),
@@ -667,7 +685,7 @@ effect fn store() -> i32 ! Problem {
   return 1
 }
 effect fn recover(error: Problem) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
   )
   assert.deepEqual(healthy.diagnostics, [])
   const store = healthy.functions.at(0)

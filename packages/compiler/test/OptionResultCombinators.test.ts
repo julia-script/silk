@@ -129,9 +129,9 @@ effect fn acquire() -> Allocation ! OutOfMemory ? &mut Allocator {
 
 effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let first = run Intrinsic.bindRequirement(acquire(), &mut allocator)
-  let second = run Intrinsic.bindRequirement(acquire(), &mut allocator)
-  let third = run Intrinsic.bindRequirement(acquire(), &mut allocator)
+  let first = run Intrinsic.bindRequirementMut(acquire(), &mut allocator)
+  let second = run Intrinsic.bindRequirementMut(acquire(), &mut allocator)
+  let third = run Intrinsic.bindRequirementMut(acquire(), &mut allocator)
   let carried = Token { storage: move first }
   let spare = Token { storage: move second }
   let fallback = Token { storage: move third }
@@ -145,7 +145,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /** Evaluator and wasm must agree on 42 for every program. */
 const acrossEngines = (name: string, source: string) =>

@@ -39,6 +39,16 @@ const makeValid = (sourceId: string, start: number, end: number): SourceSpan => 
   return Object.freeze(span)
 }
 
+/** Rehydrates a span from validated semantic provenance when source bytes are not retained. */
+export const fromOffsets = (
+  sourceId: string,
+  start: number,
+  end: number,
+): SourceSpan | undefined =>
+  Number.isSafeInteger(start) && Number.isSafeInteger(end) && start >= 0 && start <= end
+    ? makeValid(sourceId, start, end)
+    : undefined
+
 /** Returns the logical source identity that owns the span. */
 export const sourceId = (self: SourceSpan): string => self.sourceId
 

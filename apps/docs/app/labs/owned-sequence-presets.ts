@@ -38,7 +38,7 @@ effect fn recover(error: OutOfMemory) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(), recover)
+  return run Effect.catchAll(build(), recover)
 }
 `
 
@@ -93,7 +93,7 @@ effect fn build() -> i32
     |> Effect.provideMut(&mut allocator)
   let appended3 = run pending3
   let marker = run grow(&mut values)
-    |> Effect.catch(recover)
+    |> Effect.catchAll(recover)
     |> Effect.provideMut(&mut allocator)
   if marker == 7 {} else {
     return 0
@@ -114,7 +114,7 @@ effect fn outerRecover(error: OutOfMemory) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(), outerRecover)
+  return run Effect.catchAll(build(), outerRecover)
 }
 `
 
@@ -162,7 +162,7 @@ effect fn recover(error: OutOfMemory) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(), recover)
+  return run Effect.catchAll(build(), recover)
 }
 `
 
@@ -209,7 +209,7 @@ effect fn recover(error: OutOfMemory) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(), recover)
+  return run Effect.catchAll(build(), recover)
 }
 `
 
@@ -300,6 +300,6 @@ effect fn recover(error: OutOfMemory) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(), recover)
+  return run Effect.catchAll(build(), recover)
 }
 `

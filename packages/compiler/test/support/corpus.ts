@@ -629,7 +629,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from UnicodeNormalization.test.ts: the two normalized owners compared directly, which
@@ -649,7 +649,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from CharacterLiteral.test.ts: every accepted escape, multi-byte scalars, and the six
@@ -768,7 +768,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 99 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from VectorAcceptance.test.ts: growth past the initial capacity with boundary reads.
@@ -800,7 +800,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from OwnedAllocationDispatch.test.ts: quota refusal propagates typed OutOfMemory.
@@ -835,7 +835,7 @@ effect fn build() -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(), recover)
+  return run Effect.catchAll(build(), recover)
 }`,
     expected: { _tag: 'Completes', result: 7 },
   },
@@ -863,7 +863,7 @@ pub fn main() -> i32 {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     expected: { _tag: 'Completes', result: 136 },
   },
   // folded from SlotLaneWidth.test.ts: f64 lane parity including a negative value.
@@ -890,7 +890,7 @@ pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     expected: { _tag: 'Completes', result: 108 },
   },
   // folded from BytesAcceptance.test.ts: copy, append, and mutate through byte slices (exit 180).
@@ -927,7 +927,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 180 },
   },
   // folded from StaticByteViewIndexing.test.ts: out-of-bounds static byte read traps.
@@ -967,7 +967,7 @@ effect fn build(count: usize) -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(4), recover)
+  return run Effect.catchAll(build(4), recover)
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
@@ -1010,7 +1010,7 @@ effect fn retrying() -> i32 ! Problem {
 }
 effect fn recover(problem: Problem) -> i32 { return 99 }
 pub fn main() -> i32 {
-  let handled = retrying() |> Effect.catch(recover)
+  let handled = retrying() |> Effect.catchAll(recover)
   return run handled
 }`,
     expected: { _tag: 'Completes', result: 3 },
@@ -1027,7 +1027,7 @@ effect fn attempt() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
 effect fn recover(error: Problem | OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(
+  return run Effect.catchAll(
     attempt() |> Effect.retry(2) |> Effect.provideMut(&mut allocator),
     recover
   )
@@ -1060,7 +1060,7 @@ effect fn build() -> i32 ! OutOfMemory {
   fail OutOfMemory {}
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 42 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from DropHookExecution.test.ts: a guard live at a failing run releases through its hook
@@ -1100,7 +1100,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 7 },
   },
   // folded from OpaqueRepresentationEngines.test.ts: opaque callable returns keep their hidden

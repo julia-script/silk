@@ -179,7 +179,7 @@ struct Problem { position: usize }
 effect fn risky() -> Empty ! Problem { fail move Problem { position: 1 } }
 effect fn recover(problem: Problem) -> Empty { return Empty {} }
 pub fn main() -> i32 {
-  let recipe = Effect.catch(risky(), recover)
+  let recipe = Effect.catchAll(risky(), recover)
   let ignored = run recipe
   return 42
 }`
@@ -194,7 +194,7 @@ pub fn main() -> i32 {
         assert.strictEqual(planned._tag, 'Available')
         if (planned._tag !== 'Available') continue
         const outcomes = planned.value.callingShapes.filter(
-          (shape) => Type.isEffect(shape.type) && shape.type.failures.length > 0,
+          (shape) => Type.isEffect(shape.type) && Type.failureMembers(shape.type).length > 0,
         )
         assert.isAbove(outcomes.length, 0)
         for (const outcome of outcomes) {

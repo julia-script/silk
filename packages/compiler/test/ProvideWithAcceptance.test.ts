@@ -34,7 +34,7 @@ effect fn work() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(work(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 /**
  * Three failing attempts under `Effect.retry`. Every attempt fails inside the provided Effect,
@@ -53,7 +53,7 @@ effect fn work() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 42 }
 
-pub fn main() -> i32 { return run Effect.catch(work(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 const allocationEvents = (
   run: ReturnType<typeof Analysis.evaluate>,

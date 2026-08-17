@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
+import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Stdlib from '../src/Stdlib.js'
@@ -21,16 +22,21 @@ const codes = (self: Analysis.Snapshot): ReadonlyArray<string> =>
 const messages = (self: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(self).map((diagnostic) => diagnostic.message)
 
+const failureMembers = (row: Type.FailureRow): ReadonlyArray<string> => {
+  const concrete = RowAlgebra.concretize(Type.failureRowPolicy(), row)
+  return concrete._tag === 'Concrete' ? concrete.row.members.map(Type.encode) : []
+}
+
 /** A two-member failure row plus a handler for each member on its own. */
-const preamble = `struct A { code: i32 }
-struct B { code: i32 }
+const preamble = `pub struct A { code: i32 }
+pub struct B { code: i32 }
 effect fn risky(flag: bool) -> i32 ! A | B {
   if flag { fail A { code: 10 } }
   fail B { code: 20 }
 }
 effect fn recoverA(problem: A) -> i32 { return problem.code + 1 }
 effect fn recoverB(problem: B) -> i32 { return problem.code + 2 }
-effect fn recoverRow(problem: Row<!A | B>) -> i32 { return 99 }
+effect fn recoverRow(problem: A | B) -> i32 { return 99 }
 `
 
 /**
@@ -49,9 +55,52 @@ it.effect('recovers one member and leaves the other in the result failure row', 
 effect fn selective(flag: bool) -> i32 ! B {
   return run Effect.catch<A>(risky(flag), recoverA)
 }
-pub fn main() -> i32 { return 0 }`)
+pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
     // Declaring the residual as the result row is accepted: A is gone, B survives. Nothing about
     // the recovery itself is rejected — the only code is the analysis-only notice.
+    assert.deepEqual(codes(self), [analysisOnly])
+  }),
+)
+
+it.effect('infers the singleton selector from the handler parameter', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`${preamble}
+effect fn selective(flag: bool) -> i32 ! B {
+  return run Effect.catch(risky(flag), recoverA)
+}
+pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
+    assert.deepEqual(codes(self), [analysisOnly])
+  }),
+)
+
+it.effect('forwards nominal-member evidence through an open generic wrapper', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`${preamble}
+effect fn select<S, A, !E>(
+  self: once Effect<A ! E>,
+  handler: once fn(S) -> Effect<A>
+) -> A ! Without<E, S>
+where S in E {
+  return run Effect.catch(move self, move handler)
+}
+effect fn selective(flag: bool) -> i32 ! B {
+  return run select<A>(risky(flag), recoverA)
+}
+pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
+    assert.deepEqual(codes(self), [analysisOnly])
+  }),
+)
+
+it.effect('unions handler failures with the nonselected remainder', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`${preamble}
+pub struct C { code: i32 }
+effect fn recoverAWithFailure(problem: A) -> i32 ! C { fail C { code: problem.code } }
+effect fn selective(flag: bool) -> i32 ! B | C {
+  return run Effect.catch<A>(risky(flag), recoverAWithFailure)
+}
+effect fn recoverRest(problem: B | C) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverRest) }`)
     assert.deepEqual(codes(self), [analysisOnly])
   }),
 )
@@ -90,23 +139,29 @@ it.effect('records the protected, selected, handler, and residual rows as facts'
 effect fn selective(flag: bool) -> i32 ! B {
   return run Effect.catch<A>(risky(flag), recoverA)
 }
-pub fn main() -> i32 { return 0 }`)
-    const hir = Analysis.hirOf(self, 'root')
-    const catches = (hir?.functions ?? []).flatMap((fn) =>
-      fn.statements
+pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
+    const catches = self.instances.instances.flatMap((instance) =>
+      instance.function.statements
         .flatMap(Hir.statementExpressions)
         .flatMap((root) => [...Hir.expressionTree(root)])
-        .filter((expression) => expression._tag === 'EffectCatch'),
+        .filter((expression) => expression._tag === 'EffectCatch')
+        .map((expression) => Object.freeze({ expression, substitution: instance.substitution })),
     )
     assert.strictEqual(catches.length, 1)
-    const fact = catches.at(0)
-    if (fact?._tag !== 'EffectCatch') throw new Error('missing EffectCatch fact')
+    const found = catches.at(0)
+    const fact = found?.expression
+    if (fact?._tag !== 'EffectCatch' || found === undefined)
+      throw new Error('missing EffectCatch fact')
     assert.deepEqual(
       {
-        selected: Type.encode(fact.selected),
-        protectedRow: fact.protectedRow.map(Type.encode),
-        handlerRow: fact.handlerRow.map(Type.encode),
-        residualRow: fact.residualRow.map(Type.encode),
+        selected: Type.encode(Type.substitute(fact.selected, found.substitution)),
+        protectedRow: failureMembers(
+          Type.substituteFailureRow(fact.protectedRow, found.substitution),
+        ),
+        handlerRow: failureMembers(Type.substituteFailureRow(fact.handlerRow, found.substitution)),
+        residualRow: failureMembers(
+          Type.substituteFailureRow(fact.residualRow, found.substitution),
+        ),
       },
       {
         selected: 'root.A',
@@ -127,7 +182,7 @@ effect fn selective(flag: bool) -> i32 ! A | B {
   return run Effect.catch<C>(risky(flag), recoverC)
 }
 pub fn main() -> i32 { return 0 }`)
-    assert.include(messages(self).join('\n'), 'does not fail with root.C')
+    assert.deepEqual(codes(self), ['SEM0067'])
   }),
 )
 
@@ -138,7 +193,52 @@ effect fn selective(flag: bool) -> i32 ! B {
   return run Effect.catch<A>(risky(flag), recoverB)
 }
 pub fn main() -> i32 { return 0 }`)
-    assert.include(messages(self).join('\n'), 'must accept root.A')
+    assert.deepEqual(codes(self), ['SEM0100'])
+  }),
+)
+
+for (const [name, selected, handler] of [
+  ['empty selector', 'never', 'recoverNever'],
+  ['multi-member selector', 'A | B', 'recoverUnion'],
+  ['non-nominal selector', 'i32', 'recoverInteger'],
+] as const) {
+  it.effect(`rejects a ${name} before availability`, () =>
+    Effect.gen(function* () {
+      const self = yield* analyze(`${preamble}
+effect fn recoverNever(problem: never) -> i32 { return 0 }
+effect fn recoverUnion(problem: A | B) -> i32 { return 0 }
+effect fn recoverInteger(problem: i32) -> i32 { return problem }
+effect fn invalid(flag: bool) -> i32 ! A | B {
+  return run Effect.catch<${selected}>(risky(flag), ${handler})
+}
+pub fn main() -> i32 { return 0 }`)
+      assert.include(codes(self), 'SEM0067')
+      assert.notInclude(codes(self), analysisOnly)
+    }),
+  )
+}
+
+it.effect('does not let nominal membership evidence discharge a failure by itself', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`${preamble}
+effect fn lie<S, A, !E>(self: once Effect<A ! E>) -> A ! Without<E, S>
+where S in E {
+  return run self
+}
+pub fn main() -> i32 { return 0 }`)
+    assert.include(codes(self), 'SEM0066')
+  }),
+)
+
+it.effect('does not let subset evidence discharge a requirement by itself', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`struct Clock {}
+effect fn lie<?S, A, ?R>(self: once Effect<A ? R>) -> A ? Without<R, S>
+where S in R {
+  return run self
+}
+pub fn main() -> i32 { return 0 }`)
+    assert.include(codes(self), 'SEM0071')
   }),
 )
 
@@ -167,12 +267,14 @@ pub fn main() -> i32 { return run handleA(risky(true)) }`)
  */
 it.effect('reports the analysis-only diagnostic at the call that writes the selector form', () =>
   Effect.gen(function* () {
-    const call = 'Effect.catch<A>(risky(flag), recoverA)'
+    const call = 'Effect.catch<A>(risky(true), recoverA)'
     const text = `${preamble}
-effect fn selective(flag: bool) -> i32 ! B {
-  return run ${call}
+effect fn recoverRest(problem: B) -> i32 { return problem.code + 3 }
+pub fn main() -> i32 {
+  let selected = ${call}
+  return run Effect.catchAll(move selected, recoverRest)
 }
-pub fn main() -> i32 { return 0 }`
+`
     const self = yield* analyze(text)
     const reported = Analysis.diagnostics(self).filter(
       (diagnostic) => diagnostic.code === analysisOnly,
@@ -190,19 +292,21 @@ pub fn main() -> i32 { return 0 }`
         start: diagnostic?.span.start,
         end: diagnostic?.span.end,
       },
-      { sourceId: 'root', start, end: start + call.length },
+      { sourceId: 'root', start: start - 1, end: start + call.length },
     )
   }),
 )
 
 it.effect('reports it at the pipelined selector form too, spanning the operation', () =>
   Effect.gen(function* () {
-    const call = 'Effect.catch<A>(recoverA)'
+    const call = 'risky(true) |> Effect.catch<A>(recoverA)'
     const text = `${preamble}
-effect fn selective(flag: bool) -> i32 ! B {
-  return run risky(flag) |> ${call}
+effect fn recoverRest(problem: B) -> i32 { return problem.code + 3 }
+pub fn main() -> i32 {
+  let selected = ${call}
+  return run Effect.catchAll(move selected, recoverRest)
 }
-pub fn main() -> i32 { return 0 }`
+`
     const self = yield* analyze(text)
     const diagnostic = Analysis.diagnostics(self).find(
       (candidate) => candidate.code === analysisOnly,
@@ -210,7 +314,7 @@ pub fn main() -> i32 { return 0 }`
     const start = text.indexOf(call)
     assert.deepEqual(
       { start: diagnostic?.span.start, end: diagnostic?.span.end },
-      { start, end: start + call.length },
+      { start: start - 1, end: start + call.length },
     )
   }),
 )

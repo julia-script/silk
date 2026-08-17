@@ -32,7 +32,7 @@ effect fn exhausted(error: OutOfMemory) -> Clock ! Problem { fail Problem { code
 
 /// One owner, acquired inside whichever body runs this and released by that body's cleanup.
 effect fn acquireClock() -> Clock ! Problem {
-  return run Effect.catch(openClock(), exhausted)
+  return run Effect.catchAll(openClock(), exhausted)
 }
 
 effect fn release() -> () ! OutOfMemory {
@@ -50,7 +50,7 @@ effect fn ignore(error: OutOfMemory) -> () { return () }
 /// result is handed to \`ensuring\`. The combinator never sees a second outcome to reconcile with
 /// the one it is preserving.
 effect fn finalize() -> () {
-  return run Effect.catch(release(), ignore)
+  return run Effect.catchAll(release(), ignore)
 }
 
 /// The same shape holding two owners, so the finalizer's events are a nested pair rather than a
@@ -65,7 +65,7 @@ effect fn releasePair() -> () ! OutOfMemory {
 }
 
 effect fn finalizePair() -> () {
-  return run Effect.catch(releasePair(), ignore)
+  return run Effect.catchAll(releasePair(), ignore)
 }
 
 /// Reads the failure's own payload back out, so the asserted value is evidence about *which*
@@ -79,7 +79,7 @@ effect fn work() -> i32 ! Problem { return 5 }
 
 pub fn main() -> i32 {
   let guarded = Effect.ensuring(work(), finalize())
-  return run Effect.catch(move guarded, recover)
+  return run Effect.catchAll(move guarded, recover)
 }`
 
 /** The finalizer runs after a typed failure, and that same failure reaches the caller. */
@@ -89,7 +89,7 @@ effect fn work() -> i32 ! Problem { fail Problem { code: 3 } }
 
 pub fn main() -> i32 {
   let guarded = Effect.ensuring(work(), finalize())
-  return run Effect.catch(move guarded, recover)
+  return run Effect.catchAll(move guarded, recover)
 }`
 
 /**
@@ -107,7 +107,7 @@ effect fn work() -> i32 ! Problem {
 
 pub fn main() -> i32 {
   let guarded = Effect.ensuring(work(), finalizePair())
-  return run Effect.catch(move guarded, recover)
+  return run Effect.catchAll(move guarded, recover)
 }`
 
 /**
@@ -125,7 +125,7 @@ effect fn work() -> i32 ! Problem {
 
 pub fn main() -> i32 {
   let guarded = Effect.ensuring(work(), finalize())
-  return run Effect.catch(move guarded, recover)
+  return run Effect.catchAll(move guarded, recover)
 }`
 
 /** The same body on the succeeding path, where the release was never in doubt. */
@@ -138,7 +138,7 @@ effect fn work() -> i32 ! Problem {
 
 pub fn main() -> i32 {
   let guarded = Effect.ensuring(work(), finalize())
-  return run Effect.catch(move guarded, recover)
+  return run Effect.catchAll(move guarded, recover)
 }`
 
 /** A release that genuinely fails, recovered by the caller before it reaches `ensuring`. */
@@ -150,11 +150,11 @@ effect fn stubborn() -> () ! Problem { fail Problem { code: 8 } }
 
 effect fn swallow(problem: Problem) -> () { return () }
 
-effect fn tolerant() -> () { return run Effect.catch(stubborn(), swallow) }
+effect fn tolerant() -> () { return run Effect.catchAll(stubborn(), swallow) }
 
 pub fn main() -> i32 {
   let guarded = Effect.ensuring(work(), tolerant())
-  return run Effect.catch(move guarded, recover)
+  return run Effect.catchAll(move guarded, recover)
 }`
 
 /**
@@ -170,7 +170,7 @@ effect fn work(divisor: i32) -> i32 ! Problem {
 
 pub fn main() -> i32 {
   let guarded = Effect.ensuring(work(0), finalize())
-  return run Effect.catch(move guarded, recover)
+  return run Effect.catchAll(move guarded, recover)
 }`
 
 const allocationEvents = (

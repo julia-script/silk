@@ -1628,9 +1628,9 @@ const sameEffectContract = (left: SilkType.Effect, right: SilkType.Effect): bool
 
 const sameEffectChannels = (left: SilkType.Effect, right: SilkType.Effect): boolean =>
   SilkType.equals(left.success, right.success) &&
-  left.failures.length === right.failures.length &&
-  left.failures.every((failure, ordinal) => {
-    const candidate = right.failures.at(ordinal)
+  SilkType.failureMembers(left).length === SilkType.failureMembers(right).length &&
+  SilkType.failureMembers(left).every((failure, ordinal) => {
+    const candidate = SilkType.failureMembers(right).at(ordinal)
     return candidate !== undefined && SilkType.equals(failure, candidate)
   })
 
@@ -3398,11 +3398,12 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       : target.result._tag === 'EffectValue' &&
         target.parameterCount === 0 &&
         machineClosures.length === 1 &&
-        availableEntry.requirements.length === target.result.type.requirements.length &&
+        availableEntry.requirements.length ===
+          SilkType.requirementMembers(target.result.type).length &&
         availableEntry.requirements.every((requirement, ordinal) => {
           const expected =
             target.result._tag === 'EffectValue'
-              ? target.result.type.requirements.at(ordinal)
+              ? SilkType.requirementMembers(target.result.type).at(ordinal)
               : undefined
           return (
             expected !== undefined &&
@@ -3411,11 +3412,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(requirement.capability, expected.capability)
           )
         }) &&
-        availableEntry.failures.length === target.result.type.failures.length &&
+        availableEntry.failures.length === SilkType.failureMembers(target.result.type).length &&
         availableEntry.failures.every((failure, ordinal) => {
           const expected =
             target.result._tag === 'EffectValue'
-              ? target.result.type.failures.at(ordinal)
+              ? SilkType.failureMembers(target.result.type).at(ordinal)
               : undefined
           return (
             expected !== undefined &&
@@ -4004,7 +4005,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         if (operation._tag === 'Allocate') {
           const layout = fn.localTypes.at(operation.layout.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
-          const expectedFailure = operation.propagationType.type.failures.at(
+          const expectedFailure = SilkType.failureMembers(operation.propagationType.type).at(
             operation.failureTag - 1,
           )
           if (
@@ -4032,7 +4033,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const stream = fn.localTypes.at(operation.stream.ordinal)
           const bytes = fn.localTypes.at(operation.bytes.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
-          const expectedFailure = operation.propagationType.type.failures.at(
+          const expectedFailure = SilkType.failureMembers(operation.propagationType.type).at(
             operation.failureTag - 1,
           )
           const byteType = bytes === undefined ? undefined : semanticType(bytes)
@@ -4080,7 +4081,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             })
           if (
             catalog?.unsafe !== true ||
-            catalog.targets.includes('Wasm') ||
+            catalog.availability._tag !== 'Executable' ||
+            catalog.availability.targets.includes('Wasm') ||
             expectedResult === undefined ||
             destination === undefined ||
             !SilkType.equals(semanticType(destination), expectedResult) ||
@@ -4616,9 +4618,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   const cleanupEffect = cleanup.type
                   return (
                     SilkType.equals(droppedSemantic.success, cleanupEffect.success) &&
-                    droppedSemantic.failures.length === cleanupEffect.failures.length &&
-                    droppedSemantic.failures.every((failure, ordinal) => {
-                      const expected = cleanupEffect.failures.at(ordinal)
+                    SilkType.failureMembers(droppedSemantic).length ===
+                      SilkType.failureMembers(cleanupEffect).length &&
+                    SilkType.failureMembers(droppedSemantic).every((failure, ordinal) => {
+                      const expected = SilkType.failureMembers(cleanupEffect).at(ordinal)
                       return expected !== undefined && SilkType.equals(failure, expected)
                     })
                   )
@@ -5104,7 +5107,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const payload =
             operation.tag === 0
               ? operation.type.type.success
-              : operation.type.type.failures.at(operation.tag - 1)
+              : SilkType.failureMembers(operation.type.type).at(operation.tag - 1)
           if (
             destination?._tag !== 'EffectOutcome' ||
             source === undefined ||
@@ -5129,7 +5132,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             operation.mappings.length === operation.sourceType.type.members.length &&
             operation.mappings.every((mapping) => {
               const sourceMember = operation.sourceType.type.members.at(mapping.source)
-              const targetFailure = operation.type.type.failures.at(mapping.target - 1)
+              const targetFailure = SilkType.failureMembers(operation.type.type).at(
+                mapping.target - 1,
+              )
               return (
                 sourceMember !== undefined &&
                 targetFailure !== undefined &&
@@ -5177,10 +5182,15 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             matchesInstance(candidate, operation.target, operation.typeArguments),
           )
           const mappingsValid =
-            operation.tagMappings.length === operation.outcomeType.type.failures.length &&
+            operation.tagMappings.length ===
+              SilkType.failureMembers(operation.outcomeType.type).length &&
             operation.tagMappings.every((mapping) => {
-              const source = operation.outcomeType.type.failures.at(mapping.source - 1)
-              const targetFailure = operation.propagationType.type.failures.at(mapping.target - 1)
+              const source = SilkType.failureMembers(operation.outcomeType.type).at(
+                mapping.source - 1,
+              )
+              const targetFailure = SilkType.failureMembers(operation.propagationType.type).at(
+                mapping.target - 1,
+              )
               return (
                 source !== undefined &&
                 targetFailure !== undefined &&
@@ -5227,12 +5237,18 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const mappingsValid =
             operation.propagationType === undefined
               ? operation.tagMappings.length === 0
-              : operation.tagMappings.length === operation.outcomeType.type.failures.length &&
+              : operation.tagMappings.length ===
+                  SilkType.failureMembers(operation.outcomeType.type).length &&
                 operation.tagMappings.every((mapping) => {
-                  const source = operation.outcomeType.type.failures.at(mapping.source - 1)
-                  const targetFailure = operation.propagationType?.type.failures.at(
-                    mapping.target - 1,
+                  const source = SilkType.failureMembers(operation.outcomeType.type).at(
+                    mapping.source - 1,
                   )
+                  const targetFailure =
+                    operation.propagationType === undefined
+                      ? undefined
+                      : SilkType.failureMembers(operation.propagationType.type).at(
+                          mapping.target - 1,
+                        )
                   return (
                     source !== undefined &&
                     targetFailure !== undefined &&
@@ -5246,14 +5262,15 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             (effectValue !== undefined &&
               SilkType.equals(effectValue.type, stored.realization.contract) &&
               effectValue.type.access === stored.realization.access &&
-              effectValue.type.failures.length === stored.realization.rows.failures.length &&
-              effectValue.type.failures.every((failure, ordinal) => {
+              SilkType.failureMembers(effectValue.type).length ===
+                stored.realization.rows.failures.length &&
+              SilkType.failureMembers(effectValue.type).every((failure, ordinal) => {
                 const expected = stored.realization.rows.failures.at(ordinal)
                 return expected !== undefined && SilkType.equals(failure, expected)
               }) &&
-              effectValue.type.requirements.length ===
+              SilkType.requirementMembers(effectValue.type).length ===
                 stored.realization.rows.requirements.length &&
-              effectValue.type.requirements.every((requirement, ordinal) => {
+              SilkType.requirementMembers(effectValue.type).every((requirement, ordinal) => {
                 const expected = stored.realization.rows.requirements.at(ordinal)
                 return (
                   expected !== undefined &&
@@ -5290,7 +5307,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                       )
                     })
                   const expectedRequirements =
-                    stored?.realization.rows.requirements ?? effectValue.type.requirements
+                    stored?.realization.rows.requirements ??
+                    SilkType.requirementMembers(effectValue.type)
                   const requirementsMatch =
                     operation.providers.length === expectedRequirements.length &&
                     operation.providers.every((provider, ordinal) => {
@@ -5430,12 +5448,18 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const mappingsValid =
             operation.propagationType === undefined
               ? operation.tagMappings.length === 0
-              : operation.tagMappings.length === operation.outcomeType.type.failures.length &&
+              : operation.tagMappings.length ===
+                  SilkType.failureMembers(operation.outcomeType.type).length &&
                 operation.tagMappings.every((mapping) => {
-                  const source = operation.outcomeType.type.failures.at(mapping.source - 1)
-                  const targetFailure = operation.propagationType?.type.failures.at(
-                    mapping.target - 1,
+                  const source = SilkType.failureMembers(operation.outcomeType.type).at(
+                    mapping.source - 1,
                   )
+                  const targetFailure =
+                    operation.propagationType === undefined
+                      ? undefined
+                      : SilkType.failureMembers(operation.propagationType.type).at(
+                          mapping.target - 1,
+                        )
                   return (
                     source !== undefined &&
                     targetFailure !== undefined &&
@@ -5476,7 +5500,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const effect = fn.localTypes.at(operation.effect.ordinal)
           const outcome = fn.localTypes.at(operation.outcome.ordinal)
-          const expectedFailureValue = SilkType.failureValue(operation.outcomeType.type.failures)
+          const expectedFailureValue = SilkType.failureValue(
+            SilkType.failureMembers(operation.outcomeType.type),
+          )
           const expectedResult = SilkType.result(
             operation.outcomeType.type.success,
             expectedFailureValue,
@@ -5541,11 +5567,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const failuresValid =
             runner?.result._tag === 'EffectOutcome' &&
             entryFailures !== undefined &&
-            operation.failures.length === runner.result.type.failures.length &&
+            operation.failures.length === SilkType.failureMembers(runner.result.type).length &&
             operation.failures.every((failure, ordinal) => {
               const expected =
                 runner.result._tag === 'EffectOutcome'
-                  ? runner.result.type.failures.at(ordinal)
+                  ? SilkType.failureMembers(runner.result.type).at(ordinal)
                   : undefined
               const entryFailure = entryFailures.at(ordinal)
               const payload = fn.localTypes.at(failure.payload.ordinal)

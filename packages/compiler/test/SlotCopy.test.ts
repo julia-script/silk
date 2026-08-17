@@ -26,7 +26,7 @@ const copyRead = `effect fn store() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 /** Slot and shared-buffer copies preserve the active member across distinct union payload shapes. */
 const unionCopyRead = `struct Left { value: i32 }
@@ -80,7 +80,7 @@ effect fn store() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 it.effect('copies initialized Copy slots without consuming them on the evaluator and Wasm', () =>
   Effect.gen(function* () {
@@ -186,7 +186,7 @@ effect fn store() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 it.effect('rejects copying a non-Copy element at MIR verification', () =>
   Effect.gen(function* () {

@@ -3,8 +3,11 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
+import * as Instances from '../src/Instances.js'
 import * as Mir from '../src/Mir.js'
+import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as StandardStreams from '../src/StandardStreams.js'
+import * as Type from '../src/Type.js'
 
 const encoder = new TextEncoder()
 const golden = (name: string): string =>
@@ -35,7 +38,7 @@ effect fn program() -> i32 ! LogError {
 effect fn recover(error: LogError) -> i32 { return 0 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(program(), recover)
+  return run Effect.catchAll(program(), recover)
 }`
 
 const snapshot = (source: string, target = 'aarch64-apple-darwin') =>
@@ -88,7 +91,7 @@ effect fn program() -> i32 ! LogError {
 }
 
 effect fn recover(error: LogError) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(program(), recover) }`)
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
@@ -153,7 +156,7 @@ effect fn ignore(error: LogError) -> () { return () }
 effect fn program() -> i32 ! LogError {
   let mut logger = InMemoryLogger.memoryFailAt(1)
   let first = run Effect.provideMut(Effect.log("first"), &mut logger)
-  let attempted = Effect.provideMut(Effect.log("second"), &mut logger) |> Effect.catch(ignore)
+  let attempted = Effect.provideMut(Effect.log("second"), &mut logger) |> Effect.catchAll(ignore)
   let second = run attempted
   let skipped = false
   if skipped { let third = run Effect.provideMut(Effect.log("third"), &mut logger) }
@@ -163,7 +166,7 @@ effect fn program() -> i32 ! LogError {
 }
 effect fn recover(error: LogError) -> i32 { return 0 }
 pub fn main() -> i32 {
-  return run Effect.catch(program(), recover)
+  return run Effect.catchAll(program(), recover)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
@@ -177,7 +180,7 @@ pub fn main() -> i32 {
   let attempted = Effect.provideMut(
     Effect.log("12345678901234567890123456789012345678901234567890123456789012345"),
     &mut logger
-  ) |> Effect.catch(ignore)
+  ) |> Effect.catchAll(ignore)
   let completed = run attempted
   if attempts(&logger) != 1 { return 0 }
   if length(&logger) != 0 { return 0 }
@@ -229,5 +232,146 @@ it.effect('adapts complete messages to stdout without making formatting semantic
     assert.strictEqual(failed._tag, 'UnhandledFailure')
     if (failed._tag === 'UnhandledFailure') assert.include(failed.report, 'LogError')
     assert.deepEqual(failing.events(), [])
+  }),
+)
+
+it.effect('provideMut removes the Logger requirement and preserves Clock', () =>
+  Effect.gen(function* () {
+    const program = (bind: string) => `import silk.effects as Effect
+import silk.logging { Logger, LogError }
+
+struct Clock {}
+
+effect fn read() -> ()
+! LogError
+? &mut Clock | &mut Logger {
+  run Effect.log("Reading clock")
+}
+
+pub effect fn main() -> ()
+! LogError {
+  let mut logger = StdoutLogger.stdout()
+  run ${bind}
+}`
+
+    const analyze = (body: string) =>
+      Analysis.ofSource('logging/main', encoder.encode(program(body)))
+    const publicWrapper = yield* analyze('Effect.provideMut(read(), &mut logger)')
+    const directIntrinsic = yield* analyze('Intrinsic.bindRequirementMut(read(), &mut logger)')
+    const directPipeline = yield* analyze('(read() |> Intrinsic.bindRequirementMut(&mut logger))')
+
+    const unsatisfied = (self: Analysis.FrontendSnapshot) =>
+      Analysis.rootAnalysis(self)
+        .diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0071')
+        .map((diagnostic) => diagnostic.message)
+
+    assert.deepEqual(unsatisfied(publicWrapper), [
+      'Run leaves unsatisfied requirements: &mut logging/main.Clock',
+    ])
+    assert.deepEqual(unsatisfied(publicWrapper), unsatisfied(directIntrinsic))
+    assert.deepEqual(unsatisfied(publicWrapper), unsatisfied(directPipeline))
+
+    const executablePipeline = yield* snapshot(`import silk.effects as Effect
+import silk.logging { Logger, LogError }
+pub effect fn main() -> () ! LogError {
+  let mut logger = InMemoryLogger.memory()
+  return run (Effect.log("pipeline") |> Intrinsic.bindRequirementMut(&mut logger))
+}`)
+    assert.deepEqual(Analysis.diagnostics(executablePipeline), [])
+    assert.strictEqual(Analysis.evaluate(executablePipeline)._tag, 'Completed')
+
+    const storedIntrinsic = yield* snapshot(`import silk.effects as Effect
+import silk.logging { Logger, LogError }
+pub effect fn main() -> () ! LogError {
+  let mut logger = InMemoryLogger.memory()
+  let mut bind = Intrinsic.bindRequirementMut(&mut logger)
+  return run bind(Effect.log("stored"))
+}`)
+    assert.deepEqual(Analysis.diagnostics(storedIntrinsic), [])
+    assert.strictEqual(Analysis.evaluate(storedIntrinsic)._tag, 'Completed')
+  }),
+)
+
+it.effect('forwards provider-selection evidence only from an exact enclosing constraint', () =>
+  Effect.gen(function* () {
+    const wrapper = (constraint: string) => `import silk.effects as Effect
+import silk.logging { Logger, LogError }
+
+effect fn bind<?S, A, P, !E, ?R>(
+  self: once Effect<A ! E ? R>,
+  provider: &mut P
+) -> A ! E ? Without<R, S>
+${constraint} {
+  return run Intrinsic.bindRequirementMut<S>(move self, provider)
+}
+
+effect fn read() -> () ! LogError ? &mut Logger {
+  run Effect.log("Reading")
+}
+
+pub effect fn main() -> () ! LogError {
+  let mut logger = StdoutLogger.stdout()
+  return run bind(read(), &mut logger)
+}`
+
+    const constrained = yield* snapshot(wrapper('where &mut P provides S from R'))
+    assert.deepEqual(Analysis.diagnostics(constrained), [])
+    const bind = Analysis.instancesOf(constrained).instances.find(
+      (instance) => instance.key.declaration.name === 'bind',
+    )
+    assert.isDefined(bind)
+    if (bind !== undefined) {
+      assert.strictEqual(
+        RowAlgebra.concretize(
+          Type.requirementRowPolicy(),
+          bind.specialization.requirementRow ??
+            RowAlgebra.concrete(Type.requirementRowPolicy(), []),
+        )._tag,
+        'Concrete',
+      )
+      assert.isTrue(bind.specialization.evidence.length > 0)
+      assert.include(
+        bind.specialization.evidence.map((proof) => proof._tag),
+        'RequirementSelection',
+      )
+    }
+
+    const unconstrained = yield* snapshot(wrapper(''))
+    assert.isAbove(Analysis.diagnostics(unconstrained).length, 0)
+  }),
+)
+
+it.effect('carries a provider section through a closed generic forwarding call', () =>
+  Effect.gen(function* () {
+    const source = `import silk.effects as Effect
+import silk.logging { Logger, LogError }
+
+fn forward<F>(value: F) -> F { return move value }
+
+effect fn program() -> () ! LogError {
+  let mut logger = InMemoryLogger.memory()
+  let mut bind = forward(Effect.provideMut<&mut Logger>(&mut logger))
+  return run bind(Effect.log("forwarded"))
+}
+
+effect fn recover(error: LogError) -> () { return () }
+pub fn main() -> i32 {
+  let completed = run Effect.catchAll(program(), recover)
+  return 42
+}`
+    const frontend = yield* Analysis.ofSource('logging/main', encoder.encode(source))
+    assert.deepEqual(Analysis.diagnostics(frontend), [])
+    const discovery = Instances.discover(
+      'logging/main',
+      frontend.results,
+      frontend.ownership,
+      frontend.index,
+    )
+    assert.deepEqual(discovery.specializationFailures, [])
+    assert.deepEqual(discovery.violations, [])
+    assert.include(
+      discovery.instances.map((instance) => instance.key.declaration.name),
+      'provideMut',
+    )
   }),
 )

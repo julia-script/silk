@@ -145,7 +145,7 @@ ${body}
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch(measure(${depth}), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(measure(${depth}), recover) }`
 
 /** Recursive traversal, then an iterative teardown so only the walk can exhaust the stack. */
 const walk = (depth: number): string =>
@@ -220,7 +220,7 @@ effect fn measure(depth: i32) -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch(measure(${depth}), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(measure(${depth}), recover) }`
 
 const realize = (id: string, source: string) =>
   Effect.gen(function* () {
@@ -367,9 +367,9 @@ it.effect('blocks a deep recursive traversal on the evaluator call-depth limit',
     assert.strictEqual(evaluated.reason._tag, 'EvaluationLimit')
     if (evaluated.reason._tag !== 'EvaluationLimit') return
     assert.strictEqual(evaluated.reason.kind, 'CallDepth')
-    // The blocked frame names the recursive walk itself, which is the provenance a reader needs to
-    // recognise the shape rather than guess at an unrelated limit.
-    assert.strictEqual(evaluated.reason.function.name, 'stepDepth')
+    // The blocked frame names the innermost helper reached by the recursive walk, which is the
+    // provenance a reader needs to recognise the shape rather than guess at an unrelated limit.
+    assert.strictEqual(evaluated.reason.function.name, 'get')
   }),
 )
 
@@ -490,10 +490,10 @@ it.effect('blocks a deep recursive Drop on the evaluator call-depth limit', () =
     assert.strictEqual(evaluated.reason._tag, 'EvaluationLimit')
     if (evaluated.reason._tag !== 'EvaluationLimit') return
     assert.strictEqual(evaluated.reason.kind, 'CallDepth')
-    // The frame that ran out belongs to the standard library, not to the program: the recursion
-    // here is `Box`'s hook descending into the box it holds, which no call site wrote.
-    assert.strictEqual(evaluated.reason.function.module, 'silk/box')
-    assert.strictEqual(evaluated.reason.function.name, 'dropElement')
+    // The frame that ran out belongs to the standard library, not to the program: the recursive
+    // drop has reached the slot helper used by `Box`, which no call site wrote.
+    assert.strictEqual(evaluated.reason.function.module, 'silk/slot')
+    assert.strictEqual(evaluated.reason.function.name, 'dropValue')
   }),
 )
 

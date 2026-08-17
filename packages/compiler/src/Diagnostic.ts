@@ -1,4 +1,5 @@
-import type * as SourceSpan from './SourceSpan.js'
+import type * as ProviderSelection from './ProviderSelection.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as Token from './Token.js'
 
 /** The compiler phase that originated a diagnostic. */
@@ -222,6 +223,20 @@ export const overlappingConformanceCode = 'SEM0119' as const
 export const nonTerminatingConformanceCode = 'SEM0120' as const
 /** Stable code for a concrete specialization whose conditional requirements cannot be proved. */
 export const unprovenConformanceCode = 'SEM0121' as const
+/** Stable code for a complete application that reaches the instance frontier with open rows or evidence. */
+export const nonConcreteSpecializationCode = 'SEM0122' as const
+/** Stable code for a provider that matches no member of its concrete source requirement row. */
+export const providerNoMatchCode = 'SEM0123' as const
+/** Stable code for provider relations sharing a selector but retaining disjoint candidate sets. */
+export const jointProviderSelectionConflictCode = 'SEM0124' as const
+/** Stable code for provider selection that retains more than one common requirement member. */
+export const providerAmbiguityCode = 'SEM0125' as const
+/** Stable code for an explicitly or independently selected row that is not exactly one member. */
+export const selectedRowCardinalityCode = 'SEM0126' as const
+/** Stable code for a surviving provider candidate with more than one conformance witness. */
+export const providerConformanceAmbiguityCode = 'SEM0127' as const
+/** Stable code for a surviving provider candidate whose conformance mapping is invalid. */
+export const invalidProviderConformanceCode = 'SEM0128' as const
 /** Stable code for a `typeof` item that resolves to no declaration in scope. */
 export const unresolvedExactRepresentationItemCode = 'SEM0108' as const
 /** Stable code for a `typeof` item whose name belongs to more than one declaration. */
@@ -397,6 +412,13 @@ export type Code =
   | typeof overlappingConformanceCode
   | typeof nonTerminatingConformanceCode
   | typeof unprovenConformanceCode
+  | typeof nonConcreteSpecializationCode
+  | typeof providerNoMatchCode
+  | typeof jointProviderSelectionConflictCode
+  | typeof providerAmbiguityCode
+  | typeof selectedRowCardinalityCode
+  | typeof providerConformanceAmbiguityCode
+  | typeof invalidProviderConformanceCode
   | typeof unresolvedExactRepresentationItemCode
   | typeof ambiguousExactRepresentationItemCode
   | typeof uncallableExactRepresentationItemCode
@@ -569,6 +591,11 @@ export type Reason =
       readonly goal: string
       readonly detail: string
       readonly trace: ReadonlyArray<string>
+    }
+  | { readonly _tag: 'NonConcreteSpecialization'; readonly declaration: string }
+  | {
+      readonly _tag: 'ProviderSelection'
+      readonly problem: ProviderSelection.SelectionDiagnostic
     }
   | { readonly _tag: 'UnresolvedExactRepresentationItem'; readonly item: string }
   | {
@@ -964,7 +991,14 @@ export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagno
       diagnostic.code === incompatibleRepresentationBoundCode ||
       diagnostic.code === contractRowInferenceCode ||
       diagnostic.code === invalidEffectProvisionCode ||
+      diagnostic.code === providerNoMatchCode ||
+      diagnostic.code === jointProviderSelectionConflictCode ||
+      diagnostic.code === providerAmbiguityCode ||
+      diagnostic.code === selectedRowCardinalityCode ||
+      diagnostic.code === providerConformanceAmbiguityCode ||
+      diagnostic.code === invalidProviderConformanceCode ||
       diagnostic.code === suspendingContinuationAllocatorCode ||
+      diagnostic.code === nonConcreteSpecializationCode ||
       diagnostic.code === polymorphicRecursionCode,
   )
 
@@ -2939,13 +2973,13 @@ export const intrinsicTargetUnavailable = (
   })
 
 /**
- * Diagnoses a construct the front end analyzes completely but no execution surface can lower, at
- * the site that writes it.
+ * Diagnoses a reachable construct the front end analyzes completely but no execution surface can
+ * lower, at the outermost source call edge that made it reachable.
  *
  * This is deliberately a semantic-phase error rather than a backend failure: analysis is the only
- * phase that still knows the source span, and a construct that types cleanly and then dies inside
- * lowering costs its user an investigation to discover the front end accepted something no engine
- * can build. Reporting here also means the editor shows it while the line is being written.
+ * phase that retains source-edge provenance, and a construct that types cleanly and then dies
+ * inside lowering costs its user an investigation to discover the front end accepted something no
+ * engine can build. The post-discovery gate deliberately leaves unreachable declarations quiet.
  */
 export const analysisOnlyConstruct = (construct: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
@@ -3080,6 +3114,73 @@ export const unprovenConformance = (
     span,
     ...(trace.length === 0 ? {} : { notes: Object.freeze([...trace]) }),
   })
+
+export const nonConcreteSpecialization = (
+  declaration: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: nonConcreteSpecializationCode,
+    severity: 'error',
+    message: `${declaration} reaches a complete application with unresolved contract rows or evidence`,
+    reason: Object.freeze({ _tag: 'NonConcreteSpecialization', declaration }),
+    span,
+  })
+
+/** Preserves the solver's span-free semantic payload separately from ordered source locations. */
+export const providerSelection = (problem: ProviderSelection.SelectionDiagnostic): Diagnostic => {
+  const code =
+    problem._tag === 'ProviderNoMatch'
+      ? providerNoMatchCode
+      : problem._tag === 'JointSelectionConflict'
+        ? jointProviderSelectionConflictCode
+        : problem._tag === 'ProviderAmbiguity'
+          ? providerAmbiguityCode
+          : problem._tag === 'SelectedRowCardinality'
+            ? selectedRowCardinalityCode
+            : problem._tag === 'ConformanceAmbiguity'
+              ? providerConformanceAmbiguityCode
+              : invalidProviderConformanceCode
+  const message =
+    problem._tag === 'ProviderNoMatch'
+      ? 'The provider matches no compatible requirement'
+      : problem._tag === 'JointSelectionConflict'
+        ? 'Provider constraints select incompatible requirement members'
+        : problem._tag === 'ProviderAmbiguity'
+          ? 'The provider matches more than one requirement; select one explicitly'
+          : problem._tag === 'SelectedRowCardinality'
+            ? `Selected requirement row has ${problem.count} members; exactly one is required`
+            : problem._tag === 'ConformanceAmbiguity'
+              ? 'More than one conformance witness can provide the selected requirement'
+              : problem.reason
+  const primary = problem.locations.primary
+  const primarySpan =
+    SourceSpan.fromOffsets(primary.sourceId, primary.start, primary.end) ??
+    SourceSpan.fromOffsets('invalid-provider-origin', 0, 0)
+  if (primarySpan === undefined) throw new RangeError('static fallback span is invalid')
+  const primaryKey = `${primary.sourceId}:${primary.start}:${primary.end}`
+  const related = problem.locations.relations
+    .flatMap((relation) => relation.origins)
+    .filter((origin) => `${origin.sourceId}:${origin.start}:${origin.end}` !== primaryKey)
+    .flatMap((origin) => {
+      const span = SourceSpan.fromOffsets(origin.sourceId, origin.start, origin.end)
+      return span === undefined
+        ? []
+        : [Object.freeze({ label: 'contributing provider constraint', span })]
+    })
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code,
+    severity: 'error',
+    message,
+    reason: Object.freeze({ _tag: 'ProviderSelection', problem }),
+    span: primarySpan,
+    ...(related.length === 0 ? {} : { relatedSpans: Object.freeze(related) }),
+  })
+}
 
 /**
  * Creates the diagnostic for a bound operation reachable through more than one bounded parameter.

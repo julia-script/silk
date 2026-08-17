@@ -13,6 +13,7 @@ import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as SuspensionMir from '../src/SuspensionMir.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
 import * as Target from '../src/Target.js'
+import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -103,8 +104,11 @@ const assertRunnerAndRows = (module: Mir.Module, outcome: BootstrapEvaluation.Ou
     operation.runnerBase?.typeArguments ?? operation.runnerTypeArguments,
     realization.runnerArguments,
   )
-  assert.deepEqual(operation.outcomeType.type.failures, realization.rows.failures)
-  assert.deepEqual(operation.outcomeType.type.requirements, realization.rows.requirements)
+  assert.deepEqual(Type.failureMembers(operation.outcomeType.type), realization.rows.failures)
+  assert.deepEqual(
+    Type.requirementMembers(operation.outcomeType.type),
+    realization.rows.requirements,
+  )
   assert.strictEqual(outcome._tag, 'Completed')
   if (outcome._tag !== 'Completed') return
   assert.isTrue(
@@ -132,8 +136,8 @@ const assertProvidedSpecialization = (
   if (operation?._tag !== 'RunEffectValue') return
   assert.match(operation.runner.name, /^count\$effect\$-1\$provided\$/)
   assert.lengthOf(operation.providers, 1)
-  assert.deepEqual(operation.outcomeType.type.failures, [])
-  assert.lengthOf(operation.outcomeType.type.requirements, 1)
+  assert.deepEqual(Type.failureMembers(operation.outcomeType.type), [])
+  assert.lengthOf(Type.requirementMembers(operation.outcomeType.type), 1)
   assert.strictEqual(outcome._tag, 'Completed')
   if (outcome._tag !== 'Completed') return
   assert.isTrue(
@@ -216,7 +220,7 @@ effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const provided = `service Counter { effect fn get() -> i32 ? &Counter }
@@ -297,7 +301,7 @@ effect fn build() -> i32 ! Problem | OutOfMemory {
   ${exit === 'failure' ? 'return run deferred.operation' : 'return 42'}
 }
 effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('cleans unrun and failing stored Effect environments exactly once', () =>
   Effect.gen(function* () {
@@ -374,7 +378,7 @@ effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(build() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 it.effect('resumes a suspending stored Effect and cleans its environment exactly once', () =>

@@ -5,6 +5,7 @@ import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Ownership from './Ownership.js'
 import * as RepresentationField from './RepresentationField.js'
+import * as RowAlgebra from './RowAlgebra.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
@@ -1251,7 +1252,7 @@ export const catalog = (
     if (Type.isUnion(type)) for (const member of type.members) addReferenced(member)
     if (Type.isEffect(type)) {
       addReferenced(type.success)
-      for (const failure of type.failures) addReferenced(failure)
+      for (const failure of Type.failureMembers(type)) addReferenced(failure)
     }
   }
   for (const module of index.modules) {
@@ -1283,10 +1284,19 @@ export const catalog = (
   for (const instance of discovery?.instances ?? []) {
     const substitution = instance.substitution
     if (instance.function.contract._tag === 'Contract') {
-      for (const parameter of instance.function.contract.parameters) {
-        addReferenced(Type.substitute(parameter, substitution))
-      }
-      addReferenced(Type.substitute(instance.function.contract.result, substitution))
+      for (const parameter of instance.specialization.parameters) addReferenced(parameter)
+      addReferenced(instance.specialization.result)
+      for (const failure of RowAlgebra.concreteMembers(
+        Type.failureRowPolicy(),
+        instance.specialization.failureRow ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
+      ))
+        addReferenced(failure)
+      for (const requirement of RowAlgebra.concreteMembers(
+        Type.requirementRowPolicy(),
+        instance.specialization.requirementRow ??
+          RowAlgebra.concrete(Type.requirementRowPolicy(), []),
+      ))
+        addReferenced(requirement.capability)
     }
     const addSpecializedExpression = (expression: Hir.Expression): void => {
       if (expression._tag === 'Unavailable') return
@@ -1705,11 +1715,11 @@ const effectEnvironments = (
               : 'Shared'
           effect = Type.effect(
             structuralEffect.success,
-            structuralEffect.failures,
+            Type.failureMembers(structuralEffect),
             access,
-            structuralEffect.requirements,
-            structuralEffect.failureParameters,
-            structuralEffect.requirementParameters,
+            Type.requirementMembers(structuralEffect),
+            Type.failureRowParameters(structuralEffect),
+            Type.requirementRowParameters(structuralEffect),
           )
         }
         if (unavailable !== undefined) {
@@ -1804,11 +1814,11 @@ const effectEnvironments = (
             : 'Shared'
         const effect = Type.effect(
           structuralEffect.success,
-          structuralEffect.failures,
+          Type.failureMembers(structuralEffect),
           access,
-          structuralEffect.requirements,
-          structuralEffect.failureParameters,
-          structuralEffect.requirementParameters,
+          Type.requirementMembers(structuralEffect),
+          Type.failureRowParameters(structuralEffect),
+          Type.requirementRowParameters(structuralEffect),
         )
         if (unavailable !== undefined) {
           environments.push(
@@ -2023,7 +2033,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     const key = Type.key(type)
     if (Type.isEffect(type)) {
       add(type.success)
-      for (const failure of type.failures) add(failure)
+      for (const failure of Type.failureMembers(type)) add(failure)
       return
     }
     if (entries.has(key)) return
@@ -2396,7 +2406,7 @@ const shapeNode = (
   }
   if (Type.isEffect(type)) {
     const success = shapeNode(type.success, context)
-    const failures = type.failures.map((failure, index) =>
+    const failures = Type.failureMembers(type).map((failure, index) =>
       Object.freeze({
         type: failure,
         tag: index + 1,
@@ -3149,11 +3159,11 @@ const verifyEntry = (
               Type.equals(
                 Type.effect(
                   slot.type.success,
-                  slot.type.failures,
+                  Type.failureMembers(slot.type),
                   field.type.access,
-                  slot.type.requirements,
-                  slot.type.failureParameters,
-                  slot.type.requirementParameters,
+                  Type.requirementMembers(slot.type),
+                  Type.failureRowParameters(slot.type),
+                  Type.requirementRowParameters(slot.type),
                 ),
                 field.type,
               ))

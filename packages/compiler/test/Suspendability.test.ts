@@ -23,7 +23,7 @@ const recover = `effect fn recover(error: OutOfMemory) -> i32 { return 0 }`
 const main = (recipe: string): string => `pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let provided = ${recipe} |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move provided, recover)
+  return run Effect.catchAll(move provided, recover)
 }`
 
 it.effect('separates lazy Effect runners from their factory and synchronous siblings', () =>
@@ -146,7 +146,7 @@ fn suspendAndRecover(value: i32) -> i32 {
   let mut allocator = SystemAllocator.make()
   let pending = Effect.suspend(effect { return value })
   let provided = move pending |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move provided, recover)
+  return run Effect.catchAll(move provided, recover)
 }`
     const stored = yield* snapshot(`${prelude}
 pub fn main() -> i32 { let unused = suspendAndRecover return 42 }`)
@@ -206,7 +206,7 @@ effect fn work() -> i32 ! OutOfMemory {
 }
 
 ${recover}
-pub fn main() -> i32 { return run Effect.catch(work(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
     const self = yield* snapshot(source)
     const violations = Analysis.diagnostics(self).filter(
       (diagnostic) => diagnostic.code === 'SEM0102',
@@ -248,7 +248,7 @@ effect fn work() -> i32 ! OutOfMemory {
 }
 
 ${recover}
-pub fn main() -> i32 { return run Effect.catch(work(), recover) }`)
+pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const token = Type.nominal('suspendability/main', 'Token')
     const allocate = Instances.matchingSpecialization(self.instances, {
@@ -299,7 +299,7 @@ pub fn main() -> i32 {
   let ordinary = run inert() |> Effect.provideMut(&mut custom)
   let mut system = SystemAllocator.make()
   let delayed = Effect.suspend(effect { return 41 }) |> Effect.provideMut(&mut system)
-  return ordinary + run Effect.catch(move delayed, recover)
+  return ordinary + run Effect.catchAll(move delayed, recover)
 }`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])

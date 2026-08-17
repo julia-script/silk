@@ -85,7 +85,7 @@ ${body}
 
 effect fn recover(error: OutOfMemory) -> i32 { return 99 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('inserts, looks up, and removes on both engines', () =>
   Effect.gen(function* () {
@@ -223,7 +223,7 @@ effect fn build() -> i32 ! OutOfMemory {
     key = key + 1
   }
   if length<Word, i32>(&map) != 6 { return 2 }
-  let refused = run Effect.catch(grow(&mut map), noRoom) |> Effect.provideMut(&mut allocator)
+  let refused = run Effect.catchAll(grow(&mut map), noRoom) |> Effect.provideMut(&mut allocator)
   if refused != 1 { return 3 }
   // The map is exactly as it was: the same entries, the same length, the same bucket count.
   if length<Word, i32>(&map) != 6 { return 4 }
@@ -244,7 +244,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 99 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
     assert.strictEqual(value, 42)
   }),
@@ -365,7 +365,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 99 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
     assert.deepEqual(messages(snapshot), [
       'Invalid conformance: hashed-collections/no-witness.Unhashed does not implement HashKey',

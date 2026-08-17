@@ -282,8 +282,8 @@ export const effectEnvironmentOf = (
 const effectRows = (contract: Type.Effect): EffectRows =>
   Object.freeze({
     _tag: 'EffectFieldRows',
-    failures: Object.freeze([...contract.failures]),
-    requirements: Object.freeze([...contract.requirements]),
+    failures: Object.freeze([...Type.failureMembers(contract)]),
+    requirements: Object.freeze([...Type.requirementMembers(contract)]),
   })
 
 const effectCleanup = (

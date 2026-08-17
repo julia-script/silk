@@ -35,7 +35,7 @@ it('publishes the minimal portable string intrinsic catalog with exact signature
         : {
             signature: Intrinsic.signature(operation),
             unsafe: operation.unsafe,
-            targets: operation.targets,
+            availability: operation.availability,
             returnedBorrowParameter: operation.returnedBorrowParameter,
           },
     ),
@@ -43,25 +43,25 @@ it('publishes the minimal portable string intrinsic catalog with exact signature
       {
         signature: 'unsafe fn Intrinsic.stringFromUtf8Unchecked(bytes: &[u8]) -> string',
         unsafe: true,
-        targets: ['Evaluator', 'LLVM', 'Wasm'],
+        availability: { _tag: 'Executable', targets: ['Evaluator', 'LLVM', 'Wasm'] },
         returnedBorrowParameter: 0,
       },
       {
         signature: 'fn Intrinsic.stringUtf8Bytes(value: string) -> &[u8]',
         unsafe: false,
-        targets: ['Evaluator', 'LLVM', 'Wasm'],
+        availability: { _tag: 'Executable', targets: ['Evaluator', 'LLVM', 'Wasm'] },
         returnedBorrowParameter: 0,
       },
       {
         signature: 'fn Intrinsic.stringByteLength(value: string) -> usize',
         unsafe: false,
-        targets: ['Evaluator', 'LLVM', 'Wasm'],
+        availability: { _tag: 'Executable', targets: ['Evaluator', 'LLVM', 'Wasm'] },
         returnedBorrowParameter: undefined,
       },
       {
         signature: 'fn Intrinsic.stringEqualsExact(left: string, right: string) -> bool',
         unsafe: false,
-        targets: ['Evaluator', 'LLVM', 'Wasm'],
+        availability: { _tag: 'Executable', targets: ['Evaluator', 'LLVM', 'Wasm'] },
         returnedBorrowParameter: undefined,
       },
     ],
@@ -129,6 +129,7 @@ it.effect('retains runtime string identity and provenance in HIR', () =>
       _tag: 'ReachableIntrinsicCall',
       operation: formation.id,
       span: runtimeView.span,
+      origins: Object.freeze([runtimeView.span]),
     })
     assert.strictEqual(IntrinsicAvailability.select([call], 'Wasm')._tag, 'Available')
     const restrictedTargets: ReadonlyArray<Intrinsic.ExecutionTarget> = Object.freeze([
@@ -137,7 +138,7 @@ it.effect('retains runtime string identity and provenance in HIR', () =>
     ])
     const restricted: Intrinsic.Operation = Object.freeze({
       ...formation,
-      targets: restrictedTargets,
+      availability: Object.freeze({ _tag: 'Executable', targets: restrictedTargets }),
     })
     const catalog = Intrinsic.all()
       .flatMap((actor) => actor.operations)

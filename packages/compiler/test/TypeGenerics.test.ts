@@ -3,14 +3,18 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
+import * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Formatter from '../src/Formatter.js'
+import * as Instances from '../src/Instances.js'
 import * as Layout from '../src/Layout.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Mir from '../src/Mir.js'
+import * as ModuleSurface from '../src/ModuleSurface.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Parser from '../src/Parser.js'
+import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
@@ -29,6 +33,88 @@ const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
     (child): ReadonlyArray<SyntaxTree.Node> =>
       SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [],
   )
+
+it.effect('retains source-shaped row expressions and callable constraints in module facts', () =>
+  Effect.gen(function* () {
+    const constrained = `service Binder {
+  effect fn bind<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A
+  ! E
+  ? Without<R, S>
+  where &mut P provides S from R, S in R
+}
+pub fn main() -> i32 { return 0 }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'generics/constraint-facts',
+      new TextEncoder().encode(constrained),
+    )
+    const index = Analysis.declarationIndex(snapshot)
+    const operation = index.modules.at(0)?.services.at(0)?.operations.at(0)
+
+    assert.isDefined(operation)
+    if (operation === undefined) return
+    assert.strictEqual(operation.requirementRow.expression._tag, 'WithoutRowExpression')
+    assert.deepEqual(
+      operation.constraints.map((constraint) => constraint._tag),
+      ['ProviderConstraint', 'MembershipConstraint'],
+    )
+    assert.deepEqual(
+      operation.constraintContracts.map((constraint) => constraint._tag),
+      ['ProviderSelectionConstraint', 'RequirementSubsetConstraint'],
+    )
+    assert.strictEqual(
+      RowAlgebra.encode(
+        Type.requirementRowPolicy(),
+        operation.requirementRow.row,
+        (member) => `${member.access}:${Type.encode(member.capability)}@${member.role}`,
+        Type.encode,
+        (member) => `${member.access}:${member.capability.name}@${member.role}`,
+      ),
+      'Without<R, S>',
+    )
+    const provider = operation.constraints.at(0)
+    assert.strictEqual(provider?._tag, 'ProviderConstraint')
+    if (provider?._tag === 'ProviderConstraint') {
+      assert.strictEqual(provider.mode, 'Exclusive')
+      assert.strictEqual(provider.selected._tag, 'RowParameterExpression')
+      assert.strictEqual(provider.source._tag, 'RowParameterExpression')
+    }
+    const contract = DeclarationIndex.callableContract(operation)
+    assert.strictEqual(contract.constraints.length, 2)
+    assert.strictEqual(Type.isEffect(contract.result), true)
+    assert.include(Type.encode(contract.result), 'Without<R, S>')
+    const surface = ModuleSurface.fromIndex(index).get('generics/constraint-facts')
+    assert.isDefined(surface)
+    assert.include(surface?.canonical ?? '', 'ProviderConstraint')
+    assert.include(surface?.canonical ?? '', 'WithoutRowExpression')
+  }),
+)
+
+it.effect('rejects residual rows at the complete-application specialization frontier', () =>
+  Effect.gen(function* () {
+    const module = 'generics/frontier'
+    const snapshot = yield* Analysis.ofSourceRealized(
+      module,
+      new TextEncoder().encode(`effect fn forward<A, !E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
+  return run self
+}
+pub fn main() -> i32 { return 0 }`),
+    )
+    const fn = Analysis.hirOf(snapshot, module)?.functions.find(
+      (candidate) =>
+        candidate.declaration.canonical._tag === 'Canonical' &&
+        candidate.declaration.canonical.id.name === 'forward',
+    )
+    assert.isDefined(fn)
+    if (fn === undefined) return
+    assert.isUndefined(Instances.specialize(fn, new Map(), Analysis.declarationIndex(snapshot)))
+    const diagnostic = Diagnostic.nonConcreteSpecialization(
+      `${module}.forward`,
+      fn.declaration.syntax.span,
+    )
+    assert.strictEqual(diagnostic.code, 'SEM0122')
+    assert.strictEqual(diagnostic.reason._tag, 'NonConcreteSpecialization')
+  }),
+)
 
 it('parses declaration parameters and explicit call specialization losslessly', () => {
   const syntax = Parser.parse(Lexer.lex(file))
@@ -93,6 +179,35 @@ it('normalizes contract rows and infers selected-entry remainders', () => {
     '? &mut generics/Rows.Allocator',
   )
   assert.strictEqual(Type.encode(Type.substitute(pattern, inferred)), Type.encode(actual))
+})
+
+it('checks computed rows forward-only without reconstructing their operands', () => {
+  const owner = { module: 'generics/ForwardRows', name: 'without' }
+  const source = Type.parameter(owner, 0, 'E', 'FailureRow')
+  const selected = Type.parameter(owner, 1, 'S')
+  const problem = Type.nominal('generics/ForwardRows', 'Problem')
+  const other = Type.nominal('generics/ForwardRows', 'Other')
+  const origin = { sourceId: 'generics/ForwardRows', start: 10, end: 11 }
+  const computed = RowAlgebra.without(
+    Type.failureRowPolicy(),
+    RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(source),
+    RowAlgebra.singleton(Type.failureRowPolicy(), Type.failureMemberShape(selected), origin),
+  )
+  const pattern = Type.nominal('generics/ForwardRows', 'Carrier', [
+    Type.failureRowArgumentFromRow(computed),
+  ])
+  const actual = Type.nominal('generics/ForwardRows', 'Carrier', [Type.failureRowArgument([other])])
+  const unbound = new Map<string, Type.GenericArgument>()
+
+  assert.isFalse(Type.infer(pattern, actual, unbound))
+  assert.isUndefined(unbound.get(Type.key(source)))
+  assert.isUndefined(unbound.get(Type.key(selected)))
+
+  const independentlyBound = new Map<string, Type.GenericArgument>([
+    [Type.key(source), Type.failureRowArgument([problem, other])],
+    [Type.key(selected), problem],
+  ])
+  assert.isTrue(Type.infer(pattern, actual, independentlyBound))
 })
 
 it('infers failure and requirement row arguments nested in nominal applications', () => {
@@ -541,6 +656,49 @@ pub fn main() -> i32 { return pair<i32>(42, true) }`),
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
+it.effect('accepts failure-row and requirement-row arguments in an explicit prefix', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'generics/RowPrefix',
+      new TextEncoder().encode(`struct First {}
+struct Second {}
+struct Clock {}
+effect fn risky() -> i32 ! First | Second { fail First {} }
+effect fn read() -> i32 ? &Clock { return 42 }
+effect fn keepFailures<!E>(self: once Effect<i32 ! E>) -> i32 ! E { return run self }
+effect fn keepRequirements<?R>(self: once Effect<i32 ? R>) -> i32 ? R { return run self }
+effect fn useFailures() -> i32 ! First | Second {
+  return run keepFailures<First | Second>(risky())
+}
+effect fn useRequirements() -> i32 ? &Clock {
+  return run keepRequirements<&Clock>(read())
+}
+pub fn main() -> i32 { return 0 }`),
+    )
+
+    assert.deepEqual(snapshot.diagnostics, [])
+  }),
+)
+
+it.effect('rejects an explicit prefix argument outside the binder row domain', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'generics/WrongRowPrefix',
+      new TextEncoder().encode(`struct Problem {}
+struct Clock {}
+effect fn risky() -> i32 ! Problem { fail Problem {} }
+effect fn keepFailures<!E>(self: once Effect<i32 ! E>) -> i32 ! E { return run self }
+effect fn invalid() -> i32 ! Problem { return run keepFailures<&Clock>(risky()) }
+pub fn main() -> i32 { return 0 }`),
+    )
+
+    assert.include(
+      snapshot.diagnostics.map((diagnostic) => diagnostic.code),
+      'SEM0088',
+    )
   }),
 )
 

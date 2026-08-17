@@ -61,7 +61,7 @@ fn trapLayout() -> Layout {
   return trapLayout()
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 // Whole-member binding on an affine member (move it out of the union).
 const affineExtract = `struct Empty {}
@@ -88,7 +88,7 @@ fn takeStorage(full: Full) -> Allocation {
 }
 effect fn fallback() -> Full ! OutOfMemory { fail OutOfMemory {} }
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('binds whole members and lowers runtime layouts on all three engines', () =>
   Effect.gen(function* () {

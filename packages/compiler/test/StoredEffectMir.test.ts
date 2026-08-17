@@ -169,8 +169,11 @@ pub fn main() -> i32 {
     if (run?._tag !== 'RunEffectValue' || stored?._tag !== 'StoredEffectField') return
     assert.deepEqual(run.runner, stored.realization.runner)
     assert.deepEqual(run.runnerTypeArguments, stored.realization.runnerArguments)
-    assert.deepEqual(run.outcomeType.type.failures, stored.realization.rows.failures)
-    assert.deepEqual(run.outcomeType.type.requirements, stored.realization.rows.requirements)
+    assert.deepEqual(Type.failureMembers(run.outcomeType.type), stored.realization.rows.failures)
+    assert.deepEqual(
+      Type.requirementMembers(run.outcomeType.type),
+      stored.realization.rows.requirements,
+    )
     assert.deepEqual(Mir.verify(module), [])
     const alternate = operations.find(
       (operation) => operation._tag === 'RunEffectValue' && operation !== run,
@@ -358,7 +361,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 effect fn delayed() -> i32 {
   let mut allocator = SystemAllocator.make()
   let provided = Effect.suspend(effect { return 42 }) |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move provided, recover)
+  return run Effect.catchAll(move provided, recover)
 }
 pub fn main() -> i32 {
   let deferred = Deferred { operation: effect { return run delayed() } }
@@ -412,7 +415,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
     const propagating = module.functions
       .flatMap(Mir.operations)

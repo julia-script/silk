@@ -91,7 +91,7 @@ effect fn release() -> () ! OutOfMemory {
 effect fn ignore(error: OutOfMemory) -> () { return () }
 
 /// One acquire/release pair, recovered into an infallible contract so an ordinary \`fn\` can run it.
-effect fn touch() -> () { return run Effect.catch(release(), ignore) }
+effect fn touch() -> () { return run Effect.catchAll(release(), ignore) }
 
 /// Construction-time work: one pair, then the branch.
 fn buildOnce() -> Effect<i32 ! never ? &mut Counter> {
@@ -138,7 +138,10 @@ pub fn main() -> i32 {
   let alphaProvider = Fixed { value: 3 }
   let betaProvider = Fixed { value: 4 }
   let chosen = Effect.ifThenElse(${condition}, fromAlpha, fromBeta)
-  let provided = Effect.provide(Effect.provide(move chosen, &alphaProvider), &betaProvider)
+  let provided = Effect.provide<&Beta>(
+    Effect.provide<&Alpha>(move chosen, &alphaProvider),
+    &betaProvider,
+  )
   return run provided
 }`
 
@@ -156,7 +159,7 @@ effect fn recover(problem: Problem) -> i32 { return problem.code }
 
 pub fn main() -> i32 {
   let chosen = Effect.ifThenElse(${condition}, risky, safe)
-  return run Effect.catch(move chosen, recover)
+  return run Effect.catchAll(move chosen, recover)
 }`
 
 /**

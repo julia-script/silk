@@ -60,7 +60,7 @@ const program = (entry: Case): string => `effect fn store() -> i32 ! OutOfMemory
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 for (const entry of cases) {
   it.effect(`reads a ${entry.element} slot lane at its own width on every engine`, () =>
@@ -110,7 +110,7 @@ const reported = `effect fn store() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 it.effect('sums two u8 slots in one word to 14 on every engine', () =>
   Effect.gen(function* () {

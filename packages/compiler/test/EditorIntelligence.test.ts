@@ -557,6 +557,40 @@ pub fn main() -> i32 { return 0 }`),
   ),
 )
 
+it.effect('indexes every row-expression and constraint binder reference', () => {
+  const source = `effect fn bind<?S, P, ?R>(
+  self: once Effect<i32 ? R>,
+  provider: &mut P
+) -> i32 ? Without<R, S>
+where &mut P provides S from R {
+  return run self
+}`
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const occurrences = snapshot.semanticOccurrences.modules.get('main')?.occurrences ?? []
+      const spellings = occurrences.map((occurrence) =>
+        decoder.decode(encoder.encode(source).slice(occurrence.span.start, occurrence.span.end)),
+      )
+      const count = (spelling: string): number =>
+        spellings.filter((candidate) => candidate === spelling).length
+
+      assert.strictEqual(count('S'), 3)
+      assert.strictEqual(count('P'), 3)
+      assert.strictEqual(count('R'), 4)
+      for (const spelling of ['S', 'P', 'R']) {
+        const references = occurrences.filter(
+          (occurrence, ordinal) =>
+            spellings.at(ordinal) === spelling && occurrence.role !== 'Declaration',
+        )
+        assert.isTrue(references.length > 0)
+        assert.isTrue(references.every((occurrence) => occurrence.role === 'Type'))
+        assert.isTrue(references.every((occurrence) => occurrence.declaration !== undefined))
+      }
+      return undefined
+    }),
+  )
+})
+
 it.effect('completes from the innermost lexical scope and excludes later declarations', () => {
   const source = nestedBindingSource
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(

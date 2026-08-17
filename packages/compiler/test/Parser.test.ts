@@ -490,17 +490,17 @@ it('bounds a damaged unsafe call before the following statement and declaration'
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
-it('parses an explicit provider role in a provision pipeline', () => {
+it('parses an explicit selected requirement row in a provision pipeline', () => {
   const result = parseText(
     'memory://provider-role.silk',
-    'fn main() -> i32 { let recipe = work() |> Effect.provide(&clock, @Scratch) return 0 }',
+    'fn main() -> i32 { let recipe = work() |> Effect.provide<&Clock@Scratch>(&clock) return 0 }',
   )
   assert.deepEqual(result.parserDiagnostics, [])
   assert.include(
     descendants(result.root)
       .filter(SyntaxTree.isNode)
       .map((node) => node.kind),
-    'RoleExpression',
+    'ReferenceType',
   )
 })
 
@@ -1960,7 +1960,7 @@ it('parses complete callable pipelines left-to-right', () => {
   const source =
     'pub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }\n' +
     'pub fn flag() -> bool { return true |> bool.not }\n' +
-    'pub fn recover() -> i32 { return risky() |> Effect.catch(handler) }'
+    'pub fn recover() -> i32 { return risky() |> Effect.catchAll(handler) }'
   const result = parseText('memory/operator-pipelines', source)
   const pipelines = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
@@ -2361,4 +2361,81 @@ pub fn after() -> i32 { return 2 }`
     assertOriginalTokenTraversal(result)
     assert.deepEqual(reconstructedBytes(result), ascii(source), name)
   }
+})
+
+it('parses row difference and callable constraints as contextual syntax', () => {
+  const source = `effect fn bind<?S, A, P, !E, ?R>(
+  self: once Effect<A ! E ? R>,
+  provider: &mut P
+) -> A ! E ? Without<R, S>
+where &mut P provides S from R, &P provides S from R, P provides S from R, S in R {
+  return run self
+}
+
+fn keywords(where: i32, provides: i32, from: i32, in: i32) -> i32 {
+  return where + provides + from + in
+}`
+  const result = parseText('memory/row-constraints', source)
+  const kinds = descendants(result.root).flatMap((element) =>
+    SyntaxTree.isNode(element) ? [element.kind] : [],
+  )
+
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.strictEqual(kinds.filter((kind) => kind === 'RowWithout').length, 1)
+  assert.strictEqual(kinds.filter((kind) => kind === 'WhereClause').length, 1)
+  assert.strictEqual(kinds.filter((kind) => kind === 'ProviderConstraint').length, 3)
+  assert.strictEqual(kinds.filter((kind) => kind === 'MembershipConstraint').length, 1)
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 2)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('parses nested failure and requirement differences with union operands', () => {
+  const source = `effect fn transform<S, P, A, !E, ?R>(
+  self: once Effect<A ! E ? R>,
+  provider: &mut P
+) -> Effect<A ! Without<E, First | Third> ? Without<R, S>>
+where First | Third in E, &mut P provides S from R {
+  return self
+}`
+  const result = parseText('memory/nested-row-constraints', source)
+  const kinds = descendants(result.root).flatMap((element) =>
+    SyntaxTree.isNode(element) ? [element.kind] : [],
+  )
+
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.strictEqual(kinds.filter((kind) => kind === 'RowWithout').length, 2)
+  assert.strictEqual(kinds.filter((kind) => kind === 'UnionType').length, 2)
+  assert.strictEqual(kinds.filter((kind) => kind === 'ProviderConstraint').length, 1)
+  assert.strictEqual(kinds.filter((kind) => kind === 'MembershipConstraint').length, 1)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('bounds a missing provider source at its constraint', () => {
+  const source = `effect fn broken<?S, A, P, !E, ?R>(
+  self: once Effect<A ! E ? R>,
+  provider: &mut P
+) -> A ! E ? Without<R, S>
+where &mut P provides S, S in R {
+  return run self
+}
+
+fn after() -> i32 { return 1 }`
+  const result = parseText('memory/malformed-row-constraint', source)
+  const declarations = directFunctionDeclarations(result.root)
+  const constraints = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) &&
+      (element.kind === 'ProviderConstraint' || element.kind === 'MembershipConstraint'),
+  )
+
+  assert.strictEqual(declarations.length, 2)
+  assert.deepEqual(
+    constraints.map((constraint) => constraint.kind),
+    ['ProviderConstraint', 'MembershipConstraint'],
+  )
+  assert.isTrue(missingLeaves(constraints.at(0) ?? result.root).length > 0)
+  assert.deepEqual(missingLeaves(declarations.at(1) ?? result.root), [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
 })

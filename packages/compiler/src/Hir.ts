@@ -1,8 +1,10 @@
+import type * as Constraint from './Constraint.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Match from './Match.js'
 import type * as Operator from './Operator.js'
+import * as RowAlgebra from './RowAlgebra.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
@@ -22,8 +24,21 @@ export interface Contract {
   readonly functionKind?: 'Ordinary' | 'Effect'
   readonly parameters: ReadonlyArray<DeclarationIndex.SemanticType>
   readonly result: DeclarationIndex.SemanticType
-  readonly failures?: ReadonlyArray<Type.Nominal>
-  readonly requirements?: ReadonlyArray<Type.Requirement>
+  readonly failureRow?: Type.FailureRow
+  readonly requirementRow?: Type.RequirementsRow
+  readonly constraints: ReadonlyArray<Constraint.Constraint>
+}
+
+/** Resolves one symbolic binding selector at a complete application frontier. */
+export const selectedRequirement = (
+  provider: Extract<Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
+  substitution: Type.Substitution,
+): Type.Requirement | undefined => {
+  const selected = Type.substituteRequirementsRow(provider.selected, substitution)
+  const concrete = RowAlgebra.concretize(Type.requirementRowPolicy(), selected)
+  return concrete._tag === 'Concrete' && concrete.row.members.length === 1
+    ? concrete.row.members.at(0)
+    : undefined
 }
 
 /** The normalized or explicitly unavailable contract of one declaration. */
@@ -607,12 +622,14 @@ export type Expression =
        * because no source-level type can spell it.
        */
       readonly _tag: 'EffectCatch'
+      readonly intrinsic: Intrinsic.OperationId
       readonly protected: Expression
       readonly handler: Expression
-      readonly selected: Type.Nominal
-      readonly protectedRow: ReadonlyArray<Type.Nominal>
-      readonly handlerRow: ReadonlyArray<Type.Nominal>
-      readonly residualRow: ReadonlyArray<Type.Nominal>
+      readonly selected: Type.Type
+      readonly protectedRow: Type.FailureRow
+      readonly handlerRow: Type.FailureRow
+      readonly residualRow: Type.FailureRow
+      readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
     }
@@ -622,11 +639,14 @@ export type Expression =
       readonly provider: {
         readonly binding?: BindingId
         readonly parameter?: DeclarationIndex.ParameterId
-        readonly capability: Type.Nominal | Type.Parameter
+        readonly selected: Type.RequirementsRow
+        readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
+        readonly capability?: Type.Nominal | Type.Parameter
         readonly providerType: Type.Nominal | Type.Parameter
         readonly witness?: DeclarationIndex.ConformanceWitness
-        readonly role: string
-        readonly access: 'Shared' | 'Exclusive' | 'Take'
+        readonly role?: string
+        readonly selectionAccess: 'Shared' | 'Exclusive' | 'Take'
+        readonly captureAccess: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
         readonly span: SourceSpan.SourceSpan
       }
       readonly type: Type.Effect
@@ -1330,12 +1350,13 @@ export const contractOf = (declaration: DeclarationIndex.DeclarationFact): Contr
     ...(declaration.functionKind === 'Effect'
       ? {
           functionKind: 'Effect' as const,
-          failures: declaration.failureRow.failures,
-          requirements: declaration.requirementRow.requirements,
+          failureRow: declaration.failureRow.row,
+          requirementRow: declaration.requirementRow.row,
         }
       : {}),
     parameters: Object.freeze(parameters),
     result: declaration.returnType.type,
+    constraints: declaration.constraintContracts,
   })
 }
 
@@ -1421,13 +1442,41 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'EffectCatch':
       return [
-        `${indent}effect-catch ${Type.encode(expression.selected)} protected=${expression.protectedRow.map(Type.encode).join('|') || 'never'} handler=${expression.handlerRow.map(Type.encode).join('|') || 'never'} residual=${expression.residualRow.map(Type.encode).join('|') || 'never'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}effect-catch intrinsic=${Intrinsic.operationText(expression.intrinsic)} ${Type.encode(expression.selected)} protected=${RowAlgebra.encode(
+          Type.failureRowPolicy(),
+          expression.protectedRow,
+          Type.encode,
+          (parameter) => parameter.name,
+          (member) => member.parameter.name,
+        )} handler=${RowAlgebra.encode(
+          Type.failureRowPolicy(),
+          expression.handlerRow,
+          Type.encode,
+          (parameter) => parameter.name,
+          (member) => member.parameter.name,
+        )} residual=${RowAlgebra.encode(
+          Type.failureRowPolicy(),
+          expression.residualRow,
+          Type.encode,
+          (parameter) => parameter.name,
+          (member) => member.parameter.name,
+        )} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.protected, depth + 1),
         encodeExpression(expression.handler, depth + 1),
       ].join('\n')
     case 'EffectBindRequirement':
       return [
-        `${indent}effect-provide ${Type.encode(expression.provider.capability)}@${expression.provider.role} ${expression.provider.access.toLowerCase()} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}effect-provide ${
+          expression.provider.capability === undefined
+            ? RowAlgebra.encode(
+                Type.requirementRowPolicy(),
+                expression.provider.selected,
+                (member) => Type.encode(member.capability),
+                (parameter) => parameter.name,
+                (member) => member.capability.name,
+              )
+            : Type.encode(expression.provider.capability)
+        }@${expression.provider.role ?? 'DefaultRole'} selection=${expression.provider.selectionAccess.toLowerCase()} capture=${expression.provider.captureAccess.toLowerCase()} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.protected, depth + 1),
       ].join('\n')
     case 'EffectBlock':

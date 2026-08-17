@@ -200,28 +200,28 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
   }
   let filePath = run pathMake("/data/file") |> Effect.provideMut(&mut allocator)
   let input = [u8.toU8(1), u8.toU8(2), u8.toU8(3), u8.toU8(4)]
-  let written = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(writeFileWithParents(&filePath, &input), &mut fs),
+  let written = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(writeFileWithParents(&filePath, &input), &mut fs),
     &mut allocator
   )
-  let owned = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(FileSystem.readFile(&filePath), &mut fs),
+  let owned = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(FileSystem.readFile(&filePath), &mut fs),
     &mut allocator
   )
   if checksum(bytesSlice(&owned)) != 10 { return 1 }
 
   if run Effect.provideMut(exists(&filePath), &mut fs) {} else { return 2 }
   let nested = run pathMake("/a/b/c") |> Effect.provideMut(&mut allocator)
-  let created = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(createDirectoriesRecursively(&nested), &mut fs),
+  let created = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(createDirectoriesRecursively(&nested), &mut fs),
     &mut allocator
   )
   if fs.creates != 2 { return 3 }
   if fs.bExists == false { return 4 }
   if fs.cExists == false { return 5 }
   let dataPath = run pathMake("/data") |> Effect.provideMut(&mut allocator)
-  let entries = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(FileSystem.listDirectory(&dataPath), &mut fs),
+  let entries = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(FileSystem.listDirectory(&dataPath), &mut fs),
     &mut allocator
   )
   if vectorLength<DirectoryEntry>(&entries) != usize.add(0, 0) { return 6 }
@@ -340,14 +340,14 @@ effect fn rejectProviderBytes() -> bool ! FileError | OutOfMemory {
 effect fn recovered(error: FileError | OutOfMemory) -> bool { return true }
 
 pub fn main() -> i32 {
-  if run Effect.catch(construct("relative"), recovered) {} else { return 1 }
-  if run Effect.catch(construct("/trailing/"), recovered) {} else { return 2 }
-  if run Effect.catch(construct("/double//slash"), recovered) {} else { return 3 }
-  if run Effect.catch(construct("/./dot"), recovered) {} else { return 4 }
-  if run Effect.catch(construct("/../parent"), recovered) {} else { return 5 }
-  if run Effect.catch(construct("/\\u{0}"), recovered) {} else { return 6 }
-  if run Effect.catch(resolveEscape(), recovered) {} else { return 7 }
-  if run Effect.catch(rejectProviderBytes(), recovered) {} else { return 8 }
+  if run Effect.catchAll(construct("relative"), recovered) {} else { return 1 }
+  if run Effect.catchAll(construct("/trailing/"), recovered) {} else { return 2 }
+  if run Effect.catchAll(construct("/double//slash"), recovered) {} else { return 3 }
+  if run Effect.catchAll(construct("/./dot"), recovered) {} else { return 4 }
+  if run Effect.catchAll(construct("/../parent"), recovered) {} else { return 5 }
+  if run Effect.catchAll(construct("/\\u{0}"), recovered) {} else { return 6 }
+  if run Effect.catchAll(resolveEscape(), recovered) {} else { return 7 }
+  if run Effect.catchAll(rejectProviderBytes(), recovered) {} else { return 8 }
   return 42
 }`
   return Effect.gen(function* () {
@@ -394,7 +394,7 @@ effect fn build() -> i32 ! FileError | OutOfMemory {
 }
 
 effect fn recover(error: FileError | OutOfMemory) -> i32 { return 42 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
   return Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'file-system-acceptance/allocation-failure',

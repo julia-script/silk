@@ -98,7 +98,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let selected = delayed(42) |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move selected, recover)
+  return run Effect.catchAll(move selected, recover)
 }`),
       'wasm32-unknown-unknown',
       { normalizeMir: false },
@@ -165,7 +165,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let pending = seed(41) |> Effect.map(increment) |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move pending, recover)
+  return run Effect.catchAll(move pending, recover)
 }`),
       'wasm32-unknown-unknown',
     )
@@ -237,7 +237,7 @@ pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let selected = read() |> Effect.provide(&provider)
   let complete = move selected |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move complete, recover)
+  return run Effect.catchAll(move complete, recover)
 }`),
       'wasm32-unknown-unknown',
     )

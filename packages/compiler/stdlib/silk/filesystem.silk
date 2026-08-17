@@ -684,7 +684,7 @@ effect fn discardReleaseFailure(error: FileError | OutOfMemory) -> () { return (
 pub effect fn releaseIgnored(
   self: TemporaryDirectory
 ) -> () ? &mut FileSystem | &mut Allocator {
-  return run Effect.catch(release(move self), discardReleaseFailure)
+  return run Effect.catchAll(release(move self), discardReleaseFailure)
 }
 
 /// Copies one recorded Path out of the walk's own record.

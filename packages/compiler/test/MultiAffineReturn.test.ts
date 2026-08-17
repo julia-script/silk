@@ -103,7 +103,7 @@ effect fn execute() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch(execute(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(execute(), recover) }`
 
 const stackVmWithSeparateVectors = readFileSync(
   new URL('../../../examples/language-pressure/stack-vm/main.silk', import.meta.url),

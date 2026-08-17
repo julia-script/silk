@@ -1,4 +1,7 @@
+import * as CallableContract from './CallableContract.js'
+import * as Constraint from './Constraint.js'
 import type * as Hir from './Hir.js'
+import * as RowAlgebra from './RowAlgebra.js'
 import * as Scalar from './Scalar.js'
 import * as Type from './Type.js'
 
@@ -51,6 +54,24 @@ export const normalizeExecutionTargets = (
 ): ReadonlyArray<ExecutionTarget> =>
   Object.freeze(executionTargets.filter((target) => targets.includes(target)))
 
+/** Whether a sealed operation has runtime support or exists only for semantic analysis. */
+export type Availability =
+  | {
+      readonly _tag: 'Executable'
+      readonly targets: ReadonlyArray<ExecutionTarget>
+    }
+  | {
+      readonly _tag: 'AnalysisOnly'
+      readonly diagnostic: 'SEM0098'
+      readonly construct: string
+    }
+
+const executable = (targets: ReadonlyArray<ExecutionTarget>): Availability =>
+  Object.freeze({ _tag: 'Executable', targets: normalizeExecutionTargets(targets) })
+
+const analysisOnly = (diagnostic: 'SEM0098', construct: string): Availability =>
+  Object.freeze({ _tag: 'AnalysisOnly', diagnostic, construct })
+
 /** The elaboration rule selected by an intrinsic operation identity. */
 export type Rule =
   | {
@@ -62,7 +83,13 @@ export type Rule =
     }
   | {
       readonly _tag: 'EffectRule'
-      readonly operation: 'Result' | 'BindRequirement'
+      readonly operation: 'Result'
+    }
+  | {
+      readonly _tag: 'ContractRule'
+      readonly contract: CallableContract.CallableContract
+      readonly post: 'BindRequirement' | 'CatchFailure'
+      readonly providerMode?: Constraint.ProviderMode
     }
   | { readonly _tag: 'PlaceRule'; readonly operation: 'Replace' }
 
@@ -77,7 +104,7 @@ export interface Operation {
   readonly unsafe: boolean
   readonly admission?: AdmissionCategory
   readonly consumer?: string
-  readonly targets: ReadonlyArray<ExecutionTarget>
+  readonly availability: Availability
   readonly invariant?: string
   readonly hostImport?: string
   readonly returnedBorrowParameter?: number
@@ -108,7 +135,8 @@ const upperInitial = (value: string): string =>
 const intrinsicSpelling = (family: string, operation: string): string => {
   if (Scalar.isSpelling(family)) return `${family}${upperInitial(operation)}`
   if (family === 'Effect' && operation === 'suspendEffect') return 'suspendEffect'
-  if (family === 'Effect' && operation === 'bindRequirement') return 'bindRequirement'
+  if (family === 'Effect' && operation.startsWith('bindRequirement')) return operation
+  if (family === 'Effect' && operation === 'catchFailure') return operation
   if (family === 'Place' && operation === 'replace') return 'replace'
   if (family === 'Storage' && operation === 'acquire') return 'systemAllocationAcquire'
   if (family === 'Host' && operation === 'write') return 'standardStreamWrite'
@@ -170,7 +198,7 @@ const builtin = (options: {
     unsafe: options.unsafe ?? false,
     admission: admission(options.actor),
     consumer: consumer(options.actor, options.name),
-    targets: normalizeExecutionTargets(options.targets ?? executionTargets),
+    availability: executable(options.targets ?? executionTargets),
     ...(options.unsafe && (options.actor === 'RawBuffer' || options.actor === 'Slot')
       ? {
           invariant:
@@ -213,8 +241,42 @@ const effect = (options: {
     unsafe: false,
     admission: admission('Effect'),
     consumer: consumer('Effect', options.name),
-    targets: executionTargets,
-    rule: Object.freeze({ _tag: 'EffectRule', operation: options.operation }),
+    availability: executable(executionTargets),
+    rule: Object.freeze({
+      _tag: 'EffectRule',
+      operation: options.operation,
+    }),
+  })
+}
+
+const contractEffect = (options: {
+  readonly name: string
+  readonly typeParameters: ReadonlyArray<string>
+  readonly parameters: ReadonlyArray<ValueParameter>
+  readonly result: string
+  readonly contract: CallableContract.CallableContract
+  readonly post: Extract<Rule, { readonly _tag: 'ContractRule' }>['post']
+  readonly providerMode?: Constraint.ProviderMode
+  readonly availability?: Availability
+}): Operation => {
+  const spelling = intrinsicSpelling('Effect', options.name)
+  return Object.freeze({
+    _tag: 'IntrinsicOperation',
+    id: operationId('Intrinsic', spelling),
+    spelling,
+    typeParameters: Object.freeze(options.typeParameters.map(typeParameter)),
+    parameters: Object.freeze(Array.from(options.parameters)),
+    result: options.result,
+    unsafe: false,
+    admission: admission('Effect'),
+    consumer: consumer('Effect', options.name),
+    availability: options.availability ?? executable(executionTargets),
+    rule: Object.freeze({
+      _tag: 'ContractRule',
+      contract: options.contract,
+      post: options.post,
+      ...(options.providerMode === undefined ? {} : { providerMode: options.providerMode }),
+    }),
   })
 }
 
@@ -242,6 +304,145 @@ const suspensionTypeParameters = Object.freeze([
   suspensionFailure,
   suspensionRequirement,
 ])
+const bindingOwner = Object.freeze({ module: 'silk/core', name: '$BindRequirement' })
+const bindingSelected = Type.parameter(bindingOwner, 0, 'S', 'RequirementRow')
+const bindingSuccess = Type.parameter(bindingOwner, 1, 'A')
+const bindingProvider = Type.parameter(bindingOwner, 2, 'P')
+const bindingFailure = Type.parameter(bindingOwner, 3, 'E', 'FailureRow')
+const bindingRequirements = Type.parameter(bindingOwner, 4, 'R', 'RequirementRow')
+const bindingTypeParameters = Object.freeze([
+  bindingSelected,
+  bindingSuccess,
+  bindingProvider,
+  bindingFailure,
+  bindingRequirements,
+])
+const bindingFailureRow = RowAlgebra.parameter<
+  Type.Nominal,
+  Type.Parameter,
+  Type.FailureMemberShape
+>(bindingFailure)
+const bindingRequirementRow = RowAlgebra.parameter<
+  Type.Requirement,
+  Type.Parameter,
+  Type.RequirementMemberShape
+>(bindingRequirements)
+const bindingSelectedRow = RowAlgebra.parameter<
+  Type.Requirement,
+  Type.Parameter,
+  Type.RequirementMemberShape
+>(bindingSelected)
+const bindingContract = (mode: Constraint.ProviderMode): CallableContract.CallableContract => {
+  const provider = mode === 'Take' ? bindingProvider : Type.reference(mode, bindingProvider)
+  return CallableContract.make({
+    functionKind: 'Effect',
+    binders: bindingTypeParameters,
+    parameters: Object.freeze([
+      Object.freeze({
+        type: Type.effectWithRows(bindingSuccess, bindingFailureRow, 'Take', bindingRequirementRow),
+        mode: 'Take' as const,
+      }),
+      Object.freeze({ type: provider, mode }),
+    ]),
+    result: Type.effectWithRows(
+      bindingSuccess,
+      bindingFailureRow,
+      'Shared',
+      RowAlgebra.without(Type.requirementRowPolicy(), bindingRequirementRow, bindingSelectedRow),
+    ),
+    constraints: Object.freeze([
+      Constraint.providerSelection(
+        mode,
+        bindingProvider,
+        bindingSelectedRow,
+        bindingRequirementRow,
+      ),
+    ]),
+  })
+}
+const catchOwner = Object.freeze({ module: 'silk/core', name: '$CatchFailure' })
+const catchSelected = Type.parameter(catchOwner, 0, 'S')
+const catchSuccess = Type.parameter(catchOwner, 1, 'A')
+const catchProtectedFailure = Type.parameter(catchOwner, 2, 'E', 'FailureRow')
+const catchHandlerFailure = Type.parameter(catchOwner, 3, 'F', 'FailureRow')
+const catchProtectedRequirements = Type.parameter(catchOwner, 4, 'R', 'RequirementRow')
+const catchHandlerRequirements = Type.parameter(catchOwner, 5, 'Q', 'RequirementRow')
+const catchTypeParameters = Object.freeze([
+  catchSelected,
+  catchSuccess,
+  catchProtectedFailure,
+  catchHandlerFailure,
+  catchProtectedRequirements,
+  catchHandlerRequirements,
+])
+const catchProtectedFailureRow = RowAlgebra.parameter<
+  Type.Nominal,
+  Type.Parameter,
+  Type.FailureMemberShape
+>(catchProtectedFailure)
+const catchHandlerFailureRow = RowAlgebra.parameter<
+  Type.Nominal,
+  Type.Parameter,
+  Type.FailureMemberShape
+>(catchHandlerFailure)
+const catchProtectedRequirementRow = RowAlgebra.parameter<
+  Type.Requirement,
+  Type.Parameter,
+  Type.RequirementMemberShape
+>(catchProtectedRequirements)
+const catchHandlerRequirementRow = RowAlgebra.parameter<
+  Type.Requirement,
+  Type.Parameter,
+  Type.RequirementMemberShape
+>(catchHandlerRequirements)
+const catchSelectedRow = RowAlgebra.singleton(
+  Type.failureRowPolicy(),
+  Type.failureMemberShape(catchSelected),
+  Object.freeze({ sourceId: '', start: 0, end: 0 }),
+)
+const catchContract = CallableContract.make({
+  functionKind: 'Effect',
+  binders: catchTypeParameters,
+  parameters: Object.freeze([
+    Object.freeze({
+      type: Type.effectWithRows(
+        catchSuccess,
+        catchProtectedFailureRow,
+        'Take',
+        catchProtectedRequirementRow,
+      ),
+      mode: 'Take' as const,
+    }),
+    Object.freeze({
+      type: Type.callable(
+        Object.freeze([catchSelected]),
+        Type.effectWithRows(
+          catchSuccess,
+          catchHandlerFailureRow,
+          'Shared',
+          catchHandlerRequirementRow,
+        ),
+        'Take',
+      ),
+      mode: 'Take' as const,
+    }),
+  ]),
+  result: Type.effectWithRows(
+    catchSuccess,
+    RowAlgebra.union(
+      Type.failureRowPolicy(),
+      RowAlgebra.without(Type.failureRowPolicy(), catchProtectedFailureRow, catchSelectedRow),
+      catchHandlerFailureRow,
+    ),
+    'Shared',
+    RowAlgebra.union(
+      Type.requirementRowPolicy(),
+      catchProtectedRequirementRow,
+      catchHandlerRequirementRow,
+    ),
+  ),
+  constraints: Object.freeze([Constraint.nominalMember(catchSelected, catchProtectedFailureRow)]),
+})
 const nativeTargets = Object.freeze<ReadonlyArray<ExecutionTarget>>(['Evaluator', 'LLVM'])
 const byteSlice = Type.slice('Shared', 'u8')
 const mutableI32 = Type.reference('Exclusive', 'i32')
@@ -373,7 +574,7 @@ const replaceOperation: Operation = Object.freeze({
   unsafe: false,
   admission: admission('Place'),
   consumer: consumer('Place', 'replace'),
-  targets: executionTargets,
+  availability: executable(executionTargets),
   rule: Object.freeze({ _tag: 'PlaceRule', operation: 'Replace' }),
 })
 
@@ -986,15 +1187,53 @@ const intrinsicOperations = Object.freeze([
       parameters: Object.freeze([valueParameter('protected', 'Effect<A ! E ? R>')]),
       result: 'Effect<Result<A, Row<!E>> ? R>',
     }),
-    effect({
+    contractEffect({
       name: 'bindRequirement',
-      operation: 'BindRequirement',
-      typeParameters: Object.freeze([]),
+      post: 'BindRequirement',
+      providerMode: 'Shared',
+      typeParameters: Object.freeze(['?S', 'A', 'P', '!E', '?R']),
       parameters: Object.freeze([
-        valueParameter('protected', 'Effect<A ! E ? Selected | Rest>'),
-        valueParameter('provider', '&Provider'),
+        valueParameter('protected', 'once Effect<A ! E ? R>'),
+        valueParameter('provider', '&P'),
       ]),
-      result: 'Effect<A ! E ? Rest>',
+      result: 'Effect<A ! E ? Without<R, S>>',
+      contract: bindingContract('Shared'),
+    }),
+    contractEffect({
+      name: 'bindRequirementMut',
+      post: 'BindRequirement',
+      providerMode: 'Exclusive',
+      typeParameters: Object.freeze(['?S', 'A', 'P', '!E', '?R']),
+      parameters: Object.freeze([
+        valueParameter('protected', 'once Effect<A ! E ? R>'),
+        valueParameter('provider', '&mut P'),
+      ]),
+      result: 'Effect<A ! E ? Without<R, S>>',
+      contract: bindingContract('Exclusive'),
+    }),
+    contractEffect({
+      name: 'bindRequirementOwned',
+      post: 'BindRequirement',
+      providerMode: 'Take',
+      typeParameters: Object.freeze(['?S', 'A', 'P', '!E', '?R']),
+      parameters: Object.freeze([
+        valueParameter('protected', 'once Effect<A ! E ? R>'),
+        valueParameter('provider', 'P'),
+      ]),
+      result: 'Effect<A ! E ? Without<R, S>>',
+      contract: bindingContract('Take'),
+    }),
+    contractEffect({
+      name: 'catchFailure',
+      post: 'CatchFailure',
+      availability: analysisOnly('SEM0098', 'Member-selective Effect.catch'),
+      typeParameters: Object.freeze(['S', 'A', '!E', '!F', '?R', '?Q']),
+      parameters: Object.freeze([
+        valueParameter('protected', 'once Effect<A ! E ? R>'),
+        valueParameter('handler', 'once fn(S) -> Effect<A ! F ? Q>'),
+      ]),
+      result: 'Effect<A ! Without<E, S> | F ? R | Q>',
+      contract: catchContract,
     }),
   ]),
   replaceOperation,
@@ -1041,7 +1280,7 @@ export interface InventoryEntry {
   readonly hir: string
   readonly mir: string
   readonly evaluator: string
-  readonly targets: ReadonlyArray<ExecutionTarget>
+  readonly availability: Availability
   readonly hostImport?: string
 }
 
@@ -1049,22 +1288,27 @@ export interface InventoryEntry {
 export const inventory = (): ReadonlyArray<InventoryEntry> =>
   Object.freeze(
     intrinsicOperations.map((operation) => {
-      if (
-        operation.admission === undefined ||
-        operation.consumer === undefined ||
-        operation.targets.length === 0
-      )
+      if (operation.admission === undefined || operation.consumer === undefined)
         throw new RangeError(`Intrinsic ${operation.spelling} is missing admission metadata`)
-      const normalizedTargets = normalizeExecutionTargets(operation.targets)
-      if (
-        normalizedTargets.length !== operation.targets.length ||
-        normalizedTargets.some((target, index) => operation.targets.at(index) !== target)
-      )
-        throw new RangeError(`Intrinsic ${operation.spelling} has non-normalized target metadata`)
+      if (operation.availability._tag === 'Executable') {
+        const targets = operation.availability.targets
+        if (targets.length === 0)
+          throw new RangeError(`Intrinsic ${operation.spelling} has no execution target`)
+        const normalizedTargets = normalizeExecutionTargets(targets)
+        if (
+          normalizedTargets.length !== targets.length ||
+          normalizedTargets.some((target, index) => targets.at(index) !== target)
+        )
+          throw new RangeError(`Intrinsic ${operation.spelling} has non-normalized target metadata`)
+      }
       const identity =
         operation.rule._tag === 'BuiltinRule'
           ? operation.rule.operation
-          : `${operation.rule._tag}.${operation.rule.operation}`
+          : operation.rule._tag === 'EffectRule'
+            ? `${operation.rule._tag}.${operation.rule.operation}`
+            : operation.rule._tag === 'ContractRule'
+              ? `${operation.rule._tag}.${operation.rule.post}`
+              : `${operation.rule._tag}.${operation.rule.operation}`
       return Object.freeze({
         operation: `Intrinsic.${operation.spelling}`,
         signature: signature(operation),
@@ -1075,7 +1319,7 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
         hir: identity,
         mir: identity,
         evaluator: identity,
-        targets: normalizedTargets,
+        availability: operation.availability,
         ...(operation.hostImport === undefined ? {} : { hostImport: operation.hostImport }),
       })
     }),

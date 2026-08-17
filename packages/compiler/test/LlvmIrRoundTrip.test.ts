@@ -111,7 +111,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /**
  * A boxed tree whose nodes hold a `Leaf | Branch` union.
@@ -184,7 +184,7 @@ effect fn sum() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch(sum(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(sum(), recover) }`
 
 const programs: ReadonlyArray<readonly [string, string]> = [
   ['drop-hook', dropHook],
