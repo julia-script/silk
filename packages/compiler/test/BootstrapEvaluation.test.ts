@@ -46,6 +46,8 @@ it.effect('reproduces every pinned corpus outcome', () =>
       }
     }
   }),
+  // The corpus replays every pinned program; it outgrew the default 60s ceiling on CI hosts.
+  300_000,
 )
 
 it.effect('traces the identity program in order with bound and returned values', () =>
