@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 120 |
+| `SEM` | Semantic | 126 |
 | `OWN` | Ownership | 15 |
 | `LAY` | Layout | 1 |
 
-There are 151 codes in total.
+There are 157 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -152,7 +152,6 @@ There are 151 codes in total.
 | `SEM0095` | Stable code for a float literal spelling no floating-point value can represent. | `Invalid float literal: <spelling>` |
 | `SEM0096` | Stable code for an effect site or a move inside the conditional right operand of `&&` or `\|\|`. | `The right operand of <operator> must be pure, found <detail>` |
 | `SEM0097` | Stable code for a bound operation call whose receiver names more than one bounded parameter. | `<spelling> is ambiguous across bounded type parameters <join>` |
-| `SEM0098` | Stable code for a construct the front end analyzes fully but no engine can lower yet. | `<construct> is analysis-only: it type-checks, but no engine lowers it yet, so a program that uses it cannot be built` |
 | `SEM0099` | Stable code for one named type parameter left undetermined by an explicit prefix and the arguments. | `Cannot infer type argument <parameter> of <target> from supplied values` |
 | `SEM0100` | Stable code for an explicit type argument contradicting the type its value arguments imply. | `Type argument <parameter> of <target> is <written>, but the supplied values imply <implied>` |
 | `SEM0101` | Stable code for a bound operation whose selected witness has no lowering. | `<spelling> has no witness that can be lowered for <provider>` |
@@ -176,6 +175,13 @@ There are 151 codes in total.
 | `SEM0119` | Stable code for two conformance heads that may name one provider under one interface. | `<head> may overlap <other>` |
 | `SEM0120` | Stable code for a conformance requirement that does not descend toward a base witness. | `<head> declares a requirement that does not descend` |
 | `SEM0121` | Stable code for a concrete specialization whose conditional requirements cannot be proved. | `<goal> cannot be proved: <detail>` |
+| `SEM0122` | Stable code for a complete application that reaches the instance frontier with open rows or evidence. | `<declaration> reaches a complete application with unresolved contract rows or evidence` |
+| `SEM0123` | Stable code for a provider that matches no member of its concrete source requirement row. | `The provider matches no compatible requirement` |
+| `SEM0124` | Stable code for provider relations sharing a selector but retaining disjoint candidate sets. | `Provider constraints select incompatible requirement members` |
+| `SEM0125` | Stable code for provider selection that retains more than one common requirement member. | `The provider matches more than one requirement; select one explicitly` |
+| `SEM0126` | Stable code for an explicitly or independently selected row that is not exactly one member. | `Selected requirement row has <count> members; exactly one is required` |
+| `SEM0127` | Stable code for a surviving provider candidate with more than one conformance witness. | `More than one conformance witness can provide the selected requirement` |
+| `SEM0128` | Stable code for a surviving provider candidate whose conformance mapping is invalid. | `The provider's conformance mapping is invalid: <reason>` |
 
 ## Ownership (`OWN`)
 

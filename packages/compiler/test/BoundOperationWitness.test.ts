@@ -317,6 +317,41 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('freshens replayed non-direct witness operand loans across mutually exclusive arms', () =>
+  Effect.gen(function* () {
+    const source = `service Counter { effect fn read(number: i32) -> i32 ? &Counter }
+struct Fixed {}
+effect fn read(self: &Fixed, number: i32) -> i32 { return number }
+impl Counter for Fixed { read: Fixed.read }
+
+interface Combined<T> { fn add(left: &mut T, right: &mut T) -> i32 }
+struct Cell { code: i32 }
+fn cellAdd(left: &Cell, right: &Cell) -> i32 { return left.code + right.code }
+impl Combined<Cell> for Cell { add: Cell.cellAdd }
+
+effect fn branch<T: Combined>(flag: bool, left: T, right: T) -> i32 {
+  let fixed = Fixed {}
+  let pending = Intrinsic.bindRequirement<&Counter>(Counter.read(left + right), &fixed)
+  if flag {
+    return run move pending
+  }
+  return run move pending
+}
+
+pub fn main() -> i32 {
+  return (run branch<Cell>(true, Cell { code: 20 }, Cell { code: 22 }))
+    + (run branch<Cell>(false, Cell { code: 19 }, Cell { code: 23 }))
+}`
+    const snapshot = yield* analyzed('bound-operation-witness/replayed-source-operand', source)
+    assert.deepEqual(messages(snapshot), [])
+    assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 84)
+  }),
+)
+
 it.effect('unwraps an already-borrowed operand only for a sealed intrinsic witness', () =>
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
@@ -408,7 +443,9 @@ pub fn main() -> i32 {
     )
     assert.strictEqual(runner?.result._tag, 'EffectOutcome')
     if (runner?.result._tag !== 'EffectOutcome') return
-    assert.deepEqual(runner.result.type.failures.map(Type.encode), [`${module}.Problem`])
+    assert.deepEqual(Type.failureMembers(runner.result.type).map(Type.encode), [
+      `${module}.Problem`,
+    ])
     const operations = Mir.operations(runner)
     assert.strictEqual(
       operations.filter(
@@ -447,13 +484,15 @@ pub fn main() -> i32 {
     if (normalizedRunner !== undefined) {
       assert.strictEqual(normalizedRunner.result._tag, 'EffectOutcome')
       if (normalizedRunner.result._tag !== 'EffectOutcome') return
-      assert.deepEqual(normalizedRunner.result.type.failures.map(Type.encode), [
+      assert.deepEqual(Type.failureMembers(normalizedRunner.result.type).map(Type.encode), [
         `${module}.Problem`,
       ])
     } else {
       assert.strictEqual(staticRun?._tag, 'RunStaticEffect')
       if (staticRun?._tag !== 'RunStaticEffect') return
-      assert.deepEqual(staticRun.outcomeType.type.failures.map(Type.encode), [`${module}.Problem`])
+      assert.deepEqual(Type.failureMembers(staticRun.outcomeType.type).map(Type.encode), [
+        `${module}.Problem`,
+      ])
     }
 
     const outcome = Analysis.evaluate(normalized)
@@ -553,7 +592,7 @@ pub fn main() -> i32 {
     assert.isTrue(Type.isEffect(pending.contract.result))
     if (!Type.isEffect(pending.contract.result)) return
     assert.deepEqual(
-      pending.contract.result.requirements.map((requirement) => ({
+      Type.requirementMembers(pending.contract.result).map((requirement) => ({
         capability: Type.encode(requirement.capability),
         access: requirement.access,
       })),

@@ -181,7 +181,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 254 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 }
 
 /** Every bound check for the eight fixed-width types, driven off the catalog's own range table. */
@@ -383,7 +383,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 254 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('composes a diagnostic message from runtime values and releases every allocation', () =>
   Effect.gen(function* () {
@@ -435,7 +435,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 42 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('hands back OutOfMemory when a rendering cannot allocate, owning nothing', () =>
   Effect.gen(function* () {

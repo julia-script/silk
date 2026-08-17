@@ -213,7 +213,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return -1 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /**
  * Compiles the whole corpus into one native binary and returns its failure count.

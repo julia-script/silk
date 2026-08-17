@@ -591,3 +591,41 @@ pub fn main() -> i32 {
     assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
   }),
 )
+
+it.effect('deduplicates definitionally different open rows after concrete specialization', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`struct First {}
+struct Second {}
+effect fn source() -> i32 ! First | Second { return 1 }
+effect fn forward<A, !E>(self: once Effect<A ! E>) -> A ! E { return run self }
+pub fn main() -> i32 {
+  let direct = forward<i32, First | Second>(source())
+  let permuted = forward<i32, Second | First>(source())
+  return 0
+}`)
+
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    const discovered = Analysis.instancesOf(result)
+    const forwards = discovered.instances.filter(
+      (instance) => instance.key.declaration.name === 'forward',
+    )
+    assert.strictEqual(forwards.length, 1)
+    for (const instance of discovered.instances) {
+      const failures = instance.specialization.failureRow
+      const requirements = instance.specialization.requirementRow
+      if (failures !== undefined)
+        assert.strictEqual(
+          Type.isRuntimeConcreteGenericArgument({ _tag: 'FailureRowArgument', row: failures }),
+          true,
+        )
+      if (requirements !== undefined)
+        assert.strictEqual(
+          Type.isRuntimeConcreteGenericArgument({
+            _tag: 'RequirementRowArgument',
+            row: requirements,
+          }),
+          true,
+        )
+    }
+  }),
+)

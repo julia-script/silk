@@ -26,7 +26,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /** Early drop: explicit drop releases at that statement and block cleanup does not repeat it. */
 const earlyDrop = `struct Guard {
@@ -50,7 +50,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /** Typed failure: a guard live at a failing run releases through its hook before propagating. */
 const failurePropagation = `struct Guard {
@@ -86,7 +86,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /** Recursive return: every suspended activation releases its own guard exactly once. */
 const recursiveReturn = `struct Guard {
@@ -110,7 +110,7 @@ effect fn recurse(remaining: i32) -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(recurse(2), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(recurse(2), recover) }`
 
 const hookCallsOf = (run: ReturnType<typeof Analysis.evaluate>) =>
   run._tag === 'Completed'
@@ -176,8 +176,8 @@ effect fn hold<T>(value: T) -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 {
-  let first = run Effect.catch(hold<i32>(1), recover)
-  let second = run Effect.catch(hold<bool>(true), recover)
+  let first = run Effect.catchAll(hold<i32>(1), recover)
+  let second = run Effect.catchAll(hold<bool>(true), recover)
   return first + second
 }`
 

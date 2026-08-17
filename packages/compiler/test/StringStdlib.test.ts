@@ -86,7 +86,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('copies, appends, views, and drops owned String through ordinary Bytes storage', () =>
   Effect.gen(function* () {
@@ -137,7 +137,7 @@ effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = QuotaAllocator { remaining: 1 }
   let copying = copy("ok") |> Effect.provideMut(&mut allocator)
   let mut value = run copying
-  let recovered = run Effect.catch(
+  let recovered = run Effect.catchAll(
     append(&mut value, "\\u{1f642}") |> Effect.provideMut(&mut allocator),
     ignore
   )
@@ -146,7 +146,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('rolls append back when growth cannot allocate', () =>
   Effect.gen(function* () {

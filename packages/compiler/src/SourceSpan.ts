@@ -1,4 +1,5 @@
 import * as Option from 'effect/Option'
+import * as Canonical from './internal/Canonical.js'
 import type * as SourceFile from './SourceFile.js'
 
 const SourceSpanTypeId: unique symbol = Symbol.for('@silk-effect/compiler/SourceSpan')
@@ -39,6 +40,16 @@ const makeValid = (sourceId: string, start: number, end: number): SourceSpan => 
   return Object.freeze(span)
 }
 
+/** Rehydrates a span from validated semantic provenance when source bytes are not retained. */
+export const fromOffsets = (
+  sourceId: string,
+  start: number,
+  end: number,
+): SourceSpan | undefined =>
+  Number.isSafeInteger(start) && Number.isSafeInteger(end) && start >= 0 && start <= end
+    ? makeValid(sourceId, start, end)
+    : undefined
+
 /** Returns the logical source identity that owns the span. */
 export const sourceId = (self: SourceSpan): string => self.sourceId
 
@@ -54,3 +65,17 @@ export const length = (self: SourceSpan): number => self.end - self.start
 /** Tests structural equality, including source ownership. */
 export const equals = (self: SourceSpan, other: SourceSpan): boolean =>
   self.sourceId === other.sourceId && self.start === other.start && self.end === other.end
+
+/** Returns the canonical semantic identity of one source span. */
+export const key = (self: SourceSpan): string =>
+  Canonical.record('SourceSpan', [self.sourceId, `${self.start}`, `${self.end}`])
+
+/** Deduplicates and orders source spans by canonical identity. */
+export const canonicalize = (spans: Iterable<SourceSpan>): ReadonlyArray<SourceSpan> =>
+  Object.freeze(
+    [...new Map([...spans].map((span) => [key(span), span])).values()].sort((left, right) => {
+      const leftKey = key(left)
+      const rightKey = key(right)
+      return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
+    }),
+  )

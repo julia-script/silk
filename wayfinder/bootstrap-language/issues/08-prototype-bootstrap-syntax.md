@@ -89,17 +89,17 @@ fn risky<T>(value: T, selector: i32) -> Effect<T ! Problem> {
 used only when ownership actually transfers from a non-Copy binding.
 
 Provision is specialization of an effect value rather than a new lexical block syntax.
-`Capability.provide(provider, @Role)` captures an existing implementation and removes that
-capability-role entry from the effect's requirement row. Because the open function is itself a value,
-callers can branch and specialize it before supplying affine inputs.
+`effect |> Effect.provide<&Capability@Role>(&provider)` captures an existing implementation and
+removes that exact capability-role entry from the effect's requirement row. Because the open
+function is itself a value, callers can branch and specialize it before supplying affine inputs.
 
 ```silk
 let fsCompilation = Compiler.compile(move diskRequest)
-  |> Effect.provideMut(&mut scratch, @Scratch)
+  |> Effect.provideMut<&mut Allocator@Scratch>(&mut scratch)
   |> FileSystem.provide(&fileSystem)
 
 let memoryCompilation = Compiler.compile(move memoryRequest)
-  |> Effect.provideMut(&mut scratch, @Scratch)
+  |> Effect.provideMut<&mut Allocator@Scratch>(&mut scratch)
   |> FileSystem.provide(&virtualFileSystem)
 
 let diskArtifact = run fsCompilation
@@ -108,11 +108,12 @@ return run memoryCompilation
 
 A borrowed provider constrains the specialized effect's lifetime. A moved provider is owned by the
 specialized effect and is cleaned when that effect is consumed or dropped. `provide` is not a
-per-execution cleanup boundary. `Capability.provideWith(acquisitionEffect, @Role)` is the separate
-operation for acquiring a fresh provider on every execution. Its acquisition requirements and
-failures compose with the target effect, and successful provider owners clean up in reverse
-acquisition order after success or typed failure. Traps abort without a cleanup guarantee;
-cancellation and interruption are absent from bootstrap. Acquisition is never implicitly memoized.
+per-execution cleanup boundary.
+`effect |> Effect.provideWith<&mut Capability@Role>(acquisitionEffect)` is the separate operation
+for acquiring a fresh provider on every execution. Its acquisition requirements and failures
+compose with the target effect, and successful provider owners clean up in reverse acquisition
+order after success or typed failure. Traps abort without a cleanup guarantee; cancellation and
+interruption are absent from bootstrap. Acquisition is never implicitly memoized.
 
 Effect reuse is derived from captured ownership rather than represented by separate reusable and
 single-shot types. Copy captures are snapshotted at construction. An effect whose body only views

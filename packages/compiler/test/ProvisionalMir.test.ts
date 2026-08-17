@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as Type from '../src/Type.js'
+import { unreachable } from './support/raise.js'
 
 const encoder = new TextEncoder()
 
@@ -14,7 +15,7 @@ const available = (self: Analysis.Snapshot): ProvisionalMir.Module => {
   const provisional = Analysis.provisionalMirOf(self)
   assert.strictEqual(provisional._tag, 'Available')
   if (provisional._tag === 'Available') return provisional.value
-  throw new RangeError('expected provisional MIR')
+  return unreachable('expected provisional MIR')
 }
 
 const outcomes = (self: ProvisionalMir.Module): ReadonlyArray<ProvisionalMir.Outcome> =>
@@ -31,7 +32,7 @@ effect fn delayed(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let pending = delayed(42) |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move pending, recover)
+  return run Effect.catchAll(move pending, recover)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const provisional = available(self)
@@ -70,7 +71,7 @@ effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let pending = program() |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move pending, recover)
+  return run Effect.catchAll(move pending, recover)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const provisional = available(self)
@@ -103,7 +104,7 @@ pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let selected = read() |> Effect.provide(&provider)
   let complete = move selected |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move complete, recover)
+  return run Effect.catchAll(move complete, recover)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const provisional = available(self)
@@ -202,10 +203,10 @@ effect fn recoverOwner(error: OutOfMemory) -> Owner { return Owner { value: 0 } 
 pub fn main() -> i32 {
   let mut scalarAllocator = SystemAllocator.make()
   let scalar = delayed<i32>(1) |> Effect.provideMut(&mut scalarAllocator)
-  let scalarValue = run Effect.catch(move scalar, recoverScalar)
+  let scalarValue = run Effect.catchAll(move scalar, recoverScalar)
   let mut ownerAllocator = SystemAllocator.make()
   let owner = delayed<Owner>(Owner { value: 2 }) |> Effect.provideMut(&mut ownerAllocator)
-  let ownerValue = run Effect.catch(move owner, recoverOwner)
+  let ownerValue = run Effect.catchAll(move owner, recoverOwner)
   return scalarValue + ownerValue.value
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
@@ -246,5 +247,81 @@ pub fn main() -> i32 { return run seed(41) |> Effect.map(increment) }`
     assert.deepEqual(ProvisionalMir.verify(firstMir), [])
     assert.deepEqual(outcomes(firstMir), [])
     assert.strictEqual(ProvisionalMir.encode(firstMir), ProvisionalMir.encode(secondMir))
+  }),
+)
+
+it.effect('converges through a deep suspension chain independently of discovery order', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`${recover}
+effect fn level0(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
+  return run Effect.suspend(effect { return value })
+}
+effect fn level1(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level0(value) }
+effect fn level2(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level1(value) }
+effect fn level3(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level2(value) }
+effect fn level4(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level3(value) }
+effect fn level5(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level4(value) }
+effect fn level6(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level5(value) }
+effect fn level7(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level6(value) }
+pub fn main() -> i32 {
+  let mut allocator = SystemAllocator.make()
+  return run Effect.catchAll(level7(42) |> Effect.provideMut(&mut allocator), recover)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(self.layout._tag, 'Available')
+    if (self.layout._tag !== 'Available') return
+
+    const forward = ProvisionalMir.build(
+      self.instances,
+      self.layout.value,
+      Analysis.declarationIndex(self),
+    )
+    const reversed = ProvisionalMir.build(
+      Object.freeze({
+        ...self.instances,
+        instances: Object.freeze([...self.instances.instances].reverse()),
+      }),
+      self.layout.value,
+      Analysis.declarationIndex(self),
+    )
+    assert.deepEqual(ProvisionalMir.verify(forward), [])
+    assert.deepEqual(ProvisionalMir.verify(reversed), [])
+    const classifications = (module_: ProvisionalMir.Module) =>
+      module_.executions
+        .map((execution) => [execution.key.identity, execution.classification] as const)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    assert.deepEqual(classifications(forward), classifications(reversed))
+    assert.isAtLeast(
+      outcomes(forward).filter((outcome) => outcome._tag === 'RunSuspendableEffect').length,
+      8,
+      ProvisionalMir.encode(forward),
+    )
+  }),
+)
+
+it.effect('terminates a synchronous recursive provider-forwarding worklist', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`service Value {
+  effect fn read() -> i32 ? &Value
+}
+struct Fixed { value: i32 }
+effect fn read(self: &Fixed) -> i32 { return self.value }
+impl Value for Fixed { read: Fixed.read }
+effect fn leaf() -> i32 ? &Value { return run Value.read() }
+effect fn recurse(remaining: i32) -> i32 ? &Value {
+  if remaining == 0 { return run leaf() }
+  return run recurse(remaining - 1)
+}
+pub fn main() -> i32 {
+  let provider = Fixed { value: 42 }
+  return run Effect.provide(recurse(4), &provider)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const provisional = available(self)
+    assert.deepEqual(ProvisionalMir.verify(provisional), [])
+    assert.deepEqual(outcomes(provisional), [])
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
   }),
 )

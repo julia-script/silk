@@ -589,12 +589,7 @@ export type Operation =
       readonly suspendsParent: boolean
       readonly provenance: Provenance
     }
-  | {
-      readonly _tag: 'EndLoan'
-      readonly borrow: Hir.BorrowId
-      readonly slice: LocalId
-      readonly provenance: Provenance
-    }
+  | EndLoanOperation
   | {
       readonly _tag: 'SliceLength'
       readonly destination: LocalId
@@ -691,6 +686,24 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Propagates one already-materialized failure through the enclosing Effect runner. */
+      readonly _tag: 'PropagateEffectFailure'
+      readonly source: LocalId
+      readonly sourceType:
+        | Extract<Type, { readonly _tag: 'Nominal' }>
+        | Extract<Type, { readonly _tag: 'Union' }>
+      readonly propagationType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly tagMappings: ReadonlyArray<{
+        readonly source: number
+        readonly target: number
+      }>
+      readonly propagationLaneCount: number
+      /** Owners still live at this site, released before the failure outcome propagates. */
+      readonly releases?: ReadonlyArray<DropOperation>
+      readonly type: Extract<Type, { readonly _tag: 'Bottom' }>
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'UnpackEffectSuccess'
       readonly destination: LocalId
       readonly source: LocalId
@@ -710,6 +723,8 @@ export type Operation =
         readonly source: number
         readonly target: number
       }>
+      /** Caller-owned loans ended only when this run propagates a typed failure. */
+      readonly failureLoanEnds?: ReadonlyArray<EndLoanOperation>
       /** Owners still live at this site, released before a failure outcome propagates. */
       readonly releases?: ReadonlyArray<DropOperation>
       readonly propagationLaneCount: number
@@ -734,6 +749,7 @@ export type Operation =
         readonly providerType: SilkType.Nominal
         readonly witness: DeclarationIndex.ConformanceWitness
         readonly role: string
+        readonly requirementAccess: SilkType.Requirement['access']
         readonly access: 'Shared' | 'Exclusive' | 'Take'
         readonly argument?: LocalId
       }>
@@ -746,6 +762,8 @@ export type Operation =
         readonly target: number
       }>
       readonly propagationLaneCount: number
+      /** Caller-owned loans ended only when this run propagates or traps on a typed failure. */
+      readonly failureLoanEnds?: ReadonlyArray<EndLoanOperation>
       /** Owners still live at this site, released before a failure outcome propagates. */
       readonly releases?: ReadonlyArray<DropOperation>
       readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
@@ -767,6 +785,8 @@ export type Operation =
       readonly propagationType?: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly tagMappings: ReadonlyArray<{ readonly source: number; readonly target: number }>
       readonly propagationLaneCount: number
+      /** Caller-owned loans ended only when this run propagates or traps on a typed failure. */
+      readonly failureLoanEnds?: ReadonlyArray<EndLoanOperation>
       readonly releases?: ReadonlyArray<DropOperation>
       readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
       readonly provenance: Provenance
@@ -904,6 +924,14 @@ export interface DropOperation {
   readonly _tag: 'Drop'
   readonly local: LocalId
   readonly cleanup: Ownership.CleanupPlan
+  readonly provenance: Provenance
+}
+
+/** Ends one caller-owned loan on the dynamic path that contains this operation. */
+export interface EndLoanOperation {
+  readonly _tag: 'EndLoan'
+  readonly borrow: Hir.BorrowId
+  readonly slice: LocalId
   readonly provenance: Provenance
 }
 
@@ -1069,6 +1097,7 @@ export interface SuspensionProviderArgument {
   readonly capability: SilkType.Nominal
   readonly providerType: SilkType.Nominal
   readonly role: string
+  readonly requirementAccess: SilkType.Requirement['access']
   readonly access: 'Shared' | 'Exclusive' | 'Take'
   readonly argument?: LocalId
   /** ABI lane containing the provider when `argument` is a captured environment value. */
@@ -1281,6 +1310,7 @@ export interface MirFunction {
       readonly providerType: SilkType.Nominal
       readonly witness: DeclarationIndex.ConformanceWitness
       readonly role: string
+      readonly requirementAccess: SilkType.Requirement['access']
       readonly access: 'Shared' | 'Exclusive' | 'Take'
     }>
   }
@@ -1580,7 +1610,7 @@ const operationChildren = (operation: Operation): ReadonlyArray<Operation> =>
       : operation._tag === 'RunEffect' ||
           operation._tag === 'RunEffectValue' ||
           operation._tag === 'RunStaticEffect'
-        ? (operation.releases ?? [])
+        ? [...(operation.failureLoanEnds ?? []), ...(operation.releases ?? [])]
         : []
 
 /** One operation and all structurally nested operations in deterministic source order. */
@@ -1592,6 +1622,236 @@ export const operationTree = (operation: Operation): ReadonlyArray<Operation> =>
     return [current, ...operationChildren(current).flatMap(walk)]
   }
   return Object.freeze(walk(operation))
+}
+
+type LoanPathState = 'Dormant' | 'Live' | 'Ended'
+
+interface StructuredCfgPathSemantics<State> {
+  readonly initial: ReadonlySet<State>
+  readonly transfer: (operation: Operation, incoming: ReadonlySet<State>) => ReadonlySet<State>
+  readonly terminal: (states: ReadonlySet<State>) => void
+  readonly repeat: (states: ReadonlySet<State>) => ReadonlySet<State>
+  readonly merge: (...groups: ReadonlyArray<ReadonlySet<State>>) => ReadonlySet<State>
+}
+
+/**
+ * Evaluates one finite-state path analysis over every structured MIR control-flow edge. The state
+ * semantics remain analysis-owned; branching, guarded matches, loop routing, and terminal failure
+ * paths are defined once so validators cannot disagree about reachable paths.
+ */
+const structuredCfgPathsValid = <State>(
+  fn: MirFunction,
+  byId: ReadonlyMap<number, Region>,
+  loops: ReadonlyMap<number, LoopRegion>,
+  semantics: StructuredCfgPathSemantics<State>,
+): boolean => {
+  let valid = true
+  const sequence = (
+    operations: ReadonlyArray<Operation>,
+    incoming: ReadonlySet<State>,
+  ): ReadonlySet<State> => {
+    let states = incoming
+    for (const operation of operations) states = transfer(operation, states)
+    return states
+  }
+  const matchCandidates = (
+    operation: MatchOperation,
+    candidates: ReadonlyArray<Match.ArmId>,
+    ordinal: number,
+    incoming: ReadonlySet<State>,
+  ): ReadonlySet<State> => {
+    const candidate = candidates.at(ordinal)
+    if (candidate === undefined) {
+      semantics.terminal(incoming)
+      return new Set()
+    }
+    const arm = operation.arms.find((entry) => entry.id.ordinal === candidate.ordinal)
+    if (arm === undefined) {
+      valid = false
+      return new Set()
+    }
+    const guarded = arm.guard === undefined ? incoming : sequence(arm.guard.operations, incoming)
+    const selected = sequence(arm.selected.operations, guarded)
+    return arm.guard === undefined
+      ? selected
+      : semantics.merge(selected, matchCandidates(operation, candidates, ordinal + 1, guarded))
+  }
+  const transfer = (operation: Operation, incoming: ReadonlySet<State>): ReadonlySet<State> => {
+    if (operation._tag === 'PropagateEffectFailure') {
+      semantics.terminal(incoming)
+      return new Set()
+    }
+    if (
+      operation._tag === 'RunEffect' ||
+      operation._tag === 'RunEffectValue' ||
+      operation._tag === 'RunStaticEffect'
+    ) {
+      if (SilkType.failureMembers(operation.outcomeType.type).length > 0) {
+        semantics.terminal(sequence(operation.failureLoanEnds ?? [], incoming))
+      }
+      return incoming
+    }
+    if (operation._tag === 'ShortCircuit')
+      return semantics.merge(incoming, sequence(operation.right.operations, incoming))
+    if (operation._tag === 'Match') {
+      if (operation.decisions.length === 0) {
+        semantics.terminal(incoming)
+        return new Set()
+      }
+      return semantics.merge(
+        ...operation.decisions.map((decision) =>
+          matchCandidates(operation, decision.candidates, 0, incoming),
+        ),
+      )
+    }
+    return semantics.transfer(operation, incoming)
+  }
+
+  const incoming = new Map<number, Set<State>>()
+  const pending: Array<number> = []
+  const enqueue = (target: RegionId, states: ReadonlySet<State>): void => {
+    if (states.size === 0 || !byId.has(target.ordinal)) return
+    const known = incoming.get(target.ordinal) ?? new Set<State>()
+    const previous = known.size
+    for (const state of states) known.add(state)
+    incoming.set(target.ordinal, known)
+    if (known.size !== previous) pending.push(target.ordinal)
+  }
+  const route = (region: OperationRegion | CleanupRegion, states: ReadonlySet<State>): void => {
+    const outcome = region.outcome
+    if (outcome._tag === 'Forward') enqueue(outcome.target, states)
+    else if (outcome._tag === 'Return' || outcome._tag === 'Trap') semantics.terminal(states)
+    else if (outcome._tag === 'Repeat') {
+      const loop = loops.get(outcome.loop.ordinal)
+      if (loop !== undefined) enqueue(loop.condition, semantics.repeat(states))
+    } else if (outcome._tag === 'Exit') {
+      const loop = loops.get(outcome.loop.ordinal)
+      if (loop !== undefined) enqueue(loop.following, states)
+    } else {
+      const loop =
+        (region.ownerLoop === undefined ? undefined : loops.get(region.ownerLoop.ordinal)) ??
+        [...loops.values()].find((candidate) => candidate.condition.ordinal === region.id.ordinal)
+      if (loop !== undefined) {
+        enqueue(loop.body, states)
+        enqueue(loop.following, states)
+      }
+    }
+  }
+
+  enqueue(fn.entry, semantics.initial)
+  while (pending.length > 0) {
+    const ordinal = pending.shift()
+    if (ordinal === undefined) continue
+    const region = byId.get(ordinal)
+    const states = incoming.get(ordinal)
+    if (region === undefined || states === undefined) continue
+    if (region._tag === 'ConditionalRegion') {
+      enqueue(region.taken, states)
+      enqueue(region.otherwise, states)
+    } else if (region._tag === 'LoopRegion') enqueue(region.condition, states)
+    else route(region, sequence(operationsOf(region), states))
+  }
+  return valid
+}
+
+const mergePathStates = <State>(...groups: ReadonlyArray<ReadonlySet<State>>): ReadonlySet<State> =>
+  new Set(groups.flatMap((group) => [...group]))
+
+/**
+ * Proves the dynamic lifetime of one statically unique loan over structured operation branches and
+ * lexical loop backedges. A path may avoid the loan entirely, but every path that begins it must
+ * end it exactly once before terminating, and no loop may execute either endpoint twice.
+ */
+const loanPathsValid = (
+  fn: MirFunction,
+  key: string,
+  byId: ReadonlyMap<number, Region>,
+  loops: ReadonlyMap<number, LoopRegion>,
+): boolean => {
+  let valid = true
+  const terminal = (states: ReadonlySet<LoanPathState>): void => {
+    if (states.has('Live')) valid = false
+  }
+  const endpoint = (
+    states: ReadonlySet<LoanPathState>,
+    operation: Extract<Operation, { readonly _tag: 'BeginLoan' | 'EndLoan' }>,
+  ): ReadonlySet<LoanPathState> => {
+    if (borrowKey(operation.borrow) !== key) return states
+    const next = new Set<LoanPathState>()
+    for (const state of states) {
+      if (operation._tag === 'BeginLoan' && state === 'Dormant') next.add('Live')
+      else if (operation._tag === 'EndLoan' && state === 'Live') next.add('Ended')
+      else valid = false
+    }
+    return next
+  }
+  const repeat = (states: ReadonlySet<LoanPathState>): ReadonlySet<LoanPathState> =>
+    new Set([...states].map((state) => (state === 'Ended' ? 'Dormant' : state)))
+  const transfer = (operation: Operation, incoming: ReadonlySet<LoanPathState>) => {
+    if (operation._tag === 'BeginLoan' || operation._tag === 'EndLoan')
+      return endpoint(incoming, operation)
+    return incoming
+  }
+  const pathsValid = structuredCfgPathsValid(fn, byId, loops, {
+    initial: new Set<LoanPathState>(['Dormant']),
+    transfer,
+    terminal,
+    repeat,
+    merge: mergePathStates,
+  })
+  return valid && pathsValid
+}
+
+/**
+ * Tracks one direct reborrow relationship as correlated state over the whole control-flow graph.
+ * The per-loan lifetime pass above proves each endpoint count; this pass proves that a parent is
+ * live whenever its child begins and cannot end while that child remains live, including when the
+ * endpoints occur in different regions.
+ */
+const loanAncestryPathsValid = (
+  fn: MirFunction,
+  parentKey: string,
+  childKey: string,
+  byId: ReadonlyMap<number, Region>,
+  loops: ReadonlyMap<number, LoopRegion>,
+): boolean => {
+  const parentBit = 1
+  const childBit = 2
+  let valid = true
+  const endpoint = (
+    states: ReadonlySet<number>,
+    operation: Extract<Operation, { readonly _tag: 'BeginLoan' | 'EndLoan' }>,
+  ): ReadonlySet<number> => {
+    const key = borrowKey(operation.borrow)
+    if (key !== parentKey && key !== childKey) return states
+    const next = new Set<number>()
+    for (const state of states) {
+      if (key === parentKey) {
+        if (operation._tag === 'BeginLoan') next.add(state | parentBit)
+        else {
+          if ((state & childBit) !== 0) valid = false
+          next.add(state & ~parentBit)
+        }
+      } else if (operation._tag === 'BeginLoan') {
+        if ((state & parentBit) === 0) valid = false
+        next.add(state | childBit)
+      } else next.add(state & ~childBit)
+    }
+    return next
+  }
+  const transfer = (operation: Operation, incoming: ReadonlySet<number>): ReadonlySet<number> => {
+    if (operation._tag === 'BeginLoan' || operation._tag === 'EndLoan')
+      return endpoint(incoming, operation)
+    return incoming
+  }
+  const pathsValid = structuredCfgPathsValid(fn, byId, loops, {
+    initial: new Set([0]),
+    transfer,
+    terminal: () => undefined,
+    repeat: (states) => states,
+    merge: mergePathStates,
+  })
+  return valid && pathsValid
 }
 
 const cyclicOperation = (operation: Operation): boolean => {
@@ -1628,9 +1888,9 @@ const sameEffectContract = (left: SilkType.Effect, right: SilkType.Effect): bool
 
 const sameEffectChannels = (left: SilkType.Effect, right: SilkType.Effect): boolean =>
   SilkType.equals(left.success, right.success) &&
-  left.failures.length === right.failures.length &&
-  left.failures.every((failure, ordinal) => {
-    const candidate = right.failures.at(ordinal)
+  SilkType.failureMembers(left).length === SilkType.failureMembers(right).length &&
+  SilkType.failureMembers(left).every((failure, ordinal) => {
+    const candidate = SilkType.failureMembers(right).at(ordinal)
     return candidate !== undefined && SilkType.equals(failure, candidate)
   })
 
@@ -1651,7 +1911,7 @@ const sameReleaseSequence = (
   left.map(continuationReleaseText).join(',') === right.map(continuationReleaseText).join(',')
 
 const providerText = (provider: SuspensionProviderArgument): string =>
-  `${SilkType.key(provider.capability)}@${provider.role}:${provider.access}:${SilkType.key(provider.providerType)}:${provider.argument?.ordinal ?? 'none'}:${provider.argumentLane ?? 0}:${provider.witness?._tag ?? 'none'}:${provider.purposes.join('+')}`
+  `${SilkType.key(provider.capability)}@${provider.role}:${provider.requirementAccess}:${provider.access}:${SilkType.key(provider.providerType)}:${provider.argument?.ordinal ?? 'none'}:${provider.argumentLane ?? 0}:${provider.witness?._tag ?? 'none'}:${provider.purposes.join('+')}`
 
 const runnerText = (runner: SuspensionRunner): string =>
   [
@@ -1675,6 +1935,7 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
   const projectedProviderValid = (
     provider: SuspensionProviderArgument & { readonly argument: LocalId },
   ): boolean => {
+    const runtimeAccess = provider.access === 'Take' ? 'Exclusive' : provider.access
     const argumentType = fn.localTypes.at(provider.argument.ordinal)
     const laneOrdinal = provider.argumentLane ?? 0
     if (!Number.isInteger(laneOrdinal) || laneOrdinal < 0) return false
@@ -1690,12 +1951,12 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
     if (laneOrdinal !== 0) return false
     return (
       (argumentType?._tag === 'Reference' &&
-        (argumentType.type.access === provider.access ||
-          (provider.access === 'Shared' && argumentType.type.access === 'Exclusive')) &&
+        (argumentType.type.access === runtimeAccess ||
+          (runtimeAccess === 'Shared' && argumentType.type.access === 'Exclusive')) &&
         SilkType.equals(argumentType.type.target, provider.providerType)) ||
       (argumentType?._tag === 'EffectBorrow' &&
-        (argumentType.access === provider.access ||
-          (provider.access === 'Shared' && argumentType.access === 'Exclusive')) &&
+        (argumentType.access === runtimeAccess ||
+          (runtimeAccess === 'Shared' && argumentType.access === 'Exclusive')) &&
         SilkType.equals(argumentType.type, provider.providerType))
     )
   }
@@ -1765,7 +2026,9 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
         allocator.purposes.length === 2 &&
         allocator.capability.module === 'silk/core' &&
         allocator.capability.name === 'Allocator' &&
-        allocator.access === 'Exclusive' &&
+        allocator.role === 'DefaultRole' &&
+        allocator.requirementAccess === 'Exclusive' &&
+        (allocator.access === 'Exclusive' || allocator.access === 'Take') &&
         projectedProviderValid(allocator)
       if (!allocatorValid)
         invalid(
@@ -1818,14 +2081,29 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
     if (
       (region.completion._tag === 'Propagate' &&
         (region.operation._tag === 'ReifyEffect' ||
-          new Set(
-            region.completion.failureMappings.map(
-              (mapping) => `${mapping.source}:${mapping.target}`,
-            ),
-          ).size !== region.completion.failureMappings.length ||
-          region.completion.failureMappings.some(
-            (mapping) => mapping.source <= 0 || mapping.target <= 0,
-          ))) ||
+          region.completion.failureMappings.length !==
+            SilkType.failureMembers(region.operation.outcomeType.type).length ||
+          region.completion.failureMappings.some((mapping, ordinal) => {
+            const source = SilkType.failureMembers(region.operation.outcomeType.type).at(ordinal)
+            const selectedSource = SilkType.failureCarrierMember(
+              region.operation.outcomeType.type,
+              mapping.source,
+              'OneBased',
+            )
+            const target = SilkType.failureCarrierMember(
+              region.completion.outcome,
+              mapping.target,
+              'OneBased',
+            )
+            return (
+              mapping.source !== ordinal + 1 ||
+              source === undefined ||
+              selectedSource === undefined ||
+              target === undefined ||
+              !SilkType.equals(source, selectedSource) ||
+              !SilkType.equals(source, target)
+            )
+          }))) ||
       (region.completion._tag === 'Reify' &&
         (region.operation._tag !== 'ReifyEffect' ||
           !SilkType.equals(region.completion.resultType, region.operation.resultType.type) ||
@@ -1842,7 +2120,9 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
         provider.purposes.length === 1 ||
         (provider.capability.module === 'silk/core' &&
           provider.capability.name === 'Allocator' &&
-          provider.access === 'Exclusive')
+          provider.role === 'DefaultRole' &&
+          provider.requirementAccess === 'Exclusive' &&
+          (provider.access === 'Exclusive' || provider.access === 'Take'))
       if (!argumentValid || !purposeValid)
         invalid('InvalidContinuation', 'provider argument has incompatible local, type, or purpose')
     }
@@ -2071,6 +2351,8 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'PackEffectFailureUnion':
     case 'UnpackEffectSuccess':
       return [operation.destination, operation.source]
+    case 'PropagateEffectFailure':
+      return [operation.source, ...(operation.releases ?? []).map((release) => release.local)]
     case 'RunEffect':
       return [operation.destination, operation.outcome, ...operation.arguments]
     case 'RunEffectValue':
@@ -2121,7 +2403,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
 }
 
 const localUses = (region: Region): ReadonlyArray<LocalId> => [
-  ...operationsOf(region).flatMap(operationLocals),
+  ...operationsOf(region).flatMap(operationTree).flatMap(operationLocals),
   ...(region._tag === 'ConditionalRegion' ? [region.condition] : []),
   ...(region._tag === 'LoopRegion' ? [region.conditionValue] : []),
   ...(outcomeOf(region)?._tag === 'Return'
@@ -2685,10 +2967,14 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'PackEffectFailureUnion':
     case 'UnpackEffectSuccess':
       return [semanticType(operation.type)]
+    case 'PropagateEffectFailure':
+      return [semanticType(operation.sourceType), semanticType(operation.propagationType)]
     case 'RunEffect':
       return [
         semanticType(operation.outcomeType),
-        semanticType(operation.propagationType),
+        ...(operation.propagationType === undefined
+          ? []
+          : [semanticType(operation.propagationType)]),
         semanticType(operation.type),
         ...operation.typeArguments.filter(SilkType.isTypeArgument),
       ]
@@ -2839,6 +3125,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'PackEffectFailureUnion':
     case 'UnpackEffectSuccess':
       return [operation.source]
+    case 'PropagateEffectFailure':
+      return [operation.source, ...(operation.releases ?? []).map((release) => release.local)]
     case 'RunEffect':
       return operation.arguments
     case 'RunEffectValue':
@@ -2903,6 +3191,30 @@ const loanViolations = (
     const inheritedKeys = new Set(inherited.keys())
     const completed = new Set<string>()
     const calls = new Set<string>()
+    const endLoan = (
+      operation: EndLoanOperation,
+      currentActive: Map<string, ActiveLoan>,
+      currentCompleted: Set<string>,
+      currentCalls: ReadonlySet<string>,
+    ): void => {
+      const key = borrowKey(operation.borrow)
+      const loan = currentActive.get(key)
+      const beginning = loan?.operation ?? globalBeginnings.get(key)
+      const call = `${operation.borrow.callSpan.start}:${operation.borrow.callSpan.end}`
+      const liveChild = [...currentActive.values()].some((candidate) => candidate.parent === key)
+      if (
+        beginning === undefined ||
+        currentCompleted.has(key) ||
+        beginning.destination.ordinal !== operation.slice.ordinal ||
+        (loan !== undefined && !currentCalls.has(call)) ||
+        liveChild
+      ) {
+        invalid(`loan ${key} has a missing, duplicate, premature, or mismatched ending`)
+      } else {
+        currentActive.delete(key)
+        currentCompleted.add(key)
+      }
+    }
     for (const operation of sequence) {
       if (operation._tag === 'BeginLoan') {
         const key = borrowKey(operation.borrow)
@@ -2977,24 +3289,19 @@ const loanViolations = (
         calls.add(`${operation.provenance.span.start}:${operation.provenance.span.end}`)
       }
       if (operation._tag === 'EndLoan') {
-        const key = borrowKey(operation.borrow)
-        const loan = active.get(key)
-        const beginning = loan?.operation ?? globalBeginnings.get(key)
-        const call = `${operation.borrow.callSpan.start}:${operation.borrow.callSpan.end}`
-        const liveChild = [...active.values()].some((candidate) => candidate.parent === key)
-        if (
-          beginning === undefined ||
-          completed.has(key) ||
-          beginning.destination.ordinal !== operation.slice.ordinal ||
-          (loan !== undefined && !calls.has(call)) ||
-          liveChild
-        ) {
-          invalid(`loan ${key} has a missing, duplicate, premature, or mismatched ending`)
-        } else {
-          active.delete(key)
-          completed.add(key)
-        }
+        endLoan(operation, active, completed, calls)
         continue
+      }
+
+      if (
+        operation._tag === 'RunEffect' ||
+        operation._tag === 'RunEffectValue' ||
+        operation._tag === 'RunStaticEffect'
+      ) {
+        const failureActive = new Map(active)
+        const failureCompleted = new Set(completed)
+        for (const ending of operation.failureLoanEnds ?? [])
+          endLoan(ending, failureActive, failureCompleted, calls)
       }
 
       for (const local of accessedOwnerLocals(operation)) {
@@ -3299,6 +3606,52 @@ const continuationLayoutViolations = (self: Module): ReadonlyArray<Violation> =>
   return Object.freeze(violations)
 }
 
+type PropagatingRun = Extract<
+  Operation,
+  { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'RunStaticEffect' }
+>
+
+/** Validates the one canonical success/failure outcome boundary shared by every run form. */
+const runPropagationValid = (
+  layout: Layout.Plan,
+  fn: MirFunction,
+  operation: PropagatingRun,
+): boolean => {
+  const failures = SilkType.failureMembers(operation.outcomeType.type)
+  const propagation = operation.propagationType
+  if (failures.length === 0)
+    return (
+      propagation === undefined &&
+      operation.tagMappings.length === 0 &&
+      operation.propagationLaneCount === 0 &&
+      (operation.failureLoanEnds?.length ?? 0) === 0
+    )
+  if (propagation === undefined) return false
+  const shape = Layout.callingShape(layout, propagation.type)
+  return (
+    SilkType.equals(semanticType(fn.result), propagation.type) &&
+    shape?.laneCount === operation.propagationLaneCount &&
+    operation.tagMappings.length === failures.length &&
+    operation.tagMappings.every((mapping, sourceOrdinal) => {
+      const expectedSource = failures.at(sourceOrdinal)
+      const source = SilkType.failureCarrierMember(
+        operation.outcomeType.type,
+        mapping.source,
+        'OneBased',
+      )
+      const target = SilkType.failureCarrierMember(propagation.type, mapping.target, 'OneBased')
+      return (
+        mapping.source === sourceOrdinal + 1 &&
+        expectedSource !== undefined &&
+        source !== undefined &&
+        target !== undefined &&
+        SilkType.equals(source, expectedSource) &&
+        SilkType.equals(source, target)
+      )
+    })
+  )
+}
+
 export const verify = (self: Module): ReadonlyArray<Violation> => {
   const violations: Array<Violation> = Layout.verify(self.layout).map((violation) =>
     Object.freeze({
@@ -3398,11 +3751,12 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       : target.result._tag === 'EffectValue' &&
         target.parameterCount === 0 &&
         machineClosures.length === 1 &&
-        availableEntry.requirements.length === target.result.type.requirements.length &&
+        availableEntry.requirements.length ===
+          SilkType.requirementMembers(target.result.type).length &&
         availableEntry.requirements.every((requirement, ordinal) => {
           const expected =
             target.result._tag === 'EffectValue'
-              ? target.result.type.requirements.at(ordinal)
+              ? SilkType.requirementMembers(target.result.type).at(ordinal)
               : undefined
           return (
             expected !== undefined &&
@@ -3411,11 +3765,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(requirement.capability, expected.capability)
           )
         }) &&
-        availableEntry.failures.length === target.result.type.failures.length &&
+        availableEntry.failures.length === SilkType.failureMembers(target.result.type).length &&
         availableEntry.failures.every((failure, ordinal) => {
           const expected =
             target.result._tag === 'EffectValue'
-              ? target.result.type.failures.at(ordinal)
+              ? SilkType.failureCarrierMember(target.result.type, failure.tag, 'OneBased')
               : undefined
           return (
             expected !== undefined &&
@@ -3448,7 +3802,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
     if (
       fn.instance.declaration.module !== fn.id.module ||
       fn.instance.declaration.name !== fn.id.name ||
-      concreteTypes.some((type) => !SilkType.isConcrete(type)) ||
+      fn.instance.typeArguments.some(
+        (argument) => !SilkType.isRuntimeConcreteGenericArgument(argument),
+      ) ||
+      concreteTypes.some((type) => !SilkType.isRuntimeConcrete(type)) ||
       instanceKeys.has(currentInstance)
     ) {
       violations.push(
@@ -3549,33 +3906,109 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       if (color.get(region.id.ordinal) === undefined) visit(region)
     }
 
+    const loopRegions = fn.regions.filter(
+      (region): region is LoopRegion => region._tag === 'LoopRegion',
+    )
     const loops = new Map<number, LoopRegion>()
-    for (const region of fn.regions) {
-      if (region._tag === 'LoopRegion') loops.set(region.loop.ordinal, region)
+    for (const region of loopRegions) loops.set(region.loop.ordinal, region)
+    const loopIdCounts = new Map<number, number>()
+    for (const loop of loopRegions)
+      loopIdCounts.set(loop.loop.ordinal, (loopIdCounts.get(loop.loop.ordinal) ?? 0) + 1)
+    const conditionOwners = new Map<number, Array<LoopRegion>>()
+    for (const loop of loopRegions) {
+      const owners = conditionOwners.get(loop.condition.ordinal) ?? []
+      owners.push(loop)
+      conditionOwners.set(loop.condition.ordinal, owners)
     }
-    const allOperations = fn.regions.flatMap(operationsOf).flatMap(operationTree)
+    for (const loop of loopRegions) {
+      const condition = byId.get(loop.condition.ordinal)
+      const owners = conditionOwners.get(loop.condition.ordinal) ?? []
+      if (
+        loopIdCounts.get(loop.loop.ordinal) !== 1 ||
+        owners.length !== 1 ||
+        condition?._tag !== 'OperationRegion' ||
+        condition.outcome._tag !== 'Yield' ||
+        condition.ownerLoop?.ordinal !== loop.loop.ordinal
+      ) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidLoopTarget',
+            function: fn.id,
+            region: loop.id,
+            detail: `loop${loop.loop.ordinal} must own one unique yielding operation condition`,
+          }),
+        )
+      }
+    }
+    for (const region of fn.regions) {
+      const outcome = outcomeOf(region)
+      if (outcome?._tag !== 'Yield') continue
+      const owners = conditionOwners.get(region.id.ordinal) ?? []
+      if (
+        region._tag !== 'OperationRegion' ||
+        owners.length !== 1 ||
+        region.ownerLoop?.ordinal !== owners.at(0)?.loop.ordinal
+      ) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidLoopTarget',
+            function: fn.id,
+            region: region.id,
+            detail: 'yield must be the uniquely owned operation condition of one lexical loop',
+          }),
+        )
+      }
+    }
     const loanBeginnings = new Map<string, number>()
     const loanEndings = new Map<string, number>()
     const globalBeginnings = new Map<string, Extract<Operation, { readonly _tag: 'BeginLoan' }>>()
-    for (const operation of allOperations) {
-      if (operation._tag === 'BeginLoan') {
-        const key = borrowKey(operation.borrow)
-        loanBeginnings.set(key, (loanBeginnings.get(key) ?? 0) + 1)
-        globalBeginnings.set(key, operation)
-      } else if (operation._tag === 'EndLoan') {
-        const key = borrowKey(operation.borrow)
-        loanEndings.set(key, (loanEndings.get(key) ?? 0) + 1)
+    for (const region of fn.regions) {
+      for (const operation of operationsOf(region).flatMap(operationTree)) {
+        if (operation._tag === 'BeginLoan') {
+          const key = borrowKey(operation.borrow)
+          loanBeginnings.set(key, (loanBeginnings.get(key) ?? 0) + 1)
+          globalBeginnings.set(key, operation)
+        } else if (operation._tag === 'EndLoan') {
+          const key = borrowKey(operation.borrow)
+          loanEndings.set(key, (loanEndings.get(key) ?? 0) + 1)
+        }
       }
     }
     const globalEndings = new Set(loanEndings.keys())
     for (const key of new Set([...loanBeginnings.keys(), ...loanEndings.keys()])) {
-      if (loanBeginnings.get(key) !== 1 || loanEndings.get(key) !== 1) {
+      const endings = loanEndings.get(key) ?? 0
+      if (loanBeginnings.get(key) !== 1 || endings < 1 || !loanPathsValid(fn, key, byId, loops)) {
         violations.push(
           Object.freeze({
             _tag: 'Violation',
             rule: 'InvalidLoan',
             function: fn.id,
-            detail: `loan ${key} must have exactly one beginning and one ending`,
+            detail: `loan ${key} must begin once and end exactly once on every terminating path`,
+          }),
+        )
+      }
+    }
+    const beginningsByDestination = new Map<
+      number,
+      readonly [string, Extract<Operation, { readonly _tag: 'BeginLoan' }>]
+    >()
+    for (const [key, beginning] of globalBeginnings)
+      beginningsByDestination.set(beginning.destination.ordinal, [key, beginning])
+    for (const [childKey, child] of globalBeginnings) {
+      const parent = beginningsByDestination.get(child.root.ordinal)
+      if (
+        parent !== undefined &&
+        parent[0] !== childKey &&
+        !loanAncestryPathsValid(fn, parent[0], childKey, byId, loops)
+      ) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidLoan',
+            function: fn.id,
+            detail: `reborrow ${childKey} must remain within parent loan ${parent[0]} on every path`,
           }),
         )
       }
@@ -4004,8 +4437,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         if (operation._tag === 'Allocate') {
           const layout = fn.localTypes.at(operation.layout.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
-          const expectedFailure = operation.propagationType.type.failures.at(
-            operation.failureTag - 1,
+          const expectedFailure = SilkType.failureCarrierMember(
+            operation.propagationType.type,
+            operation.failureTag,
+            'OneBased',
           )
           if (
             layout?._tag !== 'Nominal' ||
@@ -4032,8 +4467,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const stream = fn.localTypes.at(operation.stream.ordinal)
           const bytes = fn.localTypes.at(operation.bytes.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
-          const expectedFailure = operation.propagationType.type.failures.at(
-            operation.failureTag - 1,
+          const expectedFailure = SilkType.failureCarrierMember(
+            operation.propagationType.type,
+            operation.failureTag,
+            'OneBased',
           )
           const byteType = bytes === undefined ? undefined : semanticType(bytes)
           const byteView =
@@ -4616,9 +5053,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   const cleanupEffect = cleanup.type
                   return (
                     SilkType.equals(droppedSemantic.success, cleanupEffect.success) &&
-                    droppedSemantic.failures.length === cleanupEffect.failures.length &&
-                    droppedSemantic.failures.every((failure, ordinal) => {
-                      const expected = cleanupEffect.failures.at(ordinal)
+                    SilkType.failureMembers(droppedSemantic).length ===
+                      SilkType.failureMembers(cleanupEffect).length &&
+                    SilkType.failureMembers(droppedSemantic).every((failure, ordinal) => {
+                      const expected = SilkType.failureMembers(cleanupEffect).at(ordinal)
                       return expected !== undefined && SilkType.equals(failure, expected)
                     })
                   )
@@ -4649,16 +5087,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   .filter((field) => field.access === 'Take' && !isCopyType(field.type))
                   .map((field) => field.ordinal)
                   .reverse()
-                const endedLoans = operations
-                  .slice(0, index)
-                  .filter((candidate) => candidate._tag === 'EndLoan').length
-                const borrowed = dropped.environment.fields.filter(
-                  (field) => field.access === 'Shared' || field.access === 'Exclusive',
-                ).length
                 return (
                   expected.length === cleanup.slots.length &&
-                  expected.every((ordinal, slot) => cleanup.slots.at(slot)?.ordinal === ordinal) &&
-                  endedLoans >= borrowed
+                  expected.every((ordinal, slot) => cleanup.slots.at(slot)?.ordinal === ordinal)
                 )
               })())
           const effectCleanupValid =
@@ -4998,7 +5429,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(destination.type, operation.type.type) &&
             Hir.sameCallableTarget(destination.target, operation.target) &&
             Hir.sameCallableTarget(operation.type.target, operation.target) &&
-            operation.typeArguments.every(SilkType.isConcreteGenericArgument) &&
+            operation.typeArguments.every(SilkType.isRuntimeConcreteGenericArgument) &&
             (environment === undefined
               ? operation.captures.length === 0
               : capturesValid &&
@@ -5083,7 +5514,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             destination !== undefined &&
             SilkType.equals(semanticType(destination), semanticType(operation.type)) &&
             operation.access === operation.callableType.mode &&
-            operation.typeArguments.every(SilkType.isConcreteGenericArgument) &&
+            operation.typeArguments.every(SilkType.isRuntimeConcreteGenericArgument) &&
             argumentsValid &&
             (environmentForm || directForm)
           if (!valid) {
@@ -5093,7 +5524,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidCallableOperation',
                 function: fn.id,
                 region: region.id,
-                detail: `callable application disagrees with its mode, arguments, realization, or result (destination=${destination !== undefined && SilkType.equals(semanticType(destination), semanticType(operation.type))}, mode=${operation.access}/${operation.callableType.mode}:${operation.access === operation.callableType.mode}, source=${source?._tag === 'CallableValue' ? source.type.mode : 'none'}, types=${operation.typeArguments.every(SilkType.isConcreteGenericArgument)}, arguments=${argumentsValid}, environment=${environmentForm}, direct=${directForm}, captures=${directCapturesValid})`,
+                detail: `callable application disagrees with its mode, arguments, realization, or result (destination=${destination !== undefined && SilkType.equals(semanticType(destination), semanticType(operation.type))}, mode=${operation.access}/${operation.callableType.mode}:${operation.access === operation.callableType.mode}, source=${source?._tag === 'CallableValue' ? source.type.mode : 'none'}, types=${operation.typeArguments.every(SilkType.isRuntimeConcreteGenericArgument)}, arguments=${argumentsValid}, environment=${environmentForm}, direct=${directForm}, captures=${directCapturesValid})`,
               }),
             )
           }
@@ -5104,7 +5535,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const payload =
             operation.tag === 0
               ? operation.type.type.success
-              : operation.type.type.failures.at(operation.tag - 1)
+              : SilkType.failureCarrierMember(operation.type.type, operation.tag, 'OneBased')
           if (
             destination?._tag !== 'EffectOutcome' ||
             source === undefined ||
@@ -5127,10 +5558,19 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const source = fn.localTypes.at(operation.source.ordinal)
           const mappingsValid =
             operation.mappings.length === operation.sourceType.type.members.length &&
-            operation.mappings.every((mapping) => {
-              const sourceMember = operation.sourceType.type.members.at(mapping.source)
-              const targetFailure = operation.type.type.failures.at(mapping.target - 1)
+            operation.mappings.every((mapping, sourceOrdinal) => {
+              const sourceMember = SilkType.failureCarrierMember(
+                operation.sourceType.type,
+                mapping.source,
+                'ZeroBased',
+              )
+              const targetFailure = SilkType.failureCarrierMember(
+                operation.type.type,
+                mapping.target,
+                'OneBased',
+              )
               return (
+                mapping.source === sourceOrdinal &&
                 sourceMember !== undefined &&
                 targetFailure !== undefined &&
                 SilkType.equals(sourceMember, targetFailure)
@@ -5150,6 +5590,54 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail: 'effect failure-union mappings do not preserve E members',
+              }),
+            )
+        }
+        if (operation._tag === 'PropagateEffectFailure') {
+          const source = fn.localTypes.at(operation.source.ordinal)
+          const sourceMembers =
+            operation.sourceType._tag === 'Nominal'
+              ? Object.freeze([operation.sourceType.type])
+              : operation.sourceType.type.members
+          const propagationShape = Layout.callingShape(self.layout, operation.propagationType.type)
+          const mappingsValid =
+            operation.tagMappings.length === sourceMembers.length &&
+            operation.tagMappings.every((mapping, sourceOrdinal) => {
+              const expectedSource = sourceMembers.at(sourceOrdinal)
+              const sourceMember = SilkType.failureCarrierMember(
+                semanticType(operation.sourceType),
+                mapping.source,
+                'ZeroBased',
+              )
+              const targetFailure = SilkType.failureCarrierMember(
+                operation.propagationType.type,
+                mapping.target,
+                'OneBased',
+              )
+              return (
+                mapping.source === sourceOrdinal &&
+                expectedSource !== undefined &&
+                sourceMember !== undefined &&
+                targetFailure !== undefined &&
+                SilkType.equals(sourceMember, expectedSource) &&
+                SilkType.equals(sourceMember, targetFailure)
+              )
+            })
+          if (
+            source === undefined ||
+            !SilkType.equals(semanticType(source), semanticType(operation.sourceType)) ||
+            !SilkType.equals(semanticType(fn.result), operation.propagationType.type) ||
+            propagationShape?.laneCount !== operation.propagationLaneCount ||
+            !SilkType.isNever(operation.type.type) ||
+            !mappingsValid
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidEffectOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'failure propagation does not preserve canonical outcome contracts',
               }),
             )
         }
@@ -5176,23 +5664,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const target = self.functions.find((candidate) =>
             matchesInstance(candidate, operation.target, operation.typeArguments),
           )
-          const mappingsValid =
-            operation.tagMappings.length === operation.outcomeType.type.failures.length &&
-            operation.tagMappings.every((mapping) => {
-              const source = operation.outcomeType.type.failures.at(mapping.source - 1)
-              const targetFailure = operation.propagationType.type.failures.at(mapping.target - 1)
-              return (
-                source !== undefined &&
-                targetFailure !== undefined &&
-                SilkType.equals(source, targetFailure)
-              )
-            })
           if (
             target === undefined ||
             target.result._tag !== 'EffectOutcome' ||
             !SilkType.equals(target.result.type, operation.outcomeType.type) ||
-            !SilkType.equals(semanticType(fn.result), operation.propagationType.type) ||
-            !mappingsValid
+            !runPropagationValid(self.layout, fn, operation)
           )
             violations.push(
               Object.freeze({
@@ -5224,21 +5700,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             suspensionRegion?._tag === 'RunSuspendableEffectRegion'
               ? suspensionRegion.runner
               : suspensionRegion?.deferred
-          const mappingsValid =
-            operation.propagationType === undefined
-              ? operation.tagMappings.length === 0
-              : operation.tagMappings.length === operation.outcomeType.type.failures.length &&
-                operation.tagMappings.every((mapping) => {
-                  const source = operation.outcomeType.type.failures.at(mapping.source - 1)
-                  const targetFailure = operation.propagationType?.type.failures.at(
-                    mapping.target - 1,
-                  )
-                  return (
-                    source !== undefined &&
-                    targetFailure !== undefined &&
-                    SilkType.equals(source, targetFailure)
-                  )
-                })
+          const propagationValid = runPropagationValid(self.layout, fn, operation)
           const effectValue = effect?._tag === 'EffectValue' ? effect : undefined
           const stored = effectValue?.storage
           const storedContractValid =
@@ -5246,14 +5708,15 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             (effectValue !== undefined &&
               SilkType.equals(effectValue.type, stored.realization.contract) &&
               effectValue.type.access === stored.realization.access &&
-              effectValue.type.failures.length === stored.realization.rows.failures.length &&
-              effectValue.type.failures.every((failure, ordinal) => {
+              SilkType.failureMembers(effectValue.type).length ===
+                stored.realization.rows.failures.length &&
+              SilkType.failureMembers(effectValue.type).every((failure, ordinal) => {
                 const expected = stored.realization.rows.failures.at(ordinal)
                 return expected !== undefined && SilkType.equals(failure, expected)
               }) &&
-              effectValue.type.requirements.length ===
+              SilkType.requirementMembers(effectValue.type).length ===
                 stored.realization.rows.requirements.length &&
-              effectValue.type.requirements.every((requirement, ordinal) => {
+              SilkType.requirementMembers(effectValue.type).every((requirement, ordinal) => {
                 const expected = stored.realization.rows.requirements.at(ordinal)
                 return (
                   expected !== undefined &&
@@ -5290,7 +5753,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                       )
                     })
                   const expectedRequirements =
-                    stored?.realization.rows.requirements ?? effectValue.type.requirements
+                    stored?.realization.rows.requirements ??
+                    SilkType.requirementMembers(effectValue.type)
                   const requirementsMatch =
                     operation.providers.length === expectedRequirements.length &&
                     operation.providers.every((provider, ordinal) => {
@@ -5304,14 +5768,18 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                       return (
                         requirement !== undefined &&
                         provider.role === requirement.role &&
+                        provider.requirementAccess === requirement.access &&
                         SilkType.equals(provider.capability, requirement.capability) &&
                         SilkType.equals(provider.witness.capability, provider.capability) &&
                         SilkType.equals(provider.witness.provider, provider.providerType) &&
-                        (requirement.access === 'Shared' || provider.access === 'Exclusive') &&
+                        (requirement.access === 'Shared' ||
+                          provider.access === 'Exclusive' ||
+                          provider.access === 'Take') &&
                         (provider.argument === undefined ||
                           (semanticArgument !== undefined &&
                             SilkType.isReference(semanticArgument) &&
-                            semanticArgument.access === provider.access &&
+                            semanticArgument.access ===
+                              (provider.access === 'Take' ? 'Exclusive' : provider.access) &&
                             SilkType.equals(semanticArgument.target, provider.providerType)))
                       )
                     })
@@ -5376,15 +5844,15 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 SilkType.equals(suspensionRunner.outcome, operation.outcomeType.type))) &&
             storedContractValid &&
             staticRunnerValid &&
-            mappingsValid
-          if ((stored !== undefined || operation.runnerBase !== undefined) && !valid)
+            propagationValid
+          if (!valid)
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
                 rule: 'InvalidEffectOperation',
                 function: fn.id,
                 region: region.id,
-                detail: `Effect value run disagrees with its static runner, exact rows, access, outcome, or propagation contract (target=${targetText(operation.runner)}, effect=${effectValue !== undefined}, runner=${runner !== undefined}, suspension-runner=${suspensionRunner !== undefined}, stored-contract=${storedContractValid}, static-runner=${staticRunnerValid}, mappings=${mappingsValid})`,
+                detail: `Effect value run disagrees with its static runner, exact rows, access, outcome, or propagation contract (target=${targetText(operation.runner)}, effect=${effectValue !== undefined}, runner=${runner !== undefined}, suspension-runner=${suspensionRunner !== undefined}, stored-contract=${storedContractValid}, static-runner=${staticRunnerValid}, propagation=${propagationValid})`,
               }),
             )
         }
@@ -5427,21 +5895,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 )
               )
             })
-          const mappingsValid =
-            operation.propagationType === undefined
-              ? operation.tagMappings.length === 0
-              : operation.tagMappings.length === operation.outcomeType.type.failures.length &&
-                operation.tagMappings.every((mapping) => {
-                  const source = operation.outcomeType.type.failures.at(mapping.source - 1)
-                  const targetFailure = operation.propagationType?.type.failures.at(
-                    mapping.target - 1,
-                  )
-                  return (
-                    source !== undefined &&
-                    targetFailure !== undefined &&
-                    SilkType.equals(source, targetFailure)
-                  )
-                })
+          const propagationValid = runPropagationValid(self.layout, fn, operation)
           const runnerResultValid =
             runner?.result._tag === 'EffectOutcome' &&
             SilkType.equals(runner.result.type, operation.outcomeType.type)
@@ -5456,7 +5910,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !outcomeValid ||
             !destinationValid ||
             !parametersValid ||
-            !mappingsValid
+            !propagationValid
           )
             violations.push(
               Object.freeze({
@@ -5476,24 +5930,30 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const effect = fn.localTypes.at(operation.effect.ordinal)
           const outcome = fn.localTypes.at(operation.outcome.ordinal)
-          const expectedFailureValue = SilkType.failureValue(operation.outcomeType.type.failures)
+          const expectedFailureValue = SilkType.failureValue(
+            SilkType.failureMembers(operation.outcomeType.type),
+          )
           const expectedResult = SilkType.result(
             operation.outcomeType.type.success,
             expectedFailureValue,
           )
           const expectedSuccess = SilkType.resultSuccess(operation.outcomeType.type.success)
           const expectedFailure = SilkType.resultFailure(expectedFailureValue)
+          const selectedSuccess = SilkType.failureCarrierMember(
+            operation.resultUnion,
+            operation.successTag,
+            'ZeroBased',
+          )
+          const selectedFailure = SilkType.failureCarrierMember(
+            operation.resultUnion,
+            operation.failureTag,
+            'ZeroBased',
+          )
           const tagsValid =
-            operation.resultUnion.members.at(operation.successTag) !== undefined &&
-            operation.resultUnion.members.at(operation.failureTag) !== undefined &&
-            SilkType.equals(
-              operation.resultUnion.members.at(operation.successTag) ?? expectedFailure,
-              expectedSuccess,
-            ) &&
-            SilkType.equals(
-              operation.resultUnion.members.at(operation.failureTag) ?? expectedSuccess,
-              expectedFailure,
-            )
+            selectedSuccess !== undefined &&
+            selectedFailure !== undefined &&
+            SilkType.equals(selectedSuccess, expectedSuccess) &&
+            SilkType.equals(selectedFailure, expectedFailure)
           if (
             runner?.result._tag !== 'EffectOutcome' ||
             effect?._tag !== 'EffectValue' ||
@@ -5541,11 +6001,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const failuresValid =
             runner?.result._tag === 'EffectOutcome' &&
             entryFailures !== undefined &&
-            operation.failures.length === runner.result.type.failures.length &&
+            operation.failures.length === SilkType.failureMembers(runner.result.type).length &&
             operation.failures.every((failure, ordinal) => {
               const expected =
                 runner.result._tag === 'EffectOutcome'
-                  ? runner.result.type.failures.at(ordinal)
+                  ? SilkType.failureCarrierMember(runner.result.type, failure.tag, 'OneBased')
                   : undefined
               const entryFailure = entryFailures.at(ordinal)
               const payload = fn.localTypes.at(failure.payload.ordinal)
@@ -5720,14 +6180,16 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = effect-outcome tag=${operation.tag} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PackEffectFailureUnion':
       return `${localText(operation.destination)} = effect-failure-union ${localText(operation.source)} mappings=${operation.mappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'PropagateEffectFailure':
+      return `propagate-effect-failure ${localText(operation.source)} mappings=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.propagationType)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'UnpackEffectSuccess':
       return `${localText(operation.destination)} = effect-success ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RunEffect':
-      return `${localText(operation.destination)} = run-effect ${targetText(operation.target)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = run-effect ${targetText(operation.target)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.failureLoanEnds === undefined || operation.failureLoanEnds.length === 0 ? '' : `failure-loans=${operation.failureLoanEnds.map((ending) => `l${ending.borrow.ordinal}:${localText(ending.slice)}`).join(',')} `}${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'RunEffectValue':
-      return `${localText(operation.destination)} = run-effect-value ${localText(operation.effect)} runner=${targetText(operation.runner)}${operation.runnerBase === undefined ? '' : ` base=${targetText(operation.runnerBase.declaration)}`} providers=${operation.providers.map((provider) => `${SilkType.encode(provider.capability)}@${provider.role}:${provider.access.toLowerCase()}`).join(',') || 'none'} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = run-effect-value ${localText(operation.effect)} runner=${targetText(operation.runner)}${operation.runnerBase === undefined ? '' : ` base=${targetText(operation.runnerBase.declaration)}`} providers=${operation.providers.map((provider) => `${SilkType.encode(provider.capability)}@${provider.role}:${provider.requirementAccess.toLowerCase()}:${provider.access.toLowerCase()}`).join(',') || 'none'} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.failureLoanEnds === undefined || operation.failureLoanEnds.length === 0 ? '' : `failure-loans=${operation.failureLoanEnds.map((ending) => `l${ending.borrow.ordinal}:${localText(ending.slice)}`).join(',')} `}${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'RunStaticEffect':
-      return `${localText(operation.destination)} = run-static-effect runner=${targetText(operation.runner)} captures=${operation.captures.map((capture) => `${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = run-static-effect runner=${targetText(operation.runner)} captures=${operation.captures.map((capture) => `${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.failureLoanEnds === undefined || operation.failureLoanEnds.length === 0 ? '' : `failure-loans=${operation.failureLoanEnds.map((ending) => `l${ending.borrow.ordinal}:${localText(ending.slice)}`).join(',')} `}${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'ReifyEffect':
       return `${localText(operation.destination)} = effect-result ${localText(operation.effect)} runner=${targetText(operation.runner)} arguments=${operation.arguments.map(localText).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'CloseEffectEntry':
@@ -5853,7 +6315,7 @@ const suspensionRunnerLines = (
   ),
   ...runner.providers.map(
     (provider) =>
-      `${indent}provider ${SilkType.encode(provider.capability)}@${provider.role} access=${provider.access.toLowerCase()} type=${SilkType.encode(provider.providerType)} argument=${provider.argument === undefined ? 'none' : localText(provider.argument)} witness=${provider.witness?._tag ?? 'none'} purposes=${provider.purposes.join('+')}`,
+      `${indent}provider ${SilkType.encode(provider.capability)}@${provider.role} requirement=${provider.requirementAccess.toLowerCase()} access=${provider.access.toLowerCase()} type=${SilkType.encode(provider.providerType)} argument=${provider.argument === undefined ? 'none' : localText(provider.argument)} witness=${provider.witness?._tag ?? 'none'} purposes=${provider.purposes.join('+')}`,
   ),
 ]
 

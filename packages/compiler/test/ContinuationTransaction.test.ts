@@ -24,7 +24,7 @@ effect fn outer(value: once Effect<i32>) -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(outer(effect { return 42 }) |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(outer(effect { return 42 }) |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const analyze = () =>

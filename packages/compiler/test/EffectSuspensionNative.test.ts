@@ -34,7 +34,7 @@ const successSource = `effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(delayed() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(delayed() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const recursiveSource = (
@@ -48,7 +48,7 @@ const recursiveSource = (
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  let answer = run Effect.catch(count(${depth}) |> Effect.provideMut(&mut allocator), recover)
+  let answer = run Effect.catchAll(count(${depth}) |> Effect.provideMut(&mut allocator), recover)
   if answer == ${depth} { return 42 }
   return 2
 }`

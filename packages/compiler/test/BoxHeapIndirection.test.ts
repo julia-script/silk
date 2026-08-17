@@ -94,7 +94,7 @@ effect fn sum() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch(sum(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(sum(), recover) }`
 
 /**
  * The pinned leak test, and the reason this lands with the feature rather than after it. Deleting
@@ -174,7 +174,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 3 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('borrows, mutates, and consumes a boxed value without unsafe code', () =>
   Effect.gen(function* () {
@@ -223,7 +223,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('releases an owning value held inside a box', () =>
   Effect.gen(function* () {
@@ -284,7 +284,7 @@ effect fn build(depth: i32) -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch(build(64), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(64), recover) }`
 
 it.effect('releases every link of a deep box chain', () =>
   Effect.gen(function* () {

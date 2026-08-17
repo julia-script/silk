@@ -1,6 +1,11 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import {
+  auditAllocatorSuspension,
+  ownedAllocatorSuspensionFailure,
+  ownedAllocatorSuspensionSuccess,
+} from './support/ownedAllocatorSuspension.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -13,7 +18,7 @@ effect fn mapped() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(mapped() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(mapped() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const flatMapSource = `effect fn selected(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
@@ -26,7 +31,7 @@ effect fn chained() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(chained() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(chained() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const recoverySource = `struct Problem { code: i32 }
@@ -37,7 +42,7 @@ effect fn protected() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
 effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(protected() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(protected() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const retrySource = `struct Problem { code: i32 }
@@ -48,7 +53,7 @@ effect fn attempt() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
 effect fn recover(error: Problem | OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(
+  return run Effect.catchAll(
     attempt() |> Effect.retry(2) |> Effect.provideMut(&mut allocator),
     recover
   )
@@ -67,7 +72,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let fixed = Fixed { value: 42 }
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(
+  return run Effect.catchAll(
     provided() |> Effect.provide(&fixed) |> Effect.provideMut(&mut allocator),
     recover
   )
@@ -86,7 +91,7 @@ effect fn odd(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(even(20) |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(even(20) |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const allocatorRefusalSource = `struct ExhaustedAllocator { tag: i32 }
@@ -101,7 +106,7 @@ effect fn protected() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = ExhaustedAllocator { tag: 0 }
-  return run Effect.catch(protected() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(protected() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const laterAllocatorRefusalSource = `struct QuotaAllocator { remaining: i32 }
@@ -126,7 +131,7 @@ effect fn protected() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = QuotaAllocator { remaining: 2 }
-  return run Effect.catch(protected() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(protected() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const cleanupSource = (failAtBase: boolean): string => `struct Problem { code: i32 }
@@ -145,7 +150,7 @@ effect fn descend(value: i32) -> i32 ! Problem | OutOfMemory ? &mut Allocator {
 effect fn recover(error: Problem | OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(descend(3) |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(descend(3) |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const trapSource = `struct Guard { storage: Allocation }
@@ -159,7 +164,7 @@ effect fn protected() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(protected() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(protected() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const runAll = Effect.fnUntraced(function* (name: string, source: string, expected: number) {
@@ -175,6 +180,105 @@ const runAll = Effect.fnUntraced(function* (name: string, source: string, expect
   )
   assert.deepEqual(Analysis.diagnostics(logical), [], `${name} logical`)
   assert.deepEqual(Analysis.diagnostics(wasm), [], `${name} wasm`)
+
+  if (name.startsWith('owned-allocator')) {
+    const catches = Analysis.loweredMir(logical).functions.filter((fn) =>
+      fn.instance.contractRow.some(
+        (entry) => entry.startsWith('effect-site:') && entry.includes('site:107374'),
+      ),
+    )
+    assert.isAbove(catches.length, 0, `${name}: generated catch runner`)
+    assert.isTrue(
+      catches.some(
+        (fn) =>
+          fn.suspension?.classification === 'Suspendable' &&
+          fn.suspension.regions.length > 0 &&
+          fn.suspension.regions.some((region) =>
+            region._tag === 'RunSuspendableEffectRegion'
+              ? region.runner.providers.some(
+                  (provider) => provider.access === 'Take' && provider.purposes.length === 2,
+                )
+              : false,
+          ),
+      ),
+      `${name}: Take allocator reaches generated catch suspension`,
+    )
+  }
+
+  for (const fn of Analysis.loweredMir(logical).functions) {
+    for (const region of fn.suspension?.regions ?? []) {
+      const runner =
+        region._tag === 'RunSuspendableEffectRegion'
+          ? region.runner
+          : region._tag === 'SuspendEffectRegion'
+            ? region.deferred
+            : undefined
+      for (const provider of runner?.providers ?? []) {
+        if (provider.purposes.length !== 2) continue
+        assert.strictEqual(provider.capability.module, 'silk/core', `${name}: allocator module`)
+        assert.strictEqual(provider.capability.name, 'Allocator', `${name}: allocator capability`)
+        assert.strictEqual(provider.role, 'DefaultRole', `${name}: allocator role`)
+        assert.strictEqual(provider.requirementAccess, 'Exclusive', `${name}: allocator demand`)
+        assert.include(['Exclusive', 'Take'], provider.access, `${name}: allocator strength`)
+      }
+    }
+  }
+
+  if (name === 'audit-allocator-role') {
+    const layout = Analysis.layoutOf(logical)
+    assert.strictEqual(layout._tag, 'Available', `${name}: layout available`)
+    const auditDemands =
+      layout._tag === 'Available'
+        ? layout.value.effectEnvironments.flatMap((environment) =>
+            environment._tag === 'EffectEnvironment'
+              ? environment.fields.flatMap((field) =>
+                  field.providedRequirement?.role.endsWith('Audit') === true
+                    ? [field.providedRequirement]
+                    : [],
+                )
+              : [],
+          )
+        : []
+    assert.isAtLeast(auditDemands.length, 2, `${name}: exact Audit bindings retained`)
+    assert.isTrue(
+      auditDemands.every((demand) => demand.requirementAccess === 'Shared'),
+      `${name}: Audit bindings retain shared stored access`,
+    )
+    assert.include(
+      auditDemands.map((demand) => demand.providerAccess),
+      'Shared',
+      `${name}: shared Audit provider strength`,
+    )
+    assert.include(
+      auditDemands.map((demand) => demand.providerAccess),
+      'Exclusive',
+      `${name}: exclusive Audit provider strength`,
+    )
+    const continuationProviders = Analysis.loweredMir(logical).functions.flatMap((fn) =>
+      (fn.suspension?.regions ?? []).flatMap((region) => {
+        const runner =
+          region._tag === 'RunSuspendableEffectRegion'
+            ? region.runner
+            : region._tag === 'SuspendEffectRegion'
+              ? region.deferred
+              : undefined
+        return runner?.providers.filter((provider) => provider.purposes.length === 2) ?? []
+      }),
+    )
+    assert.isAbove(
+      continuationProviders.length,
+      0,
+      `${name}: real default continuation Allocator retained`,
+    )
+    assert.isTrue(
+      continuationProviders.some(
+        (provider) =>
+          provider.providerType.module === 'silk/core' &&
+          provider.providerType.name === 'SystemAllocator',
+      ),
+      `${name}: SystemAllocator supplies continuation storage`,
+    )
+  }
 
   const evaluated = Analysis.evaluate(logical, { maxCallDepth: 1_024, maxSteps: 1_000_000 })
   assert.strictEqual(evaluated._tag, 'Completed', `${name}: ${evaluated._tag}`)
@@ -201,6 +305,17 @@ it.effect('retries a reusable Effect across suspension', () => runAll('retry', r
 
 it.effect('retains a provided service across suspension', () =>
   runAll('provision', provisionSource, 42),
+)
+
+it.effect('retains and releases a Take-selected affine allocator across suspension', () =>
+  Effect.gen(function* () {
+    yield* runAll('owned-allocator-success', ownedAllocatorSuspensionSuccess, 42)
+    yield* runAll('owned-allocator-failure', ownedAllocatorSuspensionFailure, 7)
+  }),
+)
+
+it.effect('uses only the exact default exclusive Allocator demand for continuation storage', () =>
+  runAll('audit-allocator-role', auditAllocatorSuspension, 42),
 )
 
 it.effect('runs suspended mutual recursion on the evaluator and Wasm', () =>

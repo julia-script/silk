@@ -306,6 +306,7 @@ const positionOf = (table: LineTable, offset: number): { line: number; column: n
 
 type LinearTerminator =
   | { readonly _tag: 'Return'; readonly value: Mir.LocalId; readonly provenance: Mir.Provenance }
+  | Extract<Mir.Operation, { readonly _tag: 'PropagateEffectFailure' }>
   | { readonly _tag: 'Jump'; readonly target: Mir.RegionId; readonly provenance: Mir.Provenance }
   | {
       readonly _tag: 'Branch'
@@ -325,7 +326,7 @@ type LinearTerminator =
   | { readonly _tag: 'Trap'; readonly reason: string; readonly provenance: Mir.Provenance }
 
 type LinearOperation =
-  | Exclude<Mir.Operation, { readonly _tag: 'Match' | 'ShortCircuit' }>
+  | Exclude<Mir.Operation, { readonly _tag: 'Match' | 'ShortCircuit' | 'PropagateEffectFailure' }>
   | {
       readonly _tag: 'BindMatch'
       readonly scrutinee: Mir.LocalId
@@ -334,6 +335,22 @@ type LinearOperation =
       readonly binding: Mir.MatchBinding
       readonly provenance: Mir.Provenance
     }
+
+const isLinearOperation = (
+  operation: Mir.Operation | LinearOperation,
+): operation is LinearOperation =>
+  operation._tag !== 'Match' &&
+  operation._tag !== 'ShortCircuit' &&
+  operation._tag !== 'PropagateEffectFailure'
+
+const linearOperations = (
+  operations: ReadonlyArray<Mir.Operation | LinearOperation>,
+): ReadonlyArray<LinearOperation> => {
+  const linear = operations.filter(isLinearOperation)
+  if (linear.length !== operations.length)
+    throw new RangeError('LLVM control expansion retained a structured operation')
+  return Object.freeze(linear)
+}
 
 interface LinearBlock {
   readonly id: Mir.RegionId
@@ -457,23 +474,38 @@ const expandMatches = (
     operations: ReadonlyArray<Mir.Operation | LinearOperation>,
     terminator: LinearTerminator,
   ): void => {
-    const structuredIndex = operations.findIndex(
-      (operation) => operation._tag === 'Match' || operation._tag === 'ShortCircuit',
+    const specialIndex = operations.findIndex(
+      (operation) =>
+        operation._tag === 'Match' ||
+        operation._tag === 'ShortCircuit' ||
+        operation._tag === 'PropagateEffectFailure',
     )
-    if (structuredIndex < 0) {
+    if (specialIndex < 0) {
       blocks.push(
         Object.freeze({
           id,
           origin,
           kind,
-          operations: Object.freeze(operations as ReadonlyArray<LinearOperation>),
+          operations: linearOperations(operations),
           terminator,
         }),
       )
       return
     }
-    const structured = operations.at(structuredIndex)
-    if (structured?._tag === 'ShortCircuit') {
+    const special = operations.at(specialIndex)
+    if (special?._tag === 'PropagateEffectFailure') {
+      blocks.push(
+        Object.freeze({
+          id,
+          origin,
+          kind,
+          operations: linearOperations(operations.slice(0, specialIndex)),
+          terminator: special,
+        }),
+      )
+      return
+    }
+    if (special?._tag === 'ShortCircuit') {
       const following = reserve()
       const evaluateRight = reserve()
       const decided = reserve()
@@ -482,35 +514,33 @@ const expandMatches = (
           id,
           origin,
           kind,
-          operations: Object.freeze(
-            operations.slice(0, structuredIndex) as ReadonlyArray<LinearOperation>,
-          ),
+          operations: linearOperations(operations.slice(0, specialIndex)),
           // `&&` reaches its right operand on a true left operand; `||` on a false one. The other
           // edge writes the operator's decided value without evaluating the right operand at all.
           terminator: Object.freeze({
             _tag: 'Branch',
-            condition: structured.left,
-            taken: structured.operator === 'And' ? evaluateRight : decided,
-            otherwise: structured.operator === 'And' ? decided : evaluateRight,
-            provenance: structured.provenance,
+            condition: special.left,
+            taken: special.operator === 'And' ? evaluateRight : decided,
+            otherwise: special.operator === 'And' ? decided : evaluateRight,
+            provenance: special.provenance,
           }),
         }),
       )
-      lowerSequence(following, origin, kind, operations.slice(structuredIndex + 1), terminator)
+      lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
       lowerSequence(
         evaluateRight,
         origin,
         'Normal',
         [
-          ...structured.right.operations,
+          ...special.right.operations,
           Object.freeze({
             _tag: 'Move' as const,
-            destination: structured.destination,
-            source: structured.right.result,
-            provenance: structured.provenance,
+            destination: special.destination,
+            source: special.right.result,
+            provenance: special.provenance,
           }),
         ],
-        jump(following, structured.provenance),
+        jump(following, special.provenance),
       )
       blocks.push(
         Object.freeze({
@@ -520,20 +550,20 @@ const expandMatches = (
           operations: Object.freeze([
             Object.freeze({
               _tag: 'Literal' as const,
-              destination: structured.destination,
-              type: structured.type,
-              value: structured.operator === 'And' ? 0 : 1,
-              provenance: structured.provenance,
+              destination: special.destination,
+              type: special.type,
+              value: special.operator === 'And' ? 0 : 1,
+              provenance: special.provenance,
             }),
           ]),
-          terminator: jump(following, structured.provenance),
+          terminator: jump(following, special.provenance),
         }),
       )
       return
     }
-    const matchIndex = structuredIndex
-    const match = operations.at(matchIndex)
-    if (match?._tag !== 'Match') throw new RangeError('LLVM match expansion lost its operation')
+    if (special?._tag !== 'Match')
+      throw new RangeError('LLVM control expansion lost its special operation')
+    const match = special
     const dispatch = reserve()
     const following = reserve()
     blocks.push(
@@ -541,13 +571,11 @@ const expandMatches = (
         id,
         origin,
         kind,
-        operations: Object.freeze(
-          operations.slice(0, matchIndex) as ReadonlyArray<LinearOperation>,
-        ),
+        operations: linearOperations(operations.slice(0, specialIndex)),
         terminator: jump(dispatch, match.provenance),
       }),
     )
-    lowerSequence(following, origin, kind, operations.slice(matchIndex + 1), terminator)
+    lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
 
     const trap = reserve()
     blocks.push(
@@ -855,7 +883,7 @@ const llvmControl = (program: Mir.Module): ReadonlyArray<ControlProvenance> =>
                 ? 'LlvmJump'
                 : terminator._tag === 'Branch' || terminator._tag === 'MatchBranch'
                   ? 'LlvmBranch'
-                  : terminator._tag === 'Return'
+                  : terminator._tag === 'Return' || terminator._tag === 'PropagateEffectFailure'
                     ? 'LlvmReturn'
                     : 'LlvmTrap',
             targets: canonicalTargets,
@@ -1508,7 +1536,12 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             }
           }
           const continuationLocals = entry.linear.flatMap((block) => {
-            if (block.terminator._tag === 'Return' || block.terminator._tag === 'Trap') return []
+            if (
+              block.terminator._tag === 'Return' ||
+              block.terminator._tag === 'Trap' ||
+              block.terminator._tag === 'PropagateEffectFailure'
+            )
+              return []
             let afterRuntimeContinuation = false
             const ordinals: Array<number> = []
             for (const operation of block.operations) {
@@ -1822,34 +1855,127 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           ) {
             const sourceIsAddress = typeof source.type !== 'string'
             const targetIsAddress = typeof target.type !== 'string'
-            if (sourceIsAddress && !targetIsAddress) {
-              return yield* FunctionBody.cast(body, 'ptrtoint', input, laneType(target), name)
-            }
-            if (!sourceIsAddress && targetIsAddress) {
-              return yield* FunctionBody.cast(body, 'inttoptr', input, laneType(target), name)
-            }
             if (sourceIsAddress && targetIsAddress) return input
             const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
             const scalarBits = (lane: Layout.CallingLane): number =>
-              typeof lane.type === 'string'
-                ? Scalar.bits(Scalar.find(lane.type) ?? Scalar.defaultInteger, pointerBits)
-                : pointerBits
+              typeof lane.type !== 'string'
+                ? pointerBits
+                : (() => {
+                    const scalar = Scalar.find(lane.type) ?? Scalar.defaultInteger
+                    return scalar.category === 'Boolean' ? 32 : Scalar.bits(scalar, pointerBits)
+                  })()
             const sourceBits = scalarBits(source)
             const targetBits = scalarBits(target)
-            if (sourceBits === targetBits) return input
             const sourceScalar =
               typeof source.type === 'string' ? Scalar.find(source.type) : undefined
-            return yield* FunctionBody.cast(
-              body,
-              targetBits > sourceBits
-                ? sourceScalar?.signedness === 'Signed'
-                  ? 'sext'
-                  : 'zext'
-                : 'trunc',
-              input,
-              laneType(target),
-              name,
+            const targetScalar =
+              typeof target.type === 'string' ? Scalar.find(target.type) : undefined
+            const sourceFloating = sourceScalar?.category === 'Floating'
+            const targetFloating = targetScalar?.category === 'Floating'
+            const sourceIntegerType = integerTypes.get(sourceBits) ?? i32
+            const targetIntegerType = integerTypes.get(targetBits) ?? i32
+            if (
+              !sourceIsAddress &&
+              !targetIsAddress &&
+              sourceBits === targetBits &&
+              sourceFloating === targetFloating
             )
+              return input
+            let bits = sourceIsAddress
+              ? yield* FunctionBody.cast(body, 'ptrtoint', input, sourceIntegerType, `${name}_bits`)
+              : sourceFloating
+                ? yield* FunctionBody.cast(
+                    body,
+                    'bitcast',
+                    input,
+                    sourceIntegerType,
+                    `${name}_bits`,
+                  )
+                : input
+            if (sourceBits !== targetBits) {
+              bits = yield* FunctionBody.cast(
+                body,
+                targetBits > sourceBits ? 'zext' : 'trunc',
+                bits,
+                targetIntegerType,
+                `${name}_width`,
+              )
+            }
+            if (targetIsAddress)
+              return yield* FunctionBody.cast(body, 'inttoptr', bits, laneType(target), name)
+            return targetFloating
+              ? yield* FunctionBody.cast(body, 'bitcast', bits, laneType(target), name)
+              : bits
+          })
+
+          const failurePayload = Effect.fnUntraced(function* (
+            source: ReadonlyArray<Value.Input>,
+            sourceType: DeclarationIndex.SemanticType,
+            sourceTag: Value.Input | undefined,
+            targetType: SilkType.Effect,
+            mappings: ReadonlyArray<{ readonly source: number; readonly target: number }>,
+            label: string,
+          ) {
+            const targetShape = Layout.callingShape(program.layout, targetType)
+            if (targetShape?.tree._tag !== 'OutcomeShape')
+              throw new RangeError('LLVM failure propagation lost its target calling shape')
+            const payload: Array<Value.Input> = []
+            for (const [targetOrdinal, targetLane] of targetShape.lanes.slice(1).entries()) {
+              let selected: Value.Input = yield* Constant.nullValue(builder, laneType(targetLane))
+              for (const [mappingOrdinal, mapping] of [...mappings].reverse().entries()) {
+                const repacking = Layout.failurePayloadRepacking(
+                  program.layout,
+                  sourceType,
+                  mapping.source,
+                  targetType,
+                  mapping.target,
+                )
+                if (repacking === undefined)
+                  throw new RangeError('LLVM failure propagation has an invalid member mapping')
+                const lane = repacking.lanes.find(
+                  (candidate) => candidate.targetOrdinal === targetOrdinal,
+                )
+                const sourceValue = lane === undefined ? undefined : source.at(lane.sourceOrdinal)
+                let candidate: Value.Input = yield* Constant.nullValue(
+                  builder,
+                  laneType(targetLane),
+                )
+                if (lane !== undefined && sourceValue !== undefined) {
+                  const member = yield* coerceLane(
+                    sourceValue,
+                    lane.source,
+                    lane.member,
+                    `${label}_${targetOrdinal}_${mappingOrdinal}_member`,
+                  )
+                  candidate = yield* coerceLane(
+                    member,
+                    lane.member,
+                    lane.target,
+                    `${label}_${targetOrdinal}_${mappingOrdinal}_carrier`,
+                  )
+                }
+                if (sourceTag === undefined) {
+                  selected = candidate
+                  continue
+                }
+                const matches = yield* FunctionBody.integerCompare(
+                  body,
+                  'eq',
+                  sourceTag,
+                  yield* Constant.integerSigned(builder, i32, BigInt(mapping.source)),
+                  `${label}_${targetOrdinal}_${mappingOrdinal}_matches`,
+                )
+                selected = yield* FunctionBody.select(
+                  body,
+                  matches,
+                  candidate,
+                  selected,
+                  `${label}_${targetOrdinal}_${mappingOrdinal}_select`,
+                )
+              }
+              payload.push(selected)
+            }
+            return Object.freeze(payload)
           })
 
           const returnStep = Effect.fnUntraced(function* (
@@ -1907,7 +2033,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           ) {
             if (!target.suspendable) return yield* callSynchronousValues(target, arguments_, name)
             if (transferPointer === undefined || suspension === undefined)
-              throw new RangeError('LLVM suspension-aware call lost transfer control')
+              throw new RangeError(
+                `LLVM suspension-aware call from ${entry.fn.id.module}.${entry.fn.id.name} to ${target.fn.id.module}.${target.fn.id.name} lost transfer control`,
+              )
             const nullPointer = yield* Constant.nullValue(builder, pointer)
             const result = yield* FunctionBody.callDirect(
               body,
@@ -2046,7 +2174,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               }
               const failure =
                 entry.fn.result._tag === 'EffectOutcome'
-                  ? entry.fn.result.type.failures.findIndex(
+                  ? SilkType.failureMembers(entry.fn.result.type).findIndex(
                       (member) => member.module === 'silk/core' && member.name === 'OutOfMemory',
                     )
                   : -1
@@ -6798,15 +6926,27 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 }
                 case 'PackEffectOutcome': {
                   const source = [...readLocal(operation.source)]
-                  const lanes = lanesFor(operation.type)
+                  const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
+                  if (sourceType === undefined)
+                    throw new RangeError('LLVM effect outcome lost its source type')
+                  const sourceLanes = valueLanesFor(sourceType)
+                  const targetLanes = lanesFor(operation.type)
                   const values: Array<Value.Input> = [
                     yield* Constant.integerSigned(builder, i32, BigInt(operation.tag)),
-                    ...source,
                   ]
-                  while (values.length < lanes.length) {
-                    const lane = lanes.at(values.length)
-                    if (lane === undefined) break
-                    values.push(yield* Constant.nullValue(builder, laneType(lane)))
+                  for (const [ordinal, targetLane] of targetLanes.slice(1).entries()) {
+                    const input = source.at(ordinal)
+                    const sourceLane = sourceLanes.at(ordinal)
+                    values.push(
+                      input === undefined || sourceLane === undefined
+                        ? yield* Constant.nullValue(builder, laneType(targetLane))
+                        : yield* coerceLane(
+                            input,
+                            sourceLane,
+                            targetLane,
+                            `effect_outcome${operation.destination.ordinal}_${ordinal}_payload`,
+                          ),
+                    )
                   }
                   locals.set(operation.destination.ordinal, Object.freeze(values))
                   break
@@ -6833,25 +6973,17 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       `effect_failure_union${operation.destination.ordinal}_${ordinal}_tag`,
                     )
                   }
-                  const sourceLanes = lanesFor(operation.sourceType)
-                  const targetLanes = lanesFor(operation.type)
-                  const values: Array<Value.Input> = [mappedTag]
-                  for (let ordinal = 1; ordinal < targetLanes.length; ordinal += 1) {
-                    const targetLane = targetLanes.at(ordinal)
-                    if (targetLane === undefined) break
-                    const input = source.at(ordinal)
-                    const sourceLane = sourceLanes.at(ordinal)
-                    values.push(
-                      input === undefined || sourceLane === undefined
-                        ? yield* Constant.nullValue(builder, laneType(targetLane))
-                        : yield* coerceLane(
-                            input,
-                            sourceLane,
-                            targetLane,
-                            `effect_failure_union${operation.destination.ordinal}_${ordinal}_payload`,
-                          ),
-                    )
-                  }
+                  const values: Array<Value.Input> = [
+                    mappedTag,
+                    ...(yield* failurePayload(
+                      source,
+                      operation.sourceType.type,
+                      sourceTag,
+                      operation.type.type,
+                      operation.mappings,
+                      `effect_failure_union${operation.destination.ordinal}_payload`,
+                    )),
+                  ]
                   locals.set(operation.destination.ordinal, Object.freeze(values))
                   break
                 }
@@ -6945,11 +7077,6 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       `effect_mapped_tag${operation.destination.ordinal}_${ordinal}`,
                     )
                   }
-                  const propagationLanes = lanesFor(operation.propagationType)
-                  // The two outcome rows can carry differently shaped payload unions, so only
-                  // positionally type-identical lanes survive the copy; past the shared failure
-                  // member the payload is dead on this path, and zeros keep the aggregate typed.
-                  const outcomeLanes = lanesFor(operation.outcomeType)
                   // Owners still live at this site release before the failure leaves the function
                   // through their complete cleanup plans, matching the Drop lowering.
                   for (const release of operation.releases ?? []) {
@@ -6960,20 +7087,17 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       `propagation_release${release.local.ordinal}`,
                     )
                   }
-                  const returned: Array<Value.Input> = [mappedTag]
-                  while (returned.length < operation.propagationLaneCount) {
-                    const lane = propagationLanes.at(returned.length)
-                    if (lane === undefined) break
-                    const sourceLane = outcomeLanes.at(returned.length)
-                    const sourceValue = outcomeValues.at(returned.length)
-                    returned.push(
-                      sourceValue !== undefined &&
-                        sourceLane !== undefined &&
-                        laneType(sourceLane) === laneType(lane)
-                        ? sourceValue
-                        : yield* Constant.nullValue(builder, laneType(lane)),
-                    )
-                  }
+                  const returned: Array<Value.Input> = [
+                    mappedTag,
+                    ...(yield* failurePayload(
+                      outcomeValues,
+                      operation.outcomeType.type,
+                      tag,
+                      operation.propagationType.type,
+                      operation.tagMappings,
+                      `effect_run${operation.destination.ordinal}_payload`,
+                    )),
+                  ]
                   if (entry.suspendable) {
                     yield* returnStep(0n, Object.freeze(returned), 'propagated_effect_step')
                   } else if (returned.length === 1) {
@@ -7146,9 +7270,6 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       `effect_value_mapped_tag${operation.destination.ordinal}_${ordinal}`,
                     )
                   }
-                  const propagationLanes = lanesFor(operation.propagationType)
-                  // See RunEffect: only positionally type-identical payload lanes are copied.
-                  const outcomeLanes = lanesFor(operation.outcomeType)
                   // Owners still live at this site release before the failure leaves the function
                   // through their complete cleanup plans, matching the Drop lowering.
                   for (const release of operation.releases ?? []) {
@@ -7159,20 +7280,17 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       `propagation_release${release.local.ordinal}`,
                     )
                   }
-                  const returned: Array<Value.Input> = [mappedTag]
-                  while (returned.length < operation.propagationLaneCount) {
-                    const lane = propagationLanes.at(returned.length)
-                    if (lane === undefined) break
-                    const sourceLane = outcomeLanes.at(returned.length)
-                    const sourceValue = outcomeValues.at(returned.length)
-                    returned.push(
-                      sourceValue !== undefined &&
-                        sourceLane !== undefined &&
-                        laneType(sourceLane) === laneType(lane)
-                        ? sourceValue
-                        : yield* Constant.nullValue(builder, laneType(lane)),
-                    )
-                  }
+                  const returned: Array<Value.Input> = [
+                    mappedTag,
+                    ...(yield* failurePayload(
+                      outcomeValues,
+                      operation.outcomeType.type,
+                      tag,
+                      operation.propagationType.type,
+                      operation.tagMappings,
+                      `effect_value${operation.destination.ordinal}_payload`,
+                    )),
+                  ]
                   if (entry.suspendable) {
                     yield* returnStep(0n, Object.freeze(returned), 'propagated_effect_value_step')
                   } else {
@@ -7307,7 +7425,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   )
                   yield* FunctionBody.branch(body, followingBlock)
                   yield* LlvmBlock.setInsertionPoint(body, failureBlock)
-                  if (operation.outcomeType.type.failures.length === 0) {
+                  if (SilkType.failureMembers(operation.outcomeType.type).length === 0) {
                     if (trapBlock === undefined)
                       trapBlock = yield* LlvmBlock.make(body, 'effect_result_invalid_tag')
                     yield* FunctionBody.branch(body, trapBlock)
@@ -7325,10 +7443,18 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       )
                     }
                     failureValues.push(...outcomeValues.slice(1))
+                    const failureLanes: Array<Layout.CallingLane> = []
+                    if (SilkType.isUnion(operation.failureValueType)) {
+                      const failureTagLane = operation.failureValueShape.lanes.at(0)
+                      if (failureTagLane === undefined)
+                        throw new RangeError('Effect result lost its failure-union tag lane')
+                      failureLanes.push(failureTagLane)
+                    }
+                    failureLanes.push(...outcomeLanes.slice(1))
                     yield* writeBranch(
                       operation.failureTag,
                       Object.freeze(failureValues),
-                      operation.failureValueShape.lanes,
+                      Object.freeze(failureLanes),
                       `effect_result${operation.destination.ordinal}_failure`,
                     )
                     yield* FunctionBody.branch(body, followingBlock)
@@ -7771,6 +7897,77 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             }
             const terminator = block.terminator
             switch (terminator._tag) {
+              case 'PropagateEffectFailure': {
+                const source = readLocal(terminator.source)
+                const sourceTag = terminator.sourceType._tag === 'Union' ? source.at(0) : undefined
+                let mappedTag: Value.Input
+                if (terminator.sourceType._tag === 'Nominal') {
+                  mappedTag = yield* Constant.integerSigned(
+                    builder,
+                    i32,
+                    BigInt(terminator.tagMappings.at(0)?.target ?? -1),
+                  )
+                } else {
+                  if (sourceTag === undefined)
+                    throw new RangeError('Effect failure propagation lost its tag lane')
+                  mappedTag = yield* Constant.integerSigned(builder, i32, -1n)
+                  for (const [ordinal, mapping] of terminator.tagMappings.entries()) {
+                    const matches = yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      sourceTag,
+                      yield* Constant.integerSigned(builder, i32, BigInt(mapping.source)),
+                      `effect_failure_propagation${terminator.source.ordinal}_${ordinal}`,
+                    )
+                    mappedTag = yield* FunctionBody.select(
+                      body,
+                      matches,
+                      yield* Constant.integerSigned(builder, i32, BigInt(mapping.target)),
+                      mappedTag,
+                      `effect_failure_propagation${terminator.source.ordinal}_${ordinal}_tag`,
+                    )
+                  }
+                }
+                for (const release of terminator.releases ?? []) {
+                  if (!Ownership.cleanupHasEffect(release.cleanup)) continue
+                  yield* dropThroughPlan(
+                    release.cleanup,
+                    readLocal(release.local),
+                    `propagation_release${release.local.ordinal}`,
+                  )
+                }
+                const returned: Array<Value.Input> = [
+                  mappedTag,
+                  ...(yield* failurePayload(
+                    source,
+                    terminator.sourceType.type,
+                    sourceTag,
+                    terminator.propagationType.type,
+                    terminator.tagMappings,
+                    `effect_failure_propagation${terminator.source.ordinal}_payload`,
+                  )),
+                ]
+                if (entry.suspendable) {
+                  yield* returnStep(
+                    0n,
+                    Object.freeze(returned),
+                    'propagated_selective_failure_step',
+                  )
+                } else {
+                  yield* FunctionBody.returnValue(
+                    body,
+                    returned.length === 1
+                      ? (returned.at(0) ?? mappedTag)
+                      : yield* FunctionBody.buildAggregate(
+                          body,
+                          entry.resultType,
+                          Object.freeze(returned.slice(0, terminator.propagationLaneCount)),
+                          'propagated_selective_failure',
+                        ),
+                  )
+                }
+                break
+              }
               case 'Return': {
                 const returned = readLocal(terminator.value)
                 if (entry.suspendable) {

@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import { storedCatchAllocatorSuspension } from './support/storedCatchAllocatorSuspension.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -11,7 +12,7 @@ const successSource = `effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(delayed() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(delayed() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const retainedStateSource = `effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator {
@@ -21,20 +22,7 @@ const retainedStateSource = `effect fn delayed() -> i32 ! OutOfMemory ? &mut All
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(delayed() |> Effect.provideMut(&mut allocator), recover)
-}`
-
-const typedFailureSource = `struct Problem { code: i32 }
-effect fn delayed() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
-  let value = run Effect.suspend(effect { return 2 })
-  if value == 2 { fail Problem { code: 35 } }
-  return value
-}
-effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
-pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let handled = delayed() |> Effect.catch(recover)
-  return run (move handled |> Effect.provideMut(&mut allocator))
+  return run Effect.catchAll(delayed() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const recursiveSource = (
@@ -48,7 +36,7 @@ const recursiveSource = (
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  let answer = run Effect.catch(count(${depth}) |> Effect.provideMut(&mut allocator), recover)
+  let answer = run Effect.catchAll(count(${depth}) |> Effect.provideMut(&mut allocator), recover)
   if answer == ${depth} { return 42 }
   return 2
 }`
@@ -82,7 +70,7 @@ it.effect('restores Wasm scalar state retained after run', () =>
 
 it.effect('propagates a resumed typed failure through Wasm handlers', () =>
   Effect.gen(function* () {
-    assert.strictEqual(yield* run('failure', typedFailureSource), 42)
+    assert.strictEqual(yield* run('failure', storedCatchAllocatorSuspension), 42)
   }),
 )
 

@@ -22,7 +22,7 @@ const source = `effect fn store() -> i32 ! OutOfMemory {
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
-  let recipe = Effect.catch(store(), recover)
+  let recipe = Effect.catchAll(store(), recover)
   return run recipe
 }`
 
@@ -43,7 +43,7 @@ const sharedReadSource = `effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 const nonCopyReadSource = `struct Guard { storage: Allocation }
 effect fn store() -> i32 ! OutOfMemory {
@@ -68,7 +68,7 @@ effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 const unionReadSource = `struct Left { value: i32 }
 struct Right { value: i32 }
@@ -91,7 +91,7 @@ effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 const moveOnlyUnionReadSource = `struct Guard { storage: Allocation }
 struct Marker { value: i32 }
@@ -122,7 +122,7 @@ effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 const unsafeProgram = (
   body: string,
@@ -140,7 +140,7 @@ ${body}
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
-  return run Effect.catch(store(), recover)
+  return run Effect.catchAll(store(), recover)
 }`
 
 const expectTrap = Effect.fnUntraced(function* (name: string, source: string, reason: string) {

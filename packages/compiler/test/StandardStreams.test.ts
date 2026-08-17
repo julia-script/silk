@@ -87,6 +87,26 @@ it.effect('lowers target-neutral writes through native and hosted Wasm boundarie
     const native = yield* snapshot()
     const mir = Analysis.loweredMir(native)
     assert.deepEqual(Mir.verify(mir), [])
+    const hostWrite = mir.functions
+      .flatMap(Mir.operations)
+      .find(
+        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'HostWrite' }> =>
+          operation._tag === 'HostWrite',
+      )
+    assert.isDefined(hostWrite)
+    for (const failureTag of [0, -1, Number.MAX_SAFE_INTEGER + 1]) {
+      const forged = structuredClone(mir)
+      const operation = forged.functions
+        .flatMap(Mir.operations)
+        .find((candidate) => candidate._tag === 'HostWrite')
+      assert.isDefined(operation)
+      if (operation === undefined) return
+      Reflect.set(operation, 'failureTag', failureTag)
+      assert.include(
+        Mir.verify(forged).map((violation) => violation.rule),
+        'InvalidStandardStreamOperation',
+      )
+    }
     assert.strictEqual(
       mir.functions.flatMap(Mir.operations).filter((operation) => operation._tag === 'HostWrite')
         .length,

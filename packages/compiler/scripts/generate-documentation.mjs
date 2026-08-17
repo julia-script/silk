@@ -275,6 +275,19 @@ const diagnosticsPage = () => {
     .map(([code, entry]) => ({ code, ...entry, ...(byName.get(entry.name) ?? {}) }))
     .sort((left, right) => left.code.localeCompare(right.code))
 
+  const missingMessages = codes.filter(
+    (entry) =>
+      entry.messages === undefined ||
+      entry.messages.length === 0 ||
+      entry.messages.some((message) => message.trim().length === 0),
+  )
+  if (missingMessages.length > 0) {
+    console.error('Diagnostic codes without a discoverable non-empty message template:')
+    for (const entry of missingMessages) console.error(`  ${entry.code} (${entry.name}Code)`)
+    console.error('Keep each code and complete message template together in a diagnostic factory.')
+    process.exit(1)
+  }
+
   const lines = [
     '# Silk diagnostic index',
     '',

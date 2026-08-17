@@ -72,7 +72,7 @@ ${body}
   return 0
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 /**
  * The substrate is only sound if the frontend keeps rejecting the programs that would violate
@@ -95,7 +95,7 @@ it.effect('rejects every prohibited allocation shape before lowering', () =>
   return 1
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
         'SEM0082',
       ],
       [

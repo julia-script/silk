@@ -69,7 +69,7 @@ const copyRange = `effect fn store() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 it.effect('copies a raw-storage range identically on the evaluator, LLVM, and Wasm', () =>
   Effect.gen(function* () {
@@ -134,7 +134,7 @@ ${extra}
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 it.effect('moves a range of move-only elements and leaves the source slots empty', () =>
   Effect.gen(function* () {
@@ -203,7 +203,7 @@ const fillRange = `effect fn store() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 it.effect('fills a byte range identically on the evaluator, LLVM, and Wasm', () =>
   Effect.gen(function* () {
@@ -268,7 +268,7 @@ const overlappingCopy = `effect fn store() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 /**
  * Rewrites the copy's destination borrow to the exclusive borrow of the buffer its source view
@@ -380,7 +380,7 @@ effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 it.effect('appends borrowed bytes through the copy intrinsic on the evaluator and Wasm', () =>
   Effect.gen(function* () {
@@ -422,7 +422,7 @@ effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 it.effect('grows a vector through one bulk copy per migration on the evaluator and Wasm', () =>
   Effect.gen(function* () {
@@ -468,7 +468,7 @@ const outOfRange = `effect fn store() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 it.effect('traps when the copied range runs past the destination', () =>
   Effect.gen(function* () {

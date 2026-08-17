@@ -275,7 +275,7 @@ effect fn recover(problem: Problem) -> i32 {
 
 pub fn main() -> i32 {
   return run retrying()
-    |> Effect.catch(recover)
+    |> Effect.catchAll(recover)
 }
 `,
   ),
@@ -292,7 +292,7 @@ effect fn read() -> i32
 pub fn main() -> i32 {
   let clock = Clock {}
   let pending = read()
-    |> Intrinsic.bindRequirement(&clock, @Primary)
+    |> Intrinsic.bindRequirement<&Clock@Primary>(&clock)
   return run pending
 }
 `,
@@ -319,7 +319,7 @@ pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let pending = delayed()
     |> Effect.provideMut(&mut allocator)
-    |> Effect.catch(recover)
+    |> Effect.catchAll(recover)
   return run pending
 }
 `,
@@ -362,7 +362,7 @@ pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let pending = composed()
     |> Effect.provideMut(&mut allocator)
-    |> Effect.catch(recover)
+    |> Effect.catchAll(recover)
   return run pending
 }
 `,
@@ -392,7 +392,7 @@ pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let pending = count(42)
     |> Effect.provideMut(&mut allocator)
-    |> Effect.catch(recover)
+    |> Effect.catchAll(recover)
   return run pending
 }
 `,
@@ -418,7 +418,7 @@ effect fn recover(error: LogError) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(program(), recover)
+  return run Effect.catchAll(program(), recover)
 }
 `,
   ),
@@ -459,7 +459,7 @@ effect fn recover(error: OutOfMemory) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(store(), recover)
+  return run Effect.catchAll(store(), recover)
 }
 `,
   ),
@@ -486,7 +486,7 @@ effect fn recover(error: OutOfMemory) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(store(), recover)
+  return run Effect.catchAll(store(), recover)
 }
 `,
   ),
@@ -515,7 +515,7 @@ effect fn recover(error: OutOfMemory) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(store(), recover)
+  return run Effect.catchAll(store(), recover)
 }
 `,
   ),
@@ -539,7 +539,7 @@ effect fn recover(error: OutOfMemory) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(store(), recover)
+  return run Effect.catchAll(store(), recover)
 }
 `,
   ),
@@ -577,7 +577,7 @@ effect fn recover(error: OutOfMemory) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(store(), recover)
+  return run Effect.catchAll(store(), recover)
 }
 `,
   ),
@@ -614,7 +614,7 @@ effect fn recover(problem: Problem) -> i32 {
 
 pub fn main() -> i32 {
   let recipe = relay(0)
-    |> Effect.catch(recover)
+    |> Effect.catchAll(recover)
   return run recipe
 }
 `,
@@ -654,7 +654,7 @@ pub fn main() -> i32 {
     |> Effect.map(increment)
     |> Effect.flatMap(double)
     |> Effect.tap(observe)
-    |> Effect.catch(recover)
+    |> Effect.catchAll(recover)
   return run program
 }
 `,

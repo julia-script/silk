@@ -124,7 +124,7 @@ it('implements deterministic equality, ordering, hashing, encoding, and unavaila
     Type.encodeGenericArgument(unavailable),
     '<unavailable CallableRepresentation: damaged bound>',
   )
-  assert.strictEqual(Type.isConcreteGenericArgument(unavailable), false)
+  assert.strictEqual(Type.isRuntimeConcreteGenericArgument(unavailable), false)
   assert.strictEqual(Type.prefixSubstitution([representation], [unavailable]), undefined)
 })
 
@@ -218,9 +218,9 @@ it('keeps open parameters inside every generic argument non-concrete', () => {
     exact,
   ])
 
-  assert.strictEqual(Type.isConcreteGenericArgument(exact), false)
+  assert.strictEqual(Type.isRuntimeConcreteGenericArgument(exact), false)
   assert.strictEqual(
-    Type.isConcreteGenericArgument(
+    Type.isRuntimeConcreteGenericArgument(
       Type.substituteGenericArgument(exact, new Map([[Type.key(value), 'i32']])),
     ),
     true,

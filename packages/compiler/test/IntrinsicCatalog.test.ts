@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as CallableContract from '../src/CallableContract.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as Scalar from '../src/Scalar.js'
 import * as Type from '../src/Type.js'
@@ -86,7 +87,7 @@ const acceptedSources = Object.freeze([
   let recipe = Effect.provideMut(Allocator.allocate(move layout), &mut allocator)
   let allocation = run recipe
   let coreLayout = Layout.of<i32>()
-  let coreRecipe = Allocator.allocate(move coreLayout) |> Intrinsic.bindRequirement(&mut allocator)
+  let coreRecipe = Allocator.allocate(move coreLayout) |> Intrinsic.bindRequirementMut(&mut allocator)
   let coreAllocation = run coreRecipe
   drop coreAllocation
   unsafe {
@@ -109,7 +110,7 @@ const acceptedSources = Object.freeze([
   return 0
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(storage(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(storage(), recover) }`,
   `struct Problem {}
 struct Clock {}
 effect fn succeed(value: i32) -> i32 { return value }
@@ -124,7 +125,7 @@ pub fn main() -> i32 {
   let chained = mapped |> Effect.flatMap(double)
   let tapped = chained |> Effect.tap(observe)
   let retried = tapped |> Effect.retry(1)
-  let handled = risky() |> Effect.catch(recover)
+  let handled = risky() |> Effect.catchAll(recover)
   let clock = Clock {}
   let provided = read() |> Effect.provide(&clock)
   let acquired = read() |> Effect.provideWith(acquire())
@@ -161,6 +162,13 @@ pub effect fn main() -> i32 {
     }
   }
 }`,
+  `struct CatalogProblem {}
+effect fn catalogRisky() -> i32 ! CatalogProblem { fail CatalogProblem {} }
+effect fn catalogRecover(error: CatalogProblem) -> i32 { return 1 }
+fn inspectCatch() -> once Effect<i32> {
+  return Intrinsic.catchFailure<CatalogProblem>(catalogRisky(), catalogRecover)
+}
+pub fn main() -> i32 { return 42 }`,
   `import silk.core { Allocator, OutOfMemory }
 struct SuspendProblem {}
 struct SuspendClock {}
@@ -253,6 +261,32 @@ effect fn hostWorkingDirectory(output: &mut [u8], reason: &mut i32, code: &mut u
   return none<usize>()
 }`,
 ])
+
+it('uses one binding contract for inventory, admission, and the proof-only post hook', () => {
+  for (const name of ['bindRequirement', 'bindRequirementMut', 'bindRequirementOwned']) {
+    const operation = Intrinsic.findOperation('Intrinsic', name)
+    const entry = Intrinsic.inventory().find(
+      (candidate) => candidate.operation === `Intrinsic.${name}`,
+    )
+    assert.isDefined(operation)
+    assert.isDefined(entry)
+    if (operation === undefined || entry === undefined) continue
+    assert.strictEqual(operation.rule._tag, 'ContractRule')
+    if (operation.rule._tag !== 'ContractRule') continue
+    assert.strictEqual(operation.rule.post, 'BindRequirement')
+    assert.strictEqual(entry.signature, Intrinsic.signature(operation))
+    assert.strictEqual(
+      CallableContract.key(operation.rule.contract),
+      CallableContract.key(operation.rule.contract),
+    )
+    assert.deepEqual(Object.keys(operation.rule).sort(), [
+      '_tag',
+      'contract',
+      'post',
+      'providerMode',
+    ])
+  }
+})
 
 it.effect('pairs every intrinsic presentation with accepted semantic analysis', () =>
   Effect.gen(function* () {

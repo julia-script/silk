@@ -249,8 +249,13 @@ const reservedTemplateStart = (state: State): boolean => {
     token = state.lexical.tokens.at(index)
   }
   if (token?.kind !== 'Less') return false
-  const following = state.lexical.tokens.at(index + 1)
-  return following?.kind === 'Identifier' || following?.kind === 'Greater'
+  index += 1
+  token = state.lexical.tokens.at(index)
+  while (token !== undefined && isTrivia(token.kind)) {
+    index += 1
+    token = state.lexical.tokens.at(index)
+  }
+  return token?.kind === 'Greater' || (token !== undefined && typeStarts.includes(token.kind))
 }
 
 /** True only for `callee<T, ...>(` with balanced angles; comparisons never enter call parsing. */
@@ -298,6 +303,7 @@ const hasCompleteAppliedPostfix = (
       token.kind !== 'DecimalInteger' &&
       token.kind !== 'Pipe' &&
       token.kind !== 'Ampersand' &&
+      token.kind !== 'At' &&
       token.kind !== 'MutKeyword'
     )
       return false
@@ -538,7 +544,6 @@ const expectCallRightParenthesis = (
 
 function parseArgumentList(initial: State, reservedForEnclosingCalls: number): NodeResult {
   const leftParenthesis = expect(initial, 'LeftParenthesis', [
-    'At',
     ...expressionStarts,
     'RightParenthesis',
     'RightBrace',
@@ -561,17 +566,7 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
   ) {
-    const argument =
-      kind === 'At'
-        ? (() => {
-            const at = expect(state, 'At', ['Identifier', 'Comma', 'RightParenthesis'])
-            const name = expect(at.state, 'Identifier', ['Comma', 'RightParenthesis'])
-            return Object.freeze({
-              state: name.state,
-              node: syntaxNode(name.state, 'RoleExpression', [...at.elements, ...name.elements]),
-            })
-          })()
-        : parseExpression(state, reservedForEnclosingCalls + 1, 'Identifier')
+    const argument = parseExpression(state, reservedForEnclosingCalls + 1, 'Identifier')
     children = Object.freeze([...children, argument.node])
     state = argument.state
     kind = nextSignificantKind(state)
@@ -587,7 +582,6 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
       break
 
     const comma = expect(state, 'Comma', [
-      'At',
       ...expressionStarts,
       'RightParenthesis',
       'RightBrace',
@@ -821,6 +815,9 @@ const isExactRepresentationStart = (state: State): boolean =>
  */
 const isOpaqueResultStart = (state: State): boolean =>
   hasContextualSpelling(state, 'some') && significantKindAfter(state, 1) === 'Less'
+
+const isRowWithoutStart = (state: State): boolean =>
+  hasContextualSpelling(state, 'Without') && significantKindAfter(state, 1) === 'Less'
 
 const isNominalPatternStart = (state: State): boolean => {
   if (nextSignificantKind(state) !== 'Identifier') return false
@@ -1862,6 +1859,25 @@ const parseTypePrimary = (
   following: ReadonlyArray<Token.TokenKind>,
   preserveFieldStart = false,
 ): NodeResult => {
+  if (isRowWithoutStart(initial)) {
+    const keyword = expect(initial, 'Identifier', ['Less', ...following])
+    const left = expect(keyword.state, 'Less', [...typeStarts, ...following])
+    const source = parseType(left.state, ['Comma', 'Greater', ...following])
+    const comma = expect(source.state, 'Comma', [...typeStarts, 'Greater', ...following])
+    const selected = parseType(comma.state, ['Greater', ...following])
+    const right = expect(selected.state, 'Greater', following)
+    return Object.freeze({
+      state: right.state,
+      node: syntaxNode(right.state, 'RowWithout', [
+        ...keyword.elements,
+        ...left.elements,
+        source.node,
+        ...comma.elements,
+        selected.node,
+        ...right.elements,
+      ]),
+    })
+  }
   if (isExactRepresentationStart(initial)) {
     const keyword = expect(initial, 'Identifier', ['LeftParenthesis', ...following])
     const left = expect(keyword.state, 'LeftParenthesis', [
@@ -1960,13 +1976,25 @@ const parseTypePrimary = (
         ? expect(ampersand.state, 'MutKeyword', ['LeftBracket', ...typeStarts, ...following])
         : undefined
     if (nextSignificantKind(mut?.state ?? ampersand.state) !== 'LeftBracket') {
-      const subject = parseTypePrimary(mut?.state ?? ampersand.state, following)
+      const subject = parseTypePrimary(mut?.state ?? ampersand.state, ['At', ...following])
+      const role =
+        nextSignificantKind(subject.state) === 'At'
+          ? (() => {
+              const at = expect(subject.state, 'At', ['Identifier', ...following])
+              const name = expect(at.state, 'Identifier', following)
+              return Object.freeze({
+                state: name.state,
+                elements: [...at.elements, ...name.elements],
+              })
+            })()
+          : undefined
       return Object.freeze({
-        state: subject.state,
-        node: syntaxNode(subject.state, 'ReferenceType', [
+        state: role?.state ?? subject.state,
+        node: syntaxNode(role?.state ?? subject.state, 'ReferenceType', [
           ...ampersand.elements,
           ...(mut?.elements ?? []),
           subject.node,
+          ...(role?.elements ?? []),
         ]),
       })
     }
@@ -2130,7 +2158,9 @@ const parseRequirementRow = (
   const parseMember = (state: State): NodeResult =>
     nextSignificantKind(state) === 'Ampersand'
       ? parseRequirement(state, ['Pipe', ...following])
-      : parseTypePath(state, ['Pipe', ...following])
+      : isRowWithoutStart(state)
+        ? parseType(state, ['Pipe', ...following])
+        : parseTypePath(state, ['Pipe', ...following])
   let member = parseMember(question.state)
   let state = member.state
   let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
@@ -2144,6 +2174,56 @@ const parseRequirementRow = (
     state = member.state
   }
   return Object.freeze({ state, node: syntaxNode(state, 'RequirementRow', children) })
+}
+
+const parseConstraint = (initial: State, following: ReadonlyArray<Token.TokenKind>): NodeResult => {
+  const subject = parseType(initial, ['Identifier', 'Comma', ...following])
+  if (hasContextualSpelling(subject.state, 'in')) {
+    const keyword = expect(subject.state, 'Identifier', [...typeStarts, ...following])
+    const source = parseType(keyword.state, following)
+    return Object.freeze({
+      state: source.state,
+      node: syntaxNode(source.state, 'MembershipConstraint', [
+        subject.node,
+        ...keyword.elements,
+        source.node,
+      ]),
+    })
+  }
+  const provides = expect(subject.state, 'Identifier', [...typeStarts, ...following])
+  const selected = parseType(provides.state, ['Identifier', ...following])
+  const from = expect(selected.state, 'Identifier', [...typeStarts, ...following])
+  const source = parseType(from.state, following)
+  return Object.freeze({
+    state: source.state,
+    node: syntaxNode(source.state, 'ProviderConstraint', [
+      subject.node,
+      ...provides.elements,
+      selected.node,
+      ...from.elements,
+      source.node,
+    ]),
+  })
+}
+
+const parseWhereClause = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+): NodeResult => {
+  const where = expect(initial, 'Identifier', [...typeStarts, ...following])
+  let constraint = parseConstraint(where.state, ['Comma', ...following])
+  let state = constraint.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...where.elements,
+    constraint.node,
+  ])
+  while (nextSignificantKind(state) === 'Comma') {
+    const comma = expect(state, 'Comma', [...typeStarts, ...following])
+    constraint = parseConstraint(comma.state, ['Comma', ...following])
+    children = Object.freeze([...children, ...comma.elements, constraint.node])
+    state = constraint.state
+  }
+  return Object.freeze({ state, node: syntaxNode(state, 'WhereClause', children) })
 }
 
 const parseParameterList = (initial: State): NodeResult => {
@@ -2499,11 +2579,13 @@ const parseServiceOperation = (initial: State): NodeResult => {
       ? parseRequirementRow(failureRow?.state ?? afterReturnType, serviceOperationFollowing)
       : undefined
   const afterContract = requirementRow?.state ?? failureRow?.state ?? afterReturnType
+  const whereClause = hasContextualSpelling(afterContract, 'where')
+    ? parseWhereClause(afterContract, ['LeftBrace', ...serviceOperationFollowing])
+    : undefined
+  const afterWhere = whereClause?.state ?? afterContract
   const body =
-    nextSignificantKind(afterContract) === 'LeftBrace'
-      ? parseBlock(afterContract, false)
-      : undefined
-  const state = body?.state ?? afterContract
+    nextSignificantKind(afterWhere) === 'LeftBrace' ? parseBlock(afterWhere, false) : undefined
+  const state = body?.state ?? afterWhere
   return Object.freeze({
     state,
     node: syntaxNode(state, 'ServiceOperation', [
@@ -2515,6 +2597,7 @@ const parseServiceOperation = (initial: State): NodeResult => {
       ...(returnType === undefined ? [] : [returnType.node]),
       ...(failureRow === undefined ? [] : [failureRow.node]),
       ...(requirementRow === undefined ? [] : [requirementRow.node]),
+      ...(whereClause === undefined ? [] : [whereClause.node]),
       ...(body === undefined ? [] : [body.node]),
     ]),
   })
@@ -2801,13 +2884,13 @@ const parseFunctionDeclaration = (initial: State, allowDropName = false): NodeRe
     nextSignificantKind(failureRow?.state ?? afterReturnType) === 'Question'
       ? parseRequirementRow(failureRow?.state ?? afterReturnType, ['LeftBrace'])
       : undefined
+  const afterContract = requirementRow?.state ?? failureRow?.state ?? afterReturnType
+  const whereClause = hasContextualSpelling(afterContract, 'where')
+    ? parseWhereClause(afterContract, ['LeftBrace'])
+    : undefined
   const unitResult =
     returnType === undefined || SyntaxTree.directNode(returnType.node, 'UnitType') !== undefined
-  const block = parseBlock(
-    requirementRow?.state ?? failureRow?.state ?? afterReturnType,
-    !unitResult,
-    unitResult,
-  )
+  const block = parseBlock(whereClause?.state ?? afterContract, !unitResult, unitResult)
 
   return Object.freeze({
     state: block.state,
@@ -2821,6 +2904,7 @@ const parseFunctionDeclaration = (initial: State, allowDropName = false): NodeRe
       ...(returnType === undefined ? [] : [returnType.node]),
       ...(failureRow === undefined ? [] : [failureRow.node]),
       ...(requirementRow === undefined ? [] : [requirementRow.node]),
+      ...(whereClause === undefined ? [] : [whereClause.node]),
       block.node,
     ]),
   })

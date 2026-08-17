@@ -176,7 +176,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 effect fn delayed() -> i32 {
   let mut allocator = SystemAllocator.make()
   let provided = Effect.suspend(effect { return 42 }) |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move provided, recover)
+  return run Effect.catchAll(move provided, recover)
 }
 pub fn main() -> i32 {
   let deferred = Deferred { operation: effect { return run delayed() } }
@@ -189,7 +189,10 @@ pub fn main() -> i32 {
     assert.strictEqual(realization.suspendable, true)
     assert.strictEqual(realization.runner.module, 'effect-field/suspending')
     assert.strictEqual(realization.runner.name, 'main$effect$0')
-    assert.strictEqual(realization.runnerArguments.every(Type.isConcreteGenericArgument), true)
+    assert.strictEqual(
+      realization.runnerArguments.every(Type.isRuntimeConcreteGenericArgument),
+      true,
+    )
     assert.deepEqual(realization.rows.failures, [])
     assert.deepEqual(realization.rows.requirements, [])
     assert.deepEqual(realization.environment, [])

@@ -55,17 +55,17 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut scalarAllocator = SystemAllocator.make()
   let scalarPending = scalar() |> Effect.provideMut(&mut scalarAllocator)
-  let scalarValue = run Effect.catch(move scalarPending, recover)
+  let scalarValue = run Effect.catchAll(move scalarPending, recover)
   let mut ownedAllocator = SystemAllocator.make()
   let ownedPending = owned() |> Effect.provideMut(&mut ownedAllocator)
-  let ownedValue = run Effect.catch(move ownedPending, recover)
+  let ownedValue = run Effect.catchAll(move ownedPending, recover)
   let mut owner = Owner { value: 20 }
   let mut borrowedAllocator = SystemAllocator.make()
   let borrowedPending = borrowed(&mut owner) |> Effect.provideMut(&mut borrowedAllocator)
-  let borrowedValue = run Effect.catch(move borrowedPending, recover)
+  let borrowedValue = run Effect.catchAll(move borrowedPending, recover)
   let mut branchedAllocator = SystemAllocator.make()
   let branchedPending = branched(true, 30, 12) |> Effect.provideMut(&mut branchedAllocator)
-  let branchedValue = run Effect.catch(move branchedPending, recover)
+  let branchedValue = run Effect.catchAll(move branchedPending, recover)
   return scalarValue + ownedValue + borrowedValue + branchedValue
 }`
 
@@ -132,8 +132,13 @@ it.effect('classifies exact post-normalization MIR locals across relay', () =>
       owned.prefixRollbacks.at(-1)?.frameDrops.map((release) => release.local.ordinal),
       [...affineLocals].reverse(),
     )
-    assert.lengthOf(borrowed.allocationRefusal.loanEnds, 1)
-    assert.lengthOf(borrowed.failure.loanEnds, 1)
+    // The user borrow and the exclusive continuation allocator are both retained dependencies.
+    assert.lengthOf(
+      borrowed.slots.filter((slot) => slot.access._tag === 'BorrowedDependency'),
+      2,
+    )
+    assert.lengthOf(borrowed.allocationRefusal.loanEnds, 2)
+    assert.lengthOf(borrowed.failure.loanEnds, 2)
     assert.lengthOf(borrowed.success.loanEnds, 0)
     assert.deepEqual(
       branched.slots

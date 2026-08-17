@@ -150,6 +150,23 @@ const laneKindsOf = (
   return shape.lanes
 }
 
+/** Whether a MIR value carries an address into an address-taken caller frame root. */
+const carriesBorrowAddress = (plan: LayoutPlan.Plan, type: Mir.Type): boolean => {
+  if (type._tag === 'EffectBorrow') return true
+  const lanes = laneKindsOf(plan, type)
+  if (type._tag === 'EffectValue' || type._tag === 'CallableValue') {
+    return lanes.some((lane) => typeof lane.type !== 'string')
+  }
+  return lanes.some(
+    (lane) =>
+      typeof lane.type !== 'string' &&
+      lane.path.some(
+        (selector) =>
+          selector._tag === 'ReferenceAddressSelector' || selector._tag === 'SliceAddressSelector',
+      ),
+  )
+}
+
 const laneValueType = (plan: LayoutPlan.Plan, lane: LayoutPlan.CallingLane): ValType.ValType => {
   if (typeof lane.type !== 'string') return i32
   const scalar = Scalar.find(lane.type)
@@ -207,7 +224,8 @@ interface FramePlan {
    * value with frame bytes nothing ever wrote.
    */
   readonly escaping: ReadonlySet<number>
-  readonly sliceRoots: ReadonlyMap<number, number>
+  /** Address-taken frame roots reachable through each MIR local's stored pointer lanes. */
+  readonly localRoots: ReadonlyMap<number, ReadonlySet<number>>
   readonly size: number
   readonly alignment: number
 }
@@ -285,12 +303,114 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
     cursor += storage.size
     alignment = Math.max(alignment, storage.alignment)
   }
+  const localRoots = new Map<number, Set<number>>(
+    [...escaping].map((local) => [local, new Set([local])] as const),
+  )
+  const include = (destination: Mir.LocalId, sources: ReadonlyArray<Mir.LocalId>): boolean => {
+    const destinationType = fn.localTypes.at(destination.ordinal)
+    if (destinationType === undefined || !carriesBorrowAddress(plan, destinationType)) return false
+    const selected = localRoots.get(destination.ordinal) ?? new Set<number>()
+    const previous = selected.size
+    for (const source of sources) {
+      for (const root of localRoots.get(source.ordinal) ?? []) selected.add(root)
+    }
+    if (selected.size > 0) localRoots.set(destination.ordinal, selected)
+    return selected.size !== previous
+  }
+  const operations = Mir.operations(fn)
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const operation of operations) {
+      switch (operation._tag) {
+        case 'BeginLoan':
+          changed = include(operation.destination, [operation.root]) || changed
+          break
+        case 'Move':
+        case 'Project':
+          changed = include(operation.destination, [operation.source]) || changed
+          break
+        case 'ReadPlace':
+          changed = include(operation.destination, [operation.root]) || changed
+          break
+        case 'WritePlace':
+          changed = include(operation.root, [operation.source]) || changed
+          break
+        case 'Construct':
+          changed =
+            include(
+              operation.destination,
+              operation.fields.map((field) => field.value),
+            ) || changed
+          break
+        case 'ConstructArray':
+          changed = include(operation.destination, operation.elements) || changed
+          break
+        case 'MakeEffect':
+        case 'MakeCallable':
+          changed =
+            include(
+              operation.destination,
+              operation.captures.map((capture) => capture.source),
+            ) || changed
+          break
+        case 'ApplyCallable':
+          changed =
+            include(operation.destination, [
+              ...(operation.callable === undefined ? [] : [operation.callable]),
+              ...operation.captures.map((capture) => capture.source),
+              ...operation.arguments,
+            ]) || changed
+          break
+        case 'Call':
+          changed = include(operation.destination, operation.arguments) || changed
+          break
+        case 'RunEffectValue':
+          changed =
+            include(operation.destination, [operation.effect, ...operation.arguments]) || changed
+          break
+        case 'RunStaticEffect':
+          changed =
+            include(operation.destination, [
+              ...operation.captures.map((capture) => capture.source),
+              ...operation.arguments,
+            ]) || changed
+          break
+        case 'ReifyEffect':
+          changed =
+            include(operation.destination, [operation.effect, ...operation.arguments]) || changed
+          break
+        case 'Match':
+          for (const arm of operation.arms) {
+            for (const binding of arm.bindings) {
+              changed = include(binding.destination, [operation.scrutinee]) || changed
+            }
+            changed = include(operation.destination, [arm.selected.result]) || changed
+          }
+          break
+        case 'ConvertUnion':
+        case 'UnpackEffectSuccess':
+          changed = include(operation.destination, [operation.source]) || changed
+          break
+        case 'SlotTake':
+        case 'SlotCopy':
+          changed = include(operation.destination, [operation.slot]) || changed
+          break
+        case 'RawBufferView':
+          changed = include(operation.destination, [operation.buffer]) || changed
+          break
+        default:
+          break
+      }
+    }
+  }
+  const frozenLocalRoots = new Map(
+    [...localRoots].map(([local, reachable]) => [local, new Set(reachable)] as const),
+  )
   return Object.freeze({
     roots,
     escaping,
-    sliceRoots: new Map(
-      formations.map((operation) => [operation.destination.ordinal, operation.root.ordinal]),
-    ),
+    localRoots: frozenLocalRoots,
     size: alignUp(cursor, alignment),
     alignment,
   })
@@ -1585,6 +1705,98 @@ const emitOperation = (
     if (type === f64) return Instr.f64Const(0)
     return Instr.i32Const(0)
   }
+  const zeroForType = (type: ValType.ValType): Instr.Instr => {
+    if (type === i64) return Instr.i64Const(0n)
+    if (type === f32) return Instr.f32Const(0)
+    if (type === f64) return Instr.f64Const(0)
+    return Instr.i32Const(0)
+  }
+  const failurePayload = (
+    source: ReadonlyArray<number>,
+    sourceType: DeclarationIndex.SemanticType,
+    sourceTag: number | undefined,
+    targetType: SilkType.Effect,
+    mappings: ReadonlyArray<{ readonly source: number; readonly target: number }>,
+  ): ReadonlyArray<ReadonlyArray<Instr.Instr>> => {
+    const targetShape = LayoutPlan.callingShape(plan, targetType)
+    if (targetShape?.tree._tag !== 'OutcomeShape')
+      throw new RangeError('Wasm failure propagation lost its target calling shape')
+    return Object.freeze(
+      targetShape.lanes.slice(1).map((targetLane, targetOrdinal) => {
+        const targetValueType = laneValueType(plan, targetLane)
+        const payloadFor = (mapping: {
+          readonly source: number
+          readonly target: number
+        }): ReadonlyArray<Instr.Instr> => {
+          const repacking = LayoutPlan.failurePayloadRepacking(
+            plan,
+            sourceType,
+            mapping.source,
+            targetType,
+            mapping.target,
+          )
+          if (repacking === undefined)
+            throw new RangeError('Wasm failure propagation has an invalid member mapping')
+          const lane = repacking.lanes.find(
+            (candidate) => candidate.targetOrdinal === targetOrdinal,
+          )
+          if (lane === undefined) return [zeroForType(targetValueType)]
+          const sourceSlot = source.at(lane.sourceOrdinal)
+          const sourceValueType =
+            sourceSlot === undefined ? undefined : layout.physicalTypes.at(sourceSlot)
+          if (sourceSlot === undefined || sourceValueType === undefined)
+            throw new RangeError('Wasm failure propagation lost a source payload lane')
+          const memberValueType = laneValueType(plan, lane.member)
+          return [
+            Instr.localGet(sourceSlot),
+            ...laneBridge(sourceValueType, memberValueType),
+            ...laneBridge(memberValueType, targetValueType),
+          ]
+        }
+        if (sourceTag === undefined) {
+          const mapping = mappings.at(0)
+          return mapping === undefined ? [zeroForType(targetValueType)] : payloadFor(mapping)
+        }
+        let selected: ReadonlyArray<Instr.Instr> = [zeroForType(targetValueType)]
+        for (const mapping of [...mappings].reverse()) {
+          selected = [
+            Instr.localGet(sourceTag),
+            Instr.i32Const(mapping.source),
+            Instr.op('i32.eq'),
+            Instr.ifElse(Instr.valueBlockType(targetValueType), payloadFor(mapping), selected),
+          ]
+        }
+        return selected
+      }),
+    )
+  }
+  const outcomePayload = (
+    source: ReadonlyArray<number>,
+    sourceType: DeclarationIndex.SemanticType,
+    targetType: SilkType.Effect,
+  ): ReadonlyArray<ReadonlyArray<Instr.Instr>> => {
+    const sourceShape = LayoutPlan.callingShape(plan, sourceType)
+    const targetShape = LayoutPlan.callingShape(plan, targetType)
+    if (sourceShape === undefined || targetShape?.tree._tag !== 'OutcomeShape')
+      throw new RangeError('Wasm effect outcome packing lost its calling shape')
+    return Object.freeze(
+      targetShape.lanes.slice(1).map((targetLane, ordinal) => {
+        const targetValueType = laneValueType(plan, targetLane)
+        const sourceSlot = source.at(ordinal)
+        const sourceLane = sourceShape.lanes.at(ordinal)
+        const sourceValueType =
+          sourceSlot === undefined ? undefined : layout.physicalTypes.at(sourceSlot)
+        if (sourceSlot === undefined || sourceLane === undefined || sourceValueType === undefined)
+          return [zeroForType(targetValueType)]
+        const memberValueType = laneValueType(plan, sourceLane)
+        return [
+          Instr.localGet(sourceSlot),
+          ...laneBridge(sourceValueType, memberValueType),
+          ...laneBridge(memberValueType, targetValueType),
+        ]
+      }),
+    )
+  }
   const copy = (source: ReadonlyArray<number>, destination: ReadonlyArray<number>) => {
     if (source.length !== destination.length) {
       throw new RangeError('Wasm backend cannot copy mismatched logical lane bundles')
@@ -1687,12 +1899,15 @@ const emitOperation = (
       ]
     })
   }
-  /**
-   * Reloads the roots a call could have written through the pointer it was handed. Roots that
-   * never gave their address away keep their authoritative value in slots, so they stay put.
-   */
-  const reloadEscapingRoots = (): ReadonlyArray<Instr.Instr> =>
-    [...(memory?.frame.escaping ?? [])].sort((left, right) => left - right).flatMap(reloadRoot)
+  /** Reloads exactly the frame roots reachable through the pointers handed to one call. */
+  const reloadReachableRoots = (inputs: ReadonlyArray<Mir.LocalId>): ReadonlyArray<Instr.Instr> =>
+    [
+      ...new Set(
+        inputs.flatMap((input) => [...(memory?.frame.localRoots.get(input.ordinal) ?? [])]),
+      ),
+    ]
+      .sort((left, right) => left - right)
+      .flatMap(reloadRoot)
   const callableCaptureRange = (
     cleanup: Extract<Ownership.CleanupPlan, { readonly _tag: 'CallableCleanup' }>,
     capture: number,
@@ -1927,7 +2142,7 @@ const emitOperation = (
    */
   const reclaimReleaseInstructions = (
     cleanup: Ownership.CleanupPlan,
-    values: ReadonlyArray<number>,
+    values: ReadonlyArray<ReadonlyArray<Instr.Instr>>,
   ): ReadonlyArray<Instr.Instr> => {
     if (!Ownership.cleanupReclaims(cleanup)) return []
     switch (cleanup._tag) {
@@ -1937,7 +2152,7 @@ const emitOperation = (
         if (context === undefined) {
           throw new RangeError('Wasm allocation cleanup lost its reclaim context')
         }
-        return [Instr.localGet(context), Instr.call(requireRelease())]
+        return [...context, Instr.call(requireRelease())]
       }
       case 'HookCleanup':
         return reclaimReleaseInstructions(cleanup.inner, values)
@@ -2005,10 +2220,6 @@ const emitOperation = (
           const physical = LayoutPlan.memberFieldSlots(shape, caseEntry.member, [])
           const memberLanes = semanticLanesOf(caseEntry.member)
           if (physical === undefined || physical.length !== memberLanes.length) return []
-          // A member's lane can sit in a physically wider union slot. Reclaim reads slots directly
-          // and has no local of the member's own type to bridge into, so a widened lane cannot be
-          // released here. Refusing to emit keeps that loud: releasing nothing would leak the
-          // member's blocks silently, and this is the only shape for which the release is missing.
           const selected = physical.flatMap((ordinal, index) => {
             const value = values.at(ordinal)
             const physicalLane = shape.lanes.at(ordinal)
@@ -2016,19 +2227,19 @@ const emitOperation = (
             if (value === undefined || physicalLane === undefined || memberLane === undefined) {
               return []
             }
-            if (laneValueType(plan, physicalLane) !== laneValueType(plan, memberLane)) {
-              throw new RangeError(
-                'Wasm union cleanup cannot release a member whose lane is narrower than its union slot',
-              )
-            }
-            return [value]
+            return [
+              Object.freeze([
+                ...value,
+                ...laneBridge(laneValueType(plan, physicalLane), laneValueType(plan, memberLane)),
+              ]),
+            ]
           })
           if (selected.length !== memberLanes.length) return []
           const inner = reclaimReleaseInstructions(caseEntry.cleanup, selected)
           return inner.length === 0
             ? []
             : [
-                Instr.localGet(tag),
+                ...tag,
                 Instr.i32Const(caseEntry.ordinal),
                 Instr.op('i32.eq'),
                 Instr.ifElse(Instr.emptyBlockType, inner, []),
@@ -2125,7 +2336,10 @@ const emitOperation = (
     local: Mir.LocalId,
   ): ReadonlyArray<Instr.Instr> => [
     ...hookReleaseInstructions(cleanup, local),
-    ...reclaimReleaseInstructions(cleanup, slots(local)),
+    ...reclaimReleaseInstructions(
+      cleanup,
+      slots(local).map((slot) => Object.freeze([Instr.localGet(slot)])),
+    ),
   ]
   const releaseAtAddress = (
     cleanup: Ownership.CleanupPlan,
@@ -3358,15 +3572,18 @@ const emitOperation = (
       const destination = slots(operation.destination)
       const tag = destination.at(0)
       if (tag === undefined) throw new RangeError('Wasm effect outcome lost its tag lane')
+      const sourceType = layout.types.at(operation.source.ordinal)
+      if (sourceType === undefined) throw new RangeError('Wasm effect outcome lost its source type')
+      const payload = outcomePayload(source, Mir.semanticType(sourceType), operation.type.type)
       return [
         Instr.i32Const(operation.tag),
         Instr.localSet(tag),
-        ...destination.slice(1).flatMap((target, index) => {
-          const value = source.at(index)
-          return value === undefined
-            ? [Instr.i32Const(0), Instr.localSet(target)]
-            : [Instr.localGet(value), Instr.localSet(target)]
-        }),
+        ...destination
+          .slice(1)
+          .flatMap((target, index) => [
+            ...(payload.at(index) ?? [zeroFor(target)]),
+            Instr.localSet(target),
+          ]),
       ]
     }
     case 'PackEffectFailureUnion': {
@@ -3376,6 +3593,13 @@ const emitOperation = (
       const destinationTag = destination.at(0)
       if (sourceTag === undefined || destinationTag === undefined)
         throw new RangeError('Wasm Effect failure union lost a tag lane')
+      const payload = failurePayload(
+        source,
+        operation.sourceType.type,
+        sourceTag,
+        operation.type.type,
+        operation.mappings,
+      )
       return [
         Instr.i32Const(-1),
         Instr.localSet(layout.scratch),
@@ -3391,12 +3615,50 @@ const emitOperation = (
         ]),
         Instr.localGet(layout.scratch),
         Instr.localSet(destinationTag),
-        ...destination.slice(1).flatMap((target, index) => {
-          const value = source.at(index + 1)
-          return value === undefined
-            ? [zeroFor(target), Instr.localSet(target)]
-            : [...transfer(value, target)]
-        }),
+        ...destination
+          .slice(1)
+          .flatMap((target, index) => [
+            ...(payload.at(index) ?? [zeroFor(target)]),
+            Instr.localSet(target),
+          ]),
+      ]
+    }
+    case 'PropagateEffectFailure': {
+      const source = slots(operation.source)
+      const sourceTag = operation.sourceType._tag === 'Union' ? source.at(0) : undefined
+      const mapTag =
+        operation.sourceType._tag === 'Nominal'
+          ? [Instr.i32Const(operation.tagMappings.at(0)?.target ?? -1)]
+          : sourceTag === undefined
+            ? []
+            : [
+                Instr.i32Const(-1),
+                Instr.localSet(layout.scratch),
+                ...operation.tagMappings.flatMap((mapping) => [
+                  Instr.localGet(sourceTag),
+                  Instr.i32Const(mapping.source),
+                  Instr.op('i32.eq'),
+                  Instr.ifElse(
+                    Instr.emptyBlockType,
+                    [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
+                    [],
+                  ),
+                ]),
+                Instr.localGet(layout.scratch),
+              ]
+      return [
+        ...(operation.releases ?? []).flatMap((release) =>
+          releaseInstructions(release.cleanup, release.local),
+        ),
+        ...mapTag,
+        ...failurePayload(
+          source,
+          operation.sourceType.type,
+          sourceTag,
+          operation.propagationType.type,
+          operation.tagMappings,
+        ).flat(),
+        Instr.op('return'),
       ]
     }
     case 'UnpackEffectSuccess':
@@ -3426,7 +3688,6 @@ const emitOperation = (
           ),
         ]),
       ]
-      const propagationPayloadCount = operation.propagationLaneCount - 1
       const failure = [
         // Owners still live at this site release before the failure leaves.
         ...(operation.releases ?? []).flatMap((release) =>
@@ -3434,10 +3695,13 @@ const emitOperation = (
         ),
         ...mapTag,
         Instr.localGet(layout.scratch),
-        ...Array.from({ length: propagationPayloadCount }, (_, index) => {
-          const source = outcomeSlots.at(index + 1)
-          return source === undefined ? Instr.i32Const(0) : Instr.localGet(source)
-        }),
+        ...failurePayload(
+          outcomeSlots,
+          operation.outcomeType.type,
+          tag,
+          operation.propagationType.type,
+          operation.tagMappings,
+        ).flat(),
         Instr.op('return'),
       ]
       const invoke = [
@@ -3446,6 +3710,7 @@ const emitOperation = (
         ),
         Instr.call(resolve(operation.target, operation.typeArguments)),
         ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
+        ...reloadReachableRoots(operation.arguments),
       ]
       const completion = [
         Instr.localGet(tag),
@@ -3483,7 +3748,11 @@ const emitOperation = (
         ),
         Instr.call(resolve(operation.runner, operation.runnerTypeArguments)),
         ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
-        ...reloadEscapingRoots(),
+        ...reloadReachableRoots(
+          operation._tag === 'RunEffectValue'
+            ? [operation.effect, ...operation.arguments]
+            : [...operation.captures.map((capture) => capture.source), ...operation.arguments],
+        ),
       ]
       const success = copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots)
       if (operation.propagationType === undefined)
@@ -3508,7 +3777,6 @@ const emitOperation = (
           ),
         ]),
       ]
-      const propagationPayloadCount = operation.propagationLaneCount - 1
       const failure = [
         // Owners still live at this site release before the failure leaves.
         ...(operation.releases ?? []).flatMap((release) =>
@@ -3516,10 +3784,13 @@ const emitOperation = (
         ),
         ...mapTag,
         Instr.localGet(layout.scratch),
-        ...Array.from({ length: propagationPayloadCount }, (_, index) => {
-          const source = outcomeSlots.at(index + 1)
-          return source === undefined ? Instr.i32Const(0) : Instr.localGet(source)
-        }),
+        ...failurePayload(
+          outcomeSlots,
+          operation.outcomeType.type,
+          tag,
+          operation.propagationType.type,
+          operation.tagMappings,
+        ).flat(),
         Instr.op('return'),
       ]
       return [
@@ -3549,16 +3820,33 @@ const emitOperation = (
         ),
         Instr.call(resolve(operation.runner, operation.runnerTypeArguments)),
         ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
-        ...reloadEscapingRoots(),
+        ...reloadReachableRoots([operation.effect, ...operation.arguments]),
       ]
       const writePayload = (
         source: ReadonlyArray<number>,
         destination: ReadonlyArray<number>,
+        memberLanes: ReadonlyArray<LayoutPlan.CallingLane> = Object.freeze([]),
       ): ReadonlyArray<Instr.Instr> =>
         destination.flatMap((target, index) => {
           const value = source.at(index)
+          const from = value === undefined ? undefined : layout.physicalTypes.at(value)
+          const to = layout.physicalTypes.at(target)
+          const member = memberLanes.at(index)
+          const memberType = member === undefined ? undefined : laneValueType(plan, member)
           return [
-            ...(value === undefined ? [Instr.i32Const(0)] : [Instr.localGet(value)]),
+            ...(value === undefined
+              ? [zeroFor(target)]
+              : [
+                  Instr.localGet(value),
+                  ...(from === undefined || memberType === undefined
+                    ? []
+                    : laneBridge(from, memberType)),
+                  ...(to === undefined || memberType === undefined
+                    ? from === undefined || to === undefined
+                      ? []
+                      : laneBridge(from, to)
+                    : laneBridge(memberType, to)),
+                ]),
             Instr.localSet(target),
           ]
         })
@@ -3567,13 +3855,20 @@ const emitOperation = (
         operation.outcomeShape.tree._tag === 'OutcomeShape'
           ? operation.outcomeShape.tree.success.laneCount
           : 0
+      const successShape = LayoutPlan.callingShape(plan, operation.outcomeType.type.success)
+      if (successShape === undefined)
+        throw new RangeError('Wasm Effect Result lost its success member shape')
       const success = [
         Instr.i32Const(operation.successTag),
         Instr.localSet(resultTag),
-        ...writePayload(outcomeSlots.slice(1, 1 + successLaneCount), resultPayload),
+        ...writePayload(
+          outcomeSlots.slice(1, 1 + successLaneCount),
+          resultPayload,
+          successShape.lanes,
+        ),
       ]
       const failure =
-        operation.outcomeType.type.failures.length === 0
+        SilkType.failureMembers(operation.outcomeType.type).length === 0
           ? [Instr.op('unreachable')]
           : [
               Instr.i32Const(operation.failureTag),
@@ -3653,16 +3948,7 @@ const emitOperation = (
         ),
         Instr.call(resolve(operation.target, operation.typeArguments)),
         ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
-        ...[
-          ...new Set(
-            operation.arguments.flatMap((argument) => {
-              const root = memory?.frame.sliceRoots.get(argument.ordinal)
-              return root !== undefined && memory?.frame.roots.has(root) ? [root] : []
-            }),
-          ),
-        ]
-          .sort((left, right) => left - right)
-          .flatMap(reloadRoot),
+        ...reloadReachableRoots(operation.arguments),
       ]
     case 'ApplyCallable': {
       const sourceType =
@@ -3976,7 +4262,11 @@ const emitOperation = (
         ...captureOperands,
         Instr.call(resolve(target.declaration, operation.typeArguments)),
         ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
-        ...reloadEscapingRoots(),
+        ...reloadReachableRoots([
+          ...(operation.callable === undefined ? [] : [operation.callable]),
+          ...operation.captures.map((capture) => capture.source),
+          ...operation.arguments,
+        ]),
       ]
     }
     case 'ConvertInteger': {
@@ -4842,7 +5132,7 @@ const emitBody = (
   ): ReadonlyArray<Instr.Instr> => {
     if (suspensionRuntime === undefined) return [Instr.op('unreachable')]
     if (fn.result._tag !== 'EffectOutcome') return [Instr.op('unreachable')]
-    const failure = fn.result.type.failures.findIndex(
+    const failure = SilkType.failureMembers(fn.result.type).findIndex(
       (member) => member.module === 'silk/core' && member.name === 'OutOfMemory',
     )
     if (failure < 0) return [Instr.op('unreachable')]
@@ -4980,7 +5270,7 @@ const emitBody = (
               allocatorSlot === undefined
             )
               throw new RangeError(
-                'Wasm continuation allocator did not resolve to a closed synchronous witness',
+                `Wasm continuation allocator for ${fn.id.module}.${fn.id.name} did not resolve to a closed synchronous witness (provider=${allocator === undefined ? 'missing' : 'present'}, constructor=${allocatorConstructor === undefined ? 'missing' : 'present'}, runner=${allocatorRunner === undefined ? 'missing' : (allocatorRunner.suspension?.classification ?? 'Synchronous')}, slot=${allocatorSlot === undefined ? 'missing' : 'present'})`,
               )
             const allocate = [
               Instr.localGet(allocatorSlot),
@@ -6108,6 +6398,7 @@ const controlProvenance = (program: Mir.Module): ReadonlyArray<Backend.ControlPr
       const conditions = new Map(
         [...loops.values()].map((loop) => [loop.condition.ordinal, loop] as const),
       )
+      const recordedEarlyReturns = new Set<string>()
       return Mir.topologicalRegions(fn).flatMap(
         (region): ReadonlyArray<Backend.ControlProvenance> => {
           if (region._tag === 'ConditionalRegion') {
@@ -6143,6 +6434,33 @@ const controlProvenance = (program: Mir.Module): ReadonlyArray<Backend.ControlPr
               }),
             ]
           }
+          const earlyReturns =
+            region._tag === 'OperationRegion'
+              ? region.operations.flatMap(Mir.operationTree).flatMap((operation) => {
+                  if (operation._tag !== 'PropagateEffectFailure') return []
+                  const span = operation.provenance.span
+                  const key = JSON.stringify([
+                    region.id.ordinal,
+                    span.sourceId,
+                    span.start,
+                    span.end,
+                  ])
+                  if (recordedEarlyReturns.has(key)) return []
+                  recordedEarlyReturns.add(key)
+                  return [
+                    Object.freeze({
+                      _tag: 'BackendControlProvenance' as const,
+                      backend: 'WebAssembly' as const,
+                      function: fn.id,
+                      instance: fn.instance,
+                      region: region.id,
+                      construct: 'WasmReturn' as const,
+                      targets: Object.freeze([]),
+                      span,
+                    }),
+                  ]
+                })
+              : Object.freeze([])
           const outcome = region.outcome
           const loop =
             outcome._tag === 'Repeat' || outcome._tag === 'Exit'
@@ -6158,7 +6476,7 @@ const controlProvenance = (program: Mir.Module): ReadonlyArray<Backend.ControlPr
                 : outcome._tag === 'Trap'
                   ? 'WasmTrap'
                   : undefined
-          if (construct === undefined) return []
+          if (construct === undefined) return earlyReturns
           const target =
             outcome._tag === 'Repeat'
               ? loop?.id
@@ -6166,6 +6484,7 @@ const controlProvenance = (program: Mir.Module): ReadonlyArray<Backend.ControlPr
                 ? loop?.following
                 : undefined
           return [
+            ...earlyReturns,
             Object.freeze({
               _tag: 'BackendControlProvenance' as const,
               backend: 'WebAssembly' as const,

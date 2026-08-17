@@ -112,7 +112,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('lowers a normalizing program to a MIR that names no Unicode operation', () =>
   Effect.gen(function* () {

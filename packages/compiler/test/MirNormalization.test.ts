@@ -98,7 +98,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let selected = delayed(42) |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move selected, recover)
+  return run Effect.catchAll(move selected, recover)
 }`),
       'wasm32-unknown-unknown',
       { normalizeMir: false },
@@ -165,7 +165,7 @@ effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let pending = seed(41) |> Effect.map(increment) |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move pending, recover)
+  return run Effect.catchAll(move pending, recover)
 }`),
       'wasm32-unknown-unknown',
     )
@@ -203,6 +203,43 @@ pub fn main() -> i32 {
       allOperations(reifiedProgram).some((operation) => operation._tag === 'ReifyEffect'),
       Mir.encode(reifiedProgram),
     )
+    const reify = allOperations(reifiedProgram).find(
+      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'ReifyEffect' }> =>
+        operation._tag === 'ReifyEffect',
+    )
+    const allocate = allOperations(reifiedProgram).find(
+      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'Allocate' }> =>
+        operation._tag === 'Allocate',
+    )
+    assert.isDefined(reify)
+    assert.isDefined(allocate)
+    if (reify === undefined || allocate === undefined) return
+    for (const failureTag of [0, -1, Number.MAX_SAFE_INTEGER + 1]) {
+      const forged = structuredClone(reifiedProgram)
+      const operation = allOperations(forged).find((candidate) => candidate._tag === 'Allocate')
+      assert.isDefined(operation)
+      if (operation === undefined) return
+      Reflect.set(operation, 'failureTag', failureTag)
+      assert.include(
+        Mir.verify(forged).map((violation) => violation.rule),
+        'InvalidAllocationOperation',
+      )
+    }
+    for (const field of ['successTag', 'failureTag'] as const) {
+      for (const tag of [-1, reify.resultUnion.members.length, Number.MAX_SAFE_INTEGER + 1]) {
+        const forged = structuredClone(reifiedProgram)
+        const operation = allOperations(forged).find(
+          (candidate) => candidate._tag === 'ReifyEffect',
+        )
+        assert.isDefined(operation)
+        if (operation === undefined) return
+        Reflect.set(operation, field, tag)
+        assert.include(
+          Mir.verify(forged).map((violation) => violation.rule),
+          'InvalidEffectOperation',
+        )
+      }
+    }
     assert.isTrue(
       allOperations(entryProgram).some((operation) => operation._tag === 'CloseEffectEntry'),
       Mir.encode(entryProgram),
@@ -237,7 +274,7 @@ pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   let selected = read() |> Effect.provide(&provider)
   let complete = move selected |> Effect.provideMut(&mut allocator)
-  return run Effect.catch(move complete, recover)
+  return run Effect.catchAll(move complete, recover)
 }`),
       'wasm32-unknown-unknown',
     )

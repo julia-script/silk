@@ -915,9 +915,36 @@ const checkExpression = (
             ? Object.freeze({ _tag: 'Parameter', parameter: expression.provider.parameter })
             : undefined
       if (site !== undefined)
-        checkUse(state, live, site, expression.provider.span, expression.provider.access === 'Take')
+        checkUse(
+          state,
+          live,
+          site,
+          expression.provider.span,
+          expression.provider.captureAccess === 'Take',
+        )
       return
     }
+    case 'EffectCatch':
+      // The sealed primitive has the same owned operands as its ordinary callable contract.
+      // Visiting both here preserves take-once use checking after elaboration replaces the call
+      // with dedicated HIR.
+      checkExpression(
+        state,
+        live,
+        expression.protected,
+        argumentConsumes(expression.protected),
+        guard,
+        escaping,
+      )
+      checkExpression(
+        state,
+        live,
+        expression.handler,
+        argumentConsumes(expression.handler),
+        guard,
+        escaping,
+      )
+      return
     case 'Run': {
       const stored = storedEffectRunAccess(state, expression.subject, expression.span)
       if (stored !== undefined) state.diagnostics.push(stored)
@@ -1150,8 +1177,8 @@ const fallibleRunSites = (
     typeof subjectType === 'object' &&
     subjectType !== null &&
     (subjectType as { readonly _tag?: string })._tag === 'EffectType' &&
-    ((subjectType as Type.Effect).failures.length > 0 ||
-      (subjectType as Type.Effect).failureParameters.length > 0)
+    (Type.failureMembers(subjectType as Type.Effect).length > 0 ||
+      Type.failureRowParameters(subjectType as Type.Effect).length > 0)
   return fallible ? [expression, ...nested] : nested
 }
 
@@ -1203,6 +1230,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
     expression: Elaboration.ExpressionFact,
   ): { readonly site: BindingSite; readonly spelling: string } | undefined => {
     if (expression._tag === 'Grouped') return directSite(expression.expression)
+    if (expression._tag === 'Move') return directSite(expression.subject)
     if (expression._tag !== 'Identifier') return undefined
     if (expression.reference._tag === 'ResolvedBinding') {
       return Object.freeze({
@@ -1217,6 +1245,47 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
       })
     }
     return undefined
+  }
+
+  const movedExecutableBindings = (
+    expression: Elaboration.ExpressionFact,
+  ): ReadonlyArray<number> => {
+    if (expression._tag === 'Grouped') return movedExecutableBindings(expression.expression)
+    if (expression._tag === 'Move') {
+      const site = directSite(expression.subject)?.site
+      return site?._tag === 'Let' &&
+        expression.subject.type._tag === 'Available' &&
+        (Type.isEffect(expression.subject.type.type) ||
+          Type.containsExecutableRepresentation(expression.subject.type.type))
+        ? Object.freeze([site.binding.ordinal])
+        : movedExecutableBindings(expression.subject)
+    }
+    if (expression._tag === 'StructLiteral')
+      return Object.freeze(
+        expression.initializers.flatMap((initializer) =>
+          movedExecutableBindings(initializer.expression),
+        ),
+      )
+    if (expression._tag === 'ArrayLiteral')
+      return Object.freeze(
+        expression.elements.flatMap((element) => movedExecutableBindings(element.expression)),
+      )
+    if (expression._tag === 'EffectResult') return movedExecutableBindings(expression.protected)
+    if (expression._tag === 'EffectCatch')
+      return Object.freeze([
+        ...movedExecutableBindings(expression.protected),
+        ...movedExecutableBindings(expression.handler),
+      ])
+    if (expression._tag === 'Call')
+      return Object.freeze(
+        expression.arguments.flatMap((argument) => movedExecutableBindings(argument.expression)),
+      )
+    if (expression._tag === 'CallableApply')
+      return Object.freeze([
+        ...movedExecutableBindings(expression.callee),
+        ...expression.arguments.flatMap((argument) => movedExecutableBindings(argument.expression)),
+      ])
+    return Object.freeze([])
   }
 
   const runEnds = new Map<
@@ -1239,10 +1308,14 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
     switch (expression._tag) {
       case 'Run': {
         const site = directSite(expression.subject)?.site
-        if (site?._tag === 'Let') {
-          const previous = runEnds.get(site.binding.ordinal)
+        const bindings = [
+          ...(site?._tag === 'Let' ? [site.binding.ordinal] : []),
+          ...movedExecutableBindings(expression.subject),
+        ]
+        for (const binding of new Set(bindings)) {
+          const previous = runEnds.get(binding)
           if (previous === undefined || previous.span.end < expression.syntax.span.end) {
-            runEnds.set(site.binding.ordinal, { region, span: expression.syntax.span })
+            runEnds.set(binding, { region, span: expression.syntax.span })
           }
         }
         scanRunEnds(expression.subject, region)
@@ -1292,6 +1365,10 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         return
       case 'CallableSection':
         for (const capture of expression.captures) scanRunEnds(capture.expression, region)
+        return
+      case 'EffectCatch':
+        scanRunEnds(expression.protected, region)
+        scanRunEnds(expression.handler, region)
         return
       case 'EffectBlock':
       case 'FunctionItem':
@@ -1372,45 +1449,38 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
   }
   scanStatementRunEnds(fn.statements)
 
-  const movedExecutableBindings = (
-    expression: Elaboration.ExpressionFact,
-  ): ReadonlyArray<number> => {
-    if (expression._tag === 'Grouped') return movedExecutableBindings(expression.expression)
-    if (expression._tag === 'Move') {
-      const site = directSite(expression.subject)?.site
-      return site?._tag === 'Let' &&
-        expression.subject.type._tag === 'Available' &&
-        (Type.isEffect(expression.subject.type.type) ||
-          Type.containsExecutableRepresentation(expression.subject.type.type))
-        ? Object.freeze([site.binding.ordinal])
-        : movedExecutableBindings(expression.subject)
-    }
-    if (expression._tag === 'StructLiteral')
-      return Object.freeze(
-        expression.initializers.flatMap((initializer) =>
-          movedExecutableBindings(initializer.expression),
-        ),
-      )
-    if (expression._tag === 'ArrayLiteral')
-      return Object.freeze(
-        expression.elements.flatMap((element) => movedExecutableBindings(element.expression)),
-      )
-    return Object.freeze([])
-  }
-  const executableAliases = new Map<number, number>()
+  const executableAliases = new Map<number, Set<number>>()
   for (const binding of fn.bindings) {
     for (const source of movedExecutableBindings(binding.initializer)) {
-      executableAliases.set(source, binding.id.ordinal)
+      const destinations = executableAliases.get(source)
+      if (destinations === undefined) executableAliases.set(source, new Set([binding.id.ordinal]))
+      else destinations.add(binding.id.ordinal)
     }
   }
   let propagatedExecutableEnd = true
   while (propagatedExecutableEnd) {
     propagatedExecutableEnd = false
-    for (const [source, destination] of executableAliases) {
-      const ending = callableEnds.get(destination)
-      if (ending === undefined || callableEnds.get(source) === ending) continue
-      callableEnds.set(source, ending)
-      propagatedExecutableEnd = true
+    for (const [source, destinations] of executableAliases) {
+      for (const destination of destinations) {
+        const runEnding = runEnds.get(destination)
+        const previousRunEnding = runEnds.get(source)
+        if (
+          runEnding !== undefined &&
+          (previousRunEnding === undefined || previousRunEnding.span.end < runEnding.span.end)
+        ) {
+          runEnds.set(source, runEnding)
+          propagatedExecutableEnd = true
+        }
+        const ending = callableEnds.get(destination)
+        const previousEnding = callableEnds.get(source)
+        if (
+          ending === undefined ||
+          (previousEnding !== undefined && previousEnding.span.end >= ending.span.end)
+        )
+          continue
+        callableEnds.set(source, ending)
+        propagatedExecutableEnd = true
+      }
     }
   }
 
@@ -1864,7 +1934,12 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
       case 'EffectBindRequirement': {
         inspect(expression.protected, region, active, 'Read', delayedEnd)
         const provider = expression.provider
-        if (provider === undefined || provider.access === 'Take') return
+        if (
+          provider === undefined ||
+          provider.captureAccess === 'Copy' ||
+          provider.captureAccess === 'Take'
+        )
+          return
         const root: BindingSite =
           provider.reference._tag === 'BindingFact'
             ? Object.freeze({ _tag: 'Let', binding: provider.reference.id })
@@ -1872,13 +1947,13 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         const conflict = active.find(
           (loan) =>
             sameSite(loan.root, root) &&
-            (loan.access === 'Exclusive' || provider.access === 'Exclusive'),
+            (loan.access === 'Exclusive' || provider.captureAccess === 'Exclusive'),
         )
         if (conflict !== undefined)
           diagnostics.push(
             Diagnostic.conflictingSliceLoan(
               conflict.access,
-              provider.access,
+              provider.captureAccess,
               conflict.startSpan,
               provider.span,
             ),
@@ -1893,7 +1968,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
               ordinal: 0,
             }),
             root,
-            access: provider.access,
+            access: provider.captureAccess,
             origin: 'EffectCapture',
             suspendsParent: false,
             startRegion: region,
@@ -1904,6 +1979,18 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         )
         return
       }
+      case 'EffectCatch':
+        // Catch retains both operands until the resulting Effect runs, just like an ordinary call
+        // returning an Effect. Propagate the delayed end so nested borrowed captures remain live.
+        inspect(
+          expression.protected,
+          region,
+          active,
+          naturalAccess(expression.protected),
+          delayedEnd,
+        )
+        inspect(expression.handler, region, active, naturalAccess(expression.handler), delayedEnd)
+        return
     }
   }
 

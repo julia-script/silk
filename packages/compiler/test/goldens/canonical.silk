@@ -76,7 +76,7 @@ fn execute(problem: Token) -> i32 {
   drop local
   let pending = delayed(move problem)
   let timed = timed()
-    |> End.provide(&local, @Clock)
+    |> End.provide<&End@Clock>(&local)
   return run pending
 }
 

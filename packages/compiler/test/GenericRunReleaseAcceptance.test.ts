@@ -53,7 +53,7 @@ effect fn work() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(work(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 /** The same body on the succeeding path, where the release is never in doubt. */
 const succeedingRun = `${generic}
@@ -67,7 +67,7 @@ effect fn work() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(work(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 const allocationEvents = (
   run: ReturnType<typeof Analysis.evaluate>,

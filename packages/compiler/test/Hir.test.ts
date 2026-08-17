@@ -62,7 +62,12 @@ it('constructs typed HIR with canonical call targets and normalized contracts', 
   const result = elaborate('golden://accepted.silk', acceptedSource)
   const main = result.hir.functions.at(1)
 
-  assert.deepEqual(main?.contract, { _tag: 'Contract', parameters: [], result: 'i32' })
+  assert.deepEqual(main?.contract, {
+    _tag: 'Contract',
+    parameters: [],
+    result: 'i32',
+    constraints: [],
+  })
   const body = main === undefined ? undefined : Hir.returned(main)
   assert.strictEqual(body?._tag, 'Call')
   if (body?._tag !== 'Call') return
@@ -350,7 +355,12 @@ pub fn main() -> i32 { if check(true) { return 1 } return 0 }`,
 
   assert.deepEqual(result.diagnostics, [])
   const check = result.hir.functions.at(0)
-  assert.deepEqual(check?.contract, { _tag: 'Contract', parameters: ['bool'], result: 'bool' })
+  assert.deepEqual(check?.contract, {
+    _tag: 'Contract',
+    parameters: ['bool'],
+    result: 'bool',
+    constraints: [],
+  })
   const returned = check === undefined ? undefined : Hir.returned(check)
   assert.strictEqual(returned?._tag, 'ParameterReference')
   if (returned?._tag !== 'ParameterReference') return
@@ -469,7 +479,7 @@ it.effect('desugars effect functions and source-defined catch calls to hidden ef
 effect fn risky() -> i32 ! Problem { fail move Problem { code: 41 } }
 effect fn recover(problem: Problem) -> i32 { return problem.code + 1 }
 pub fn main() -> i32 {
-  let recipe = Effect.catch(risky(), recover)
+  let recipe = Effect.catchAll(risky(), recover)
   return run recipe
 }`,
     )
@@ -498,7 +508,7 @@ pub fn main() -> i32 {
     )
     if (binding?._tag === 'Bind' && binding.initializer._tag === 'EffectConstruct') {
       assert.strictEqual(binding.initializer.target.module, 'silk/effects')
-      assert.strictEqual(binding.initializer.target.name, 'catch')
+      assert.strictEqual(binding.initializer.target.name, 'catchAll')
       assert.strictEqual(binding.initializer.arguments.at(0)?._tag, 'EffectConstruct')
     }
     assert.strictEqual(main === undefined ? undefined : Hir.returned(main)._tag, 'Run')

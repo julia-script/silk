@@ -79,7 +79,7 @@ effect fn writeStdoutCounted(
   streams: &mut NativeStandardStreams,
   message: &[u8]
 ) -> i32 ! StreamWriteFailure {
-  let written = run Intrinsic.bindRequirement(send(false, message), streams)
+  let written = run Intrinsic.bindRequirementMut(send(false, message), streams)
   return 0
 }
 

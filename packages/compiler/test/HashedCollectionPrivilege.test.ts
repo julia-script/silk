@@ -52,7 +52,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 99 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /** Every operation of every region of every lowered function, in one flat sequence. */
 const operationsOf = (module: Mir.Module): ReadonlyArray<Mir.Operation> =>

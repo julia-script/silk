@@ -41,9 +41,9 @@ const typeText = (type: Type.Type): string =>
         ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
         : type._tag === 'EffectType'
           ? `Effect<${typeText(type.success)}${
-              type.failures.length === 0
+              Type.failureMembers(type).length === 0
                 ? ''
-                : ` ! ${type.failures.map(typeText).join(' | ')}`
+                : ` ! ${Type.failureMembers(type).map(typeText).join(' | ')}`
             }> ${type.access.toLowerCase()}`
           : type._tag === 'CallableType'
             ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
@@ -788,6 +788,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = effect outcome tag ${operation.tag} payload ${localText(operation.source)}`
     case 'PackEffectFailureUnion':
       return `${localText(operation.destination)} = effect failure union ${localText(operation.source)} · ${operation.mappings.map((mapping) => `${mapping.source}→${mapping.target}`).join(', ')}`
+    case 'PropagateEffectFailure':
+      return `propagate effect failure ${localText(operation.source)} · ${operation.tagMappings.map((mapping) => `${mapping.source}→${mapping.target}`).join(', ')}`
     case 'UnpackEffectSuccess':
       return `${localText(operation.destination)} = effect success ${localText(operation.source)}`
     case 'RunEffect':

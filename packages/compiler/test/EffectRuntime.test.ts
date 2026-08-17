@@ -23,7 +23,7 @@ effect fn relay(value: i32) -> i32 ! Problem {
 }
 effect fn recover(problem: Problem) -> i32 { return problem.code |> i32.add(1) }
 pub fn main() -> i32 {
-  let recipe = relay(0) |> Effect.catch(recover)
+  let recipe = relay(0) |> Effect.catchAll(recover)
   return run recipe
 }`
 const successSource = source.replace('relay(0)', 'relay(42)')
@@ -51,14 +51,14 @@ effect fn retrying() -> i32 ! Problem {
 }
 effect fn recover(problem: Problem) -> i32 { return 99 }
 pub fn main() -> i32 {
-  let handled = retrying() |> Effect.catch(recover)
+  let handled = retrying() |> Effect.catchAll(recover)
   return run handled
 }`
 const providerSource = `struct Clock {}
 effect fn read() -> i32 ? &Clock@Primary { return 42 }
 pub fn main() -> i32 {
   let clock = Clock {}
-  let provided = read() |> Intrinsic.bindRequirement(&clock, @Primary)
+  let provided = read() |> Intrinsic.bindRequirement<&Clock@Primary>(&clock)
   return run provided
 }`
 const callableMapSource = `effect fn succeed(value: i32) -> i32 { return value }
@@ -170,12 +170,12 @@ effect fn recover(problem: Problem) -> i32 { return problem.code }
 fn double(value: i32) -> i32 { return value * 2 }
 pub fn main() -> i32 {
   return run failValue()
-    |> Effect.catch(recover)
+    |> Effect.catchAll(recover)
     |> Effect.map(double)
 }`
 const retryMapSource = `${retrySource.replace(
-  'let handled = retrying() |> Effect.catch(recover)',
-  'let handled = retrying() |> Effect.catch(recover) |> Effect.map(i32.add(39))',
+  'let handled = retrying() |> Effect.catchAll(recover)',
+  'let handled = retrying() |> Effect.catchAll(recover) |> Effect.map(i32.add(39))',
 )}`
 const outOfMemorySource = `import silk.core { OutOfMemory }
 
@@ -184,7 +184,7 @@ effect fn exhaust() -> i32 ! OutOfMemory {
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 42 }
 pub fn main() -> i32 {
-  return run exhaust() |> Effect.catch(recover)
+  return run exhaust() |> Effect.catchAll(recover)
 }`
 const higherOrderEffectSource = `effect fn succeed(value: i32) -> i32 { return value }
 effect fn alternate(value: i32) -> i32 { return value }

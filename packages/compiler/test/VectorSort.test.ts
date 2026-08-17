@@ -26,7 +26,7 @@ ${body}
 
 effect fn recover(error: OutOfMemory) -> i32 { return 99 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /** Appends each value in source order through the effectful `append`. */
 const fill = (name: string, values: ReadonlyArray<number>): string =>
@@ -192,7 +192,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 99 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
     assert.strictEqual(value, 42)
   }),
@@ -342,7 +342,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 99 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('keeps equal elements of a user type in their input order', () =>
   Effect.gen(function* () {
@@ -400,7 +400,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 99 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('sorts a move-only element type and releases every allocation it acquires', () =>
   Effect.gen(function* () {

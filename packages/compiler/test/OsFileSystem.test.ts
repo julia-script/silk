@@ -95,8 +95,8 @@ pub effect fn main() -> () ! FileError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("/tmp") |> Effect.provideMut(&mut allocator)
   let path = run pathRoot() |> Effect.provideMut(&mut allocator)
-  let entries = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(FileSystem.listDirectory(&path), &mut fs),
+  let entries = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(FileSystem.listDirectory(&path), &mut fs),
     &mut allocator
   )
   drop entries
@@ -143,9 +143,9 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let path = run pathMake("/message") |> Effect.provideMut(&mut allocator)
   let input = [u8.toU8(104), u8.toU8(101), u8.toU8(108), u8.toU8(108), u8.toU8(111)]
-  let written = run Intrinsic.bindRequirement(FileSystem.writeFile(&path, &input), &mut fs)
-  let owned = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(FileSystem.readFile(&path), &mut fs),
+  let written = run Intrinsic.bindRequirementMut(FileSystem.writeFile(&path, &input), &mut fs)
+  let owned = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(FileSystem.readFile(&path), &mut fs),
     &mut allocator
   )
   if bytesSlice(&owned).length == usize.add(0, 5) { return 42 }
@@ -258,8 +258,8 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let root = run pathRoot() |> Effect.provideMut(&mut allocator)
-  let entries = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(FileSystem.listDirectory(&root), &mut fs),
+  let entries = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(FileSystem.listDirectory(&root), &mut fs),
     &mut allocator
   )
   let listed = vectorSlice<DirectoryEntry>(&entries)
@@ -556,18 +556,18 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let path = run pathMake("/hello.txt") |> Effect.provideMut(&mut allocator)
   let input = [u8.toU8(104), u8.toU8(101), u8.toU8(108), u8.toU8(108), u8.toU8(111)]
-  let written = run Intrinsic.bindRequirement(FileSystem.writeFile(&path, &input), &mut fs)
-  let owned = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(FileSystem.readFile(&path), &mut fs),
+  let written = run Intrinsic.bindRequirementMut(FileSystem.writeFile(&path, &input), &mut fs)
+  let owned = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(FileSystem.readFile(&path), &mut fs),
     &mut allocator
   )
   let bytes = bytesSlice(&owned)
   if bytes.length != usize.add(0, 5) { return 1 }
   if bytes[usize.add(0, 0)] != u8.toU8(104) { return 2 }
-  let removed = run Intrinsic.bindRequirement(FileSystem.removeFile(&path), &mut fs)
+  let removed = run Intrinsic.bindRequirementMut(FileSystem.removeFile(&path), &mut fs)
   let empty = run pathMake("/empty") |> Effect.provideMut(&mut allocator)
-  let created = run Intrinsic.bindRequirement(FileSystem.createDirectory(&empty), &mut fs)
-  let removedEmpty = run Intrinsic.bindRequirement(FileSystem.removeDirectory(&empty), &mut fs)
+  let created = run Intrinsic.bindRequirementMut(FileSystem.createDirectory(&empty), &mut fs)
+  let removedEmpty = run Intrinsic.bindRequirementMut(FileSystem.removeDirectory(&empty), &mut fs)
   let mut kind = 0
   let mut length = usize.add(0, 0)
   let mut reason = 0

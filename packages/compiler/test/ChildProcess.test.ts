@@ -158,8 +158,8 @@ it.effect('carries an exit code, captured output, and captured errors as one own
         'Scripted { code: 0, signal: false, first: u8.toU8(115) }',
         `  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
   let built = run request(&path) |> Effect.provideMut(&mut allocator)
-  let outcome = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(submit(&built), &mut provider),
+  let outcome = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
     &mut allocator
   )
   if isSignaled(&outcome) { return 1 }
@@ -187,8 +187,8 @@ it.effect('reports a nonzero exit code as outcome data rather than as a typed fa
         // A failing child stays on the success channel, so this run never reaches the recovery band.
         `  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
   let built = run request(&path) |> Effect.provideMut(&mut allocator)
-  let outcome = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(submit(&built), &mut provider),
+  let outcome = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
     &mut allocator
   )
   if isSignaled(&outcome) { return 1 }
@@ -212,8 +212,8 @@ it.effect('separates termination by a signal from an ordinary exit code', () =>
         'Scripted { code: 9, signal: true, first: u8.toU8(0) }',
         `  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
   let built = run request(&path) |> Effect.provideMut(&mut allocator)
-  let outcome = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(submit(&built), &mut provider),
+  let outcome = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
     &mut allocator
   )
   if isSignaled(&outcome) == false { return 1 }
@@ -243,8 +243,8 @@ it.effect('routes a provider failure into the typed failure channel', () =>
         'Broken {}',
         `  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
   let built = run request(&path) |> Effect.provideMut(&mut allocator)
-  let outcome = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(submit(&built), &mut provider),
+  let outcome = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
     &mut allocator
   )
   return 1`,
@@ -291,8 +291,8 @@ const nativeEcho =
   nativeRun(`  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
   let mut built = run request(&path) |> Effect.provideMut(&mut allocator)
   let added = run addArgument(&mut built, &firstArgument) |> Effect.provideMut(&mut allocator)
-  let outcome = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(submit(&built), &mut provider),
+  let outcome = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
     &mut allocator
   )
   if isSignaled(&outcome) { return 1 }
@@ -332,8 +332,8 @@ it.effect('keeps a nonzero exit code on the success channel through the native p
     const self = yield* snapshot(
       nativeRun(`  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
   let built = run request(&path) |> Effect.provideMut(&mut allocator)
-  let outcome = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(submit(&built), &mut provider),
+  let outcome = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
     &mut allocator
   )
   if isSignaled(&outcome) { return 1 }
@@ -359,8 +359,8 @@ it.effect('turns a missing executable into a typed start failure that retains it
     const self = yield* snapshot(
       nativeRun(`  let path = run pathFromBytes(&absentPath) |> Effect.provideMut(&mut allocator)
   let built = run request(&path) |> Effect.provideMut(&mut allocator)
-  let outcome = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(submit(&built), &mut provider),
+  let outcome = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
     &mut allocator
   )
   return 1`),
@@ -381,16 +381,16 @@ it.effect('never reads the caller environment and passes exact bytes for what it
     const self = yield* snapshot(
       nativeRun(`  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
   let inherited = run request(&path) |> Effect.provideMut(&mut allocator)
-  let first = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(submit(&inherited), &mut provider),
+  let first = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(submit(&inherited), &mut provider),
     &mut allocator
   )
   let mut named = run request(&path) |> Effect.provideMut(&mut allocator)
   let variable = run setVariable(&mut named, &variableName, &rawValue)
     |> Effect.provideMut(&mut allocator)
   let argument = run addArgument(&mut named, &rawArgument) |> Effect.provideMut(&mut allocator)
-  let second = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(submit(&named), &mut provider),
+  let second = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(submit(&named), &mut provider),
     &mut allocator
   )
   return 42`),
@@ -422,8 +422,8 @@ it.effect('presents the requested working directory to the host', () =>
       nativeRun(`  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
   let directory = run pathFromBytes(&workPath) |> Effect.provideMut(&mut allocator)
   let built = run requestWithin(&path, &directory) |> Effect.provideMut(&mut allocator)
-  let outcome = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(submit(&built), &mut provider),
+  let outcome = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
     &mut allocator
   )
   return 42`),

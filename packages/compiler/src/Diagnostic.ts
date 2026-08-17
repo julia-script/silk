@@ -1,4 +1,5 @@
-import type * as SourceSpan from './SourceSpan.js'
+import type * as ProviderSelection from './ProviderSelection.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as Token from './Token.js'
 
 /** The compiler phase that originated a diagnostic. */
@@ -202,8 +203,6 @@ export const typeArgumentConflictCode = 'SEM0100' as const
 /** Stable code for a bound operation whose selected witness has no lowering. */
 export const unlowerableBoundWitnessCode = 'SEM0101' as const
 
-/** Stable code for a construct the front end analyzes fully but no engine can lower yet. */
-export const analysisOnlyConstructCode = 'SEM0098' as const
 /** Stable code for selecting a suspending provider to allocate continuation storage. */
 export const suspendingContinuationAllocatorCode = 'SEM0102' as const
 /** Stable code for constructing an aggregate that stores a bare callable value. */
@@ -222,6 +221,20 @@ export const overlappingConformanceCode = 'SEM0119' as const
 export const nonTerminatingConformanceCode = 'SEM0120' as const
 /** Stable code for a concrete specialization whose conditional requirements cannot be proved. */
 export const unprovenConformanceCode = 'SEM0121' as const
+/** Stable code for a complete application that reaches the instance frontier with open rows or evidence. */
+export const nonConcreteSpecializationCode = 'SEM0122' as const
+/** Stable code for a provider that matches no member of its concrete source requirement row. */
+export const providerNoMatchCode = 'SEM0123' as const
+/** Stable code for provider relations sharing a selector but retaining disjoint candidate sets. */
+export const jointProviderSelectionConflictCode = 'SEM0124' as const
+/** Stable code for provider selection that retains more than one common requirement member. */
+export const providerAmbiguityCode = 'SEM0125' as const
+/** Stable code for an explicitly or independently selected row that is not exactly one member. */
+export const selectedRowCardinalityCode = 'SEM0126' as const
+/** Stable code for a surviving provider candidate with more than one conformance witness. */
+export const providerConformanceAmbiguityCode = 'SEM0127' as const
+/** Stable code for a surviving provider candidate whose conformance mapping is invalid. */
+export const invalidProviderConformanceCode = 'SEM0128' as const
 /** Stable code for a `typeof` item that resolves to no declaration in scope. */
 export const unresolvedExactRepresentationItemCode = 'SEM0108' as const
 /** Stable code for a `typeof` item whose name belongs to more than one declaration. */
@@ -384,7 +397,6 @@ export type Code =
   | typeof invalidFloatLiteralCode
   | typeof impureShortCircuitOperandCode
   | typeof ambiguousBoundOperationCode
-  | typeof analysisOnlyConstructCode
   | typeof uninferredTypeParameterCode
   | typeof typeArgumentConflictCode
   | typeof unlowerableBoundWitnessCode
@@ -397,6 +409,13 @@ export type Code =
   | typeof overlappingConformanceCode
   | typeof nonTerminatingConformanceCode
   | typeof unprovenConformanceCode
+  | typeof nonConcreteSpecializationCode
+  | typeof providerNoMatchCode
+  | typeof jointProviderSelectionConflictCode
+  | typeof providerAmbiguityCode
+  | typeof selectedRowCardinalityCode
+  | typeof providerConformanceAmbiguityCode
+  | typeof invalidProviderConformanceCode
   | typeof unresolvedExactRepresentationItemCode
   | typeof ambiguousExactRepresentationItemCode
   | typeof uncallableExactRepresentationItemCode
@@ -507,7 +526,6 @@ export type Reason =
       readonly operation: string
       readonly target: 'Evaluator' | 'LLVM' | 'Wasm'
     }
-  | { readonly _tag: 'AnalysisOnlyConstruct'; readonly construct: string }
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
   | { readonly _tag: 'InvalidFloatLiteral'; readonly spelling: string }
@@ -569,6 +587,11 @@ export type Reason =
       readonly goal: string
       readonly detail: string
       readonly trace: ReadonlyArray<string>
+    }
+  | { readonly _tag: 'NonConcreteSpecialization'; readonly declaration: string }
+  | {
+      readonly _tag: 'ProviderSelection'
+      readonly problem: ProviderSelection.SelectionProblem
     }
   | { readonly _tag: 'UnresolvedExactRepresentationItem'; readonly item: string }
   | {
@@ -964,7 +987,14 @@ export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagno
       diagnostic.code === incompatibleRepresentationBoundCode ||
       diagnostic.code === contractRowInferenceCode ||
       diagnostic.code === invalidEffectProvisionCode ||
+      diagnostic.code === providerNoMatchCode ||
+      diagnostic.code === jointProviderSelectionConflictCode ||
+      diagnostic.code === providerAmbiguityCode ||
+      diagnostic.code === selectedRowCardinalityCode ||
+      diagnostic.code === providerConformanceAmbiguityCode ||
+      diagnostic.code === invalidProviderConformanceCode ||
       diagnostic.code === suspendingContinuationAllocatorCode ||
+      diagnostic.code === nonConcreteSpecializationCode ||
       diagnostic.code === polymorphicRecursionCode,
   )
 
@@ -2938,26 +2968,6 @@ export const intrinsicTargetUnavailable = (
     span,
   })
 
-/**
- * Diagnoses a construct the front end analyzes completely but no execution surface can lower, at
- * the site that writes it.
- *
- * This is deliberately a semantic-phase error rather than a backend failure: analysis is the only
- * phase that still knows the source span, and a construct that types cleanly and then dies inside
- * lowering costs its user an investigation to discover the front end accepted something no engine
- * can build. Reporting here also means the editor shows it while the line is being written.
- */
-export const analysisOnlyConstruct = (construct: string, span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: analysisOnlyConstructCode,
-    severity: 'error',
-    message: `${construct} is analysis-only: it type-checks, but no engine lowers it yet, so a program that uses it cannot be built`,
-    reason: Object.freeze({ _tag: 'AnalysisOnlyConstruct', construct }),
-    span,
-  })
-
 export const invalidBorrowPosition = (span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
@@ -3080,6 +3090,136 @@ export const unprovenConformance = (
     span,
     ...(trace.length === 0 ? {} : { notes: Object.freeze([...trace]) }),
   })
+
+export const nonConcreteSpecialization = (
+  declaration: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: nonConcreteSpecializationCode,
+    severity: 'error',
+    message: `${declaration} reaches a complete application with unresolved contract rows or evidence`,
+    reason: Object.freeze({ _tag: 'NonConcreteSpecialization', declaration }),
+    span,
+  })
+
+const providerSelectionFields = (
+  problem: ProviderSelection.SelectionProblem,
+  locations: ProviderSelection.DiagnosticLocations,
+) => {
+  const primarySpan = locations.primary
+  const primaryKey = SourceSpan.key(primarySpan)
+  const related = locations.relations
+    .flatMap((relation) => relation.origins)
+    .filter((origin) => SourceSpan.key(origin) !== primaryKey)
+    .map((span) => Object.freeze({ label: 'contributing provider constraint', span }))
+  return Object.freeze({
+    reason: Object.freeze({ _tag: 'ProviderSelection', problem }),
+    span: primarySpan,
+    ...(related.length === 0 ? {} : { relatedSpans: Object.freeze(related) }),
+  })
+}
+
+const providerNoMatch = (
+  problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ProviderNoMatch' }>,
+  locations: ProviderSelection.DiagnosticLocations,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: providerNoMatchCode,
+    severity: 'error',
+    message: 'The provider matches no compatible requirement',
+    ...providerSelectionFields(problem, locations),
+  })
+
+const jointProviderSelectionConflict = (
+  problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'JointSelectionConflict' }>,
+  locations: ProviderSelection.DiagnosticLocations,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: jointProviderSelectionConflictCode,
+    severity: 'error',
+    message: 'Provider constraints select incompatible requirement members',
+    ...providerSelectionFields(problem, locations),
+  })
+
+const providerAmbiguity = (
+  problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ProviderAmbiguity' }>,
+  locations: ProviderSelection.DiagnosticLocations,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: providerAmbiguityCode,
+    severity: 'error',
+    message: 'The provider matches more than one requirement; select one explicitly',
+    ...providerSelectionFields(problem, locations),
+  })
+
+const selectedRowCardinality = (
+  problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'SelectedRowCardinality' }>,
+  locations: ProviderSelection.DiagnosticLocations,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: selectedRowCardinalityCode,
+    severity: 'error',
+    message: `Selected requirement row has ${problem.count} members; exactly one is required`,
+    ...providerSelectionFields(problem, locations),
+  })
+
+const providerConformanceAmbiguity = (
+  problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ConformanceAmbiguity' }>,
+  locations: ProviderSelection.DiagnosticLocations,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: providerConformanceAmbiguityCode,
+    severity: 'error',
+    message: 'More than one conformance witness can provide the selected requirement',
+    ...providerSelectionFields(problem, locations),
+  })
+
+const invalidProviderConformance = (
+  problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'InvalidConformance' }>,
+  locations: ProviderSelection.DiagnosticLocations,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidProviderConformanceCode,
+    severity: 'error',
+    message: `The provider's conformance mapping is invalid: ${problem.reason}`,
+    ...providerSelectionFields(problem, locations),
+  })
+
+/** Preserves the solver's span-free semantic payload separately from ordered source locations. */
+export const providerSelection = (
+  diagnostic: ProviderSelection.SelectionDiagnostic,
+): Diagnostic => {
+  const problem = diagnostic.problem
+  switch (problem._tag) {
+    case 'ProviderNoMatch':
+      return providerNoMatch(problem, diagnostic.locations)
+    case 'JointSelectionConflict':
+      return jointProviderSelectionConflict(problem, diagnostic.locations)
+    case 'ProviderAmbiguity':
+      return providerAmbiguity(problem, diagnostic.locations)
+    case 'SelectedRowCardinality':
+      return selectedRowCardinality(problem, diagnostic.locations)
+    case 'ConformanceAmbiguity':
+      return providerConformanceAmbiguity(problem, diagnostic.locations)
+    case 'InvalidConformance':
+      return invalidProviderConformance(problem, diagnostic.locations)
+  }
+}
 
 /**
  * Creates the diagnostic for a bound operation reachable through more than one bounded parameter.

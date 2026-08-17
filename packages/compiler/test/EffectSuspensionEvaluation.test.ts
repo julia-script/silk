@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import type * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
+import { storedCatchAllocatorSuspension } from './support/storedCatchAllocatorSuspension.js'
 
 const encoder = new TextEncoder()
 
@@ -28,7 +29,7 @@ effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(program() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(program() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 it.effect('executes suspension through the heap activation machine', () =>
@@ -88,7 +89,7 @@ effect fn maybe(shouldSuspend: bool) -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(maybe(false) |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(maybe(false) |> Effect.provideMut(&mut allocator), recover)
 }`)
     assert.strictEqual(outcome._tag, 'Completed', inspect(outcome))
     if (outcome._tag !== 'Completed') return
@@ -113,7 +114,7 @@ effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(delayed() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(delayed() |> Effect.provideMut(&mut allocator), recover)
 }`)
     assert.strictEqual(outcome._tag, 'Completed', inspect(outcome))
     if (outcome._tag !== 'Completed') return
@@ -134,6 +135,16 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('preserves an outer allocator through a stored catch wrapper', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluate(storedCatchAllocatorSuspension)
+    assert.strictEqual(outcome._tag, 'Completed', inspect(outcome))
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42)
+    assert.isAbove(outcome.trace.filter((event) => event._tag === 'ContinuationRequest').length, 0)
+  }),
+)
+
 const depth = 20
 const chain = Array.from({ length: depth }, (_value, ordinal) => {
   const next = ordinal + 1
@@ -147,7 +158,7 @@ effect fn level${depth}() -> i32 ! OutOfMemory ? &mut Allocator { return 0 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(level0() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(level0() |> Effect.provideMut(&mut allocator), recover)
 }`
 
 const recursiveSelf = `effect fn count(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
@@ -159,7 +170,7 @@ const recursiveSelf = `effect fn count(value: i32) -> i32 ! OutOfMemory ? &mut A
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(count(1200) |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(count(1200) |> Effect.provideMut(&mut allocator), recover)
 }`
 
 it.effect('keeps suspended parents in deterministic logical CallDepth', () =>
@@ -170,8 +181,8 @@ it.effect('keeps suspended parents in deterministic logical CallDepth', () =>
     assert.strictEqual(blocked.reason._tag, 'EvaluationLimit')
     if (blocked.reason._tag !== 'EvaluationLimit') return
     assert.strictEqual(blocked.reason.kind, 'CallDepth')
-    assert.strictEqual(blocked.reason.count, 12)
-    assert.lengthOf(blocked.reason.activeFrames, 12)
+    assert.strictEqual(blocked.reason.count, 13)
+    assert.lengthOf(blocked.reason.activeFrames, 13)
 
     const completed = yield* evaluate(recursive, { maxCallDepth: 256, maxSteps: 100_000 })
     assert.strictEqual(completed._tag, 'Completed', inspect(completed))

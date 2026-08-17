@@ -400,7 +400,7 @@ effect fn build() -> i32 ! OutOfMemory {
 }
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map(

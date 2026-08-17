@@ -5274,11 +5274,35 @@
     },
     {
       "operation": "Intrinsic.bindRequirement",
-      "signature": "fn Intrinsic.bindRequirement(protected: Effect<A ! E ? Selected | Rest>, provider: &Provider) -> Effect<A ! E ? Rest>",
+      "signature": "fn Intrinsic.bindRequirement<?S, A, P, !E, ?R>(protected: once Effect<A ! E ? R>, provider: &P) -> Effect<A ! E ? Without<R, S>>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.bindRequirement",
-      "identity": "EffectRule.BindRequirement"
+      "identity": "ContractRule.BindRequirement"
+    },
+    {
+      "operation": "Intrinsic.bindRequirementMut",
+      "signature": "fn Intrinsic.bindRequirementMut<?S, A, P, !E, ?R>(protected: once Effect<A ! E ? R>, provider: &mut P) -> Effect<A ! E ? Without<R, S>>",
+      "unsafe": false,
+      "admission": "Effect",
+      "consumer": "silk/effects.bindRequirementMut",
+      "identity": "ContractRule.BindRequirement"
+    },
+    {
+      "operation": "Intrinsic.bindRequirementOwned",
+      "signature": "fn Intrinsic.bindRequirementOwned<?S, A, P, !E, ?R>(protected: once Effect<A ! E ? R>, provider: P) -> Effect<A ! E ? Without<R, S>>",
+      "unsafe": false,
+      "admission": "Effect",
+      "consumer": "silk/effects.bindRequirementOwned",
+      "identity": "ContractRule.BindRequirement"
+    },
+    {
+      "operation": "Intrinsic.catchFailure",
+      "signature": "fn Intrinsic.catchFailure<S, A, !E, !F, ?R, ?Q>(protected: once Effect<A ! E ? R>, handler: once fn(S) -> Effect<A ! F ? Q>) -> Effect<A ! Without<E, S> | F ? R | Q>",
+      "unsafe": false,
+      "admission": "Effect",
+      "consumer": "silk/effects.catchFailure",
+      "identity": "ContractRule.CatchFailure"
     },
     {
       "operation": "Intrinsic.replace",

@@ -6,6 +6,7 @@ import * as Intrinsic from './Intrinsic.js'
 import type * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 
@@ -501,6 +502,57 @@ const collectDeclaredType = (
     for (const member of fact.members) collectDeclaredType(member, index, scope, pending)
 }
 
+const collectRowExpression = (
+  fact: DeclarationIndex.RowExpressionFact,
+  index: DeclarationIndex.Index,
+  scope: NameResolution.ModuleScope | undefined,
+  pending: Array<Pending>,
+): void => {
+  switch (fact._tag) {
+    case 'EmptyRowExpression':
+    case 'UnavailableRowExpression':
+      return
+    case 'RowParameterExpression': {
+      const declaration = typeParameterFact(index, fact.parameter)
+      const token = SyntaxTree.tokens(fact.syntax).find(
+        (candidate) => candidate.kind === 'Identifier',
+      )
+      push(
+        pending,
+        token?.span,
+        'Type',
+        available(Object.freeze({ _tag: 'TypeParameterIdentity', id: fact.parameter })),
+        declaration === undefined ? undefined : locationOfTypeParameter(declaration),
+      )
+      return
+    }
+    case 'FailureMemberExpression':
+      collectDeclaredType(fact.member, index, scope, pending)
+      return
+    case 'RequirementMemberExpression':
+      collectDeclaredType(fact.capability, index, scope, pending)
+      return
+    case 'UnionRowExpression':
+      for (const operand of fact.operands) collectRowExpression(operand, index, scope, pending)
+      return
+    case 'WithoutRowExpression':
+      collectRowExpression(fact.source, index, scope, pending)
+      collectRowExpression(fact.selected, index, scope, pending)
+      return
+  }
+}
+
+const collectConstraint = (
+  fact: DeclarationIndex.ConstraintFact,
+  index: DeclarationIndex.Index,
+  scope: NameResolution.ModuleScope | undefined,
+  pending: Array<Pending>,
+): void => {
+  if (fact._tag === 'ProviderConstraint') collectDeclaredType(fact.provider, index, scope, pending)
+  collectRowExpression(fact.selected, index, scope, pending)
+  collectRowExpression(fact.source, index, scope, pending)
+}
+
 const parameterResolution = (
   reference: Elaboration.ParameterReferenceFact,
 ): { readonly resolution: Resolution; readonly declaration?: DeclarationLocation } => {
@@ -857,6 +909,11 @@ const collectExpression = (
       collectIntrinsicReference(expression.reference, index, pending)
       collectExpression(expression.protected, index, scope, pending)
       return
+    case 'EffectCatch':
+      collectIntrinsicReference(expression.reference, index, pending)
+      collectExpression(expression.protected, index, scope, pending)
+      collectExpression(expression.handler, index, scope, pending)
+      return
     case 'EffectBindRequirement':
       collectIntrinsicReference(expression.reference, index, pending)
       collectExpression(expression.protected, index, scope, pending)
@@ -963,10 +1020,10 @@ const collectMember = (
       collectDeclaredType(parameter.declaredType, index, scope, pending)
     }
     collectDeclaredType(member.returnType, index, scope, pending)
-    for (const failure of member.failureRow.members)
-      collectDeclaredType(failure, index, scope, pending)
-    for (const requirement of member.requirementRow.entries)
-      collectDeclaredType(requirement.capability, index, scope, pending)
+    collectRowExpression(member.failureRow.expression, index, scope, pending)
+    collectRowExpression(member.requirementRow.expression, index, scope, pending)
+    for (const constraint of member.constraints)
+      collectConstraint(constraint, index, scope, pending)
     return
   }
   if (member._tag === 'ConstantDeclaration') {
@@ -1016,10 +1073,10 @@ const collectMember = (
         collectDeclaredType(parameter.declaredType, index, scope, pending)
       }
       collectDeclaredType(operation.returnType, index, scope, pending)
-      for (const failure of operation.failureRow.members)
-        collectDeclaredType(failure, index, scope, pending)
-      for (const requirement of operation.requirementRow.entries)
-        collectDeclaredType(requirement.capability, index, scope, pending)
+      collectRowExpression(operation.failureRow.expression, index, scope, pending)
+      collectRowExpression(operation.requirementRow.expression, index, scope, pending)
+      for (const constraint of operation.constraints)
+        collectConstraint(constraint, index, scope, pending)
     }
     return
   }

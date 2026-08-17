@@ -26,7 +26,7 @@ effect fn store() -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(store(), recover)
+  return run Effect.catchAll(store(), recover)
 }`
 
 /** A user-authored allocator that hands out real system blocks, exercising the success half. */
@@ -53,7 +53,7 @@ effect fn store() -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(store(), recover)
+  return run Effect.catchAll(store(), recover)
 }`
 
 it.effect('dispatches provision through user allocator witnesses on the evaluator and Wasm', () =>
@@ -144,7 +144,7 @@ effect fn build() -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(), recover)
+  return run Effect.catchAll(build(), recover)
 }`
 
 it.effect('sweeps allocation failure ordinals with atomic rejection and unchanged failure', () =>
@@ -222,7 +222,7 @@ effect fn build() -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(), recover)
+  return run Effect.catchAll(build(), recover)
 }`
 
 /**
@@ -296,7 +296,7 @@ effect fn build() -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(), recover)
+  return run Effect.catchAll(build(), recover)
 }`
 
 it.effect('writes forwarded exclusive provider mutations back on the evaluator and Wasm', () =>

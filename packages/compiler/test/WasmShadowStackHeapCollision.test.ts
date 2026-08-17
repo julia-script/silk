@@ -155,7 +155,7 @@ ${body}
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch(measure(${depth}), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(measure(${depth}), recover) }`
 
 /** Build the chain, walk it recursively, drain it. The walk is the only recursion. */
 const walk = (depth: number): string =>
@@ -549,7 +549,7 @@ effect fn probing() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn probe() -> i32 { return run Effect.catch(probing(), recover) }
+pub fn probe() -> i32 { return run Effect.catchAll(probing(), recover) }
 
 pub fn main() -> i32 {
   let seed = Wide { ${lanes.map((lane) => `lane${lane}: ${lane}`).join(', ')} }

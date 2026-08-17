@@ -350,6 +350,7 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
             ...(run.propagationType === undefined ? {} : { propagationType: run.propagationType }),
             tagMappings: run.tagMappings,
             propagationLaneCount: run.propagationLaneCount,
+            ...(run.failureLoanEnds === undefined ? {} : { failureLoanEnds: run.failureLoanEnds }),
             ...(run.releases === undefined ? {} : { releases: run.releases }),
             type: run.type,
             provenance: run.provenance,

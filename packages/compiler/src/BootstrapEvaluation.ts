@@ -143,6 +143,30 @@ export interface EffectOutcomeValue {
   readonly payload: Value
 }
 
+const repackFailurePayload = (
+  payload: Value,
+  sourceType: DeclarationIndex.SemanticType,
+  sourceTag: number,
+  targetType: Type.Effect,
+  targetTag: number,
+): AggregateValue => {
+  const sourceMember = Type.failureCarrierMember(
+    sourceType,
+    sourceTag,
+    Type.isEffect(sourceType) ? 'OneBased' : 'ZeroBased',
+  )
+  const targetMember = Type.failureCarrierMember(targetType, targetTag, 'OneBased')
+  if (
+    payload._tag !== 'AggregateValue' ||
+    sourceMember === undefined ||
+    targetMember === undefined ||
+    !Type.equals(sourceMember, targetMember) ||
+    !Type.equals(payload.type, sourceMember)
+  )
+    throw new RangeError('MIR failure payload does not match its canonical member mapping')
+  return payload
+}
+
 export interface EffectBorrowValue {
   readonly _tag: 'EffectBorrowValue'
   readonly frame: number
@@ -4568,7 +4592,11 @@ function* executeFunction(
               throw new RangeError('MIR attempted to fail with a non-union value')
             const mapping = operation.mappings.find((candidate) =>
               Type.equals(
-                operation.sourceType.type.members.at(candidate.source) ?? Type.unit,
+                Type.failureCarrierMember(
+                  operation.sourceType.type,
+                  candidate.source,
+                  'ZeroBased',
+                ) ?? Type.unit,
                 source.member,
               ),
             )
@@ -4579,7 +4607,13 @@ function* executeFunction(
                 _tag: 'EffectOutcomeValue',
                 type: operation.type.type,
                 tag: mapping.target,
-                payload: source.payload,
+                payload: repackFailurePayload(
+                  source.payload,
+                  operation.sourceType.type,
+                  mapping.source,
+                  operation.type.type,
+                  mapping.target,
+                ),
               }),
               fromCall: false,
             })
@@ -4605,6 +4639,47 @@ function* executeFunction(
             }
             write(operation.destination, { value: outcome.value.payload, fromCall: true })
             break
+          }
+          case 'PropagateEffectFailure': {
+            const source = read(operation.source).value
+            const sourceTag =
+              source._tag === 'UnionValue'
+                ? operation.sourceType._tag === 'Union'
+                  ? operation.sourceType.type.members.findIndex((member) =>
+                      Type.equals(member, source.member),
+                    )
+                  : -1
+                : source._tag === 'AggregateValue' && operation.sourceType._tag === 'Nominal'
+                  ? 0
+                  : -1
+            const payload =
+              source._tag === 'UnionValue'
+                ? source.payload
+                : source._tag === 'AggregateValue'
+                  ? source
+                  : undefined
+            const mapping = operation.tagMappings.find(
+              (candidate) => candidate.source === sourceTag,
+            )
+            if (payload === undefined || mapping === undefined)
+              throw new RangeError('MIR propagated failure has no canonical tag mapping')
+            const released = yield* executeOperations(operation.releases ?? [])
+            if (released !== undefined) return released
+            return Object.freeze({
+              _tag: 'Value',
+              value: Object.freeze({
+                _tag: 'EffectOutcomeValue',
+                type: operation.propagationType.type,
+                tag: mapping.target,
+                payload: repackFailurePayload(
+                  payload,
+                  Mir.semanticType(operation.sourceType),
+                  mapping.source,
+                  operation.propagationType.type,
+                  mapping.target,
+                ),
+              }),
+            })
           }
           case 'RunEffect': {
             const target = functionFor(program, operation.target, operation.typeArguments)
@@ -4664,13 +4739,21 @@ function* executeFunction(
             )
             if (mapping === undefined)
               throw new RangeError('MIR propagated effect has no canonical failure-tag mapping')
+            const ended = yield* executeOperations(operation.failureLoanEnds ?? [])
+            if (ended !== undefined) return ended
             const released = yield* executeOperations(operation.releases ?? [])
             if (released !== undefined) return released
             const propagated: EffectOutcomeValue = Object.freeze({
               _tag: 'EffectOutcomeValue',
               type: operation.propagationType.type,
               tag: mapping.target,
-              payload: effectOutcome.payload,
+              payload: repackFailurePayload(
+                effectOutcome.payload,
+                operation.outcomeType.type,
+                effectOutcome.tag,
+                operation.propagationType.type,
+                mapping.target,
+              ),
             })
             trace.push(
               Object.freeze({
@@ -4739,25 +4822,36 @@ function* executeFunction(
               write(operation.destination, { value: effectOutcome.payload, fromCall: true })
               break
             }
-            if (operation.propagationType === undefined)
+            if (operation.propagationType === undefined) {
+              const ended = yield* executeOperations(operation.failureLoanEnds ?? [])
+              if (ended !== undefined) return ended
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
                 reason: 'unhandled Effect failure escaped an infallible context',
                 span: operation.provenance.span,
               })
+            }
             const mapping = operation.tagMappings.find(
               (candidate) => candidate.source === effectOutcome.tag,
             )
             if (mapping === undefined)
               throw new RangeError('MIR Effect runner has no failure-tag mapping')
+            const ended = yield* executeOperations(operation.failureLoanEnds ?? [])
+            if (ended !== undefined) return ended
             const released = yield* executeOperations(operation.releases ?? [])
             if (released !== undefined) return released
             const propagated: EffectOutcomeValue = Object.freeze({
               _tag: 'EffectOutcomeValue',
               type: operation.propagationType.type,
               tag: mapping.target,
-              payload: effectOutcome.payload,
+              payload: repackFailurePayload(
+                effectOutcome.payload,
+                operation.outcomeType.type,
+                effectOutcome.tag,
+                operation.propagationType.type,
+                mapping.target,
+              ),
             })
             return Object.freeze({ _tag: 'Value', value: propagated })
           }
@@ -4808,7 +4902,11 @@ function* executeFunction(
                     ]),
                   })
                 : (() => {
-                    const failure = operation.outcomeType.type.failures.at(outcome.tag - 1)
+                    const failure = Type.failureCarrierMember(
+                      operation.outcomeType.type,
+                      outcome.tag,
+                      'OneBased',
+                    )
                     if (failure === undefined || outcome.payload._tag !== 'AggregateValue')
                       throw new RangeError('MIR Effect result has an invalid failure tag')
                     const failureValue: Value = Type.isUnion(operation.failureValueType)
@@ -5533,7 +5631,7 @@ const executeMachine = (
         const innermost = rollbackPending.at(0)
         const failureOutcome =
           innermost?.relay?.descriptor.runner.outcome ?? context.step.origin.deferred.outcome
-        const failureTag = failureOutcome.failures.findIndex(
+        const failureTag = Type.failureMembers(failureOutcome).findIndex(
           (member) => member.module === 'silk/core' && member.name === 'OutOfMemory',
         )
         if (failureTag < 0)

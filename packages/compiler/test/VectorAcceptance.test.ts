@@ -51,7 +51,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'grows, reads, and releases a Silk-written vector on the evaluator and Wasm',
@@ -136,7 +136,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'returns shared and exclusive Vector views on the evaluator and Wasm',
@@ -204,7 +204,7 @@ effect fn build() -> i32 ! OutOfMemory {
   let pending3 = append<i32>(&mut values, 13) |> Effect.provideMut(&mut allocator)
   let appended3 = run pending3
   let marker = run grow(&mut values)
-    |> Effect.catch(recover)
+    |> Effect.catchAll(recover)
     |> Effect.provideMut(&mut allocator)
   if marker == 7 {} else { return 0 }
   if length<i32>(&values) == 4 {} else { return 1 }
@@ -216,7 +216,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn outerRecover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), outerRecover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), outerRecover) }`
 
 it.effect(
   'preserves the original vector when replacement allocation fails',
@@ -283,7 +283,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('drops initialized elements in order before releasing vector storage', () =>
   Effect.gen(function* () {
@@ -355,7 +355,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('transfers vector ownership and drops it early on the evaluator and Wasm', () =>
   Effect.gen(function* () {
@@ -404,7 +404,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
     const snapshot = yield* Analysis.ofSourceRealized(
       'vector-acceptance/zero-sized-read',
       ascii(source),
@@ -455,7 +455,7 @@ effect fn build() -> i32 ! OutOfMemory {
     observe(move secondAgain)
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
       const snapshot = yield* Analysis.ofSourceRealized(
         'vector-acceptance/structural-union-read',
         ascii(source),
@@ -495,7 +495,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
     const snapshot = yield* Analysis.ofSourceRealized(
       'vector-acceptance/move-only-union-read',
       ascii(source),
@@ -583,7 +583,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'pops the last element and decreases the length by one on the evaluator and Wasm',
@@ -607,7 +607,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'returns an absent value when popping an empty vector on the evaluator and Wasm',
@@ -641,7 +641,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'removes an element and shifts later elements down on the evaluator and Wasm',
@@ -674,7 +674,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'clears the length while keeping the capacity on the evaluator and Wasm',
@@ -724,7 +724,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'drops the overwritten element exactly once on the evaluator and Wasm',
@@ -772,7 +772,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'releases each truncated element exactly once on the evaluator and Wasm',
@@ -838,7 +838,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'pairs every acquire with one release across append, pop, and drop of move-only elements',
@@ -885,7 +885,7 @@ effect fn build() -> i32 ! OutOfMemory {
   let pending1 = append<i32>(&mut values, 11) |> Effect.provideMut(&mut allocator)
   let appended1 = run pending1
   let marker = run grow(&mut values)
-    |> Effect.catch(recover)
+    |> Effect.catchAll(recover)
     |> Effect.provideMut(&mut allocator)
   if marker == 7 {} else { return 1 }
   // The failed reserve committed nothing: length, capacity, and every element survive.
@@ -898,7 +898,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn outerRecover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), outerRecover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), outerRecover) }`
 
 it.effect(
   'leaves the vector unchanged when reserve fails with OutOfMemory',
@@ -939,7 +939,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'reads back element zero of a move-only element on the evaluator and Wasm',
@@ -976,7 +976,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'reads back every element of a move-only append sequence on the evaluator and Wasm',
@@ -1020,7 +1020,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 8 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'reads back every element across both growths of a move-only vector on the evaluator and Wasm',
@@ -1056,7 +1056,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect(
   'reads back element zero when the move-only field is Bytes on the evaluator and Wasm',

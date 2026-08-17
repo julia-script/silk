@@ -122,13 +122,13 @@ effect fn example() -> i32 ! FileError | OutOfMemory {
   }
   let target = run path("/notes/todo.bin") |> Effect.provideMut(&mut allocator)
   let message = [u8.toU8(10), u8.toU8(11), u8.toU8(12), u8.toU8(9)]
-  let written = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(writeFileWithParents(&target, &message), &mut files),
+  let written = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(writeFileWithParents(&target, &message), &mut files),
     &mut allocator,
   )
   if run exists(&target) |> Effect.provideMut(&mut files) {} else { return 1 }
-  let owned = run Intrinsic.bindRequirement(
-    Intrinsic.bindRequirement(FileSystem.readFile(&target), &mut files),
+  let owned = run Intrinsic.bindRequirementMut(
+    Intrinsic.bindRequirementMut(FileSystem.readFile(&target), &mut files),
     &mut allocator,
   )
   return checksum(asSlice(&owned))
@@ -136,4 +136,4 @@ effect fn example() -> i32 ! FileError | OutOfMemory {
 
 effect fn recover(error: FileError | OutOfMemory) -> i32 { return 2 }
 
-pub fn main() -> i32 { return run Effect.catch(example(), recover) }
+pub fn main() -> i32 { return run Effect.catchAll(example(), recover) }

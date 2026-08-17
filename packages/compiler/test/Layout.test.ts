@@ -179,7 +179,7 @@ struct Problem { position: usize }
 effect fn risky() -> Empty ! Problem { fail move Problem { position: 1 } }
 effect fn recover(problem: Problem) -> Empty { return Empty {} }
 pub fn main() -> i32 {
-  let recipe = Effect.catch(risky(), recover)
+  let recipe = Effect.catchAll(risky(), recover)
   let ignored = run recipe
   return 42
 }`
@@ -194,7 +194,7 @@ pub fn main() -> i32 {
         assert.strictEqual(planned._tag, 'Available')
         if (planned._tag !== 'Available') continue
         const outcomes = planned.value.callingShapes.filter(
-          (shape) => Type.isEffect(shape.type) && shape.type.failures.length > 0,
+          (shape) => Type.isEffect(shape.type) && Type.failureMembers(shape.type).length > 0,
         )
         assert.isAbove(outcomes.length, 0)
         for (const outcome of outcomes) {
@@ -205,6 +205,94 @@ pub fn main() -> i32 {
         assert.deepEqual(Layout.verify(planned.value), [])
       }
     }),
+)
+
+it.effect('rejects non-canonical failure tags before payload-member indexing', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'layout/failure-tags',
+      ascii(`struct A { code: i32 }
+struct B { code: f64 }
+effect fn risky(flag: bool) -> i32 ! A | B {
+  if flag { fail A { code: 1 } }
+  fail B { code: 2.0 }
+}
+effect fn recover(problem: A | B) -> i32 {
+  return match move problem {
+    A { code } => code
+    B { code } => 0
+  }
+}
+pub fn main() -> i32 { return run Effect.catchAll(risky(true), recover) }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const planned = Analysis.layoutOf(snapshot)
+    assert.strictEqual(planned._tag, 'Available')
+    if (planned._tag !== 'Available') return
+
+    const a = Type.nominal('layout/failure-tags', 'A')
+    const b = Type.nominal('layout/failure-tags', 'B')
+    const normalizedUnion = Type.union([a, b])
+    assert.strictEqual(normalizedUnion._tag, 'Normalized')
+    if (normalizedUnion._tag !== 'Normalized' || !Type.isUnion(normalizedUnion.type)) return
+    const union = normalizedUnion.type
+    const effect = planned.value.callingShapes
+      .map((shape) => shape.type)
+      .find(
+        (type): type is Type.Effect =>
+          Type.isEffect(type) &&
+          Type.failureMembers(type).length === 2 &&
+          Type.failureMembers(type).some((failure) => Type.equals(failure, a)),
+      )
+    assert.notStrictEqual(effect, undefined)
+    if (effect === undefined) return
+    const targetTag =
+      Type.failureMembers(effect).findIndex((failure) => Type.equals(failure, a)) + 1
+    const unionTag = union.members.findIndex((member) => Type.equals(member, a))
+    assert.isAbove(targetTag, 0)
+    assert.isAtLeast(unionTag, 0)
+    assert.notStrictEqual(
+      Layout.failurePayloadRepacking(planned.value, a, 0, effect, targetTag),
+      undefined,
+    )
+    assert.notStrictEqual(
+      Layout.failurePayloadRepacking(planned.value, union, unionTag, effect, targetTag),
+      undefined,
+    )
+    assert.notStrictEqual(
+      Layout.failurePayloadRepacking(planned.value, effect, targetTag, effect, targetTag),
+      undefined,
+    )
+
+    const invalidTags = [-1, Number.MAX_SAFE_INTEGER + 1, Number.NaN, Number.POSITIVE_INFINITY, 0.5]
+    for (const tag of invalidTags) {
+      assert.strictEqual(
+        Layout.failurePayloadRepacking(planned.value, a, tag, effect, targetTag),
+        undefined,
+      )
+      assert.strictEqual(
+        Layout.failurePayloadRepacking(planned.value, union, tag, effect, targetTag),
+        undefined,
+      )
+      assert.strictEqual(
+        Layout.failurePayloadRepacking(planned.value, effect, tag, effect, targetTag),
+        undefined,
+      )
+      assert.strictEqual(
+        Layout.failurePayloadRepacking(planned.value, effect, targetTag, effect, tag),
+        undefined,
+      )
+    }
+    assert.strictEqual(
+      Layout.failurePayloadRepacking(planned.value, effect, 0, effect, targetTag),
+      undefined,
+    )
+    assert.strictEqual(
+      Layout.failurePayloadRepacking(planned.value, effect, targetTag, effect, 0),
+      undefined,
+    )
+  }),
 )
 
 it('reports malformed target, order, duplicates, and scalar facts as data', () => {

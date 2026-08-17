@@ -349,6 +349,7 @@ const printServiceOperation = (
   const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
   const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
   const requirementRow = directNodes(node).find((child) => child.kind === 'RequirementRow')
+  const whereClause = directNodes(node).find((child) => child.kind === 'WhereClause')
   const body = directNodes(node).find((child) => child.kind === 'Block')
   return FormatDocument.concat(
     ...(effectKeyword === undefined
@@ -369,6 +370,9 @@ const printServiceOperation = (
     ...(requirementRow === undefined
       ? []
       : [printNode(context, requirementRow, FormatDocument.text(' '))]),
+    ...(whereClause === undefined
+      ? []
+      : [printNode(context, whereClause, FormatDocument.text(' '))]),
     ...(body === undefined ? [] : [printNode(context, body, FormatDocument.text(' '))]),
   )
 }
@@ -444,6 +448,7 @@ const printFunctionDeclaration = (
   const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
   const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
   const requirementRow = directNodes(node).find((child) => child.kind === 'RequirementRow')
+  const whereClause = directNodes(node).find((child) => child.kind === 'WhereClause')
   const name =
     directTokens(node).find((token) => token.kind === 'Identifier') ??
     directTokens(node).find((token) => token.kind === 'DropKeyword')
@@ -476,6 +481,9 @@ const printFunctionDeclaration = (
     ...(requirementRow === undefined
       ? []
       : [printNode(context, requirementRow, FormatDocument.hardLine)]),
+    ...(whereClause === undefined
+      ? []
+      : [printNode(context, whereClause, FormatDocument.hardLine)]),
     printNode(context, nodeOf(node, 'Block'), FormatDocument.text(' ')),
   )
 }
@@ -724,10 +732,14 @@ const printNode = (
     }
     case 'ReferenceType': {
       const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
+      const at = directTokens(node).find((token) => token.kind === 'At')
+      const role = directTokens(node).find((token) => token.kind === 'Identifier')
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'Ampersand'), prefix, preserveBlank),
         ...(mut === undefined ? [] : [printToken(context, mut), FormatDocument.text(' ')]),
         printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
+        ...(at === undefined ? [] : [printToken(context, at)]),
+        ...(role === undefined ? [] : [printToken(context, role)]),
       )
     }
     case 'CallableType': {
@@ -846,7 +858,8 @@ const printNode = (
       )
     case 'RequirementRow': {
       const members = directNodes(node).filter(
-        (child) => child.kind === 'Requirement' || child.kind === 'TypePath',
+        (child) =>
+          child.kind === 'Requirement' || child.kind === 'TypePath' || child.kind === 'RowWithout',
       )
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'Question'), prefix, preserveBlank),
@@ -869,6 +882,61 @@ const printNode = (
         printNode(context, nodeOf(node, 'TypePath')),
         ...(at === undefined ? [] : [printToken(context, at)]),
         ...(role === undefined ? [] : [printToken(context, role)]),
+      )
+    }
+    case 'RowWithout': {
+      const operands = directNodes(node)
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Identifier'), prefix, preserveBlank),
+        printToken(context, tokenOf(node, 'Less')),
+        printNode(context, operands[0] ?? nodeOf(node, 'TypePath')),
+        printToken(context, tokenOf(node, 'Comma')),
+        printNode(context, operands[1] ?? nodeOf(node, 'TypePath'), FormatDocument.text(' ')),
+        printToken(context, tokenOf(node, 'Greater')),
+      )
+    }
+    case 'WhereClause': {
+      const constraints = directNodes(node)
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Identifier'), prefix, preserveBlank),
+        FormatDocument.group(
+          FormatDocument.indent(
+            FormatDocument.concat(
+              ...constraints.map((constraint, ordinal) =>
+                printNode(
+                  context,
+                  constraint,
+                  ordinal === 0
+                    ? FormatDocument.softLine
+                    : FormatDocument.concat(FormatDocument.text(','), FormatDocument.softLine),
+                ),
+              ),
+            ),
+          ),
+        ),
+      )
+    }
+    case 'MembershipConstraint': {
+      const operands = directNodes(node)
+      return FormatDocument.concat(
+        printNode(context, operands[0] ?? nodeOf(node, 'TypePath'), prefix, preserveBlank),
+        printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+        printNode(context, operands[1] ?? nodeOf(node, 'TypePath'), FormatDocument.text(' ')),
+      )
+    }
+    case 'ProviderConstraint': {
+      const operands = directNodes(node)
+      const keywords = directTokens(node).filter((token) => token.kind === 'Identifier')
+      return FormatDocument.concat(
+        printNode(context, operands[0] ?? nodeOf(node, 'TypePath'), prefix, preserveBlank),
+        ...(keywords[0] === undefined
+          ? []
+          : [printToken(context, keywords[0], FormatDocument.text(' '))]),
+        printNode(context, operands[1] ?? nodeOf(node, 'TypePath'), FormatDocument.text(' ')),
+        ...(keywords[1] === undefined
+          ? []
+          : [printToken(context, keywords[1], FormatDocument.text(' '))]),
+        printNode(context, operands[2] ?? nodeOf(node, 'TypePath'), FormatDocument.text(' ')),
       )
     }
     case 'Block':
@@ -978,8 +1046,6 @@ const printNode = (
           FormatDocument.text(' '),
         ),
       )
-    case 'RoleExpression':
-      return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
     case 'UnitExpression':
     case 'IntegerLiteralExpression':
     case 'FloatingLiteralExpression':

@@ -7,6 +7,15 @@
 import { readFileSync } from 'node:fs'
 import * as Transcendental from '../../src/Transcendental.js'
 import { floatMathPrograms } from './floatMath.js'
+import {
+  auditAllocatorSuspension,
+  mixedServiceProviderSuspension,
+  ownedAllocatorSuspensionFailure,
+  ownedAllocatorSuspensionSuccess,
+  ownedProviderSuspendedFailure,
+  ownedProviderSuspendedSuccess,
+} from './ownedAllocatorSuspension.js'
+import { storedCatchAllocatorSuspension } from './storedCatchAllocatorSuspension.js'
 
 // folded from Transcendental.test.ts: the canonical-bits program is generated from the pinned
 // high-precision vectors plus the fixed edge cases, so the expected bits can never drift from the
@@ -66,6 +75,99 @@ export interface InvalidCorpusProgram {
   readonly source: string
   readonly codes: ReadonlyArray<string>
 }
+
+export const constrainedCallableForwarding = `service Counter {
+  effect fn get() -> i32 ? &Counter
+}
+struct Fixed { value: i32 }
+effect fn get(self: &Fixed) -> i32 { return self.value }
+impl Counter for Fixed { get: Fixed.get }
+effect fn read() -> i32 ? &Counter { return run Counter.get() }
+fn forward<F>(value: F) -> F { return move value }
+fn forwardAgain<F>(value: F) -> F {
+  let forwarded = forward(move value)
+  return move forwarded
+}
+pub fn main() -> i32 {
+  let fixed = Fixed { value: 42 }
+  let bind = forwardAgain(Effect.provide<&Counter>(&fixed))
+  return run bind(read())
+}`
+
+/** Failure payloads retain member bits while rows change their widest physical carrier lane. */
+export const heterogeneousFailurePayload = `import silk.effects as Effect
+struct Selected { code: i32 }
+struct Small { code: i32 }
+struct Wide { code: f64 }
+effect fn risky() -> i32 ! Selected | Small { fail Small { code: 41 } }
+effect fn recoverSelected(problem: Selected) -> i32 ! Wide { return problem.code }
+effect fn recoverAny(problem: Small | Wide) -> i32 {
+  return match move problem {
+    Small { code } => code + 1
+    Wide { code } => 0
+  }
+}
+effect fn widenedResidual() -> i32 ! Small | Wide {
+  return run Effect.catch<Selected>(risky(), recoverSelected)
+}
+effect fn completeResidual() -> i32 {
+  return run Effect.catchAll(widenedResidual(), recoverAny)
+}
+pub fn main() -> i32 { return run completeResidual() }
+`
+
+/** Detached address payloads survive a row carrier widened by a floating handler failure. */
+export const heterogeneousOwnedFailurePayload = `import silk.effects as Effect
+struct Selected { code: i32 }
+struct Owned { storage: Allocation }
+struct Wide { code: f64 }
+effect fn risky() -> i32 ! Selected | Owned | OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<i32>()
+  let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let storage = run pending
+  fail Owned { storage: move storage }
+}
+effect fn recoverSelected(problem: Selected) -> i32 ! Wide { return problem.code }
+fn release(storage: Allocation) -> i32 {
+  drop storage
+  return 42
+}
+effect fn recoverAny(problem: Owned | OutOfMemory | Wide) -> i32 {
+  return match move problem {
+    Owned { storage } => release(move storage)
+    OutOfMemory {} => 0
+    Wide { code } => 0
+  }
+}
+effect fn widenedResidual() -> i32 ! Owned | OutOfMemory | Wide {
+  return run Effect.catch<Selected>(risky(), recoverSelected)
+}
+effect fn completeResidual() -> i32 {
+  return run Effect.catchAll(widenedResidual(), recoverAny)
+}
+pub fn main() -> i32 { return run completeResidual() }
+`
+
+/** Reified residual unions release owned address payloads from a floating carrier when dropped. */
+export const heterogeneousOwnedFailureResultDrop = `import silk.effects as Effect
+struct Selected { code: i32 }
+struct Owned { storage: Allocation }
+struct Wide { code: f64 }
+effect fn risky() -> i32 ! Selected | Owned | OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let pending = Allocator.allocate(Layout.of<i32>()) |> Effect.provideMut(&mut allocator)
+  let storage = run pending
+  fail Owned { storage: move storage }
+}
+effect fn recoverSelected(problem: Selected) -> i32 ! Wide { return problem.code }
+pub fn main() -> i32 {
+  let selected = Effect.catch<Selected>(risky(), recoverSelected)
+  let completed = run Effect.result(move selected)
+  drop completed
+  return 42
+}
+`
 
 const staticCompositionFixture = readFileSync(
   new URL('../fixtures/static-composition/static-composition-acceptance.silk', import.meta.url),
@@ -153,6 +255,11 @@ export const corpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'literal',
     source: 'pub fn main() -> i32 { return 42 }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'constrained-callable-forwarding',
+    source: constrainedCallableForwarding,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -629,7 +736,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from UnicodeNormalization.test.ts: the two normalized owners compared directly, which
@@ -649,7 +756,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from CharacterLiteral.test.ts: every accepted escape, multi-byte scalars, and the six
@@ -768,7 +875,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 99 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from VectorAcceptance.test.ts: growth past the initial capacity with boundary reads.
@@ -800,7 +907,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from OwnedAllocationDispatch.test.ts: quota refusal propagates typed OutOfMemory.
@@ -835,7 +942,7 @@ effect fn build() -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(), recover)
+  return run Effect.catchAll(build(), recover)
 }`,
     expected: { _tag: 'Completes', result: 7 },
   },
@@ -863,7 +970,7 @@ pub fn main() -> i32 {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     expected: { _tag: 'Completes', result: 136 },
   },
   // folded from SlotLaneWidth.test.ts: f64 lane parity including a negative value.
@@ -890,7 +997,7 @@ pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(store(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     expected: { _tag: 'Completes', result: 108 },
   },
   // folded from BytesAcceptance.test.ts: copy, append, and mutate through byte slices (exit 180).
@@ -927,7 +1034,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 180 },
   },
   // folded from StaticByteViewIndexing.test.ts: out-of-bounds static byte read traps.
@@ -967,7 +1074,7 @@ effect fn build(count: usize) -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(4), recover)
+  return run Effect.catchAll(build(4), recover)
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
@@ -1010,7 +1117,7 @@ effect fn retrying() -> i32 ! Problem {
 }
 effect fn recover(problem: Problem) -> i32 { return 99 }
 pub fn main() -> i32 {
-  let handled = retrying() |> Effect.catch(recover)
+  let handled = retrying() |> Effect.catchAll(recover)
   return run handled
 }`,
     expected: { _tag: 'Completes', result: 3 },
@@ -1027,12 +1134,32 @@ effect fn attempt() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
 effect fn recover(error: Problem | OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
-  return run Effect.catch(
+  return run Effect.catchAll(
     attempt() |> Effect.retry(2) |> Effect.provideMut(&mut allocator),
     recover
   )
 }`,
     expected: { _tag: 'Completes', result: 7 },
+  },
+  {
+    name: 'stored-catch-allocator-suspension',
+    source: storedCatchAllocatorSuspension,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'owned-allocator-suspension-success',
+    source: ownedAllocatorSuspensionSuccess,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'owned-allocator-suspension-failure',
+    source: ownedAllocatorSuspensionFailure,
+    expected: { _tag: 'Completes', result: 7 },
+  },
+  {
+    name: 'audit-allocator-suspension',
+    source: auditAllocatorSuspension,
+    expected: { _tag: 'Completes', result: 42 },
   },
   // folded from StoredCallableRuntime.test.ts: an uncalled stored callable owning a Drop guard is
   // cleaned exactly once when a typed failure exits the frame.
@@ -1060,7 +1187,7 @@ effect fn build() -> i32 ! OutOfMemory {
   fail OutOfMemory {}
 }
 effect fn recover(error: OutOfMemory) -> i32 { return 42 }
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from DropHookExecution.test.ts: a guard live at a failing run releases through its hook
@@ -1100,7 +1227,7 @@ effect fn build() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> i32 { return run Effect.catch(build(), recover) }`,
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 7 },
   },
   // folded from OpaqueRepresentationEngines.test.ts: opaque callable returns keep their hidden
@@ -1114,6 +1241,81 @@ pub fn main() -> i32 {
   let second = make(1)
   return first(1) + second(0)
 }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // One program covers success bypass, selected recovery, and residual propagation. Keeping the
+  // complete branch matrix in the shared corpus proves native execution without a feature-local
+  // compile/link test.
+  {
+    name: 'effect-selective-catch',
+    source: `import silk.effects as Effect
+struct Selected { code: i32 }
+struct Residual { code: i32 }
+effect fn risky(mode: i32) -> i32 ! Selected | Residual {
+  if mode == 0 { return 10 }
+  if mode == 1 { fail Selected { code: 10 } }
+  fail Residual { code: 16 }
+}
+effect fn recoverSelected(problem: Selected) -> i32 { return problem.code + 4 }
+effect fn recoverResidual(problem: Residual) -> i32 { return problem.code + 2 }
+effect fn selective(mode: i32) -> i32 ! Residual {
+  return run Effect.catch<Selected>(risky(mode), recoverSelected)
+}
+effect fn completed(mode: i32) -> i32 {
+  return run Effect.catchAll(selective(mode), recoverResidual)
+}
+pub fn main() -> i32 {
+  return (run completed(0)) + (run completed(1)) + (run completed(2))
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-selective-catch-direct-stored',
+    source: `import silk.effects as Effect
+struct Selected { code: i32 }
+struct Residual { code: i32 }
+effect fn risky() -> i32 ! Selected | Residual { fail Selected { code: 10 } }
+effect fn recoverSelected(problem: Selected) -> i32 { return problem.code + 1 }
+effect fn recoverResidual(problem: Residual) -> i32 { return problem.code + 2 }
+pub fn main() -> i32 {
+  let selected = Intrinsic.catchFailure<Selected>(risky(), recoverSelected)
+  return run Effect.catchAll(move selected, recoverResidual)
+}`,
+    expected: { _tag: 'Completes', result: 11 },
+  },
+  {
+    name: 'effect-heterogeneous-failure-payload',
+    source: heterogeneousFailurePayload,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-heterogeneous-owned-failure-payload',
+    source: heterogeneousOwnedFailurePayload,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-heterogeneous-owned-failure-result-drop',
+    source: heterogeneousOwnedFailureResultDrop,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // Affine owned service providers remain in the parent frame while a pre-read scalar suspends,
+  // then release exactly once after either success or typed failure.
+  {
+    name: 'owned-provider-suspended-success',
+    source: ownedProviderSuspendedSuccess,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'owned-provider-suspended-failure',
+    source: ownedProviderSuspendedFailure,
+    expected: { _tag: 'Completes', result: 7 },
+  },
+  // One service call site is specialized with both a synchronous and a suspendable provider. The
+  // outer allocator binding must relay through the intermediate wrappers without contaminating
+  // either provider-specific execution classification.
+  {
+    name: 'mixed-service-provider-suspension',
+    source: mixedServiceProviderSuspension,
     expected: { _tag: 'Completes', result: 42 },
   },
   // The float math conformance programs join the corpus so the native differential compiles and

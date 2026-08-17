@@ -28,5 +28,5 @@ effect fn build(count: usize) -> i32 ! OutOfMemory {
 effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
 pub fn main() -> i32 {
-  return run Effect.catch(build(4), recover)
+  return run Effect.catchAll(build(4), recover)
 }

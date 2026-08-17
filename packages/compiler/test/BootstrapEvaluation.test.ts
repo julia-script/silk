@@ -46,6 +46,8 @@ it.effect('reproduces every pinned corpus outcome', () =>
       }
     }
   }),
+  // The corpus replays every pinned program; it outgrew the default 60s ceiling on CI hosts.
+  300_000,
 )
 
 it.effect('traces the identity program in order with bound and returned values', () =>
@@ -317,7 +319,7 @@ effect fn recover(problem: Problem, adjustment: i32) -> i32 {
   return problem.code + adjustment
 }
 pub fn main() -> i32 {
-  let handled = failNow() |> Effect.catch(recover(1))
+  let handled = failNow() |> Effect.catchAll(recover(1))
   return run handled
 }`)
 
@@ -385,7 +387,7 @@ effect fn risky(value: i32) -> i32 ! Problem {
 }
 effect fn recover(problem: Problem) -> i32 { return problem.code + 1 }
 pub fn main() -> i32 {
-  let recipe = Effect.catch(risky(0), recover)
+  let recipe = Effect.catchAll(risky(0), recover)
   return run recipe
 }`)
 
@@ -476,7 +478,7 @@ effect fn countdown(value: i32) -> i32 ! Problem {
   return run countdown(value - 1)
 }
 effect fn recover(problem: Problem) -> i32 { return problem.code + 1 }
-pub fn main() -> i32 { return run Effect.catch(countdown(4), recover) }`)
+pub fn main() -> i32 { return run Effect.catchAll(countdown(4), recover) }`)
 
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return

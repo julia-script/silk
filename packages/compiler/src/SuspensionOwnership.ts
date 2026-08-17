@@ -326,8 +326,20 @@ const planFor = (
 ): Plan => {
   const definitions = definitionMap(fn)
   const operationDefined = operationDefinitions(operation)
+  const continuationAllocatorLocals =
+    operation._tag === 'RunEffectValue'
+      ? operation.providers.flatMap((provider) =>
+          provider.argument !== undefined &&
+          provider.role === 'DefaultRole' &&
+          provider.requirementAccess === 'Exclusive' &&
+          (provider.access === 'Exclusive' || provider.access === 'Take') &&
+          Type.equals(provider.capability, Type.allocator)
+            ? [provider.argument.ordinal]
+            : [],
+        )
+      : []
   const slots = Object.freeze(
-    [...live]
+    [...new Set([...live, ...continuationAllocatorLocals])]
       .filter((ordinal) => !operationDefined.has(ordinal))
       .sort((left, right) => left - right)
       .flatMap((ordinal) => {

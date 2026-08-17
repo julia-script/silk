@@ -168,7 +168,7 @@ effect fn measure() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch(measure(), recover) }
+pub fn main() -> i32 { return run Effect.catchAll(measure(), recover) }
 ```
 
 The recursive spelling of `length` is shorter and reads better, and for a chain of known-small depth
@@ -231,7 +231,7 @@ effect fn measure() -> i32 ! OutOfMemory {
 
 effect fn recover(error: OutOfMemory) -> i32 { return 1 }
 
-pub fn main() -> i32 { return run Effect.catch(measure(), recover) }
+pub fn main() -> i32 { return run Effect.catchAll(measure(), recover) }
 ```
 
 ## 5. What about effects?
