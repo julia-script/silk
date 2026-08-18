@@ -57,11 +57,18 @@ not belong in a language rule unless a program can observe them.
 
 ## Contents
 
-- [Program entry](program-entry.md) — the public `main` forms and current misleading diagnostic.
+- [Program entry](program-entry.md) — ordinary and effectful `main`, automatic Effect execution,
+  unhandled typed failures, and requirement closure.
 - [Statements and discarded values](statements-and-discarding.md) — which expression results may be
   ignored and why the current rule still needs confirmation.
 - [Effects and execution](effects-and-execution.md) — effect construction, success values, `run`,
   and nested Effects. Initial rules are confirmed.
+- [Effect contracts](effect-contracts.md) — success, failure, and requirement channels; declaration
+  bounds; generic failure types and requirement rows; and concrete Effect identity.
+- [Typed failures](typed-failures.md) — ordinary failure values, propagation, recovery, cleanup,
+  diagnostic context, and fatal traps.
+- [Language style guide](style-guide.md) — non-semantic naming conventions for readable,
+  discoverable Silk APIs.
 - [Ownership and borrowing](ownership-and-borrowing.md) — Copy and affine values, moves, borrows,
   mutation, and cleanup. Initial rules are candidates pending review.
 

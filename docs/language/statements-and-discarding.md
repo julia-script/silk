@@ -14,7 +14,7 @@ or return it.
 ```silk
 effect fn answer() -> i32 { return 42 }
 
-pub effect fn main() -> () {
+pub effect fn main() {
   drop run answer()
 }
 ```
@@ -25,7 +25,7 @@ ignore its lazy Effect value. It does not execute the Effect.
 ```silk,ignore
 effect fn answer() -> i32 { return 42 }
 
-pub effect fn main() -> () {
+pub effect fn main() {
   answer()
 }
 ```

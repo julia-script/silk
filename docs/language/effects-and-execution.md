@@ -7,7 +7,7 @@ exactly one Effect layer. An Effect may succeed with another Effect as an ordina
 
 **Status:** Confirmed
 
-An effect function declared with success type `A`, failure row `E`, and requirement row `R` has call
+An effect function declared with success type `A`, failure type `E`, and requirement row `R` has call
 result `Effect<A ! E ? R>`. Calling it does not execute its body.
 
 ```silk
@@ -131,7 +131,7 @@ The following superficially confusing case does not demonstrate automatic flatte
 effect fn inner() -> i32 { return 42 }
 effect fn outer() -> i32 { return inner() }
 
-pub effect fn main() -> () {
+pub effect fn main() {
   let value = run outer()
 }
 ```
@@ -211,42 +211,47 @@ diagnostic. Invalid captures are diagnosed by the capture and ownership rules st
 **Status:** Confirmed
 
 An ordinary `fn` has no typed-failure or requirement channels. The Effect at a `run` site inside an
-ordinary function must therefore have empty failure and requirement rows. All typed failures must
-be recovered or reified as values, and all requirements must be provided, before execution crosses
-that boundary.
+ordinary function must therefore have failure type `never` and an empty requirement row. All typed
+failures must be recovered or reified as values, and all requirements must be provided, before
+execution crosses that boundary.
 
-The rule applies to the final residual rows after composition. A recovery operation whose handler
-can fail, or a provision operation whose acquisition has requirements, does not close the boundary
-unless those new rows are also eliminated.
+The rule applies to the final residual channels after composition. A recovery operation whose
+handler can fail, or a provision operation whose acquisition has requirements, does not close the
+boundary unless those new channels are also eliminated.
 
 ```silk
 import silk.effects as Effect
 
-struct Problem {}
+struct ProblemError {}
 
-effect fn risky() -> i32 ! Problem {
-  fail move Problem {}
+effect fn risky() -> i32 ! ProblemError {
+  fail ProblemError {}
 }
 
-effect fn recover(problem: Problem) -> i32 {
+effect fn recover(error: ProblemError) -> i32 {
   return 0
 }
 
 pub fn main() -> i32 {
-  return run Effect.catch<Problem>(risky(), recover)
+  return run Effect.catch<ProblemError>(risky(), recover)
 }
 ```
 
-An `effect fn` may instead propagate residual failures and requirements when its own declared or
-inferred contract contains them.
+An `effect fn` may instead propagate residual failures and requirements when its own contract
+contains them.
 
-**Boundary:** Neither failure nor requirement rows may escape through an ordinary function's `run`.
+An executable `effect fn main` is itself an Effect boundary handled by the generated program entry
+adapter; it is not an ordinary-function exception to this rule. See
+[program entry](program-entry.md).
+
+**Boundary:** Neither a non-`never` failure type nor a nonempty requirement row may escape through an
+ordinary function's `run`.
 
 ```silk,ignore
-struct Problem {}
+struct ProblemError {}
 
-effect fn risky() -> i32 ! Problem {
-  fail move Problem {}
+effect fn risky() -> i32 ! ProblemError {
+  fail ProblemError {}
 }
 
 pub fn main() -> i32 {
@@ -268,10 +273,10 @@ pub fn main() -> i32 {
 }
 ```
 
-**Diagnostics:** A nonempty residual failure row reports `SEM0066` at `run` and names every
+**Diagnostics:** A residual failure type other than `never` reports `SEM0066` at `run` and names every
 unhandled failure member. A nonempty residual requirement row reports `SEM0071` at `run` and names
-every unsatisfied requirement member. When both rows are nonempty, the diagnostics must expose both
-residual rows rather than stopping after the first category.
+every unsatisfied requirement member. When both channels remain open, the diagnostics must expose
+both rather than stopping after the first category.
 
 **Evidence:** [effect-contract decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
 [flow specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
@@ -285,15 +290,18 @@ language-level Effect surface is:
 
 | Area | Rules still to define |
 | --- | --- |
-| Effect contracts | `effect fn` as a fully deferred body; `Effect<A ! E ? R>` syntax, defaults, inference, visibility requirements, hidden identity, and storage boundaries |
-| Execution | Effect-to-effect row propagation, row inference at `run` sites, and any remaining permitted execution contexts |
-| Typed failure | Valid failure-row members; `fail`; declared versus inferred failures; propagation; recovery; traps versus typed failures |
+| Execution | Any remaining permitted execution contexts |
 | Requirements and provision | Requirement entries, access modes, roles, service calls, provider selection, and row subtraction |
 | Capture and reuse | Copy snapshots, shared and exclusive captures, moved captures, run access, repeated execution, and take-once Effects |
-| Lifecycle | Dropping an unrun Effect, cleanup after success or typed failure, retry state, suspension, and the boundary around unrecoverable traps |
+| Lifecycle | Dropping an unrun Effect, cleanup after success, retry state, and suspension |
 | Bootstrap limits | Cancellation, interruption, concurrency, and asynchronous cleanup are absent from the bootstrap language |
 
 The standard-library operations built from these rules—including `result`, `mapBoth`, `map`,
 `mapError`, `flatMap`, `flatten`, `zip`, `zip3`, `tap`, `catch`, `catchAll`, `ensuring`,
 `ifThenElse`, `retry`, the requirement-binding and provision operations, and `suspend`—belong in an
 Effect API reference rather than on this language-semantics page.
+
+The signature-level rules for Effect channels, declaration bounds, generic failure types and
+requirement rows, and concrete identity are defined in [Effect contracts](effect-contracts.md).
+Valid failure values, propagation, recovery, cleanup, diagnostic context, and fatal traps are
+defined in [typed failures](typed-failures.md).

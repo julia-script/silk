@@ -1,0 +1,491 @@
+# Typed failures
+
+A typed failure is an ordinary Silk value carried through an Effect's failure channel. Failure
+values do not implement a marker interface, inherit from an error hierarchy, or receive a wrapper
+before they may be used with `fail`.
+
+## Terminology
+
+These terms have the following meanings throughout the language reference:
+
+| Term | Definition |
+| --- | --- |
+| **Typed failure** | An unsuccessful Effect outcome carrying a value compatible with the Effect's failure type `E`. |
+| **Failure payload** | The value carried by one typed failure. In `fail "not found"`, the string value is the payload. |
+| **Failure type** | The ordinary type `E` in `Effect<A ! E>`. Multiple alternatives use an ordinary union such as `NotFoundError \| InvalidInputError`; `never` means no possible typed failure. |
+| **Concrete type** | A complete value type that is known when executable code is specialized. A generic function may name an ordinary type parameter while being checked, but every executable specialization resolves it to a concrete type. |
+| **Owned value** | A value that is not a borrow. The value carries responsibility for releasing the resources it owns. Moving an affine owned value transfers that responsibility; copying a `Copy` value creates an independent value. |
+| **`Copy` value** | A value that an ordinary read may duplicate. Reading it does not consume the original binding. |
+| **Affine value** | A value that cannot be duplicated implicitly. It has one owner at a time and must be moved to transfer that ownership. |
+| **Move** | An ownership transfer written as `move value`. The destination becomes responsible for the value, and the source binding is no longer available on that continuing control-flow path. |
+| **Detached value** | An owned value that remains valid independently of the lexical scope and service providers where it was created. It contains no borrowed reference or provider-dependent storage. |
+| **Self-contained allocation** | Storage whose ownership and cleanup authority travel with the value. An owned string or vector may therefore be detached even though it uses allocated memory. |
+| **Nominal type** | A type identified by its declaration name rather than only by its representation. Two structs with identical fields remain different nominal types. |
+| **Abortive expression** | An expression that stops the current execution path instead of producing an ordinary value. Statements after an unconditional abortive expression are unreachable. |
+| **`never`** | The success type of an expression that cannot produce a success value. It is compatible with any expected success type because no value reaches that context. |
+| **Propagate** | Forward a typed failure from one Effect execution to an enclosing Effect without recovering it or converting it into an ordinary value. |
+| **Enclosing Effect contract** | The success, failure, and requirement channels declared by the `effect fn` or `effect {}` body containing an operation. |
+| **Residual failure type** | The ordinary type still able to propagate after recovery and other Effect transformations have been applied. |
+| **Protected Effect** | The Effect whose failure outcome a recovery operation observes. Successful execution bypasses the recovery handler. |
+| **Recovery handler** | A callable that receives an owned failure payload and constructs the Effect that runs for that failure. |
+| **Recover** | Handle a typed failure and continue the composed Effect with the handler's outcome instead of propagating that failure unchanged. |
+| **Normalized union** | A union with unreachable `never` members and duplicate types removed. A one-member union is that member itself. |
+| **Selected failure type** | The nonempty ordinary type or union `S` that one recovery operation handles. `S` must be contained in the protected failure type `E`. |
+| **Union subset** | A type whose every union alternative also occurs in another type. `NotFoundError | string` is a subset of `NotFoundError | string | OfflineError`. |
+| **Union difference** | The ordinary type operation `Without<E, S>`, which removes every alternative in `S` from `E`. It transforms a type; it does not by itself transform or discard a runtime value. |
+| **Structured exit** | Leaving one or more lexical scopes through ordinary language control flow, including `return`, `break`, `continue`, or typed-failure propagation. Every owner left behind is cleaned according to the ordinary ownership rules. |
+| **Diagnostic context** | Hidden execution metadata retained for reporting a failure, such as its source origin and logical Effect call path. It is not part of the failure payload or failure type. |
+| **Logical Effect trace** | The Effect execution path relevant to a failure, including its origin and meaningful execution boundaries even after the corresponding native stack frames have been exited. |
+| **Trap** | Fatal abnormal termination caused by an invalid runtime operation or violated invariant. A trap is not an Effect outcome, does not appear in `E`, and cannot be recovered. |
+
+“Detached” does not mean “contains no allocation.” It means that everything required to keep the
+value valid and eventually clean it up travels with the value.
+
+```silk
+struct MessageView { text: &string } // borrowed; not detached
+struct OwnedMessage { text: string } // owns its text; detached
+```
+
+The complete ownership rules are defined under
+[ownership and borrowing](ownership-and-borrowing.md).
+
+## FAIL-001 — Any concrete, owned, detached value may be a typed failure
+
+**Status:** Confirmed
+
+A failure payload does not need to conform to `Report`, `Error`, or any other marker interface. Its
+type does not need to be nominal. Built-in values, named structs, and other concrete value types may
+appear as an Effect's failure type when their values are owned and detached.
+
+```silk
+effect fn read() -> i32 ! string {
+  fail "not found"
+}
+```
+
+Nominal structs remain useful when an API needs distinct failure categories:
+
+```silk
+struct NotFoundError { id: i32 }
+struct PermissionDeniedError { id: i32 }
+
+effect fn read(id: i32) -> i32 ! NotFoundError | PermissionDeniedError {
+  fail NotFoundError { id: id }
+}
+```
+
+The `Error` suffix follows the
+[language naming convention](style-guide.md#style-001--nominal-error-types-use-the-error-suffix).
+Neither the suffix nor the struct declarations opt the values into a special error system.
+
+**Boundary:** A borrowed value is not a valid failure payload because it is tied to a lexical
+lifetime that failure propagation may leave.
+
+```silk,ignore
+effect fn invalid(message: &string) -> i32 ! &string {
+  fail message
+}
+```
+
+A value containing a borrow or provider-dependent storage is invalid for the same reason, even when
+its outer type is a named struct.
+
+**Diagnostics:** A failure type that is unresolved when executable code must be specialized
+receives a type diagnostic at the invalid failure channel and identifies the unresolved type. A
+payload that is not detached receives `SEM0073` at the failure origin or invalid contract and
+identifies the borrow or provider dependency that would escape.
+
+Using a non-nominal concrete type is valid and produces no diagnostic.
+
+**Current compiler:** Disputed. The compiler currently treats the failure channel as a distinct row
+kind, restricts its members to concrete nominal types, and reports `SEM0061` for built-in types such
+as `i32`. The distinct kind and nominal-only restriction are superseded by this rule. The compiler
+already reports `SEM0073` for a named payload containing a lexical borrow.
+
+**Evidence:** [confirmed stabilization decision](README.md),
+[older nominal-only direction](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
+[current row validation](../../packages/compiler/test/DeclarationIndex.test.ts),
+[detachment diagnostics](../../packages/compiler/test/Elaboration.test.ts).
+
+## FAIL-002 — `fail` follows ordinary ownership rules and has type `never`
+
+**Status:** Confirmed
+
+Executing `fail payload` aborts the current Effect execution and transfers the payload into its
+typed-failure channel. The expression has success type `never`, so an Effect with any declared
+success type may end by failing.
+
+`fail` does not introduce a special ownership rule:
+
+```silk
+struct ProblemError { code: i32 }
+
+effect fn fromTemporary() -> i32 ! ProblemError {
+  fail ProblemError { code: 1 }
+}
+
+effect fn fromBinding(error: ProblemError) -> i32 ! ProblemError {
+  fail move error
+}
+
+effect fn fromCopy(code: i32) -> i32 ! i32 {
+  fail code
+}
+```
+
+A newly constructed temporary already belongs to the expression and is consumed directly. Reading
+a `Copy` binding copies its value. Transferring an affine binding requires `move`, exactly as it
+does when passing or returning that value elsewhere.
+
+`fail` may execute only inside an Effect body: either an `effect fn` body or an explicit
+`effect {}` block. An ordinary function may construct an Effect containing `fail`; it may not
+execute `fail` directly.
+
+**Boundary:** Omitting `move` does not implicitly consume an affine binding.
+
+```silk,ignore
+struct ProblemError { code: i32 }
+
+effect fn invalid(error: ProblemError) -> i32 ! ProblemError {
+  fail error
+}
+```
+
+Spelling `fail` directly in an ordinary function is also invalid:
+
+```silk,ignore
+fn invalid() -> i32 {
+  fail 1
+}
+```
+
+**Diagnostics:** An implicit transfer of an affine payload reports `OWN0003` at the payload and
+identifies the binding that requires `move`. Executing `fail` outside an Effect body reports
+`SEM0063` at the `fail` expression. Failing with a type absent from the enclosing Effect contract
+reports `SEM0064` at the payload and names the missing failure type.
+
+The `never` result of a valid `fail` is not a return-type mismatch and produces no diagnostic.
+
+**Evidence:** [ownership rules](ownership-and-borrowing.md),
+[effect-origin diagnostics](../../packages/compiler/test/Elaboration.test.ts),
+[failure-channel decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md).
+
+## FAIL-003 — `run` propagates permitted typed failures
+
+**Status:** Confirmed
+
+When `run` executes an Effect that fails, it forwards the same owned failure payload through the
+enclosing Effect. Statements after that `run` on the failing path do not execute. No additional
+propagation operator is required.
+
+```silk
+struct NotFoundError {}
+
+effect fn load() -> i32 ! NotFoundError {
+  fail NotFoundError {}
+}
+
+effect fn program() -> i32 ! NotFoundError {
+  let value = run load()
+  return value + 1
+}
+```
+
+If `load()` fails, `value` is not created and `return value + 1` is not executed. The
+`NotFoundError` payload leaves `program` through its declared failure channel. Propagation does not
+copy or convert the payload.
+
+Calling `load()` without `run` only constructs `Effect<i32 ! NotFoundError>`. Construction does not
+execute the body and therefore cannot produce or propagate its failure.
+
+The residual failure type at a `run` site must be compatible with the enclosing Effect's declared
+failure type. The enclosing type may contain additional union alternatives because declarations are
+upper bounds. Named effect functions do not infer a missing failure type from `run`; omission means
+`never`. See [Effect contracts](effect-contracts.md#eff-009--declared-failure-and-requirement-channels-are-upper-bounds).
+
+An ordinary function has no failure channel, so its `run` operand must have residual failure type
+`never`. An effect entry is handled separately by the generated program boundary, as defined under
+[program entry](program-entry.md#entry-003--unhandled-effect-entry-failures-become-process-failures).
+
+**Boundary:** An enclosing Effect may not silently discard a propagated failure by omitting it from
+the declaration.
+
+```silk,ignore
+struct NotFoundError {}
+
+effect fn load() -> i32 ! NotFoundError {
+  fail NotFoundError {}
+}
+
+effect fn invalid() -> i32 {
+  return run load()
+}
+```
+
+Adding a Rust-style `?` after `run` is neither required nor part of this rule. `run` already means
+that a permitted failure propagates.
+
+**Diagnostics:** If the residual failure type at `run` is not compatible with the enclosing
+contract, `SEM0066` is reported at `run` and lists every unhandled failure type. The same diagnostic
+applies inside an ordinary function, whose permitted failure type is `never`. Merely constructing
+or returning a fallible Effect produces no propagation diagnostic.
+
+**Evidence:** [Effect execution rules](effects-and-execution.md),
+[declared channel bounds](effect-contracts.md),
+[run propagation diagnostics](../../packages/compiler/test/Elaboration.test.ts),
+[failure propagation decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md).
+
+## FAIL-004 — Recovery preserves every reachable success type
+
+**Status:** Confirmed
+
+A recovery handler may succeed with a type different from the protected Effect's success type. If
+the protected Effect succeeds with `A` and the handler succeeds with `B`, the recovered Effect's
+success type is the normalized union `A | B`.
+
+```silk
+import silk.effects as Effect
+
+struct NotFoundError {}
+
+effect fn load() -> i32 ! NotFoundError {
+  fail NotFoundError {}
+}
+
+effect fn recover(error: NotFoundError) -> string {
+  return "missing"
+}
+
+fn handled() -> Effect<i32 | string> {
+  return Effect.catch<NotFoundError>(load(), recover)
+}
+```
+
+If `load` succeeds, its `i32` bypasses `recover`. If it fails with `NotFoundError`, `recover` owns
+the payload and may produce a `string`. The resulting value is therefore `i32 | string`; the
+recovery operation does not coerce either value to the other type.
+
+A recovery path with success type `never` contributes no success member. If both paths produce the
+same type, normalization leaves that type rather than a duplicate union.
+
+The recovery handler is lazy with the composed Effect. Constructing the recovered Effect does not
+run the protected Effect or the handler. The handler runs only when the composed Effect is run and
+the selected failure occurs.
+
+**Boundary:** A caller may not assume that recovery preserves the protected success type when the
+handler returns another type. It must accept or narrow the complete union.
+
+```silk,ignore
+fn invalid() -> Effect<i32> {
+  return Effect.catch<NotFoundError>(load(), recover)
+}
+```
+
+**Diagnostics:** Using the recovered Effect where only one member of its success union is accepted
+must produce a type mismatch at that use and identify the complete actual success type. A stable
+diagnostic code for this general mismatch is not yet assigned.
+
+**Current compiler:** Disputed. The current `Effect.catch` and `Effect.catchAll` standard-library
+signatures require the protected Effect and handler to share one success type `A`. That restriction
+must be generalized to separate success types whose normalized union becomes the result.
+
+**Evidence:** [current recovery signatures](../../packages/compiler/stdlib/silk/effects.silk),
+[earlier union decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
+[selective recovery tests](../../packages/compiler/test/SelectiveCatch.test.ts).
+
+## FAIL-005 — `catch<S>` recovers any selected nonempty subset
+
+**Status:** Confirmed
+
+For a protected `Effect<A ! E ? R>`, `catch<S>` accepts one or more failure alternatives as ordinary
+selected type `S`. `S` must be a nonempty subset of ordinary failure type `E`. A selected failure
+invokes the handler; every nonselected failure propagates unchanged.
+
+If the handler constructs `Effect<B ! F ? Q>`, the recovered contract is:
+
+```text
+Effect<A | B ! Without<E, S> | F ? R | Q>
+```
+
+Success and failure types use ordinary union normalization. Requirement rows retain their separate
+capability, access, and role normalization.
+
+```silk
+import silk.effects as Effect
+
+struct NotFoundError {}
+struct InvalidInputError {}
+struct OfflineError {}
+
+effect fn work() -> i32 ! NotFoundError | InvalidInputError | OfflineError {
+  fail OfflineError {}
+}
+
+effect fn recoverKnown(error: NotFoundError | InvalidInputError) -> string {
+  return "fallback"
+}
+
+fn handled() -> Effect<i32 | string ! OfflineError> {
+  return Effect.catch<NotFoundError | InvalidInputError>(work(), recoverKnown)
+}
+```
+
+Here `S` is `NotFoundError | InvalidInputError`. Either selected type invokes `recoverKnown`;
+`OfflineError` remains as the result's failure type. Selecting one type is the same rule with a
+one-alternative `S`.
+
+The selected type may be inferred from the handler's input when the explicit type argument is
+omitted. Selecting the complete protected failure type gives whole-type recovery. A
+standard-library `catchAll` may remain as a convenience alias, but it has no different language
+semantics.
+
+The handler may explicitly re-fail a selected payload. That failure belongs to `F` and therefore
+reappears in the result's failure type under the same ordinary rules as any other handler failure.
+
+**Boundary:** `S` may not be empty and may not contain a type absent from `E`.
+
+```silk,ignore
+struct NotFoundError {}
+struct OfflineError {}
+
+effect fn work() -> i32 ! NotFoundError {
+  fail NotFoundError {}
+}
+
+effect fn recoverOffline(error: OfflineError) -> i32 {
+  return 0
+}
+
+fn invalid() -> Effect<i32> {
+  return Effect.catch<OfflineError>(work(), recoverOffline)
+}
+```
+
+**Diagnostics:** An empty selection or a selection that is not a subset of the protected failure
+type reports `SEM0067` at the `catch` application. The diagnostic must show the selected and
+protected types and identify every selected alternative that the protected Effect cannot produce. A
+handler whose input does not accept the complete selected type receives an ordinary callable
+compatibility diagnostic at the handler argument.
+
+**Current compiler:** Disputed. The compiler currently requires failure-row parameters such as
+`!E`, uses `Row<!E>` to turn them into values, and restricts `S in E` plus
+`Intrinsic.catchFailure<S>` to one nominal selected type. Recovery must instead use ordinary types
+`E`, `S`, and `F`, accept every valid failure type confirmed under FAIL-001, and partition a
+specialized failure union between `S` and `Without<E, S>`. The public `Effect.catch` contract and
+selection policy remain ordinary standard-library Silk; a sealed target-neutral primitive may
+perform the owned runtime partition.
+
+A runtime partition must preserve both possible payloads. For `S` selected from `E`, its result is
+equivalent to:
+
+```text
+Selected<S> | Unselected<Without<E, S>>
+```
+
+Returning only `Without<E, S>` is not total: when the input payload belongs to `S`, there is no
+unselected value to return, and the selected payload is still needed by the handler. The outer
+`Selected` or `Unselected` case also lets generic code branch without knowing every concrete member
+of either union.
+
+**Evidence:** [set-to-set `Without` behavior](../../packages/compiler/stdlib/silk/effects.silk),
+[current singleton recovery path](../../packages/compiler/test/SelectiveCatch.test.ts),
+[current singleton-only specification](../../openspec/specs/bootstrap-flow-functions/spec.md).
+
+## FAIL-006 — Typed failure applies ordinary cleanup and preserves diagnostic context
+
+**Status:** Confirmed
+
+Typed-failure propagation is a structured exit. Before control reaches a recovery handler or an
+outer Effect, every live owner in each exited scope is cleaned exactly once in the ordinary
+innermost-to-outermost order. Moving the failure payload out of those scopes transfers its cleanup
+obligation with it; propagation neither cleans nor copies that payload.
+
+The protected Effect's exited scopes are fully cleaned before a selected recovery handler begins.
+The handler then owns the selected payload. A nonselected payload bypasses the handler and continues
+outward with the same ownership obligation.
+
+Cleanup does not erase the failure's diagnostic context. The execution records the failure origin
+and relevant logical Effect path before leaving the scopes needed to describe it. This context is
+runtime metadata associated with the failure outcome, not a source-visible wrapper around `E`:
+
+```text
+internal failure outcome = owned payload E + hidden diagnostic context
+```
+
+Consequently, failure values remain ordinary values. Diagnostic context does not participate in
+type checking, equality, union matching, ownership, or the handler's parameter type. A value does
+not need to implement a reporting interface to receive this context.
+
+Ordinary propagation and nonselected recovery preserve the existing context. If a selected handler
+succeeds, the handled context is no longer part of the composed outcome. If the handler fails, the
+runtime retains the earlier failure as diagnostic context for the new one, so an unhandled report
+can explain that the new failure occurred while handling the earlier failure.
+
+**Boundary:** Infallible ownership cleanup cannot replace the typed failure being propagated.
+Cleanup whose failure matters is an explicit Effect operation and must complete before propagation,
+normally through a standard-library finalization combinator. A trap during cleanup belongs to the
+separate trap rules and is not converted into a typed failure.
+
+The language guarantees that structured cleanup preserves the information needed to report the
+failure. Exact trace depth, formatting, symbolization, and debug-versus-release collection policy
+belong to a later diagnostics and observability reference.
+
+**Diagnostics:** Valid cleanup and propagation produce no compile-time diagnostic. Ordinary
+ownership diagnostics identify double cleanup, use after move, or an invalid implicit transfer.
+When a typed failure reaches the generated entry boundary, its runtime report includes the failure
+identity and available logical Effect trace after cleanup has completed.
+
+**Current compiler:** Partially aligned. The evaluator retains a deterministic execution trace on
+an unhandled effect-entry failure, and existing entry tests confirm that payload cleanup runs before
+the failure is exposed. The stable source-level trace policy and causal presentation of a handler
+failure remain unimplemented.
+
+**Evidence:** [ownership cleanup rule](ownership-and-borrowing.md#cleanup-001--cleanup-follows-ownership),
+[effect finalization contract](../../packages/compiler/stdlib/silk/effects.silk),
+[effect-entry trace and cleanup tests](../../packages/compiler/test/EffectEntry.test.ts).
+
+## FAIL-007 — A trap is fatal and remains outside Effect outcomes
+
+**Status:** Confirmed
+
+Effect execution has two language-visible outcomes: success and typed failure. Silk has no
+exception system and no third recoverable defect channel. A trap is instead fatal abnormal
+termination caused by an operation that cannot continue while preserving the language's runtime
+invariants.
+
+Bounds violations, division by zero, arithmetic overflow from trapping operators, impossible
+compiler-generated states, and violated unsafe contracts are traps. They do not add a type to `E`,
+do not become a hidden failure alternative, and cannot be intercepted by `catch`, `catchAll`,
+`result`, or another Effect combinator.
+
+A trap terminates the program. It may bypass `ensuring`, `Drop` hooks, and all other structured
+cleanup; the language makes no cleanup guarantee after the trapping operation. For a
+compiler-generated checked operation, the runtime should report its source origin and available
+logical execution trace before termination. Failures such as corrupted runtime state or invalid
+unsafe memory may permit only a best-effort report.
+
+**Boundary:** A condition the program intends to recover from must be represented before a trap
+occurs: as ordinary data or as a typed failure from a checked operation. An Effect handler cannot
+turn a trap into `E` after the fact. A deliberate process-abort operation, if one is exposed by the
+standard library, triggers terminal trap behavior rather than creating an Effect-style `die`
+channel.
+
+Silk source cannot throw. A future foreign boundary must translate an anticipated host failure into
+ordinary data or a declared typed failure before it enters Silk. An unexpected foreign exception
+that crosses the boundary is fatal; it does not justify adding a recoverable defect channel to all
+Silk Effects.
+
+**Diagnostics:** A trap encountered while evaluating a required compile-time constant reports a
+compile-time diagnostic at the trapping operation. A trap reached during program execution reports
+abnormal termination at runtime. The runtime report must distinguish a trap from an unhandled typed
+failure; stable diagnostic and process-status codes remain to be assigned.
+
+**Current compiler:** Aligned. Current Effect combinators and acceptance tests treat arithmetic
+traps as abnormal termination that bypasses typed handlers, finalizers, and Drop cleanup.
+
+**Evidence:** [failure and trap decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
+[trap boundary specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
+[finalization acceptance tests](../../packages/compiler/test/EnsuringAcceptance.test.ts).
+
+Typed-failure values, propagation, recovery, cleanup, diagnostic context, and the trap boundary are
+now defined. Requirements and service provision remain a separate contract area.
