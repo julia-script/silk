@@ -18,6 +18,31 @@ coherent subset of the intended language rather than a disposable dialect, altho
 implementations may impose restrictions and alpha discoveries may still justify breaking changes.
 _Avoid_: v0 language, minimal language
 
+**Affine value**:
+A non-`Copy` value with one current owner; it may be transferred or discarded, but never duplicated
+implicitly. Its cleanup responsibility follows ownership.
+_Avoid_: linear value, manually managed value
+
+**Move**:
+An explicit transfer that consumes the source binding and gives its value and cleanup responsibility
+to a new owner. An explicit move consumes even a `Copy` binding.
+_Avoid_: assignment copy, ownership hint
+
+**Lexical borrow**:
+Temporary shared or exclusive access to an owned value without transferring its cleanup
+responsibility. The backing owner remains constrained until the borrow's last permitted use.
+_Avoid_: stored reference, shared ownership
+
+**Cleanup obligation**:
+The responsibility carried by an affine owner to perform its deterministic, infallible cleanup
+exactly once unless ownership is transferred.
+_Avoid_: manual free, ambient finalizer
+
+**Effect function**:
+A function whose call constructs one lazy `Effect` value; its declared result is the success value
+produced when that Effect executes. Calling it does not execute or flatten the Effect.
+_Avoid_: async function, implicitly executed effect
+
 **Actor module**:
 A module centered on one minimal data or service concept whose core capabilities preserve its
 invariants. Its richer public API consists of qualified, data-first sibling functions that are
