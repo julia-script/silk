@@ -17,4 +17,5 @@ SLP (direction and coherence)
 
 ## Proposals
 
-No proposals have been numbered yet.
+- [SLP-0001: Module-level static value composition](0001-static-value-composition/proposal.md)
+  — Draft; parked until static schema composition becomes a stabilization priority.
