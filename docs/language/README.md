@@ -65,10 +65,13 @@ not belong in a language rule unless a program can observe them.
   and nested Effects. Initial rules are confirmed.
 - [Effect contracts](effect-contracts.md) — success, failure, and requirement channels; declaration
   bounds; generic failure types and requirement rows; and concrete Effect identity.
+- [Requirements and services](requirements-and-services.md) — runtime-provided capabilities,
+  dependency-eligible interfaces, conformances, roles, access, provision, and requirement-row
+  operations.
 - [Typed failures](typed-failures.md) — ordinary failure values, propagation, recovery, cleanup,
   diagnostic context, and fatal traps.
-- [Language style guide](style-guide.md) — non-semantic naming conventions for readable,
-  discoverable Silk APIs.
+- [Language style guide](style-guide.md) — non-semantic naming and data-first actor-function
+  conventions for readable, composable, and extensible Silk APIs.
 - [Ownership and borrowing](ownership-and-borrowing.md) — Copy and affine values, moves, borrows,
   mutation, and cleanup. Initial rules are candidates pending review.
 

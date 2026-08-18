@@ -138,22 +138,26 @@ an implementation for a missing requirement.
 ```silk
 import silk.effects as Effect
 
-struct Clock {}
+service Clock {}
+
+struct SystemClock {}
+
+impl Clock for SystemClock {}
 
 effect fn work() -> () ? &Clock {
   return ()
 }
 
 pub effect fn main() {
-  let clock = Clock {}
-  return run work() |> Effect.provide(&clock)
+  let clock = SystemClock {}
+  return run Effect.provide<Clock>(work(), &clock)
 }
 ```
 
 **Boundary:** An entry that retains a requirement is invalid:
 
 ```silk,ignore
-struct Clock {}
+service Clock {}
 
 effect fn work() -> () ? &Clock {
   return ()
@@ -166,6 +170,9 @@ pub effect fn main() ? &Clock {
 
 **Diagnostics:** An open effect entry must be rejected before backend emission. The entry diagnostic
 must list every unresolved requirement. A stable source diagnostic code is not yet assigned.
+
+Only dependency-eligible services may appear in the row, as defined by
+[SERV-002](requirements-and-services.md#serv-002--only-services-may-be-effect-requirements).
 
 **Deferred direction:** A future proposal may let an entry adapter supply target-specific defaults
 for selected capabilities, such as a standard-output logger, while allowing explicit source
