@@ -28,4 +28,4 @@
 - [x] 4.2 Build the webview renderer: row grammar + phase picker + filter/trivia controls in plain DOM, styled with `--vscode-*` variables; postMessage protocol (`pickView`, `activateRow`, `setFilter`, `evaluate` / `viewResult`, `cursor`)
 - [x] 4.3 Host wiring: follow active `.silk` editor (sticky on blur), request views over `silk/inspectorView`, refresh on `silk/inspectorInvalidated`
 - [x] 4.4 Cursor sync: editor selection → module-qualified span → tint; row activation → resolve module URI → `showTextDocument` + `revealRange`
-- [ ] 4.5 Manual verification in the extension dev host against a real multi-file Silk workspace: phase switching, cross-module row navigation, theme switch, edit-refresh; update `packages/vscode/README.md`
+- [x] 4.5 Manual verification in the extension dev host against a real multi-file Silk workspace: phase switching, cross-module row navigation, theme switch, edit-refresh; update `packages/vscode/README.md`
