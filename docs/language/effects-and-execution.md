@@ -197,10 +197,11 @@ Evaluation of `run prepareAnswer()` has two ordered steps:
 
 **Boundary:** Calling `prepareAnswer()` without `run` still computes `n` and constructs the Effect;
 it does not execute `return n` inside the `effect` block. This rule describes execution timing only.
-The ownership rules for values captured by an Effect remain pending.
+Values retained by the deferred block follow the ordinary
+[capture rules](ownership-and-borrowing.md#capture-001--delayed-values-acquire-their-captures-when-constructed).
 
 **Diagnostics:** This evaluation order is valid behavior, not a source restriction, so it has no
-diagnostic. Invalid captures are diagnosed by the capture and ownership rules still to be written.
+diagnostic. Invalid captures receive the corresponding capture, borrow, move, or escape diagnostic.
 
 **Evidence:** [function-contract decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
 [effect-block elaboration](../../packages/compiler/src/Elaboration.ts),

@@ -6,7 +6,7 @@ module-local function, not an executable entry point.
 
 ## ENTRY-001 — `main` must be public
 
-**Status:** Candidate
+**Status:** Confirmed
 
 The executable entry must be declared with `pub`. The two supported shapes are a zero-argument
 ordinary `main` returning `i32`, or a zero-argument effect `main` succeeding with `()` and carrying

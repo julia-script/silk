@@ -19,3 +19,5 @@ SLP (direction and coherence)
 
 - [SLP-0001: Module-level static value composition](0001-static-value-composition/proposal.md)
   — Draft; parked until static schema composition becomes a stabilization priority.
+- [SLP-0002: Explicit non-unit result discard](0002-explicit-result-discard/proposal.md)
+  — Draft; records the selected strict explicit-discard model and awaits Candidate review.

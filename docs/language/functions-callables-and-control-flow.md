@@ -1,0 +1,662 @@
+# Functions, callables, and control flow
+
+Silk functions have locally readable contracts, evaluate calls in a fixed order, and use explicit
+control transfers. Named functions are first-class callable values. `if`, `while`, and `match`
+provide structured selection and repetition without truthiness, implicit exception flow, or hidden
+ownership transfers.
+
+Effect construction, execution, and channels are defined by [effects and execution](effects-and-execution.md)
+and [Effect contracts](effect-contracts.md). This page describes the ordinary function and
+control-flow behavior shared by eager and effect bodies. Moves, borrows, captures, and cleanup are
+defined by [ownership and borrowing](ownership-and-borrowing.md).
+
+## Terminology
+
+- A **named function** is a module-level `fn` or `effect fn` declaration.
+- A **function item** is the callable value denoted by naming a function without calling it.
+- A **callable** is a value that may be invoked with an ordered list of arguments.
+- A callable's **invocation mode** is shared reusable `fn`, exclusive reusable `mut fn`, or
+  consuming `once fn` access to its captured environment.
+- A **section** is a callable produced by supplying a trailing suffix of a named function's
+  arguments while leaving one or more leading parameters unsupplied.
+- A **control transfer** is `return`, `break`, `continue`, typed failure propagation, or another
+  operation that exits the current region without ordinary fallthrough.
+- A **reachable path** is a possible route through the body that has not already returned, failed,
+  diverged, broken, or continued.
+- A **guard** is the optional boolean expression between a match pattern and `=>`.
+- **Coverage** is the set of possible nominal alternatives handled by a match's arms.
+- **Narrowing** gives a value a more precise type within one proven branch without changing its
+  declared type outside that branch.
+
+## Function declarations, calls, and returns
+
+### FUNC-001 — Every named function has a locally readable contract
+
+**Status:** Confirmed
+
+Every parameter declares its type. Omitting a result annotation declares `()`, not an inferred
+result. For an effect function, the declared success, failure, and requirement channels describe
+the Effect produced by calling it.
+
+```silk
+struct LoadError {}
+
+service Store {
+  effect fn load(id: i32) -> i32 ! LoadError ? &Store
+}
+
+fn notify(message: string) {
+}
+
+effect fn load(id: i32) -> i32 ! LoadError ? &Store {
+  return run Store.load(id)
+}
+```
+
+`notify` has result type `()`. Calling `load` has result
+`Effect<i32 ! LoadError ? &Store>`. The compiler checks bodies against those declarations without
+using later callers to enlarge or replace them.
+
+**Boundary:** A named function cannot omit a result annotation and later return another type. An
+effect function cannot originate a failure or requirement omitted from its declared channels.
+Generic parameters may make parts of the contract abstract, but they remain explicit declaration
+parameters rather than caller-driven rewriting of the signature.
+
+**Diagnostics:** Unknown parameter or result types receive their ordinary type diagnostic. A
+non-unit return from an omitted result contract receives the return mismatch described by
+RETURN-001. Undeclared Effect failures and requirements report the channel diagnostics defined by
+EFF-009 and EFF-011.
+
+**Evidence:** [effect-function contracts](effect-contracts.md#eff-008--an-effect-function-declares-the-contract-of-its-returned-effect),
+[omitted unit results](effect-contracts.md#eff-010--omitting-the-result-annotation-declares-unit),
+[omitted channels](effect-contracts.md#eff-011--omitted-channels-have-fixed-empty-meanings).
+
+### FUNC-002 — Ordinary functions execute eagerly and effect functions construct lazily
+
+**Status:** Confirmed
+
+Calling an ordinary `fn` executes its body immediately. Calling an `effect fn` captures its supplied
+arguments and constructs one Effect whose complete body executes only when run.
+
+```silk
+fn increment(value: i32) -> i32 {
+  return value + 1
+}
+
+effect fn incrementLater(value: i32) -> i32 {
+  return value + 1
+}
+```
+
+`increment(41)` is `42`. `incrementLater(41)` is `Effect<i32>`; `run incrementLater(41)` is `42`.
+
+**Boundary:** The `effect fn` spelling changes execution timing, not the meaning of `return` or the
+declared success type. Returning an Effect from an ordinary function does not make that function
+lazy: eager setup still runs before the returned Effect is constructed.
+
+**Diagnostics:** Calling either declaration is valid. Using `Effect<A>` where `A` is required must
+report the type mismatch defined under EFF-002. Ignoring the constructed Effect as a statement
+reports `SEM0087` under STMT-001.
+
+**Evidence:** [Effect construction](effects-and-execution.md#eff-001--calling-an-effect-function-constructs-an-effect),
+[eager setup](effects-and-execution.md#eff-005--an-ordinary-function-can-construct-a-deferred-effect).
+
+### CALL-001 — A call evaluates each argument once from left to right
+
+**Status:** Confirmed
+
+A call evaluates its callable expression once, then evaluates supplied arguments once in source
+order from left to right. Only after the arguments complete are their values bound to parameters and
+the target body entered.
+
+```silk
+fn first() -> i32 { return 1 }
+fn second() -> i32 { return 2 }
+fn combine(left: i32, right: i32) -> i32 { return left * 10 + right }
+
+pub fn main() -> i32 {
+  return combine(first(), second())
+}
+```
+
+`first()` completes before `second()`, and both complete before `combine` begins. The result is
+`12`.
+
+**Boundary:** If evaluating an earlier argument traps, propagates a typed failure, or otherwise
+transfers control, later arguments do not begin. Argument evaluation order never changes to match
+parameter ownership, optimizer preference, or target ABI order.
+
+A pipeline has its own related order: it evaluates its completed left expression before evaluating
+the callable expression on the right, as defined by PIPE-001.
+
+**Diagnostics:** Evaluation order is behavior rather than a validity condition. Each invalid
+argument receives its own expression, ownership, failure, or requirement diagnostic at that
+argument. A control transfer prevents execution of later arguments but does not suppress independent
+compile-time diagnostics in their source.
+
+**Evidence:** [evaluation trace specification](../../openspec/specs/bootstrap-evaluation/spec.md),
+[callable application specification](../../openspec/specs/bootstrap-callable-values/spec.md).
+
+### CALL-002 — Calls satisfy the declared positional parameter contract
+
+**Status:** Confirmed
+
+A full invocation supplies one compatible argument for every positional parameter. Arguments bind
+to parameters by ordinal; names at the call site do not reorder them. Silk performs no implicit
+numeric conversion, truthiness conversion, or ownership-mode conversion to make an argument fit.
+
+```silk
+fn subtract(left: i32, right: i32) -> i32 {
+  return left - right
+}
+
+pub fn main() -> i32 {
+  return subtract(10, 3)
+}
+```
+
+The result is `7`, with `10` bound to `left` and `3` to `right`.
+
+Supplying a nonempty trailing suffix may construct a section instead of invoking the body under
+CALLABLE-002. Supplying too many arguments is always invalid. Supplying no arguments to a function
+that declares parameters neither invokes it nor creates a redundant section; name the function item
+directly.
+
+**Boundary:** `subtract(10, true)` is invalid rather than converting `true`. Passing an affine
+binding to an owned parameter requires explicit `move`; passing a fixed array to a slice parameter
+requires an explicit borrow.
+
+**Diagnostics:** Too many arguments or another non-section arity mismatch reports `SEM0007`.
+Incompatible argument types report `SEM0012` at the argument. Applying a non-callable reports
+`SEM0075`. A redundant empty call of a unary function reports `SEM0078`; invalid ownership uses the
+corresponding `OWN` diagnostic.
+
+**Evidence:** [call semantic diagnostics](../../packages/compiler/src/Diagnostic.ts),
+[callable specification](../../openspec/specs/bootstrap-callable-values/spec.md),
+[parameter ownership](ownership-and-borrowing.md#call-001--parameter-types-determine-ownership-transfer-or-borrowing).
+
+### RETURN-001 — `return` exits with a value compatible with the declared result
+
+**Status:** Confirmed
+
+`return expression` evaluates the expression once and exits the current function or Effect body
+with that value. The value must be compatible with the declaration's result or success type. Silk
+does not infer a different result from the returned expression and does not insert numeric or Effect
+conversions.
+
+```silk
+fn absolute(value: i32) -> i32 {
+  if value < 0 {
+    return -value
+  }
+  return value
+}
+```
+
+Every reachable path through a non-unit body must reach a compatible `return` or another terminal
+operation such as a typed failure or divergence. `return` without an expression is equivalent to
+`return ()` and is valid only for a unit result. A unit body may fall through its closing brace,
+which produces `()`.
+
+```silk
+fn notify() {
+  return
+}
+
+fn alsoNotify() {
+}
+```
+
+**Boundary:** Falling through a body declared to return `i32` is invalid. Returning
+`Effect<i32>` from a body declared to produce `i32`, or returning `i32` from a body declared to
+produce `Effect<i32>`, is a type mismatch; neither direction runs, wraps, or flattens automatically.
+
+**Diagnostics:** A wholly missing required return currently uses parser diagnostic `PAR0004`.
+An incompatible returned expression must be diagnosed at that expression with the declared and
+actual types; the general mismatch still lacks one stable semantic code. Effect-specific examples
+and current compiler gaps are recorded under EFF-002.
+
+**Current compiler:** The parser currently requires a syntactically trailing `return` in a non-unit
+body even when every reachable `if` arm already returns. The confirmed rule instead makes the
+contract semantic: a trailing return is unnecessary when no reachable path can fall through.
+
+**Evidence:** [function syntax](../../openspec/specs/bootstrap-syntax/spec.md),
+[Effect return semantics](effects-and-execution.md#eff-002--an-effect-body-returns-its-success-value),
+[unit fallthrough tests](../../packages/compiler/test/IntegerScalars.test.ts).
+
+## Callable values and pipelines
+
+### CALLABLE-001 — Naming a function produces a first-class callable value
+
+**Status:** Confirmed
+
+A resolved named function may be passed, returned, or bound without being invoked. A plain named
+function has no captured environment and supports shared reusable invocation.
+
+```silk
+fn increment(value: i32) -> i32 { return value + 1 }
+
+fn apply(transform: fn(i32) -> i32, value: i32) -> i32 {
+  return transform(value)
+}
+
+pub fn main() -> i32 {
+  return apply(increment, 41)
+}
+```
+
+The result is `42`. Naming `increment` does not call it and does not require empty parentheses.
+
+**Boundary:** A function item must satisfy the expected parameter, result, and invocation-mode
+contract. Two functions with the same visible callable signature may retain distinct concrete
+identities for specialization; source cannot erase those identities merely by naming the structural
+callable type.
+
+**Diagnostics:** Applying a non-callable reports `SEM0075`. An incompatible callable parameter,
+result, or mode reports `SEM0076`. A context that would erase a required concrete callable identity
+reports `SEM0080` or the more specific represented-storage diagnostic.
+
+**Evidence:** [callable specification](../../openspec/specs/bootstrap-callable-values/spec.md),
+[indirect-call tests](../../packages/compiler/test/IndirectCallAcceptance.test.ts).
+
+### CALLABLE-002 — Supplying a trailing argument suffix constructs a section
+
+**Status:** Confirmed
+
+Calling an `N`-parameter named function with `K` arguments, where `0 < K < N`, binds those arguments
+to the trailing `K` parameters and returns a callable awaiting the leading `N - K` parameters.
+
+```silk
+fn combine(a: i32, b: i32, c: i32) -> i32 {
+  return a + b + c
+}
+
+fn staged() -> i32 {
+  let withThree = combine(3)
+  let withTwoAndThree = withThree(2)
+  return withTwoAndThree(1)
+}
+```
+
+`combine(3)(2)(1)` invokes `combine(1, 2, 3)` and produces `6`. Every stage captures one contiguous
+trailing suffix; sections do not leave holes, reorder parameters, or bind a leading parameter while
+omitting a later one.
+
+**Boundary:** Supplying all parameters invokes the function. Supplying none denotes no application;
+use the function name as a callable value. Supplying more than the remaining arity is invalid.
+
+**Diagnostics:** Too many arguments report the ordinary arity diagnostic. A partially applied
+callable used where its eventual result is required reports a type mismatch naming the remaining
+callable contract. Capture ownership errors occur when the section is constructed.
+
+**Current compiler:** The compiler currently constructs a section only when exactly one leading
+parameter remains. Deeper under-application such as `combine(3)` reports `SEM0079`; that restriction
+conflicts with this confirmed rule and with the ownership reference.
+
+**Conflicting artifact:** The
+[callable specification](../../openspec/specs/bootstrap-callable-values/spec.md) still retains the
+older unary-section-only model and requires reconciliation.
+
+**Evidence:** [captured callable rule](ownership-and-borrowing.md#callable-001--named-functions-support-trailing-partial-application),
+[pipeline syntax decision](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md).
+
+### CALLABLE-003 — Invocation mode describes access to the callable environment
+
+**Status:** Confirmed
+
+Callable contracts distinguish three modes:
+
+| Contract | Environment access | Reuse |
+| --- | --- | --- |
+| `fn(A) -> B` | shared | repeatable |
+| `mut fn(A) -> B` | exclusive | repeatable in sequence |
+| `once fn(A) -> B` | consuming | at most once |
+
+Shared callable access may satisfy an exclusive or consuming parameter, and exclusive access may
+satisfy a consuming parameter. The reverse substitutions are invalid because they promise more
+reuse than the supplied callable supports.
+
+Invocation mode applies to the hidden environment, independently from the ownership modes of newly
+supplied arguments. A shared callable may still accept an owned argument; a consuming callable may
+accept a Copy argument while consuming one capture.
+
+**Boundary:** A callable that moves an affine capture during invocation is `once` even if its
+visible argument and result types are Copy. A callable that mutates an exclusive capture is `mut`
+even when callers invoke it sequentially.
+
+**Diagnostics:** An incompatible callable contract reports `SEM0076`. Invoking a callable without
+the required shared, exclusive, or consuming access reports `SEM0077`; represented stored values may
+use ownership diagnostic `OWN0014` for the same access violation.
+
+**Evidence:** [callable ownership](ownership-and-borrowing.md#callable-002--invocation-mode-derives-from-access-to-the-callable-environment),
+[callable specification](../../openspec/specs/bootstrap-callable-values/spec.md).
+
+### PIPE-001 — A pipeline invokes one unary callable after evaluating its left value
+
+**Status:** Confirmed
+
+`value |> operation` evaluates the completed left expression exactly once, then evaluates the right
+expression as a unary callable and invokes it with the left value. Pipelines associate left to
+right.
+
+```silk
+fn add(left: i32, right: i32) -> i32 { return left + right }
+fn multiply(left: i32, right: i32) -> i32 { return left * right }
+
+pub fn main() -> i32 {
+  return 2 |> add(3) |> multiply(4)
+}
+```
+
+The expression groups as `(2 |> add(3)) |> multiply(4)` and produces `20`.
+
+The pipeline does not insert an argument into syntax. `add(3)` is first an ordinary section waiting
+for `left`; the pipeline then invokes that callable with `2`.
+
+**Boundary:** The right side may be a function item, section, binding, grouped expression, or any
+other compatible unary callable. It does not perform method lookup, open a namespace, import a name,
+or change the callable's ownership contract.
+
+**Diagnostics:** A non-callable right expression reports `SEM0075`. A callable with incompatible
+arity, parameter type, result use, or invocation mode reports the corresponding callable or
+argument diagnostic. Invalid transfer or borrowing of the left value reports its ordinary ownership
+diagnostic.
+
+**Evidence:** [operator pipeline specification](../../openspec/specs/bootstrap-operator-semantics/spec.md),
+[pipeline elaboration tests](../../packages/compiler/test/Elaboration.test.ts),
+[pipeline ownership](ownership-and-borrowing.md#pipe-001--a-pipeline-applies-ordinary-leading-parameter-ownership).
+
+## Conditionals, loops, and transfers
+
+### IF-001 — `if` selects one statement branch using a boolean condition
+
+**Status:** Confirmed
+
+An `if` statement evaluates its condition exactly once. The condition must have type `bool`; Silk
+has no truthiness conversion. A true condition executes the first arm, while a false condition
+executes the `else` arm when present and otherwise continues after the statement.
+
+```silk
+fn choose(flag: bool) -> i32 {
+  if flag {
+    return 1
+  }
+  return 2
+}
+```
+
+Only the selected arm executes. Chained `else if` uses the same rule in source order.
+
+**Boundary:** Bootstrap `if` is a statement, not a value-producing expression. A branch communicates
+a value by returning it, binding or mutating an outer place under ordinary ownership rules, or by
+continuing to a later expression. Code needing a value selected from exhaustive alternatives may use
+`match`.
+
+Silk intends to support a future pattern-conditioned form that tests and destructures a value while
+introducing bindings only in the selected arm, in the style of an `if let` construct. Its syntax,
+accepted patterns, and interaction with guards remain undefined; ordinary boolean `if` does not
+implicitly perform that matching today.
+
+An `if` condition cannot be an integer, nominal value, Effect, or other implicitly converted value.
+Conditionally executed Effects must be run inside the selected statement arm rather than placed in
+the skipped side of `&&` or `||`.
+
+**Diagnostics:** A non-boolean condition reports `SEM0011` at the condition and identifies its actual
+type. Invalid `if` use in expression position receives a parser diagnostic. Each arm retains its own
+type, ownership, failure, and requirement diagnostics even though only one arm executes at runtime.
+
+**Evidence:** [conditional syntax](../../openspec/specs/bootstrap-syntax/spec.md),
+[conditional semantic facts](../../openspec/specs/bootstrap-semantic-facts/spec.md),
+[short-circuit boundary](../../openspec/specs/bootstrap-operator-semantics/spec.md).
+
+### LOOP-001 — `while` is a boolean pre-test loop
+
+**Status:** Confirmed
+
+`while condition { body }` evaluates `condition` before every possible iteration. It enters the body
+only when the result is `true`. A false initial result executes the body zero times.
+
+```silk
+fn countToThree() -> i32 {
+  let mut count = 0
+  while count < 3 {
+    count = count + 1
+  }
+  return count
+}
+```
+
+The condition is evaluated four times, the body three times, and the result is `3`. Body fallthrough
+or `continue` begins the next condition evaluation; `break` continues after the loop.
+
+**Boundary:** The condition must be `bool`; there is no integer or optional-value truthiness. The
+bootstrap language has no `for`, unconditional `loop`, labeled loop, or value-producing `break`.
+Equivalent iteration is expressed with `while` and explicit mutable state.
+
+Every path that repeats must restore a compatible ownership state for outer bindings. Iteration
+locals are new lexical owners on each iteration and clean before the next one begins.
+
+**Diagnostics:** A non-boolean condition reports `SEM0011`. A repeating path with incompatible owner
+liveness reports `OWN0005` and identifies the loop and affected owner. Other invalid reads, writes,
+moves, and borrows receive their ordinary diagnostics.
+
+**Evidence:** [mutable loop specification](../../openspec/specs/bootstrap-mutable-loops/spec.md),
+[loop ownership](ownership-and-borrowing.md#loop-001--every-repeating-path-must-restore-a-compatible-ownership-state),
+[mutable-loop tests](../../packages/compiler/test/MutableLoops.test.ts).
+
+### TRANSFER-001 — `break` and `continue` target the innermost loop
+
+**Status:** Confirmed
+
+`continue` ends the current iteration and begins the innermost loop's next condition evaluation.
+`break` exits the innermost loop and continues with the following statement. Neither form carries a
+value.
+
+```silk
+fn stopAtThree() -> i32 {
+  let mut index = 0
+  while true {
+    if index == 3 {
+      break
+    }
+    index = index + 1
+    continue
+  }
+  return index
+}
+```
+
+Every live owner created inside an exited arm or iteration is cleaned before the transfer reaches
+its target. The transfer does not bypass borrow ending or structured cleanup.
+
+**Boundary:** `break` and `continue` are invalid outside a loop. Bootstrap has no labels for
+targeting an outer loop directly and no `break expression` form. `return` exits the function or
+Effect body rather than merely exiting a loop.
+
+**Diagnostics:** A loop transfer outside any loop reports `SEM0038`. Supplying a value or label
+receives a parser diagnostic. Ownership and cleanup conflicts at a transfer use their ordinary
+`OWN` diagnostics.
+
+**Evidence:** [mutable loop specification](../../openspec/specs/bootstrap-mutable-loops/spec.md),
+[loop cleanup specification](../../openspec/specs/bootstrap-ownership/spec.md),
+[mutable-loop tests](../../packages/compiler/test/MutableLoops.test.ts).
+
+## Exhaustive matching
+
+### MATCH-001 — A match states how it accesses its scrutinee
+
+**Status:** Confirmed
+
+A match evaluates its scrutinee exactly once. `match value` is available only when the scrutinee is
+Copy. `match move value` consumes one complete owner. `match &value` borrows it shared, and
+`match &mut value` borrows one mutable place exclusively.
+
+```silk
+struct Token { kind: i32 }
+struct End {}
+
+fn inspect(event: Token | End) -> i32 {
+  return match &event {
+    Token { kind } => kind
+    End {} => 0
+  }
+}
+```
+
+The shared match leaves `event` owned by the function. Pattern bindings inherit the selected access
+mode; a consuming match transfers complete selected payload ownership into its arm.
+
+**Boundary:** A bare affine match is invalid because it would hide whether the operation copies,
+borrows, or consumes. A shared or exclusive pattern binding cannot escape its arm or be placed in
+owned storage. An exclusive match requires a mutable place.
+
+**Diagnostics:** A bare affine match reports `OWN0003`. Exclusive access to an immutable root
+reports `OWN0007`. An invalid borrowed scrutinee place reports `OWN0009`; escaping a borrowed pattern
+binding reports `OWN0006`.
+
+**Evidence:** [match ownership](ownership-and-borrowing.md#match-001--a-match-declares-how-it-accesses-its-scrutinee),
+[exhaustive matching specification](../../openspec/specs/bootstrap-exhaustive-matching/spec.md).
+
+### MATCH-002 — Nominal patterns are complete or explicitly omit fields
+
+**Status:** Confirmed
+
+A nominal pattern names one possible nominal member and either names every field exactly once or
+uses `..` to acknowledge omitted fields. Fields may bind under their own names, bind under another
+local name with `field: local`, or contain a nested nominal pattern.
+
+```silk
+struct Span {
+  start: i32
+  end: i32
+}
+
+struct Token {
+  kind: i32
+  span: Span
+}
+
+fn start(token: Token) -> i32 {
+  return match &token {
+    Token { span: Span { start: offset, .. }, .. } => offset
+  }
+}
+```
+
+Pattern bindings are flat, arm-local declarations. They do not shadow an existing declaration in
+the same visible scope. In a consuming arm, omitted affine fields remain that arm's cleanup
+obligations; `..` does not leak or forget them.
+
+**Boundary:** Omitting a field without `..`, naming one field twice, naming a field absent from the
+member, or introducing a conflicting binding makes the arm invalid. A whole-member pattern such as
+`Token token` binds the complete payload and therefore needs no per-field list or `..`.
+
+**Diagnostics:** A missing field reports `SEM0046` and suggests naming it or using `..`. A duplicate
+field reports `SEM0047`; a binding conflict reports `SEM0048`. Unknown members or fields receive
+their specific match or field diagnostic while other supplied pattern facts remain available.
+
+**Evidence:** [exhaustive matching specification](../../openspec/specs/bootstrap-exhaustive-matching/spec.md),
+[matching tests](../../packages/compiler/test/ExhaustiveMatching.test.ts),
+[whole-member tests](../../packages/compiler/test/WholeMemberBinding.test.ts).
+
+### MATCH-003 — Match coverage is exhaustive and guards do not prove coverage
+
+**Status:** Confirmed
+
+Arms are tested in source order. An unguarded nominal arm covers its member. A guarded arm handles
+that member only when its guard evaluates to `true`, so it removes nothing from the remaining
+coverage set. `_` covers every remaining member and makes every following arm unreachable.
+
+```silk
+struct Token { kind: i32 }
+struct End {}
+
+fn classify(event: Token | End) -> i32 {
+  return match &event {
+    Token { kind } if kind > 0 => kind
+    Token { .. } => 0
+    End {} => -1
+  }
+}
+```
+
+The second `Token` arm remains necessary because the first arm's guard may be false. Every guard
+must have type `bool` and may inspect its provisional pattern bindings without consuming them.
+
+**Boundary:** A match missing any member is invalid. A duplicate unguarded member, an arm after `_`,
+or another arm made impossible by earlier coverage is unreachable. A guarded arm alone never makes
+a member exhaustive.
+
+**Diagnostics:** An incomplete match reports `SEM0044` and lists the uncovered members. An
+unreachable arm reports `SEM0043`. A non-boolean guard reports `SEM0045`. Consuming a provisional
+guard binding reports `OWN0008` because later arms may still need the unchanged payload.
+
+**Evidence:** [exhaustive matching specification](../../openspec/specs/bootstrap-exhaustive-matching/spec.md),
+[coverage tests](../../packages/compiler/test/ExhaustiveMatching.test.ts).
+
+### MATCH-004 — Matching narrows only inside the selected arm
+
+**Status:** Confirmed
+
+Inside a nominal arm, bindings and projections use that precise member type. The original
+scrutinee's declared union type does not change outside the arm. A borrowed match may therefore
+inspect a narrowed member and later continue using the unchanged union owner.
+
+```silk
+struct Token { kind: i32 }
+struct End {}
+
+fn inspect(event: Token | End) -> i32 {
+  let result = match &event {
+    Token { kind } => kind
+    End {} => 0
+  }
+  return result
+}
+```
+
+Within the first arm, `kind` comes from a precise `Token`. Outside the match, `event` remains
+`Token | End`.
+
+**Boundary:** Match narrowing does not introduce general subtyping, mutate a binding's declared
+type, expose a union's numeric runtime tag, or carry a borrowed member binding outside its arm.
+
+**Diagnostics:** A pattern member absent from the scrutinee reports `SEM0042`. Using a member-only
+field without branch proof receives the ordinary field/type diagnostic. Escaping a borrowed narrowed
+binding reports `OWN0006`.
+
+**Evidence:** [exhaustive matching specification](../../openspec/specs/bootstrap-exhaustive-matching/spec.md),
+[matching tests](../../packages/compiler/test/ExhaustiveMatching.test.ts).
+
+### MATCH-005 — A match joins the results of reachable arms
+
+**Status:** Confirmed
+
+The type of a match expression is computed from reachable arm results. Equal types remain that
+type. Distinct nominal results form one normalized structural union. An arm of type `never`
+contributes no result member.
+
+```silk
+struct Left { value: i32 }
+struct Right { value: i32 }
+
+fn preserve(input: Left | Right) -> Left | Right {
+  return match move input {
+    Left left => move left
+    Right right => move right
+  }
+}
+```
+
+The result is the normalized union `Left | Right`, independent of arm order.
+
+**Boundary:** Silk does not invent a union for arbitrary incompatible builtin types. Arms returning
+`i32` and `bool`, arrays of different element types or lengths, or another invalid union mixture make
+the match result unavailable. Source must choose one compatible result contract explicitly.
+
+**Diagnostics:** Incompatible reachable arm results report `SEM0049` and list their types. An
+unreachable arm contributes neither a result type nor a second result mismatch. Ownership transfers
+from result expressions remain governed by their arm's access mode.
+
+**Evidence:** [exhaustive matching specification](../../openspec/specs/bootstrap-exhaustive-matching/spec.md),
+[match result tests](../../packages/compiler/test/ExhaustiveMatching.test.ts).

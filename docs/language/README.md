@@ -60,7 +60,7 @@ not belong in a language rule unless a program can observe them.
 - [Program entry](program-entry.md) — ordinary and effectful `main`, automatic Effect execution,
   unhandled typed failures, and requirement closure.
 - [Statements and discarded values](statements-and-discarding.md) — which expression results may be
-  ignored and why the current rule still needs confirmation.
+  ignored and how `drop` makes intentional discard explicit.
 - [Effects and execution](effects-and-execution.md) — effect construction, success values, `run`,
   and nested Effects. Initial rules are confirmed.
 - [Effect contracts](effect-contracts.md) — success, failure, and requirement channels; declaration
@@ -73,14 +73,15 @@ not belong in a language rule unless a program can observe them.
 - [Language style guide](style-guide.md) — non-semantic naming and data-first actor-function
   conventions for readable, composable, and extensible Silk APIs.
 - [Ownership and borrowing](ownership-and-borrowing.md) — Copy and affine values, moves, borrows,
-  mutation, and cleanup. Initial rules are candidates pending review.
+  mutation, captures, cleanup, allocation lifecycles, and returned views.
+- [Functions, callables, and control flow](functions-callables-and-control-flow.md) — named function
+  contracts, ordered calls, returns, callable sections, pipelines, conditionals, loops, and matches.
 
 The following domains will receive pages only when their first rules are ready:
 
 - remaining syntax and expressions;
 - modules, names, and visibility beyond entry discovery;
 - values and types;
-- functions, callables, and control flow;
 - generics, interfaces, and specialization;
 - targets, unsafe code, and intrinsics; and
 - standard-library boundaries.

@@ -3,9 +3,9 @@
 An expression statement evaluates an expression without binding or returning its result. The
 current compiler accepts this form only when the result is `()` or `never`.
 
-## STMT-001 — A non-unit expression result cannot be ignored implicitly
+## STMT-001 — A non-unit expression result must be handled explicitly
 
-**Status:** Disputed
+**Status:** Confirmed
 
 The current compiler rejects a standalone expression whose type is neither `()` nor `never`. To
 discard such a result, source must say so explicitly with `drop`; to preserve it, source must bind
@@ -36,16 +36,13 @@ The current compiler reports `SEM0087` because the statement produces `Effect<i3
 the produced type. The error must distinguish constructing and discarding an Effect from executing
 it; it must not imply that the Effect body ran.
 
-**Why the current rule exists:** It prevents code that appears to perform work while actually
-discarding a lazy Effect recipe, and it makes every discarded value explicit. This is not required
-by the borrow checker: the same rule rejects an ignored `i32`, even though copying or discarding an
-`i32` creates no ownership problem. It is a language safety and ergonomics policy introduced by
-the existing specification and implementation, not a confirmed ownership law.
+This is a uniform statement rule rather than a borrow-checker requirement. It rejects an ignored
+`i32` even though the value is Copy, and it rejects an affine result before automatic cleanup can
+silently stand in for authored intent. The same rule prevents a lazy Effect construction from
+looking like execution. `drop` is the explicit statement that the result is intentionally unwanted.
 
-**Stabilization question:** Silk still needs to choose whether to reject every non-unit result,
-reject only values whose discard is especially suspicious such as Effects and affine owners, or
-allow implicit discard. Until the author confirms one of those policies, `SEM0087` remains
-implemented but disputed.
+Dropping an Effect value does not run it. `drop answer()` constructs and discards the Effect;
+`drop run answer()` executes it and discards its successful result.
 
 **Evidence:** [expression-statement requirements](../../openspec/specs/bootstrap-expression-statements/spec.md),
 [semantic implementation](../../packages/compiler/src/Elaboration.ts),
