@@ -84,7 +84,7 @@ pub fn notEquals(left: f32, right: f32) -> bool {
 
 /// Calls the concrete f32 lessThan primitive.
 pub fn lessThan(left: f32, right: f32) -> bool {
-  return Intrinsic.f32LessThan(left, right)
+  return Intrinsic.f32LessThan(&left, &right)
 }
 
 /// Calls the concrete f32 lessOrEqual primitive.

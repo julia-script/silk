@@ -166,7 +166,7 @@ pub fn main() -> i32 {
         assert.strictEqual(main(), 42)
         const evaluated = Analysis.evaluate(native)
         assert.strictEqual(evaluated._tag, 'Completed')
-        assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+        assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
         assert.include(llvm.ir, 'define i32 @silk_main')
       }
     }),

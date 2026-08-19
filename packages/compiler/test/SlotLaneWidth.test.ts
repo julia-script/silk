@@ -81,7 +81,7 @@ for (const entry of cases) {
         JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? `${value}n` : value)),
       )
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, entry.expected)
+      assert.strictEqual(evaluated.result.value, BigInt(entry.expected))
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -125,7 +125,7 @@ it.effect('sums two u8 slots in one word to 14 on every engine', () =>
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 14)
+    assert.strictEqual(evaluated.result.value, 14n)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -169,7 +169,7 @@ it.effect('reads a sub-word field through a reference at its own width on every 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, expected)
+    assert.strictEqual(evaluated.result.value, BigInt(expected))
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})

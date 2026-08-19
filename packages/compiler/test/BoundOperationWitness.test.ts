@@ -39,7 +39,7 @@ const evaluatedValue = (name: string, source: string) =>
     assert.deepEqual(messages(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    return outcome._tag === 'Completed' ? outcome.result.value : undefined
+    return outcome._tag === 'Completed' ? Number(outcome.result.value) : undefined
   })
 
 /** Runs one source on the bootstrap evaluator and the direct WebAssembly backend. */
@@ -50,7 +50,7 @@ const twoEngineValue = (name: string, source: string) =>
 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
-    const bootstrap = evaluated._tag === 'Completed' ? evaluated.result.value : undefined
+    const bootstrap = evaluated._tag === 'Completed' ? Number(evaluated.result.value) : undefined
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -348,29 +348,7 @@ pub fn main() -> i32 {
 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 84)
-  }),
-)
-
-it.effect('unwraps an already-borrowed operand only for a sealed intrinsic witness', () =>
-  Effect.gen(function* () {
-    const value = yield* evaluatedValue(
-      'bound-operation-witness/preborrowed-intrinsic',
-      `interface Keyed<T> {
-  fn digest(left: &T, right: &T) -> T
-}
-
-impl Keyed<i32> for i32 { digest: Intrinsic.i32WrappingAdd }
-
-fn digestOf<T: Keyed>(left: &T, right: &T) -> T { return Keyed.digest(left, right) }
-
-pub fn main() -> i32 {
-  let left = 20
-  let right = 22
-  return digestOf<i32>(&left, &right)
-}`,
-    )
-    assert.strictEqual(value, 42)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 84n)
   }),
 )
 
@@ -497,7 +475,7 @@ pub fn main() -> i32 {
 
     const outcome = Analysis.evaluate(normalized)
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -621,7 +599,7 @@ pub fn main() -> i32 {
 
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -653,30 +631,28 @@ pub fn main() -> i32 {
 
 it.effect('lets one bound operation select an intrinsic witness and a source witness', () =>
   Effect.gen(function* () {
-    // The intrinsic half of the same call site keeps selecting its sealed operation: the fallback
-    // is reached only where the conformance names source.
     const value = yield* evaluatedValue(
       'bound-operation-witness/mixed-witnesses',
-      `interface Keyed<T> {
-  fn digest(left: &T, right: &T) -> T
+      `interface Ranked<T> {
+  fn lessThan(left: &T, right: &T) -> bool
 }
 
 struct Cell { weight: i32 }
 
-fn cellDigest(left: &Cell, right: &Cell) -> Cell {
-  return Cell { weight: left.weight + right.weight }
+fn cellLessThan(left: &Cell, right: &Cell) -> bool {
+  return left.weight < right.weight
 }
 
-impl Keyed<Cell> for Cell { digest: Cell.cellDigest }
-impl Keyed<i32> for i32 { digest: Intrinsic.i32WrappingAdd }
+impl Ranked<Cell> for Cell { lessThan: Cell.cellLessThan }
+impl Ranked<i32> for i32 { lessThan: Intrinsic.i32LessThan }
 
-fn digestOf<T: Keyed>(left: T, right: T) -> T { return Keyed.digest(&left, &right) }
+fn ranksBelow<T: Ranked>(left: T, right: T) -> bool { return left < right }
 
 pub fn main() -> i32 {
-  let cell = digestOf<Cell>(Cell { weight: 20 }, Cell { weight: 1 })
-  let scalar = digestOf<i32>(2147483647, 1)
-  if scalar != -2147483648 { return 1 }
-  return cell.weight * 2
+  if ranksBelow<Cell>(Cell { weight: 20 }, Cell { weight: 22 }) {
+    if ranksBelow<i32>(20, 22) { return 42 }
+  }
+  return 1
 }`,
     )
     assert.strictEqual(value, 42)

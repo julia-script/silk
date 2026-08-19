@@ -411,7 +411,7 @@
     },
     {
       "operation": "Intrinsic.u8LessThan",
-      "signature": "fn Intrinsic.u8LessThan(left: u8, right: u8) -> bool",
+      "signature": "fn Intrinsic.u8LessThan(left: &u8, right: &u8) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/u8.lessThan",
@@ -827,7 +827,7 @@
     },
     {
       "operation": "Intrinsic.u16LessThan",
-      "signature": "fn Intrinsic.u16LessThan(left: u16, right: u16) -> bool",
+      "signature": "fn Intrinsic.u16LessThan(left: &u16, right: &u16) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/u16.lessThan",
@@ -1243,7 +1243,7 @@
     },
     {
       "operation": "Intrinsic.u32LessThan",
-      "signature": "fn Intrinsic.u32LessThan(left: u32, right: u32) -> bool",
+      "signature": "fn Intrinsic.u32LessThan(left: &u32, right: &u32) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/u32.lessThan",
@@ -1659,7 +1659,7 @@
     },
     {
       "operation": "Intrinsic.u64LessThan",
-      "signature": "fn Intrinsic.u64LessThan(left: u64, right: u64) -> bool",
+      "signature": "fn Intrinsic.u64LessThan(left: &u64, right: &u64) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/u64.lessThan",
@@ -2075,7 +2075,7 @@
     },
     {
       "operation": "Intrinsic.usizeLessThan",
-      "signature": "fn Intrinsic.usizeLessThan(left: usize, right: usize) -> bool",
+      "signature": "fn Intrinsic.usizeLessThan(left: &usize, right: &usize) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/usize.lessThan",
@@ -2515,7 +2515,7 @@
     },
     {
       "operation": "Intrinsic.i8LessThan",
-      "signature": "fn Intrinsic.i8LessThan(left: i8, right: i8) -> bool",
+      "signature": "fn Intrinsic.i8LessThan(left: &i8, right: &i8) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/i8.lessThan",
@@ -2955,7 +2955,7 @@
     },
     {
       "operation": "Intrinsic.i16LessThan",
-      "signature": "fn Intrinsic.i16LessThan(left: i16, right: i16) -> bool",
+      "signature": "fn Intrinsic.i16LessThan(left: &i16, right: &i16) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/i16.lessThan",
@@ -3395,7 +3395,7 @@
     },
     {
       "operation": "Intrinsic.i32LessThan",
-      "signature": "fn Intrinsic.i32LessThan(left: i32, right: i32) -> bool",
+      "signature": "fn Intrinsic.i32LessThan(left: &i32, right: &i32) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/i32.lessThan",
@@ -3835,7 +3835,7 @@
     },
     {
       "operation": "Intrinsic.i64LessThan",
-      "signature": "fn Intrinsic.i64LessThan(left: i64, right: i64) -> bool",
+      "signature": "fn Intrinsic.i64LessThan(left: &i64, right: &i64) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/i64.lessThan",
@@ -4275,7 +4275,7 @@
     },
     {
       "operation": "Intrinsic.isizeLessThan",
-      "signature": "fn Intrinsic.isizeLessThan(left: isize, right: isize) -> bool",
+      "signature": "fn Intrinsic.isizeLessThan(left: &isize, right: &isize) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/isize.lessThan",
@@ -4371,7 +4371,7 @@
     },
     {
       "operation": "Intrinsic.f32LessThan",
-      "signature": "fn Intrinsic.f32LessThan(left: f32, right: f32) -> bool",
+      "signature": "fn Intrinsic.f32LessThan(left: &f32, right: &f32) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/f32.lessThan",
@@ -4659,7 +4659,7 @@
     },
     {
       "operation": "Intrinsic.f64LessThan",
-      "signature": "fn Intrinsic.f64LessThan(left: f64, right: f64) -> bool",
+      "signature": "fn Intrinsic.f64LessThan(left: &f64, right: &f64) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/f64.lessThan",
@@ -4899,7 +4899,7 @@
     },
     {
       "operation": "Intrinsic.charLessThan",
-      "signature": "fn Intrinsic.charLessThan(left: char, right: char) -> bool",
+      "signature": "fn Intrinsic.charLessThan(left: &char, right: &char) -> bool",
       "unsafe": false,
       "admission": "Scalar",
       "consumer": "silk/char.lessThan",

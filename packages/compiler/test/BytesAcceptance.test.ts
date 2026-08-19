@@ -59,7 +59,7 @@ it.effect(
         ),
       )
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 180)
+      assert.strictEqual(evaluated.result.value, 180n)
       const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
       const releases = evaluated.trace.filter((event) => event._tag === 'AllocationRelease')
       assert.strictEqual(acquires.length, 2)
@@ -122,7 +122,7 @@ it.effect('preserves allocation failure and creates no owned storage when copy f
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(
       evaluated.trace.filter((event) => event._tag === 'AllocationAcquire'),
       [],

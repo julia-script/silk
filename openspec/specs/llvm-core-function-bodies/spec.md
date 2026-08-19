@@ -22,7 +22,7 @@ The system SHALL associate arguments, blocks, instructions, and local values wit
 
 #### Scenario: Use a foreign local value
 - **WHEN** an instruction operand belongs to a different function body
-- **THEN** instruction creation fails with `SilkError` without changing either body
+- **THEN** instruction creation fails with `LlvmError` without changing either body
 
 ### Requirement: Core SSA instructions
 The system SHALL construct the pinned builder's core unary, arithmetic, cast, comparison, select, extract-value, and insert-value instructions with validated result and operand types.
@@ -33,7 +33,7 @@ The system SHALL construct the pinned builder's core unary, arithmetic, cast, co
 
 #### Scenario: Reject incompatible operands
 - **WHEN** a caller supplies operand types that violate an instruction's LLVM constraints
-- **THEN** the instruction fails with `SilkError` before allocating a result value
+- **THEN** the instruction fails with `LlvmError` before allocating a result value
 
 ### Requirement: Structured control flow
 The system SHALL construct basic blocks and the supported branch, conditional branch, switch, return, and unreachable terminators, and SHALL require every committed block to end in exactly one terminator.
@@ -44,7 +44,7 @@ The system SHALL construct basic blocks and the supported branch, conditional br
 
 #### Scenario: Reject an unterminated block
 - **WHEN** final validation finds a block without a terminator
-- **THEN** body construction fails with `SilkError` and the draft is not committed
+- **THEN** body construction fails with `LlvmError` and the draft is not committed
 
 ### Requirement: Phi nodes
 The system SHALL support normal and fast-math phi nodes, including forward value references, and SHALL validate that each incoming value corresponds to a declared predecessor and has the phi result type.
@@ -62,7 +62,7 @@ The system SHALL construct direct and indirect calls with supported tail kinds, 
 
 #### Scenario: Reject an invalid return
 - **WHEN** a return value does not match the enclosing function return type
-- **THEN** return construction fails with `SilkError`
+- **THEN** return construction fails with `LlvmError`
 
 ### Requirement: Core body serialization
 The system SHALL emit every core instruction and control-flow construct supported by this capability in textual LLVM IR and LLVM bitcode with deterministic relative value encoding.

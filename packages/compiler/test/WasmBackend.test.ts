@@ -56,7 +56,7 @@ const golden = (name: string): string =>
 /** The bootstrap interpreter is the oracle every emission is differentially checked against. */
 const interpret = Effect.fnUntraced(function* (text: string) {
   const outcome = Analysis.evaluate(yield* snapshotOf(text))
-  return outcome._tag === 'Completed' ? outcome.result.value : 'trap'
+  return outcome._tag === 'Completed' ? Number(outcome.result.value) : 'trap'
 })
 
 it.effect('emits an instantiable module whose entry is exported as silk_main', () =>
@@ -98,7 +98,7 @@ pub fn main() -> i32 {
 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed', evaluated._tag)
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 5)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 5n)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     assert.strictEqual(yield* WasmMain.invoke(wasm.bytes, 'WasmBackend.invokePlainAggregate'), 5)
@@ -151,7 +151,7 @@ pub fn main() -> i32 {
 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed', evaluated._tag)
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     assert.strictEqual(yield* WasmMain.invoke(wasm.bytes, 'WasmBackend.invokeBorrowedEffect'), 42)

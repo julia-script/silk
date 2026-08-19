@@ -3,6 +3,8 @@ import { assert, it } from '@effect/vitest'
 import * as Model from '../src/Model.js'
 import * as Search from '../src/Search.js'
 
+const source = Object.freeze({ sourceId: 'project/main', start: 0, end: 10 })
+
 const entry = (name: string, module: string, summary = ''): Search.Entry => ({
   name,
   module,
@@ -44,9 +46,11 @@ it('ranks an exact name above a prefix, a substring, and a summary match', () =>
 it('builds entries from declaration names and documentation text', () => {
   const decoded = Model.decode({
     schema: Model.schemaName,
+    experimental: true,
     modules: [
       {
         name: 'project/main',
+        sourceId: 'project/main',
         items: [
           {
             id: 'project/main::add',
@@ -54,12 +58,23 @@ it('builds entries from declaration names and documentation text', () => {
             name: 'add',
             visibility: 'Public',
             signature: { text: 'pub fn add(left: i32, right: i32) -> i32' },
-            documentation: { markdown: 'Adds two values.\n\nMore prose.', blocks: [] },
+            source,
+            documentation: {
+              _tag: 'Document',
+              source,
+              markdown: 'Adds two values.\n\nMore prose.',
+              blocks: [],
+              examples: [],
+              fallback: false,
+            },
             children: [
               {
                 id: 'project/main::add::parameter:0',
                 kind: 'Parameter',
                 name: 'left',
+                visibility: 'Inherited',
+                signature: { text: 'left: i32' },
+                source,
                 children: [],
               },
             ],
@@ -68,12 +83,17 @@ it('builds entries from declaration names and documentation text', () => {
             id: 'project/main::Problem',
             kind: 'Struct',
             name: 'Problem',
+            visibility: 'Public',
+            signature: { text: 'pub struct Problem' },
+            source,
             children: [
               {
                 id: 'project/main::Problem::field:0',
                 kind: 'Field',
                 name: 'code',
+                visibility: 'Public',
                 signature: { text: 'pub code: i32' },
+                source,
                 children: [],
               },
             ],

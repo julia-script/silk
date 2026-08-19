@@ -406,7 +406,7 @@ pub fn main() -> i32 {
     assertRealizedCallable(snapshot)
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 3)
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 3n)
   }),
 )
 
@@ -423,6 +423,6 @@ pub fn main() -> i32 {
     assertRealizedCallable(snapshot)
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 1)
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 1n)
   }),
 )

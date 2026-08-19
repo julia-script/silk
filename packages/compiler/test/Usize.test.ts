@@ -101,7 +101,7 @@ pub fn main() -> i32 {
         (event) => event._tag === 'Return' && event.function.name === 'maximum',
       )
       assert.strictEqual(returned?._tag, 'Return')
-      if (returned?._tag === 'Return' && returned.value._tag === 'UsizeValue') {
+      if (returned?._tag === 'Return' && returned.value._tag === 'IntegerValue') {
         assert.strictEqual(returned.value.value.toString(), '18446744073709551615')
       } else assert.fail('expected an exact usize return trace')
     }),
@@ -135,13 +135,13 @@ it.effect('evaluates exact native usize arithmetic without host-number precision
     const outcome = Analysis.evaluate(snapshot)
 
     assert.strictEqual(outcome._tag, 'Completed')
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42n)
     const wideBinding = outcome.trace.find(
       (event): event is BootstrapEvaluation.BindingTraceEvent =>
         event._tag === 'Binding' && event.target.name === 'increment',
     )
-    assert.strictEqual(wideBinding?.value._tag, 'UsizeValue')
-    if (wideBinding?.value._tag === 'UsizeValue') {
+    assert.strictEqual(wideBinding?.value._tag, 'IntegerValue')
+    if (wideBinding?.value._tag === 'IntegerValue') {
       assert.strictEqual(wideBinding.value.value, 9007199254740993n)
     }
   }),
@@ -190,7 +190,7 @@ it.effect('executes Wasm usize comparisons with unsigned i32 semantics', () =>
     assert.include(artifact.wat, 'i32.gt_u')
     assert.strictEqual(main(), 42)
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42n)
   }),
 )
 
@@ -232,7 +232,7 @@ pub fn main() -> i32 {
     const llvm = yield* Analysis.codegen(native, { mode: 'release' })
     assert.match(llvm.ir, /i64.*i64/)
     const outcome = Analysis.evaluate(native)
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42n)
 
     const wasm = yield* source(program, 'wasm32-unknown-unknown')
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
@@ -268,7 +268,7 @@ pub fn main() -> i32 { return inspect(decode(true)) }`
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
     const logical = Analysis.evaluate(wasm)
-    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42)
+    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42n)
   }),
 )
 

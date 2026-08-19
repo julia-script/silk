@@ -26,21 +26,9 @@ import * as Type from './Type.js'
  * depends on it.
  */
 
-/** The exact value produced by the closed bootstrap interpreter. */
-export interface I32Value {
-  readonly _tag: 'I32Value'
-  readonly value: number
-}
-
-/** An exact target-sized unsigned integer, independent of host number precision. */
-export interface UsizeValue {
-  readonly _tag: 'UsizeValue'
-  readonly value: bigint
-}
-
-/** An exact fixed- or target-width integer outside the legacy i32/usize value views. */
-export interface ScalarIntegerValue {
-  readonly _tag: 'ScalarIntegerValue'
+/** One exact fixed- or target-width integer. */
+export interface IntegerValue {
+  readonly _tag: 'IntegerValue'
   readonly type: Scalar.IntegerSpelling
   readonly value: bigint
 }
@@ -232,9 +220,7 @@ export interface SlotValue {
 
 /** One immutable logical evaluator value, independent of backend lane realization. */
 export type Value =
-  | I32Value
-  | UsizeValue
-  | ScalarIntegerValue
+  | IntegerValue
   | CharacterValue
   | FloatValue
   | AggregateValue
@@ -570,7 +556,7 @@ export type BlockedReason =
 export interface Completed {
   readonly _tag: 'Completed'
   readonly entry: DeclarationIndex.CanonicalId
-  readonly result: I32Value
+  readonly result: IntegerValue
   readonly trace: ReadonlyArray<TraceEvent>
 }
 
@@ -605,18 +591,8 @@ interface TransferStep {
   readonly child: CallRequest
 }
 
-const value = (input: number): I32Value => Object.freeze({ _tag: 'I32Value', value: input })
-const usizeValue = (input: bigint): UsizeValue =>
-  Object.freeze({ _tag: 'UsizeValue', value: input })
-const scalarIntegerValue = (
-  type: Scalar.IntegerSpelling,
-  input: bigint,
-): I32Value | UsizeValue | ScalarIntegerValue =>
-  type === 'i32'
-    ? value(Number(input))
-    : type === 'usize'
-      ? usizeValue(input)
-      : Object.freeze({ _tag: 'ScalarIntegerValue', type, value: input })
+const integerValue = (type: Scalar.IntegerSpelling, input: bigint | number): IntegerValue =>
+  Object.freeze({ _tag: 'IntegerValue', type, value: BigInt(input) })
 
 const characterValue = (input: number): CharacterValue =>
   Object.freeze({ _tag: 'CharacterValue', value: input })
@@ -650,7 +626,7 @@ const floatingUnary = (
             : operation === 'IsSubnormal'
               ? FloatingPoint.isSubnormal(bits)
               : FloatingPoint.isSignNegative(bits)
-  return value(result ? 1 : 0)
+  return integerValue('i32', result ? 1 : 0)
 }
 
 const floatingBinary = (
@@ -682,10 +658,11 @@ const floatingBinary = (
               : operation === 'GreaterThan'
                 ? leftNumber > rightNumber
                 : leftNumber >= rightNumber
-    return value(result ? 1 : 0)
+    return integerValue('i32', result ? 1 : 0)
   }
   if (operation === 'TotalOrder')
-    return value(
+    return integerValue(
+      'i32',
       FloatingPoint.totalOrderKey(leftBits) <= FloatingPoint.totalOrderKey(rightBits) ? 1 : 0,
     )
   const result =
@@ -895,12 +872,12 @@ function* executeFunction(
 
   const read = (local: Mir.LocalId): LocalState => {
     const direct = state.cells.get(cellKey(frame, local.ordinal)) ??
-      locals.get(local.ordinal) ?? { value: value(0), fromCall: false }
+      locals.get(local.ordinal) ?? { value: integerValue('i32', 0), fromCall: false }
     if (direct.value._tag !== 'EffectBorrowValue' && direct.value._tag !== 'CallableBorrowValue')
       return direct
     return (
       state.cells.get(cellKey(direct.value.frame, direct.value.cell)) ?? {
-        value: value(0),
+        value: integerValue('i32', 0),
         fromCall: false,
       }
     )
@@ -947,28 +924,15 @@ function* executeFunction(
     return Object.freeze({ value: selected, fromCall: found.fromCall })
   }
 
-  const readI32 = (local: Mir.LocalId): I32Value => {
+  const readInteger = (local: Mir.LocalId, expected?: Scalar.IntegerSpelling): IntegerValue => {
     const found = read(local).value
-    if (found._tag !== 'I32Value') {
-      throw new RangeError(`MIR verifier allowed aggregate local %${local.ordinal} as a scalar`)
-    }
-    return found
-  }
-
-  const readUsize = (local: Mir.LocalId): UsizeValue => {
-    const found = read(local).value
-    if (found._tag !== 'UsizeValue') {
-      throw new RangeError(`MIR verifier allowed non-usize local %${local.ordinal} as an index`)
-    }
-    return found
-  }
-
-  const readInteger = (local: Mir.LocalId): I32Value | UsizeValue | ScalarIntegerValue => {
-    const found = read(local).value
+    const localType = fn.localTypes.at(local.ordinal)
+    const semantic = localType === undefined ? undefined : Mir.semanticType(localType)
+    const scalar = typeof semantic === 'string' ? Scalar.find(semantic) : undefined
+    const expectedType = expected ?? (scalar?.category === 'Integer' ? scalar.spelling : undefined)
     if (
-      found._tag !== 'I32Value' &&
-      found._tag !== 'UsizeValue' &&
-      found._tag !== 'ScalarIntegerValue'
+      found._tag !== 'IntegerValue' ||
+      (expectedType !== undefined && found.type !== expectedType)
     ) {
       throw new RangeError(`MIR verifier allowed aggregate local %${local.ordinal} as an integer`)
     }
@@ -1241,12 +1205,7 @@ function* executeFunction(
     if (actorScalar?.category === 'Floating') {
       const first = arguments_.at(0)
       if (operation === 'FromBits') {
-        if (
-          first === undefined ||
-          (first._tag !== 'I32Value' &&
-            first._tag !== 'UsizeValue' &&
-            first._tag !== 'ScalarIntegerValue')
-        )
+        if (first === undefined || first._tag !== 'IntegerValue')
           throw new RangeError('MIR verifier allowed invalid float bits')
         return Object.freeze({
           _tag: 'Value',
@@ -1257,7 +1216,7 @@ function* executeFunction(
         throw new RangeError('MIR verifier allowed invalid float callable')
       if (operation === 'ToBits') {
         const targetType: Scalar.IntegerSpelling = actorScalar.spelling === 'f32' ? 'u32' : 'u64'
-        return Object.freeze({ _tag: 'Value', value: scalarIntegerValue(targetType, first.bits) })
+        return Object.freeze({ _tag: 'Value', value: integerValue(targetType, first.bits) })
       }
       const floatTarget = Scalar.floatConversionTarget(operation)
       if (floatTarget !== undefined) {
@@ -1286,7 +1245,7 @@ function* executeFunction(
           })
         return Object.freeze({
           _tag: 'Value',
-          value: scalarIntegerValue(conversionTarget.spelling, exact),
+          value: integerValue(conversionTarget.spelling, exact),
         })
       }
       if (
@@ -1306,12 +1265,7 @@ function* executeFunction(
     const floatTarget = Scalar.floatConversionTarget(operation)
     if (actorScalar?.category === 'Integer' && floatTarget !== undefined) {
       const first = arguments_.at(0)
-      if (
-        first === undefined ||
-        (first._tag !== 'I32Value' &&
-          first._tag !== 'UsizeValue' &&
-          first._tag !== 'ScalarIntegerValue')
-      )
+      if (first === undefined || first._tag !== 'IntegerValue')
         throw new RangeError('MIR verifier allowed invalid integer-to-float callable')
       const encoded = FloatingPoint.fromNumber(
         Number(BigInt(first.value)),
@@ -1328,17 +1282,12 @@ function* executeFunction(
         source?.category !== 'Integer' ||
         resultScalar?.category !== 'Integer' ||
         leftValue === undefined ||
-        (leftValue._tag !== 'I32Value' &&
-          leftValue._tag !== 'UsizeValue' &&
-          leftValue._tag !== 'ScalarIntegerValue')
+        leftValue._tag !== 'IntegerValue'
       )
         throw new RangeError('MIR verifier allowed an invalid checked callable')
       const left = BigInt(leftValue.value)
       const right =
-        rightValue !== undefined &&
-        (rightValue._tag === 'I32Value' ||
-          rightValue._tag === 'UsizeValue' ||
-          rightValue._tag === 'ScalarIntegerValue')
+        rightValue !== undefined && rightValue._tag === 'IntegerValue'
           ? BigInt(rightValue.value)
           : undefined
       const exact = operation.startsWith('CheckedConvertTo')
@@ -1377,7 +1326,7 @@ function* executeFunction(
                 ? entry.representation.fields.map((field) =>
                     Object.freeze({
                       field: field.id,
-                      value: scalarIntegerValue(resultScalar.spelling, exact),
+                      value: integerValue(resultScalar.spelling, exact),
                     }),
                   )
                 : [],
@@ -1388,12 +1337,7 @@ function* executeFunction(
     }
     if (conversionTarget !== undefined) {
       const subject = arguments_.at(0)
-      if (
-        subject === undefined ||
-        (subject._tag !== 'I32Value' &&
-          subject._tag !== 'UsizeValue' &&
-          subject._tag !== 'ScalarIntegerValue')
-      )
+      if (subject === undefined || subject._tag !== 'IntegerValue')
         throw new RangeError('MIR verifier allowed a non-integer conversion argument')
       const exact = BigInt(subject.value)
       const range = Scalar.range(
@@ -1409,7 +1353,7 @@ function* executeFunction(
         })
       return Object.freeze({
         _tag: 'Value',
-        value: scalarIntegerValue(conversionTarget.spelling, exact),
+        value: integerValue(conversionTarget.spelling, exact),
       })
     }
     if (
@@ -1420,16 +1364,14 @@ function* executeFunction(
       operation === 'SaturatingNegate'
     ) {
       const subject = arguments_.at(0)
-      if (
-        subject === undefined ||
-        (subject._tag !== 'I32Value' &&
-          subject._tag !== 'UsizeValue' &&
-          subject._tag !== 'ScalarIntegerValue')
-      ) {
+      if (subject === undefined || subject._tag !== 'IntegerValue') {
         throw new RangeError('MIR verifier allowed a non-scalar unary callable argument')
       }
       if (operation === 'Not')
-        return Object.freeze({ _tag: 'Value', value: value(subject.value === 0 ? 1 : 0) })
+        return Object.freeze({
+          _tag: 'Value',
+          value: integerValue('i32', subject.value === 0n ? 1n : 0n),
+        })
       const scalar = Scalar.find(target.actor)
       if (scalar === undefined || scalar.category !== 'Integer') {
         throw new RangeError('MIR verifier allowed a non-integer negate callable')
@@ -1449,7 +1391,7 @@ function* executeFunction(
       }
       return Object.freeze({
         _tag: 'Value',
-        value: scalarIntegerValue(
+        value: integerValue(
           scalar.spelling,
           operation === 'WrappingNegate'
             ? scalar.signedness === 'Signed'
@@ -1496,12 +1438,8 @@ function* executeFunction(
       if (
         leftValue === undefined ||
         rightValue === undefined ||
-        (leftValue._tag !== 'I32Value' &&
-          leftValue._tag !== 'UsizeValue' &&
-          leftValue._tag !== 'ScalarIntegerValue') ||
-        (rightValue._tag !== 'I32Value' &&
-          rightValue._tag !== 'UsizeValue' &&
-          rightValue._tag !== 'ScalarIntegerValue')
+        leftValue._tag !== 'IntegerValue' ||
+        rightValue._tag !== 'IntegerValue'
       ) {
         throw new RangeError('MIR verifier allowed invalid binary callable arguments')
       }
@@ -1531,7 +1469,7 @@ function* executeFunction(
                   : operation === 'GreaterThan'
                     ? left > right
                     : left >= right
-        return Object.freeze({ _tag: 'Value', value: value(holds ? 1 : 0) })
+        return Object.freeze({ _tag: 'Value', value: integerValue('i32', holds ? 1 : 0) })
       }
       if ((operation === 'Divide' || operation === 'Remainder') && right === 0n) {
         return blockedStep({ _tag: 'Trap', function: fn.id, reason: 'division by zero', span })
@@ -1629,7 +1567,7 @@ function* executeFunction(
           : exact
       return Object.freeze({
         _tag: 'Value',
-        value: scalarIntegerValue(scalar.spelling, result),
+        value: integerValue(scalar.spelling, result),
       })
     }
     return blockedStep({
@@ -1766,7 +1704,7 @@ function* executeFunction(
         if (selected._tag !== 'SliceValue' && selected._tag !== 'StaticViewValue') {
           throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
         }
-        const exactIndex = readUsize(selector.index).value
+        const exactIndex = readInteger(selector.index, 'usize').value
         if (exactIndex >= BigInt(selected.length)) {
           return {
             _tag: 'Blocked',
@@ -1785,7 +1723,7 @@ function* executeFunction(
             throw new RangeError('MIR static view range exceeds its immutable bytes')
           }
           indexes.push(index)
-          selected = scalarIntegerValue('u8', BigInt(byte))
+          selected = integerValue('u8', BigInt(byte))
           continue
         }
         if (selected.ticket !== undefined) {
@@ -1816,7 +1754,7 @@ function* executeFunction(
       const index =
         selector.index._tag === 'Proven'
           ? selector.index.value
-          : Number(readUsize(selector.index.local).value)
+          : Number(readInteger(selector.index.local, 'usize').value)
       if (index < 0 || !Number.isSafeInteger(index) || index >= selector.length) {
         return {
           _tag: 'Blocked',
@@ -1944,7 +1882,7 @@ function* executeFunction(
       return Object.freeze(
         Array.from({ length: viewed.length }, (_, index) => {
           const selected = allocation.values.get(String(viewed.base + index))
-          if (selected?._tag !== 'ScalarIntegerValue' || selected.type !== 'u8')
+          if (selected?._tag !== 'IntegerValue' || selected.type !== 'u8')
             throw new RangeError('OS intrinsic received uninitialized byte storage')
           return Number(selected.value)
         }),
@@ -1954,7 +1892,7 @@ function* executeFunction(
     if (backing._tag !== 'ArrayValue') throw new RangeError('OS byte slice lost its array')
     return Object.freeze(
       backing.elements.slice(viewed.base, viewed.base + viewed.length).map((selected) => {
-        if (selected._tag !== 'ScalarIntegerValue' || selected.type !== 'u8')
+        if (selected._tag !== 'IntegerValue' || selected.type !== 'u8')
           throw new RangeError('OS intrinsic received a non-byte slice')
         return Number(selected.value)
       }),
@@ -1998,7 +1936,7 @@ function* executeFunction(
       if (allocation === undefined || !allocation.active)
         throw new RangeError('OS intrinsic output uses released storage')
       for (const [index, byte] of bytes.entries()) {
-        allocation.values.set(String(viewed.base + index), scalarIntegerValue('u8', BigInt(byte)))
+        allocation.values.set(String(viewed.base + index), integerValue('u8', BigInt(byte)))
       }
       return
     }
@@ -2011,7 +1949,7 @@ function* executeFunction(
       elements: Object.freeze(
         backing.value.elements.map((element, index) => {
           const byte = bytes.at(index - viewed.base)
-          return byte === undefined ? element : scalarIntegerValue('u8', BigInt(byte))
+          return byte === undefined ? element : integerValue('u8', BigInt(byte))
         }),
       ),
     })
@@ -2058,8 +1996,11 @@ function* executeFunction(
             field: field.id,
             value:
               field.name === '$identity'
-                ? Object.freeze({ _tag: 'UsizeValue' as const, value: BigInt(handle.identity) })
-                : value(field.name === '$kind' ? (handle.kind === 'File' ? 0 : 1) : 1),
+                ? integerValue('usize', BigInt(handle.identity))
+                : integerValue(
+                    'i32',
+                    field.name === '$kind' ? (handle.kind === 'File' ? 0 : 1) : 1,
+                  ),
           }),
         ),
       ),
@@ -2075,15 +2016,18 @@ function* executeFunction(
     const kind = selected.fields.at(1)?.value
     const active = selected.fields.at(2)?.value
     if (
-      identity?._tag !== 'UsizeValue' ||
-      kind?._tag !== 'I32Value' ||
-      active?._tag !== 'I32Value' ||
-      active.value !== 1
+      identity?._tag !== 'IntegerValue' ||
+      identity.type !== 'usize' ||
+      kind?._tag !== 'IntegerValue' ||
+      kind.type !== 'i32' ||
+      active?._tag !== 'IntegerValue' ||
+      active.type !== 'i32' ||
+      active.value !== 1n
     )
       throw new RangeError('OS intrinsic expected one live OsHandle')
     return Object.freeze({
       identity: Number(identity.value),
-      kind: kind.value === 0 ? 'File' : 'Directory',
+      kind: kind.value === 0n ? 'File' : 'Directory',
     })
   }
 
@@ -2116,7 +2060,7 @@ function* executeFunction(
     )
 
     if (region._tag === 'ConditionalRegion') {
-      const taken = readI32(region.condition).value !== 0
+      const taken = readInteger(region.condition, 'i32').value !== 0n
       trace.push(
         Object.freeze({
           _tag: 'Condition',
@@ -2144,12 +2088,12 @@ function* executeFunction(
         state.steps += 1
         switch (operation._tag) {
           case 'ShortCircuit': {
-            const decided = readI32(operation.left).value !== 0
+            const decided = readInteger(operation.left, 'i32').value !== 0n
             // `&&` decides on a false left operand, `||` on a true one. Only the undecided case
             // executes the nested right-operand operations at all.
             if (decided === (operation.operator === 'Or')) {
               write(operation.destination, {
-                value: value(decided ? 1 : 0),
+                value: integerValue('i32', decided ? 1 : 0),
                 fromCall: false,
               })
               break
@@ -2232,7 +2176,7 @@ function* executeFunction(
               if (arm.guard !== undefined) {
                 const guardStep = yield* executeOperations(arm.guard.operations)
                 if (guardStep !== undefined) return guardStep
-                if (readI32(arm.guard.result).value === 0) continue
+                if (readInteger(arm.guard.result, 'i32').value === 0n) continue
               }
               trace.push(
                 Object.freeze({
@@ -2302,10 +2246,10 @@ function* executeFunction(
                 value: floating
                   ? floatValue(semantic, BigInt(operation.value))
                   : integer
-                    ? scalarIntegerValue(semantic, BigInt(operation.value))
+                    ? integerValue(semantic, BigInt(operation.value))
                     : character
                       ? characterValue(Number(operation.value))
-                      : value(Number(operation.value)),
+                      : integerValue('i32', Number(operation.value)),
                 fromCall: false,
               })
             }
@@ -2414,7 +2358,7 @@ function* executeFunction(
               throw new RangeError('MIR verifier allowed byte length of a non-string')
             stringBytes(string)
             write(operation.destination, {
-              value: usizeValue(BigInt(string.byteLength)),
+              value: integerValue('usize', BigInt(string.byteLength)),
               fromCall: false,
             })
             trace.push(
@@ -2439,7 +2383,10 @@ function* executeFunction(
               leftBytes.length === rightBytes.length &&
               leftBytes.every((byte, index) => byte === rightBytes.at(index))
             const result = operation.negated ? !equal : equal
-            write(operation.destination, { value: value(result ? 1 : 0), fromCall: false })
+            write(operation.destination, {
+              value: integerValue('i32', result ? 1 : 0),
+              fromCall: false,
+            })
             trace.push(
               Object.freeze({
                 _tag: 'StringEqualsExact',
@@ -2529,7 +2476,7 @@ function* executeFunction(
               throw new RangeError('MIR verifier allowed slice length on a non-slice value')
             }
             write(operation.destination, {
-              value: usizeValue(BigInt(slice.length)),
+              value: integerValue('usize', BigInt(slice.length)),
               fromCall: false,
             })
             break
@@ -2574,11 +2521,8 @@ function* executeFunction(
             break
           }
           case 'ValidateLayout': {
-            const bytes = readInteger(operation.bytes)
-            const alignment = readInteger(operation.alignment)
-            if (bytes._tag !== 'UsizeValue' || alignment._tag !== 'UsizeValue') {
-              throw new RangeError('MIR verifier allowed non-usize layout construction')
-            }
+            const bytes = readInteger(operation.bytes, 'usize')
+            const alignment = readInteger(operation.alignment, 'usize')
             const valid = alignment.value > 0n && (alignment.value & (alignment.value - 1n)) === 0n
             const member = valid ? Type.layout : Type.invalidAlignment
             const entry = program.layout.entries.find((candidate) =>
@@ -2612,8 +2556,8 @@ function* executeFunction(
           }
           case 'RepeatLayout': {
             const layout = read(operation.layout).value
-            const count = readInteger(operation.count)
-            if (layout._tag !== 'AggregateValue' || count._tag !== 'UsizeValue') {
+            const count = readInteger(operation.count, 'usize')
+            if (layout._tag !== 'AggregateValue') {
               throw new RangeError('MIR verifier allowed invalid repeated-layout operands')
             }
             const entry = program.layout.entries.find((candidate) =>
@@ -2623,12 +2567,12 @@ function* executeFunction(
               throw new RangeError('Target plan omitted Layout')
             }
             const representation = entry.representation
-            const fieldValue = (name: string): UsizeValue | undefined => {
+            const fieldValue = (name: string): IntegerValue | undefined => {
               const field = representation.fields.find((candidate) => candidate.name === name)
               const value = layout.fields.find(
                 (candidate) => candidate.field.ordinal === field?.id.ordinal,
               )?.value
-              return value?._tag === 'UsizeValue' ? value : undefined
+              return value?._tag === 'IntegerValue' && value.type === 'usize' ? value : undefined
             }
             const bytes = fieldValue('bytes')
             const alignment = fieldValue('alignment')
@@ -2652,7 +2596,7 @@ function* executeFunction(
             ) {
               throw new RangeError('Target plan omitted a repeated-layout result member')
             }
-            const total = usizeValue(overflow ? 0n : stride * count.value)
+            const total = integerValue('usize', overflow ? 0n : stride * count.value)
             const payload: AggregateValue = Object.freeze({
               _tag: 'AggregateValue',
               type: member,
@@ -2688,12 +2632,12 @@ function* executeFunction(
               throw new RangeError('Target plan omitted Layout')
             }
             const representation = entry.representation
-            const fieldValue = (name: string): UsizeValue | undefined => {
+            const fieldValue = (name: string): IntegerValue | undefined => {
               const field = representation.fields.find((candidate) => candidate.name === name)
               const found = layout.fields.find(
                 (candidate) => candidate.field.ordinal === field?.id.ordinal,
               )?.value
-              return found?._tag === 'UsizeValue' ? found : undefined
+              return found?._tag === 'IntegerValue' && found.type === 'usize' ? found : undefined
             }
             const bytes = fieldValue('bytes')
             const alignment = fieldValue('alignment')
@@ -2723,7 +2667,7 @@ function* executeFunction(
             break
           }
           case 'HostWrite': {
-            const stream = readI32(operation.stream)
+            const stream = readInteger(operation.stream, 'i32')
             const viewed = read(operation.bytes).value
             const bytes = (() => {
               if (viewed._tag === 'StaticViewValue') return viewed.bytes
@@ -2732,14 +2676,12 @@ function* executeFunction(
               if (root._tag !== 'ArrayValue') return undefined
               const selected = root.elements.slice(viewed.base, viewed.base + viewed.length)
               if (
-                selected.some(
-                  (element) => element._tag !== 'ScalarIntegerValue' || element.type !== 'u8',
-                )
+                selected.some((element) => element._tag !== 'IntegerValue' || element.type !== 'u8')
               )
                 return undefined
               return Object.freeze(
                 selected.flatMap((element) =>
-                  element._tag === 'ScalarIntegerValue' ? [Number(element.value)] : [],
+                  element._tag === 'IntegerValue' ? [Number(element.value)] : [],
                 ),
               )
             })()
@@ -2747,7 +2689,7 @@ function* executeFunction(
               throw new RangeError('MIR verifier allowed a non-byte slice standard-stream write')
             }
             const destination: StandardStreams.Destination =
-              stream.value === 0 ? 'Stdout' : 'Stderr'
+              stream.value === 0n ? 'Stdout' : 'Stderr'
             const result = (() => {
               if (state.standardStreams === undefined) return undefined
               try {
@@ -2804,12 +2746,12 @@ function* executeFunction(
             const status = (failure?: OsFileSystemHost.Failure): void => {
               replaceReferenced(
                 reasonOutput,
-                value(failure === undefined ? 0 : OsFileSystemHost.reasonCode(failure.reason)),
+                integerValue(
+                  'i32',
+                  failure === undefined ? 0 : OsFileSystemHost.reasonCode(failure.reason),
+                ),
               )
-              replaceReferenced(
-                codeOutput,
-                scalarIntegerValue('u32', BigInt(failure?.nativeCode ?? 0)),
-              )
+              replaceReferenced(codeOutput, integerValue('u32', BigInt(failure?.nativeCode ?? 0)))
             }
             const commit = (result: Value): void =>
               write(operation.destination, { value: result, fromCall: false })
@@ -2830,12 +2772,7 @@ function* executeFunction(
                 throw new RangeError('standard-input provider overran the caller buffer')
               writeByteView(output, result.bytes)
               status()
-              commit(
-                optionValue(
-                  'usize',
-                  Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.bytes.length) }),
-                ),
-              )
+              commit(optionValue('usize', integerValue('usize', BigInt(result.bytes.length))))
               break
             }
             if (name === 'osProcessExecute') {
@@ -2890,7 +2827,7 @@ function* executeFunction(
                 state.processCaptures[0] = Object.freeze([])
                 state.processCaptures[1] = Object.freeze([])
                 status({ _tag: 'Failure', reason: 'InvalidPath' })
-                commit(value(0))
+                commit(integerValue('i32', 0))
                 break
               }
               const result = child.execute(
@@ -2909,26 +2846,23 @@ function* executeFunction(
                   reason: result.reason,
                   ...(result.nativeCode === undefined ? {} : { nativeCode: result.nativeCode }),
                 })
-                commit(value(0))
+                commit(integerValue('i32', 0))
                 break
               }
               state.processCaptures[0] = result.output
               state.processCaptures[1] = result.errors
-              replaceReferenced(processStatus, value(result._tag === 'Exited' ? 0 : 1))
+              replaceReferenced(
+                processStatus,
+                integerValue('i32', result._tag === 'Exited' ? 0 : 1),
+              )
               replaceReferenced(
                 processCode,
-                value(result._tag === 'Exited' ? result.code : result.signal),
+                integerValue('i32', result._tag === 'Exited' ? result.code : result.signal),
               )
-              replaceReferenced(
-                outputLength,
-                Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.output.length) }),
-              )
-              replaceReferenced(
-                errorLength,
-                Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.errors.length) }),
-              )
+              replaceReferenced(outputLength, integerValue('usize', BigInt(result.output.length)))
+              replaceReferenced(errorLength, integerValue('usize', BigInt(result.errors.length)))
               status()
-              commit(value(1))
+              commit(integerValue('i32', 1))
               break
             }
             if (name === 'osProcessCapture') {
@@ -2937,10 +2871,10 @@ function* executeFunction(
               const output = arguments_.at(2)
               if (stream === undefined || offset === undefined || output === undefined)
                 throw new RangeError('OS capture omitted arguments')
-              const selector = readI32(stream).value
-              const captured = state.processCaptures.at(selector)
-              const start = Number(readUsize(offset).value)
-              if (selector !== 0 && selector !== 1) {
+              const selector = readInteger(stream, 'i32').value
+              const captured = state.processCaptures.at(Number(selector))
+              const start = Number(readInteger(offset, 'usize').value)
+              if (selector !== 0n && selector !== 1n) {
                 status({ _tag: 'Failure', reason: 'WrongType' })
                 commit(optionValue('usize'))
                 break
@@ -2953,12 +2887,7 @@ function* executeFunction(
               const transferred = captured.slice(start, start + byteView(output).length)
               writeByteView(output, transferred)
               status()
-              commit(
-                optionValue(
-                  'usize',
-                  Object.freeze({ _tag: 'UsizeValue', value: BigInt(transferred.length) }),
-                ),
-              )
+              commit(optionValue('usize', integerValue('usize', BigInt(transferred.length))))
               break
             }
             if (name.startsWith('osHost')) {
@@ -2970,15 +2899,12 @@ function* executeFunction(
                 const result = input.argumentCount()
                 if (result._tag === 'LookupFailure') {
                   status({ _tag: 'Failure', reason: 'Other' })
-                  commit(value(0))
+                  commit(integerValue('i32', 0))
                   break
                 }
-                replaceReferenced(
-                  count,
-                  Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.count) }),
-                )
+                replaceReferenced(count, integerValue('usize', BigInt(result.count)))
                 status()
-                commit(value(1))
+                commit(integerValue('i32', 1))
                 break
               }
               const output = arguments_.at(name === 'osHostWorkingDirectory' ? 0 : 1)
@@ -2987,7 +2913,7 @@ function* executeFunction(
               if (selector === undefined) throw new RangeError('OS lookup omitted its subject')
               const result =
                 name === 'osHostArgument'
-                  ? input.argument(Number(readUsize(selector).value))
+                  ? input.argument(Number(readInteger(selector, 'usize').value))
                   : name === 'osHostVariable'
                     ? input.variable(byteView(selector))
                     : input.workingDirectory()
@@ -3006,12 +2932,7 @@ function* executeFunction(
               const capacity = byteView(output).length
               writeByteView(output, result.bytes.slice(0, capacity))
               status()
-              commit(
-                optionValue(
-                  'usize',
-                  Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.bytes.length) }),
-                ),
-              )
+              commit(optionValue('usize', integerValue('usize', BigInt(result.bytes.length))))
               break
             }
             const host = state.osFileSystem
@@ -3027,7 +2948,7 @@ function* executeFunction(
                     ? host.fileOpen(
                         byteView(root),
                         byteView(path),
-                        readI32(arguments_.at(2) ?? root).value,
+                        Number(readInteger(arguments_.at(2) ?? root, 'i32').value),
                       )
                     : host.directoryOpen(byteView(root), byteView(path))
                 if (result._tag === 'Failure') {
@@ -3052,12 +2973,7 @@ function* executeFunction(
                 } else {
                   writeByteView(output, result.bytes)
                   status()
-                  commit(
-                    optionValue(
-                      'usize',
-                      Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.bytes.length) }),
-                    ),
-                  )
+                  commit(optionValue('usize', integerValue('usize', BigInt(result.bytes.length))))
                 }
                 break
               }
@@ -3069,19 +2985,14 @@ function* executeFunction(
                   throw new RangeError('OS write omitted arguments')
                 const result = host.fileWrite(
                   hostHandle(handle),
-                  byteView(input).slice(Number(readUsize(offset).value)),
+                  byteView(input).slice(Number(readInteger(offset, 'usize').value)),
                 )
                 if (result._tag === 'Failure') {
                   status(result)
                   commit(optionValue('usize'))
                 } else {
                   status()
-                  commit(
-                    optionValue(
-                      'usize',
-                      Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.count) }),
-                    ),
-                  )
+                  commit(optionValue('usize', integerValue('usize', BigInt(result.count))))
                 }
                 break
               }
@@ -3107,22 +3018,17 @@ function* executeFunction(
                   if (result._tag === 'BufferTooSmall')
                     replaceReferenced(
                       required,
-                      Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.requiredCapacity) }),
+                      integerValue('usize', BigInt(result.requiredCapacity)),
                     )
                   commit(optionValue('usize'))
                 } else if (result._tag === 'End') {
                   status()
-                  commit(optionValue('usize', Object.freeze({ _tag: 'UsizeValue', value: 0n })))
+                  commit(optionValue('usize', integerValue('usize', 0n)))
                 } else {
                   writeByteView(output, result.name)
-                  replaceReferenced(kind, value(result.kind === 'File' ? 0 : 1))
+                  replaceReferenced(kind, integerValue('i32', result.kind === 'File' ? 0 : 1))
                   status()
-                  commit(
-                    optionValue(
-                      'usize',
-                      Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.name.length) }),
-                    ),
-                  )
+                  commit(optionValue('usize', integerValue('usize', BigInt(result.name.length))))
                 }
                 break
               }
@@ -3155,18 +3061,13 @@ function* executeFunction(
                   if (result._tag === 'BufferTooSmall')
                     replaceReferenced(
                       required,
-                      Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.requiredCapacity) }),
+                      integerValue('usize', BigInt(result.requiredCapacity)),
                     )
                   commit(optionValue('usize'))
                 } else {
                   writeByteView(output, result.name)
                   status()
-                  commit(
-                    optionValue(
-                      'usize',
-                      Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.name.length) }),
-                    ),
-                  )
+                  commit(optionValue('usize', integerValue('usize', BigInt(result.name.length))))
                 }
                 break
               }
@@ -3185,15 +3086,12 @@ function* executeFunction(
                 const result = host.pathInspect(byteView(root), byteView(path))
                 if (result._tag === 'Failure') {
                   status(result)
-                  commit(value(0))
+                  commit(integerValue('i32', 0))
                 } else {
-                  replaceReferenced(kind, value(result.kind === 'File' ? 0 : 1))
-                  replaceReferenced(
-                    length,
-                    Object.freeze({ _tag: 'UsizeValue', value: BigInt(result.byteLength) }),
-                  )
+                  replaceReferenced(kind, integerValue('i32', result.kind === 'File' ? 0 : 1))
+                  replaceReferenced(length, integerValue('usize', BigInt(result.byteLength)))
                   status()
-                  commit(value(1))
+                  commit(integerValue('i32', 1))
                 }
                 break
               }
@@ -3218,10 +3116,10 @@ function* executeFunction(
               if (command === undefined) throw new RangeError(`Unknown OS intrinsic ${name}`)
               if (command._tag === 'Failure') {
                 status(command)
-                commit(value(0))
+                commit(integerValue('i32', 0))
               } else {
                 status()
-                commit(value(1))
+                commit(integerValue('i32', 1))
               }
             } catch {
               const failure: OsFileSystemHost.Failure = { _tag: 'Failure', reason: 'Other' }
@@ -3235,15 +3133,15 @@ function* executeFunction(
                         ? Type.osHandle
                         : 'usize',
                     )
-                  : value(0),
+                  : integerValue('i32', 0),
               )
             }
             break
           }
           case 'RawBufferFrom': {
             const allocation = read(operation.allocation).value
-            const count = readInteger(operation.count)
-            if (allocation._tag !== 'AllocationValue' || count._tag !== 'UsizeValue') {
+            const count = readInteger(operation.count, 'usize')
+            if (allocation._tag !== 'AllocationValue') {
               throw new RangeError('MIR verifier allowed invalid RawBuffer construction operands')
             }
             const expectedBytes = BigInt(operation.stride) * count.value
@@ -3286,13 +3184,16 @@ function* executeFunction(
             if (buffer._tag !== 'RawBufferValue') {
               throw new RangeError('MIR verifier allowed RawBuffer.count on another value')
             }
-            write(operation.destination, { value: usizeValue(buffer.count), fromCall: false })
+            write(operation.destination, {
+              value: integerValue('usize', buffer.count),
+              fromCall: false,
+            })
             break
           }
           case 'RawBufferView': {
             const buffer = referenced(operation.buffer).value
-            const offset = readUsize(operation.offset).value
-            const length = readUsize(operation.length).value
+            const offset = readInteger(operation.offset, 'usize').value
+            const length = readInteger(operation.length, 'usize').value
             if (buffer._tag !== 'RawBufferValue') {
               throw new RangeError('MIR verifier allowed RawBuffer.view on another value')
             }
@@ -3324,8 +3225,8 @@ function* executeFunction(
           }
           case 'RawBufferRead': {
             const buffer = referenced(operation.buffer).value
-            const index = readInteger(operation.index)
-            if (buffer._tag !== 'RawBufferValue' || index._tag !== 'UsizeValue') {
+            const index = readInteger(operation.index, 'usize')
+            if (buffer._tag !== 'RawBufferValue') {
               throw new RangeError('MIR verifier allowed invalid RawBuffer.read operands')
             }
             if (index.value >= buffer.count) {
@@ -3364,8 +3265,8 @@ function* executeFunction(
           }
           case 'RawBufferSlot': {
             const buffer = referenced(operation.buffer).value
-            const index = readInteger(operation.index)
-            if (buffer._tag !== 'RawBufferValue' || index._tag !== 'UsizeValue') {
+            const index = readInteger(operation.index, 'usize')
+            if (buffer._tag !== 'RawBufferValue') {
               throw new RangeError('MIR verifier allowed invalid RawBuffer.slot operands')
             }
             if (index.value >= buffer.count) {
@@ -3403,8 +3304,8 @@ function* executeFunction(
           }
           case 'RawBufferCopy': {
             const buffer = referenced(operation.buffer).value
-            const offset = readUsize(operation.offset).value
-            const length = readUsize(operation.length).value
+            const offset = readInteger(operation.offset, 'usize').value
+            const length = readInteger(operation.length, 'usize').value
             const source = read(operation.source).value
             if (
               buffer._tag !== 'RawBufferValue' ||
@@ -3471,7 +3372,7 @@ function* executeFunction(
                 source._tag === 'StaticViewValue'
                   ? (() => {
                       const byte = source.bytes.at(index)
-                      return byte === undefined ? undefined : scalarIntegerValue('u8', BigInt(byte))
+                      return byte === undefined ? undefined : integerValue('u8', BigInt(byte))
                     })()
                   : sourceStorage === undefined
                     ? backing?._tag === 'ArrayValue'
@@ -3526,10 +3427,10 @@ function* executeFunction(
           }
           case 'RawBufferFill': {
             const buffer = referenced(operation.buffer).value
-            const offset = readUsize(operation.offset).value
-            const length = readUsize(operation.length).value
+            const offset = readInteger(operation.offset, 'usize').value
+            const length = readInteger(operation.length, 'usize').value
             const value = readInteger(operation.value)
-            if (buffer._tag !== 'RawBufferValue' || value._tag !== 'ScalarIntegerValue') {
+            if (buffer._tag !== 'RawBufferValue') {
               throw new RangeError('MIR verifier allowed invalid RawBuffer.fill operands')
             }
             if (
@@ -3554,7 +3455,7 @@ function* executeFunction(
                 span: operation.provenance.span,
               })
             }
-            const byte = scalarIntegerValue('u8', value.value)
+            const byte = integerValue('u8', value.value)
             for (let index = 0; index < Number(length); index += 1) {
               allocation.values.set(String(offset + BigInt(index)), byte)
             }
@@ -3750,7 +3651,10 @@ function* executeFunction(
                             : undefined
               if (holds === undefined)
                 throw new RangeError('MIR verifier allowed a non-comparison char operation')
-              write(operation.destination, { value: value(holds ? 1 : 0), fromCall: false })
+              write(operation.destination, {
+                value: integerValue('i32', holds ? 1 : 0),
+                fromCall: false,
+              })
               break
             }
             const leftValue = readInteger(operation.left)
@@ -3789,7 +3693,7 @@ function* executeFunction(
                           ? left > right
                           : left >= right
               write(operation.destination, {
-                value: value(holds ? 1 : 0),
+                value: integerValue('i32', holds ? 1 : 0),
                 fromCall: false,
               })
               break
@@ -3904,7 +3808,7 @@ function* executeFunction(
                     : exact
                 : exact
             write(operation.destination, {
-              value: scalarIntegerValue(scalar.spelling, result),
+              value: integerValue(scalar.spelling, result),
               fromCall: false,
             })
             break
@@ -3924,7 +3828,7 @@ function* executeFunction(
                 span: operation.provenance.span,
               })
             write(operation.destination, {
-              value: scalarIntegerValue(target.spelling, exact),
+              value: integerValue(target.spelling, exact),
               fromCall: false,
             })
             break
@@ -3959,7 +3863,7 @@ function* executeFunction(
                   span: operation.provenance.span,
                 })
               write(operation.destination, {
-                value: scalarIntegerValue(targetType.spelling, exact),
+                value: integerValue(targetType.spelling, exact),
                 fromCall: false,
               })
               break
@@ -3981,11 +3885,7 @@ function* executeFunction(
             const target = Scalar.find(operation.type._tag)
             const subject = read(operation.source).value
             if (target?.category === 'Floating') {
-              if (
-                subject._tag !== 'I32Value' &&
-                subject._tag !== 'UsizeValue' &&
-                subject._tag !== 'ScalarIntegerValue'
-              )
+              if (subject._tag !== 'IntegerValue')
                 throw new RangeError('MIR verifier allowed invalid float reinterpretation')
               write(operation.destination, {
                 value: floatValue(target.spelling, BigInt(subject.value)),
@@ -3993,7 +3893,7 @@ function* executeFunction(
               })
             } else if (target?.category === 'Integer' && subject._tag === 'FloatValue') {
               write(operation.destination, {
-                value: scalarIntegerValue(target.spelling, subject.bits),
+                value: integerValue(target.spelling, subject.bits),
                 fromCall: false,
               })
             } else throw new RangeError('MIR verifier allowed invalid scalar reinterpretation')
@@ -4060,7 +3960,7 @@ function* executeFunction(
                   ? entry.representation.fields.map((field) =>
                       Object.freeze({
                         field: field.id,
-                        value: scalarIntegerValue(target.spelling, arithmetic),
+                        value: integerValue(target.spelling, arithmetic),
                       }),
                     )
                   : [],
@@ -4178,7 +4078,7 @@ function* executeFunction(
                 if (selected._tag !== 'SliceValue' && selected._tag !== 'StaticViewValue') {
                   throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
                 }
-                const exactIndex = readUsize(selector.index).value
+                const exactIndex = readInteger(selector.index, 'usize').value
                 if (exactIndex >= BigInt(selected.length)) {
                   return blockedStep({
                     _tag: 'Trap',
@@ -4202,7 +4102,7 @@ function* executeFunction(
                       span: selector.provenance.span,
                     }),
                   )
-                  selected = scalarIntegerValue('u8', BigInt(byte))
+                  selected = integerValue('u8', BigInt(byte))
                   continue
                 }
                 if (selected.ticket !== undefined) {
@@ -4252,7 +4152,7 @@ function* executeFunction(
               const index =
                 selector.index._tag === 'Proven'
                   ? selector.index.value
-                  : Number(readUsize(selector.index.local).value)
+                  : Number(readInteger(selector.index.local, 'usize').value)
               if (index < 0 || !Number.isSafeInteger(index) || index >= selector.length) {
                 return blockedStep({
                   _tag: 'Trap',
@@ -4993,7 +4893,7 @@ function* executeFunction(
             const effectOutcome = execution.value
             write(operation.outcome, { value: effectOutcome, fromCall: true })
             if (effectOutcome.tag === 0) {
-              write(operation.destination, { value: value(0), fromCall: true })
+              write(operation.destination, { value: integerValue('i32', 0), fromCall: true })
               break
             }
             const failure = operation.failures.find(
@@ -5022,7 +4922,10 @@ function* executeFunction(
                 span: operation.provenance.span,
               }),
             )
-            write(operation.destination, { value: value(failure.tag), fromCall: true })
+            write(operation.destination, {
+              value: integerValue('i32', failure.tag),
+              fromCall: true,
+            })
             break
           }
           case 'Call': {
@@ -5134,7 +5037,7 @@ function* executeFunction(
       case 'Yield': {
         const loop = conditionOwners.get(region.id.ordinal)
         if (loop === undefined) throw new RangeError('MIR verifier allowed an unowned yield')
-        const enter = readI32(loop.conditionValue).value !== 0
+        const enter = readInteger(loop.conditionValue, 'i32').value !== 0n
         trace.push(
           Object.freeze({
             _tag: enter ? 'Iteration' : 'Condition',
@@ -5340,7 +5243,10 @@ const executeMachine = (
         layoutEntry.representation.fields.map((field) =>
           Object.freeze({
             field: field.id,
-            value: usizeValue(BigInt(field.name === 'bytes' ? request.bytes : request.alignment)),
+            value: integerValue(
+              'usize',
+              BigInt(field.name === 'bytes' ? request.bytes : request.alignment),
+            ),
           }),
         ),
       ),
@@ -5910,12 +5816,13 @@ export const evaluate = (
   }
   if (result._tag === 'Transfer')
     throw new RangeError('Bootstrap evaluator returned a private suspension transfer')
-  if (result.value._tag !== 'I32Value') {
+  if (result.value._tag !== 'IntegerValue' || result.value.type !== 'i32') {
     throw new RangeError('Bootstrap entry returned a non-i32 value')
   }
   const status = result.value
-  if (program.entry._tag === 'EffectEntry' && status.value !== 0) {
-    const failure = program.entry.failures.find((candidate) => candidate.tag === status.value)
+  const statusCode = Number(status.value)
+  if (program.entry._tag === 'EffectEntry' && statusCode !== 0) {
+    const failure = program.entry.failures.find((candidate) => candidate.tag === statusCode)
     if (failure === undefined) {
       return Object.freeze({
         _tag: 'Blocked',

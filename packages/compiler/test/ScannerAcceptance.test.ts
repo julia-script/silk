@@ -61,15 +61,15 @@ it.effect(
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed')
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42)
+      assert.strictEqual(evaluated.result.value, 42n)
       const tokenKinds = evaluated.trace.flatMap((event) =>
         event._tag === 'Binding' &&
         event.target.name === 'observe' &&
-        event.value._tag === 'I32Value'
+        event.value._tag === 'IntegerValue'
           ? [event.value.value]
           : [],
       )
-      assert.deepEqual(tokenKinds, [1, 2, 3, 1, 2, 3, 1, 2, 3, 1])
+      assert.deepEqual(tokenKinds, [1n, 2n, 3n, 1n, 2n, 3n, 1n, 2n, 3n, 1n])
       assert.strictEqual(
         evaluated.trace.filter((event) => event._tag === 'AllocationAcquire').length,
         3,
@@ -104,7 +104,7 @@ it.effect(
         const evaluated = Analysis.evaluate(snapshot)
         assert.strictEqual(evaluated._tag, 'Completed', label)
         if (evaluated._tag !== 'Completed') continue
-        assert.strictEqual(evaluated.result.value, expected, label)
+        assert.strictEqual(evaluated.result.value, BigInt(expected), label)
         const events = Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag)
         assert.strictEqual(
           events.filter((event) => event === 'AllocationAcquire').length,
@@ -119,7 +119,8 @@ it.effect(
 
         const again = Analysis.evaluate(snapshot)
         assert.strictEqual(again._tag, 'Completed', label)
-        if (again._tag === 'Completed') assert.strictEqual(again.result.value, expected, label)
+        if (again._tag === 'Completed')
+          assert.strictEqual(again.result.value, BigInt(expected), label)
 
         const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
         const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})

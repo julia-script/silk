@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as Mir from '../src/Mir.js'
 import { corpus } from './support/corpus.js'
+import * as Json from './support/Json.js'
 
 // UTF-8, not charCodeAt: corpus programs may carry non-ASCII literals, and for ASCII sources the
 // bytes are identical.
@@ -18,34 +19,40 @@ const evaluateSource = (
     Analysis.evaluate(snapshot, options),
   )
 
-it.effect('reproduces every pinned corpus outcome', () =>
-  Effect.gen(function* () {
-    for (const program of corpus) {
-      const outcome = yield* evaluateSource(program.source)
-      switch (program.expected._tag) {
-        case 'Completes':
-          assert.strictEqual(outcome._tag, 'Completed', program.name)
-          if (outcome._tag === 'Completed') {
-            assert.strictEqual(outcome.result.value, program.expected.result, program.name)
-          }
-          break
-        case 'Trap':
-          assert.strictEqual(outcome._tag, 'Blocked', program.name)
-          if (outcome._tag === 'Blocked') {
-            assert.strictEqual(outcome.reason._tag, 'Trap', program.name)
-          }
-          break
-        case 'UnavailableEntry':
-          assert.strictEqual(outcome._tag, 'Blocked', program.name)
-          if (outcome._tag === 'Blocked' && outcome.reason._tag === 'UnavailableEntry') {
-            assert.strictEqual(outcome.reason.reason, program.expected.reason, program.name)
-          } else {
-            assert.fail(`${program.name} expected an unavailable entry`)
-          }
-          break
+it.effect(
+  'reproduces every pinned corpus outcome',
+  () =>
+    Effect.gen(function* () {
+      for (const program of corpus) {
+        const outcome = yield* evaluateSource(program.source)
+        switch (program.expected._tag) {
+          case 'Completes':
+            assert.strictEqual(outcome._tag, 'Completed', program.name)
+            if (outcome._tag === 'Completed') {
+              assert.strictEqual(
+                outcome.result.value,
+                BigInt(program.expected.result),
+                program.name,
+              )
+            }
+            break
+          case 'Trap':
+            assert.strictEqual(outcome._tag, 'Blocked', program.name)
+            if (outcome._tag === 'Blocked') {
+              assert.strictEqual(outcome.reason._tag, 'Trap', program.name)
+            }
+            break
+          case 'UnavailableEntry':
+            assert.strictEqual(outcome._tag, 'Blocked', program.name)
+            if (outcome._tag === 'Blocked' && outcome.reason._tag === 'UnavailableEntry') {
+              assert.strictEqual(outcome.reason.reason, program.expected.reason, program.name)
+            } else {
+              assert.fail(`${program.name} expected an unavailable entry`)
+            }
+            break
+        }
       }
-    }
-  }),
+    }),
   // The corpus replays every pinned program; it outgrew the default 60s ceiling on CI hosts.
   300_000,
 )
@@ -55,7 +62,7 @@ it.effect('traces the identity program in order with bound and returned values',
     const outcome = yield* evaluateSource(`pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(42) }`)
 
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
     assert.deepEqual(
       outcome.trace.map((event) => event._tag),
       ['Entry', 'RegionEntry', 'Call', 'Binding', 'Entry', 'RegionEntry', 'Return', 'Return'],
@@ -63,9 +70,9 @@ pub fn main() -> i32 { return identity(42) }`)
     const binding = outcome.trace.at(3)
     assert.strictEqual(binding?._tag, 'Binding')
     if (binding?._tag !== 'Binding') return
-    assert.strictEqual(binding.value._tag, 'I32Value')
-    if (binding.value._tag !== 'I32Value') return
-    assert.strictEqual(binding.value.value, 42)
+    assert.strictEqual(binding.value._tag, 'IntegerValue')
+    if (binding.value._tag !== 'IntegerValue') return
+    assert.strictEqual(binding.value.value, 42n)
     assert.strictEqual(binding.parameterOrdinal, 0)
     assert.strictEqual(binding.fromCall, false)
     assert.strictEqual(binding.frame, 1)
@@ -92,9 +99,9 @@ pub fn main() -> i32 {
   return run pending
 }`)
 
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
     assert.isTrue(
       outcome.trace.some(
         (event) => event._tag === 'Call' && event.target.name.includes('$effect$'),
@@ -130,9 +137,9 @@ pub fn main() -> i32 {
     )
     const outcome = Analysis.evaluate(snapshot)
 
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -145,9 +152,9 @@ pub fn main() -> i32 {
   return named(plusTwo(40))
 }`)
 
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
     assert.strictEqual(
       outcome.trace.filter((event) => event._tag === 'CallableConstruct').length,
       2,
@@ -171,9 +178,9 @@ pub fn main() -> i32 {
   return second
 }`)
 
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 22)
+    assert.strictEqual(outcome.result.value, 22n)
     assert.strictEqual(
       outcome.trace.filter((event) => event._tag === 'CallableApply' && event.mode === 'Exclusive')
         .length,
@@ -215,7 +222,7 @@ pub fn main() -> i32 {
     }
 
     const outcome = BootstrapEvaluation.evaluate(self.instances, repeated)
-    assert.strictEqual(outcome._tag, 'Blocked', JSON.stringify(outcome, undefined, 2))
+    assert.strictEqual(outcome._tag, 'Blocked', JSON.stringify(outcome, Json.bigIntReplacer, 2))
     if (outcome._tag !== 'Blocked') return
     assert.strictEqual(outcome.reason._tag, 'InvalidCallableReuse')
     assert.strictEqual(outcome.trace.at(-1)?._tag, 'CallableRejected')
@@ -238,8 +245,8 @@ pub fn main() -> i32 { return run succeed(42) |> Effect.tap(observe) }`)
       [flatMapped, 42],
       [tapped, 42],
     ] as const) {
-      assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
-      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, expected)
+      assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, BigInt(expected))
     }
   }),
 )
@@ -250,8 +257,8 @@ it.effect('keeps an Effect returned from map nested until a second run', () =>
 effect fn double(value: i32) -> i32 { return value * 2 }
 pub fn main() -> i32 { return run (run (succeed(21) |> Effect.map(double))) }`)
 
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -276,10 +283,10 @@ pub fn main() -> i32 {
     assert.strictEqual(
       outcome._tag,
       'Completed',
-      `${JSON.stringify({ diagnostics: self.diagnostics, outcome }, undefined, 2)}\n${Mir.encode(Analysis.loweredMir(self))}`,
+      `${JSON.stringify({ diagnostics: self.diagnostics, outcome }, Json.bigIntReplacer, 2)}\n${Mir.encode(Analysis.loweredMir(self))}`,
     )
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 43)
+    assert.strictEqual(outcome.result.value, 43n)
     assert.strictEqual(
       outcome.trace.filter(
         (event) =>
@@ -304,9 +311,9 @@ pub fn main() -> i32 {
   return 42
 }`)
 
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
     assert.strictEqual(outcome.trace.filter((event) => event._tag === 'CallableCleanup').length, 1)
   }),
 )
@@ -323,9 +330,9 @@ pub fn main() -> i32 {
   return run handled
 }`)
 
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
     assert.include(
       outcome.trace.map((event) => event._tag),
       'CallableApply',
@@ -343,9 +350,9 @@ it.effect('preserves exclusive capture state across repeated Effect runs', () =>
   return first * 10 + second
 }`)
 
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 12)
+    assert.strictEqual(outcome.result.value, 12n)
   }),
 )
 
@@ -357,8 +364,8 @@ pub fn main() -> i32 {
   return run recipe
 }`)
 
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42n)
     assert.deepEqual(
       outcome.trace.map((event) => event._tag),
       [
@@ -391,8 +398,8 @@ pub fn main() -> i32 {
   return run recipe
 }`)
 
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42n)
     assert.isTrue(outcome.trace.some((event) => event._tag === 'EffectFailure'))
     assert.isTrue(outcome.trace.some((event) => event._tag === 'EffectSuccess'))
   }),
@@ -482,7 +489,7 @@ pub fn main() -> i32 { return run Effect.catchAll(countdown(4), recover) }`)
 
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
     assert.isAtLeast(outcome.trace.filter((event) => event._tag === 'EffectFailure').length, 1)
   }),
 )
@@ -564,9 +571,9 @@ it.effect('evaluates operator precedence, prefix operations, and pipeline chains
     )
 
     assert.strictEqual(arithmetic._tag, 'Completed')
-    assert.strictEqual(arithmetic._tag === 'Completed' ? arithmetic.result.value : undefined, 15)
+    assert.strictEqual(arithmetic._tag === 'Completed' ? arithmetic.result.value : undefined, 15n)
     assert.strictEqual(boolean._tag, 'Completed')
-    assert.strictEqual(boolean._tag === 'Completed' ? boolean.result.value : undefined, 42)
+    assert.strictEqual(boolean._tag === 'Completed' ? boolean.result.value : undefined, 42n)
   }),
 )
 
@@ -596,7 +603,7 @@ pub fn inspect(input: Left | Right) -> i32 {
 pub fn main() -> i32 { return inspect(Left { value: 41 }) }`)
 
     assert.strictEqual(outcome._tag, 'Completed')
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42n)
     assert.deepEqual(
       outcome.trace.filter((event) => event._tag.startsWith('Match')).map((event) => event._tag),
       [
@@ -622,7 +629,7 @@ pub fn main() -> i32 {
 }`)
 
     assert.strictEqual(outcome._tag, 'Completed')
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42n)
     const cleanup = outcome.trace.filter((event) => event._tag === 'MatchCleanup')
     assert.strictEqual(cleanup.length, 1)
     const first = cleanup.at(0)
@@ -644,7 +651,7 @@ pub fn main() -> i32 {
 }`)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
     assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Cleanup').length, 1)
   }),
 )
@@ -697,8 +704,9 @@ pub fn main() -> i32 { return inspect(Token { value: 42 }) }`),
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
     assert.deepEqual(outcome.result, {
-      _tag: 'I32Value',
-      value: 42,
+      _tag: 'IntegerValue',
+      type: 'i32',
+      value: 42n,
     })
   }),
 )

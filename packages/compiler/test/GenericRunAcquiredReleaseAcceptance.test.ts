@@ -114,7 +114,7 @@ const accept = (
     // assertion is what fails first if run-fallibility starts publishing redundant cleanup.
     assert.strictEqual(evaluated._tag, 'Completed', name)
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, expected, name)
+    assert.strictEqual(evaluated.result.value, BigInt(expected), name)
 
     // The interleaving is the stronger statement: each execution had finished with its own
     // provider before the next acquired, rather than the releases merely trailing the acquires.

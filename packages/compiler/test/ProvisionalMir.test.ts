@@ -322,6 +322,6 @@ pub fn main() -> i32 {
     assert.deepEqual(outcomes(provisional), [])
     const evaluated = Analysis.evaluate(self)
     assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
   }),
 )

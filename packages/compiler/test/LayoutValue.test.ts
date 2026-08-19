@@ -30,7 +30,7 @@ it.effect('constructs valid zero-sized and over-aligned Layout values', () =>
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed')
-      assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+      assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
       assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [])
     }
   }),
@@ -46,7 +46,7 @@ it.effect('returns ordinary InvalidAlignment data before allocation', () =>
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 0)
+    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 0n)
   }),
 )
 

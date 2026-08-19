@@ -102,7 +102,7 @@ it.effect(
         ),
       )
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42)
+      assert.strictEqual(evaluated.result.value, 42n)
 
       // The recorded counts describe the substrate honestly: three logical blocks were acquired,
       // and all three are released by the time the program returns.
@@ -179,7 +179,7 @@ it.effect(
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed')
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42)
+      assert.strictEqual(evaluated.result.value, 42n)
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -232,7 +232,7 @@ it.effect('costs a program that never reads the metrics nothing at all', () =>
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(
       Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag),
       ['AllocationAcquire', 'AllocationRelease'],
@@ -302,7 +302,7 @@ pub fn main() -> i32 {
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
 
     // Holding and reading metrics allocates nothing.
     assert.deepEqual(Analysis.allocationTraceEventsOf(evaluated), [])

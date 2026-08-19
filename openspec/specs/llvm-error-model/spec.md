@@ -7,7 +7,7 @@ Defines an LLVM-specific typed failure contract so callers can recover from inva
 ## Requirements
 
 ### Requirement: LLVM-specific public error identity
-The package SHALL expose expected LLVM operation failures as a yieldable `LlvmError` tagged with `LlvmError`, and SHALL export that contract from `@silk-effect/llvm/LlvmError` and the package root. The superseded `SilkError` class, tag, actor, and package subpath SHALL be removed as a breaking API migration.
+The package SHALL expose expected LLVM operation failures as a yieldable `LlvmError` tagged with `LlvmError`, and SHALL export that contract from `@silk-effect/llvm/LlvmError` and the package root.
 
 #### Scenario: Caller handles an LLVM failure
 - **WHEN** a public LLVM operation rejects caller input
@@ -16,8 +16,7 @@ The package SHALL expose expected LLVM operation failures as a yieldable `LlvmEr
 
 #### Scenario: Caller imports the error contract
 - **WHEN** a consumer imports the package root or `@silk-effect/llvm/LlvmError`
-- **THEN** the exported error class is named `LlvmError`
-- **AND** no `SilkError` public export or subpath remains
+- **THEN** the exported error class is named `LlvmError` and carries the canonical LLVM error contract
 
 ### Requirement: Expected invalid inputs stay in the typed channel
 Every public operation that accepts values requiring runtime validation SHALL represent rejected values as `LlvmError` failures. It MUST NOT throw, die, or expose an untyped failure for expected invalid input, including fractional, non-finite, unsafe, negative, or out-of-range numeric values.

@@ -289,7 +289,7 @@ pub fn notEquals(left: isize, right: isize) -> bool {
 
 /// Calls the concrete isize lessThan primitive.
 pub fn lessThan(left: isize, right: isize) -> bool {
-  return Intrinsic.isizeLessThan(left, right)
+  return Intrinsic.isizeLessThan(&left, &right)
 }
 
 /// Calls the concrete isize lessOrEqual primitive.

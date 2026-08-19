@@ -94,7 +94,7 @@ const accept = (name: string, source: string, expected: number) =>
     // assertion is what fails first if run-fallibility starts publishing redundant cleanup.
     assert.strictEqual(evaluated._tag, 'Completed', name)
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, expected, name)
+    assert.strictEqual(evaluated.result.value, BigInt(expected), name)
 
     const events = allocationEvents(evaluated)
     assert.deepEqual(events, ['AllocationAcquire', 'AllocationRelease'], `${name} trace`)

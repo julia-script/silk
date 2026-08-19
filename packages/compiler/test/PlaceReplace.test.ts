@@ -57,7 +57,7 @@ it.effect('swaps places atomically on the evaluator and Wasm', () =>
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed', name)
       if (evaluated._tag !== 'Completed') continue
-      assert.strictEqual(evaluated.result.value, expected, name)
+      assert.strictEqual(evaluated.result.value, BigInt(expected), name)
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})

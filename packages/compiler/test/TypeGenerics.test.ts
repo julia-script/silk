@@ -20,6 +20,7 @@ import * as SourceResolver from '../src/SourceResolver.js'
 import * as SourceSpan from '../src/SourceSpan.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
+import * as Json from './support/Json.js'
 import { unreachable } from './support/raise.js'
 
 const source = `fn identity<T>(value: T) -> T { return move value }
@@ -635,9 +636,9 @@ it.effect('infers and explicitly selects finite concrete instances before MIR', 
     assert.strictEqual(snapshot.mir.value.functions.length, 3)
     assert.notInclude(Mir.encode(snapshot.mir.value), 'TypeParameter')
     const outcome = BootstrapEvaluation.evaluate(snapshot.instances, snapshot.mir.value)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome))
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
     if (outcome._tag === 'Completed') {
-      assert.strictEqual(outcome.result.value, 42)
+      assert.strictEqual(outcome.result.value, 42n)
       assert.deepEqual(
         outcome.trace.flatMap((event) =>
           event._tag === 'Call' && event.target.name === 'identity'
@@ -670,8 +671,8 @@ pub fn main() -> i32 { return pair<i32>(42, true) }`),
       ],
     )
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -730,8 +731,8 @@ pub fn main() -> i32 { return accept<Left | Right>(Left { value: 0 }, true) }`),
 
     assert.deepEqual(snapshot.diagnostics, [])
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -788,7 +789,7 @@ pub fn main() -> i32 {
     assert.deepEqual(snapshot.diagnostics, [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -874,7 +875,7 @@ pub fn main() -> i32 {
     )
     const outcome = BootstrapEvaluation.evaluate(snapshot.instances, snapshot.mir.value)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -904,7 +905,7 @@ pub fn main() -> i32 { return Generic.identity<i32>(Generic.identity(42)) }`),
     if (snapshot.mir._tag !== 'Available') return
     const outcome = BootstrapEvaluation.evaluate(snapshot.instances, snapshot.mir.value)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -955,7 +956,7 @@ pub fn main() -> i32 { return recurse<i32>(1) }`),
     assert.deepEqual(snapshot.instances.violations, [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -1091,8 +1092,8 @@ pub fn main() -> i32 { return take(Box<i32> { value: 42 }) }`),
       )
       assert.deepEqual(snapshot.diagnostics, [])
       const outcome = Analysis.evaluate(snapshot)
-      assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome))
-      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+      assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
+      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     }),
 )
 
@@ -1131,7 +1132,7 @@ pub fn main() -> i32 {
     )
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 

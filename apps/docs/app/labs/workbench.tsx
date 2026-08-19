@@ -22,6 +22,13 @@
 import { RegistryProvider, useAtom, useAtomSet, useAtomValue } from '@effect/atom-react'
 import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
 import type { Target } from '@silk-effect/compiler'
+import {
+  type ViewContext,
+  type ViewId,
+  siblingsOf,
+  viewById,
+  views,
+} from '@silk-effect/inspector/Registry'
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview-react'
 import { DockviewReact } from 'dockview-react'
 import { Atom } from 'effect/unstable/reactivity'
@@ -29,7 +36,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { SilkEditor } from './editor'
 import { PresetPalette } from './preset-palette'
 import { type Preset, presetGroups, presets } from './presets'
-import { type ViewContext, siblingsOf, viewById, views } from './registry'
 import { EmptyState, RowList } from './row/row'
 import {
   activeModuleAtom,
@@ -68,8 +74,8 @@ function PhasePicker({
   onPick,
   onClose,
 }: {
-  readonly active: string
-  readonly onPick: (id: string) => void
+  readonly active: ViewId
+  readonly onPick: (id: ViewId) => void
   readonly onClose: () => void
 }) {
   return (
@@ -112,6 +118,14 @@ function SourceBody() {
   const active = names.includes(activeModule) ? activeModule : (names[0] ?? '')
   const text = modules[active] ?? ''
 
+  // The editor speaks bare byte ranges; the shared cursor is module-qualified, so the active
+  // module is attached here — the one place that knows which module the editor is showing.
+  const onSelect = useCallback(
+    (range: { readonly start: number; readonly end: number }) =>
+      setCursor({ module: active, ...range }),
+    [setCursor, active],
+  )
+
   const activeRef = useRef(active)
   activeRef.current = active
   const onChange = useCallback(
@@ -129,7 +143,7 @@ function SourceBody() {
         module={active}
         cursor={cursor}
         onChange={onChange}
-        onSelect={setCursor}
+        onSelect={onSelect}
         formatRef={formatRef}
         className={shell.editor}
       />
@@ -155,7 +169,7 @@ function SourceBody() {
  * Every pane. One 22px bar carries the phase picker, sibling phases, any pane-local control and
  * the pane's meta; the body is either the editor or a list of rows.
  */
-function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
+function ViewPane(props: IDockviewPanelProps<{ view: ViewId }>) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const [showTrivia, setShowTrivia] = useState(false)
@@ -170,13 +184,11 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
   const evaluationOptions = useAtomValue(evaluationOptionsAtom)
   const setEvaluation = useAtomSet(evaluationAtom)
 
-  // A layout saved before the redesign carries a `source`-component panel with no `view` param
-  // at all; its panel id still says what it was. Resolving it here keeps old layouts working.
-  const viewId = props.params.view ?? (props.api.id === 'source' ? 'source' : undefined)
-  const definition = viewId === undefined ? undefined : viewById(viewId)
+  const viewId = props.params.view
+  const definition = viewById(viewId)
 
   const onPick = useCallback(
-    (next: string) => {
+    (next: ViewId) => {
       const picked = viewById(next)
       if (picked === undefined) return
       props.api.updateParameters({ view: next })
@@ -196,9 +208,7 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
         <div className={shell.emptyPaneBody}>
           <div className={shell.emptyPaneChooser}>
             <p className={shell.emptyPaneHint}>
-              {viewId === undefined || viewId === ''
-                ? 'This pane has no content yet — pick a view:'
-                : `“${viewId}” is not a view this workbench knows — pick one:`}
+              {`“${viewId}” is not a view this workbench knows — pick one:`}
             </p>
             <div className={shell.emptyPaneList} role="menu">
               {views.map((view) => (
@@ -227,19 +237,19 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
     root: analysisInput.rootModule,
     mode,
     profile,
-    cursor,
-    onSelectSpan: setCursor,
     evaluation,
-    // Evaluation runs the lowered MIR, which is absent when the target did not resolve.
-    onEvaluate: () =>
-      setEvaluation(
-        Analysis.mirOf(snapshot)._tag === 'Available'
-          ? Analysis.evaluate(snapshot, evaluationOptions)
-          : undefined,
-      ),
     filter,
     showTrivia,
   }
+
+  // The registry advertises actions as data; evaluation is the only one, and it runs the lowered
+  // MIR, which is absent when the target did not resolve.
+  const runAction = () =>
+    setEvaluation(
+      Analysis.mirOf(snapshot)._tag === 'Available'
+        ? Analysis.evaluate(snapshot, evaluationOptions)
+        : undefined,
+    )
 
   const isSource = definition.id === 'source'
   const result = isSource ? undefined : definition.project(context)
@@ -304,11 +314,7 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
         ) : null}
 
         {definition.action === undefined ? null : (
-          <button
-            type="button"
-            className={shell.paneToggle}
-            onClick={() => definition.action?.run(context)}
-          >
+          <button type="button" className={shell.paneToggle} onClick={runAction}>
             {definition.action.label}
           </button>
         )}
@@ -335,6 +341,7 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
         <RowList
           rows={result?.rows ?? []}
           cursor={cursor}
+          onPick={setCursor}
           label={`${definition.title} rows`}
         />
       )}
@@ -346,7 +353,7 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
   )
 }
 
-const components = { source: ViewPane, view: ViewPane }
+const components = { view: ViewPane }
 
 /**
  * Opens a workspace's six panes as three columns of two.
@@ -365,20 +372,20 @@ const openWorkspace = (api: DockviewApi, workspace: Workspace): void => {
   const columnA = api.addPanel({
     id: 'pane-a1',
     component: 'view',
-    title: viewById(a1 as string)?.title ?? 'Source',
+    title: viewById(a1)?.title ?? 'Source',
     params: { view: a1 },
   })
   const columnB = api.addPanel({
     id: 'pane-b1',
     component: 'view',
-    title: viewById(b1 as string)?.title ?? '',
+    title: viewById(b1)?.title ?? '',
     params: { view: b1 },
     position: { direction: 'right', referencePanel: columnA },
   })
   const columnC = api.addPanel({
     id: 'pane-c1',
     component: 'view',
-    title: viewById(c1 as string)?.title ?? '',
+    title: viewById(c1)?.title ?? '',
     params: { view: c1 },
     position: { direction: 'right', referencePanel: columnB },
   })
@@ -386,21 +393,21 @@ const openWorkspace = (api: DockviewApi, workspace: Workspace): void => {
   api.addPanel({
     id: 'pane-a2',
     component: 'view',
-    title: viewById(a2 as string)?.title ?? '',
+    title: viewById(a2)?.title ?? '',
     params: { view: a2 },
     position: { direction: 'below', referencePanel: columnA },
   })
   api.addPanel({
     id: 'pane-b2',
     component: 'view',
-    title: viewById(b2 as string)?.title ?? '',
+    title: viewById(b2)?.title ?? '',
     params: { view: b2 },
     position: { direction: 'below', referencePanel: columnB },
   })
   api.addPanel({
     id: 'pane-c2',
     component: 'view',
-    title: viewById(c2 as string)?.title ?? '',
+    title: viewById(c2)?.title ?? '',
     params: { view: c2 },
     position: { direction: 'below', referencePanel: columnC },
   })
@@ -613,14 +620,22 @@ function WorkbenchInner() {
     if (api === undefined || name.trim() === '') return
     // A workspace is the *arrangement*, so it stores the views its panes currently show.
     const panes = api.panels.slice(0, 6)
+    const viewAt = (index: number): ViewId => {
+      const params: unknown = panes[index]?.params
+      if (typeof params !== 'object' || params === null || !('view' in params)) return 'source'
+      const view = params.view
+      return typeof view === 'string' ? (viewById(view)?.id ?? 'source') : 'source'
+    }
     const entry: Workspace = {
       name: name.trim(),
-      panes: Object.fromEntries(
-        slotOrder.map((slot, index) => [
-          slot,
-          (panes[index]?.params as { view?: string } | undefined)?.view ?? 'source',
-        ]),
-      ) as Workspace['panes'],
+      panes: {
+        a1: viewAt(0),
+        a2: viewAt(1),
+        b1: viewAt(2),
+        b2: viewAt(3),
+        c1: viewAt(4),
+        c2: viewAt(5),
+      },
     }
     setSavedWorkspaces([...savedList.filter((candidate) => candidate.name !== entry.name), entry])
     setActiveWorkspace(entry.name)

@@ -1,73 +1,34 @@
 'use client'
 
 /**
- * The one row every inspector is built from.
+ * The React shell around the shared row grammar.
  *
- * Each phase used to render its own card markup, so comparing two phases meant reading two
- * different visual languages and scrolling six times as far. A shared row makes the phases
- * genuinely comparable: the same construct occupies the same shape everywhere, and the only
- * thing that differs between panes is the content of the columns.
+ * The row model itself lives in `@silk-effect/inspector` — rows are pure data with
+ * module-qualified spans, so the same projections serve this workbench and the language server.
+ * What stays here is rendering and activation: a row is pickable exactly when it carries a span,
+ * and picking one moves the shared span cursor.
  */
 
+import type { RowModel, Span } from '@silk-effect/inspector'
+import { cursorStateFor, spanLabel } from '@silk-effect/inspector'
 import type { ReactNode } from 'react'
 import styles from './row.module.css'
 
-/** A byte range in one module's source. The join between every phase. */
-export interface Span {
-  readonly start: number
-  readonly end: number
-}
-
-export type RowTone = 'error' | 'warning' | 'symbol' | 'ok'
-export type DotKind = 'token' | 'node' | 'missing' | 'error' | 'warning' | 'ok' | 'symbol'
-
-export interface RowModel {
-  readonly key: string
-  /** Optional line/token index, rendered in the 26px tabular lead column. */
-  readonly lead?: string | number
-  readonly depth?: number
-  /** `undefined` renders no caret; a branch row supplies `▾`/`▸`. */
-  readonly caret?: string
-  readonly dot?: DotKind
-  readonly label: string
-  readonly detail?: string
-  readonly span?: Span
-  /** Group heads render at 700 weight — the row grammar's only typographic emphasis. */
-  readonly head?: boolean
-  readonly tone?: RowTone
-  readonly onActivate?: () => void
-}
-
 const INDENT_STEP = 13
-
-/**
- * Where the span cursor sits relative to a row.
- *
- * `contains` is deliberately not `equals`: clicking `identity` in the token stream should tint
- * the enclosing `CallExpression` in the tree and the function that lowered it in MIR, because
- * those are the same construct seen through later phases.
- */
-export type CursorState = 'exact' | 'contains' | undefined
-
-export const cursorStateFor = (span: Span | undefined, cursor: Span | undefined): CursorState => {
-  if (span === undefined || cursor === undefined) return undefined
-  if (span.start === cursor.start && span.end === cursor.end) return 'exact'
-  return span.start <= cursor.start && span.end >= cursor.end ? 'contains' : undefined
-}
-
-export const spanLabel = (span: Span | undefined): string =>
-  span === undefined ? '' : `${span.start}–${span.end}`
 
 export function Row({
   model,
   cursor,
+  onPick,
 }: {
   readonly model: RowModel
   readonly cursor?: Span | undefined
+  readonly onPick?: ((span: Span) => void) | undefined
 }) {
   const state = cursorStateFor(model.span, cursor)
   const depth = model.depth ?? 0
-  const pickable = model.onActivate !== undefined
+  const span = model.span
+  const pickable = span !== undefined && onPick !== undefined
 
   // A row that moves the cursor is a button; a row that only displays is not, so the keyboard
   // walks exactly the rows that do something.
@@ -76,7 +37,7 @@ export function Row({
   return (
     <Element
       className={styles.row}
-      {...(pickable ? { type: 'button' as const, onClick: model.onActivate } : {})}
+      {...(pickable ? { type: 'button' as const, onClick: () => onPick(span) } : {})}
       data-pickable={pickable}
       data-cursor={state}
       data-tone={model.tone}
@@ -108,15 +69,17 @@ export function RowList({
   rows,
   cursor,
   label,
+  onPick,
 }: {
   readonly rows: ReadonlyArray<RowModel>
   readonly cursor?: Span | undefined
   readonly label: string
+  readonly onPick?: ((span: Span) => void) | undefined
 }) {
   return (
     <div className={styles.rows} role="list" aria-label={label}>
       {rows.map((row) => (
-        <Row key={row.key} model={row} cursor={cursor} />
+        <Row key={row.key} model={row} cursor={cursor} onPick={onPick} />
       ))}
     </div>
   )

@@ -11,6 +11,7 @@
  */
 
 import type { SerializedDockview } from 'dockview'
+import { viewById } from '@silk-effect/inspector/Registry'
 
 export const sourceParam = 's'
 export const layoutParam = 'l'
@@ -112,9 +113,25 @@ export const encodeLayout = async (layout: SerializedDockview): Promise<string |
 export const decodeLayout = async (value: string): Promise<SerializedDockview | undefined> => {
   try {
     const parsed: unknown = JSON.parse(await inflate(value))
-    // A layout from an older build can deserialize into something dockview rejects at
-    // `fromJSON`, which would throw during render; the shape check keeps that to a fallback.
-    if (typeof parsed !== 'object' || parsed === null || !('grid' in parsed)) return undefined
+    if (typeof parsed !== 'object' || parsed === null || !('grid' in parsed) || !('panels' in parsed))
+      return undefined
+    const panels = parsed.panels
+    if (typeof panels !== 'object' || panels === null || Array.isArray(panels)) return undefined
+    for (const panel of Object.values(panels)) {
+      if (
+        typeof panel !== 'object' ||
+        panel === null ||
+        !('contentComponent' in panel) ||
+        panel.contentComponent !== 'view' ||
+        !('params' in panel) ||
+        typeof panel.params !== 'object' ||
+        panel.params === null ||
+        !('view' in panel.params) ||
+        typeof panel.params.view !== 'string' ||
+        viewById(panel.params.view) === undefined
+      )
+        return undefined
+    }
     return parsed as SerializedDockview
   } catch {
     return undefined

@@ -312,7 +312,7 @@ it.effect(
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed', 'the evaluator ran the slice')
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 0)
+      assert.strictEqual(evaluated.result.value, 0n)
     }),
   600_000,
 )

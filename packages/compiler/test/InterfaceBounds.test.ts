@@ -22,12 +22,14 @@ const describe = (outcome: unknown): string =>
  * `subtract` — over the canonical parameter, once, before any concrete argument exists.
  */
 const twoOperations = `pub interface Arith<T> {
-  fn add(left: &T, right: &T) -> T
-  fn subtract(left: &T, right: &T) -> T
+  fn add(left: T, right: T) -> T
+  fn subtract(left: T, right: T) -> T
 }
 impl Arith<i32> for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
-pub fn combine<T: Arith>(left: T, right: T) -> T { return (left + right) - left }
-pub fn main() -> i32 { return combine(40, 44) }`
+pub fn combine<T: Arith>(left: T, right: T, offset: T) -> T {
+  return (move left + move right) - move offset
+}
+pub fn main() -> i32 { return combine(40, 44, 40) }`
 
 it.effect('calls every operation of a two-operation bound in one generic body', () =>
   Effect.gen(function* () {
@@ -35,26 +37,28 @@ it.effect('calls every operation of a two-operation bound in one generic body', 
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
     // (40 + 44) - 40 selects `subtract`, not a second `add`.
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 44)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 44n)
   }),
 )
 
 it.effect('specializes one two-operation bound per conforming provider', () =>
   Effect.gen(function* () {
     const { self, outcome } = yield* evaluate(`pub interface Arith<T> {
-  fn add(left: &T, right: &T) -> T
-  fn subtract(left: &T, right: &T) -> T
+  fn add(left: T, right: T) -> T
+  fn subtract(left: T, right: T) -> T
 }
 impl Arith<i32> for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
 impl Arith<u8> for u8 { add: Intrinsic.u8Add subtract: Intrinsic.u8Subtract }
-pub fn combine<T: Arith>(left: T, right: T) -> T { return (left + right) - left }
+pub fn combine<T: Arith>(left: T, right: T, offset: T) -> T {
+  return (move left + move right) - move offset
+}
 pub fn main() -> i32 {
-  let narrow = combine<u8>(200, 55)
-  return combine<i32>(40, 42)
+  let narrow = combine<u8>(10, 20, 5)
+  return combine<i32>(40, 42, 40)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -64,12 +68,12 @@ pub fn main() -> i32 {
  */
 const comparisonBound = `pub interface Ranked<T> {
   fn lessThan(left: &T, right: &T) -> bool
-  fn subtract(left: &T, right: &T) -> T
+  fn subtract(left: T, right: T) -> T
 }
 impl Ranked<i32> for i32 { lessThan: Intrinsic.i32LessThan subtract: Intrinsic.i32Subtract }
 pub fn gap<T: Ranked>(left: T, right: T) -> T {
-  if left < right { return right - left }
-  return left - right
+  if left < right { return move right - move left }
+  return move left - move right
 }
 pub fn main() -> i32 { return gap(2, 44) }`
 
@@ -78,19 +82,21 @@ it.effect('keeps a bound comparison at its declared result type', () =>
     const { self, outcome } = yield* evaluate(comparisonBound)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
 it.effect('rejects a type argument whose witness omits one bound operation', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`pub interface Arith<T> {
-  fn add(left: &T, right: &T) -> T
-  fn subtract(left: &T, right: &T) -> T
+  fn add(left: T, right: T) -> T
+  fn subtract(left: T, right: T) -> T
 }
 impl Arith<i32> for i32 { add: Intrinsic.i32Add }
-pub fn combine<T: Arith>(left: T, right: T) -> T { return (left + right) - left }
-pub fn main() -> i32 { return combine(40, 44) }`)
+pub fn combine<T: Arith>(left: T, right: T, offset: T) -> T {
+  return (move left + move right) - move offset
+}
+pub fn main() -> i32 { return combine(40, 44, 40) }`)
     // The specialization names the operation the witness never supplied, not just the interface.
     assert.include(messages(self), 'Invalid conformance: i32 does not implement Arith.subtract')
   }),
@@ -101,22 +107,24 @@ it.effect('checks a bound against a type argument an explicit prefix wrote', () 
     // A substitution seeded from a written prefix is still a substitution: what it binds faces the
     // same conformance check an inferred binding does.
     const declarations = `pub interface Arith<T> {
-  fn add(left: &T, right: &T) -> T
-  fn subtract(left: &T, right: &T) -> T
+  fn add(left: T, right: T) -> T
+  fn subtract(left: T, right: T) -> T
 }
 impl Arith<i32> for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
 struct Plain { value: i32 }
-pub fn combine<T: Arith, U>(left: T, right: T, other: U) -> T { return (left + right) - left }
+pub fn combine<T: Arith, U>(left: T, right: T, offset: T, other: U) -> T {
+  return (move left + move right) - move offset
+}
 `
     const { self, outcome } = yield* evaluate(
-      `${declarations}pub fn main() -> i32 { return combine<i32>(40, 44, true) }`,
+      `${declarations}pub fn main() -> i32 { return combine<i32>(40, 44, 40, true) }`,
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 44)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 44n)
 
     const violated = yield* snapshot(
-      `${declarations}pub fn main() -> i32 { let held = combine<Plain>(Plain { value: 1 }, Plain { value: 2 }, true) return 0 }`,
+      `${declarations}pub fn main() -> i32 { let held = combine<Plain>(Plain { value: 1 }, Plain { value: 2 }, Plain { value: 1 }, true) return 0 }`,
     )
     assert.include(
       messages(violated),
@@ -132,7 +140,7 @@ pub fn sum<T: Integer>(left: T, right: T) -> T { return move left + move right }
 pub fn main() -> i32 { return sum(20, 22) }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -145,7 +153,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -193,7 +201,7 @@ it.effect('calls a bound operation no operator spells', () =>
     const { self, outcome } = yield* evaluate(nonOperatorOperation)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -216,7 +224,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -237,7 +245,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -255,7 +263,7 @@ pub fn sum<T: Integer>(left: T, right: T) -> T {
 pub fn main() -> i32 { return sum(20, 22) }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -265,7 +273,7 @@ it.effect('keeps the module function reachable where no bound claims the name', 
 pub fn main() -> i32 { return Integer.add(40, 2) }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 

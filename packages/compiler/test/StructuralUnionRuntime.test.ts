@@ -127,7 +127,7 @@ it.effect('lowers injection and widening through shared sum layouts and evaluate
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
     assert.deepEqual(
       outcome.trace
         .filter((event) => event._tag === 'UnionConversion')
@@ -185,7 +185,7 @@ pub fn main() -> i32 {
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag === 'Completed') {
-      assert.strictEqual(outcome.result.value, 42)
+      assert.strictEqual(outcome.result.value, 42n)
       assert.deepEqual(
         outcome.trace
           .flatMap((event) => (event._tag === 'ReplacementCleanup' ? (event.members ?? []) : []))
@@ -265,7 +265,7 @@ it.effect('carries a member narrower than its union slot through the Wasm backen
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 29507)
+    assert.strictEqual(outcome.result.value, 29507n)
 
     const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})

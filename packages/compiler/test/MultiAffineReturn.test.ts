@@ -173,7 +173,7 @@ it.effect('keeps ordinary multi-affine Effect transport in evaluator and Wasm pa
     const evaluated = Analysis.evaluate(wasmSnapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)

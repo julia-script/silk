@@ -30,7 +30,7 @@ pub fn main() -> i32 {
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 45)
+    assert.strictEqual(outcome.result.value, 45n)
     const sliceBinding = outcome.trace.find(
       (event) => event._tag === 'Binding' && event.value._tag === 'SliceValue',
     )
@@ -64,7 +64,7 @@ pub fn main() -> i32 { return three() + six() + emptySize() }`,
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 11)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 11n)
   }),
 )
 
@@ -116,7 +116,7 @@ pub fn main() -> i32 {
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
     const relevant = outcome.trace
       .filter(
         (event) =>

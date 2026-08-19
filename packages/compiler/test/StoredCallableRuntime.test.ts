@@ -28,9 +28,9 @@ const lowerStored = Effect.fnUntraced(function* (
 const completedValue = (outcome: BootstrapEvaluation.Outcome): number => {
   assert.strictEqual(outcome._tag, 'Completed')
   if (outcome._tag !== 'Completed') return unreachable('expected completed evaluation')
-  assert.strictEqual(outcome.result._tag, 'I32Value')
-  if (outcome.result._tag !== 'I32Value') return unreachable('expected i32 result')
-  return outcome.result.value
+  assert.strictEqual(outcome.result._tag, 'IntegerValue')
+  if (outcome.result._tag !== 'IntegerValue') return unreachable('expected i32 result')
+  return Number(outcome.result.value)
 }
 
 const runWasm = Effect.fnUntraced(function* (bytes: Uint8Array) {

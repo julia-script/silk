@@ -1,15 +1,13 @@
 import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
+import * as Effect from 'effect/Effect'
 import { describe, expect, it } from 'vitest'
-import type { ViewContext, ViewResult } from './registry'
-import { siblingsOf, viewById, views } from './registry'
-import * as Snapshot from './snapshot'
+import type { ViewContext, ViewResult } from '../src/Registry.js'
+import { siblingsOf, viewById, views } from '../src/Registry.js'
 
 const project = (viewId: string, source: string): ViewResult => {
   const sourceId = 'memory/docs/unified-layout'
-  const snapshot = Snapshot.ofSource(
-    sourceId,
-    new TextEncoder().encode(source),
-    'aarch64-apple-darwin',
+  const snapshot = Effect.runSync(
+    Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), 'aarch64-apple-darwin'),
   )
   const root = snapshot.closure.rootModule
   const context: ViewContext = {
@@ -18,10 +16,7 @@ const project = (viewId: string, source: string): ViewResult => {
     root,
     mode: 'release',
     profile: 'release',
-    cursor: undefined,
-    onSelectSpan: () => undefined,
     evaluation: undefined,
-    onEvaluate: () => undefined,
     filter: '',
     showTrivia: false,
   }
@@ -41,10 +36,8 @@ const text = (result: ViewResult): string =>
  */
 const projectStructValues = (source: string): ViewResult => {
   const sourceId = 'memory/docs/unified-struct-values'
-  const snapshot = Snapshot.ofSource(
-    sourceId,
-    new TextEncoder().encode(source),
-    'wasm32-unknown-unknown',
+  const snapshot = Effect.runSync(
+    Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), 'wasm32-unknown-unknown'),
   )
   const evaluation = Analysis.evaluate(snapshot)
   expect(evaluation._tag).toBe('Completed')
@@ -57,10 +50,7 @@ const projectStructValues = (source: string): ViewResult => {
     root: sourceId,
     mode: 'release',
     profile: 'release',
-    cursor: undefined,
-    onSelectSpan: () => undefined,
     evaluation,
-    onEvaluate: () => undefined,
     filter: '',
     showTrivia: false,
   })
@@ -68,10 +58,8 @@ const projectStructValues = (source: string): ViewResult => {
 
 const projectArrayValues = (source: string): ViewResult => {
   const sourceId = 'memory/docs/unified-array-values'
-  const snapshot = Snapshot.ofSource(
-    sourceId,
-    new TextEncoder().encode(source),
-    'wasm32-unknown-unknown',
+  const snapshot = Effect.runSync(
+    Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), 'wasm32-unknown-unknown'),
   )
   const evaluation = Analysis.evaluate(snapshot)
   expect(evaluation._tag).toBe('Completed')
@@ -84,10 +72,7 @@ const projectArrayValues = (source: string): ViewResult => {
     root: sourceId,
     mode: 'release',
     profile: 'release',
-    cursor: undefined,
-    onSelectSpan: () => undefined,
     evaluation,
-    onEvaluate: () => undefined,
     filter: '',
     showTrivia: false,
   })
@@ -108,14 +93,9 @@ describe('view registry', () => {
     ])
   })
 
-  // Layouts live in URLs and in localStorage, so a link shared before the merge still names the
-  // retired ids. Resolving them keeps those links working instead of showing an unknown view.
-  it('still resolves the retired per-backend ids', () => {
-    expect(viewById('llvm')?.id).toBe('backend')
-    expect(viewById('wasm')?.id).toBe('backend')
-  })
-
-  it('reports a genuinely unknown id as missing', () => {
+  it('reports unknown and retired ids as missing', () => {
+    expect(viewById('llvm')).toBeUndefined()
+    expect(viewById('wasm')).toBeUndefined()
     expect(viewById('not-a-view')).toBeUndefined()
   })
 
@@ -172,9 +152,7 @@ pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left:
     expect(rendered).toContain('[1].#0')
     expect(rendered).toContain('construct Array<')
     expect(rendered).toContain('read Array<')
-    expect(result.rows.some((row) => row.span !== undefined && row.onActivate !== undefined)).toBe(
-      true,
-    )
+    expect(result.rows.some((row) => row.span !== undefined)).toBe(true)
   })
 })
 
@@ -227,9 +205,7 @@ describe('control DAG view', () => {
     expect(rendered).toContain('condition r')
     expect(rendered).toContain('repeat loop0')
     expect(result.meta).toContain('region')
-    expect(result.rows.some((row) => row.span !== undefined && row.onActivate !== undefined)).toBe(
-      true,
-    )
+    expect(result.rows.some((row) => row.span !== undefined)).toBe(true)
   })
 
   it('shows ownership fixed points and source-linked backend control conversion', () => {
@@ -246,9 +222,7 @@ describe('control DAG view', () => {
     expect(text(backend)).toContain('control conversion')
     expect(text(backend)).toContain('LlvmBranch')
     expect(
-      backend.rows.some(
-        (row) => row.key.startsWith('backend-control-') && row.onActivate !== undefined,
-      ),
+      backend.rows.some((row) => row.key.startsWith('backend-control-') && row.span !== undefined),
     ).toBe(true)
   })
 
@@ -274,7 +248,7 @@ pub fn main() -> i32 { return inspect(Left { value: 42 }) }`
     expect(text(mir)).toContain('decision memory/docs/unified-layout.Left')
     expect(text(mir)).toContain('guard _')
     expect(mir.facts?.map((fact) => fact.text)).toContain('1 structured match')
-    expect(mir.rows.some((row) => row.onActivate !== undefined)).toBe(true)
+    expect(mir.rows.some((row) => row.span !== undefined)).toBe(true)
   })
 })
 
@@ -282,10 +256,12 @@ describe('downstream panes state why they are empty', () => {
   // A blank pane and a pane for a program that never got that far look identical, which hides
   // the phase that actually broke. Every absent phase has to name its reason.
   it('says why MIR is unavailable for an unresolved target', () => {
-    const snapshot = Snapshot.ofSource(
-      'memory/docs/unavailable',
-      new TextEncoder().encode('pub fn main() -> i32 { return 42 }'),
-      'not-a-real-target',
+    const snapshot = Effect.runSync(
+      Analysis.ofSourceRealized(
+        'memory/docs/unavailable',
+        new TextEncoder().encode('pub fn main() -> i32 { return 42 }'),
+        'not-a-real-target',
+      ),
     )
     const view = viewById('mir')
     expect(view).toBeDefined()
@@ -296,10 +272,7 @@ describe('downstream panes state why they are empty', () => {
       root: snapshot.closure.rootModule,
       mode: 'release',
       profile: 'release',
-      cursor: undefined,
-      onSelectSpan: () => undefined,
       evaluation: undefined,
-      onEvaluate: () => undefined,
       filter: '',
       showTrivia: false,
     })
@@ -347,17 +320,16 @@ pub fn main() -> i32 { return answer( }`,
     const source = 'pub fn main() -> i32 { return 42 }'
     const view = viewById('tree')
     if (view === undefined) throw new Error('missing tree view')
-    const snapshot = Snapshot.ofSource('memory/docs/trivia', new TextEncoder().encode(source))
+    const snapshot = Effect.runSync(
+      Analysis.ofSourceRealized('memory/docs/trivia', new TextEncoder().encode(source)),
+    )
     const base = {
       snapshot,
       modules: { [snapshot.closure.rootModule]: source },
       root: snapshot.closure.rootModule,
       mode: 'release' as const,
       profile: 'release' as const,
-      cursor: undefined,
-      onSelectSpan: () => undefined,
       evaluation: undefined,
-      onEvaluate: () => undefined,
       filter: '',
     }
 

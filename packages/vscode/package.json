@@ -21,6 +21,10 @@
       {
         "command": "silk.restartLanguageServer",
         "title": "Silk: Restart Language Server"
+      },
+      {
+        "command": "silk.openInspector",
+        "title": "Silk: Open Inspector"
       }
     ],
     "languages": [

@@ -82,7 +82,7 @@ it.effect('copies a raw-storage range identically on the evaluator, LLVM, and Wa
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 76)
+    assert.strictEqual(evaluated.result.value, 76n)
     assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'RawBufferCopy').length, 1)
     const encoded = Mir.encode(Analysis.loweredMir(snapshot))
     assert.include(encoded, 'raw-buffer-copy')
@@ -148,7 +148,7 @@ it.effect('moves a range of move-only elements and leaves the source slots empty
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     // Both payload allocations release through the moved elements' new home, not the old one.
     assert.strictEqual(
       evaluated.trace.filter((event) => event._tag === 'AllocationRelease').length,
@@ -216,7 +216,7 @@ it.effect('fills a byte range identically on the evaluator, LLVM, and Wasm', () 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 99)
+    assert.strictEqual(evaluated.result.value, 99n)
     assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'RawBufferFill').length, 2)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
@@ -328,7 +328,7 @@ it.effect('treats an overlapping copy as a defined move on all three engines', (
     const untouched = Analysis.evaluate(snapshot)
     assert.strictEqual(untouched._tag, 'Completed')
     if (untouched._tag !== 'Completed') return
-    assert.strictEqual(untouched.result.value, 58)
+    assert.strictEqual(untouched.result.value, 58n)
 
     const overlapping = aliasDestinationWithSource(Analysis.loweredMir(snapshot))
     assert.deepEqual(Mir.verify(overlapping), [])
@@ -336,7 +336,7 @@ it.effect('treats an overlapping copy as a defined move on all three engines', (
     const evaluated = BootstrapEvaluation.evaluate(Analysis.instancesOf(snapshot), overlapping)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 45)
+    assert.strictEqual(evaluated.result.value, 45n)
 
     const wasm = yield* Backend.emit(WasmBackend.WasmBackend, overlapping, { mode: 'release' })
     assert.strictEqual(runWasm(wasm.bytes), 45)
@@ -396,7 +396,7 @@ it.effect('appends borrowed bytes through the copy intrinsic on the evaluator an
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 95)
+    assert.strictEqual(evaluated.result.value, 95n)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     assert.strictEqual(runWasm(wasm.bytes), 95)
@@ -435,7 +435,7 @@ it.effect('grows a vector through one bulk copy per migration on the evaluator a
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 80)
+    assert.strictEqual(evaluated.result.value, 80n)
     // Three migrations (4 -> 8 -> 16 elements plus the first allocation) move 12 elements between
     // buffers, and each migration is one copy rather than one Slot.take/Slot.write pair each.
     assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'RawBufferCopy').length, 2)

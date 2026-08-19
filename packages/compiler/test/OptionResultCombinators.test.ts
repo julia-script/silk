@@ -172,7 +172,7 @@ const acrossEngines = (name: string, source: string) =>
       )}`,
     )
     if (evaluated._tag !== 'Completed') return evaluated
-    assert.strictEqual(evaluated.result.value, 42, `${name} evaluator`)
+    assert.strictEqual(evaluated.result.value, 42n, `${name} evaluator`)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})

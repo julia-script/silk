@@ -18,7 +18,7 @@ The system SHALL document JavaScript-platform differences and behavior the pinne
 
 #### Scenario: Encounter an unsupported upstream operation
 - **WHEN** a caller requests a construct recorded as intentionally unsupported
-- **THEN** the public API either omits the operation or fails with a documented `SilkError` rather than emitting approximate IR
+- **THEN** the public API either omits the operation or fails with a documented `LlvmError` rather than emitting approximate IR
 
 ### Requirement: LLVM interoperability
 The system SHALL validate representative output with the supported LLVM assembler, disassembler, verifier, and bitcode analyzer and SHALL compare semantic structure after round trips.

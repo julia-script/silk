@@ -1,13 +1,13 @@
-import { Analysis } from '@silk-effect/compiler'
-import * as Snapshot from '../snapshot'
 import type { Elaboration } from '@silk-effect/compiler'
+import { Analysis } from '@silk-effect/compiler'
+import * as Effect from 'effect/Effect'
 import { describe, expect, it } from 'vitest'
-import { projectDataFlow } from './flow-model'
+import { projectDataFlow } from '../src/FlowModel.js'
 
 const encoder = new TextEncoder()
 
 const snap = (id: string, text: string): Analysis.Snapshot =>
-  Snapshot.ofSource(id, encoder.encode(text))
+  Effect.runSync(Analysis.ofSourceRealized(id, encoder.encode(text)))
 
 const analyze = (id: string, text: string): Elaboration.Result =>
   Analysis.rootAnalysis(snap(id, text))
@@ -69,7 +69,7 @@ describe('projectDataFlow', () => {
     expect(new Set(children.map((group) => group.id)).size).toBe(2)
     expect(children.map((group) => group.evaluation?.order)).toEqual([3, 8])
     expect(flow.mode).toBe('Evaluated')
-    expect(flow.nodes.some((item) => item.evaluation?.value === 2)).toBe(true)
+    expect(flow.nodes.some((item) => item.evaluation?.value === 2n)).toBe(true)
   })
 
   it('terminates an unavailable inner type contract without inventing an enclosing result', () => {
@@ -99,37 +99,48 @@ pub fn main() -> i32 { return identity(identity()) }`,
 
     expect(flow.status).toBe('Incomplete')
     expect(flow.nodes.some((item) => item.label === 'Data flow stops: ArityMismatch')).toBe(true)
-    expect(
-      flow.nodes.some(
-        (item) => item.kind === 'Parameter' && item.state === 'Unmatched',
-      ),
-    ).toBe(true)
+    expect(flow.nodes.some((item) => item.kind === 'Parameter' && item.state === 'Unmatched')).toBe(
+      true,
+    )
     expect(flow.nodes.some((item) => item.kind === 'FunctionReturn')).toBe(false)
   })
 
   it('overlays only the completed prefix when a later sibling blocks', () => {
-    const snapshot = snap('memory/flow-blocked', `pub fn identity(value: i32) -> i32 { return value }
+    const snapshot = snap(
+      'memory/flow-blocked',
+      `pub fn identity(value: i32) -> i32 { return value }
 pub fn choose(left: i32, right: i32) -> i32 { return right }
-pub fn main() -> i32 { return choose(identity(1), missing(2)) }`)
+pub fn main() -> i32 { return choose(identity(1), missing(2)) }`,
+    )
     const analysis = Analysis.rootAnalysis(snapshot)
     const outcome = Analysis.evaluate(snapshot)
     const flow = projectDataFlow(analysis, outcome)
     const outer = flow.groups.find((group) => group.depth === 0)
 
     expect(outcome._tag).toBe('Blocked')
-    expect(flow.nodes.some((item) => item.evaluation !== undefined && item.layer !== 'Evaluated')).toBe(false)
+    expect(
+      flow.nodes.some((item) => item.evaluation !== undefined && item.layer !== 'Evaluated'),
+    ).toBe(false)
     expect(flow.nodes.some((item) => item.label === 'Evaluation stops: Trap')).toBe(true)
     expect(
       flow.edges.some(
-        (item) => item.groupId === outer?.id && item.label === 'binds positionally to' && item.evaluation !== undefined,
+        (item) =>
+          item.groupId === outer?.id &&
+          item.label === 'binds positionally to' &&
+          item.evaluation !== undefined,
       ),
     ).toBe(false)
-    expect(flow.nodes.some((item) => item.kind === 'FunctionReturn' && item.evaluation !== undefined)).toBe(false)
+    expect(
+      flow.nodes.some((item) => item.kind === 'FunctionReturn' && item.evaluation !== undefined),
+    ).toBe(false)
   })
 
   it('renders a call-depth limit as one finite trace-backed terminal', () => {
-    const snapshot = snap('memory/flow-cycle', `pub fn identity(value: i32) -> i32 { return value }
-pub fn main() -> i32 { return identity(main()) }`)
+    const snapshot = snap(
+      'memory/flow-cycle',
+      `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(main()) }`,
+    )
     const analysis = Analysis.rootAnalysis(snapshot)
     const outcome = Analysis.evaluate(snapshot, { maxCallDepth: 4 })
     const flow = projectDataFlow(analysis, outcome)
@@ -141,7 +152,9 @@ pub fn main() -> i32 { return identity(main()) }`)
     expect(terminals).toHaveLength(1)
     expect(terminals.at(0)?.detail).toContain('EvaluationLimit(CallDepth): 4/4')
     expect(terminals.at(0)?.detail).toContain('f3:d4 main')
-    expect(flow.nodes.some((item) => item.kind === 'FunctionReturn' && item.evaluation !== undefined)).toBe(false)
+    expect(
+      flow.nodes.some((item) => item.kind === 'FunctionReturn' && item.evaluation !== undefined),
+    ).toBe(false)
   })
 
   it('recomputes deterministically from equivalent disposable analysis state', () => {

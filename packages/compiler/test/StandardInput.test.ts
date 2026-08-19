@@ -91,7 +91,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome._tag))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -117,7 +117,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -148,7 +148,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -169,7 +169,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -202,7 +202,7 @@ it.effect('drains the native provider through the OS intrinsic host boundary', (
     const host = StandardInput.memory([115, 105, 108], { chunk: 3 })
     const outcome = Analysis.evaluate(self, { standardInput: host.provider })
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     assert.deepEqual(
       host.events().map((event) => [event.capacity, [...event.bytes]]),
       [
@@ -219,7 +219,7 @@ it.effect('routes a native host error into the typed failure channel', () =>
     const host = StandardInput.memory([115, 105, 108], { chunk: 3, failAt: 0 })
     const outcome = Analysis.evaluate(self, { standardInput: host.provider })
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 0)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 0n)
   }),
 )
 

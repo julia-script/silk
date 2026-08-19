@@ -68,7 +68,7 @@ it.effect('dispatches provision through user allocator witnesses on the evaluato
     const refusedRun = Analysis.evaluate(refused)
     assert.strictEqual(refusedRun._tag, 'Completed')
     if (refusedRun._tag !== 'Completed') return
-    assert.strictEqual(refusedRun.result.value, 7)
+    assert.strictEqual(refusedRun.result.value, 7n)
     assert.isTrue(
       refusedRun.trace.some(
         (event) => event._tag === 'Call' && event.target.name.startsWith('allocate'),
@@ -93,7 +93,7 @@ it.effect('dispatches provision through user allocator witnesses on the evaluato
       ),
     )
     if (delegatedRun._tag !== 'Completed') return
-    assert.strictEqual(delegatedRun.result.value, 42)
+    assert.strictEqual(delegatedRun.result.value, 42n)
     assert.deepEqual(
       Analysis.allocationTraceEventsOf(delegatedRun).map((event) => event._tag),
       ['AllocationAcquire', 'AllocationRelease'],
@@ -163,7 +163,7 @@ it.effect('sweeps allocation failure ordinals with atomic rejection and unchange
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed', name)
       if (evaluated._tag !== 'Completed') continue
-      assert.strictEqual(evaluated.result.value, expected, name)
+      assert.strictEqual(evaluated.result.value, BigInt(expected), name)
 
       const events = Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag)
       // Atomic rejection: a refused request acquires nothing, and every request before the
@@ -184,7 +184,7 @@ it.effect('sweeps allocation failure ordinals with atomic rejection and unchange
       // A failure leaves the process reusable: the same snapshot evaluates identically again.
       const again = Analysis.evaluate(snapshot)
       assert.strictEqual(again._tag, 'Completed', name)
-      if (again._tag === 'Completed') assert.strictEqual(again.result.value, expected, name)
+      if (again._tag === 'Completed') assert.strictEqual(again.result.value, BigInt(expected), name)
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -246,7 +246,7 @@ it.effect('runs a counted quota allocator identically on the evaluator and Wasm'
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed', `q${quota}`)
       if (evaluated._tag !== 'Completed') continue
-      assert.strictEqual(evaluated.result.value, expected, `q${quota}`)
+      assert.strictEqual(evaluated.result.value, BigInt(expected), `q${quota}`)
       const events = Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag)
       assert.strictEqual(
         events.filter((event) => event === 'AllocationAcquire').length,
@@ -316,7 +316,7 @@ it.effect('writes forwarded exclusive provider mutations back on the evaluator a
       ),
     )
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 1)
+    assert.strictEqual(evaluated.result.value, 1n)
     assert.deepEqual(
       Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag),
       ['AllocationAcquire', 'AllocationRelease'],

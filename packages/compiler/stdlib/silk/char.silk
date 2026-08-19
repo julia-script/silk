@@ -21,7 +21,7 @@ pub fn notEquals(left: char, right: char) -> bool {
 
 /// Calls the concrete char lessThan primitive, which orders by Unicode scalar value.
 pub fn lessThan(left: char, right: char) -> bool {
-  return Intrinsic.charLessThan(left, right)
+  return Intrinsic.charLessThan(&left, &right)
 }
 
 /// Calls the concrete char lessOrEqual primitive, which orders by Unicode scalar value.

@@ -165,15 +165,3 @@ It supports `--source-root`, `--output`/`-o`, native `--target`, `--profile`, `-
 
 Each target commits atomically. A failed target leaves no partial destination and does not remove a
 successful sibling artifact.
-
-## Migration from the earlier alpha manifest
-
-Existing manifests must add a version:
-
-```toml
-version = "0.1.0"
-```
-
-Build output moved from `.silk/build/<target>/<profile>/<package>` to the visible,
-backend-qualified `build/<backend>/<target>/<profile>/<package>[.wasm]` layout. No compatibility
-symlink is created.

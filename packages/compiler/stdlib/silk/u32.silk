@@ -265,7 +265,7 @@ pub fn notEquals(left: u32, right: u32) -> bool {
 
 /// Calls the concrete u32 lessThan primitive.
 pub fn lessThan(left: u32, right: u32) -> bool {
-  return Intrinsic.u32LessThan(left, right)
+  return Intrinsic.u32LessThan(&left, &right)
 }
 
 /// Calls the concrete u32 lessOrEqual primitive.

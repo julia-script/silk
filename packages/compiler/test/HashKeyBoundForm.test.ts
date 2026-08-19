@@ -7,12 +7,9 @@ import * as Analysis from '../src/Analysis.js'
  *
  * `HashKey` needs two operations over one bound: an equivalence, whose name `==` spells, and a
  * hash, whose name no operator spells. The first is reached through its operator; the second is
- * reached only through `Bound.operation(args)`. Each half is confirmed here against both witness
- * kinds a provider may have — a sealed intrinsic and a function of the provider's own actor —
- * because `HashMap` is generic over the key and therefore meets both.
- *
- * Three of the four combinations carry the collection. The fourth does not, and the test that
- * records it asserts the failure rather than skipping it, so it fails the moment the gap closes.
+ * reached only through `Bound.operation(args)`. The operator-spelled half is confirmed with both
+ * sealed and source witnesses. The named half is confirmed with source witnesses, because no
+ * sealed intrinsic is a hash primitive.
  */
 
 const ascii = (value: string): Uint8Array =>
@@ -33,35 +30,8 @@ const evaluatedValue = (name: string, source: string) =>
     assert.deepEqual(messages(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    return outcome._tag === 'Completed' ? outcome.result.value : undefined
+    return outcome._tag === 'Completed' ? Number(outcome.result.value) : undefined
   })
-
-/**
- * The shape of `HashKey` itself: an equivalence an operator spells and a digest none does, declared
- * over one bound and mapped by one witness. `i32` answers both with sealed intrinsics.
- */
-const scalarKey = `pub interface HashKey<T> {
-  fn equals(left: &T, right: &T) -> bool
-  fn digest(left: &T, right: &T) -> T
-}
-impl HashKey<i32> for i32 { equals: Intrinsic.i32Equals digest: Intrinsic.i32WrappingAdd }
-pub fn probe<T: HashKey>(left: T, right: T) -> T {
-  if left == right { return HashKey.digest(&left, &right) }
-  return HashKey.digest(&right, &left)
-}`
-
-it.effect('accepts a two-operation bound whose second operation no operator spells', () =>
-  Effect.gen(function* () {
-    // Requirement 3. Both halves are reached from one body: `==` selects `equals`, and the bound's
-    // own name reaches `digest`, which no operator could have spelled.
-    const value = yield* evaluatedValue(
-      'hash-key-bound/scalar',
-      `${scalarKey}
-pub fn main() -> i32 { return probe<i32>(21, 21) }`,
-    )
-    assert.strictEqual(value, 42)
-  }),
-)
 
 it.effect('reaches a different witness per specialization for the non-operator operation', () =>
   Effect.gen(function* () {

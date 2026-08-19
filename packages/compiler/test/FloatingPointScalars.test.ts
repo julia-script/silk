@@ -64,7 +64,7 @@ it.effect('keeps a well-formed exponent compiling to its exact value', () =>
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -86,7 +86,7 @@ it.effect('keeps evaluator, LLVM, and direct Wasm float semantics aligned', () =
     assert.deepEqual(Analysis.diagnostics(native), [])
     const outcome = Analysis.evaluate(native)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     const llvm = yield* Analysis.codegen(native, { mode: 'release' })
     assert.isAbove(llvm.bitcode.length, 0)
     assert.notInclude(llvm.ir, 'fast')
@@ -189,7 +189,7 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(native), [])
       const outcome = Analysis.evaluate(native)
       assert.strictEqual(outcome._tag, 'Completed')
-      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
       assert.isAbove((yield* Analysis.codegen(native, { mode: 'release' })).bitcode.length, 0)
 
       const wasm = yield* Analysis.ofSourceRealized(

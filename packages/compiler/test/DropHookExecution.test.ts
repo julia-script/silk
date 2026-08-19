@@ -136,7 +136,7 @@ it.effect('runs Drop hooks before field cleanup exactly once on every structured
       const run = Analysis.evaluate(snapshot)
       assert.strictEqual(run._tag, 'Completed', name)
       if (run._tag !== 'Completed') continue
-      assert.strictEqual(run.result.value, expected, name)
+      assert.strictEqual(run.result.value, BigInt(expected), name)
       assert.strictEqual(hookCallsOf(run).length, expectedHooks, `${name} hook calls`)
       const releases = run.trace.filter((event) => event._tag === 'AllocationRelease')
       assert.strictEqual(releases.length, expectedReleases, `${name} releases`)
@@ -231,7 +231,7 @@ it.effect('monomorphizes one parametric Drop conformance per reachable instantia
     const run = Analysis.evaluate(snapshot)
     assert.strictEqual(run._tag, 'Completed')
     if (run._tag !== 'Completed') return
-    assert.strictEqual(run.result.value, 42)
+    assert.strictEqual(run.result.value, 42n)
     assert.strictEqual(hookCallsOf(run).length, 2)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })

@@ -41,6 +41,10 @@
       "types": "./dist/Document.d.ts",
       "import": "./dist/Document.js"
     },
+    "./Inspection": {
+      "types": "./dist/Inspection.d.ts",
+      "import": "./dist/Inspection.js"
+    },
     "./LineIndex": {
       "types": "./dist/LineIndex.d.ts",
       "import": "./dist/LineIndex.js"
@@ -66,6 +70,7 @@
     "@silk-effect/compiler": "workspace:*",
     "@silk-effect/compiler-cli": "workspace:*",
     "@silk-effect/documentation": "workspace:*",
+    "@silk-effect/inspector": "workspace:*",
     "effect": "catalog:",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12",

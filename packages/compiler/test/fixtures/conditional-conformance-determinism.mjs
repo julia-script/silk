@@ -202,55 +202,58 @@ const declaredHeads = index.modules
 const outcome = Analysis.evaluate(wasm)
 const evaluation = {
   outcome: outcome._tag,
-  result: outcome._tag === 'Completed' ? outcome.result.value : undefined,
+  result: outcome._tag === 'Completed' ? Number(outcome.result.value) : undefined,
   events: outcome.trace.map(
     (event) => `${event._tag} ${'function' in event ? event.function.name : ''}`,
   ),
 }
 
 process.stdout.write(
-  JSON.stringify({
-    diagnostics: Analysis.diagnostics(wasm).map((diagnostic) => ({
-      code: diagnostic.code,
-      message: diagnostic.message,
-    })),
-    conformances: conformanceFacts,
-    normalization: {
-      canonical: ConformanceHead.key(canonicalHead),
-      scrambled: ConformanceHead.key(scrambledHead),
-      canonicalRequirements: canonicalHead.requirements.map((requirement) =>
-        Type.key(requirement.provider),
-      ),
-      scrambledRequirements: scrambledHead.requirements.map((requirement) =>
-        Type.key(requirement.provider),
-      ),
-      // Every distinct pair of declared heads, in both directions, so an asymmetric overlap answer
-      // would show up as a disagreeing pair rather than hide behind one arbitrary orientation.
-      overlaps: declaredHeads.flatMap((left, leftOrdinal) =>
-        declaredHeads.flatMap((right, rightOrdinal) =>
-          leftOrdinal === rightOrdinal
-            ? []
-            : [
-                {
-                  left: ConformanceHead.key(left),
-                  right: ConformanceHead.key(right),
-                  overlaps: ConformanceHead.mayOverlap(left, right),
-                },
-              ],
+  JSON.stringify(
+    {
+      diagnostics: Analysis.diagnostics(wasm).map((diagnostic) => ({
+        code: diagnostic.code,
+        message: diagnostic.message,
+      })),
+      conformances: conformanceFacts,
+      normalization: {
+        canonical: ConformanceHead.key(canonicalHead),
+        scrambled: ConformanceHead.key(scrambledHead),
+        canonicalRequirements: canonicalHead.requirements.map((requirement) =>
+          Type.key(requirement.provider),
         ),
-      ),
+        scrambledRequirements: scrambledHead.requirements.map((requirement) =>
+          Type.key(requirement.provider),
+        ),
+        // Every distinct pair of declared heads, in both directions, so an asymmetric overlap answer
+        // would show up as a disagreeing pair rather than hide behind one arbitrary orientation.
+        overlaps: declaredHeads.flatMap((left, leftOrdinal) =>
+          declaredHeads.flatMap((right, rightOrdinal) =>
+            leftOrdinal === rightOrdinal
+              ? []
+              : [
+                  {
+                    left: ConformanceHead.key(left),
+                    right: ConformanceHead.key(right),
+                    overlaps: ConformanceHead.mayOverlap(left, right),
+                  },
+                ],
+          ),
+        ),
+      },
+      proofs,
+      reversedProofs,
+      instances: Analysis.instancesOf(wasm).instances.map((instance) => ({
+        declaration: instance.key.declaration.name,
+        module: instance.key.declaration.module,
+        arguments: instance.key.typeArguments.map(Type.genericArgumentKey),
+        contractRow: instance.key.contractRow,
+      })),
+      mir: Mir.encode(Analysis.loweredMir(wasm)),
+      evaluation,
+      wasm: hash(wasmArtifact.bytes),
+      native: hash(nativeArtifact.bitcode),
     },
-    proofs,
-    reversedProofs,
-    instances: Analysis.instancesOf(wasm).instances.map((instance) => ({
-      declaration: instance.key.declaration.name,
-      module: instance.key.declaration.module,
-      arguments: instance.key.typeArguments.map(Type.genericArgumentKey),
-      contractRow: instance.key.contractRow,
-    })),
-    mir: Mir.encode(Analysis.loweredMir(wasm)),
-    evaluation,
-    wasm: hash(wasmArtifact.bytes),
-    native: hash(nativeArtifact.bitcode),
-  }),
+    (_, value) => (typeof value === 'bigint' ? value.toString() : value),
+  ),
 )

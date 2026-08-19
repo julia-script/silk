@@ -86,7 +86,7 @@ it.effect(
       const second = Analysis.evaluate(native)
       assert.deepEqual(first, second)
       assert.strictEqual(first._tag, 'Completed')
-      if (first._tag === 'Completed') assert.strictEqual(first.result.value, 42)
+      if (first._tag === 'Completed') assert.strictEqual(first.result.value, 42n)
 
       const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
       assert.notInclude(nativeArtifact.ir, 'llvm.sin')

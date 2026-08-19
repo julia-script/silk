@@ -49,7 +49,7 @@ it.effect('returns canonical Some and None outcomes for recoverable integer oper
       'Completed',
       JSON.stringify(outcome, (_, value) => (typeof value === 'bigint' ? `${value}n` : value), 2),
     )
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -173,7 +173,7 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(native), [])
       const outcome = Analysis.evaluate(native)
       assert.strictEqual(outcome._tag, 'Completed')
-      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
       const llvm = yield* Analysis.codegen(native, { mode: 'release' })
       assert.isAbove(llvm.bitcode.length, 0)
 
@@ -275,7 +275,7 @@ it.effect('uses concrete call and pipeline parameters as exact integer literal c
 
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 

@@ -34,7 +34,7 @@ pub fn main() -> i32 {
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed', target)
       if (evaluated._tag !== 'Completed') continue
-      assert.strictEqual(evaluated.result.value, 42, target)
+      assert.strictEqual(evaluated.result.value, 42n, target)
     }
     const wasm = yield* Analysis.codegenWasm(
       yield* Analysis.ofSourceRealized(

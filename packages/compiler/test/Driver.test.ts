@@ -103,7 +103,7 @@ it.effect('compiles a three-module call chain to native execution matching the i
     assert.strictEqual(interpreted._tag, 'Completed')
     if (outcome._tag !== 'Compiled' || interpreted._tag !== 'Completed') return
     const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, interpreted.result.value)
+    assert.strictEqual(run.status, Number(interpreted.result.value))
   }),
 )
 

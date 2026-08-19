@@ -31,7 +31,7 @@ const evaluatedValue = (name: string, source: string) =>
     assert.deepEqual(messages(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    return outcome._tag === 'Completed' ? outcome.result.value : undefined
+    return outcome._tag === 'Completed' ? Number(outcome.result.value) : undefined
   })
 
 /** Runs one source on the bootstrap evaluator and the direct WebAssembly backend. */
@@ -42,7 +42,7 @@ const twoEngineValue = (name: string, source: string) =>
 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
-    const bootstrap = evaluated._tag === 'Completed' ? evaluated.result.value : undefined
+    const bootstrap = evaluated._tag === 'Completed' ? Number(evaluated.result.value) : undefined
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})

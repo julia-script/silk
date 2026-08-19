@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Mir from '../src/Mir.js'
+import * as Json from './support/Json.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -68,12 +69,10 @@ it.effect(
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        JSON.stringify(evaluated, (_, value) =>
-          typeof value === 'bigint' ? value.toString() : value,
-        ),
+        JSON.stringify(evaluated, Json.bigIntReplacer),
       )
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42)
+      assert.strictEqual(evaluated.result.value, 42n)
       // Two growths acquire two buffers; the migration and the final Drop hook release both,
       // and every acquire pairs with exactly one release.
       const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
@@ -152,12 +151,10 @@ it.effect(
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        JSON.stringify(evaluated, (_, value) =>
-          typeof value === 'bigint' ? value.toString() : value,
-        ),
+        JSON.stringify(evaluated, Json.bigIntReplacer),
       )
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42)
+      assert.strictEqual(evaluated.result.value, 42n)
       assert.isTrue(
         Analysis.loweredMir(wasmSnapshot).functions.some((fn) =>
           Mir.operations(fn).some((operation) => operation._tag === 'RawBufferView'),
@@ -233,12 +230,10 @@ it.effect(
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        JSON.stringify(evaluated, (_, value) =>
-          typeof value === 'bigint' ? value.toString() : value,
-        ),
+        JSON.stringify(evaluated, Json.bigIntReplacer),
       )
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42)
+      assert.strictEqual(evaluated.result.value, 42n)
       const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
       const releases = evaluated.trace.filter((event) => event._tag === 'AllocationRelease')
       assert.strictEqual(acquires.length, 1)
@@ -297,14 +292,16 @@ it.effect('drops initialized elements in order before releasing vector storage',
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     const recorded = evaluated.trace.flatMap((event) =>
-      event._tag === 'Binding' && event.target.name === 'record' && event.value._tag === 'I32Value'
+      event._tag === 'Binding' &&
+      event.target.name === 'record' &&
+      event.value._tag === 'IntegerValue'
         ? [event.value.value]
         : [],
     )
     // Capacity is four, but only the three initialized slots run Entry.drop, in index order.
-    assert.deepEqual(recorded, [3, 5, 7])
+    assert.deepEqual(recorded, [3n, 5n, 7n])
     const lastRecord = evaluated.trace.findLastIndex(
       (event) => event._tag === 'Call' && event.target.name === 'record',
     )
@@ -369,13 +366,15 @@ it.effect('transfers vector ownership and drops it early on the evaluator and Wa
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     const recorded = evaluated.trace.flatMap((event) =>
-      event._tag === 'Binding' && event.target.name === 'record' && event.value._tag === 'I32Value'
+      event._tag === 'Binding' &&
+      event.target.name === 'record' &&
+      event.value._tag === 'IntegerValue'
         ? [event.value.value]
         : [],
     )
-    assert.deepEqual(recorded, [11, 13])
+    assert.deepEqual(recorded, [11n, 13n])
     const releaseIndices = evaluated.trace.flatMap((event, index) =>
       event._tag === 'AllocationRelease' ? [index] : [],
     )
@@ -413,7 +412,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
     assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'RawBufferRead').length, 1)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
@@ -464,7 +463,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed')
-      assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+      assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
       assert.strictEqual(
         evaluated.trace.filter((event) => event._tag === 'RawBufferRead').length,
         4,
@@ -531,15 +530,9 @@ const acceptOnEngines = (name: string, source: string) =>
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(
-      evaluated._tag,
-      'Completed',
-      JSON.stringify(evaluated, (_, value) =>
-        typeof value === 'bigint' ? value.toString() : value,
-      ),
-    )
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
     if (evaluated._tag !== 'Completed') throw new Error('unreachable')
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -550,9 +543,11 @@ const acceptOnEngines = (name: string, source: string) =>
 
 const recordedValues = (
   evaluated: Extract<ReturnType<typeof Analysis.evaluate>, { _tag: 'Completed' }>,
-): ReadonlyArray<number> =>
+): ReadonlyArray<bigint> =>
   evaluated.trace.flatMap((event) =>
-    event._tag === 'Binding' && event.target.name === 'record' && event.value._tag === 'I32Value'
+    event._tag === 'Binding' &&
+    event.target.name === 'record' &&
+    event.value._tag === 'IntegerValue'
       ? [event.value.value]
       : [],
   )
@@ -732,7 +727,7 @@ it.effect(
     Effect.gen(function* () {
       const evaluated = yield* acceptOnEngines('set-drops-old', setDropsOldElement)
       // The overwritten 3 drops during set; 9 and 5 drop with the vector at scope end.
-      assert.deepEqual(recordedValues(evaluated), [3, 9, 5])
+      assert.deepEqual(recordedValues(evaluated), [3n, 9n, 5n])
     }),
   60_000,
 )
@@ -780,7 +775,7 @@ it.effect(
     Effect.gen(function* () {
       const evaluated = yield* acceptOnEngines('truncate-releases-tail', truncateReleasesTail)
       // The tail drops in index order during truncate; the survivor drops with the vector.
-      assert.deepEqual(recordedValues(evaluated), [5, 7, 3])
+      assert.deepEqual(recordedValues(evaluated), [5n, 7n, 3n])
     }),
   60_000,
 )
@@ -850,7 +845,7 @@ it.effect(
       const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
       const releases = evaluated.trace.filter((event) => event._tag === 'AllocationRelease')
       assert.strictEqual(acquires.length, releases.length)
-      assert.deepEqual(recordedValues(evaluated), [9, 3, 5, 7])
+      assert.deepEqual(recordedValues(evaluated), [9n, 3n, 5n, 7n])
     }),
   60_000,
 )

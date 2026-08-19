@@ -206,7 +206,7 @@ layer(NodeServices.layer)('static composition acceptance', (it) => {
         )
         const outcome = Analysis.evaluate(snapshot)
         assert.strictEqual(outcome._tag, 'Completed', name)
-        if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42, name)
+        if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n, name)
         assert.strictEqual(snapshot.mir._tag, 'Available', name)
         if (snapshot.mir._tag !== 'Available') continue
         const operations = snapshot.mir.value.functions.flatMap(Mir.operations)
@@ -292,7 +292,7 @@ fn divergent(input: FirstBranch | SecondBranch) -> i32 {
           const outcome = Analysis.evaluate(wasmSnapshot)
           assert.strictEqual(outcome._tag, 'Completed', scenario.name)
           if (outcome._tag !== 'Completed') continue
-          assert.strictEqual(outcome.result.value, scenario.result, scenario.name)
+          assert.strictEqual(outcome.result.value, BigInt(scenario.result), scenario.name)
           assert.strictEqual(callCount(outcome, 'applicationHandler'), scenario.handlerCalls)
           assert.strictEqual(dropCallCount(outcome), scenario.dropCalls)
           assert.isAtLeast(selectedCallCount(outcome, scenario.selectedTarget), 1, scenario.name)

@@ -201,12 +201,15 @@ it.effect('keeps static bytes, reuse, lengths, and backend placement in parity',
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      JSON.stringify({
-        evaluated,
-        staticData: native.layout._tag === 'Available' ? native.layout.value.staticData : [],
-      }),
+      JSON.stringify(
+        {
+          evaluated,
+          staticData: native.layout._tag === 'Available' ? native.layout.value.staticData : [],
+        },
+        (_, value) => (typeof value === 'bigint' ? value.toString() : value),
+      ),
     )
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
     const llvm = yield* Analysis.codegen(native, { mode: 'release' })
     assert.include(llvm.ir, 'constant [5 x i8] c"life\\0A"')
 

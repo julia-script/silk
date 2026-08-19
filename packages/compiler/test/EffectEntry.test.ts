@@ -9,6 +9,7 @@ import * as Driver from '../src/Driver.js'
 import * as Mir from '../src/Mir.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Json from './support/Json.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -108,7 +109,7 @@ it.effect('composes capability provision and mapping in an effect entry', () =>
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [])
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome))
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
   }),
 )
 
@@ -199,7 +200,7 @@ it.effect('executes Evaluate effects in order and halts on failure across every 
       assert.strictEqual(
         evaluated._tag,
         expected === 0 ? 'Completed' : 'UnhandledFailure',
-        JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? `${value}n` : value)),
+        JSON.stringify(evaluated, Json.bigIntReplacer),
       )
       if (name === 'evaluate-failure') {
         assert.strictEqual(

@@ -10,16 +10,32 @@
  * than replacing it.
  */
 
-import type { ViewId } from './registry'
+import { viewIds } from '@silk-effect/inspector/Registry'
+import * as Schema from 'effect/Schema'
 
 /** A pane's slot in the seeded two-row grid. */
 export type Slot = 'a1' | 'a2' | 'b1' | 'b2' | 'c1' | 'c2'
 
-export interface Workspace {
-  readonly name: string
-  /** Ordered by slot: the first three are the top row, the last three the bottom. */
-  readonly panes: Readonly<Record<Slot, ViewId>>
-}
+const viewIdSchema = Schema.Literals(viewIds)
+
+/** The exact persisted shape for one current workspace. */
+export const workspaceSchema = Schema.Struct({
+  name: Schema.String,
+  panes: Schema.Struct({
+    a1: viewIdSchema,
+    a2: viewIdSchema,
+    b1: viewIdSchema,
+    b2: viewIdSchema,
+    c1: viewIdSchema,
+    c2: viewIdSchema,
+  }),
+}).annotate({ parseOptions: { onExcessProperty: 'error' } })
+
+export const workspacesSchema = Schema.Array(workspaceSchema).annotate({
+  parseOptions: { onExcessProperty: 'error' },
+})
+
+export type Workspace = typeof workspaceSchema.Type
 
 export const seededWorkspaces: ReadonlyArray<Workspace> = [
   {
@@ -78,4 +94,4 @@ export const seededWorkspaces: ReadonlyArray<Workspace> = [
 
 export const slotOrder: ReadonlyArray<Slot> = ['a1', 'a2', 'b1', 'b2', 'c1', 'c2']
 
-export const workspaceStorageKey = 'silk-labs-workbench-workspaces'
+export const workspaceStorageKey = 'silk-labs-workspaces'

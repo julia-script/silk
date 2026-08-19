@@ -302,7 +302,7 @@ pub fn main() -> i32 {
       }),
     )
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
 
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const module = new WebAssembly.Module(artifact.bytes.slice())
@@ -364,7 +364,7 @@ pub fn main() -> i32 {
       JSON.stringify(evaluated._tag === 'Blocked' ? evaluated.reason : evaluated._tag),
     )
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const module = new WebAssembly.Module(artifact.bytes.slice())
     assert.deepEqual(WebAssembly.Module.imports(module), [])
@@ -405,7 +405,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(
       evaluated.trace.filter((event) => event._tag === 'AllocationAcquire'),
       [],
@@ -466,7 +466,7 @@ it.effect('keeps the documented portable FileSystem example executable', () =>
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
@@ -497,7 +497,7 @@ it.effect(
         }),
       )
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42)
+      assert.strictEqual(evaluated.result.value, 42n)
       const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
       const releases = evaluated.trace.filter((event) => event._tag === 'AllocationRelease')
       assert.strictEqual(releases.length, acquires.length)

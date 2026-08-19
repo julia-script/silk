@@ -16,7 +16,6 @@ import * as Stdlib from '../dist/Stdlib.js'
 
 const documentationRoot = fileURLToPath(new URL('../../language/docs/', import.meta.url))
 const stdlibRoot = fileURLToPath(new URL('../../language/docs/stdlib/', import.meta.url))
-const obsoleteStdlibPage = fileURLToPath(new URL('../../language/docs/stdlib.md', import.meta.url))
 const diagnosticSource = fileURLToPath(new URL('../src/Diagnostic.ts', import.meta.url))
 
 const stdlibTree = async () => {
@@ -399,18 +398,11 @@ const writeStdlib = (files) => {
         process.exitCode = 1
       }
     }
-    if (existsSync(obsoleteStdlibPage)) {
-      console.error(
-        'stdlib.md is obsolete. Run pnpm --filter @silk-effect/compiler documentation:generate',
-      )
-      process.exitCode = 1
-    }
     return
   }
   mkdirSync(stdlibRoot, { recursive: true })
   for (const path of actual) if (!expected.has(path)) rmSync(`${stdlibRoot}${path}`)
   for (const [path, contents] of expected) writeFileSync(`${stdlibRoot}${path}`, contents)
-  if (existsSync(obsoleteStdlibPage)) rmSync(obsoleteStdlibPage)
 }
 
 // The complete tree and diagnostic page are rendered before anything is written, so a collision

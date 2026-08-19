@@ -20,7 +20,7 @@ const assertRunsEverywhere = Effect.fnUntraced(function* (
     JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? value.toString() : value)),
   )
   if (evaluated._tag === 'Completed') {
-    assert.strictEqual(evaluated.result.value, expected)
+    assert.strictEqual(evaluated.result.value, BigInt(expected))
   }
 
   const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
@@ -95,7 +95,7 @@ pub fn main() -> i32 {
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 3)
+    assert.strictEqual(evaluated.result.value, 3n)
   }),
 )
 

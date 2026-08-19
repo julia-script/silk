@@ -200,7 +200,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed', outcome._tag)
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -236,7 +236,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed', outcome._tag)
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -273,7 +273,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed', outcome._tag)
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -293,7 +293,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed', outcome._tag)
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -352,7 +352,7 @@ it.effect('reaches the native provider through the injected OS host boundary', (
     const host = nativeHost()
     const outcome = Analysis.evaluate(self, { hostInput: host.provider })
     assert.strictEqual(outcome._tag, 'Completed', outcome._tag)
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     assert.deepEqual(host.events(), [
       { _tag: 'ArgumentCount' },
       { _tag: 'Argument', index: 1 },
@@ -389,7 +389,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     const host = HostInput.memory({ arguments: [long] })
     const outcome = Analysis.evaluate(self, { hostInput: host.provider })
     assert.strictEqual(outcome._tag, 'Completed', outcome._tag)
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     // The first pass reports the complete length from a short buffer; the second copies it.
     assert.deepEqual(host.events(), [
       { _tag: 'Argument', index: 0 },
@@ -407,7 +407,7 @@ it.effect('routes a native host error into the typed failure channel', () =>
     })
     const outcome = Analysis.evaluate(self, { hostInput: host.provider })
     assert.strictEqual(outcome._tag, 'Completed', outcome._tag)
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 0)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 0n)
   }),
 )
 

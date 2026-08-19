@@ -84,7 +84,7 @@ it.effect('lowers a HashMap program to a MIR that names no hash operation', () =
         typeof value === 'bigint' ? value.toString() : value,
       ),
     )
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
 
     const mir = Analysis.mirOf(snapshot)
     assert.strictEqual(mir._tag, 'Available')
@@ -178,6 +178,6 @@ pub fn main() -> i32 {
     assert.deepEqual(messages(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
   }),
 )

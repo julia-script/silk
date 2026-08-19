@@ -31,8 +31,8 @@ it('keeps scanner phases, stdlib imports, and artifacts byte-identical across fr
   assert.deepEqual(encoded.wasm.diagnostics, [])
   assert.include(encoded.native.modules, 'silk/vector')
   assert.include(encoded.wasm.modules, 'silk/vector')
-  assert.strictEqual(encoded.native.result, 42)
-  assert.strictEqual(encoded.wasm.result, 42)
+  assert.strictEqual(encoded.native.result, '42')
+  assert.strictEqual(encoded.wasm.result, '42')
   assert.deepEqual(encoded.native.allocations, [
     'AllocationAcquire',
     'AllocationAcquire',

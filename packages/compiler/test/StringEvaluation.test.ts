@@ -30,7 +30,7 @@ pub fn main() -> i32 {
 
       assert.strictEqual(outcome._tag, 'Completed')
       if (outcome._tag !== 'Completed') return
-      assert.strictEqual(outcome.result.value, 6)
+      assert.strictEqual(outcome.result.value, 6n)
       assert.deepEqual(
         outcome.trace.filter((event) => event._tag.startsWith('String')).map((event) => event._tag),
         [
@@ -63,7 +63,7 @@ it.effect('compares exact UTF-8 bytes without Unicode normalization', () =>
 
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 0)
+    assert.strictEqual(outcome.result.value, 0n)
     assert.deepEqual(
       outcome.trace.flatMap((event) => (event._tag === 'StringEqualsExact' ? [event.result] : [])),
       [false, false],

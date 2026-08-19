@@ -101,7 +101,7 @@ const program = Effect.gen(function* () {
 
   const report = {
     diagnostics: Analysis.diagnostics(native).map((diagnostic) => diagnostic.code),
-    evaluator: evaluated._tag === 'Completed' ? evaluated.result.value : evaluated._tag,
+    evaluator: evaluated._tag === 'Completed' ? Number(evaluated.result.value) : evaluated._tag,
     wasm: wasmResult,
     native: nativeRun.exitCode,
     instanceKeys: Analysis.instancesOf(native).instances.map((instance) =>
@@ -118,7 +118,11 @@ const program = Effect.gen(function* () {
     directWasm:
       !wasmArtifact.wat.includes('call_indirect') && !wasmArtifact.wat.includes('(table '),
   }
-  yield* Effect.try(() => process.stdout.write(JSON.stringify(report)))
+  yield* Effect.try(() =>
+    process.stdout.write(
+      JSON.stringify(report, (_, value) => (typeof value === 'bigint' ? value.toString() : value)),
+    ),
+  )
 }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
 
 await Effect.runPromise(program)

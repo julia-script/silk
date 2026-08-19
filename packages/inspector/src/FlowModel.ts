@@ -12,25 +12,25 @@ const typeText = (type: Type.Type): string =>
         }`
       : type._tag === 'TypeParameter'
         ? type.name
-      : type._tag === 'FixedArrayType'
-        ? `Array<${typeText(type.element)}, ${type.length}>`
-      : type._tag === 'SliceType'
-        ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
-        : type._tag === 'EffectType'
-          ? `Effect<${typeText(type.success)}${
-              Type.failureMembers(type).length === 0
-                ? ''
-                : ` ! ${Type.failureMembers(type).map(typeText).join(' | ')}`
-            }> ${type.access.toLowerCase()}`
-          : type._tag === 'CallableType'
-            ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
-            : type._tag === 'ReferenceType'
-              ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
-              : type._tag === 'FailureProjectionType'
-                ? `Row<!${type.parameter.name}>`
-                : type._tag === 'RepresentedType'
-                  ? Type.encode(type)
-                  : type.members.map(typeText).join(' | ')
+        : type._tag === 'FixedArrayType'
+          ? `Array<${typeText(type.element)}, ${type.length}>`
+          : type._tag === 'SliceType'
+            ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
+            : type._tag === 'EffectType'
+              ? `Effect<${typeText(type.success)}${
+                  Type.failureMembers(type).length === 0
+                    ? ''
+                    : ` ! ${Type.failureMembers(type).map(typeText).join(' | ')}`
+                }> ${type.access.toLowerCase()}`
+              : type._tag === 'CallableType'
+                ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
+                : type._tag === 'ReferenceType'
+                  ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
+                  : type._tag === 'FailureProjectionType'
+                    ? `Row<!${type.parameter.name}>`
+                    : type._tag === 'RepresentedType'
+                      ? Type.encode(type)
+                      : type.members.map(typeText).join(' | ')
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'
@@ -61,7 +61,7 @@ export interface FlowGroup {
   readonly span: SourceSpan.SourceSpan
   readonly nodeIds: ReadonlyArray<string>
   readonly edgeIds: ReadonlyArray<string>
-  readonly evaluation?: FlowEvidence
+  readonly evaluation?: FlowEvidence | undefined
 }
 
 export interface FlowNode {
@@ -76,7 +76,7 @@ export interface FlowNode {
   readonly layer: FlowLayer
   readonly state: FlowItemState
   readonly span: SourceSpan.SourceSpan
-  readonly evaluation?: FlowEvidence
+  readonly evaluation?: FlowEvidence | undefined
 }
 
 export interface FlowEdge {
@@ -90,7 +90,7 @@ export interface FlowEdge {
   readonly layer: FlowLayer
   readonly state: FlowItemState
   readonly span: SourceSpan.SourceSpan
-  readonly evaluation?: FlowEvidence
+  readonly evaluation?: FlowEvidence | undefined
 }
 
 export interface FlowModel {
@@ -137,9 +137,7 @@ const declarationName = (declaration: Elaboration.DeclarationFact): string =>
     : `function #${declaration.id.ordinal}`
 
 const parameterName = (parameter: Elaboration.ParameterFact): string =>
-  parameter.name._tag === 'Present'
-    ? parameter.name.spelling
-    : `parameter #${parameter.id.ordinal}`
+  parameter.name._tag === 'Present' ? parameter.name.spelling : `parameter #${parameter.id.ordinal}`
 
 const callName = (call: CallFact): string =>
   call.reference._tag === 'Unavailable' ? 'unavailable call' : call.reference.spelling
@@ -197,8 +195,7 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
   return 'unavailable integer'
 }
 
-const callId = (call: CallFact): string =>
-  `call-${call.syntax.span.start}-${call.syntax.span.end}`
+const callId = (call: CallFact): string => `call-${call.syntax.span.start}-${call.syntax.span.end}`
 
 const sameSpan = (left: SourceSpan.SourceSpan, right: SourceSpan.SourceSpan): boolean =>
   left.sourceId === right.sourceId && left.start === right.start && left.end === right.end
@@ -358,9 +355,7 @@ const projectCall = (
 
   if (call.reference._tag !== 'Resolved') {
     const referenceSpan =
-      call.reference._tag === 'Unavailable'
-        ? call.reference.syntax.span
-        : call.reference.token.span
+      call.reference._tag === 'Unavailable' ? call.reference.syntax.span : call.reference.token.span
     const referenceId = `${id}-reference`
     addNode(
       draft,
@@ -535,10 +530,7 @@ const projectCall = (
   const targetFact = functionFor(analysis, target)
   const returned = targetFact?.returnedExpression
   const returnedReference = returned === undefined ? undefined : directReference(returned)
-  if (
-    returned === undefined ||
-    (returned._tag !== 'Integer' && returnedReference === undefined)
-  ) {
+  if (returned === undefined || (returned._tag !== 'Integer' && returnedReference === undefined)) {
     const terminalId = `${id}-return-stop`
     addNode(
       draft,
@@ -746,13 +738,10 @@ const traceOverlay = (draft: ProjectionDraft, outcome: BootstrapEvaluation.Outco
     target.canonical.id.name === id.name
 
   for (const [index, event] of outcome.trace.entries()) {
-    const eventValue =
-      event._tag === 'Binding' || event._tag === 'Return' ? event.value : undefined
+    const eventValue = event._tag === 'Binding' || event._tag === 'Return' ? event.value : undefined
     const evidence = Object.freeze({
       order: index + 1,
-      ...(eventValue?._tag === 'I32Value' || eventValue?._tag === 'UsizeValue'
-        ? { value: eventValue.value }
-        : {}),
+      ...(eventValue?._tag === 'IntegerValue' ? { value: eventValue.value } : {}),
     })
     if (event._tag === 'Call') {
       const group = draft.groups.find((candidate) => sameSpan(candidate.span, event.span))
@@ -892,23 +881,24 @@ export const projectDataFlow = (
     }
   }
 
-  const groups = draft.groups.map((group): FlowGroup =>
-    Object.freeze({
-      _tag: 'FlowGroup',
-      id: group.id,
-      label: group.label,
-      detail: group.detail,
-      depth: group.depth,
-      ordinal: group.ordinal,
-      parentId: group.parentId,
-      state: group.state,
-      span: group.span,
-      nodeIds: Object.freeze([...group.nodeIds]),
-      edgeIds: Object.freeze([...group.edgeIds]),
-      ...(overlay?.groups.get(group.id) === undefined
-        ? {}
-        : { evaluation: overlay.groups.get(group.id) }),
-    }),
+  const groups = draft.groups.map(
+    (group): FlowGroup =>
+      Object.freeze({
+        _tag: 'FlowGroup',
+        id: group.id,
+        label: group.label,
+        detail: group.detail,
+        depth: group.depth,
+        ordinal: group.ordinal,
+        parentId: group.parentId,
+        state: group.state,
+        span: group.span,
+        nodeIds: Object.freeze([...group.nodeIds]),
+        edgeIds: Object.freeze([...group.edgeIds]),
+        ...(overlay?.groups.get(group.id) === undefined
+          ? {}
+          : { evaluation: overlay.groups.get(group.id) }),
+      }),
   )
   const nodes = draft.nodes.map((item): FlowNode => {
     const evaluation = item.evaluation ?? overlay?.items.get(item.id)

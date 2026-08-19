@@ -58,7 +58,7 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
 const completedValue = (outcome: BootstrapEvaluation.Outcome): number => {
   assert.strictEqual(outcome._tag, 'Completed', outcome._tag)
   if (outcome._tag !== 'Completed') return unreachable('expected completed evaluation')
-  return outcome.result.value
+  return Number(outcome.result.value)
 }
 
 const storedRealizations = (module: Mir.Module) =>

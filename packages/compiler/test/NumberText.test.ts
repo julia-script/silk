@@ -278,7 +278,7 @@ it.effect(
         ),
       )
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 0, 'first failing check index')
+      assert.strictEqual(evaluated.result.value, 0n, 'first failing check index')
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -332,7 +332,7 @@ it.effect('reports which byte stopped a read and which values do not fit', () =>
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 0, 'first failing check index')
+    assert.strictEqual(evaluated.result.value, 0n, 'first failing check index')
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -397,7 +397,7 @@ it.effect('composes a diagnostic message from runtime values and releases every 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 0)
+    assert.strictEqual(evaluated.result.value, 0n)
 
     const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
     const releases = evaluated.trace.filter((event) => event._tag === 'AllocationRelease')
@@ -449,7 +449,7 @@ it.effect('hands back OutOfMemory when a rendering cannot allocate, owning nothi
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(
       evaluated.trace.filter((event) => event._tag === 'AllocationAcquire'),
       [],

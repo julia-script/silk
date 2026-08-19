@@ -280,9 +280,13 @@ it.effect(
           )}`,
         )
         if (evaluated._tag !== 'Completed') continue
-        assert.strictEqual(evaluated.result._tag, 'I32Value', manifest.id)
-        if (evaluated.result._tag !== 'I32Value') continue
-        assert.strictEqual(evaluated.result.value, manifest.expected.entryResult, manifest.id)
+        assert.strictEqual(evaluated.result._tag, 'IntegerValue', manifest.id)
+        if (evaluated.result._tag !== 'IntegerValue') continue
+        assert.strictEqual(
+          evaluated.result.value,
+          BigInt(manifest.expected.entryResult),
+          manifest.id,
+        )
         if (manifest.expected.allocation !== undefined) {
           const allocationEvents = evaluated.trace.flatMap(
             (event): ReadonlyArray<AllocationEvent> =>

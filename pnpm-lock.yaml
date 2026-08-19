@@ -59,6 +59,9 @@ importers:
       '@silk-effect/compiler':
         specifier: workspace:*
         version: link:../../packages/compiler
+      '@silk-effect/inspector':
+        specifier: workspace:*
+        version: link:../../packages/inspector
       '@silk-effect/language':
         specifier: workspace:*
         version: link:../../packages/language
@@ -261,6 +264,19 @@ importers:
         specifier: ^24.10.1
         version: 24.13.3
 
+  packages/inspector:
+    dependencies:
+      '@silk-effect/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102
+    devDependencies:
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.13.3
+
   packages/language:
     dependencies:
       '@silk-effect/compiler':
@@ -316,6 +332,9 @@ importers:
       '@silk-effect/documentation':
         specifier: workspace:*
         version: link:../documentation
+      '@silk-effect/inspector':
+        specifier: workspace:*
+        version: link:../inspector
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.102

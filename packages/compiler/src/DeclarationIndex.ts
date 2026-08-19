@@ -4752,11 +4752,8 @@ const interfaceWitnessCompatibility = (
   )
 }
 
-/** The one legacy bridge: sealed scalar intrinsics consume what ordinary interfaces now borrow. */
-const intrinsicWitnessOperand = (type: Type.Type): Type.Type =>
-  Type.isReference(type) && type.access === 'Shared' ? type.target : type
-
-const intrinsicWitnessCompatibility = (
+/** Checks a sealed witness against the interface's literal operand ownership contract. */
+const sealedWitnessCompatibility = (
   contract: InterfaceOperationApplicationFact | undefined,
   parameters: ReadonlyArray<Type.Type>,
   result: Type.Type,
@@ -4764,13 +4761,7 @@ const intrinsicWitnessCompatibility = (
   if (contract === undefined || contract.success._tag !== 'Resolved') return undefined
   const operands = contract.operands.flatMap((operand) =>
     operand.type._tag === 'Resolved'
-      ? [
-          compatibilityOperand(
-            operand.parameter,
-            intrinsicWitnessOperand(operand.type.type),
-            contract.provider,
-          ),
-        ]
+      ? [compatibilityOperand(operand.parameter, operand.type.type, contract.provider)]
       : [],
   )
   if (operands.length !== contract.operands.length) return undefined
@@ -6189,8 +6180,8 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
               ),
             )
           }
-          // A source witness uses the applied contract's literal operands. Only a sealed intrinsic
-          // crosses the narrowly scoped scalar value/shared-borrow bridge below.
+          // Every witness uses the applied contract's literal operands. Source functions and
+          // sealed intrinsics are checked by the same ownership rules.
           if (
             Type.isNominal(provider) &&
             target._tag === 'TypePath' &&
@@ -6272,13 +6263,16 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             target.segments.at(0)?.spelling === 'Intrinsic'
               ? Intrinsic.findOperation('Intrinsic', target.segments.at(1)?.spelling ?? '')
               : undefined
-          const rule = operation?.rule
-          const parameters = rule?._tag === 'BuiltinRule' ? rule.parameters : undefined
-          const result = rule?._tag === 'BuiltinRule' ? rule.result : undefined
+          const builtin =
+            operation !== undefined && Intrinsic.isBuiltinOperation(operation)
+              ? operation
+              : undefined
+          const parameters = builtin?.callParameters
+          const result = builtin?.rule.result
           const compatibility =
             parameters === undefined || result === undefined
               ? undefined
-              : intrinsicWitnessCompatibility(mapping.contract, parameters, result)
+              : sealedWitnessCompatibility(mapping.contract, parameters, result)
           if (
             operation === undefined ||
             operation.unsafe ||

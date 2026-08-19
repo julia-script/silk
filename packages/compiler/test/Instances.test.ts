@@ -587,8 +587,16 @@ pub fn main() -> i32 {
     assert.strictEqual(delayed?.result._tag, 'EffectValue')
     assert.strictEqual(runner?.result._tag, 'EffectOutcome')
     const outcome = Analysis.evaluate(result)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
+    assert.strictEqual(
+      outcome._tag,
+      'Completed',
+      JSON.stringify(
+        outcome,
+        (_, value) => (typeof value === 'bigint' ? value.toString() : value),
+        2,
+      ),
+    )
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42n)
   }),
 )
 

@@ -26,7 +26,7 @@ it.effect('keeps one owned allocation in parity across the evaluator and Wasm', 
     const evaluated = Analysis.evaluate(native)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
 
     // Exactly one logical block is acquired and released, and every typed storage step in
     // between is ordered: no take precedes its write, and no release precedes the last take.

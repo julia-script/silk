@@ -46,7 +46,7 @@ it.effect(
         ),
       )
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42)
+      assert.strictEqual(evaluated.result.value, 42n)
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -63,7 +63,7 @@ it.effect('keeps a prefixed literal equal to its decimal spelling in the same pr
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 0)
+    assert.strictEqual(evaluated.result.value, 0n)
   }),
 )
 

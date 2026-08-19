@@ -263,9 +263,7 @@ const observations = (
   const scalarValues = (name: string): ReadonlyArray<number> =>
     outcome.trace.flatMap((event) => {
       if (event._tag !== 'Binding' || event.target.name !== name) return []
-      if (event.value._tag === 'I32Value') return [event.value.value]
-      if (event.value._tag === 'ScalarIntegerValue') return [Number(event.value.value)]
-      if (event.value._tag === 'UsizeValue') return [Number(event.value.value)]
+      if (event.value._tag === 'IntegerValue') return [Number(event.value.value)]
       return []
     })
   const pcs = scalarValues('observeStepPc')

@@ -26,7 +26,7 @@ The system SHALL create and resolve supported metadata forward references and SH
 
 #### Scenario: Encode with an unresolved reference
 - **WHEN** output is requested while a reachable metadata forward reference remains unresolved
-- **THEN** output fails with `SilkError` rather than emitting malformed metadata
+- **THEN** output fails with `LlvmError` rather than emitting malformed metadata
 
 ### Requirement: Debug information model
 The system SHALL construct the debug files, compile units, subprograms, lexical blocks, locations, basic types, composite types, derived types, subroutine types, enumerators, subranges, expressions, local variables, parameters, and global variables supported by the pinned builder.

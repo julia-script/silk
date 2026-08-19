@@ -209,7 +209,7 @@ pub fn main() -> i32 {
       ])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 3)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 3n)
   }),
 )
 
@@ -424,7 +424,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag === 'Completed') {
-      assert.strictEqual(outcome.result.value, 42)
+      assert.strictEqual(outcome.result.value, 42n)
       assert.strictEqual(
         outcome.trace.filter(
           (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl#'),
@@ -513,7 +513,7 @@ pub fn main() -> i32 {
     )
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -657,7 +657,7 @@ pub fn main() -> i32 {
       assert.isFalse(encodedMir.includes(spelling), `${spelling} reached MIR`)
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -849,6 +849,6 @@ pub fn main() -> i32 {
 
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
