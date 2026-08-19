@@ -314,7 +314,7 @@ describe('preset catalog', () => {
     }
   })
 
-  it('exposes suspension, continuation state, composition, and recursion in Labs', () => {
+  it('exposes suspension, coroutine-frame state, composition, and recursion in Labs', () => {
     for (const [index, preset] of suspendedEffectPresets.entries()) {
       expect(preset, suspendedEffectLabels[index]).toBeDefined()
       if (preset === undefined) continue
@@ -333,14 +333,14 @@ describe('preset catalog', () => {
         evaluation.trace.some((event) => event._tag === 'SuspensionOrigin'),
         preset.label,
       ).toBe(true)
-      const requests = evaluation.trace.filter(
-        (event) => event._tag === 'ContinuationRequest',
+      const pushes = evaluation.trace.filter(
+        (event) => event._tag === 'CoroutineFramePush',
       ).length
-      const releases = evaluation.trace.filter(
-        (event) => event._tag === 'ContinuationRelease',
+      const completions = evaluation.trace.filter(
+        (event) => event._tag === 'CoroutineFrameComplete',
       ).length
-      expect(requests, preset.label).toBeGreaterThan(0)
-      expect(releases, preset.label).toBe(requests)
+      expect(pushes, preset.label).toBeGreaterThan(0)
+      expect(completions, preset.label).toBe(pushes)
     }
   })
 

@@ -15,9 +15,8 @@ effect fn suspend<A, E, ?R>(
 ) -> A ! E ? R
 ```
 
-The current compiler and standard library still expose source-selected continuation allocation,
-`OutOfMemory`, and an `Allocator` requirement. Those are implementation mismatches. The rules
-on this page define the accepted language contract that later implementation work must restore.
+The compiler and standard library preserve that contract exactly. Coroutine frames use private
+execution-stack storage; they never select a source `Allocator` or add `OutOfMemory` to an Effect.
 
 Rule numbers follow the accepted proposal. SUSP-009, SUSP-010, SUSP-012, and SUSP-014 constrain
 private lowering rather than programmer-observable Silk, so their details remain in the proposal
@@ -166,9 +165,6 @@ member of `E`.
 **Diagnostics:** `Effect.suspend` produces no allocator-provision or storage-failure diagnostic.
 Existing child-channel mismatches retain their ordinary codes.
 
-**Current compiler:** It currently adds `OutOfMemory` and `&mut Allocator`; those channels must
-be removed during implementation reconciliation.
-
 **Evidence:** [Effect channels](effect-contracts.md),
 [accepted channel-preservation decision](../../proposals/0009-explicit-effect-suspension/proposal.md).
 
@@ -303,10 +299,19 @@ Because `Effect.suspend` does not select or call a source allocator, it imposes 
 recursion, bootstrap, or self-hosting restriction on ordinary `Allocator` implementations.
 
 ```silk,ignore
-impl Allocator for ArenaAllocator {
-  effect fn reserve(self: &mut ArenaAllocator, size: usize) -> Reservation ! ReserveError {
-    return run Effect.suspend(self.reserveChunk(size))
-  }
+struct SuspendingAllocator {}
+
+effect fn allocate(
+  self: &mut SuspendingAllocator,
+  layout: Layout
+) -> Allocation ! OutOfMemory {
+  return run Effect.suspend(effect {
+    return run Intrinsic.systemAllocationAcquire(move layout)
+  })
+}
+
+impl Allocator for SuspendingAllocator {
+  allocate: SuspendingAllocator.allocate
 }
 ```
 
@@ -440,10 +445,20 @@ changing `Effect.suspend`.
 **Evidence:** [no ambient runtime facilities](runtime-and-standard-library.md#runtime-004--silk-has-no-ambient-runtime-facilities),
 [accepted async exclusion](../../proposals/0009-explicit-effect-suspension/proposal.md).
 
-## Private lowering direction
+## Private lowering model
 
-The accepted proposal also constrains the compiler's coroutine lowering so the public guarantees
-above can be implemented consistently. Exact continuation layout, frame reuse, transition state,
-and storage placement are compiler architecture rather than Silk programmer rules; they are kept in
-the [suspension proposal](../../proposals/0009-explicit-effect-suspension/proposal.md) and its
-OpenSpec implementation plan.
+These are compiler architecture rules, not additional source obligations:
+
+- One concrete suspendable invocation owns one reusable coroutine frame. Repeated suspension by
+  that invocation changes its resume state; it does not allocate another continuation record.
+- Every resume state names only the values needed after that transfer. One statically known maximum
+  layout covers all mutually exclusive states, including compiler-generated temporaries.
+- The parent completes its ownership and state transition before the deferred child begins. A live
+  value therefore has one owner throughout transfer, execution, resumption, and cleanup.
+- Evaluation keeps frames in its activation machine. Native uses non-moving segmented private
+  storage. Direct Wasm uses a private, non-overlapping linear-memory region. Growth failure follows
+  SUSP-006 on all three engines.
+
+The complete architecture contract remains in the
+[suspension proposal](../../proposals/0009-explicit-effect-suspension/proposal.md) and its OpenSpec
+implementation plan.

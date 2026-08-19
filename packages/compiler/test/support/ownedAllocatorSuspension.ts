@@ -10,17 +10,16 @@ effect fn open() -> OwnedAllocator ! OutOfMemory ? &mut Allocator {
   let storage = run Allocator.allocate(move layout)
   return OwnedAllocator { storage: move storage }
 }
-effect fn protected() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn protected() -> i32 ? &mut Allocator {
   return run Effect.suspend(effect { return 42 })
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 effect fn inspect(self: once Effect<i32 ? &mut Allocator>) -> Result<i32, never>
 ? &mut Allocator {
   return run Effect.result(move self)
 }
 effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
   let provider = run open()
-  let inspected = inspect(Intrinsic.catchFailure<OutOfMemory>(protected(), recover))
+  let inspected = inspect(protected())
   let completed = run Intrinsic.bindRequirementOwned<&mut Allocator>(move inspected, move provider)
   return match move completed {
     Result<i32, never> { value: outcome } => match move outcome {
@@ -51,13 +50,13 @@ effect fn open() -> OwnedAllocator ! OutOfMemory ? &mut Allocator {
   let storage = run Allocator.allocate(move layout)
   return OwnedAllocator { storage: move storage }
 }
-effect fn protected() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
+effect fn protected() -> i32 ! Problem ? &mut Allocator {
   let code = run Effect.suspend(effect { return 42 })
   fail Problem { code: code }
 }
 effect fn recover(error: Problem) -> i32 { return 7 }
-effect fn inspect(self: once Effect<i32 ! OutOfMemory ? &mut Allocator>)
--> Result<i32, OutOfMemory>
+effect fn inspect(self: once Effect<i32 ? &mut Allocator>)
+-> Result<i32, never>
 ? &mut Allocator {
   return run Effect.result(move self)
 }
@@ -66,9 +65,9 @@ effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
   let inspected = inspect(Intrinsic.catchFailure<Problem>(protected(), recover))
   let completed = run Intrinsic.bindRequirementOwned<&mut Allocator>(move inspected, move provider)
   return match move completed {
-    Result<i32, OutOfMemory> { value: outcome } => match move outcome {
+    Result<i32, never> { value: outcome } => match move outcome {
       Success<i32> { value } => move value
-      Failure<OutOfMemory> { error } => 9
+      Failure<never> { error } => move error
     }
   }
 }
@@ -82,10 +81,10 @@ pub fn main() -> i32 {
 }`
 
 /**
- * Both Audit providers conform to Allocator, and one is supplied with exclusive provider strength,
- * but their stored demands are shared and non-default. Only the real `&mut Allocator@DefaultRole`
- * may allocate continuation storage. The Audit implementation always refuses, so accidental
- * runtime selection is observable on every engine while the real default allocator succeeds.
+ * Both Audit providers conform to Allocator, and one is supplied with exclusive provider strength.
+ * Suspension preserves those explicit requirements exactly but never selects either provider for
+ * private coroutine storage. The Audit implementation always refuses, so accidental selection is
+ * observable on every engine.
  */
 export const auditAllocatorSuspension = `import silk.effects as Effect
 struct AuditAllocator { tag: i32 }
@@ -93,35 +92,29 @@ effect fn allocate(self: &mut AuditAllocator, layout: Layout) -> Allocation ! Ou
   fail OutOfMemory {}
 }
 impl Allocator for AuditAllocator { allocate: AuditAllocator.allocate }
-effect fn protected() -> i32 ! OutOfMemory
-? &Allocator@SharedAudit | &Allocator@ExclusiveAudit | &mut Allocator {
+effect fn protected() -> i32
+? &Allocator@SharedAudit | &Allocator@ExclusiveAudit {
   return run Effect.suspend(effect { return 42 })
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 pub fn main() -> i32 {
   let sharedAudit = AuditAllocator { tag: 0 }
   let mut exclusiveAudit = AuditAllocator { tag: 0 }
-  let mut allocator = SystemAllocator.make()
-  return run Effect.catchAll(
-    protected()
-      |> Effect.provideMut<&mut Allocator>(&mut allocator)
-      |> Effect.provide<&Allocator@SharedAudit>(&sharedAudit)
-      |> Effect.provideMut<&Allocator@ExclusiveAudit>(&mut exclusiveAudit),
-    recover
-  )
+  return run (protected()
+    |> Effect.provide<&Allocator@SharedAudit>(&sharedAudit)
+    |> Effect.provideMut<&Allocator@ExclusiveAudit>(&mut exclusiveAudit))
 }`
 
 export const ownedProviderSuspendedSuccess = `import silk.effects as Effect
 service Counter {
-  effect fn increment() -> i32 ! OutOfMemory ? &mut Counter | &mut Allocator
+  effect fn increment() -> i32 ? &mut Counter
 }
 struct Cell { value: i32 storage: Allocation }
-effect fn increment(self: &mut Cell) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn increment(self: &mut Cell) -> i32 {
   let value = self.value
   return run Effect.suspend(effect { return value + 1 })
 }
 impl Counter for Cell { increment: Cell.increment }
-effect fn read() -> i32 ! OutOfMemory ? &mut Counter | &mut Allocator {
+effect fn read() -> i32 ? &mut Counter {
   return run Counter.increment()
 }
 effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
@@ -143,10 +136,10 @@ pub fn main() -> i32 {
 export const ownedProviderSuspendedFailure = `import silk.effects as Effect
 struct Problem { code: i32 }
 service Value {
-  effect fn read() -> i32 ! Problem | OutOfMemory ? &mut Value | &mut Allocator
+  effect fn read() -> i32 ! Problem ? &mut Value
 }
 struct Provider { code: i32 storage: Allocation }
-effect fn read(self: &mut Provider) -> i32 ! Problem | OutOfMemory ? &mut Allocator {
+effect fn read(self: &mut Provider) -> i32 ! Problem {
   let providerCode = self.code
   let code = run Effect.suspend(effect { return providerCode })
   fail Problem { code: code }
@@ -158,7 +151,7 @@ effect fn open() -> Provider ! OutOfMemory {
   let storage = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   return Provider { code: 42, storage: move storage }
 }
-effect fn use() -> i32 ! Problem | OutOfMemory ? &mut Value | &mut Allocator {
+effect fn use() -> i32 ! Problem ? &mut Value {
   return run Value.read()
 }
 effect fn program() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
@@ -173,35 +166,33 @@ pub fn main() -> i32 {
 
 export const mixedServiceProviderSuspension = `import silk.effects as Effect
 service Value {
-  effect fn read() -> i32 ! OutOfMemory ? &mut Value | &mut Allocator
+  effect fn read() -> i32 ? &mut Value
 }
 struct Immediate { value: i32 }
-effect fn readImmediate(self: &mut Immediate) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn readImmediate(self: &mut Immediate) -> i32 {
   return self.value
 }
 impl Value for Immediate { read: Immediate.readImmediate }
 struct Delayed { value: i32 }
-effect fn readDelayed(self: &mut Delayed) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn readDelayed(self: &mut Delayed) -> i32 {
   let value = self.value
   return run Effect.suspend(effect { return value })
 }
 impl Value for Delayed { read: Delayed.readDelayed }
-effect fn use() -> i32 ! OutOfMemory ? &mut Value | &mut Allocator {
+effect fn use() -> i32 ? &mut Value {
   return run Value.read()
 }
-effect fn immediate() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn immediate() -> i32 {
   let mut provider = Immediate { value: 20 }
   return run Intrinsic.bindRequirementMut<&mut Value>(use(), &mut provider)
 }
-effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn delayed() -> i32 {
   let mut provider = Delayed { value: 22 }
   return run Intrinsic.bindRequirementMut<&mut Value>(use(), &mut provider)
 }
-effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn program() -> i32 {
   return (run immediate()) + (run delayed())
 }
-effect fn recover(error: OutOfMemory) -> i32 { return -1 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  return run Effect.catchAll(Effect.provideMut(program(), &mut allocator), recover)
+  return run program()
 }`

@@ -28,29 +28,38 @@ afterAll(() => {
   rmSync(destinationRoot, { recursive: true, force: true })
 })
 
-const successSource = `effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator {
+const successSource = `effect fn delayed() -> i32 {
   return run Effect.suspend(effect { return 2 })
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+pub fn main() -> i32 { return run delayed() }`
+
+const retryFailureSource = `struct Problem {}
+effect fn attempt() -> i32 ! Problem {
+  let resumed = run Effect.suspend(effect { return () })
+  fail Problem {}
+}
+effect fn recover(error: Problem) -> i32 { return 7 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  return run Effect.catchAll(delayed() |> Effect.provideMut(&mut allocator), recover)
+  return run Effect.catchAll(
+    attempt() |> Effect.retry(1),
+    recover
+  )
 }`
 
-const recursiveSource = (
-  depth: number,
-): string => `effect fn count(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
+const recursiveSource = (depth: number): string => `struct Owner { value: i32 }
+effect fn count(value: i32) -> i32 {
   if value == 0 { return 0 }
   let next = run Effect.suspend(effect { return value - 1 })
   let inner = run count(next)
   return inner + 1
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn retainOwner(owner: &mut Owner, value: i32) -> i32 {
+  let answer = run count(value)
+  return owner.value + answer - answer + 1
+}
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let answer = run Effect.catchAll(count(${depth}) |> Effect.provideMut(&mut allocator), recover)
-  if answer == ${depth} { return 42 }
-  return 2
+  let mut owner = Owner { value: 41 }
+  return run retainOwner(&mut owner, ${depth})
 }`
 
 it.effect('runs one million suspended native recursive frames with bounded machine stack', () =>
@@ -69,10 +78,20 @@ it.effect('runs one million suspended native recursive frames with bounded machi
     const run = spawnSync(compiled.path, [], { encoding: 'utf8', timeout: 60_000 })
     assert.strictEqual(run.signal, null, run.stderr)
     assert.strictEqual(run.status, 42, run.stderr)
+
+    const exhausted = spawnSync(compiled.path, [], {
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: { ...process.env, SILK_PRIVATE_EXECUTION_STACK_LIMIT_BYTES: '1' },
+    })
+    assert.isTrue(
+      exhausted.signal !== null || exhausted.status !== 42,
+      'private execution-stack exhaustion must terminate instead of entering Effect failure',
+    )
   }),
 )
 
-it.effect('uses a private iterative native suspension protocol', () =>
+it.effect('uses a private iterative native coroutine-frame protocol', () =>
   Effect.gen(function* () {
     const analysis = yield* Analysis.ofSourceRealized(
       'suspension-native/shape',
@@ -91,9 +110,32 @@ it.effect('uses a private iterative native suspension protocol', () =>
     assert.include(artifact.ir, '$suspend_step')
     assert.include(artifact.ir, 'suspend_drive')
     assert.include(artifact.ir, 'silk_suspend_resume_')
+    assert.include(artifact.ir, 'silk_coroutine_frame_push_v1')
+    assert.include(artifact.ir, 'silk_coroutine_frame_pop_v1')
+    assert.notInclude(artifact.ir, 'declare ptr @malloc')
+    assert.notInclude(artifact.ir, 'declare void @free')
     assert.notInclude(artifact.ir, 'llvm.coro.')
     assert.notInclude(artifact.ir, 'musttail')
     assert.notInclude(artifact.ir, 'setjmp')
     assert.notInclude(artifact.ir, 'longjmp')
+  }),
+)
+
+it.effect('propagates a failure after a resumed retry into its native handler', () =>
+  Effect.gen(function* () {
+    const compiled = yield* Driver.compile({
+      compilation: {
+        root: SourceFile.make('suspension-native/retry-failure', ascii(retryFailureSource)),
+      },
+      toolchain,
+      profile: 'release',
+      destination: join(destinationRoot, 'retry-failure'),
+    }).pipe(Effect.provide(SourceResolver.empty))
+
+    assert.strictEqual(compiled._tag, 'Compiled')
+    if (compiled._tag !== 'Compiled') return
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
+    assert.strictEqual(run.signal, null, run.stderr)
+    assert.strictEqual(run.status, 7, run.stderr)
   }),
 )

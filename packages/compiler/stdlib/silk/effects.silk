@@ -29,7 +29,7 @@
 //! # Gotchas
 //! Typed failures are outcomes that combinators can reify and recover. Traps are not: they bypass
 //! [`catchAll`], [`ensuring`], and Drop hooks. [`suspend`] crosses the stack-safe execution boundary
-//! and therefore adds explicit [`OutOfMemory`] and [`Allocator`] channels.
+//! while preserving all three channels exactly; frame exhaustion is fatal.
 
 // Familiar channel transformations derived from the closed compiler core. The core executes one
 // Effect into Result data and binds one typed requirement; everything here is ordinary Silk.
@@ -475,9 +475,14 @@ where &mut P provides S from R {
   }
 }
 
-/// Defers one Effect through the compiler-owned stack-safe execution boundary.
-pub effect fn suspend<A, !E, ?R>(
+/// Defers one Effect through stack-safe execution while preserving its channels exactly.
+///
+/// # Details
+///
+/// Suspension adds no allocator requirement or recoverable allocation failure. Coroutine frames
+/// belong to the compiler-owned execution stack, whose exhaustion is a fatal trap.
+pub effect fn suspend<A, E, ?R>(
   deferred: once Effect<A ! E ? R>
-) -> A ! E | OutOfMemory ? R | &mut Allocator {
+) -> A ! E ? R {
   return run Intrinsic.suspendEffect(move deferred)
 }

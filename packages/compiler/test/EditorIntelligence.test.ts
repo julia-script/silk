@@ -930,7 +930,7 @@ it.effect('presents and completes the sealed suspension intrinsic with its exact
       const hover = Analysis.hoverSubjectAt(snapshot, 'main', operationOffset)
       assert.strictEqual(
         hover?.presentation.text,
-        'fn Intrinsic.suspendEffect<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
+        'fn Intrinsic.suspendEffect<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E ? R>',
       )
 
       const completionOffset = encoder.encode(
@@ -942,7 +942,7 @@ it.effect('presents and completes the sealed suspension intrinsic with its exact
       )
       assert.strictEqual(
         candidate?.detail?.text,
-        'fn Intrinsic.suspendEffect<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
+        'fn Intrinsic.suspendEffect<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E ? R>',
       )
       return undefined
     }),

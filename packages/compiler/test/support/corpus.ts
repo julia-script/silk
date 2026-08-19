@@ -15,7 +15,7 @@ import {
   ownedProviderSuspendedFailure,
   ownedProviderSuspendedSuccess,
 } from './ownedAllocatorSuspension.js'
-import { storedCatchAllocatorSuspension } from './storedCatchAllocatorSuspension.js'
+import { storedCatchSuspension } from './storedCatchSuspension.js'
 
 // folded from Transcendental.test.ts: the canonical-bits program is generated from the pinned
 // high-precision vectors plus the fixed edge cases, so the expected bits can never drift from the
@@ -1127,23 +1127,32 @@ pub fn main() -> i32 {
   {
     name: 'suspension-retry-failure',
     source: `struct Problem { code: i32 }
-effect fn attempt() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
+effect fn attempt() -> i32 ! Problem {
   let observed = run Effect.suspend(effect { return 1 })
   fail Problem { code: observed }
 }
-effect fn recover(error: Problem | OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: Problem) -> i32 { return 7 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
   return run Effect.catchAll(
-    attempt() |> Effect.retry(2) |> Effect.provideMut(&mut allocator),
+    attempt() |> Effect.retry(2),
     recover
   )
 }`,
     expected: { _tag: 'Completes', result: 7 },
   },
   {
-    name: 'stored-catch-allocator-suspension',
-    source: storedCatchAllocatorSuspension,
+    name: 'suspension-repeated-states',
+    source: `effect fn twice() -> i32 {
+  let left = run Effect.suspend(effect { return 40 })
+  let right = run Effect.suspend(effect { return 2 })
+  return left + right
+}
+pub fn main() -> i32 { return run twice() }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'stored-catch-suspension',
+    source: storedCatchSuspension,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

@@ -1,6 +1,5 @@
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Instances from './Instances.js'
-import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import * as ProvisionalMir from './ProvisionalMir.js'
 import type * as SuspensionOwnership from './SuspensionOwnership.js'
@@ -35,17 +34,6 @@ const resumeOf = (
   path: Mir.ResumePointId['path'],
 ): Mir.ResumePointId => Object.freeze({ _tag: 'ResumePointId', point, path })
 
-const isContinuationAllocator = (provider: {
-  readonly capability: Type.Nominal
-  readonly role: string
-  readonly requirementAccess: Type.Requirement['access']
-  readonly access: 'Shared' | 'Exclusive' | 'Take'
-}): boolean =>
-  Type.equals(provider.capability, Type.allocator) &&
-  provider.role === 'DefaultRole' &&
-  provider.requirementAccess === 'Exclusive' &&
-  (provider.access === 'Exclusive' || provider.access === 'Take')
-
 const operationArguments = (
   operation: Extract<
     Mir.Operation,
@@ -53,16 +41,6 @@ const operationArguments = (
   >,
 ): ReadonlyArray<Mir.LocalId> =>
   operation._tag === 'RunEffect' ? operation.arguments : operation.arguments
-
-const operationProviderCandidates = (
-  operation: Extract<
-    Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
-  >,
-): ReadonlyArray<Mir.LocalId> =>
-  operation._tag === 'RunEffect'
-    ? operation.arguments
-    : Object.freeze([operation.effect, ...operation.arguments])
 
 const runnerOf = (
   runner: ProvisionalMir.Runner,
@@ -116,7 +94,6 @@ const runnerOf = (
           : arguments_.at(argumentOffset + runtimeOrdinal)
         : undefined
       if (hasRuntimeArgument) runtimeOrdinal += 1
-      const continuationAllocator = isContinuationAllocator(provider)
       const witness =
         provider.witness ??
         DeclarationIndex.witness(index, provider.providerType, provider.capability)
@@ -124,9 +101,7 @@ const runnerOf = (
         ...provider,
         ...(witness === undefined ? {} : { witness }),
         ...(argument === undefined ? {} : { argument }),
-        purposes: continuationAllocator
-          ? (['ChildRequirement', 'ContinuationAllocator'] as const)
-          : (['ChildRequirement'] as const),
+        purposes: ['ChildRequirement'] as const,
       })
     })
   const declaration =
@@ -167,142 +142,7 @@ const runnerOf = (
 const completionOf = (completion: ProvisionalMir.CompletionPolicy): Mir.SuspensionCompletion =>
   Object.freeze({ ...completion })
 
-const continuationAllocatorOf = (
-  program: Mir.Module,
-  fn: Mir.MirFunction,
-  index: DeclarationIndex.Index,
-  candidates: ReadonlyArray<Mir.LocalId> = Object.freeze(
-    Array.from({ length: fn.parameterCount }, (_value, ordinal) =>
-      Object.freeze({ _tag: 'Local' as const, ordinal }),
-    ),
-  ),
-): (Mir.SuspensionProviderArgument & { readonly argument: Mir.LocalId }) | undefined => {
-  const declaredRequirement =
-    fn.result._tag === 'EffectOutcome'
-      ? Type.requirementMembers(fn.result.type).find(
-          (requirement) =>
-            requirement.access === 'Exclusive' &&
-            requirement.role === 'DefaultRole' &&
-            Type.equals(requirement.capability, Type.allocator),
-        )
-      : undefined
-  const fieldLaneCount = (field: Layout.EffectEnvironmentField): number =>
-    Layout.effectFieldLanes(program.layout, field).length
-  const allocatorInEnvironment = (
-    environment: Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
-    baseLane = 0,
-    visited = new Set<string>(),
-  ): { readonly lane: number; readonly providerType: Type.Nominal } | undefined => {
-    const identity = Instances.effectIdentity(environment.instance, environment.site)
-    if (visited.has(identity)) return undefined
-    const nextVisited = new Set(visited).add(identity)
-    let lane = baseLane
-    // A provider already bound inside a captured Effect is semantically part of that Effect. It
-    // outranks unrelated Allocator-conforming captures in an enclosing wrapper, regardless of
-    // capture order. This is what keeps non-default Allocator roles from competing with the hidden
-    // DefaultRole continuation provider.
-    for (const field of environment.fields) {
-      if (field.effectIdentity !== undefined) {
-        const nested = Layout.effectEnvironmentByFieldIdentity(program.layout, field.effectIdentity)
-        if (nested !== undefined) {
-          const nestedSelected = allocatorInEnvironment(nested, lane, nextVisited)
-          if (nestedSelected !== undefined) return nestedSelected
-        }
-      }
-      lane += fieldLaneCount(field)
-    }
-    lane = baseLane
-    for (const field of environment.fields) {
-      if (
-        field.providedRequirement !== undefined &&
-        Type.equals(field.providedRequirement.capability, Type.allocator) &&
-        field.providedRequirement.role === 'DefaultRole' &&
-        field.providedRequirement.requirementAccess === 'Exclusive' &&
-        (field.providedRequirement.providerAccess === 'Exclusive' ||
-          field.providedRequirement.providerAccess === 'Take') &&
-        Type.isReference(field.type) &&
-        field.type.access === 'Exclusive' &&
-        Type.isNominal(field.type.target)
-      )
-        return Object.freeze({ lane, providerType: field.type.target })
-      lane += fieldLaneCount(field)
-    }
-    return undefined
-  }
-  interface AllocatorCandidate {
-    readonly local: Mir.LocalId
-    readonly lane: number
-    readonly providerType: Type.Nominal
-    readonly nested: boolean
-  }
-  const selectedCandidates: ReadonlyArray<AllocatorCandidate> = candidates.flatMap(
-    (local): ReadonlyArray<AllocatorCandidate> => {
-      const type = fn.localTypes.at(local.ordinal)
-      if (
-        type?._tag === 'Reference' &&
-        type.type.access === 'Exclusive' &&
-        Type.isNominal(type.type.target) &&
-        DeclarationIndex.witness(index, type.type.target, Type.allocator) !== undefined
-      )
-        return [Object.freeze({ local, lane: 0, providerType: type.type.target, nested: false })]
-      if (
-        type?._tag === 'EffectBorrow' &&
-        type.access === 'Exclusive' &&
-        Type.isNominal(type.type) &&
-        DeclarationIndex.witness(index, type.type, Type.allocator) !== undefined
-      )
-        return [Object.freeze({ local, lane: 0, providerType: type.type, nested: false })]
-      if (type?._tag !== 'EffectValue') return []
-      const projection = allocatorInEnvironment(type.environment)
-      return projection === undefined
-        ? []
-        : [
-            Object.freeze({
-              local,
-              lane: projection.lane,
-              providerType: projection.providerType,
-              nested: true,
-            }),
-          ]
-    },
-  )
-  const parameterizedProviders =
-    fn.effectRunner?.providers.filter(
-      (provider) => provider.witness._tag === 'SourceConformanceWitness',
-    ) ?? []
-  const exactProviderOrdinal = parameterizedProviders.findIndex(isContinuationAllocator)
-  const exactParameterOrdinal =
-    exactProviderOrdinal < 0
-      ? undefined
-      : fn.parameterCount - parameterizedProviders.length + exactProviderOrdinal
-  const exactParameter =
-    exactParameterOrdinal === undefined
-      ? undefined
-      : selectedCandidates.find(
-          (candidate) => !candidate.nested && candidate.local.ordinal === exactParameterOrdinal,
-        )
-  const selected =
-    exactParameter ??
-    selectedCandidates.findLast((candidate) => candidate.nested) ??
-    (declaredRequirement === undefined ? undefined : selectedCandidates.at(-1))
-  if (selected === undefined) return undefined
-  const providerType = selected.providerType
-  const witness = DeclarationIndex.witness(index, providerType, Type.allocator)
-  if (witness === undefined) return undefined
-  return Object.freeze({
-    capability: Type.allocator,
-    providerType,
-    role: 'DefaultRole',
-    requirementAccess: 'Exclusive',
-    access: 'Exclusive',
-    argument: selected.local,
-    ...(selected.lane === 0 ? {} : { argumentLane: selected.lane }),
-    witness,
-    purposes: ['ChildRequirement', 'ContinuationAllocator'] as const,
-  })
-}
-
-const pathPlanOf = (plan: SuspensionOwnership.ResumePlan): Mir.ContinuationPathPlan =>
+const pathPlanOf = (plan: SuspensionOwnership.ResumePlan): Mir.CoroutineFramePathPlan =>
   Object.freeze({
     restores: plan.restores,
     loanEnds: plan.loanEnds,
@@ -313,19 +153,13 @@ const descriptorOf = (
   point: Mir.SuspensionPointId,
   runner: Mir.SuspensionRunner,
   plan: SuspensionOwnership.Plan,
-): Mir.ContinuationDescriptor =>
+): Mir.CoroutineFrameState =>
   Object.freeze({
-    _tag: 'ContinuationDescriptor',
+    _tag: 'CoroutineFrameState',
     point,
     runner,
     outcome: runner.outcome,
-    layout: Object.freeze({
-      _tag: 'LogicalContinuationLayout',
-      slots: plan.slots,
-      initializationOrder: plan.initializationOrder,
-      prefixRollbacks: plan.prefixRollbacks,
-    }),
-    allocationRefusal: pathPlanOf(plan.allocationRefusal),
+    slots: plan.slots,
     success: Object.freeze({
       ...pathPlanOf(plan.success),
       resume: resumeOf(point, 'Success'),
@@ -394,21 +228,6 @@ const regionsOf = (
         )
         if (candidate === undefined) return []
         const deferred = runnerOf(outcome.deferred, index, candidate.operation, program.functions)
-        const allocator =
-          deferred.providers.find(
-            (provider) =>
-              provider.purposes.length === 2 &&
-              isContinuationAllocator(provider) &&
-              provider.argument !== undefined,
-          ) ??
-          continuationAllocatorOf(
-            program,
-            fn,
-            index,
-            operationProviderCandidates(candidate.operation),
-          ) ??
-          continuationAllocatorOf(program, fn, index)
-        if (allocator?.argument === undefined) return []
         return [
           Object.freeze({
             _tag: 'SuspendEffectRegion',
@@ -416,10 +235,7 @@ const regionsOf = (
             ownerRegion: candidate.region,
             operation: candidate.operation,
             deferred,
-            transfer: Object.freeze({
-              ...outcome.transfer,
-              allocator: Object.freeze({ ...allocator, argument: allocator.argument }),
-            }),
+            transfer: Object.freeze({ _tag: 'OriginateTransfer' as const }),
             provenance: Object.freeze({ span: outcome.span, generated: false }),
           }),
         ]
@@ -438,24 +254,7 @@ const regionsOf = (
           Instances.keyText(candidatePlan.function) === Instances.keyText(fn.instance) &&
           samePoint(candidatePlan.point, region.id),
       )
-      const selectedRunner = runnerOf(outcome.runner, index, candidate.operation, program.functions)
-      const continuationAllocator =
-        continuationAllocatorOf(
-          program,
-          fn,
-          index,
-          operationProviderCandidates(candidate.operation),
-        ) ?? continuationAllocatorOf(program, fn, index)
-      const runner =
-        continuationAllocator === undefined ||
-        selectedRunner.providers.some(
-          (provider) => provider.purposes.length === 2 && isContinuationAllocator(provider),
-        )
-          ? selectedRunner
-          : Object.freeze({
-              ...selectedRunner,
-              providers: Object.freeze([...selectedRunner.providers, continuationAllocator]),
-            })
+      const runner = runnerOf(outcome.runner, index, candidate.operation, program.functions)
       return [
         Object.freeze({
           _tag: 'RunSuspendableEffectRegion',
@@ -471,7 +270,7 @@ const regionsOf = (
             preserves: outcome.relay.preserves,
             frame: plan?.frame ?? 'MissingOwnershipPlan',
             ...(plan?.frame === 'StatefulRelay'
-              ? { continuation: descriptorOf(point, runner, plan) }
+              ? { state: descriptorOf(point, runner, plan) }
               : {}),
           }),
           provenance: candidate.operation.provenance,
@@ -499,11 +298,37 @@ export const finalize = (
           ownership,
           index,
         )
+        const states = Object.freeze(
+          regions
+            .flatMap((region) =>
+              region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
+                ? [region.relay.state]
+                : [],
+            )
+            .sort(
+              (left, right) =>
+                left.point.sourceId.localeCompare(right.point.sourceId) ||
+                left.point.spanStart - right.point.spanStart ||
+                left.point.ordinal - right.point.ordinal,
+            ),
+        )
         return classification === 'Synchronous' && regions.length === 0
           ? fn
           : Object.freeze({
               ...fn,
-              suspension: Object.freeze({ classification, regions }),
+              suspension: Object.freeze({
+                classification,
+                regions,
+                ...(states.length === 0
+                  ? {}
+                  : {
+                      frame: Object.freeze({
+                        _tag: 'CoroutineFrameDescriptor' as const,
+                        function: fn.instance,
+                        states,
+                      }),
+                    }),
+              }),
             })
       })(),
     ),
@@ -528,7 +353,7 @@ export const summary = (program: Mir.Module): string =>
     .flatMap((fn) =>
       (fn.suspension?.regions ?? []).map(
         (region) =>
-          `${Instances.keyText(fn.instance)}:${region._tag}:${region.point.sourceId}:${region.point.spanStart}:${region.point.ordinal}:${region._tag === 'RunSuspendableEffectRegion' ? (region.relay.continuation?.layout.slots.map((slot) => `${slot.ordinal}:${slot.local.ordinal}:${Type.encode(Mir.semanticType(slot.type))}`).join(',') ?? 'tail') : 'origin'}`,
+          `${Instances.keyText(fn.instance)}:${region._tag}:${region.point.sourceId}:${region.point.spanStart}:${region.point.ordinal}:${region._tag === 'RunSuspendableEffectRegion' ? (region.relay.state?.slots.map((slot) => `${slot.ordinal}:${slot.local.ordinal}:${Type.encode(Mir.semanticType(slot.type))}`).join(',') ?? 'tail') : 'origin'}`,
       ),
     )
     .join('\n')

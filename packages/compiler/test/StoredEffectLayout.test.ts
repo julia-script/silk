@@ -81,11 +81,8 @@ it.effect('keeps exact rows compile-time-only and suspendability in the layout d
     const { plan } = yield* storedLayout(
       'stored-effect-layout/suspending',
       `struct Deferred<F: Effect<i32>> { operation: F }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 effect fn delayed() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let provided = Effect.suspend(effect { return 42 }) |> Effect.provideMut(&mut allocator)
-  return run Effect.catchAll(move provided, recover)
+  return run Effect.suspend(effect { return 42 })
 }
 pub fn main() -> i32 {
   let deferred = Deferred { operation: effect { return run delayed() } }

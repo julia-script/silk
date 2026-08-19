@@ -3851,10 +3851,20 @@ const resolveDeclaredType = (
       ...requirements.flatMap((requirement) => requirement.capability.diagnostics),
     ]
     const failureTypes: Array<Type.Nominal> = []
+    const symbolicFailureTypes: Array<{
+      readonly type: Type.Parameter
+      readonly span: SourceSpan.SourceSpan
+    }> = []
     let failuresAvailable = true
     for (const failure of failures) {
       if (failure.fact._tag === 'Resolved' && Type.isNominal(failure.fact.type)) {
         failureTypes.push(failure.fact.type)
+      } else if (
+        failure.fact._tag === 'Resolved' &&
+        Type.isParameter(failure.fact.type) &&
+        failure.fact.type.kind === 'Value'
+      ) {
+        symbolicFailureTypes.push({ type: failure.fact.type, span: failure.fact.syntax.span })
       } else if (!(failure.fact._tag === 'Resolved' && Type.isNever(failure.fact.type))) {
         failuresAvailable = false
         if (failure.fact._tag === 'Resolved')
@@ -3891,13 +3901,32 @@ const resolveDeclaredType = (
       }
     }
     if (success.fact._tag === 'Resolved' && failuresAvailable && requirementsAvailable) {
-      const type = Type.effect(
+      const base = Type.effect(
         success.fact.type,
         failureTypes,
         fact.access,
         requirementTypes,
         fact.failureParameters,
         fact.requirementParameters,
+      )
+      const failureRow = symbolicFailureTypes.reduce<Type.FailureRow>(
+        (row, failure) =>
+          RowAlgebra.union(
+            Type.failureRowPolicy(),
+            row,
+            RowAlgebra.singleton(
+              Type.failureRowPolicy(),
+              Type.failureMemberShape(failure.type),
+              failure.span,
+            ),
+          ),
+        base.failureRow,
+      )
+      const type = Type.effectWithRows(
+        success.fact.type,
+        failureRow,
+        fact.access,
+        base.requirementRow,
       )
       return Object.freeze({
         fact: Object.freeze({
@@ -5066,8 +5095,10 @@ const resolveFailureRow = (
   for (const member of members) {
     if (
       member._tag !== 'Resolved' ||
-      !Type.isNominal(member.type) ||
-      !Type.isRuntimeConcrete(member.type)
+      !(
+        (Type.isNominal(member.type) && Type.isRuntimeConcrete(member.type)) ||
+        (Type.isParameter(member.type) && member.type.kind === 'Value')
+      )
     ) {
       available = false
       if (member._tag === 'Resolved')
@@ -5076,7 +5107,7 @@ const resolveFailureRow = (
         )
       continue
     }
-    failures.set(Type.key(member.type), member.type)
+    if (Type.isNominal(member.type)) failures.set(Type.key(member.type), member.type)
   }
   return Object.freeze({
     fact: Object.freeze({

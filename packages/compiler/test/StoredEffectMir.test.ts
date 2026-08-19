@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as ContinuationLayout from '../src/ContinuationLayout.js'
+import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
@@ -44,7 +44,7 @@ const finalizeSuspension = (
 ): Mir.Module => {
   const provisional = ProvisionalMir.build(snapshot.instances, layout, snapshot.index)
   const normalized = MirNormalization.normalize(module, provisional)
-  return ContinuationLayout.apply(
+  return CoroutineFrame.apply(
     SuspensionMir.finalize(
       normalized,
       provisional,
@@ -357,11 +357,8 @@ it.effect('retains stored runners across suspension and resume planning', () =>
     const lowered = yield* lowerStored(
       'stored-effect-mir/suspending',
       `struct Deferred<F: Effect<i32>> { operation: F }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 effect fn delayed() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let provided = Effect.suspend(effect { return 42 }) |> Effect.provideMut(&mut allocator)
-  return run Effect.catchAll(move provided, recover)
+  return run Effect.suspend(effect { return 42 })
 }
 pub fn main() -> i32 {
   let deferred = Deferred { operation: effect { return run delayed() } }

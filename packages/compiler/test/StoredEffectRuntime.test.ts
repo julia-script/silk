@@ -2,7 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as ContinuationLayout from '../src/ContinuationLayout.js'
+import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
@@ -44,7 +44,7 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
   )
   const provisional = ProvisionalMir.build(snapshot.instances, layout, snapshot.index)
   const normalized = MirNormalization.normalize(lowered, provisional)
-  const module = ContinuationLayout.apply(
+  const module = CoroutineFrame.apply(
     SuspensionMir.finalize(
       normalized,
       provisional,
@@ -365,7 +365,7 @@ fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
 ) -> Deferred<A, E, R, F> {
   return Deferred<A, E, R> { operation: move operation }
 }
-effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn delayed(guard: Guard) -> i32 {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
 }
@@ -401,18 +401,18 @@ it.effect('resumes a suspending stored Effect and cleans its environment exactly
     const allocationReleases = outcome.trace.flatMap((event) =>
       event._tag === 'AllocationRelease' ? [event.ticket] : [],
     )
-    assert.isAbove(allocationAcquires.length, 1, 'guard plus continuation allocations')
+    assert.lengthOf(allocationAcquires, 1, 'only the source Guard allocation')
     assertTicketsReleasedExactlyOnce(
       allocationAcquires,
       allocationReleases,
       'suspending allocation',
     )
-    const continuationAcquires = outcome.trace.flatMap((event) =>
-      event._tag === 'ContinuationAcquire' && event.ticket !== undefined ? [event.ticket] : [],
+    const framePushes = outcome.trace.flatMap((event) =>
+      event._tag === 'CoroutineFramePush' && event.ticket !== undefined ? [event.ticket] : [],
     )
-    const continuationReleases = outcome.trace.flatMap((event) =>
-      event._tag === 'ContinuationRelease' && event.ticket !== undefined ? [event.ticket] : [],
+    const frameCompletions = outcome.trace.flatMap((event) =>
+      event._tag === 'CoroutineFrameComplete' && event.ticket !== undefined ? [event.ticket] : [],
     )
-    assertTicketsReleasedExactlyOnce(continuationAcquires, continuationReleases, 'continuation')
+    assertTicketsReleasedExactlyOnce(framePushes, frameCompletions, 'coroutine frame')
   }),
 )

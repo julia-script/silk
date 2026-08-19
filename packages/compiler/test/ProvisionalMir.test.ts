@@ -21,18 +21,13 @@ const available = (self: Analysis.Snapshot): ProvisionalMir.Module => {
 const outcomes = (self: ProvisionalMir.Module): ReadonlyArray<ProvisionalMir.Outcome> =>
   self.executions.flatMap((execution) => execution.regions.map((region) => region.outcome))
 
-const recover = `effect fn recover(error: OutOfMemory) -> i32 { return 0 }`
-
 it.effect('separates the canonical suspension origin from complete-or-relay callers', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`${recover}
-effect fn delayed(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
+    const self = yield* snapshot(`effect fn delayed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let pending = delayed(42) |> Effect.provideMut(&mut allocator)
-  return run Effect.catchAll(move pending, recover)
+  return run delayed(42)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const provisional = available(self)
@@ -45,7 +40,7 @@ pub fn main() -> i32 {
     const origin = origins.at(0)
     assert.strictEqual(origin?._tag, 'SuspendEffect')
     if (origin?._tag === 'SuspendEffect') {
-      assert.strictEqual(origin.transfer._tag, 'OriginateUnpublishedTransfer')
+      assert.strictEqual(origin.transfer._tag, 'OriginateTransfer')
       assert.strictEqual(origin.span.sourceId, 'silk/effects')
     }
     for (const relay of relays) {
@@ -60,18 +55,15 @@ pub fn main() -> i32 {
 
 it.effect('retains Reify completion for ordinary source-defined combinators', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`${recover}
-effect fn seed(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
+    const self = yield* snapshot(`effect fn seed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
 fn increment(value: i32) -> i32 { return value + 1 }
-effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn program() -> i32 {
   return run seed(41) |> Effect.map(increment)
 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let pending = program() |> Effect.provideMut(&mut allocator)
-  return run Effect.catchAll(move pending, recover)
+  return run program()
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const provisional = available(self)
@@ -88,23 +80,19 @@ pub fn main() -> i32 {
 it.effect('classifies a selected suspending service implementation on the provided runner', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`service Value {
-  effect fn get() -> i32 ! OutOfMemory ? &Value | &mut Allocator
+  effect fn get() -> i32 ? &Value
 }
 struct SuspendedValue { value: i32 }
-effect fn get(self: &SuspendedValue) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn get(self: &SuspendedValue) -> i32 {
   return run Effect.suspend(effect { return self.value })
 }
 impl Value for SuspendedValue { get: SuspendedValue.get }
-effect fn read() -> i32 ! OutOfMemory ? &Value | &mut Allocator {
+effect fn read() -> i32 ? &Value {
   return run Value.get()
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
   let provider = SuspendedValue { value: 42 }
-  let mut allocator = SystemAllocator.make()
-  let selected = read() |> Effect.provide(&provider)
-  let complete = move selected |> Effect.provideMut(&mut allocator)
-  return run Effect.catchAll(move complete, recover)
+  return run Effect.provide(read(), &provider)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const provisional = available(self)
@@ -195,18 +183,12 @@ pub fn main() -> i32 {
 it.effect('specializes generic suspension captures without retaining type parameters', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`struct Owner { value: i32 }
-effect fn delayed<T>(value: T) -> T ! OutOfMemory ? &mut Allocator {
+effect fn delayed<T>(value: T) -> T {
   return run Effect.suspend(effect { return move value })
 }
-effect fn recoverScalar(error: OutOfMemory) -> i32 { return 0 }
-effect fn recoverOwner(error: OutOfMemory) -> Owner { return Owner { value: 0 } }
 pub fn main() -> i32 {
-  let mut scalarAllocator = SystemAllocator.make()
-  let scalar = delayed<i32>(1) |> Effect.provideMut(&mut scalarAllocator)
-  let scalarValue = run Effect.catchAll(move scalar, recoverScalar)
-  let mut ownerAllocator = SystemAllocator.make()
-  let owner = delayed<Owner>(Owner { value: 2 }) |> Effect.provideMut(&mut ownerAllocator)
-  let ownerValue = run Effect.catchAll(move owner, recoverOwner)
+  let scalarValue = run delayed<i32>(1)
+  let ownerValue = run delayed<Owner>(Owner { value: 2 })
   return scalarValue + ownerValue.value
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
@@ -252,20 +234,18 @@ pub fn main() -> i32 { return run seed(41) |> Effect.map(increment) }`
 
 it.effect('converges through a deep suspension chain independently of discovery order', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`${recover}
-effect fn level0(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
+    const self = yield* snapshot(`effect fn level0(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
-effect fn level1(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level0(value) }
-effect fn level2(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level1(value) }
-effect fn level3(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level2(value) }
-effect fn level4(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level3(value) }
-effect fn level5(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level4(value) }
-effect fn level6(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level5(value) }
-effect fn level7(value: i32) -> i32 ! OutOfMemory ? &mut Allocator { return run level6(value) }
+effect fn level1(value: i32) -> i32 { return run level0(value) }
+effect fn level2(value: i32) -> i32 { return run level1(value) }
+effect fn level3(value: i32) -> i32 { return run level2(value) }
+effect fn level4(value: i32) -> i32 { return run level3(value) }
+effect fn level5(value: i32) -> i32 { return run level4(value) }
+effect fn level6(value: i32) -> i32 { return run level5(value) }
+effect fn level7(value: i32) -> i32 { return run level6(value) }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  return run Effect.catchAll(level7(42) |> Effect.provideMut(&mut allocator), recover)
+  return run level7(42)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(self.layout._tag, 'Available')

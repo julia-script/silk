@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as CoroutineRuntime from '../src/CoroutineRuntime.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as Target from '../src/Target.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
@@ -103,6 +104,16 @@ it('captures the process command line in both entry shapes without changing term
   assert.include(passThrough, 'return silk_main();')
   assert.include(reporting, 'const int tag = silk_main();')
   assert.include(reporting, 'if (tag == 0) return 0;')
+})
+
+it('includes non-moving segmented coroutine storage only when suspension requests it', () => {
+  const direct = ToolchainPlan.shimSource({ _tag: 'PassThrough' })
+  const suspended = ToolchainPlan.shimSource({ _tag: 'PassThrough' }, CoroutineRuntime.symbols)
+  assert.notInclude(direct, CoroutineRuntime.pushSymbol)
+  assert.include(suspended, `void *${CoroutineRuntime.pushSymbol}`)
+  assert.include(suspended, `void ${CoroutineRuntime.popSymbol}`)
+  assert.include(suspended, 'silk_coroutine_segment_v1')
+  assert.include(suspended, 'SILK_PRIVATE_EXECUTION_STACK_LIMIT_BYTES')
 })
 
 it('plans every native profile for each canonical native target', () => {

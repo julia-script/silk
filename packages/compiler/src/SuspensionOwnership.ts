@@ -37,12 +37,6 @@ export interface Release {
   readonly cleanup: Ownership.CleanupPlan
 }
 
-export interface PrefixRollback {
-  readonly initialized: number
-  readonly frameDrops: ReadonlyArray<Release>
-  readonly sourceReleases: ReadonlyArray<Release>
-}
-
 export interface ResumePlan {
   readonly restores: ReadonlyArray<number>
   readonly loanEnds: ReadonlyArray<BorrowIdentity>
@@ -55,11 +49,8 @@ export interface Plan {
   readonly function: Instances.InstanceKey
   readonly region: Mir.RegionId
   readonly span: SourceSpan.SourceSpan
-  readonly frame: 'TailRelay' | 'StatefulRelay'
+  readonly frame: 'StatefulRelay'
   readonly slots: ReadonlyArray<Slot>
-  readonly initializationOrder: ReadonlyArray<number>
-  readonly prefixRollbacks: ReadonlyArray<PrefixRollback>
-  readonly allocationRefusal: ResumePlan
   readonly success: ResumePlan
   readonly failure: ResumePlan
 }
@@ -326,20 +317,8 @@ const planFor = (
 ): Plan => {
   const definitions = definitionMap(fn)
   const operationDefined = operationDefinitions(operation)
-  const continuationAllocatorLocals =
-    operation._tag === 'RunEffectValue'
-      ? operation.providers.flatMap((provider) =>
-          provider.argument !== undefined &&
-          provider.role === 'DefaultRole' &&
-          provider.requirementAccess === 'Exclusive' &&
-          (provider.access === 'Exclusive' || provider.access === 'Take') &&
-          Type.equals(provider.capability, Type.allocator)
-            ? [provider.argument.ordinal]
-            : [],
-        )
-      : []
   const slots = Object.freeze(
-    [...new Set([...live, ...continuationAllocatorLocals])]
+    [...new Set(live)]
       .filter((ordinal) => !operationDefined.has(ordinal))
       .sort((left, right) => left - right)
       .flatMap((ordinal) => {
@@ -392,55 +371,17 @@ const planFor = (
         all.findIndex((candidate) => candidate.local.ordinal === release.local.ordinal) === ordinal,
     ),
   )
-  const prefixRollbacks = Object.freeze(
-    slots
-      .map((_slot, initialized) => initialized)
-      .concat(slots.length)
-      .map((initialized) => {
-        const initializedLocals = new Set(
-          slots.slice(0, initialized).map((slot) => slot.local.ordinal),
-        )
-        return Object.freeze({
-          initialized,
-          frameDrops: Object.freeze(
-            [...affine]
-              .filter((slot) => initializedLocals.has(slot.local.ordinal))
-              .reverse()
-              .map((slot) => Object.freeze({ local: slot.local, cleanup: slot.access.cleanup })),
-          ),
-          sourceReleases: Object.freeze(
-            releaseOrder.filter((release) => !initializedLocals.has(release.local.ordinal)),
-          ),
-        })
-      }),
-  )
   const loanEnds = Object.freeze([...borrowed].reverse().map((slot) => slot.access.loan))
-  const operations = regionOperations(region)
-  const tailRelay =
-    region._tag === 'OperationRegion' &&
-    operations.at(-1) === operation &&
-    'destination' in operation &&
-    region.outcome._tag === 'Return' &&
-    region.outcome.value.ordinal === operation.destination.ordinal &&
-    releases.length === 0 &&
-    slots.length === 0
   return Object.freeze({
     _tag: 'SuspensionOwnershipPlan',
     point: control.id,
     function: fn.instance,
     region: region.id,
     span: operation.provenance.span,
-    // A direct final return can relay the transferred child unchanged. Anything with suffix
-    // control — including a zero-payload map/catch state machine — retains a header-only frame.
-    frame: tailRelay ? 'TailRelay' : 'StatefulRelay',
+    // Every suspendable invocation owns one frame. Header-only states are retained because even a
+    // final `run` may adapt the child's represented Effect outcome to the caller's result shape.
+    frame: 'StatefulRelay',
     slots,
-    initializationOrder: Object.freeze(slots.map((slot) => slot.ordinal)),
-    prefixRollbacks,
-    allocationRefusal: Object.freeze({
-      restores: Object.freeze([]),
-      loanEnds,
-      releases: releaseOrder,
-    }),
     success: Object.freeze({
       restores: Object.freeze(slots.map((slot) => slot.ordinal)),
       loanEnds: Object.freeze([]),
@@ -531,10 +472,6 @@ export const encode = (self: Module): string =>
           : slot.access._tag === 'BorrowedDependency'
             ? `  slot ${slot.ordinal} %${slot.local.ordinal} borrow:${slot.access.access.toLowerCase()} root=%${slot.access.root.ordinal} ${borrowText(slot.access.loan)} ${Type.encode(Mir.semanticType(slot.type))}`
             : `  slot ${slot.ordinal} %${slot.local.ordinal} move:${slot.access.cleanup._tag} ${Type.encode(Mir.semanticType(slot.type))}`,
-      ),
-      ...plan_.prefixRollbacks.map(
-        (rollback) =>
-          `  rollback ${rollback.initialized} frame=${rollback.frameDrops.map((release) => `%${release.local.ordinal}`).join(',') || 'none'} source=${rollback.sourceReleases.map((release) => `%${release.local.ordinal}`).join(',') || 'none'}`,
       ),
     ]),
     ...self.violations.map(

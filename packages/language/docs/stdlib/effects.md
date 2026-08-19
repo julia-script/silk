@@ -36,7 +36,7 @@ short-circuit on the first typed failure.
 
 Typed failures are outcomes that combinators can reify and recover. Traps are not: they bypass
 [`catchAll`](#declaration-73696c6b2f656666656374733a3a6361746368416c6c), [`ensuring`](#declaration-73696c6b2f656666656374733a3a656e737572696e67), and Drop hooks. [`suspend`](#declaration-73696c6b2f656666656374733a3a73757370656e64) crosses the stack-safe execution boundary
-and therefore adds explicit [`OutOfMemory`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279) and [`Allocator`](./core.md#declaration-73696c6b2f636f72653a3a416c6c6f6361746f72) channels.
+while preserving all three channels exactly; frame exhaustion is fatal.
 
 Import as `Effect` with `import silk.effects`.
 
@@ -468,7 +468,12 @@ provider is gone, so a recovering caller never observes it.
 ## `suspend`
 
 ```silk
-pub effect fn suspend<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> A ! E | OutOfMemory ? R | &mut Allocator
+pub effect fn suspend<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> A ! E ? R
 ```
 
-Defers one Effect through the compiler-owned stack-safe execution boundary.
+Defers one Effect through stack-safe execution while preserving its channels exactly.
+
+### Details
+
+Suspension adds no allocator requirement or recoverable allocation failure. Coroutine frames
+belong to the compiler-owned execution stack, whose exhaustion is a fatal trap.

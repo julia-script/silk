@@ -203,8 +203,6 @@ export const typeArgumentConflictCode = 'SEM0100' as const
 /** Stable code for a bound operation whose selected witness has no lowering. */
 export const unlowerableBoundWitnessCode = 'SEM0101' as const
 
-/** Stable code for selecting a suspending provider to allocate continuation storage. */
-export const suspendingContinuationAllocatorCode = 'SEM0102' as const
 /** Stable code for constructing an aggregate that stores a bare callable value. */
 export const storedCallableConstructionCode = 'SEM0103' as const
 /** Stable code for the first struct initializer that contradicts an inferred representation. */
@@ -400,7 +398,6 @@ export type Code =
   | typeof uninferredTypeParameterCode
   | typeof typeArgumentConflictCode
   | typeof unlowerableBoundWitnessCode
-  | typeof suspendingContinuationAllocatorCode
   | typeof storedCallableConstructionCode
   | typeof conflictingInitializerRepresentationCode
   | typeof divergentRepresentationJoinCode
@@ -533,11 +530,6 @@ export type Reason =
       readonly _tag: 'ImpureShortCircuitOperand'
       readonly operator: string
       readonly detail: string
-    }
-  | {
-      readonly _tag: 'SuspendingContinuationAllocator'
-      readonly provider: string
-      readonly implementation: string
     }
   | {
       readonly _tag: 'StoredCallableConstruction'
@@ -993,7 +985,6 @@ export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagno
       diagnostic.code === selectedRowCardinalityCode ||
       diagnostic.code === providerConformanceAmbiguityCode ||
       diagnostic.code === invalidProviderConformanceCode ||
-      diagnostic.code === suspendingContinuationAllocatorCode ||
       diagnostic.code === nonConcreteSpecializationCode ||
       diagnostic.code === polymorphicRecursionCode,
   )
@@ -1893,26 +1884,6 @@ export const invalidEffectProvision = (detail: string, span: SourceSpan.SourceSp
     severity: 'error',
     message: `Invalid Effect provider: ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidEffectProvision', detail }),
-    span,
-  })
-
-/** Rejects an allocator whose selected allocation implementation can itself suspend. */
-export const suspendingContinuationAllocator = (
-  provider: string,
-  implementation: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: suspendingContinuationAllocatorCode,
-    severity: 'error',
-    message: `Allocator ${provider} cannot provide continuation storage because ${implementation} can suspend`,
-    reason: Object.freeze({
-      _tag: 'SuspendingContinuationAllocator',
-      provider,
-      implementation,
-    }),
     span,
   })
 

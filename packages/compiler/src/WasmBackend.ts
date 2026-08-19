@@ -16,7 +16,6 @@ import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as FloatingPoint from './FloatingPoint.js'
-import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as LayoutPlan from './Layout.js'
 import type * as Match from './Match.js'
@@ -911,7 +910,6 @@ interface Layout {
     readonly frame: number
     readonly append: number
     readonly next: number
-    readonly allocation: readonly [number, number, number, number, number, number, number]
   }
   /** Every local the definition must declare beyond the function's parameters. */
   readonly declared: ReadonlyArray<FuncActor.Local>
@@ -1533,15 +1531,6 @@ const layoutOf = (
           frame: first,
           append: first + 1,
           next: first + 2,
-          allocation: Object.freeze([
-            first + 3,
-            first + 4,
-            first + 5,
-            first + 6,
-            first + 7,
-            first + 8,
-            first + 9,
-          ] as const),
         })
       })()
     : undefined
@@ -1550,13 +1539,6 @@ const layoutOf = (
       named(i32, 'suspend_frame'),
       named(i32, 'suspend_append'),
       named(i32, 'suspend_next'),
-      named(i32, 'suspend_allocation_tag'),
-      named(i32, 'suspend_allocation_base'),
-      named(i32, 'suspend_allocation_bytes'),
-      named(i32, 'suspend_allocation_alignment'),
-      named(i32, 'suspend_allocation_reclaim'),
-      named(i32, 'suspend_allocation_context'),
-      named(i32, 'suspend_allocation_active'),
     )
   return {
     scratch,
@@ -4914,10 +4896,10 @@ interface WasmSuspensionRuntime {
   readonly transferResultOffset: number
   readonly origins: ReadonlyMap<string, number>
   readonly resumes: ReadonlyMap<string, number>
-  readonly layouts: ReadonlyMap<string, Mir.ContinuationTargetLayout>
-  readonly heapAllocate: FuncActor.Func
-  readonly heapRelease: FuncActor.Func
-  readonly rollback: FuncActor.Func
+  readonly frames: ReadonlyMap<string, Mir.CoroutineFrameTargetLayout>
+  readonly layouts: ReadonlyMap<string, Mir.CoroutineFrameTargetStateLayout>
+  readonly frameStackPointer: Global.Global
+  readonly frameMemory: Memory.Memory
   readonly memory: Memory.Memory
 }
 
@@ -4935,7 +4917,6 @@ const branchDepth = (
 /** Direct structured emission from canonical regions; no CFG recovery or dispatch loop exists. */
 const emitBody = (
   fn: Mir.MirFunction,
-  functions: ReadonlyArray<Mir.MirFunction>,
   layout: Layout,
   plan: LayoutPlan.Plan,
   resolve: (
@@ -4952,7 +4933,7 @@ const emitBody = (
     destination: ReadonlyArray<number>,
   ): ReadonlyArray<Instr.Instr> => {
     if (source.length !== destination.length)
-      throw new RangeError('Wasm continuation cannot copy mismatched logical lane bundles')
+      throw new RangeError('Wasm coroutine state cannot copy mismatched logical lane bundles')
     return source.flatMap((value, ordinal) => {
       const target = destination.at(ordinal)
       return target === undefined ? [] : [Instr.localGet(value), Instr.localSet(target)]
@@ -5095,6 +5076,82 @@ const emitBody = (
     ...resultLanes.map((lane) => zeroOf(laneValueType(plan, lane))),
     Instr.op('return'),
   ]
+  const coroutineFrame =
+    suspensionRuntime === undefined
+      ? undefined
+      : suspensionRuntime.frames.get(Instances.keyText(fn.instance))
+  const acquireCoroutineFrame = (): ReadonlyArray<Instr.Instr> => {
+    const scratch = layout.suspensionScratch
+    if (suspensionRuntime === undefined || coroutineFrame === undefined || scratch === undefined)
+      return []
+    const frameAlignment = Math.max(16, coroutineFrame.alignment)
+    const frameSize = alignUp(Math.max(1, coroutineFrame.size), frameAlignment)
+    const reportStorageExhaustion = [
+      Instr.i32Const(statusAddress),
+      Instr.i32Const(statusStackOverflow),
+      Instr.memoryAccess('i32.store', suspensionRuntime.memory),
+      Instr.op('unreachable'),
+    ]
+    return [
+      Instr.localGet(scratch.frame),
+      Instr.ifElse(
+        Instr.emptyBlockType,
+        [],
+        [
+          Instr.globalGet(suspensionRuntime.frameStackPointer),
+          Instr.i32Const(frameAlignment - 1),
+          Instr.op('i32.add'),
+          Instr.i32Const(-frameAlignment),
+          Instr.op('i32.and'),
+          Instr.localTee(scratch.frame),
+          Instr.i32Const(frameSize),
+          Instr.op('i32.add'),
+          Instr.localTee(scratch.append),
+          Instr.localGet(scratch.frame),
+          Instr.op('i32.lt_u'),
+          Instr.ifElse(Instr.emptyBlockType, reportStorageExhaustion, []),
+          Instr.localGet(scratch.append),
+          Instr.i32Const(1),
+          Instr.op('i32.sub'),
+          Instr.i32Const(16),
+          Instr.op('i32.shr_u'),
+          Instr.i32Const(1),
+          Instr.op('i32.add'),
+          Instr.localTee(scratch.next),
+          Instr.memorySize(suspensionRuntime.frameMemory),
+          Instr.op('i32.gt_u'),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            [
+              Instr.localGet(scratch.next),
+              Instr.memorySize(suspensionRuntime.frameMemory),
+              Instr.op('i32.sub'),
+              Instr.memoryGrow(suspensionRuntime.frameMemory),
+              Instr.i32Const(-1),
+              Instr.op('i32.eq'),
+              Instr.ifElse(Instr.emptyBlockType, reportStorageExhaustion, []),
+            ],
+            [],
+          ),
+          Instr.localGet(scratch.append),
+          Instr.globalSet(suspensionRuntime.frameStackPointer),
+        ],
+      ),
+    ]
+  }
+  const releaseCoroutineFrame = (): ReadonlyArray<Instr.Instr> => {
+    const scratch = layout.suspensionScratch
+    return suspensionRuntime === undefined || coroutineFrame === undefined || scratch === undefined
+      ? []
+      : [
+          Instr.localGet(scratch.frame),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            [Instr.localGet(scratch.frame), Instr.globalSet(suspensionRuntime.frameStackPointer)],
+            [],
+          ),
+        ]
+  }
   const storeI32 = (address: number, value: number): ReadonlyArray<Instr.Instr> => {
     if (suspensionRuntime === undefined) return []
     return [
@@ -5126,40 +5183,6 @@ const emitBody = (
       { offset },
     ),
   ]
-  const returnAllocationRefusal = (
-    releases: ReadonlyArray<Mir.ContinuationRelease>,
-    provenance: Mir.Provenance,
-  ): ReadonlyArray<Instr.Instr> => {
-    if (suspensionRuntime === undefined) return [Instr.op('unreachable')]
-    if (fn.result._tag !== 'EffectOutcome') return [Instr.op('unreachable')]
-    const failure = SilkType.failureMembers(fn.result.type).findIndex(
-      (member) => member.module === 'silk/core' && member.name === 'OutOfMemory',
-    )
-    if (failure < 0) return [Instr.op('unreachable')]
-    return [
-      ...releases.flatMap((release) =>
-        emitOperation(
-          Object.freeze({
-            _tag: 'Drop',
-            local: release.local,
-            cleanup: release.cleanup,
-            provenance,
-          }),
-          layout,
-          plan,
-          resolve,
-          memory,
-        ),
-      ),
-      Instr.i32Const(0),
-      Instr.globalSet(suspensionRuntime.status),
-      Instr.call(suspensionRuntime.rollback),
-      ...restoreFrame(),
-      Instr.i32Const(failure + 1),
-      ...resultLanes.slice(1).map((lane) => zeroOf(laneValueType(plan, lane))),
-      Instr.op('return'),
-    ]
-  }
   const suspensionRegions = new Map(
     (fn.suspension?.regions ?? []).map((region) => [region.operation, region] as const),
   )
@@ -5181,10 +5204,7 @@ const emitBody = (
               throw new RangeError('Wasm suspension origin argument lanes disagree')
             return [
               ...storeI32(suspensionRuntime.transferAddress, child),
-              ...storeI32(
-                suspensionRuntime.transferAddress + plan.target.pointerSize * 2,
-                suspensionRuntime.transferAddress + plan.target.pointerSize,
-              ),
+              ...storeI32(suspensionRuntime.transferAddress + plan.target.pointerSize * 2, 0),
               ...packed.lanes.flatMap((lane, ordinal) => {
                 const value = values.at(ordinal)
                 if (value === undefined) return []
@@ -5203,7 +5223,7 @@ const emitBody = (
           relay: (
             region: Extract<Mir.SuspensionRegion, { readonly _tag: 'RunSuspendableEffectRegion' }>,
           ) => {
-            const descriptor = region.relay.continuation
+            const descriptor = region.relay.state
             const transfer = [
               Instr.globalGet(suspensionRuntime.status),
               Instr.ifElse(Instr.emptyBlockType, returnTransfer(), []),
@@ -5214,114 +5234,39 @@ const emitBody = (
             const scratch = layout.suspensionScratch
             if (targetLayout === undefined || resume === undefined || scratch === undefined)
               throw new RangeError('Wasm stateful relay lost its layout or dispatch identity')
-            const { frame, append, next, allocation } = scratch
-            const [allocationTag, allocationBase, , , , allocationContext] = allocation
-            if (
-              allocationTag === undefined ||
-              allocationBase === undefined ||
-              allocationContext === undefined
-            )
-              throw new RangeError('Wasm stateful relay lost its allocation result scratch')
-            const allocator = region.runner.providers.find(
-              (provider) => provider.purposes.length === 2 && provider.argument !== undefined,
-            )
-            const implementation =
-              allocator?.witness?._tag === 'SourceConformanceWitness'
-                ? allocator.witness.operations.find((operation) => operation.name === 'allocate')
-                    ?.implementation
-                : undefined
-            const allocatorConstructor =
-              implementation === undefined || allocator?.argument === undefined
-                ? undefined
-                : functions.find((candidate) => {
-                    const parameter = candidate.localTypes.at(0)
-                    return (
-                      candidate.id.module === implementation.module &&
-                      candidate.id.name === implementation.name &&
-                      parameter?._tag === 'Reference' &&
-                      SilkType.equals(parameter.type.target, allocator.providerType) &&
-                      candidate.result._tag === 'EffectValue'
-                    )
-                  })
-            const effectType = allocatorConstructor?.result
-            const runnerDeclaration =
-              effectType?._tag === 'EffectValue'
-                ? Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site)
-                : undefined
-            const allocatorRunner =
-              runnerDeclaration === undefined || effectType?._tag !== 'EffectValue'
-                ? undefined
-                : functions.find((candidate) =>
-                    Mir.matchesInstance(
-                      candidate,
-                      runnerDeclaration,
-                      effectType.environment.instance.typeArguments,
-                    ),
-                  )
-            const allocatorSlot =
-              allocator?.argument === undefined
-                ? undefined
-                : layout.slots.at(allocator.argument.ordinal)?.at(allocator.argumentLane ?? 0)
-            if (
-              allocator === undefined ||
-              allocatorConstructor === undefined ||
-              allocatorRunner === undefined ||
-              (allocatorRunner.suspension?.classification ?? 'Synchronous') !== 'Synchronous' ||
-              allocatorSlot === undefined
-            )
-              throw new RangeError(
-                `Wasm continuation allocator for ${fn.id.module}.${fn.id.name} did not resolve to a closed synchronous witness (provider=${allocator === undefined ? 'missing' : 'present'}, constructor=${allocatorConstructor === undefined ? 'missing' : 'present'}, runner=${allocatorRunner === undefined ? 'missing' : (allocatorRunner.suspension?.classification ?? 'Synchronous')}, slot=${allocatorSlot === undefined ? 'missing' : 'present'})`,
-              )
-            const allocate = [
-              Instr.localGet(allocatorSlot),
-              Instr.i32Const(targetLayout.size),
-              Instr.i32Const(targetLayout.alignment),
-              Instr.call(
-                resolve(allocatorConstructor.id, allocatorConstructor.instance.typeArguments),
-              ),
-              Instr.call(resolve(allocatorRunner.id, allocatorRunner.instance.typeArguments)),
-              ...[...allocation].reverse().map((local) => Instr.localSet(local)),
-              Instr.localGet(allocationTag),
-              Instr.op('i32.eqz'),
-              Instr.ifElse(
-                Instr.emptyBlockType,
-                [],
-                returnAllocationRefusal(descriptor.allocationRefusal.releases, region.provenance),
-              ),
-              Instr.localGet(allocationBase),
-              Instr.localTee(frame),
-              Instr.op('i32.eqz'),
-              Instr.ifElse(
-                Instr.emptyBlockType,
-                returnAllocationRefusal(descriptor.allocationRefusal.releases, region.provenance),
-                [],
-              ),
-            ]
+            const { frame, append, next } = scratch
+            if (memory === undefined)
+              throw new RangeError('Wasm coroutine-frame stack lost its memory context')
+            const ownerFrame = coroutineFrame
+            if (ownerFrame === undefined)
+              throw new RangeError('Wasm coroutine-frame stack lost its invocation layout')
             const initialize = [
-              ...allocate,
+              Instr.localGet(frame),
+              Instr.op('i32.eqz'),
+              Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
               Instr.i32Const(suspensionRuntime.transferAddress + plan.target.pointerSize * 2),
               Instr.memoryAccess('i32.load', suspensionRuntime.memory),
               Instr.localSet(append),
               Instr.localGet(append),
-              Instr.memoryAccess('i32.load', suspensionRuntime.memory),
+              Instr.ifElse(
+                Instr.valueBlockType(i32),
+                [
+                  Instr.localGet(append),
+                  Instr.memoryAccess('i32.load', suspensionRuntime.frameMemory),
+                ],
+                [
+                  Instr.i32Const(suspensionRuntime.transferAddress + plan.target.pointerSize),
+                  Instr.memoryAccess('i32.load', suspensionRuntime.memory),
+                ],
+              ),
               Instr.localSet(next),
               Instr.localGet(frame),
               Instr.localGet(next),
-              Instr.memoryAccess('i32.store', suspensionRuntime.memory),
+              Instr.memoryAccess('i32.store', suspensionRuntime.frameMemory),
               Instr.localGet(frame),
               Instr.i32Const(resume),
-              Instr.memoryAccess('i32.store', suspensionRuntime.memory, {
+              Instr.memoryAccess('i32.store', suspensionRuntime.frameMemory, {
                 offset: plan.target.pointerSize,
-              }),
-              Instr.localGet(frame),
-              Instr.i32Const(resume),
-              Instr.memoryAccess('i32.store', suspensionRuntime.memory, {
-                offset: plan.target.pointerSize * 2,
-              }),
-              Instr.localGet(frame),
-              Instr.localGet(allocationContext),
-              Instr.memoryAccess('i32.store', suspensionRuntime.memory, {
-                offset: plan.target.pointerSize * 3,
               }),
               ...targetLayout.payload.flatMap((field) => {
                 const fieldLanes = layout.lanes.at(field.local.ordinal) ?? []
@@ -5331,12 +5276,37 @@ const emitBody = (
                   const value = fieldSlots.at(ordinal)
                   return value === undefined
                     ? []
-                    : storeLocalLane([Instr.localGet(frame)], lane.offset, value, lane.type)
+                    : [
+                        Instr.localGet(frame),
+                        Instr.localGet(value),
+                        Instr.memoryAccess(
+                          lane.type === i64
+                            ? 'i64.store'
+                            : lane.type === f32
+                              ? 'f32.store'
+                              : lane.type === f64
+                                ? 'f64.store'
+                                : 'i32.store',
+                          suspensionRuntime.frameMemory,
+                          { offset: lane.offset },
+                        ),
+                      ]
                 })
               }),
               Instr.localGet(append),
-              Instr.localGet(frame),
-              Instr.memoryAccess('i32.store', suspensionRuntime.memory),
+              Instr.ifElse(
+                Instr.emptyBlockType,
+                [
+                  Instr.localGet(append),
+                  Instr.localGet(frame),
+                  Instr.memoryAccess('i32.store', suspensionRuntime.frameMemory),
+                ],
+                [
+                  Instr.i32Const(suspensionRuntime.transferAddress + plan.target.pointerSize),
+                  Instr.localGet(frame),
+                  Instr.memoryAccess('i32.store', suspensionRuntime.memory),
+                ],
+              ),
               Instr.i32Const(suspensionRuntime.transferAddress + plan.target.pointerSize * 2),
               Instr.localGet(frame),
               Instr.memoryAccess('i32.store', suspensionRuntime.memory),
@@ -5361,6 +5331,7 @@ const emitBody = (
           : emitRegion(outcome.target, labels, stop)
       case 'Return':
         return [
+          ...releaseCoroutineFrame(),
           ...restoreFrame(),
           ...(layout.slots.at(outcome.value.ordinal) ?? []).map((slot) => Instr.localGet(slot)),
           Instr.op('return'),
@@ -5432,8 +5403,10 @@ const emitBody = (
 
   const resumeDispatch = (): ReadonlyArray<Instr.Instr> => {
     if (suspensionRuntime === undefined || suspensionContext === undefined) return []
-    return (fn.suspension?.regions ?? []).flatMap((region) => {
-      if (region._tag !== 'RunSuspendableEffectRegion' || region.relay.continuation === undefined)
+    const currentFrame = layout.suspensionScratch?.frame
+    if (currentFrame === undefined) return []
+    const dispatch = (fn.suspension?.regions ?? []).flatMap((region) => {
+      if (region._tag !== 'RunSuspendableEffectRegion' || region.relay.state === undefined)
         return []
       const id = suspensionRuntime.resumes.get(suspensionPointKey(region.point))
       const targetLayout = suspensionRuntime.layouts.get(suspensionPointKey(region.point))
@@ -5448,16 +5421,16 @@ const emitBody = (
           const destination = destinations.at(ordinal)
           if (destination === undefined) return []
           return [
-            Instr.globalGet(suspensionRuntime.resumeFrame),
+            Instr.localGet(currentFrame),
             Instr.memoryAccess(
               laneLoadMnemonic(
                 plan,
                 lanes.at(ordinal) ??
                   (() => {
-                    throw new RangeError('Wasm continuation payload lost its lane')
+                    throw new RangeError('Wasm coroutine payload lost its lane')
                   })(),
               ),
-              suspensionRuntime.memory,
+              suspensionRuntime.frameMemory,
               { offset: lane.offset },
             ),
             Instr.localSet(destination),
@@ -5556,6 +5529,13 @@ const emitBody = (
         Instr.ifElse(Instr.emptyBlockType, resumed, []),
       ]
     })
+    return [
+      Instr.globalGet(suspensionRuntime.resumeFrame),
+      Instr.localSet(currentFrame),
+      Instr.i32Const(0),
+      Instr.globalSet(suspensionRuntime.resumeFrame),
+      ...dispatch,
+    ]
   }
 
   return [
@@ -5565,6 +5545,7 @@ const emitBody = (
       ? []
       : [Instr.i32Const(0), Instr.globalSet(suspensionRuntime.status)]),
     ...resumeDispatch(),
+    ...acquireCoroutineFrame(),
     ...emitRegion(fn.entry, Object.freeze([])),
     Instr.op('unreachable'),
   ]
@@ -5631,7 +5612,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
     const resumeRecords = program.functions
       .flatMap((fn) =>
         (fn.suspension?.regions ?? []).flatMap((region) =>
-          region._tag === 'RunSuspendableEffectRegion' && region.relay.continuation !== undefined
+          region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
             ? [Object.freeze({ fn, region })]
             : [],
         ),
@@ -5651,11 +5632,16 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
         ordinal + 1,
       ]),
     )
-    const continuationLayouts = new Map(
-      (program.continuations?.entries ?? []).map((entry) => [
-        suspensionPointKey(entry.point),
+    const coroutineFrames = new Map(
+      (program.coroutineFrames?.entries ?? []).map((entry) => [
+        Instances.keyText(entry.function),
         entry,
       ]),
+    )
+    const coroutineFrameStates = new Map(
+      (program.coroutineFrames?.entries ?? []).flatMap((entry) =>
+        entry.states.map((state) => [suspensionPointKey(state.point), state] as const),
+      ),
     )
     const transferHeaderSize = program.layout.target.pointerSize * 3
     const originArgumentSize = program.functions.reduce((maximum, fn) => {
@@ -5697,32 +5683,30 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
     // A cleanup plan can reclaim a block this module never allocated itself — a caller's owner
     // dropped here — so the release helper is needed wherever a reclaim ticket is consumed too.
     const releasesBlocks = (plan: Ownership.CleanupPlan): boolean => Ownership.cleanupReclaims(plan)
-    const needsHeap =
-      suspensionEnabled ||
-      program.functions.some((fn) =>
-        Mir.operations(fn).some(
-          (operation) =>
-            operation._tag === 'Allocate' ||
-            operation._tag === 'RawBufferFrom' ||
-            operation._tag === 'RawBufferCount' ||
-            operation._tag === 'RawBufferSlot' ||
-            operation._tag === 'RawBufferRead' ||
-            operation._tag === 'RawBufferView' ||
-            operation._tag === 'RawBufferCopy' ||
-            operation._tag === 'RawBufferFill' ||
-            operation._tag === 'SlotWrite' ||
-            operation._tag === 'SlotTake' ||
-            operation._tag === 'SlotCopy' ||
-            operation._tag === 'SlotDrop' ||
-            (operation._tag === 'Drop' && releasesBlocks(operation.cleanup)) ||
-            ((operation._tag === 'RunEffect' ||
-              operation._tag === 'RunEffectValue' ||
-              operation._tag === 'RunStaticEffect') &&
-              (operation.releases ?? []).some((release) => releasesBlocks(release.cleanup))) ||
-            (operation._tag === 'CloseEffectEntry' &&
-              operation.failures.some((failure) => releasesBlocks(failure.cleanup))),
-        ),
-      )
+    const needsHeap = program.functions.some((fn) =>
+      Mir.operations(fn).some(
+        (operation) =>
+          operation._tag === 'Allocate' ||
+          operation._tag === 'RawBufferFrom' ||
+          operation._tag === 'RawBufferCount' ||
+          operation._tag === 'RawBufferSlot' ||
+          operation._tag === 'RawBufferRead' ||
+          operation._tag === 'RawBufferView' ||
+          operation._tag === 'RawBufferCopy' ||
+          operation._tag === 'RawBufferFill' ||
+          operation._tag === 'SlotWrite' ||
+          operation._tag === 'SlotTake' ||
+          operation._tag === 'SlotCopy' ||
+          operation._tag === 'SlotDrop' ||
+          (operation._tag === 'Drop' && releasesBlocks(operation.cleanup)) ||
+          ((operation._tag === 'RunEffect' ||
+            operation._tag === 'RunEffectValue' ||
+            operation._tag === 'RunStaticEffect') &&
+            (operation.releases ?? []).some((release) => releasesBlocks(release.cleanup))) ||
+          (operation._tag === 'CloseEffectEntry' &&
+            operation.failures.some((failure) => releasesBlocks(failure.cleanup))),
+      ),
+    )
     const needsHostWrite = program.functions.some((fn) =>
       Mir.operations(fn).some((operation) => operation._tag === 'HostWrite'),
     )
@@ -5737,6 +5721,21 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           builder,
           { min: needsHeap ? 2 : 1, max: 65536 },
           debug ? { name: 'silk_memory' } : {},
+        )
+      : undefined
+    const privateExecutionStackPages = request.privateExecutionStackPages ?? 65536
+    if (
+      !Number.isSafeInteger(privateExecutionStackPages) ||
+      privateExecutionStackPages < 1 ||
+      privateExecutionStackPages > 65536
+    ) {
+      throw new RangeError('privateExecutionStackPages must be an integer from 1 through 65536')
+    }
+    const coroutineFrameMemory = suspensionEnabled
+      ? yield* Memory.make(
+          builder,
+          { min: 1, max: privateExecutionStackPages },
+          debug ? { name: 'silk_coroutine_frame_memory' } : {},
         )
       : undefined
     // Every function is exported so the artifact is directly instantiable for inspection; the
@@ -5805,6 +5804,15 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           debug ? { name: 'silk_suspend_resume_frame' } : {},
         )
       : undefined
+    const suspendFrameStackPointer = suspensionEnabled
+      ? yield* Global.make(
+          builder,
+          i32,
+          true,
+          [Instr.i32Const(16)],
+          debug ? { name: 'silk_coroutine_frame_stack_pointer' } : {},
+        )
+      : undefined
     const heapAllocate =
       needsHeap && privateMemory !== undefined && heapPointer !== undefined
         ? yield* FuncActor.declare(
@@ -5819,14 +5827,6 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
             builder,
             yield* WasmType.func(builder, [i32], []),
             debug ? { name: 'silk_heap_release' } : {},
-          )
-        : undefined
-    const suspendRollback =
-      suspensionEnabled && privateMemory !== undefined && heapRelease !== undefined
-        ? yield* FuncActor.declare(
-            builder,
-            yield* WasmType.func(builder, [], []),
-            debug ? { name: 'silk_suspend_rollback' } : {},
           )
         : undefined
     const standardWrite = needsHostWrite
@@ -5849,42 +5849,6 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       yield* FuncActor.define(builder, heapRelease, {
         locals: [debug ? { type: i32, name: 'list' } : { type: i32 }],
         body: heapReleaseBody(privateMemory),
-      })
-    }
-    if (
-      suspendRollback !== undefined &&
-      privateMemory !== undefined &&
-      heapRelease !== undefined &&
-      transferAddress !== undefined
-    ) {
-      yield* FuncActor.define(builder, suspendRollback, {
-        locals: [
-          debug ? { type: i32, name: 'frame' } : { type: i32 },
-          debug ? { type: i32, name: 'next' } : { type: i32 },
-        ],
-        body: [
-          Instr.block(Instr.emptyBlockType, [
-            Instr.loop(Instr.emptyBlockType, [
-              Instr.i32Const(transferAddress + program.layout.target.pointerSize),
-              Instr.memoryAccess('i32.load', privateMemory),
-              Instr.localTee(0),
-              Instr.op('i32.eqz'),
-              Instr.brIf(1),
-              Instr.localGet(0),
-              Instr.memoryAccess('i32.load', privateMemory),
-              Instr.localSet(1),
-              Instr.i32Const(transferAddress + program.layout.target.pointerSize),
-              Instr.localGet(1),
-              Instr.memoryAccess('i32.store', privateMemory),
-              Instr.localGet(0),
-              Instr.memoryAccess('i32.load', privateMemory, {
-                offset: program.layout.target.pointerSize * 3,
-              }),
-              Instr.call(heapRelease),
-              Instr.br(0),
-            ]),
-          ]),
-        ],
       })
     }
 
@@ -5970,10 +5934,9 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       suspendStatus === undefined ||
       suspendResumePath === undefined ||
       suspendResumeFrame === undefined ||
+      suspendFrameStackPointer === undefined ||
+      coroutineFrameMemory === undefined ||
       transferAddress === undefined ||
-      heapAllocate === undefined ||
-      heapRelease === undefined ||
-      suspendRollback === undefined ||
       privateMemory === undefined
         ? undefined
         : Object.freeze({
@@ -5985,10 +5948,10 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
             transferResultOffset,
             origins: originIds,
             resumes: resumeIds,
-            layouts: continuationLayouts,
-            heapAllocate,
-            heapRelease,
-            rollback: suspendRollback,
+            frames: coroutineFrames,
+            layouts: coroutineFrameStates,
+            frameStackPointer: suspendFrameStackPointer,
+            frameMemory: coroutineFrameMemory,
             memory: privateMemory,
           })
 
@@ -6045,7 +6008,6 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           ? [Instr.op('unreachable')]
           : emitBody(
               entry.fn,
-              program.functions,
               layout,
               program.layout,
               resolve,
@@ -6125,6 +6087,8 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
         thunk === undefined ||
         target === undefined ||
         suspendStatus === undefined ||
+        suspendResumePath === undefined ||
+        suspendResumeFrame === undefined ||
         transferAddress === undefined
       )
         throw new RangeError('Wasm suspension child thunk lost its target or runtime')
@@ -6149,6 +6113,10 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
         body: [
           Instr.i32Const(0),
           Instr.globalSet(suspendStatus),
+          Instr.i32Const(0),
+          Instr.globalSet(suspendResumePath),
+          Instr.i32Const(0),
+          Instr.globalSet(suspendResumeFrame),
           ...inputPacked.lanes.flatMap((lane, laneOrdinal) => {
             const callingLane = inputLanes.at(laneOrdinal)
             return callingLane === undefined ? [] : loadTransferLane(callingLane, lane.offset)
@@ -6178,8 +6146,8 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
         suspendStatus === undefined ||
         suspendResumePath === undefined ||
         suspendResumeFrame === undefined ||
-        privateMemory === undefined ||
-        heapRelease === undefined
+        coroutineFrameMemory === undefined ||
+        privateMemory === undefined
       )
         throw new RangeError('Wasm suspension resume thunk lost its owner or runtime')
       const ownerResultLanes = lanesFor(owner.fn.result)
@@ -6191,19 +6159,13 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       const parameterLanes = owner.fn.localTypes
         .slice(0, owner.fn.parameterCount)
         .flatMap((type) => lanesFor(type))
-      const frameLocal = ownerResultLanes.length
       yield* FuncActor.define(builder, thunk, {
-        locals: [
-          ...ownerResultLanes.map((lane, laneOrdinal) =>
-            debug
-              ? { type: laneValueType(program.layout, lane), name: `result${laneOrdinal}` }
-              : { type: laneValueType(program.layout, lane) },
-          ),
-          debug ? { type: i32, name: 'frame' } : { type: i32 },
-        ],
+        locals: ownerResultLanes.map((lane, laneOrdinal) =>
+          debug
+            ? { type: laneValueType(program.layout, lane), name: `result${laneOrdinal}` }
+            : { type: laneValueType(program.layout, lane) },
+        ),
         body: [
-          Instr.globalGet(suspendResumeFrame),
-          Instr.localSet(frameLocal),
           Instr.i32Const(0),
           Instr.globalSet(suspendStatus),
           Instr.i32Const(id),
@@ -6228,11 +6190,6 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
               ? []
               : storeTransferLocal(laneOrdinal, callingLane, lane.offset)
           }),
-          Instr.localGet(frameLocal),
-          Instr.memoryAccess('i32.load', privateMemory, {
-            offset: program.layout.target.pointerSize * 3,
-          }),
-          Instr.call(heapRelease),
           Instr.globalGet(suspendStatus),
         ],
       })
@@ -6243,7 +6200,9 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       privateMemory !== undefined &&
       transferAddress !== undefined &&
       suspendStatus !== undefined &&
-      suspendResumeFrame !== undefined
+      suspendResumeFrame !== undefined &&
+      suspendFrameStackPointer !== undefined &&
+      coroutineFrameMemory !== undefined
     ) {
       const parameterLanes = machine.fn.localTypes
         .slice(0, machine.fn.parameterCount)
@@ -6300,6 +6259,8 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           Instr.memoryAccess('i32.store', privateMemory),
           Instr.i32Const(0),
           Instr.globalSet(suspendStatus),
+          Instr.i32Const(16),
+          Instr.globalSet(suspendFrameStackPointer),
           ...parameterLanes.map((_lane, ordinal) => Instr.localGet(ordinal)),
           Instr.call(machine.handle),
           ...resultLanes
@@ -6337,12 +6298,12 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
                   [
                     Instr.i32Const(transferAddress + program.layout.target.pointerSize),
                     Instr.localGet(headLocal),
-                    Instr.memoryAccess('i32.load', privateMemory),
+                    Instr.memoryAccess('i32.load', coroutineFrameMemory),
                     Instr.memoryAccess('i32.store', privateMemory),
                     Instr.localGet(headLocal),
                     Instr.globalSet(suspendResumeFrame),
                     Instr.localGet(headLocal),
-                    Instr.memoryAccess('i32.load', privateMemory, {
+                    Instr.memoryAccess('i32.load', coroutineFrameMemory, {
                       offset: program.layout.target.pointerSize,
                     }),
                     Instr.localSet(idLocal),

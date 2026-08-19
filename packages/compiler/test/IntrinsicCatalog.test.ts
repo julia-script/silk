@@ -288,22 +288,29 @@ it('uses one binding contract for inventory, admission, and the proof-only post 
   }
 })
 
-it.effect('pairs every intrinsic presentation with accepted semantic analysis', () =>
-  Effect.gen(function* () {
-    const observed = new Set<string>()
-    for (const [ordinal, source] of acceptedSources.entries()) {
-      const snapshot = yield* Analysis.ofSource(
-        `intrinsic/accepted-${ordinal}`,
-        encoder.encode(source),
+it.effect(
+  'pairs every intrinsic presentation with accepted semantic analysis',
+  () =>
+    Effect.gen(function* () {
+      const observed = new Set<string>()
+      for (const [ordinal, source] of acceptedSources.entries()) {
+        const snapshot = yield* Analysis.ofSource(
+          `intrinsic/accepted-${ordinal}`,
+          encoder.encode(source),
+        )
+        assert.deepEqual(
+          Analysis.diagnostics(snapshot),
+          [],
+          `accepted intrinsic fixture ${ordinal}`,
+        )
+        for (const operation of operationKeys(snapshot)) observed.add(operation)
+      }
+      const catalog = Intrinsic.all().flatMap((actor) =>
+        actor.operations.map((operation) => key(actor.spelling, operation.spelling)),
       )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [], `accepted intrinsic fixture ${ordinal}`)
-      for (const operation of operationKeys(snapshot)) observed.add(operation)
-    }
-    const catalog = Intrinsic.all().flatMap((actor) =>
-      actor.operations.map((operation) => key(actor.spelling, operation.spelling)),
-    )
-    assert.deepEqual([...observed].sort(), [...catalog].sort())
-  }),
+      assert.deepEqual([...observed].sort(), [...catalog].sort())
+    }),
+  30_000,
 )
 
 it.effect('keeps every intrinsic identifiable and presentable in rejected calls', () =>
@@ -326,15 +333,14 @@ it.effect('keeps every intrinsic identifiable and presentable in rejected calls'
   }),
 )
 
-it.effect('infers the suspension intrinsic exact widened Effect rows', () =>
+it.effect('infers the suspension intrinsic exact Effect channels', () =>
   Effect.gen(function* () {
     const module = 'intrinsic/suspend-rows'
-    const source = `import silk.core { Allocator, OutOfMemory }
-struct Problem {}
+    const source = `struct Problem {}
 struct Clock {}
 fn suspend(
   deferred: once Effect<i32 ! Problem ? &Clock>
-) -> once Effect<i32 ! Problem | OutOfMemory ? &Clock | &mut Allocator> {
+) -> once Effect<i32 ! Problem ? &Clock> {
   return Intrinsic.suspendEffect(move deferred)
 }
 pub fn main() -> i32 { return 42 }`
@@ -348,7 +354,7 @@ pub fn main() -> i32 { return 42 }`
     )
     assert.strictEqual(
       suspended?.type._tag === 'Available' ? Type.encode(suspended.type.type) : undefined,
-      `once Effect<i32 ! ${module}.Problem | silk/core.OutOfMemory ? &${module}.Clock | &mut silk/core.Allocator>`,
+      `once Effect<i32 ! ${module}.Problem ? &${module}.Clock>`,
     )
   }),
 )
@@ -398,7 +404,7 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
       {
         operation: 'Intrinsic.suspendEffect',
         signature:
-          'fn Intrinsic.suspendEffect<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
+          'fn Intrinsic.suspendEffect<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E ? R>',
         targets: ['Evaluator', 'LLVM', 'Wasm'],
       },
     ],

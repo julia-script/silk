@@ -107,9 +107,7 @@ effect fn guarded(guard: Guard) -> i32 {
   return guard.value
 }
 
-effect fn delayed(guard: Guard) -> i32
-! OutOfMemory
-? &mut Allocator {
+effect fn delayed(guard: Guard) -> i32 {
   let base = run Effect.suspend(
     effect {
       return 0

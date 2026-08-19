@@ -300,9 +300,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Suspended state resumes',
-    `effect fn delayed() -> i32
-! OutOfMemory
-? &mut Allocator {
+    `effect fn delayed() -> i32 {
   let left = 40
   return left + run Effect.suspend(
     effect {
@@ -311,16 +309,8 @@ pub fn main() -> i32 {
   )
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
-  return 0
-}
-
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let pending = delayed()
-    |> Effect.provideMut(&mut allocator)
-    |> Effect.catchAll(recover)
-  return run pending
+  return run delayed()
 }
 `,
   ),
@@ -331,9 +321,7 @@ pub fn main() -> i32 {
   return value + 1
 }
 
-effect fn select(value: i32) -> i32
-! OutOfMemory
-? &mut Allocator {
+effect fn select(value: i32) -> i32 {
   return run Effect.suspend(
     effect {
       return value + 1
@@ -341,9 +329,7 @@ effect fn select(value: i32) -> i32
   )
 }
 
-effect fn composed() -> i32
-! OutOfMemory
-? &mut Allocator {
+effect fn composed() -> i32 {
   let first = Effect.suspend(
     effect {
       return 40
@@ -354,25 +340,15 @@ effect fn composed() -> i32
     |> Effect.flatMap(select))
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
-  return 0
-}
-
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let pending = composed()
-    |> Effect.provideMut(&mut allocator)
-    |> Effect.catchAll(recover)
-  return run pending
+  return run composed()
 }
 `,
   ),
   one(
     'effects',
     'ok · Stack-safe suspended recursion',
-    `effect fn count(value: i32) -> i32
-! OutOfMemory
-? &mut Allocator {
+    `effect fn count(value: i32) -> i32 {
   if value == 0 {
     return 0
   }
@@ -384,16 +360,8 @@ pub fn main() -> i32 {
   return 1 + run count(next)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
-  return 0
-}
-
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let pending = count(42)
-    |> Effect.provideMut(&mut allocator)
-    |> Effect.catchAll(recover)
-  return run pending
+  return run count(42)
 }
 `,
   ),

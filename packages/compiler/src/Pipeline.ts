@@ -2,7 +2,7 @@ import * as Effect from 'effect/Effect'
 import { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as Backend from './Backend.js'
 import * as BackendRegistry from './BackendRegistry.js'
-import * as ContinuationLayout from './ContinuationLayout.js'
+import * as CoroutineFrame from './CoroutineFrame.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -50,7 +50,7 @@ const finalizeMir = (
   const normalized = normalizeMir(program, provisional, options)
   return options.normalizeMir === false
     ? normalized
-    : ContinuationLayout.apply(
+    : CoroutineFrame.apply(
         SuspensionMir.finalize(
           normalized,
           provisional,
@@ -576,7 +576,6 @@ const instanceViolationDiagnostics = (
     Instances.unlowerableWitnessViolations(discovery, self.index),
     Instances.storedCallableViolations(discovery, self.index),
     Instances.storedEffectViolations(discovery, self.index),
-    Instances.continuationAllocatorViolations(discovery, self.index, self.results),
   )
 
 /** Derives immutable target/runtime facts from one completed frontend. */

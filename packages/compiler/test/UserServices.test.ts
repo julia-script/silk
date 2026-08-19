@@ -400,20 +400,6 @@ it.effect('retains an affine owned provider while a pre-read scalar suspends and
       assert.isAbove(acquired, 0)
       assert.strictEqual(released, acquired)
     }
-    const providedProgram = mir.functions.find((fn) =>
-      fn.id.name.startsWith('program$effect$-1$provided$'),
-    )
-    assert.isDefined(providedProgram)
-    assert.isTrue(
-      providedProgram?.suspension?.regions.some(
-        (region) =>
-          region._tag === 'RunSuspendableEffectRegion' &&
-          region.runner.providers.some(
-            (provider) =>
-              provider.purposes.length === 2 && Type.equals(provider.capability, Type.allocator),
-          ),
-      ) ?? false,
-    )
     const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
     assert.strictEqual(
       yield* WasmMain.invoke(wasm.bytes, 'UserServices.invokeSuspendedOwnedProviderSuccessWasm'),

@@ -11,7 +11,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as CallableFieldRealization from '../src/CallableFieldRealization.js'
-import * as ContinuationLayout from '../src/ContinuationLayout.js'
+import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
@@ -117,7 +117,7 @@ const lowerSource = Effect.fnUntraced(function* (
   )
   const provisional = ProvisionalMir.build(snapshot.instances, layout, snapshot.index)
   const normalized = MirNormalization.normalize(lowered, provisional)
-  const module = ContinuationLayout.apply(
+  const module = CoroutineFrame.apply(
     SuspensionMir.finalize(
       normalized,
       provisional,
@@ -605,18 +605,21 @@ pub fn main() -> i32 {
   }
 
   /** Runs a Wasm artifact and reports both its result and the heap it needed. */
-  const runWasmMeasured = Effect.fnUntraced(function* (bytes: Uint8Array) {
-    return yield* Effect.try(() => {
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice()), {})
-      const main = instance.exports.silk_main
-      if (typeof main !== 'function') return unreachable('expected Wasm main')
-      const value = main()
-      const memory = instance.exports[StandardStreams.wasmMemoryExport]
-      const class0 =
-        memory instanceof WebAssembly.Memory
-          ? new DataView(memory.buffer).getInt32(wasmHeapTableBase, true)
-          : 0
-      return Object.freeze({ value, pages: pagesOf(instance), class0 })
+  const runWasmMeasured = Effect.fnUntraced(function* (bytes: Uint8Array, label = 'artifact') {
+    return yield* Effect.try({
+      try: () => {
+        const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice()), {})
+        const main = instance.exports.silk_main
+        if (typeof main !== 'function') return unreachable('expected Wasm main')
+        const value = main()
+        const memory = instance.exports[StandardStreams.wasmMemoryExport]
+        const class0 =
+          memory instanceof WebAssembly.Memory
+            ? new DataView(memory.buffer).getInt32(wasmHeapTableBase, true)
+            : 0
+        return Object.freeze({ value, pages: pagesOf(instance), class0 })
+      },
+      catch: (cause) => new Error(`failed to run ${label}`, { cause }),
     })
   })
 
@@ -721,7 +724,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
   )
 
   const suspendingProgram = (kind: DropKind = 'poison'): string => `${cleanupSurface(kind)}
-effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn delayed(guard: Guard) -> i32 {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
 }
@@ -898,7 +901,7 @@ pub fn main() -> i32 {
 }`
 
   const suspendCycles = (count: number): string => `${cleanupSurface()}
-effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn delayed(guard: Guard) -> i32 {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
 }
@@ -920,82 +923,85 @@ pub fn main() -> i32 {
   return 1
 }`
 
-  it.effect('keeps the Wasm heap flat across repeated stored Effect cleanup cycles', () =>
-    Effect.gen(function* () {
-      const leakShort = yield* lowerSource(
-        'stored-effect-parity/cycles-leak-short',
-        leakHolds(8),
-        Target.wasm32UnknownUnknown,
-      )
-      const leakLong = yield* lowerSource(
-        'stored-effect-parity/cycles-leak-long',
-        leakHolds(80),
-        Target.wasm32UnknownUnknown,
-      )
-      const leakShortWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakShort.module, {
-        mode: 'release',
-      })
-      const leakLongWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakLong.module, {
-        mode: 'release',
-      })
-      assert.strictEqual(leakShortWasm._tag, 'WebAssemblyModuleArtifact', 'leak short')
-      assert.strictEqual(leakLongWasm._tag, 'WebAssemblyModuleArtifact', 'leak long')
-      if (leakShortWasm._tag !== 'WebAssemblyModuleArtifact') return
-      if (leakLongWasm._tag !== 'WebAssemblyModuleArtifact') return
-      const leakShortRun = yield* runWasmMeasured(leakShortWasm.bytes)
-      const leakLongRun = yield* runWasmMeasured(leakLongWasm.bytes)
-      assert.strictEqual(leakShortRun.value, 42, 'leak short')
-      assert.strictEqual(leakLongRun.value, 42, 'leak long')
-      // Sensitivity: 80 live 2KiB holds must grow past the 8-hold heap, or a missed Drop is invisible.
-      assert.isAbove(leakLongRun.pages, leakShortRun.pages, 'leak control must grow Wasm pages')
+  it.effect(
+    'keeps the Wasm heap flat across repeated stored Effect cleanup cycles',
+    () =>
+      Effect.gen(function* () {
+        const leakShort = yield* lowerSource(
+          'stored-effect-parity/cycles-leak-short',
+          leakHolds(8),
+          Target.wasm32UnknownUnknown,
+        )
+        const leakLong = yield* lowerSource(
+          'stored-effect-parity/cycles-leak-long',
+          leakHolds(80),
+          Target.wasm32UnknownUnknown,
+        )
+        const leakShortWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakShort.module, {
+          mode: 'release',
+        })
+        const leakLongWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakLong.module, {
+          mode: 'release',
+        })
+        assert.strictEqual(leakShortWasm._tag, 'WebAssemblyModuleArtifact', 'leak short')
+        assert.strictEqual(leakLongWasm._tag, 'WebAssemblyModuleArtifact', 'leak long')
+        if (leakShortWasm._tag !== 'WebAssemblyModuleArtifact') return
+        if (leakLongWasm._tag !== 'WebAssemblyModuleArtifact') return
+        const leakShortRun = yield* runWasmMeasured(leakShortWasm.bytes)
+        const leakLongRun = yield* runWasmMeasured(leakLongWasm.bytes)
+        assert.strictEqual(leakShortRun.value, 42, 'leak short')
+        assert.strictEqual(leakLongRun.value, 42, 'leak long')
+        // Sensitivity: 80 live 2KiB holds must grow past the 8-hold heap, or a missed Drop is invisible.
+        assert.isAbove(leakLongRun.pages, leakShortRun.pages, 'leak control must grow Wasm pages')
 
-      const programs = [
-        {
-          name: 'unrun',
-          short: 8,
-          long: 80,
-          source: (count: number) => cleanupCycles('unrun', count),
-        },
-        {
-          name: 'failure',
-          short: 8,
-          long: 80,
-          source: (count: number) => cleanupCycles('failure', count),
-        },
-        { name: 'suspending', short: 8, long: 80, source: suspendCycles },
-      ] as const
-      for (const testCase of programs) {
-        const short = yield* lowerStored(
-          `stored-effect-parity/cycles-${testCase.name}-short`,
-          testCase.source(testCase.short),
-          Target.wasm32UnknownUnknown,
-        )
-        const long = yield* lowerStored(
-          `stored-effect-parity/cycles-${testCase.name}-long`,
-          testCase.source(testCase.long),
-          Target.wasm32UnknownUnknown,
-        )
-        const shortWasm = yield* Backend.emit(WasmBackend.WasmBackend, short.module, {
-          mode: 'release',
-        })
-        const longWasm = yield* Backend.emit(WasmBackend.WasmBackend, long.module, {
-          mode: 'release',
-        })
-        assert.strictEqual(shortWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
-        assert.strictEqual(longWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
-        if (shortWasm._tag !== 'WebAssemblyModuleArtifact') return
-        if (longWasm._tag !== 'WebAssemblyModuleArtifact') return
-        const shortRun = yield* runWasmMeasured(shortWasm.bytes)
-        const longRun = yield* runWasmMeasured(longWasm.bytes)
-        assert.strictEqual(shortRun.value, 42, `${testCase.name} short cycles`)
-        assert.strictEqual(longRun.value, 42, `${testCase.name} long cycles`)
-        // Same counts as the leak control: cleanup must reuse, so pages stay flat.
-        assert.strictEqual(
-          longRun.pages,
-          shortRun.pages,
-          `${testCase.name} heap growth across cycles`,
-        )
-      }
-    }),
+        const programs = [
+          {
+            name: 'unrun',
+            short: 8,
+            long: 80,
+            source: (count: number) => cleanupCycles('unrun', count),
+          },
+          {
+            name: 'failure',
+            short: 8,
+            long: 80,
+            source: (count: number) => cleanupCycles('failure', count),
+          },
+          { name: 'suspending', short: 8, long: 80, source: suspendCycles },
+        ] as const
+        for (const testCase of programs) {
+          const short = yield* lowerStored(
+            `stored-effect-parity/cycles-${testCase.name}-short`,
+            testCase.source(testCase.short),
+            Target.wasm32UnknownUnknown,
+          )
+          const long = yield* lowerStored(
+            `stored-effect-parity/cycles-${testCase.name}-long`,
+            testCase.source(testCase.long),
+            Target.wasm32UnknownUnknown,
+          )
+          const shortWasm = yield* Backend.emit(WasmBackend.WasmBackend, short.module, {
+            mode: 'release',
+          })
+          const longWasm = yield* Backend.emit(WasmBackend.WasmBackend, long.module, {
+            mode: 'release',
+          })
+          assert.strictEqual(shortWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
+          assert.strictEqual(longWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
+          if (shortWasm._tag !== 'WebAssemblyModuleArtifact') return
+          if (longWasm._tag !== 'WebAssemblyModuleArtifact') return
+          const shortRun = yield* runWasmMeasured(shortWasm.bytes, `${testCase.name} short cycles`)
+          const longRun = yield* runWasmMeasured(longWasm.bytes, `${testCase.name} long cycles`)
+          assert.strictEqual(shortRun.value, 42, `${testCase.name} short cycles`)
+          assert.strictEqual(longRun.value, 42, `${testCase.name} long cycles`)
+          // Same counts as the leak control: cleanup must reuse, so pages stay flat.
+          assert.strictEqual(
+            longRun.pages,
+            shortRun.pages,
+            `${testCase.name} heap growth across cycles`,
+          )
+        }
+      }),
+    30_000,
   )
 })

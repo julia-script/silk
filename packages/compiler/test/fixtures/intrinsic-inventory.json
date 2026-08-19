@@ -5258,7 +5258,7 @@
     },
     {
       "operation": "Intrinsic.suspendEffect",
-      "signature": "fn Intrinsic.suspendEffect<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E | OutOfMemory ? R | &mut Allocator>",
+      "signature": "fn Intrinsic.suspendEffect<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E ? R>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.suspendEffect",

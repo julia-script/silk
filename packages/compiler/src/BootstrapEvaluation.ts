@@ -1,5 +1,4 @@
 import type * as ChildProcess from './ChildProcess.js'
-import * as ContinuationTransaction from './ContinuationTransaction.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
@@ -7,7 +6,6 @@ import type * as Hir from './Hir.js'
 import type * as HostInput from './HostInput.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
-import type * as Layout from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as OsFileSystemHost from './OsFileSystemHost.js'
@@ -436,17 +434,13 @@ export interface AllocationTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
-export interface ContinuationTraceEvent {
+export interface CoroutineFrameTraceEvent {
   readonly _tag:
     | 'SuspensionOrigin'
-    | 'ContinuationRequest'
-    | 'ContinuationReject'
-    | 'ContinuationAcquire'
-    | 'ContinuationLoanEnd'
-    | 'ContinuationInitialize'
-    | 'ContinuationPublish'
-    | 'ContinuationResume'
-    | 'ContinuationRelease'
+    | 'CoroutineFramePush'
+    | 'CoroutineFrameStateTransition'
+    | 'CoroutineFrameResume'
+    | 'CoroutineFrameComplete'
     | 'SuspensionChildStart'
     | 'SuspensionChildComplete'
   readonly function: DeclarationIndex.CanonicalId
@@ -501,7 +495,7 @@ export type TraceEvent =
   | EffectTraceEvent
   | CallableTraceEvent
   | AllocationTraceEvent
-  | ContinuationTraceEvent
+  | CoroutineFrameTraceEvent
   | StandardStreamTraceEvent
   | StringTraceEvent
 
@@ -698,10 +692,12 @@ interface EvaluationState {
   nextFrame: number
   nextAllocation: number
   nextCallable: number
-  nextContinuation: number
+  nextCoroutineFrame: number
   steps: number
   readonly maxSteps: number
   readonly maxCallDepth: number
+  readonly maxExecutionStackBytes: number
+  executionStackBytes: number
   activeFrames: ReadonlyArray<ActiveFrame>
   readonly cells: Map<string, LocalState>
   readonly allocations: Map<number, { active: boolean; readonly values: Map<string, Value> }>
@@ -741,27 +737,15 @@ interface RelayTransferRequest {
   readonly _tag: 'RelayTransferRequest'
   readonly transfer: TransferStep
   readonly region: Mir.RunSuspendableEffectRegion
-  readonly relay?: ContinuationTransaction.Relay
+  readonly state?: Mir.CoroutineFrameState
 }
 
 interface TransferContext {
   readonly step: TransferStep
-  readonly relays: Array<ContinuationTransaction.Relay>
   readonly pending: Array<{
     readonly activation: ActivationRecord
-    readonly relay?: ContinuationTransaction.Relay
+    readonly state?: Mir.CoroutineFrameState
   }>
-  readonly allocations: Array<{
-    readonly relay: ContinuationTransaction.Relay
-    readonly allocation: AllocationValue
-  }>
-  preparation?: {
-    index: number
-    phase: 'Constructor' | 'Runner'
-    readonly relay: ContinuationTransaction.Relay
-    readonly pending: ActivationRecord
-    activation: ActivationRecord
-  }
   readonly parent?: TransferContext
 }
 
@@ -773,9 +757,11 @@ interface ActivationRecord extends ActiveFrame {
   continuation?: FunctionExecution
   pendingCall?: CallRequest
   cleanupState?: Ownership.CleanupPlan['_tag']
-  continuationTicket?: number
-  continuationPoint?: Mir.SuspensionPointId
-  continuationAllocation?: AllocationValue
+  coroutineFrame?: {
+    readonly ticket: number
+    readonly bytes: number
+    point: Mir.SuspensionPointId
+  }
 }
 
 type FunctionExecution = Generator<MachineRequest, Step, Step>
@@ -842,14 +828,12 @@ function* executeFunction(
     const result = yield* callFunction(target, arguments_, operation.provenance.span)
     if (result._tag !== 'Transfer') return result
     if (control?._tag !== 'RunSuspendableEffectRegion') return result
-    const descriptor = control.relay.continuation
-    const relay =
-      descriptor === undefined ? undefined : ContinuationTransaction.relay(program, fn, descriptor)
+    const frameState = control.relay.state
     const request: RelayTransferRequest = Object.freeze({
       _tag: 'RelayTransferRequest',
       transfer: result,
       region: control,
-      ...(relay === undefined ? {} : { relay }),
+      ...(frameState === undefined ? {} : { state: frameState }),
     })
     return yield request
   }
@@ -5144,243 +5128,73 @@ const executeMachine = (
   let transfer: TransferContext | undefined
   let resumed: Step | undefined
 
-  const localValue = (activation: ActivationRecord, local: Mir.LocalId): Value | undefined =>
-    state.cells.get(cellKey(activation.frame, local.ordinal))?.value ??
-    activation.locals.get(local.ordinal)?.value
-
-  const providerInEffect = (
-    effect: EffectValue,
-    environment: Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
-    providerType: Type.Nominal,
-    visited = new Set<string>(),
-  ): Value | undefined => {
-    const identity = Instances.effectIdentity(environment.instance, environment.site)
-    if (visited.has(identity)) return undefined
-    const nextVisited = new Set(visited).add(identity)
-    let selected: Value | undefined
-    for (const [ordinal, field] of environment.fields.entries()) {
-      const capture = effect.captures.at(ordinal)
-      if (capture === undefined) continue
-      if (
-        Type.isReference(field.type) &&
-        field.type.access === 'Exclusive' &&
-        Type.isNominal(field.type.target) &&
-        Type.equals(field.type.target, providerType)
-      )
-        selected = capture
-      if (field.effectIdentity !== undefined && capture._tag === 'EffectValue') {
-        const nested = program.layout.effectEnvironments.find(
-          (candidate) =>
-            candidate._tag === 'EffectEnvironment' &&
-            Instances.effectIdentity(candidate.instance, candidate.site) === field.effectIdentity,
-        )
-        if (nested?._tag === 'EffectEnvironment') {
-          const nestedSelected = providerInEffect(capture, nested, providerType, nextVisited)
-          if (nestedSelected !== undefined) selected = nestedSelected
-        }
-      }
-    }
-    return selected
-  }
-
-  const continuationAllocatorCall = (
-    relay: ContinuationTransaction.Relay,
-    activation: ActivationRecord,
-  ):
-    | {
-        readonly constructor: Mir.MirFunction
-        readonly arguments: ReadonlyArray<Value>
-      }
-    | undefined => {
-    const provider = relay.descriptor.runner.providers.find(
-      (candidate) => candidate.purposes.length === 2 && candidate.argument !== undefined,
-    )
-    if (provider?.argument === undefined || provider.witness?._tag !== 'SourceConformanceWitness')
-      return undefined
-    const argumentType =
-      activation.function.module === relay.function.declaration.module
-        ? program.functions
-            .find(
-              (candidate) =>
-                Instances.keyText(candidate.instance) === Instances.keyText(relay.function),
-            )
-            ?.localTypes.at(provider.argument.ordinal)
-        : undefined
-    const argument = localValue(activation, provider.argument)
-    const selectedProvider =
-      argumentType?._tag === 'EffectValue' && argument?._tag === 'EffectValue'
-        ? providerInEffect(argument, argumentType.environment, provider.providerType)
-        : argument
-    if (selectedProvider === undefined) return undefined
-    const implementation = provider.witness.operations.find(
-      (operation) => operation.name === 'allocate',
-    )?.implementation
-    if (implementation === undefined) return undefined
-    const layoutConstructor = program.functions.find((candidate) => {
-      const parameter = candidate.localTypes.at(0)
-      return (
-        candidate.id.module === implementation.module &&
-        candidate.id.name === implementation.name &&
-        parameter?._tag === 'Reference' &&
-        Type.equals(parameter.type.target, provider.providerType) &&
-        candidate.result._tag === 'EffectValue'
-      )
-    })
-    const layoutEntry = program.layout.entries.find((candidate) =>
-      Type.equals(candidate.type, Type.layout),
-    )
-    if (
-      layoutConstructor === undefined ||
-      layoutEntry?._tag !== 'LayoutEntry' ||
-      layoutEntry.representation._tag !== 'Aggregate'
-    )
-      return undefined
-    const request = relay.layout.acquisition.request
-    const layoutValue: AggregateValue = Object.freeze({
-      _tag: 'AggregateValue',
-      type: Type.layout,
-      fields: Object.freeze(
-        layoutEntry.representation.fields.map((field) =>
-          Object.freeze({
-            field: field.id,
-            value: integerValue(
-              'usize',
-              BigInt(field.name === 'bytes' ? request.bytes : request.alignment),
-            ),
-          }),
-        ),
-      ),
-    })
-    return Object.freeze({
-      constructor: layoutConstructor,
-      arguments: Object.freeze([selectedProvider, layoutValue]),
-    })
-  }
-
-  const beginAllocatorPreparation = (context: TransferContext): boolean => {
-    const relay = context.relays.at(context.allocations.length)
-    if (relay === undefined) return false
-    const pending = context.pending.find((candidate) => candidate.relay === relay)?.activation
-    if (pending === undefined)
-      throw new RangeError('Evaluator continuation relay lost its activation')
-    const call = continuationAllocatorCall(relay, pending)
-    if (call === undefined)
-      throw new RangeError('Evaluator continuation allocator did not resolve to a selected witness')
-    const activation = makeActivation(
-      program,
-      call.constructor,
-      call.arguments,
-      pending.depth + 1,
-      trace,
-      state,
-    )
-    context.preparation = {
-      index: context.allocations.length,
-      phase: 'Constructor',
-      relay,
-      pending,
-      activation,
-    }
-    stack.push(activation)
-    return true
-  }
-
-  const reclaimContinuationAllocation = (
-    allocation: AllocationValue,
-    function_: DeclarationIndex.CanonicalId,
-    point: Mir.SuspensionPointId,
-  ): void => {
-    const ticket = state.allocations.get(allocation.ticket)
-    if (ticket === undefined || !ticket.active)
-      throw new RangeError('Evaluator continuation allocation was reclaimed more than once')
-    ticket.active = false
+  const releaseActivationFrame = (activation: ActivationRecord): void => {
+    const frame = activation.coroutineFrame
+    if (frame === undefined) return
+    state.executionStackBytes -= frame.bytes
     trace.push(
       Object.freeze({
-        _tag: 'AllocationRelease',
-        function: function_,
-        ticket: allocation.ticket,
-        span: suspensionSpan(program, point),
+        _tag: 'CoroutineFrameComplete',
+        function: activation.function,
+        point: frame.point,
+        ticket: frame.ticket,
+        span: suspensionSpan(program, frame.point),
       }),
     )
+    delete activation.coroutineFrame
   }
 
-  const releaseActivationContinuation = (activation: ActivationRecord): void => {
-    const point = activation.continuationPoint
-    if (point === undefined) return
-    if (activation.continuationTicket !== undefined)
-      trace.push(
-        Object.freeze({
-          _tag: 'ContinuationRelease',
-          function: activation.function,
-          point,
-          ticket: activation.continuationTicket,
-          span: suspensionSpan(program, point),
-        }),
-      )
-    if (activation.continuationAllocation !== undefined)
-      reclaimContinuationAllocation(activation.continuationAllocation, activation.function, point)
-    delete activation.continuationTicket
-    delete activation.continuationPoint
-    delete activation.continuationAllocation
-  }
-
-  const publishPreparedTransfer = (context: TransferContext): void => {
-    const prepared = ContinuationTransaction.prepare(context.relays, undefined)
-    if (prepared._tag !== 'Prepared')
-      throw new RangeError('Evaluator continuation preparation unexpectedly refused')
-    const tickets = new Map<number, number>()
-    for (const event of prepared.events) {
-      if (event._tag === 'Acquire') {
-        const ticket = state.nextContinuation
-        state.nextContinuation += 1
-        tickets.set(event.ordinal, ticket)
-      }
-      if (
-        event._tag !== 'Request' &&
-        event._tag !== 'Acquire' &&
-        event._tag !== 'EndAllocatorLoan' &&
-        event._tag !== 'Initialize' &&
-        event._tag !== 'Publish'
-      )
-        continue
-      const tag =
-        event._tag === 'Request'
-          ? 'ContinuationRequest'
-          : event._tag === 'Acquire'
-            ? 'ContinuationAcquire'
-            : event._tag === 'EndAllocatorLoan'
-              ? 'ContinuationLoanEnd'
-              : event._tag === 'Initialize'
-                ? 'ContinuationInitialize'
-                : 'ContinuationPublish'
-      const ticket = tickets.get(event.ordinal)
-      const relay = context.relays.at(event.ordinal - 1)
-      const continuationEvent: ContinuationTraceEvent = Object.freeze({
-        _tag: tag,
-        function: relay?.function.declaration ?? context.step.child.target.id,
-        point: event.point,
-        ordinal: event.ordinal,
-        ...(ticket === undefined ? {} : { ticket }),
-        ...(event._tag === 'Request' ? { bytes: event.bytes, alignment: event.alignment } : {}),
-        span: suspensionSpan(program, event.point),
-      })
-      trace.push(continuationEvent)
-    }
-    let relayOrdinal = 0
+  const publishTransfer = (context: TransferContext): BlockedReason | undefined => {
     for (const pending of context.pending) {
-      if (pending.relay === undefined) continue
-      relayOrdinal += 1
-      // A resumed activation may relay another transfer before completing. The replacement frame
-      // is now fully prepared, so its prior private storage no longer owns live payload and can be
-      // reclaimed before the activation adopts the new continuation identity.
-      releaseActivationContinuation(pending.activation)
-      const ticket = tickets.get(relayOrdinal)
-      if (ticket !== undefined) pending.activation.continuationTicket = ticket
-      pending.activation.continuationPoint = pending.relay.descriptor.point
-      const allocation = context.allocations.find(
-        (candidate) => candidate.relay === pending.relay,
-      )?.allocation
-      if (allocation !== undefined) pending.activation.continuationAllocation = allocation
+      const frameState = pending.state
+      if (frameState === undefined) continue
+      const existing = pending.activation.coroutineFrame
+      if (existing === undefined) {
+        const bytes =
+          program.coroutineFrames?.entries.find(
+            (candidate) =>
+              Instances.keyText(candidate.function) ===
+              Instances.keyText(pending.activation.instance),
+          )?.size ?? 0
+        if (state.executionStackBytes + bytes > state.maxExecutionStackBytes) {
+          return Object.freeze({
+            _tag: 'Trap',
+            function: pending.activation.function,
+            reason: 'private execution stack exhausted',
+            span: suspensionSpan(program, frameState.point),
+          })
+        }
+        const ticket = state.nextCoroutineFrame
+        state.nextCoroutineFrame += 1
+        state.executionStackBytes += bytes
+        pending.activation.coroutineFrame = {
+          ticket,
+          bytes,
+          point: frameState.point,
+        }
+        trace.push(
+          Object.freeze({
+            _tag: 'CoroutineFramePush',
+            function: pending.activation.function,
+            point: frameState.point,
+            ticket,
+            span: suspensionSpan(program, frameState.point),
+          }),
+        )
+      } else {
+        existing.point = frameState.point
+      }
+      const frame = pending.activation.coroutineFrame
+      if (frame !== undefined)
+        trace.push(
+          Object.freeze({
+            _tag: 'CoroutineFrameStateTransition',
+            function: pending.activation.function,
+            point: frameState.point,
+            ticket: frame.ticket,
+            span: suspensionSpan(program, frameState.point),
+          }),
+        )
     }
     const origin = context.pending.at(0)?.activation
     if (origin === undefined)
@@ -5403,8 +5217,8 @@ const executeMachine = (
         span: suspensionSpan(program, context.step.origin.point),
       }),
     )
+    return undefined
   }
-
   while (stack.length > 0) {
     const suspended: Array<ActivationRecord> = []
     for (let current = transfer; current !== undefined; current = current.parent)
@@ -5420,146 +5234,7 @@ const executeMachine = (
     if (advanced.done) {
       stack.pop()
       if (advanced.value._tag === 'Blocked') return advanced.value
-      const preparation = transfer?.preparation
-      if (preparation?.activation === activation) {
-        if (preparation.phase === 'Constructor') {
-          if (advanced.value._tag !== 'Value' || advanced.value.value._tag !== 'EffectValue')
-            throw new RangeError('Evaluator continuation allocator constructor returned no Effect')
-          const effect = advanced.value.value
-          const runner = functionFor(program, effect.runner, effect.runnerTypeArguments)
-          if (
-            runner === undefined ||
-            (runner.suspension?.classification ?? 'Synchronous') !== 'Synchronous'
-          )
-            throw new RangeError(
-              'Evaluator continuation allocator runner is not closed synchronous',
-            )
-          const runnerActivation = makeActivation(
-            program,
-            runner,
-            effect.captures,
-            preparation.pending.depth + 1,
-            trace,
-            state,
-          )
-          preparation.phase = 'Runner'
-          preparation.activation = runnerActivation
-          stack.push(runnerActivation)
-          continue
-        }
-        if (advanced.value._tag !== 'Value' || advanced.value.value._tag !== 'EffectOutcomeValue')
-          throw new RangeError('Evaluator continuation allocator runner returned no typed outcome')
-        const allocationOutcome = advanced.value.value
-        if (allocationOutcome.tag === 0) {
-          if (allocationOutcome.payload._tag !== 'AllocationValue')
-            throw new RangeError('Evaluator continuation allocator success returned no Allocation')
-          transfer?.allocations.push(
-            Object.freeze({ relay: preparation.relay, allocation: allocationOutcome.payload }),
-          )
-          if (transfer !== undefined) delete transfer.preparation
-          if (transfer !== undefined && beginAllocatorPreparation(transfer)) continue
-          if (transfer === undefined)
-            throw new RangeError('Evaluator continuation allocation lost its transfer')
-          publishPreparedTransfer(transfer)
-          continue
-        }
-        const context = transfer
-        if (context === undefined)
-          throw new RangeError('Evaluator continuation refusal lost its transfer')
-        const refusalOrdinal = preparation.index + 1
-        const refused = ContinuationTransaction.prepare(
-          context.relays,
-          allocationOutcome.payload,
-          refusalOrdinal,
-        )
-        if (refused._tag !== 'Refused')
-          throw new RangeError('Evaluator allocator refusal prepared a continuation')
-        const tickets = new Map<number, number>()
-        for (const event of refused.events) {
-          if (event._tag === 'Acquire') {
-            const relay = context.relays.at(event.ordinal - 1)
-            const pending = context.pending.find(
-              (candidate) => candidate.relay === relay,
-            )?.activation
-            const allocation = context.allocations.find(
-              (candidate) => candidate.relay === relay,
-            )?.allocation
-            if (relay === undefined || pending === undefined || allocation === undefined)
-              throw new RangeError('Evaluator accepted continuation lost its rollback owner')
-            const ticket = state.nextContinuation
-            state.nextContinuation += 1
-            tickets.set(event.ordinal, ticket)
-            pending.continuationTicket = ticket
-            pending.continuationPoint = relay.descriptor.point
-            pending.continuationAllocation = allocation
-          }
-          if (
-            event._tag !== 'Request' &&
-            event._tag !== 'Reject' &&
-            event._tag !== 'Acquire' &&
-            event._tag !== 'EndAllocatorLoan' &&
-            event._tag !== 'Initialize'
-          )
-            continue
-          const tag =
-            event._tag === 'Request'
-              ? 'ContinuationRequest'
-              : event._tag === 'Reject'
-                ? 'ContinuationReject'
-                : event._tag === 'Acquire'
-                  ? 'ContinuationAcquire'
-                  : event._tag === 'EndAllocatorLoan'
-                    ? 'ContinuationLoanEnd'
-                    : 'ContinuationInitialize'
-          trace.push(
-            Object.freeze({
-              _tag: tag,
-              function:
-                context.relays.at(event.ordinal - 1)?.function.declaration ??
-                preparation.pending.function,
-              point: event.point,
-              ordinal: event.ordinal,
-              ...(event._tag === 'Request'
-                ? { bytes: event.bytes, alignment: event.alignment }
-                : {}),
-              ...(tickets.get(event.ordinal) === undefined
-                ? {}
-                : { ticket: tickets.get(event.ordinal) }),
-              span: suspensionSpan(program, event.point),
-            }) as ContinuationTraceEvent,
-          )
-        }
-        // The intrinsic origin has no caller frame and must not be resumed with allocator failure.
-        // Every relay activation, including already-initialized inner frames and the refusing
-        // current activation, does resume through its ordinary typed-failure path. That executes
-        // source cleanup before releaseActivationContinuation reclaims accepted private storage.
-        const rollbackPending = context.pending.slice(1)
-        const innermost = rollbackPending.at(0)
-        const failureOutcome =
-          innermost?.relay?.descriptor.runner.outcome ?? context.step.origin.deferred.outcome
-        const failureTag = Type.failureMembers(failureOutcome).findIndex(
-          (member) => member.module === 'silk/core' && member.name === 'OutOfMemory',
-        )
-        if (failureTag < 0)
-          throw new RangeError('Evaluator continuation refusal has no OutOfMemory channel')
-        const refusal: Step = Object.freeze({
-          _tag: 'Value',
-          value: Object.freeze({
-            _tag: 'EffectOutcomeValue',
-            type: failureOutcome,
-            tag: failureTag + 1,
-            payload: allocationOutcome.payload,
-          }),
-        })
-        if (!rollbackPending.some((candidate) => candidate.activation === preparation.pending))
-          throw new RangeError('Evaluator continuation refusal lost its pending activation')
-        const survivors = rollbackPending.map((pending) => pending.activation).reverse()
-        transfer = context.parent
-        stack.push(...survivors)
-        resumed = refusal
-        continue
-      }
-      releaseActivationContinuation(activation)
+      releaseActivationFrame(activation)
       if (stack.length === 0 && transfer !== undefined) {
         let next = transfer.pending.shift()
         while (next === undefined && transfer.parent !== undefined) {
@@ -5569,7 +5244,7 @@ const executeMachine = (
         if (next !== undefined) {
           stack.push(next.activation)
           if (
-            next.relay === undefined &&
+            next.state === undefined &&
             advanced.value._tag === 'Value' &&
             advanced.value.value._tag === 'EffectOutcomeValue'
           )
@@ -5583,19 +5258,18 @@ const executeMachine = (
               }),
             )
           if (
-            next.activation.continuationTicket !== undefined &&
-            next.activation.continuationPoint !== undefined &&
+            next.activation.coroutineFrame !== undefined &&
             advanced.value._tag === 'Value' &&
             advanced.value.value._tag === 'EffectOutcomeValue'
           )
             trace.push(
               Object.freeze({
-                _tag: 'ContinuationResume',
+                _tag: 'CoroutineFrameResume',
                 function: next.activation.function,
-                point: next.activation.continuationPoint,
-                ticket: next.activation.continuationTicket,
+                point: next.activation.coroutineFrame.point,
+                ticket: next.activation.coroutineFrame.ticket,
                 outcome: advanced.value.value.tag === 0 ? 'Success' : 'Failure',
-                span: suspensionSpan(program, next.activation.continuationPoint),
+                span: suspensionSpan(program, next.activation.coroutineFrame.point),
               }),
             )
           resumed = advanced.value
@@ -5617,9 +5291,7 @@ const executeMachine = (
       })
       transfer = {
         step,
-        relays: [],
         pending: [Object.freeze({ activation })],
-        allocations: [],
         ...(transfer === undefined ? {} : { parent: transfer }),
       }
       trace.push(
@@ -5635,7 +5307,8 @@ const executeMachine = (
         resumed = step
         continue
       }
-      publishPreparedTransfer(transfer)
+      const storageFailure = publishTransfer(transfer)
+      if (storageFailure !== undefined) return blockedStep(storageFailure)
       continue
     }
     if (request._tag === 'RelayTransferRequest') {
@@ -5644,16 +5317,16 @@ const executeMachine = (
       transfer.pending.push(
         Object.freeze({
           activation,
-          ...(request.relay === undefined ? {} : { relay: request.relay }),
+          ...(request.state === undefined ? {} : { state: request.state }),
         }),
       )
-      if (request.relay !== undefined) transfer.relays.push(request.relay)
       stack.pop()
       if (stack.length > 0) {
         resumed = transfer.step
         continue
       }
-      if (!beginAllocatorPreparation(transfer)) publishPreparedTransfer(transfer)
+      const storageFailure = publishTransfer(transfer)
+      if (storageFailure !== undefined) return blockedStep(storageFailure)
       continue
     }
     let suspendedDepth = 0
@@ -5703,6 +5376,7 @@ const executeMachine = (
 
 export const defaultMaxSteps = 1_000_000
 export const defaultMaxCallDepth = 1_024
+export const defaultMaxExecutionStackBytes = Number.MAX_SAFE_INTEGER
 
 const evaluationLimitOption = (
   name: string,
@@ -5725,6 +5399,8 @@ export interface Options {
   readonly osFileSystem?: OsFileSystemHost.Provider
   readonly maxSteps?: number
   readonly maxCallDepth?: number
+  /** Host-only deterministic bound for compiler-private coroutine-frame storage. */
+  readonly maxExecutionStackBytes?: number
 }
 
 /** Executes the lowered program from the discovered entry, replaying MIR operations as a trace. */
@@ -5738,6 +5414,11 @@ export const evaluate = (
     'maxCallDepth',
     options.maxCallDepth,
     defaultMaxCallDepth,
+  )
+  const maxExecutionStackBytes = evaluationLimitOption(
+    'maxExecutionStackBytes',
+    options.maxExecutionStackBytes,
+    defaultMaxExecutionStackBytes,
   )
   const availability = IntrinsicAvailability.select(program.intrinsics, 'Evaluator')
   if (availability._tag === 'Unavailable') {
@@ -5789,10 +5470,12 @@ export const evaluate = (
     nextFrame: 0,
     nextAllocation: 0,
     nextCallable: 0,
-    nextContinuation: 0,
+    nextCoroutineFrame: 0,
     steps: 0,
     maxSteps,
     maxCallDepth,
+    maxExecutionStackBytes,
+    executionStackBytes: 0,
     activeFrames: Object.freeze([]),
     cells: new Map(),
     allocations: new Map(),

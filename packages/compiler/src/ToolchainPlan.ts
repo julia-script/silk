@@ -5,6 +5,7 @@
  */
 
 import type * as Backend from './Backend.js'
+import * as CoroutineRuntime from './CoroutineRuntime.js'
 import * as OsRuntime from './OsRuntime.js'
 import type * as Target from './Target.js'
 
@@ -167,10 +168,12 @@ export const shimSource = (
   nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
 ): string => {
   const osRuntime = OsRuntime.source(nativeRuntimeSymbols)
+  const coroutineRuntime = CoroutineRuntime.source(nativeRuntimeSymbols)
   if (termination._tag === 'PassThrough')
     return `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
 ${hostWriteShimSource}
 ${osRuntime}
+${coroutineRuntime}
 extern int silk_main(void);
 
 int main(int argc, char **argv) {
@@ -190,6 +193,7 @@ int main(int argc, char **argv) {
   return `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
 ${hostWriteShimSource}
 ${osRuntime}
+${coroutineRuntime}
 
 extern int silk_main(void);
 ${declarations.join('\n')}

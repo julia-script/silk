@@ -291,7 +291,7 @@ const rawElement = Type.parameter({ module: 'silk/core', name: '$RawStorage' }, 
 const rawTypeParameters = Object.freeze([rawElement])
 const suspensionOwner = Object.freeze({ module: 'silk/core', name: '$EffectSuspend' })
 const suspensionSuccess = Type.parameter(suspensionOwner, 0, 'A')
-const suspensionFailure = Type.parameter(suspensionOwner, 1, 'E', 'FailureRow')
+const suspensionFailure = Type.parameter(suspensionOwner, 1, 'E')
 const suspensionRequirement = Type.parameter(suspensionOwner, 2, 'R', 'RequirementRow')
 const suspensionTypeParameters = Object.freeze([
   suspensionSuccess,
@@ -394,6 +394,16 @@ const intrinsicContractOrigin = (() => {
   if (span === undefined) throw new RangeError('intrinsic contract span is invalid')
   return span
 })()
+const suspensionFailureRow = RowAlgebra.singleton(
+  Type.failureRowPolicy(),
+  Type.failureMemberShape(suspensionFailure),
+  intrinsicContractOrigin,
+)
+const suspensionRequirementRow = RowAlgebra.parameter<
+  Type.Requirement,
+  Type.Parameter,
+  Type.RequirementMemberShape
+>(suspensionRequirement)
 const catchSelectedRow = RowAlgebra.singleton(
   Type.failureRowPolicy(),
   Type.failureMemberShape(catchSelected),
@@ -1156,33 +1166,23 @@ const intrinsicOperations = Object.freeze([
       actor: 'Effect',
       name: 'suspendEffect',
       operation: 'EffectSuspend',
-      typeParameters: Object.freeze(['A', '!E', '?R']),
+      typeParameters: Object.freeze(['A', 'E', '?R']),
       semanticTypeParameters: suspensionTypeParameters,
       parameters: Object.freeze([valueParameter('deferred', 'once Effect<A ! E ? R>')]),
       semanticParameters: Object.freeze([
-        Type.effect(
+        Type.effectWithRows(
           suspensionSuccess,
-          Object.freeze([]),
+          suspensionFailureRow,
           'Take',
-          Object.freeze([]),
-          Object.freeze([suspensionFailure]),
-          Object.freeze([suspensionRequirement]),
+          suspensionRequirementRow,
         ),
       ]),
-      result: 'Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
-      semanticResult: Type.effect(
+      result: 'Effect<A ! E ? R>',
+      semanticResult: Type.effectWithRows(
         suspensionSuccess,
-        Object.freeze([Type.outOfMemory]),
+        suspensionFailureRow,
         'Take',
-        Object.freeze([
-          Object.freeze({
-            capability: Type.allocator,
-            role: 'DefaultRole',
-            access: 'Exclusive',
-          }),
-        ]),
-        Object.freeze([suspensionFailure]),
-        Object.freeze([suspensionRequirement]),
+        suspensionRequirementRow,
       ),
     }),
     effect({

@@ -1059,7 +1059,7 @@ export type SuspensionBorrowIdentity =
   | { readonly _tag: 'BorrowedParameter'; readonly parameterOrdinal: number }
   | { readonly _tag: 'BorrowedLocal'; readonly local: LocalId }
 
-export type ContinuationAccess =
+export type CoroutineFrameAccess =
   | { readonly _tag: 'Copy' }
   | {
       readonly _tag: 'BorrowedDependency'
@@ -1069,28 +1069,22 @@ export type ContinuationAccess =
     }
   | { readonly _tag: 'AffineTransfer'; readonly cleanup: Ownership.CleanupPlan }
 
-export interface ContinuationSlot {
+export interface CoroutineFrameSlot {
   readonly ordinal: number
   readonly local: LocalId
   readonly type: Type
-  readonly access: ContinuationAccess
+  readonly access: CoroutineFrameAccess
 }
 
-export interface ContinuationRelease {
+export interface CoroutineFrameRelease {
   readonly local: LocalId
   readonly cleanup: Ownership.CleanupPlan
 }
 
-export interface ContinuationPrefixRollback {
-  readonly initialized: number
-  readonly frameDrops: ReadonlyArray<ContinuationRelease>
-  readonly sourceReleases: ReadonlyArray<ContinuationRelease>
-}
-
-export interface ContinuationPathPlan {
+export interface CoroutineFramePathPlan {
   readonly restores: ReadonlyArray<number>
   readonly loanEnds: ReadonlyArray<SuspensionBorrowIdentity>
-  readonly releases: ReadonlyArray<ContinuationRelease>
+  readonly releases: ReadonlyArray<CoroutineFrameRelease>
 }
 
 export interface SuspensionProviderArgument {
@@ -1103,9 +1097,7 @@ export interface SuspensionProviderArgument {
   /** ABI lane containing the provider when `argument` is a captured environment value. */
   readonly argumentLane?: number
   readonly witness?: DeclarationIndex.ConformanceWitness
-  readonly purposes:
-    | readonly ['ChildRequirement']
-    | readonly ['ChildRequirement', 'ContinuationAllocator']
+  readonly purposes: readonly ['ChildRequirement']
 }
 
 export interface SuspensionRunner {
@@ -1149,90 +1141,68 @@ export type SuspensionCompletion =
       readonly failureValueShape: Layout.CallingShape
     }
 
-export interface ContinuationDescriptor {
-  readonly _tag: 'ContinuationDescriptor'
+export interface CoroutineFrameState {
+  readonly _tag: 'CoroutineFrameState'
   readonly point: SuspensionPointId
   readonly runner: SuspensionRunner
   readonly outcome: SilkType.Effect
-  readonly layout: {
-    readonly _tag: 'LogicalContinuationLayout'
-    readonly slots: ReadonlyArray<ContinuationSlot>
-    readonly initializationOrder: ReadonlyArray<number>
-    readonly prefixRollbacks: ReadonlyArray<ContinuationPrefixRollback>
-  }
-  readonly allocationRefusal: ContinuationPathPlan
-  readonly success: ContinuationPathPlan & { readonly resume: ResumePointId }
-  readonly failure: ContinuationPathPlan & { readonly resume: ResumePointId }
+  readonly slots: ReadonlyArray<CoroutineFrameSlot>
+  readonly success: CoroutineFramePathPlan & { readonly resume: ResumePointId }
+  readonly failure: CoroutineFramePathPlan & { readonly resume: ResumePointId }
 }
 
-export type ContinuationHeaderRole = 'Parent' | 'Resume' | 'Reclaim' | 'ReclaimContext'
+/** One reusable logical frame owned by one specialized suspendable invocation. */
+export interface CoroutineFrameDescriptor {
+  readonly _tag: 'CoroutineFrameDescriptor'
+  readonly function: Instances.InstanceKey
+  readonly states: ReadonlyArray<CoroutineFrameState>
+}
 
-export interface ContinuationHeaderField {
-  readonly _tag: 'ContinuationHeaderField'
-  readonly role: ContinuationHeaderRole
+export type CoroutineFrameHeaderRole = 'Parent' | 'State'
+
+export interface CoroutineFrameHeaderField {
+  readonly _tag: 'CoroutineFrameHeaderField'
+  readonly role: CoroutineFrameHeaderRole
   readonly offset: number
   readonly size: number
   readonly alignment: number
 }
 
-export interface ContinuationPayloadField {
-  readonly _tag: 'ContinuationPayloadField'
+export interface CoroutineFramePayloadField {
+  readonly _tag: 'CoroutineFramePayloadField'
   readonly slot: number
   readonly local: LocalId
   readonly type: Type
-  readonly access: ContinuationAccess
+  readonly access: CoroutineFrameAccess
   readonly offset: number
   readonly size: number
   readonly alignment: number
   readonly padding: number
 }
 
-/** One target-owned physical frame plan kept separate from the target-neutral descriptor. */
-export interface ContinuationTargetLayout {
-  readonly _tag: 'ContinuationTargetLayout'
+export interface CoroutineFrameTargetStateLayout {
+  readonly _tag: 'CoroutineFrameTargetStateLayout'
   readonly point: SuspensionPointId
+  readonly size: number
+  readonly alignment: number
+  readonly payload: ReadonlyArray<CoroutineFramePayloadField>
+  readonly tailPadding: number
+}
+
+/** One maximum physical frame plan shared by every mutually-exclusive state of an invocation. */
+export interface CoroutineFrameTargetLayout {
+  readonly _tag: 'CoroutineFrameTargetLayout'
   readonly function: Instances.InstanceKey
   readonly size: number
   readonly alignment: number
-  readonly header: ReadonlyArray<ContinuationHeaderField>
-  readonly payload: ReadonlyArray<ContinuationPayloadField>
-  readonly tailPadding: number
-  readonly initialization: ReadonlyArray<{
-    readonly initialized: number
-    readonly fields: ReadonlyArray<number>
-    readonly rollback: ContinuationPrefixRollback
-  }>
-  readonly acquisition: {
-    readonly _tag: 'ContinuationAcquisition'
-    readonly allocator: {
-      readonly _tag: 'IncomingTransferAllocator'
-      readonly capability: SilkType.Nominal
-      readonly role: string
-      readonly access: 'Exclusive'
-    }
-    readonly request: { readonly bytes: number; readonly alignment: number }
-    readonly loan: {
-      readonly _tag: 'ContinuationAllocatorLoan'
-      readonly access: 'Exclusive'
-      readonly ends: 'BeforeInitializationAndPublication'
-    }
-    readonly retainedAuthority: readonly ['Reclaim', 'ReclaimContext']
-    readonly order: readonly [
-      'Request',
-      'EndAllocatorLoan',
-      'Initialize',
-      'Publish',
-      'ChildReborrow',
-      'ChildStart',
-    ]
-  }
-  readonly publication: { readonly _tag: 'AfterCompleteInitialization' }
+  readonly header: ReadonlyArray<CoroutineFrameHeaderField>
+  readonly states: ReadonlyArray<CoroutineFrameTargetStateLayout>
 }
 
-export interface ContinuationLayoutPlan {
-  readonly _tag: 'ContinuationLayoutPlan'
+export interface CoroutineFramePlan {
+  readonly _tag: 'CoroutineFramePlan'
   readonly target: Layout.Plan['target']
-  readonly entries: ReadonlyArray<ContinuationTargetLayout>
+  readonly entries: ReadonlyArray<CoroutineFrameTargetLayout>
 }
 
 export type SuspensionRegion =
@@ -1245,10 +1215,7 @@ export type SuspensionRegion =
         { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
       >
       readonly deferred: SuspensionRunner
-      readonly transfer: {
-        readonly _tag: 'OriginateUnpublishedTransfer'
-        readonly allocator: SuspensionProviderArgument & { readonly argument: LocalId }
-      }
+      readonly transfer: { readonly _tag: 'OriginateTransfer' }
       readonly provenance: Provenance
     }
   | {
@@ -1267,8 +1234,8 @@ export type SuspensionRegion =
       readonly relay: {
         readonly _tag: 'RelayExistingTransfer'
         readonly preserves: readonly ['Child', 'Origin', 'TypedOutcome']
-        readonly frame: 'TailRelay' | 'StatefulRelay' | 'MissingOwnershipPlan'
-        readonly continuation?: ContinuationDescriptor
+        readonly frame: 'StatefulRelay' | 'MissingOwnershipPlan'
+        readonly state?: CoroutineFrameState
       }
       readonly provenance: Provenance
     }
@@ -1317,6 +1284,7 @@ export interface MirFunction {
   readonly suspension?: {
     readonly classification: SuspensionClassification
     readonly regions: ReadonlyArray<SuspensionRegion>
+    readonly frame?: CoroutineFrameDescriptor
   }
 }
 
@@ -1351,7 +1319,7 @@ export interface Module {
   readonly staticData?: ReadonlyArray<StaticText.Data>
   readonly functions: ReadonlyArray<MirFunction>
   readonly normalization?: ReadonlyArray<NormalizationVerdict>
-  readonly continuations?: ContinuationLayoutPlan
+  readonly coroutineFrames?: CoroutineFramePlan
 }
 
 /** The concrete zero-parameter `i32` function exported as the machine entry. */
@@ -1443,19 +1411,19 @@ export const suspensionControlEdges = (self: MirFunction): ReadonlyArray<Suspens
               to: Object.freeze({ _tag: 'RelayExit' as const }),
               kind: 'RelayTransfer' as const,
             }),
-            ...(region.relay.continuation === undefined
+            ...(region.relay.state === undefined
               ? []
               : [
                   Object.freeze({
                     _tag: 'SuspensionControlEdge' as const,
                     from: region.point,
-                    to: region.relay.continuation.success.resume,
+                    to: region.relay.state.success.resume,
                     kind: 'ResumeSuccess' as const,
                   }),
                   Object.freeze({
                     _tag: 'SuspensionControlEdge' as const,
                     from: region.point,
-                    to: region.relay.continuation.failure.resume,
+                    to: region.relay.state.failure.resume,
                     kind: 'ResumeFailure' as const,
                   }),
                 ]),
@@ -1474,15 +1442,14 @@ export const suspensionLocals = (self: MirFunction): ReadonlyArray<LocalId> =>
             provider.argument === undefined ? [] : [provider.argument],
           ),
         ]
-      const descriptor = region.relay.continuation
+      const descriptor = region.relay.state
       return [
         ...operationLocals(region.operation),
         ...region.liveLocals,
-        ...(descriptor?.layout.slots.flatMap((slot) => [
+        ...(descriptor?.slots.flatMap((slot) => [
           slot.local,
           ...(slot.access._tag === 'BorrowedDependency' ? [slot.access.root] : []),
         ]) ?? []),
-        ...(descriptor?.allocationRefusal.releases.map((release) => release.local) ?? []),
         ...(descriptor?.failure.releases.map((release) => release.local) ?? []),
         ...region.runner.providers.flatMap((provider) =>
           provider.argument === undefined ? [] : [provider.argument],
@@ -1584,8 +1551,7 @@ export interface Violation {
     | 'InvalidMatchJoin'
     | 'CyclicMatchOperation'
     | 'InvalidSuspension'
-    | 'InvalidContinuation'
-    | 'InvalidContinuationLayout'
+    | 'InvalidCoroutineFrame'
     | 'OrphanSuspensionMachinery'
   readonly function?: DeclarationIndex.CanonicalId
   readonly region?: RegionId
@@ -1901,14 +1867,8 @@ const suspensionBorrowText = (borrow: SuspensionBorrowIdentity): string =>
       ? `parameter:${borrow.parameterOrdinal}`
       : `local:${borrow.local.ordinal}`
 
-const continuationReleaseText = (release: ContinuationRelease): string =>
+const coroutineFrameReleaseText = (release: CoroutineFrameRelease): string =>
   `${release.local.ordinal}:${release.cleanup._tag}:${SilkType.key(release.cleanup.type)}`
-
-const sameReleaseSequence = (
-  left: ReadonlyArray<ContinuationRelease>,
-  right: ReadonlyArray<ContinuationRelease>,
-): boolean =>
-  left.map(continuationReleaseText).join(',') === right.map(continuationReleaseText).join(',')
 
 const providerText = (provider: SuspensionProviderArgument): string =>
   `${SilkType.key(provider.capability)}@${provider.role}:${provider.requirementAccess}:${provider.access}:${SilkType.key(provider.providerType)}:${provider.argument?.ordinal ?? 'none'}:${provider.argumentLane ?? 0}:${provider.witness?._tag ?? 'none'}:${provider.purposes.join('+')}`
@@ -1963,7 +1923,7 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
   const invalid = (
     rule: Extract<
       Violation['rule'],
-      'InvalidSuspension' | 'InvalidContinuation' | 'OrphanSuspensionMachinery'
+      'InvalidSuspension' | 'InvalidCoroutineFrame' | 'OrphanSuspensionMachinery'
     >,
     detail: string,
     region?: RegionId,
@@ -1983,7 +1943,7 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
   for (const local of suspensionLocals(fn))
     if (local.ordinal < 0 || local.ordinal >= fn.localTypes.length)
       invalid(
-        'InvalidContinuation',
+        'InvalidCoroutineFrame',
         `suspension control references undeclared local %${local.ordinal}`,
       )
   if (suspension.classification === 'Synchronous' && suspension.regions.length > 0)
@@ -2003,8 +1963,8 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
       )
     points.add(pointKey)
     if (region._tag === 'SuspendEffectRegion') {
-      if (region.transfer._tag !== 'OriginateUnpublishedTransfer')
-        invalid('InvalidSuspension', 'explicit suspension must originate one unpublished transfer')
+      if (region.transfer._tag !== 'OriginateTransfer')
+        invalid('InvalidSuspension', 'explicit suspension must originate one transfer')
       const owning = fn.regions.find(
         (candidate) => candidate.id.ordinal === region.ownerRegion.ordinal,
       )
@@ -2020,20 +1980,6 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
         invalid(
           'InvalidSuspension',
           'explicit suspension child outcome disagrees with its run carrier',
-        )
-      const allocator = region.transfer.allocator
-      const allocatorValid =
-        allocator.purposes.length === 2 &&
-        allocator.capability.module === 'silk/core' &&
-        allocator.capability.name === 'Allocator' &&
-        allocator.role === 'DefaultRole' &&
-        allocator.requirementAccess === 'Exclusive' &&
-        (allocator.access === 'Exclusive' || allocator.access === 'Take') &&
-        projectedProviderValid(allocator)
-      if (!allocatorValid)
-        invalid(
-          'InvalidSuspension',
-          'explicit suspension must seed its unpublished transfer with the selected exclusive allocator',
         )
       continue
     }
@@ -2116,28 +2062,21 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
       const argumentValid =
         provider.argument === undefined ||
         projectedProviderValid(Object.freeze({ ...provider, argument: provider.argument }))
-      const purposeValid =
-        provider.purposes.length === 1 ||
-        (provider.capability.module === 'silk/core' &&
-          provider.capability.name === 'Allocator' &&
-          provider.role === 'DefaultRole' &&
-          provider.requirementAccess === 'Exclusive' &&
-          (provider.access === 'Exclusive' || provider.access === 'Take'))
+      const purposeValid = provider.purposes.join(',') === 'ChildRequirement'
       if (!argumentValid || !purposeValid)
-        invalid('InvalidContinuation', 'provider argument has incompatible local, type, or purpose')
+        invalid(
+          'InvalidCoroutineFrame',
+          'provider argument has incompatible local, type, or purpose',
+        )
     }
-    const descriptor = region.relay.continuation
+    const descriptor = region.relay.state
     if (region.relay.frame === 'MissingOwnershipPlan')
       invalid(
-        'InvalidContinuation',
+        'InvalidCoroutineFrame',
         'suspendable run has no exact post-normalization ownership plan',
       )
     if (descriptor === undefined) {
-      if (region.relay.frame === 'StatefulRelay' || region.liveLocals.length > 0)
-        invalid(
-          'InvalidContinuation',
-          'tail relay omits a descriptor for live post-transfer locals',
-        )
+      invalid('InvalidCoroutineFrame', 'suspendable invocation omits its coroutine-frame state')
       continue
     }
     if (
@@ -2148,37 +2087,30 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
       descriptor.failure.resume.path !== 'Failure'
     )
       invalid(
-        'InvalidContinuation',
+        'InvalidCoroutineFrame',
         'continuation has missing or ambiguous stable resume identities',
       )
     if (
       runnerText(descriptor.runner) !== runnerText(region.runner) ||
       !sameEffectContract(descriptor.outcome, region.runner.outcome)
     )
-      invalid('InvalidContinuation', 'continuation runner or typed outcome is stale')
-    const slots = descriptor.layout.slots
+      invalid('InvalidCoroutineFrame', 'continuation runner or typed outcome is stale')
+    const slots = descriptor.slots
     const slotOrdinals = slots.map((slot) => slot.ordinal)
     const localOrdinals = slots.map((slot) => slot.local.ordinal)
     const expectedOrdinals = slots.map((_slot, ordinal) => ordinal)
     if (
       new Set(localOrdinals).size !== localOrdinals.length ||
       slotOrdinals.join(',') !== expectedOrdinals.join(',') ||
-      descriptor.layout.initializationOrder.join(',') !== expectedOrdinals.join(',') ||
       !sameLocalSequence(
         [...region.liveLocals].sort((left, right) => left.ordinal - right.ordinal),
         slots.map((slot) => slot.local),
       )
     )
       invalid(
-        'InvalidContinuation',
+        'InvalidCoroutineFrame',
         'logical layout omits, duplicates, or reorders a post-normalization live local',
       )
-    const prefixOrdinals = descriptor.layout.prefixRollbacks.map((rollback) => rollback.initialized)
-    if (
-      prefixOrdinals.join(',') !==
-      Array.from({ length: slots.length + 1 }, (_value, ordinal) => ordinal).join(',')
-    )
-      invalid('InvalidContinuation', 'initialization-prefix rollback table is incomplete')
     for (const slot of slots) {
       const declared = fn.localTypes.at(slot.local.ordinal)
       const accessValid =
@@ -2195,51 +2127,17 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
         !accessValid
       )
         invalid(
-          'InvalidContinuation',
+          'InvalidCoroutineFrame',
           `continuation slot %${slot.local.ordinal} has incompatible type or access`,
         )
     }
     if (
       descriptor.success.restores.join(',') !== expectedOrdinals.join(',') ||
-      descriptor.allocationRefusal.restores.length !== 0 ||
       descriptor.failure.restores.length !== 0
     )
-      invalid('InvalidContinuation', 'allocation-refusal or resume path plan is incomplete')
-    const affine = slots.filter(
-      (
-        slot,
-      ): slot is ContinuationSlot & {
-        readonly access: Extract<ContinuationAccess, { readonly _tag: 'AffineTransfer' }>
-      } => slot.access._tag === 'AffineTransfer',
-    )
-    for (const rollback of descriptor.layout.prefixRollbacks) {
-      const initialized = new Set(
-        slots.slice(0, rollback.initialized).map((slot) => slot.local.ordinal),
-      )
-      const expectedFrameDrops = [...affine]
-        .filter((slot) => initialized.has(slot.local.ordinal))
-        .reverse()
-        .map((slot) => Object.freeze({ local: slot.local, cleanup: slot.access.cleanup }))
-      const expectedSourceReleases = descriptor.allocationRefusal.releases.filter(
-        (release) => !initialized.has(release.local.ordinal),
-      )
-      if (
-        !sameReleaseSequence(rollback.frameDrops, expectedFrameDrops) ||
-        !sameReleaseSequence(rollback.sourceReleases, expectedSourceReleases)
-      )
-        invalid('InvalidContinuation', 'initialization-prefix rollback ownership is incomplete')
-    }
-    if (
-      descriptor.success.loanEnds.length !== 0 ||
-      descriptor.success.releases.length !== 0 ||
-      descriptor.failure.loanEnds.map(suspensionBorrowText).join(',') !==
-        descriptor.allocationRefusal.loanEnds.map(suspensionBorrowText).join(',') ||
-      !sameReleaseSequence(descriptor.failure.releases, descriptor.allocationRefusal.releases)
-    )
-      invalid(
-        'InvalidContinuation',
-        'success, failure, or allocation-refusal cleanup plan diverges',
-      )
+      invalid('InvalidCoroutineFrame', 'resume path plan is incomplete')
+    if (descriptor.success.loanEnds.length !== 0 || descriptor.success.releases.length !== 0)
+      invalid('InvalidCoroutineFrame', 'success or failure cleanup plan diverges')
   }
   return Object.freeze(violations)
 }
@@ -3452,22 +3350,14 @@ const suspensionTypes = (fn: MirFunction): ReadonlyArray<SilkType.Type> =>
             region.completion.failureType,
             region.completion.failureValueType,
           ]
-    const descriptor = region.relay.continuation
+    const descriptor = region.relay.state
     if (descriptor === undefined) return [...runnerTypes, ...completionTypes]
-    const releases = [
-      ...descriptor.layout.prefixRollbacks.flatMap((rollback) => [
-        ...rollback.frameDrops,
-        ...rollback.sourceReleases,
-      ]),
-      ...descriptor.allocationRefusal.releases,
-      ...descriptor.success.releases,
-      ...descriptor.failure.releases,
-    ]
+    const releases = [...descriptor.success.releases, ...descriptor.failure.releases]
     return [
       ...runnerTypes,
       ...completionTypes,
       descriptor.outcome,
-      ...descriptor.layout.slots.flatMap((slot) => [
+      ...descriptor.slots.flatMap((slot) => [
         semanticType(slot.type),
         ...(slot.access._tag === 'AffineTransfer' ? cleanupTypes(slot.access.cleanup) : []),
       ]),
@@ -3475,49 +3365,42 @@ const suspensionTypes = (fn: MirFunction): ReadonlyArray<SilkType.Type> =>
     ]
   })
 
-const continuationLayoutViolations = (self: Module): ReadonlyArray<Violation> => {
+const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> => {
   const invalid = (detail: string, fn?: MirFunction): Violation =>
     Object.freeze(
       fn === undefined
-        ? { _tag: 'Violation', rule: 'InvalidContinuationLayout', detail }
-        : { _tag: 'Violation', rule: 'InvalidContinuationLayout', function: fn.id, detail },
+        ? { _tag: 'Violation', rule: 'InvalidCoroutineFrame', detail }
+        : { _tag: 'Violation', rule: 'InvalidCoroutineFrame', function: fn.id, detail },
     )
   const descriptors = self.functions.flatMap((fn) =>
-    (fn.suspension?.regions ?? []).flatMap((region) =>
-      region._tag === 'RunSuspendableEffectRegion' && region.relay.continuation !== undefined
-        ? [Object.freeze({ fn, descriptor: region.relay.continuation })]
-        : [],
-    ),
+    fn.suspension?.frame === undefined
+      ? []
+      : [Object.freeze({ fn, descriptor: fn.suspension.frame })],
   )
   if (descriptors.length === 0)
-    return self.continuations === undefined
+    return self.coroutineFrames === undefined
       ? Object.freeze([])
-      : Object.freeze([invalid('MIR without frames retains a continuation target-layout plan')])
-  if (self.continuations === undefined)
+      : Object.freeze([invalid('MIR without frames retains a coroutine-frame layout plan')])
+  if (self.coroutineFrames === undefined)
     return Object.freeze([invalid('frame-producing suspension has no target-layout plan')])
   const violations: Array<Violation> = []
-  if (self.continuations.target.id !== self.layout.target.id)
-    violations.push(invalid('continuation target layout disagrees with the MIR target'))
+  if (self.coroutineFrames.target.id !== self.layout.target.id)
+    violations.push(invalid('coroutine-frame layout disagrees with the MIR target'))
   const matched = new Set<number>()
   for (const { fn, descriptor } of descriptors) {
-    const candidates = self.continuations.entries
+    const candidates = self.coroutineFrames.entries
       .map((entry, ordinal) => Object.freeze({ entry, ordinal }))
-      .filter(({ entry }) => sameSuspensionPoint(entry.point, descriptor.point))
+      .filter(({ entry }) => instanceText(entry.function) === instanceText(descriptor.function))
     const selected = candidates.at(0)
     if (selected === undefined || candidates.length !== 1) {
-      violations.push(invalid('continuation descriptor must own exactly one physical layout', fn))
+      violations.push(invalid('coroutine-frame descriptor must own exactly one maximum layout', fn))
       continue
     }
     matched.add(selected.ordinal)
     const entry = selected.entry
     const wordSize = self.layout.target.pointerSize
     const wordAlignment = self.layout.target.pointerAlignment
-    const roles: ReadonlyArray<ContinuationHeaderRole> = [
-      'Parent',
-      'Resume',
-      'Reclaim',
-      'ReclaimContext',
-    ]
+    const roles: ReadonlyArray<CoroutineFrameHeaderRole> = ['Parent', 'State']
     const headerValid =
       entry.header.length === roles.length &&
       entry.header.every(
@@ -3527,85 +3410,75 @@ const continuationLayoutViolations = (self: Module): ReadonlyArray<Violation> =>
           field.size === wordSize &&
           field.alignment === wordAlignment,
       )
-    let cursor: number = roles.length * wordSize
-    let alignment: number = wordAlignment
-    const payloadValid =
-      entry.payload.length === descriptor.layout.slots.length &&
-      entry.payload.every((field, ordinal) => {
-        const slot = descriptor.layout.slots.at(ordinal)
-        if (slot === undefined) return false
-        const physical =
-          slot.access._tag === 'BorrowedDependency' || slot.type._tag === 'EffectBorrow'
-            ? Object.freeze({ size: wordSize, alignment: wordAlignment })
-            : slot.type._tag === 'EffectValue'
-              ? slot.type.environment
-              : slot.type._tag === 'CallableValue'
-                ? (slot.type.environment?.view ??
-                  Object.freeze({ size: wordSize * 2, alignment: wordAlignment }))
-                : Layout.entry(self.layout, semanticType(slot.type))
-        if (physical === undefined) return false
-        const offset = Math.ceil(cursor / physical.alignment) * physical.alignment
-        const valid =
-          field.slot === slot.ordinal &&
-          field.local.ordinal === slot.local.ordinal &&
-          SilkType.equals(semanticType(field.type), semanticType(slot.type)) &&
-          field.access._tag === slot.access._tag &&
-          field.offset === offset &&
-          field.size === physical.size &&
-          field.alignment === physical.alignment &&
-          field.padding === offset - cursor
-        cursor = offset + physical.size
-        alignment = Math.max(alignment, physical.alignment)
-        return valid
-      })
-    const size = Math.ceil(cursor / alignment) * alignment
-    const initializationValid =
-      entry.initialization.length === descriptor.layout.prefixRollbacks.length &&
-      entry.initialization.every((prefix, ordinal) => {
-        const rollback = descriptor.layout.prefixRollbacks.at(ordinal)
-        return (
-          rollback !== undefined &&
-          prefix.initialized === rollback.initialized &&
-          prefix.rollback === rollback &&
-          prefix.fields.join(',') ===
-            descriptor.layout.initializationOrder.slice(0, rollback.initialized).join(',')
-        )
-      })
-    const acquisitionValid =
-      entry.acquisition.allocator._tag === 'IncomingTransferAllocator' &&
-      entry.acquisition.allocator.capability.module === 'silk/core' &&
-      entry.acquisition.allocator.capability.name === 'Allocator' &&
-      entry.acquisition.allocator.access === 'Exclusive' &&
-      entry.acquisition.request.bytes === entry.size &&
-      entry.acquisition.request.alignment === entry.alignment &&
-      entry.acquisition.loan._tag === 'ContinuationAllocatorLoan' &&
-      entry.acquisition.loan.access === 'Exclusive' &&
-      entry.acquisition.loan.ends === 'BeforeInitializationAndPublication' &&
-      entry.acquisition.retainedAuthority.join(',') === 'Reclaim,ReclaimContext' &&
-      entry.acquisition.order.join(',') ===
-        'Request,EndAllocatorLoan,Initialize,Publish,ChildReborrow,ChildStart'
+    const stateValid = descriptor.states.every((state) => {
+      const candidates = entry.states.filter((layout) =>
+        sameSuspensionPoint(layout.point, state.point),
+      )
+      const layout = candidates.at(0)
+      if (layout === undefined || candidates.length !== 1) return false
+      let cursor = roles.length * wordSize
+      let alignment: number = wordAlignment
+      const payloadValid =
+        layout.payload.length === state.slots.length &&
+        layout.payload.every((field, ordinal) => {
+          const slot = state.slots.at(ordinal)
+          if (slot === undefined) return false
+          const physical =
+            slot.access._tag === 'BorrowedDependency' || slot.type._tag === 'EffectBorrow'
+              ? Object.freeze({ size: wordSize, alignment: wordAlignment })
+              : slot.type._tag === 'EffectValue'
+                ? slot.type.environment
+                : slot.type._tag === 'CallableValue'
+                  ? (slot.type.environment?.view ??
+                    Object.freeze({ size: wordSize * 2, alignment: wordAlignment }))
+                  : Layout.entry(self.layout, semanticType(slot.type))
+          if (physical === undefined) return false
+          const offset = Math.ceil(cursor / physical.alignment) * physical.alignment
+          const valid =
+            field.slot === slot.ordinal &&
+            field.local.ordinal === slot.local.ordinal &&
+            SilkType.equals(semanticType(field.type), semanticType(slot.type)) &&
+            field.access._tag === slot.access._tag &&
+            field.offset === offset &&
+            field.size === physical.size &&
+            field.alignment === physical.alignment &&
+            field.padding === offset - cursor
+          cursor = offset + physical.size
+          alignment = Math.max(alignment, physical.alignment)
+          return valid
+        })
+      const size = Math.ceil(cursor / alignment) * alignment
+      return (
+        payloadValid &&
+        layout.size === size &&
+        layout.alignment === alignment &&
+        layout.tailPadding === size - cursor
+      )
+    })
+    const maximumAlignment = Math.max(
+      wordAlignment,
+      ...entry.states.map((state) => state.alignment),
+    )
+    const maximumSize =
+      Math.ceil(
+        Math.max(roles.length * wordSize, ...entry.states.map((state) => state.size)) /
+          maximumAlignment,
+      ) * maximumAlignment
     if (
       !headerValid ||
-      !payloadValid ||
-      entry.size !== size ||
-      entry.alignment !== alignment ||
-      entry.tailPadding !== size - cursor ||
-      !initializationValid ||
-      !acquisitionValid ||
-      entry.publication._tag !== 'AfterCompleteInitialization'
+      !stateValid ||
+      entry.states.length !== descriptor.states.length ||
+      entry.alignment !== maximumAlignment ||
+      entry.size !== maximumSize
     )
       violations.push(
-        invalid(
-          'continuation physical layout is not the canonical complete header/payload plan',
-          fn,
-        ),
+        invalid('coroutine-frame maximum layout or one of its states is not canonical', fn),
       )
   }
-  if (matched.size !== self.continuations.entries.length)
-    violations.push(invalid('continuation target-layout plan contains a stale or duplicate entry'))
+  if (matched.size !== self.coroutineFrames.entries.length)
+    violations.push(invalid('coroutine-frame layout plan contains a stale or duplicate entry'))
   return Object.freeze(violations)
 }
-
 type PropagatingRun = Extract<
   Operation,
   { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'RunStaticEffect' }
@@ -3660,7 +3533,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       detail: `${violation.rule}: ${violation.detail}`,
     }),
   )
-  violations.push(...continuationLayoutViolations(self))
+  violations.push(...coroutineFrameLayoutViolations(self))
   const staticData = self.staticData ?? []
   const staticTableValid = staticData.every((data, ordinal) => {
     const previous = ordinal === 0 ? undefined : staticData.at(ordinal - 1)
@@ -6301,8 +6174,8 @@ const regionLines = (region: Region): ReadonlyArray<string> => {
 const suspensionPointText = (point: SuspensionPointId): string =>
   `${point.sourceId}:${point.spanStart}:${point.spanEnd}#${point.ordinal}`
 
-const continuationPathText = (name: string, path: ContinuationPathPlan): string =>
-  `    ${name} restores=${path.restores.join(',') || 'none'} loans=${path.loanEnds.map(suspensionBorrowText).join(',') || 'none'} releases=${path.releases.map(continuationReleaseText).join(',') || 'none'}`
+const continuationPathText = (name: string, path: CoroutineFramePathPlan): string =>
+  `    ${name} restores=${path.restores.join(',') || 'none'} loans=${path.loanEnds.map(suspensionBorrowText).join(',') || 'none'} releases=${path.releases.map(coroutineFrameReleaseText).join(',') || 'none'}`
 
 const suspensionRunnerLines = (
   runner: SuspensionRunner,
@@ -6327,10 +6200,10 @@ const suspensionLines = (fn: MirFunction): ReadonlyArray<string> => {
     ...suspension.regions.flatMap((region) => {
       if (region._tag === 'SuspendEffectRegion')
         return [
-          `  suspend-origin ${suspensionPointText(region.point)} owner=${regionText(region.ownerRegion)} operation=${region.operation._tag} transfer=unpublished allocator=${localText(region.transfer.allocator.argument)}:${SilkType.encode(region.transfer.allocator.providerType)}`,
+          `  suspend-origin ${suspensionPointText(region.point)} owner=${regionText(region.ownerRegion)} operation=${region.operation._tag} transfer=private-frame-stack`,
           ...suspensionRunnerLines(region.deferred),
         ]
-      const descriptor = region.relay.continuation
+      const descriptor = region.relay.state
       return [
         `  suspend-run ${suspensionPointText(region.point)} owner=${regionText(region.ownerRegion)} operation=${region.operation._tag} runner=${region.runner.declaration === undefined ? 'unknown' : targetText(region.runner.declaration)} complete=current relay=preserve-child-origin-outcome frame=${region.relay.frame.toLowerCase()}`,
         ...suspensionRunnerLines(region.runner),
@@ -6342,19 +6215,13 @@ const suspensionLines = (fn: MirFunction): ReadonlyArray<string> => {
           ? []
           : [
               `    descriptor outcome=${SilkType.encode(descriptor.outcome)} resume-success=${suspensionPointText(descriptor.success.resume.point)}:${descriptor.success.resume.path.toLowerCase()} resume-failure=${suspensionPointText(descriptor.failure.resume.point)}:${descriptor.failure.resume.path.toLowerCase()}`,
-              ...descriptor.layout.slots.map((slot) =>
+              ...descriptor.slots.map((slot) =>
                 slot.access._tag === 'Copy'
                   ? `    slot ${slot.ordinal} ${localText(slot.local)} copy ${typeText(slot.type)}`
                   : slot.access._tag === 'BorrowedDependency'
                     ? `    slot ${slot.ordinal} ${localText(slot.local)} borrow:${slot.access.access.toLowerCase()} root=${localText(slot.access.root)} ${typeText(slot.type)}`
                     : `    slot ${slot.ordinal} ${localText(slot.local)} move:${slot.access.cleanup._tag} ${typeText(slot.type)}`,
               ),
-              `    initialization ${descriptor.layout.initializationOrder.join(',') || 'none'}`,
-              ...descriptor.layout.prefixRollbacks.map(
-                (rollback) =>
-                  `    rollback ${rollback.initialized} frame=${rollback.frameDrops.map(continuationReleaseText).join(',') || 'none'} source=${rollback.sourceReleases.map(continuationReleaseText).join(',') || 'none'}`,
-              ),
-              continuationPathText('allocation-refusal', descriptor.allocationRefusal),
               continuationPathText('success', descriptor.success),
               continuationPathText('failure', descriptor.failure),
             ]),
@@ -6363,22 +6230,20 @@ const suspensionLines = (fn: MirFunction): ReadonlyArray<string> => {
   ]
 }
 
-const continuationTargetLines = (self: Module): ReadonlyArray<string> =>
-  (self.continuations?.entries ?? []).flatMap((entry) => [
-    `continuation-target ${suspensionPointText(entry.point)} size=${entry.size} alignment=${entry.alignment} tail-padding=${entry.tailPadding} publication=after-complete-initialization`,
+const coroutineFrameTargetLines = (self: Module): ReadonlyArray<string> =>
+  (self.coroutineFrames?.entries ?? []).flatMap((entry) => [
+    `coroutine-frame ${instanceText(entry.function)} size=${entry.size} alignment=${entry.alignment} storage=private-execution-stack`,
     ...entry.header.map(
       (field) =>
         `  header ${field.role.toLowerCase()} offset=${field.offset} size=${field.size} alignment=${field.alignment}`,
     ),
-    ...entry.payload.map(
-      (field) =>
-        `  payload slot=${field.slot} local=${localText(field.local)} offset=${field.offset} size=${field.size} alignment=${field.alignment} padding=${field.padding}`,
-    ),
-    ...entry.initialization.map(
-      (prefix) =>
-        `  initialize prefix=${prefix.initialized} fields=${prefix.fields.join(',') || 'none'} rollback=${prefix.rollback.initialized}`,
-    ),
-    `  acquire allocator=incoming-transfer:${SilkType.encode(entry.acquisition.allocator.capability)}@${entry.acquisition.allocator.role} access=exclusive request=${entry.acquisition.request.bytes}/${entry.acquisition.request.alignment} loan-end=${entry.acquisition.loan.ends} retain=${entry.acquisition.retainedAuthority.join('+')} order=${entry.acquisition.order.join('>')}`,
+    ...entry.states.flatMap((state) => [
+      `  state ${suspensionPointText(state.point)} size=${state.size} alignment=${state.alignment} tail-padding=${state.tailPadding}`,
+      ...state.payload.map(
+        (field) =>
+          `    payload slot=${field.slot} local=${localText(field.local)} offset=${field.offset} size=${field.size} alignment=${field.alignment} padding=${field.padding}`,
+      ),
+    ]),
   ])
 
 export const encode = (self: Module): string =>
@@ -6398,7 +6263,7 @@ export const encode = (self: Module): string =>
         ? `normalization accepted kind=${verdict.kind} function=${targetText(verdict.function)} region=${regionText(verdict.region)} local=${localText(verdict.local)} guards=${verdict.guards.join(',')} ${provenanceText(verdict.provenance)}`
         : `normalization rejected reason=${verdict.reason} function=${targetText(verdict.function)} region=${regionText(verdict.region)} local=${localText(verdict.local)} ${provenanceText(verdict.provenance)}`,
     ),
-    ...continuationTargetLines(self),
+    ...coroutineFrameTargetLines(self),
     ...Layout.encode(self.layout).trimEnd().split('\n'),
     ...self.functions.flatMap((fn) => [
       `fn ${targetText(fn.id)}${

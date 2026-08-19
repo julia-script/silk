@@ -573,14 +573,14 @@ it.effect('resolves imported failure members and preserves invalid row facts', (
       })),
       [
         { available: true, failures: ['errors/Error.Error'] },
-        { available: false, failures: [] },
+        { available: true, failures: [] },
         { available: false, failures: [] },
         { available: false, failures: [] },
       ],
     )
     assert.deepEqual(
       index.diagnostics.map((diagnostic) => diagnostic.code),
-      ['SEM0061', 'SEM0061', 'SEM0001'],
+      ['SEM0061', 'SEM0001'],
     )
   }),
 )

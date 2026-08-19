@@ -16,10 +16,11 @@ import * as Variable from '@silk-effect/llvm/Variable'
 import * as Verify from '@silk-effect/llvm/Verify'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
+import * as CoroutineFrame from './CoroutineFrame.js'
+import * as CoroutineRuntime from './CoroutineRuntime.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
-import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
@@ -76,6 +77,8 @@ const reclaimContextPaths = (
 export interface CodegenRequest {
   readonly mode: 'debug' | 'release'
   readonly sources?: ReadonlyMap<string, Uint8Array>
+  /** Host-only bound for compiler-private Wasm coroutine storage; never a Silk capability. */
+  readonly privateExecutionStackPages?: number
 }
 
 /** One instance's deterministic native symbol. */
@@ -939,7 +942,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
     const usizeType =
       usizeLayout?.representation._tag === 'UnsignedInteger'
         ? yield* LlvmType.integer(builder, usizeLayout.representation.bits)
-        : undefined
+        : suspensionEnabled
+          ? yield* LlvmType.integer(builder, program.layout.target.pointerSize * 8)
+          : undefined
     const integerTypes = new Map<number, LlvmType.Type>([[32, i32]])
     if (usizeLayout?.representation._tag === 'UnsignedInteger' && usizeType !== undefined) {
       integerTypes.set(usizeLayout.representation.bits, usizeType)
@@ -1142,30 +1147,28 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
     }
     const signedOverflowSignatures = new Map<number, OverflowSignature>()
     const unsignedOverflowSignatures = new Map<number, OverflowSignature>()
-    const needsAllocation =
-      suspensionEnabled ||
-      program.functions.some((fn) =>
-        Mir.operations(fn).some(
-          (operation) =>
-            operation._tag === 'Allocate' ||
-            operation._tag === 'RawBufferFrom' ||
-            operation._tag === 'RawBufferCount' ||
-            operation._tag === 'RawBufferSlot' ||
-            operation._tag === 'RawBufferRead' ||
-            operation._tag === 'RawBufferView' ||
-            operation._tag === 'RawBufferCopy' ||
-            operation._tag === 'RawBufferFill' ||
-            operation._tag === 'SlotWrite' ||
-            operation._tag === 'SlotTake' ||
-            operation._tag === 'SlotCopy' ||
-            operation._tag === 'SlotDrop' ||
-            (operation._tag === 'CloseEffectEntry' &&
-              operation.failures.some((failure) => Ownership.cleanupReclaims(failure.cleanup))) ||
-            // A witness-dispatched allocation can arrive without any local Allocate operation,
-            // and its cleanup still calls the release shim — at any nesting depth of the plan.
-            (operation._tag === 'Drop' && Ownership.cleanupReclaims(operation.cleanup)),
-        ),
-      )
+    const needsAllocation = program.functions.some((fn) =>
+      Mir.operations(fn).some(
+        (operation) =>
+          operation._tag === 'Allocate' ||
+          operation._tag === 'RawBufferFrom' ||
+          operation._tag === 'RawBufferCount' ||
+          operation._tag === 'RawBufferSlot' ||
+          operation._tag === 'RawBufferRead' ||
+          operation._tag === 'RawBufferView' ||
+          operation._tag === 'RawBufferCopy' ||
+          operation._tag === 'RawBufferFill' ||
+          operation._tag === 'SlotWrite' ||
+          operation._tag === 'SlotTake' ||
+          operation._tag === 'SlotCopy' ||
+          operation._tag === 'SlotDrop' ||
+          (operation._tag === 'CloseEffectEntry' &&
+            operation.failures.some((failure) => Ownership.cleanupReclaims(failure.cleanup))) ||
+          // A witness-dispatched allocation can arrive without any local Allocate operation,
+          // and its cleanup still calls the release shim — at any nesting depth of the plan.
+          (operation._tag === 'Drop' && Ownership.cleanupReclaims(operation.cleanup)),
+      ),
+    )
     const malloc =
       needsAllocation && usizeType !== undefined
         ? yield* FunctionActor.declare(
@@ -1178,6 +1181,23 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       ? yield* FunctionActor.declare(
           builder,
           'free',
+          yield* LlvmType.functionType(builder, voidType ?? (yield* LlvmType.voidType(builder)), [
+            pointer,
+          ]),
+        )
+      : undefined
+    const coroutineFramePush =
+      suspensionEnabled && usizeType !== undefined
+        ? yield* FunctionActor.declare(
+            builder,
+            CoroutineRuntime.pushSymbol,
+            yield* LlvmType.functionType(builder, pointer, [usizeType, usizeType]),
+          )
+        : undefined
+    const coroutineFramePop = suspensionEnabled
+      ? yield* FunctionActor.declare(
+          builder,
+          CoroutineRuntime.popSymbol,
           yield* LlvmType.functionType(builder, voidType ?? (yield* LlvmType.voidType(builder)), [
             pointer,
           ]),
@@ -1328,11 +1348,6 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
     const resumeThunkType = suspensionEnabled
       ? yield* LlvmType.functionType(builder, i32, [pointer, pointer])
       : undefined
-    const reclaimThunkType = suspensionEnabled
-      ? yield* LlvmType.functionType(builder, voidType ?? (yield* LlvmType.voidType(builder)), [
-          pointer,
-        ])
-      : undefined
     const originThunks = new Map<
       string,
       {
@@ -1345,10 +1360,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       string,
       {
         readonly handle: FunctionActor.Function
-        readonly reclaim: FunctionActor.Function
         readonly region: Mir.RunSuspendableEffectRegion
         readonly owner: (typeof declared)[number]
-        readonly layout: Mir.ContinuationTargetLayout
+        readonly frame: Mir.CoroutineFrameTargetLayout
+        readonly layout: Mir.CoroutineFrameTargetStateLayout
       }
     >()
     for (const owner of declared) {
@@ -1371,28 +1386,26 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           )
           continue
         }
-        const descriptor = region.relay.continuation
+        const descriptor = region.relay.state
         if (descriptor === undefined) continue
-        const layout = program.continuations?.entries.find(
-          (candidate) => suspensionPointKey(candidate.point) === key,
+        const frame = program.coroutineFrames?.entries.find(
+          (candidate) =>
+            Instances.keyText(candidate.function) === Instances.keyText(owner.fn.instance),
         )
-        if (layout === undefined || resumeThunkType === undefined || reclaimThunkType === undefined)
-          throw new RangeError('LLVM continuation lost its physical layout or thunk type')
+        const layout = CoroutineFrame.stateLayout(program, region.point)
+        if (frame === undefined || layout === undefined || resumeThunkType === undefined)
+          throw new RangeError('LLVM coroutine frame lost its physical layout or thunk type')
         resumeThunks.set(
           key,
           Object.freeze({
             owner,
             region,
+            frame,
             layout,
             handle: yield* FunctionActor.declare(
               builder,
               `silk_suspend_resume_${suffix}`,
               resumeThunkType,
-            ),
-            reclaim: yield* FunctionActor.declare(
-              builder,
-              `silk_suspend_reclaim_${suffix}`,
-              reclaimThunkType,
             ),
           }),
         )
@@ -1504,9 +1517,33 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               ),
             )
             .map((resume, ordinal) => Object.freeze({ ...resume, ordinal: ordinal + 1 }))
+          const coroutineFrame = program.coroutineFrames?.entries.find(
+            (candidate) =>
+              Instances.keyText(candidate.function) === Instances.keyText(entry.fn.instance),
+          )
           const dispatchBlock = entry.suspendable
             ? yield* LlvmBlock.make(body, 'suspend_dispatch')
             : undefined
+          const frameReuseBlock =
+            entry.suspendable && coroutineFrame !== undefined
+              ? yield* LlvmBlock.make(body, 'suspend_invocation_frame_reuse')
+              : undefined
+          const frameAllocateBlock =
+            entry.suspendable && coroutineFrame !== undefined
+              ? yield* LlvmBlock.make(body, 'suspend_invocation_frame_push')
+              : undefined
+          const frameAcquiredBlock =
+            entry.suspendable && coroutineFrame !== undefined
+              ? yield* LlvmBlock.make(body, 'suspend_invocation_frame_acquired')
+              : undefined
+          const frameTrapBlock =
+            entry.suspendable && coroutineFrame !== undefined
+              ? yield* LlvmBlock.make(body, 'suspend_invocation_frame_trap')
+              : undefined
+          const framePushedBlock =
+            entry.suspendable && coroutineFrame !== undefined
+              ? yield* LlvmBlock.make(body, 'suspend_invocation_frame_pushed')
+              : undefined
           const blocks = new Map<number, LlvmBlock.Block>()
           for (const block of entry.linear) {
             blocks.set(
@@ -1525,6 +1562,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               ),
             ),
           )
+          const invocationFrameStorage =
+            entry.suspendable && coroutineFrame !== undefined
+              ? yield* FunctionBody.alloca(body, pointer, 'suspend_invocation_frame_slot')
+              : undefined
           let trapBlock: LlvmBlock.Block | undefined
           let checkOrdinal = 0
           const locals = new Map<number, ReadonlyArray<Value.Input>>()
@@ -1572,12 +1613,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             ...continuationLocals,
             ...runtimeContinuationDestinations,
             ...(entry.fn.suspension?.regions ?? []).flatMap((region) =>
-              region._tag === 'RunSuspendableEffectRegion' &&
-              region.relay.continuation !== undefined
+              region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
                 ? [
                     region.operation.destination.ordinal,
                     region.operation.outcome.ordinal,
-                    ...region.relay.continuation.layout.slots.map((slot) => slot.local.ordinal),
+                    ...region.relay.state.slots.map((slot) => slot.local.ordinal),
                   ]
                 : [],
             ),
@@ -1648,6 +1688,21 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 alignment: yield* Alignment.fromByteUnits(layout.alignment),
               }),
             )
+          }
+          const stableAddressFields = new Map<number, Mir.CoroutineFramePayloadField>()
+          if (coroutineFrame !== undefined) {
+            for (const state of coroutineFrame.states) {
+              for (const field of state.payload) {
+                if (!addressRoots.has(field.local.ordinal)) continue
+                const existing = stableAddressFields.get(field.local.ordinal)
+                if (existing !== undefined && existing.offset !== field.offset) {
+                  throw new RangeError(
+                    `LLVM coroutine frame moved borrowed root %${field.local.ordinal} between states`,
+                  )
+                }
+                stableAddressFields.set(field.local.ordinal, field)
+              }
+            }
           }
 
           /**
@@ -1802,6 +1857,140 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               entryBlock === undefined
             )
               throw new RangeError('LLVM suspension dispatch lost its entry state')
+            if (coroutineFrame !== undefined) {
+              if (
+                invocationFrameStorage === undefined ||
+                coroutineFramePush === undefined ||
+                usizeType === undefined ||
+                frameReuseBlock === undefined ||
+                frameAllocateBlock === undefined ||
+                frameAcquiredBlock === undefined ||
+                frameTrapBlock === undefined ||
+                framePushedBlock === undefined
+              )
+                throw new RangeError('LLVM coroutine-frame stack lost private storage support')
+              const resumeAddress = yield* FunctionBody.cast(
+                body,
+                'ptrtoint',
+                resumeFrame,
+                usizeType,
+                'suspend_resume_frame_address',
+              )
+              yield* FunctionBody.conditionalBranch(
+                body,
+                yield* FunctionBody.integerCompare(
+                  body,
+                  'ne',
+                  resumeAddress,
+                  yield* Constant.integerUnsigned(builder, usizeType, 0n),
+                  'suspend_has_reusable_frame',
+                ),
+                frameReuseBlock,
+                frameAllocateBlock,
+              )
+              yield* LlvmBlock.setInsertionPoint(body, frameReuseBlock)
+              yield* FunctionBody.store(body, resumeFrame, invocationFrameStorage)
+              yield* FunctionBody.branch(body, frameAcquiredBlock)
+              yield* LlvmBlock.setInsertionPoint(body, frameAllocateBlock)
+              const allocatedFrame = yield* FunctionBody.callDirect(
+                body,
+                coroutineFramePush,
+                [
+                  yield* Constant.integerUnsigned(
+                    builder,
+                    usizeType,
+                    BigInt(Math.max(coroutineFrame.size, 1)),
+                  ),
+                  yield* Constant.integerUnsigned(
+                    builder,
+                    usizeType,
+                    BigInt(Math.max(coroutineFrame.alignment, 1)),
+                  ),
+                ],
+                'suspend_invocation_frame',
+              )
+              if (allocatedFrame === undefined)
+                throw new RangeError('LLVM private frame allocation returned no pointer')
+              const exhausted = yield* FunctionBody.integerCompare(
+                body,
+                'eq',
+                yield* FunctionBody.cast(
+                  body,
+                  'ptrtoint',
+                  allocatedFrame,
+                  usizeType,
+                  'suspend_invocation_frame_address',
+                ),
+                yield* Constant.integerUnsigned(builder, usizeType, 0n),
+                'suspend_invocation_frame_exhausted',
+              )
+              yield* FunctionBody.conditionalBranch(
+                body,
+                exhausted,
+                frameTrapBlock,
+                framePushedBlock,
+              )
+              yield* LlvmBlock.setInsertionPoint(body, frameTrapBlock)
+              yield* Intrinsic.call(body, 'trap', [], [])
+              yield* FunctionBody.unreachable(body)
+              yield* LlvmBlock.setInsertionPoint(body, framePushedBlock)
+              yield* FunctionBody.store(body, allocatedFrame, invocationFrameStorage)
+              for (const [root, field] of stableAddressFields) {
+                if (root >= entry.fn.parameterCount) continue
+                const logicalType = entry.fn.localTypes.at(root)
+                const values = locals.get(root)
+                if (logicalType === undefined || values === undefined)
+                  throw new RangeError(`LLVM coroutine frame lost parameter root %${root}`)
+                const base = yield* FunctionBody.getElementPtr(
+                  body,
+                  i8,
+                  allocatedFrame,
+                  [yield* Constant.integerUnsigned(builder, i32, BigInt(field.offset))],
+                  `suspend_parameter_root${root}`,
+                )
+                for (const [ordinal, lane] of valueLanesFor(logicalType).entries()) {
+                  const offset = Layout.laneOffset(
+                    program.layout,
+                    Mir.semanticType(logicalType),
+                    lane.path,
+                  )
+                  const value = values.at(ordinal)
+                  if (offset === undefined || value === undefined)
+                    throw new RangeError(`LLVM coroutine parameter root %${root} lost a lane`)
+                  yield* FunctionBody.store(
+                    body,
+                    value,
+                    yield* FunctionBody.getElementPtr(
+                      body,
+                      i8,
+                      base,
+                      [yield* Constant.integerUnsigned(builder, i32, BigInt(offset))],
+                      `suspend_parameter_root${root}_${ordinal}`,
+                    ),
+                  )
+                }
+              }
+              yield* FunctionBody.branch(body, frameAcquiredBlock)
+              yield* LlvmBlock.setInsertionPoint(body, frameAcquiredBlock)
+              const invocationFrame = yield* FunctionBody.load(
+                body,
+                pointer,
+                invocationFrameStorage,
+                'suspend_selected_invocation_frame',
+              )
+              for (const [root, field] of stableAddressFields) {
+                addressStorage.set(
+                  root,
+                  yield* FunctionBody.getElementPtr(
+                    body,
+                    i8,
+                    invocationFrame,
+                    [yield* Constant.integerUnsigned(builder, i32, BigInt(field.offset))],
+                    `suspend_stable_root${root}`,
+                  ),
+                )
+              }
+            }
             const dispatch = yield* FunctionBody.switchTerminator(body, resumePath, entryBlock)
             for (const resume of resumeControls) {
               const target = resumeBlocks.get(suspensionPointKey(resume.region.point))
@@ -1985,6 +2174,23 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           ) {
             if (!entry.suspendable)
               throw new RangeError('LLVM synchronous function cannot return a suspension step')
+            if (status === 0n && invocationFrameStorage !== undefined) {
+              if (coroutineFramePop === undefined)
+                throw new RangeError('LLVM suspension step lost private frame release')
+              yield* FunctionBody.callDirect(
+                body,
+                coroutineFramePop,
+                [
+                  yield* FunctionBody.load(
+                    body,
+                    pointer,
+                    invocationFrameStorage,
+                    `${tag}_invocation_frame`,
+                  ),
+                ],
+                `${tag}_release_invocation_frame`,
+              )
+            }
             const padded = [...values]
             const resultLanes = lanesFor(entry.fn.result)
             while (padded.length < resultLanes.length) {
@@ -2065,131 +2271,18 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               transferred,
             )
             yield* LlvmBlock.setInsertionPoint(body, transferred)
-            const continuation = suspension.relay.continuation
+            const continuation = suspension.relay.state
             if (continuation !== undefined) {
               const generated = resumeThunks.get(suspensionPointKey(suspension.point))
-              if (generated === undefined || usizeType === undefined)
-                throw new RangeError('LLVM continuation relay lost its native frame plan')
-              const allocator = suspension.runner.providers.find(
-                (provider) => provider.purposes.length === 2 && provider.argument !== undefined,
-              )
-              const implementation =
-                allocator?.witness?._tag === 'SourceConformanceWitness'
-                  ? allocator.witness.operations.find((operation) => operation.name === 'allocate')
-                      ?.implementation
-                  : undefined
-              const allocatorConstructor =
-                implementation === undefined || allocator?.argument === undefined
-                  ? undefined
-                  : declared.find((candidate) => {
-                      const parameter = candidate.fn.localTypes.at(0)
-                      return (
-                        candidate.fn.id.module === implementation.module &&
-                        candidate.fn.id.name === implementation.name &&
-                        parameter?._tag === 'Reference' &&
-                        SilkType.equals(parameter.type.target, allocator.providerType) &&
-                        candidate.fn.result._tag === 'EffectValue'
-                      )
-                    })
-              const allocationEffect =
-                allocatorConstructor === undefined || allocator?.argument === undefined
-                  ? undefined
-                  : yield* callSynchronousValues(
-                      allocatorConstructor,
-                      [
-                        readLocal(allocator.argument).at(allocator.argumentLane ?? 0) ??
-                          (() => {
-                            throw new RangeError(
-                              'LLVM continuation allocator projection has no runtime lane',
-                            )
-                          })(),
-                        yield* Constant.integerUnsigned(
-                          builder,
-                          usizeType,
-                          BigInt(generated.layout.size),
-                        ),
-                        yield* Constant.integerUnsigned(
-                          builder,
-                          usizeType,
-                          BigInt(generated.layout.alignment),
-                        ),
-                      ],
-                      `${name}_allocator_effect`,
-                    )
-              const effectType = allocatorConstructor?.fn.result
-              const runnerDeclaration =
-                effectType?._tag === 'EffectValue'
-                  ? Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site)
-                  : undefined
-              const allocatorRunner =
-                runnerDeclaration === undefined || effectType?._tag !== 'EffectValue'
-                  ? undefined
-                  : declared.find((candidate) =>
-                      Mir.matchesInstance(
-                        candidate.fn,
-                        runnerDeclaration,
-                        effectType.environment.instance.typeArguments,
-                      ),
-                    )
-              if (
-                allocator === undefined ||
-                allocatorConstructor === undefined ||
-                allocationEffect === undefined ||
-                allocatorRunner === undefined ||
-                allocatorRunner.suspendable
-              ) {
-                throw new RangeError(
-                  `LLVM continuation allocator did not resolve to a closed synchronous witness (function=${entry.fn.id.name}, allocator=${allocator !== undefined}, witness=${allocator?.witness?._tag ?? 'missing'}, implementation=${implementation?.name ?? 'missing'}, constructor=${allocatorConstructor?.fn.id.name ?? 'missing'}, effect=${allocationEffect !== undefined}, runner=${allocatorRunner?.fn.id.name ?? 'missing'}, suspendable=${allocatorRunner?.suspendable ?? 'missing'})`,
-                )
-              }
-              const allocation = yield* callSynchronousValues(
-                allocatorRunner,
-                allocationEffect,
-                `${name}_allocator_run`,
-              )
-              const tag = allocation.at(0)
-              const base = allocation.at(1)
-              const reclaimContext = allocation.at(5)
-              if (tag === undefined || base === undefined || reclaimContext === undefined)
-                throw new RangeError(
-                  'LLVM continuation allocator returned an incomplete Allocation',
-                )
-              const rejectedValue = yield* FunctionBody.integerCompare(
+              if (generated === undefined)
+                throw new RangeError('LLVM coroutine relay lost its native frame plan')
+              if (invocationFrameStorage === undefined)
+                throw new RangeError('LLVM coroutine relay lost its invocation frame')
+              const frame = yield* FunctionBody.load(
                 body,
-                'ne',
-                tag,
-                yield* Constant.integerSigned(builder, i32, 0n),
-                `${name}_frame_rejected_tag`,
-              )
-              const rejected = yield* LlvmBlock.make(body, `${name}_frame_rejected`)
-              const acquired = yield* LlvmBlock.make(body, `${name}_frame_acquired`)
-              yield* FunctionBody.conditionalBranch(body, rejectedValue, rejected, acquired)
-              yield* LlvmBlock.setInsertionPoint(body, rejected)
-              for (const release of continuation.allocationRefusal.releases) {
-                yield* dropThroughPlan(
-                  release.cleanup,
-                  readLocal(release.local),
-                  `${name}_refusal_release${release.local.ordinal}`,
-                )
-              }
-              const failure =
-                entry.fn.result._tag === 'EffectOutcome'
-                  ? SilkType.failureMembers(entry.fn.result.type).findIndex(
-                      (member) => member.module === 'silk/core' && member.name === 'OutOfMemory',
-                    )
-                  : -1
-              const refusal: Array<Value.Input> =
-                entry.fn.result._tag === 'EffectOutcome'
-                  ? [yield* Constant.integerSigned(builder, i32, BigInt(failure + 1))]
-                  : []
-              yield* returnStep(0n, Object.freeze(refusal), `${name}_refused`)
-              yield* LlvmBlock.setInsertionPoint(body, acquired)
-              const frame = yield* FunctionBody.cast(
-                body,
-                'inttoptr',
-                base,
                 pointer,
-                `${name}_frame`,
+                invocationFrameStorage,
+                `${name}_invocation_frame`,
               )
               const appendPointerPointer = yield* FunctionBody.getElementPtr(
                 body,
@@ -2228,25 +2321,6 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   yield* FunctionActor.global(builder, generated.handle),
                 ),
                 yield* pointerAt(program.layout.target.pointerSize, 'store_resume'),
-              )
-              yield* FunctionBody.store(
-                body,
-                yield* Constant.fromGlobal(
-                  builder,
-                  yield* FunctionActor.global(builder, generated.reclaim),
-                ),
-                yield* pointerAt(program.layout.target.pointerSize * 2, 'store_reclaim'),
-              )
-              yield* FunctionBody.store(
-                body,
-                yield* FunctionBody.cast(
-                  body,
-                  'inttoptr',
-                  reclaimContext,
-                  pointer,
-                  `${name}_reclaim_context`,
-                ),
-                yield* pointerAt(program.layout.target.pointerSize * 3, 'store_context'),
               )
               for (const field of generated.layout.payload) {
                 const values = readLocal(field.local)
@@ -2370,16 +2444,14 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           ) {
             const suspension = suspensionRegions.get(operation)
             const descriptor =
-              suspension?._tag === 'RunSuspendableEffectRegion'
-                ? suspension.relay.continuation
-                : undefined
+              suspension?._tag === 'RunSuspendableEffectRegion' ? suspension.relay.state : undefined
             if (descriptor === undefined) return completedValues
             if (transferPointer === undefined || resumeFrame === undefined)
-              throw new RangeError('LLVM continuation resume lost private arguments')
+              throw new RangeError('LLVM coroutine resume lost private arguments')
             const generated = resumeThunks.get(suspensionPointKey(descriptor.point))
             const resumeBlock = resumeBlocks.get(suspensionPointKey(descriptor.point))
             if (generated === undefined || resumeBlock === undefined)
-              throw new RangeError('LLVM continuation resume lost generated control')
+              throw new RangeError('LLVM coroutine resume lost generated control')
             yield* storeMutable(operation.outcome, completedValues)
             const following = yield* LlvmBlock.make(body, `${name}_joined`)
             yield* FunctionBody.branch(body, following)
@@ -2397,7 +2469,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               const type = entry.fn.localTypes.at(field.local.ordinal)
               const storage = mutableStorage.get(field.local.ordinal)
               if (type === undefined || storage === undefined)
-                throw new RangeError('LLVM continuation payload has no mutable restore storage')
+                throw new RangeError('LLVM coroutine payload has no mutable restore storage')
               const packed = packedLanes(lanesFor(type), field.offset)
               for (const [ordinal, lane] of packed.entries.entries()) {
                 const target = storage.at(ordinal)
@@ -2416,7 +2488,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             }
             const outcomeStorage = mutableStorage.get(operation.outcome.ordinal)
             if (outcomeStorage === undefined)
-              throw new RangeError('LLVM continuation outcome has no restore storage')
+              throw new RangeError('LLVM coroutine outcome has no restore storage')
             const outcomePacked = packedLanes(lanesFor(operation.outcomeType), transferResultOffset)
             for (const [ordinal, lane] of outcomePacked.entries.entries()) {
               const target = outcomeStorage.at(ordinal)
@@ -8205,42 +8277,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               yield* bytePointer(body, transfer, lane.offset, `resume_result${laneOrdinal}_ptr`),
             )
           }
-          if (free === undefined) throw new RangeError('LLVM resume thunk lost reclaim operation')
-          const reclaimContext = yield* FunctionBody.load(
-            body,
-            pointer,
-            yield* bytePointer(
-              body,
-              frame,
-              program.layout.target.pointerSize * 3,
-              'resume_reclaim_context_ptr',
-            ),
-            'resume_reclaim_context',
-          )
-          yield* FunctionBody.callDirect(body, free, [reclaimContext])
           yield* FunctionBody.returnValue(body, status)
-        }),
-      )
-      yield* FunctionActor.buildBody(
-        builder,
-        resume.reclaim,
-        Effect.fnUntraced(function* (body) {
-          yield* LlvmBlock.make(body, 'entry')
-          const frame = yield* Value.argument(body, 0)
-          if (free === undefined) throw new RangeError('LLVM reclaim thunk lost reclaim operation')
-          const reclaimContext = yield* FunctionBody.load(
-            body,
-            pointer,
-            yield* bytePointer(
-              body,
-              frame,
-              program.layout.target.pointerSize * 3,
-              'reclaim_context_ptr',
-            ),
-            'reclaim_context',
-          )
-          yield* FunctionBody.callDirect(body, free, [reclaimContext])
-          yield* FunctionBody.returnVoid(body)
         }),
       )
     }
@@ -8402,6 +8439,13 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             'suspend_next_parent',
           )
           yield* FunctionBody.store(body, nextParent, parentPointer)
+          const appendPointerPointer = yield* bytePointer(
+            body,
+            transfer,
+            program.layout.target.pointerSize * 2,
+            'suspend_append_ptr_ptr',
+          )
+          yield* FunctionBody.store(body, parentPointer, appendPointerPointer)
           const resumeFunction = yield* FunctionBody.load(
             body,
             pointer,
@@ -8481,9 +8525,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           symbol: entry.publicSymbol,
         }),
       ),
-      nativeRuntimeSymbols: Object.freeze(
-        [...osRuntimes.values()].map((runtime) => runtime.symbol),
-      ),
+      nativeRuntimeSymbols: Object.freeze([
+        ...[...osRuntimes.values()].map((runtime) => runtime.symbol),
+        ...(suspensionEnabled ? CoroutineRuntime.symbols : []),
+      ]),
       ir: yield* IrText.render(builder),
       bitcode: yield* Bitcode.encode(builder),
     }

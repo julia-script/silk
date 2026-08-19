@@ -659,12 +659,8 @@ try {
       const loweredWasm = Analysis.loweredMir(wasm)
       const runners = runnerClassifications(loweredWasm)
       const mirOperationTags = countTags(loweredWasm.functions.flatMap(Mir.operations))
-      const continuationDescriptors = loweredWasm.functions.flatMap((fn) =>
-        (fn.suspension?.regions ?? []).flatMap((region) =>
-          region._tag === 'RunSuspendableEffectRegion' && region.relay.continuation !== undefined
-            ? [region.relay.continuation]
-            : [],
-        ),
+      const coroutineFrameDescriptors = loweredWasm.functions.filter(
+        (fn) => fn.suspension?.frame !== undefined,
       ).length
       const applicability = directStaticCases.has(sample.id)
         ? 'DirectStaticRun'
@@ -708,7 +704,7 @@ try {
             executions: Analysis.suspendableExecutionsOf(wasm).map(identity),
             effects: Analysis.suspendableEffectsOf(wasm),
           }),
-          continuationDescriptors,
+          coroutineFrameDescriptors,
           pipeTokens: Object.freeze({
             hir: occurrences(hir, /\|>/g),
             mir: occurrences(mir, /\|>/g),

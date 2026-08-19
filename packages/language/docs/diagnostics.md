@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 126 |
+| `SEM` | Semantic | 125 |
 | `OWN` | Ownership | 15 |
 | `LAY` | Layout | 1 |
 
-There are 157 codes in total.
+There are 156 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -155,7 +155,6 @@ There are 157 codes in total.
 | `SEM0099` | Stable code for one named type parameter left undetermined by an explicit prefix and the arguments. | `Cannot infer type argument <parameter> of <target> from supplied values` |
 | `SEM0100` | Stable code for an explicit type argument contradicting the type its value arguments imply. | `Type argument <parameter> of <target> is <written>, but the supplied values imply <implied>` |
 | `SEM0101` | Stable code for a bound operation whose selected witness has no lowering. | `<spelling> has no witness that can be lowered for <provider>` |
-| `SEM0102` | Stable code for selecting a suspending provider to allocate continuation storage. | `Allocator <provider> cannot provide continuation storage because <implementation> can suspend` |
 | `SEM0103` | Stable code for constructing an aggregate that stores a bare callable value. | `Cannot construct <aggregate>: <site> retains the static identity of <callable>, but represented callable storage has no supported runtime layout`<br>`Cannot construct <aggregate>: <site> would store the callable <callable>, whose environment layout depends on a hidden concrete identity that <aggregate> does not carry` |
 | `SEM0104` | Stable code for the first struct initializer that contradicts an inferred representation. | `Representation <parameter> was inferred as <expected>, but this initializer uses <actual>` |
 | `SEM0105` | Stable code for the first exact representation that diverges at a static value join. | `Cannot join <expected> with <actual>; consume each represented value inside its branch before joining` |

@@ -2479,6 +2479,10 @@ export const specializeFailureRow = (
       if (replacement === undefined) return Object.freeze({ _tag: 'Residual', member })
       if (isTypeArgument(replacement) && isNominal(replacement))
         return Object.freeze({ _tag: 'Concrete', member: replacement })
+      if (isTypeArgument(replacement) && isUnion(replacement))
+        return Object.freeze({ _tag: 'ConcreteRow', members: replacement.members })
+      if (isTypeArgument(replacement) && isNever(replacement))
+        return Object.freeze({ _tag: 'ConcreteRow', members: Object.freeze([]) })
       if (isTypeArgument(replacement) && isParameter(replacement) && replacement.kind === 'Value')
         return Object.freeze({
           _tag: 'Residual',
@@ -2931,6 +2935,25 @@ const inferFailureRowArgument = (
   if (genericArgumentKey(pattern) === genericArgumentKey(actual)) return true
   const substitutedPattern = failureRowArgumentFromRow(substituteFailureRow(pattern.row, inferred))
   if (genericArgumentKey(substitutedPattern) === genericArgumentKey(actual)) return true
+  if (pattern.row.expression._tag === 'Singleton') {
+    if (actual.row.expression._tag === 'Singleton')
+      return bindGenericArgument(
+        pattern.row.expression.member.parameter,
+        actual.row.expression.member.parameter,
+        inferred,
+        context,
+      )
+    const concrete = RowAlgebra.concretize(failureRowPolicy(), actual.row)
+    if (concrete._tag !== 'Concrete') return false
+    const normalized = union(concrete.row.members)
+    if (normalized._tag !== 'Normalized') return false
+    return bindGenericArgument(
+      pattern.row.expression.member.parameter,
+      normalized.type,
+      inferred,
+      context,
+    )
+  }
   if (pattern.row.expression._tag === 'RowParameter') {
     // Occurs check: E may never bind to a row that still mentions E.
     if (
@@ -2945,7 +2968,6 @@ const inferFailureRowArgument = (
   }
   if (
     pattern.row.expression._tag === 'Without' ||
-    pattern.row.expression._tag === 'Singleton' ||
     (pattern.row.expression._tag === 'Union' &&
       pattern.row.expression.operands.some(
         (operand) => operand._tag === 'Without' || operand._tag === 'Singleton',

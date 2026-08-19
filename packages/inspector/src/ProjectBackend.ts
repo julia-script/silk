@@ -1150,22 +1150,14 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `release allocation #${event.ticket}`
     case 'SuspensionOrigin':
       return `originate suspension ${event.point.ordinal}`
-    case 'ContinuationRequest':
-      return `request continuation ${event.ordinal ?? '?'} · ${event.bytes ?? '?'} bytes · align ${event.alignment ?? '?'}`
-    case 'ContinuationReject':
-      return `reject continuation ${event.ordinal ?? '?'}`
-    case 'ContinuationAcquire':
-      return `acquire continuation #${event.ticket ?? '?'} · ordinal ${event.ordinal ?? '?'}`
-    case 'ContinuationLoanEnd':
-      return `end continuation allocator loan · ordinal ${event.ordinal ?? '?'}`
-    case 'ContinuationInitialize':
-      return `initialize continuation #${event.ticket ?? '?'} · ordinal ${event.ordinal ?? '?'}`
-    case 'ContinuationPublish':
-      return `publish continuation #${event.ticket ?? '?'} · ordinal ${event.ordinal ?? '?'}`
-    case 'ContinuationResume':
-      return `resume continuation #${event.ticket ?? '?'} · ${event.outcome?.toLowerCase() ?? '?'}`
-    case 'ContinuationRelease':
-      return `release continuation #${event.ticket ?? '?'}`
+    case 'CoroutineFramePush':
+      return `push coroutine frame #${event.ticket ?? '?'} · state ${event.point.ordinal}`
+    case 'CoroutineFrameStateTransition':
+      return `transition coroutine frame #${event.ticket ?? '?'} · state ${event.point.ordinal}`
+    case 'CoroutineFrameResume':
+      return `resume coroutine frame #${event.ticket ?? '?'} · ${event.outcome?.toLowerCase() ?? '?'}`
+    case 'CoroutineFrameComplete':
+      return `complete coroutine frame #${event.ticket ?? '?'}`
     case 'SuspensionChildStart':
       return `start suspended child · point ${event.point.ordinal}`
     case 'SuspensionChildComplete':
@@ -1236,14 +1228,10 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'SlotDrop':
     case 'AllocationRelease':
     case 'SuspensionOrigin':
-    case 'ContinuationRequest':
-    case 'ContinuationReject':
-    case 'ContinuationAcquire':
-    case 'ContinuationLoanEnd':
-    case 'ContinuationInitialize':
-    case 'ContinuationPublish':
-    case 'ContinuationResume':
-    case 'ContinuationRelease':
+    case 'CoroutineFramePush':
+    case 'CoroutineFrameStateTransition':
+    case 'CoroutineFrameResume':
+    case 'CoroutineFrameComplete':
     case 'SuspensionChildStart':
     case 'SuspensionChildComplete':
     case 'HostWrite':

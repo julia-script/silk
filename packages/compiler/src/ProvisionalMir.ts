@@ -110,7 +110,7 @@ export type Outcome =
       readonly deferred: Runner
       /** An unpublished transfer is created; this does not start the deferred runner. */
       readonly transfer: {
-        readonly _tag: 'OriginateUnpublishedTransfer'
+        readonly _tag: 'OriginateTransfer'
       }
       readonly span: SourceSpan.SourceSpan
     }
@@ -269,7 +269,7 @@ const providedClassification = (
   // suspension region, so it cannot contribute to the collection above. Its generated runner
   // still belongs to the exact source-function instance and must inherit that proven
   // classification; leaving it Unknown makes backends invent suspension control for a contract
-  // that has no continuation allocator requirement.
+  // that contributes no source allocation requirement.
   if (!instance.contractRow.some((entry) => entry.startsWith('witness-effect-site:')))
     return undefined
   const effectMarker = baseName.lastIndexOf('$effect$')
@@ -952,7 +952,7 @@ const controlsOf = (
               outcome: Object.freeze({
                 _tag: 'SuspendEffect',
                 deferred: runnerOf(deferred, context),
-                transfer: Object.freeze({ _tag: 'OriginateUnpublishedTransfer' }),
+                transfer: Object.freeze({ _tag: 'OriginateTransfer' }),
                 span: expression.span,
               }),
             }),
