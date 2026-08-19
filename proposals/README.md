@@ -33,3 +33,6 @@ SLP (direction and coherence)
 - [SLP-0007: Explicit unsafe contracts and sealed intrinsics](0007-explicit-unsafe-and-sealed-intrinsics/proposal.md)
   — Candidate; fixed direction for unsafe caller obligations, minimal compiler privilege, safe
   wrappers, undefined behavior, and reachable intrinsic target availability.
+- [SLP-0008: Layered toolchain and ordinary standard library](0008-layered-toolchain-and-standard-library/proposal.md)
+  — Candidate; fixed direction for the language/library/runtime boundary, portable distribution
+  baseline, target providers, pay-for-use, and toolchain compatibility.

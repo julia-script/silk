@@ -90,11 +90,13 @@ not belong in a language rule unless a program can observe them.
 - [Unsafe code, intrinsics, and targets](unsafe-intrinsics-and-targets.md) — lexical unsafe
   acknowledgement, caller-owned unsafe contracts, sealed compiler primitives, and reachable target
   availability. Rules are confirmed.
+- [Runtime and standard-library boundary](runtime-and-standard-library.md) — language versus
+  library semantics, ordinary portable and target-provider source, private runtime support,
+  distribution contents, and pay-for-use. Initial rules are under review.
 
 The following domains will receive pages only when their first rules are ready:
 
 - remaining syntax beyond expressions;
-- standard-library boundaries.
 
 Tutorials, task-oriented guides, design rationale, compiler architecture, and standard-library API
 documentation remain separate from this reference.
