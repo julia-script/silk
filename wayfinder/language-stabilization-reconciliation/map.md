@@ -59,6 +59,12 @@ handoffs.
   paths, access-bearing requirement selectors, legacy entry rules, construction-identity joins,
   and incomplete failure observability. Eight ordered implementation handoffs replace symptom-level
   fixes; issue 226 belongs to the first frontend-soundness handoff.
+- [Ownership, borrowing, captures, and callable audit](issues/02-ownership-borrowing-and-callables.md)
+  — 36 of 53 scoped rules are implemented, with the remaining differences concentrated in one
+  sealed Copy property, general owner/place identities for temporary and local borrows, generalized
+  trailing sections, shared last-use logic for delayed values, ordinary aggregate treatment of
+  represented executable fields, and lifecycle work already owned by the Effect, termination, and
+  suspension handoffs.
 
 ## Not yet specified
 
