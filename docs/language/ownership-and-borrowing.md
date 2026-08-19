@@ -1714,8 +1714,9 @@ not transferred into the result or failure payload.
 **Boundary:** A typed failure cleans exited execution regions before propagation or recovery under
 FAIL-006. Retry cleans the completed attempt's per-run locals before starting another attempt, while
 retaining only the captures that its reusable Effect contract permits. Suspension transfers each
-live value into exactly one continuation owner and applies the same cleanup rules when that
-continuation completes.
+live value into exactly one later-execution owner and applies the same cleanup rules when execution
+resumes and completes, as defined by the
+[suspension ownership rules](effect-suspension.md#ownership-and-lifecycle).
 
 An explicit finalization Effect such as `ensuring` is an ordinary composed operation. It runs on the
 structured success and typed-failure paths promised by its contract, not merely because a hidden

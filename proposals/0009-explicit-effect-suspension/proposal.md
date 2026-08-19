@@ -2,7 +2,7 @@
 
 SLP: 0009
 Status: Candidate
-Revision: 7
+Revision: 8
 Author: Julia Ortiz
 Created: 2026-08-19
 Updated: 2026-08-19
@@ -15,7 +15,7 @@ Supersedes: —
 Superseded by: —
 Revisit when: runtime parking, async execution, or structured concurrency becomes a priority
 Resolution: Accepted direction: SUSP-001–020
-OpenSpec handoff: Existing implementation predates this SLP; reconcile after Candidate acceptance.
+OpenSpec handoff: `align-effect-suspension-coroutine-storage`
 
 ## Summary
 
@@ -222,7 +222,7 @@ design drift this proposal corrects.
 The stable function instead has this contract:
 
 ```silk,ignore
-effect fn suspend<A, !E, ?R>(
+effect fn suspend<A, E, ?R>(
   deferred: once Effect<A ! E ? R>
 ) -> A ! E ? R
 ```
@@ -279,7 +279,7 @@ planning remains a separate OpenSpec step.
 - **SUSP-004 — Deliberate exclusions:** Ordinary function recursion, Effect recursion whose cycle
   does not cross the boundary, recursive `Drop`, and arbitrary recursive data traversal receive no
   stack-safety guarantee from this feature.
-- **SUSP-005 — Channel preservation:** `Effect.suspend<A, !E, ?R>` preserves exactly `A`, `E`, and
+- **SUSP-005 — Channel preservation:** `Effect.suspend<A, E, ?R>` preserves exactly `A`, `E`, and
   `R`. It adds no storage failure or allocator service to the public Effect contract.
 - **SUSP-006 — Execution-resource exhaustion:** One invocation's coroutine-frame size is known
   statically, but dynamic recursion depth is not. Exhausting the compiler-owned execution stack is a
@@ -564,3 +564,4 @@ change rather than an assumption that the current artifacts are authoritative.
 | 5 | 2026-08-19 | Author confirmed SUSP-011–015: ordinary affine and borrow rules across stable frame states, complete ownership transitions, exact structured cleanup, execution-owned unobservable frame placement, and no allocator-specific suspension restriction. |
 | 6 | 2026-08-19 | Author confirmed SUSP-016–020: suspended invocations retain logical `CallDepth`, engines preserve typed and ownership parity, non-suspending graphs pay no coroutine cost, uncovered recursion remains valid with optional LSP guidance, and future runtime parking remains separate. |
 | 7 | 2026-08-19 | Promoted the fully reviewed SUSP-001–020 direction to Candidate with the author's explicit acceptance. |
+| 8 | 2026-08-19 | Corrected the stable generic spelling to use ordinary failure type parameter `E`; the current widened signature retains obsolete `!E` only as evidence of implementation drift. This aligns suspension with the confirmed Effect contract without changing SUSP-001–020 semantics. |

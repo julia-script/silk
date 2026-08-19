@@ -8,9 +8,20 @@ module-local function, not an executable entry point.
 
 **Status:** Confirmed
 
-The executable entry must be declared with `pub`. The two supported shapes are a zero-argument
-ordinary `main` returning `i32`, or a zero-argument effect `main` succeeding with `()` and carrying
-no unresolved requirements. The effect entry may omit its unit result annotation.
+The executable entry must be declared with `pub`. The supported shapes are a zero-argument ordinary
+`main` explicitly returning `()` or `i32`, or a zero-argument effect `main` succeeding with `()` and
+carrying no unresolved requirements. Only the effect entry may omit its unit result annotation.
+
+```silk
+pub fn main() -> () {
+}
+```
+
+```silk
+pub fn main() -> i32 {
+  return 0
+}
+```
 
 ```silk
 pub effect fn main() {
@@ -28,7 +39,9 @@ effect fn main() {
 ```
 
 **Diagnostics:** A private root `main` must produce an entry diagnostic that identifies the missing
-`pub` visibility at the declaration. No stable diagnostic code is currently assigned.
+`pub` visibility at the declaration. An ordinary `main` without an explicit result receives the
+ordinary missing-result diagnostic rather than entry-specific unit inference. No stable diagnostic
+code is currently assigned.
 
 **Current compiler:** The compiler currently reports:
 
@@ -48,7 +61,12 @@ diagnostic should say that `main` must be public, or that the root module has no
 
 **Status:** Confirmed
 
-The two entry forms are:
+The three entry forms are:
+
+```silk
+pub fn main() -> () {
+}
+```
 
 ```silk
 pub fn main() -> i32 {
@@ -61,19 +79,20 @@ pub effect fn main() {
 }
 ```
 
-Both forms take no parameters and declare no generic parameters. The compiler recognizes an
+All three forms take no parameters and declare no generic parameters. The compiler recognizes an
 `effect fn main`, constructs its Effect, and executes it exactly once through the generated program
 entry boundary. Source does not call `run main()`. An omitted result annotation on the effect entry
 means `()`, so the explicit spelling `pub effect fn main() -> ()` is equivalent but unnecessary.
 
 **Boundary:** Entry kind follows the declaration, not its return type. An ordinary `fn main` must
-return `i32`; returning `Effect<()>` does not make it an effect entry. An `effect fn main` must
-succeed with `()`.
+explicitly return `()` or `i32`; returning `Effect<()>` does not make it an effect entry. An
+`effect fn main` must succeed with `()`.
 
-**Diagnostics:** An invalid ordinary result must identify the required `i32` entry result. An
-invalid effect success type must identify the required `()` success type. Stable source diagnostic
-codes for invalid entry shapes are not yet assigned. Omitting the unit result is valid and must not
-produce an entry diagnostic.
+**Diagnostics:** An invalid ordinary result must identify the allowed `()` and `i32` entry results.
+An invalid effect success type must identify the required `()` success type. Stable source
+diagnostic codes for invalid entry shapes are not yet assigned. Omitting the effect entry's unit
+result is valid and must not produce an entry diagnostic; omitting an ordinary entry result remains
+invalid.
 
 **Evidence:** [entry-instance requirements](../../openspec/specs/bootstrap-instances/spec.md),
 [effect-entry tests](../../packages/compiler/test/EffectEntry.test.ts).
@@ -109,8 +128,9 @@ concrete, every possible payload is owned and detached from lexical borrows and 
 unresolved generic remains. Requirement closure remains the separate ENTRY-004 boundary.
 
 **Diagnostics:** A valid concrete failure type receives no entry-specific diagnostic. Invalid
-failure types and payloads receive the ordinary typed-failure diagnostics at their source. The exact
-process-report rendering remains to be stabilized.
+failure types and payloads receive the ordinary typed-failure diagnostics at their source. Exact
+process-report rules are defined in
+[program termination and reporting](program-termination-and-reporting.md).
 
 **Current compiler:** Disputed. `silk check` currently accepts the example above, but `silk build`
 rejects it during entry discovery with:
@@ -182,10 +202,44 @@ the current language.
 **Evidence:** [entry-instance requirements](../../openspec/specs/bootstrap-instances/spec.md),
 [effect-entry provision tests](../../packages/compiler/test/EffectEntry.test.ts).
 
-## Pending rules
+## ENTRY-005 — An ordinary entry explicitly returns `()` or `i32`
 
-Later passes will cover exact process-report rendering, ordinary-entry exit semantics, and the
-stable diagnostic assigned to each invalid entry shape. Removing the obsolete `Report` marker from
+**Status:** Confirmed
+
+An ordinary entry has one of two valid result shapes: `pub fn main() -> ()` or
+`pub fn main() -> i32`. The declaration kind and explicit result annotation determine the entry
+shape; the integer does not turn the function into an Effect entry.
+
+```silk
+pub fn main() -> () {
+}
+```
+
+```silk
+pub fn main() -> i32 {
+  return 7
+}
+```
+
+The generated host outcomes for these shapes, including native and Wasm status behavior, are
+defined by [TERM-001](program-termination-and-reporting.md#term-001--an-ordinary-entry-explicitly-returns-unit-or-one-status-value).
+
+**Boundary:** The explicit return annotation is required in both ordinary forms. Supporting
+`pub fn main() {}` belongs to a future general return-omission decision rather than an entry-only
+exception.
+
+**Diagnostics:** Any ordinary entry result other than `()` or `i32` reports an invalid entry shape
+and names both permitted types. A missing ordinary result annotation receives the ordinary
+missing-result diagnostic.
+
+**Evidence:** [confirmed stabilization decision](README.md),
+[program-termination proposal](../../proposals/0011-program-termination-and-diagnostic-reports/proposal.md).
+
+## Implementation reconciliation
+
+Exact process-report behavior is defined in
+[program termination and reporting](program-termination-and-reporting.md). A later diagnostic pass
+will assign stable codes to invalid entry shapes. Removing the obsolete `Report` marker from
 the compiler, standard library, specifications, tests, and generated documentation belongs to the
 later implementation-reconciliation pass. Default entry providers require a separate language
 proposal before they can become current semantics.

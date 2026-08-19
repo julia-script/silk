@@ -283,19 +283,20 @@ both rather than stopping after the first category.
 [flow specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
 [run diagnostics](../../packages/compiler/test/Elaboration.test.ts).
 
-## Coverage still missing
+## Related Effect rules
 
 The confirmed rules above define construction, one-layer execution, nested success values, the
-eager/deferred boundary, and closure at an ordinary execution boundary. The remaining
-language-level Effect surface is:
+eager/deferred boundary, and closure at an ordinary execution boundary. The rest of the current
+language-level Effect model is defined in focused pages:
 
-| Area | Rules still to define |
+| Area | Reference |
 | --- | --- |
-| Execution | Any remaining permitted execution contexts |
-| Requirements and provision | Requirement entries, access modes, roles, service calls, provider selection, and row subtraction |
-| Capture and reuse | Copy snapshots, shared and exclusive captures, moved captures, run access, repeated execution, and take-once Effects |
-| Lifecycle | Dropping an unrun Effect, cleanup after success, retry state, and suspension |
-| Bootstrap limits | Cancellation, interruption, concurrency, and asynchronous cleanup are absent from the bootstrap language |
+| Success, failure, and requirement channels | [Effect contracts](effect-contracts.md) |
+| Requirements, services, roles, and provision | [Requirements and services](requirements-and-services.md) |
+| Captures, run access, reuse, and cleanup | [Ownership and borrowing](ownership-and-borrowing.md) |
+| Typed propagation, recovery, and traps | [Typed failures](typed-failures.md) |
+| Stack-safe recursive transfer | [Effect suspension and stack-safe recursion](effect-suspension.md) |
+| Cancellation, interruption, concurrency, and async cleanup | Not part of the stabilized language |
 
 The standard-library operations built from these rules—including `result`, `mapBoth`, `map`,
 `mapError`, `flatMap`, `flatten`, `zip`, `zip3`, `tap`, `catch`, `catchAll`, `ensuring`,

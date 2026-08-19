@@ -39,3 +39,10 @@ SLP (direction and coherence)
 - [SLP-0009: Explicit stack-safe Effect suspension](0009-explicit-effect-suspension/proposal.md)
   — Candidate; fixes the explicit recursion boundary, reusable coroutine-frame model, ownership and
   cleanup guarantees, exact channel preservation, and separation from future runtime parking.
+- [SLP-0010: Shared patterns and conditional destructuring](0010-shared-patterns-and-conditional-destructuring/proposal.md)
+  — Draft; author-confirmed direction for exact nominal and non-nominal union-member patterns,
+  irrefutable local destructuring, and conditional `if let`, pending Candidate preparation.
+- [SLP-0011: Program termination and diagnostic reports](0011-program-termination-and-diagnostic-reports/proposal.md)
+  — Draft; author-confirmed direction for ordinary and effect entry statuses, unhandled typed-error
+  reports, logical traces, fatal traps, and standalone versus embedded hosts, pending Candidate
+  preparation.

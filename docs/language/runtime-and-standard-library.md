@@ -517,11 +517,11 @@ constructing or providing their implementations.
 
 This rule describes the current synchronous execution model; it does not decide that future async
 execution can be implemented entirely as ordinary library code. The existing `Effect.suspend`
-operation defers Effect construction and supports stack-safe trampolining, but it does not park an
-unfinished execution or schedule another one. A future async and concurrency proposal may add a
-narrow compiler/runtime suspension seam for resumable frames, while defining schedulers,
-executors, queues, and user-facing policy as ordinary source over that seam. Programs that cannot
-reach runtime suspension or concurrency must still acquire no scheduler or fiber cost.
+operation transfers one deferred child through the explicit stack-safe execution boundary, but it
+does not park an unfinished execution or schedule another one. A future async and concurrency
+proposal may add a narrow compiler/runtime suspension seam for resumable frames, while defining
+schedulers, executors, queues, and user-facing policy as ordinary source over that seam. Programs
+that cannot reach runtime suspension or concurrency must still acquire no scheduler or fiber cost.
 
 This makes an allocation-free, host-independent program genuinely require no heap provider or host
 runtime:
@@ -535,9 +535,10 @@ pub fn main() -> i32 {
 **Boundary:** Compiler-planned storage for a value or callable representation is part of target
 lowering, not evidence of an ambient public allocator. A toolchain adapter may receive machine
 process state so an explicitly selected provider can expose it, but ordinary source cannot read that
-state without the provider contract. Any future runtime suspension must specify resumption,
-ownership across suspension, cancellation and cleanup, target support, and whether an executor is
-explicitly provided or selected; none of those contracts is inferred from `Effect.suspend` today.
+state without the provider contract. Any future runtime parking or async execution must specify
+wakeup, ownership while dormant, cancellation and cleanup, target support, and whether an executor
+is explicitly provided or selected; none of those contracts is inferred from `Effect.suspend`
+today.
 
 **Diagnostics:** Using an unavailable language feature receives its language diagnostic; using an
 unprovided service receives a requirement diagnostic. The compiler must not silently initialize a
@@ -548,6 +549,7 @@ runtime contain host support used by provider intrinsics; stabilization must ver
 ambient source behavior or unavoidable artifact cost.
 
 **Evidence:** [explicit requirements](requirements-and-services.md),
+[Effect suspension](effect-suspension.md),
 [entry requirement closure](program-entry.md#entry-004--effect-entry-requirements-must-be-resolved),
 [minimum runtime exclusions](../../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md).
 
@@ -561,8 +563,8 @@ function and cannot be imported as a source module. Ordinary `main` compilation 
 this adapter from source or create an additional user-visible entry API; a future explicit custom-
 entry or freestanding build mode may define a different boundary.
 
-- An ordinary `pub fn main() -> i32` executes eagerly and supplies its status to the target entry
-  contract.
+- An ordinary `pub fn main() -> ()` executes eagerly and supplies status zero, while
+  `pub fn main() -> i32` supplies its explicit status to the target entry contract.
 - A `pub effect fn main()` constructs one Effect and the adapter runs it exactly once.
 - Effect success becomes successful target termination.
 - A concrete unhandled typed failure is closed at the boundary, reported according to the target's
@@ -583,9 +585,10 @@ through the program-entry diagnostics. Missing private adapter support is a brok
 Unhandled typed failures and fatal traps retain their distinct runtime behavior rather than being
 reported as source validation errors.
 
-**Current compiler:** Disputed only where the obsolete operation-free `Report` marker still gates
-effect entries and where exact report rendering remains unstabilized. Automatic execution and
-requirement closure already follow the intended shape.
+**Current compiler:** Disputed where the obsolete operation-free `Report` marker still gates effect
+entries and where failure-member ordinals and incomplete rendering do not yet implement the
+confirmed termination-report rules. Automatic execution and requirement closure already follow the
+intended shape.
 
 **Evidence:** [program entry](program-entry.md),
 [entry termination specification](../../openspec/specs/bootstrap-entry-termination/spec.md),

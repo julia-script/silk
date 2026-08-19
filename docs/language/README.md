@@ -62,7 +62,10 @@ not belong in a language rule unless a program can observe them.
 - [Statements and discarded values](statements-and-discarding.md) — which expression results may be
   ignored and how `drop` makes intentional discard explicit.
 - [Effects and execution](effects-and-execution.md) — effect construction, success values, `run`,
-  and nested Effects. Initial rules are confirmed.
+  and nested Effects.
+- [Effect suspension and stack-safe recursion](effect-suspension.md) — the explicit suspension
+  boundary, covered recursive cycles, exact channel preservation, ownership and cleanup, logical
+  depth, cross-engine parity, pay-for-use, and the boundary with future async execution.
 - [Effect contracts](effect-contracts.md) — success, failure, and requirement channels; declaration
   bounds; generic failure types and requirement rows; and concrete Effect identity.
 - [Requirements and services](requirements-and-services.md) — runtime-provided capabilities,
@@ -76,6 +79,8 @@ not belong in a language rule unless a program can observe them.
   mutation, captures, cleanup, allocation lifecycles, and returned views.
 - [Functions, callables, and control flow](functions-callables-and-control-flow.md) — named function
   contracts, ordered calls, returns, callable sections, pipelines, conditionals, loops, and matches.
+- [Patterns and destructuring](patterns-and-destructuring.md) — one pattern language across exact
+  union-member matches, irrefutable local destructuring, and conditional `if let`.
 - [Values and types](values-and-types.md) — foundational scalars, literals, nominal structs, fixed
   arrays, lexical views, structural unions, precise inference, and compatibility.
 - [Expressions and operators](expressions-and-operators.md) — deterministic evaluation, expression
@@ -92,11 +97,12 @@ not belong in a language rule unless a program can observe them.
   availability. Rules are confirmed.
 - [Runtime and standard-library boundary](runtime-and-standard-library.md) — language versus
   library semantics, ordinary portable and target-provider source, private runtime support,
-  distribution contents, and pay-for-use. Initial rules are under review.
+  distribution contents, and pay-for-use.
+- [Program termination and reporting](program-termination-and-reporting.md) — ordinary and effect
+  statuses, unhandled typed-error reports, logical traces, fatal traps, and host boundaries.
 
-The following domains will receive pages only when their first rules are ready:
-
-- remaining syntax beyond expressions;
+Every domain in the initial stabilization map now has a reference page. Individual pages continue
+to name unresolved boundaries rather than inventing rules to make the table look complete.
 
 Tutorials, task-oriented guides, design rationale, compiler architecture, and standard-library API
 documentation remain separate from this reference.

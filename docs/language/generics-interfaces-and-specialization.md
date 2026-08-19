@@ -1529,7 +1529,6 @@ selection.
 | Service conformance | Current witness logic has service-specific operation and special `Report` paths. | Keep only dependency eligibility special; reuse interface conformance afterward and remove `Report`. |
 | Inline implementations | General `impl` parsing accepts mappings; a narrow hook form accepts one inline function. | Implement the already confirmed general inline-or-mapped rule. |
 
-## Pending rule batches
-
-The remaining reconciliation decision is whether conformances need any independently written
-visibility surface.
+IMPL-005 resolves the former conformance-visibility question: conformances have no independently
+written visibility surface. Endpoint visibility and provider-local coherence determine whether a
+goal is usable.

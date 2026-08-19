@@ -392,10 +392,10 @@ a value by returning it, binding or mutating an outer place under ordinary owner
 continuing to a later expression. Code needing a value selected from exhaustive alternatives may use
 `match`.
 
-Silk intends to support a future pattern-conditioned form that tests and destructures a value while
-introducing bindings only in the selected arm, in the style of an `if let` construct. Its syntax,
-accepted patterns, and interaction with guards remain undefined; ordinary boolean `if` does not
-implicitly perform that matching today.
+Pattern-conditioned `if let Pattern = expression { ... }` tests and destructures a value while
+introducing bindings only in the selected body. It remains distinct from ordinary boolean `if` and
+does not add implicit matching to a boolean condition. See
+[PATT-007](patterns-and-destructuring.md#patt-007--if-let-tests-one-refutable-pattern).
 
 An `if` condition cannot be an integer, nominal value, Effect, or other implicitly converted value.
 An Effect returning `bool` may be executed conditionally either inside the selected statement arm or
@@ -662,8 +662,9 @@ arm's access mode.
 
 **Current compiler:** Match joining accepts distinct nominal results only. General unions require
 the join to accept ordinary value types and require an exact type-pattern form for non-nominal
-members. The type-pattern syntax remains to be stabilized with the pattern language; nominal
-patterns keep the rules in MATCH-002.
+members. PATT-015–019 define exact whole-value bindings for non-nominal union
+members; nominal patterns keep the rules in MATCH-002 and all forms share the contextual rules in
+[patterns and destructuring](patterns-and-destructuring.md).
 
 **Evidence:** [exhaustive matching specification](../../openspec/specs/bootstrap-exhaustive-matching/spec.md),
 [match result tests](../../packages/compiler/test/ExhaustiveMatching.test.ts).

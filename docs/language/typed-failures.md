@@ -431,8 +431,10 @@ normally through a standard-library finalization combinator. A trap during clean
 separate trap rules and is not converted into a typed failure.
 
 The language guarantees that structured cleanup preserves the information needed to report the
-failure. Exact trace depth, formatting, symbolization, and debug-versus-release collection policy
-belong to a later diagnostics and observability reference.
+failure. The stable logical trace minimum and debug-versus-release boundary are defined by
+[TERM-004 and TERM-007](program-termination-and-reporting.md#term-004--a-failure-report-has-one-stable-minimum).
+Exact textual formatting, symbolization decoration, colors, and source excerpts remain host and
+tooling policy.
 
 **Diagnostics:** Valid cleanup and propagation produce no compile-time diagnostic. Ordinary
 ownership diagnostics identify double cleanup, use after move, or an invalid implicit transfer.
