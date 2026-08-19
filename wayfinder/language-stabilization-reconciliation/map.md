@@ -70,6 +70,10 @@ handoffs.
   work is ordinary-type unions, public-field struct construction, ordinary text views, complete
   struct inference, explicit operator declarations, removal of short-circuit purity privilege, and
   the Copy/failure seams already owned by earlier handoffs.
+- [Control flow, patterns, modules, names, and visibility audit](issues/04-control-patterns-modules-and-visibility.md)
+  — 27 of 49 rules are implemented. Existing loops, nominal match, module closure, names, and
+  visibility are strong; remaining work is one shared-pattern/ordinary-union handoff plus removal
+  of redundant-import errors and the implicit standard-library prelude.
 
 ## Not yet specified
 
