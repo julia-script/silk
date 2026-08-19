@@ -30,3 +30,6 @@ SLP (direction and coherence)
 - [SLP-0006: Static generics and coherent interfaces](0006-static-generics-and-coherent-interfaces/proposal.md)
   — Candidate; fixed direction for generic inference, interface contracts, conformances,
   coherence, executable representations, and specialization.
+- [SLP-0007: Explicit unsafe contracts and sealed intrinsics](0007-explicit-unsafe-and-sealed-intrinsics/proposal.md)
+  — Candidate; fixed direction for unsafe caller obligations, minimal compiler privilege, safe
+  wrappers, undefined behavior, and reachable intrinsic target availability.

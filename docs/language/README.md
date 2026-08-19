@@ -87,11 +87,13 @@ not belong in a language rule unless a program can observe them.
 - [Generics, interfaces, and specialization](generics-interfaces-and-specialization.md) — generic
   parameters and inference, compile-time interface contracts, conformances, coherence, and finite
   static specialization, including exact and opaque callable and Effect representations.
+- [Unsafe code, intrinsics, and targets](unsafe-intrinsics-and-targets.md) — lexical unsafe
+  acknowledgement, caller-owned unsafe contracts, sealed compiler primitives, and reachable target
+  availability. Rules are confirmed.
 
 The following domains will receive pages only when their first rules are ready:
 
 - remaining syntax beyond expressions;
-- targets, unsafe code, and intrinsics; and
 - standard-library boundaries.
 
 Tutorials, task-oriented guides, design rationale, compiler architecture, and standard-library API
