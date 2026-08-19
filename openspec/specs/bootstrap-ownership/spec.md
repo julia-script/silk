@@ -518,40 +518,42 @@ typed failure. Traps SHALL add no unwind promise.
 After concrete specialization and suspendability-aware MIR normalization, ownership SHALL derive
 the exact MIR-local live set needed after a deferred child transfers and later completes. The set
 SHALL include compiler-generated temporaries as well as locals corresponding to source bindings.
-Copy values MAY be copied; affine values SHALL move into one continuation slot; and shared or
-exclusive borrows and provider references SHALL retain their exact root, access, and loan
-dependencies until resumption or exit. A value MUST NOT remain independently owned by both the
-suspended activation and its continuation frame.
+Copy values MAY be copied; affine values SHALL occupy one field in exactly one state of the
+invocation's reusable coroutine frame; and shared or exclusive borrows and provider references
+SHALL retain their exact root, access, and loan dependencies until resumption or exit. A referent
+that remains borrowed across suspension SHALL retain a stable logical location for the borrow's
+lifetime regardless of private frame placement or relocation. A value MUST NOT remain independently
+owned by both the running state and suspended state.
 
 #### Scenario: Hold one owner per recursive level
 
 - **WHEN** every level of a suspended recursive Effect creates one affine owner used after its child completes
-- **THEN** ownership moves each owner into exactly one continuation slot and rejects any duplicate use from the suspended activation
+- **THEN** ownership places each owner in exactly one active invocation frame state and rejects any duplicate use from another state
 
 #### Scenario: Retain an exclusive provider dependency
 
 - **WHEN** source code intentionally holds an ordinary exclusive provider reference across its deferred child
-- **THEN** ownership keeps that provider immovable and exclusively borrowed until the continuation resumes and ends the loan; this does not apply to the transient continuation-allocation loan, which ends before the child starts
+- **THEN** ownership keeps that provider immovable and exclusively borrowed until the parent resumes and ends the loan
+
+#### Scenario: Preserve a borrow across private frame growth
+
+- **WHEN** a valid source borrow remains live while the private execution stack grows, segments, or relocates implementation storage
+- **THEN** the borrow continues to identify the same referent with unchanged access and lifetime
 
 ### Requirement: Continuation cleanup preserves structured-exit semantics
 
 On successful resumption, ordinary return, fallthrough, explicit structured exit, or typed failure,
-each continuation SHALL move or clean every live source value exactly once in the existing lexical
-order, then consume its private storage obligation exactly once without replacing the original
-typed outcome. Ownership SHALL publish distinct deterministic plans for initialization-prefix
-rollback before publication, resumed success, and resumed typed failure. If any continuation
-allocation or initialization step fails before publication, already-transferred affine prefixes
-SHALL roll back in reverse initialization order while values not yet transferred remain owned by
-their current activations; the combined plan SHALL clean every obligation exactly once. A source
-trap or target defect that cannot return to the runner SHALL retain the existing no-unwind
-guarantee: it MUST NOT report that source Drop ran or duplicate an obligation. Any compiler-private
-continuation storage reached by an orderly runner teardown after an internal defect SHALL be
-consumed exactly once without being reported as source cleanup.
+each coroutine-frame state SHALL move or clean every live source value exactly once in the existing
+lexical order, then release its completed private frame through the execution owner without
+replacing the original typed outcome. A state transition SHALL finish moving every live obligation
+before the driver starts the deferred child, and no obligation may appear in two simultaneously
+owned states. A source trap or target defect that cannot return to the runner SHALL retain the
+existing no-unwind guarantee: it MUST NOT report that source `Drop` ran or duplicate an obligation.
 
-#### Scenario: Roll back a partially initialized continuation chain
+#### Scenario: Complete one frame-state transition
 
-- **WHEN** allocation or initialization fails after an affine prefix has moved into unpublished continuation storage
-- **THEN** ownership releases the initialized prefix in reverse initialization order, leaves the remaining values owned by their current activations, and preserves the original typed allocation failure
+- **WHEN** a parent invocation suspends while affine values remain live after its child
+- **THEN** every retained value belongs to the completed parent frame state before the child begins and no prior state retains a duplicate owner
 
 #### Scenario: Clean deep success in order
 
@@ -565,5 +567,5 @@ consumed exactly once without being reported as source cleanup.
 
 #### Scenario: Preserve trap semantics
 
-- **WHEN** a resumed suspended computation reaches a source trap
+- **WHEN** a resumed suspended computation reaches a source trap or exhausts private execution-stack storage
 - **THEN** the runner exposes no typed failure or successful Drop trace and makes no claim that normal source cleanup ran

@@ -622,17 +622,18 @@ ownership, execution, and cleanup behavior.
 
 ### Requirement: Synchronous Effects retain a suspension-compatible abstraction
 
-The public Effect contract SHALL NOT expose a concrete callback ABI, scheduler object, continuation
-frame, runtime requirement record, or complete-or-suspended representation. A closed Effect call
-graph that cannot reach the suspension intrinsic MUST NOT contain continuation allocation,
-scheduler or fiber linkage, atomic synchronization, a mandatory complete-versus-pending branch, or
-a private suspension dispatcher. Existing source-defined combinators SHALL compose with
-suspendable Effects without changing their contracts or recognizing a private pending state.
+The public Effect contract SHALL NOT expose a concrete callback ABI, scheduler object, coroutine
+frame, runtime requirement record, execution-stack allocator, or complete-or-suspended
+representation. A closed Effect call graph that cannot reach the suspension intrinsic MUST NOT
+contain coroutine-frame transformation, scheduler or fiber linkage, atomic synchronization, a
+mandatory complete-versus-pending branch, or a private suspension dispatcher. Existing
+source-defined combinators SHALL compose with suspendable Effects without changing their contracts
+or recognizing a private pending state.
 
 #### Scenario: Run a closed synchronous pipeline
 
 - **WHEN** a closed Effect call graph cannot reach suspension, fork, interruption, or a fiber observation
-- **THEN** execution retains its direct synchronous entry and call shape and links no continuation or concurrency runtime solely because it uses library Effect combinators
+- **THEN** execution retains its direct synchronous entry and call shape and links no coroutine or concurrency runtime solely because it uses library Effect combinators
 
 #### Scenario: Preserve the runner seam under suspension
 
@@ -660,59 +661,87 @@ over minimal `Intrinsic` machinery.
 ### Requirement: Effect suspension is explicit lazy composition
 
 The canonical ordinary Silk function
-`Effect.suspend<A, !E, ?R>(deferred: once Effect<A ! E ? R>)` SHALL defer execution of `deferred`
-until the returned Effect is run. Its result contract SHALL be
-`A ! E | OutOfMemory ? R | &mut Allocator`: continuation storage exhaustion is an explicit typed
-failure and allocator requirement only at a suspension boundary. The compiler MUST NOT recognize
-the public function by actor, module, or operation spelling.
+`Effect.suspend<A, E, ?R>(deferred: once Effect<A ! E ? R>)` SHALL defer execution of `deferred`
+until the returned Effect is run and SHALL transfer its execution through the explicit stack-safe
+boundary. Its result contract SHALL be exactly `A ! E ? R`: suspension MUST NOT add an allocation
+failure or allocator requirement. Each concrete suspendable invocation SHALL reuse one statically
+shaped coroutine frame across its possible suspension states. Dynamic execution-stack exhaustion
+SHALL be a fatal trap outside the typed failure channel. The compiler MUST NOT recognize the public
+function by actor, module, or operation spelling.
 
 #### Scenario: Keep suspension lazy
 
 - **WHEN** an Effect with observable work is passed to `Effect.suspend` and the returned Effect is not run
 - **THEN** the deferred work does not execute and dropping the returned Effect releases its captures exactly once
 
-#### Scenario: Report continuation exhaustion explicitly
+#### Scenario: Preserve the child channels
 
-- **WHEN** the selected allocator refuses storage for a continuation at `Effect.suspend`
-- **THEN** the suspended Effect fails with `OutOfMemory`, the deferred body does not start, and no continuation owner is created
+- **WHEN** `Effect.suspend` receives `Effect<A ! E ? R>`
+- **THEN** the returned Effect has exactly `A ! E ? R` with no `OutOfMemory` member and no `Allocator` requirement introduced by suspension
 
-### Requirement: Explicitly suspended Effect cycles are stack safe
+#### Scenario: Preserve a nested Effect success value
 
-A terminating self-recursive or mutually-recursive Effect cycle SHALL use native and WebAssembly
-machine stack bounded by a constant independent of logical recursion depth when every recursive
-cycle crosses `Effect.suspend`. The guarantee SHALL include non-tail work and owned state retained
-after the suspended child completes. Recursion that does not cross `Effect.suspend`, ordinary
-function recursion, and recursive Drop hooks SHALL receive no stack-safety guarantee.
+- **WHEN** the deferred child succeeds with `Effect<i32>` as its declared success value
+- **THEN** one run of `Effect.suspend` produces that nested `Effect<i32>` value without flattening or running it
 
-#### Scenario: Resume non-tail self-recursion
+#### Scenario: Exhaust private execution storage
 
-- **WHEN** a recursive Effect suspends before its recursive run and adds one to the returned value at each of one million levels
-- **THEN** native execution returns the expected value without exhausting the machine stack
+- **WHEN** compiled suspended recursion exhausts its finite compiler-owned execution stack
+- **THEN** execution traps without producing a typed failure or permitting `Effect.catch` to recover the exhaustion
 
-#### Scenario: Resume mutual recursion
+#### Scenario: Do not interpret suspension as parking
 
-- **WHEN** two Effects call each other through explicit suspension until a finite counter reaches zero
-- **THEN** native, WebAssembly, and evaluation produce the same typed result with machine-stack use bounded on native and WebAssembly
+- **WHEN** a running Effect reaches `Effect.suspend`
+- **THEN** it transfers synchronous execution of its deferred child without creating a task, parking for a wakeup, yielding scheduler fairness, or adding interruption and cancellation semantics
 
-#### Scenario: Exclude ordinary recursive cleanup
+### Requirement: Explicit suspension covers recursive cycles, not recursive declarations
 
-- **WHEN** an ordinary Drop hook recursively destroys a deep heap-linked value without crossing an Effect suspension boundary
-- **THEN** this capability makes no stack-safety promise for that destruction
+A terminating self-recursive or mutually recursive Effect graph SHALL use bounded native and Wasm
+machine stack when every possible recursive cycle crosses an explicit suspension origin. A
+suspension origin on an unrelated or avoidable branch SHALL NOT cover a cycle. Recursive functions
+and Effects without a covered cycle SHALL remain valid Silk and MUST NOT receive a mandatory
+compiler diagnostic solely because their depth is unbounded.
+
+#### Scenario: Cover mutual recursion with one suspension edge
+
+- **WHEN** every path around a mutually recursive Effect cycle crosses one explicit `Effect.suspend` edge
+- **THEN** terminating execution uses bounded native and Wasm machine stack even though the other recursive edges do not suspend
+
+#### Scenario: Leave an uncovered cycle valid
+
+- **WHEN** a recursive Effect cycle can execute without crossing any suspension origin
+- **THEN** the compiler accepts the otherwise valid program without promising bounded machine stack
+
+#### Scenario: Ignore suspension on an unrelated branch
+
+- **WHEN** a recursive cycle can avoid a branch containing `Effect.suspend`
+- **THEN** that branch does not establish the bounded-machine-stack guarantee for the cycle
+
+### Requirement: Suspension imposes no allocator implementation restriction
+
+An ordinary implementation of the `Allocator` service SHALL be permitted to suspend whenever its
+declared Effect contract permits suspension. The compiler MUST NOT apply a suspension-specific
+bootstrap, recursion, conformance, or self-hosting restriction to that implementation.
+
+#### Scenario: Suspend inside an allocator operation
+
+- **WHEN** an `Allocator` implementation satisfies its ordinary service contract and one operation reaches `Effect.suspend`
+- **THEN** it is checked like any other service implementation and receives no suspension-specific diagnostic
 
 ### Requirement: Source-defined Effect combinators compose across suspension
 
-`Effect.map`, `Effect.flatMap`, outcome reification, recovery, retry, and provision SHALL compose
-with a suspended Effect through their existing ordinary Silk definitions and public signatures.
-They MUST NOT inspect or expose a pending state, continuation frame, driver token, or private runner
-ABI. The suspended Effect's existing failure and requirement rows, including `OutOfMemory` and
-`&mut Allocator`, SHALL compose by the ordinary row rules.
+`Effect.map`, `Effect.flatMap`, outcome reification, recovery, retry, provision, and equivalent user
+combinators SHALL compose with a suspended Effect through their existing ordinary Silk definitions
+and public signatures. They MUST NOT inspect or expose a pending state, coroutine frame, driver
+token, or private runner ABI. Suspension SHALL preserve the child's failure and requirement rows
+exactly; combinators SHALL compose only the rows contributed by their ordinary inputs and callbacks.
 
 #### Scenario: Map after suspension
 
 - **WHEN** a suspended Effect succeeds and its result is transformed with `Effect.map`
-- **THEN** the mapper runs once after resumption and receives the original success value
+- **THEN** the mapper runs once after resumption and receives the original success value without adding a suspension-specific failure or requirement
 
 #### Scenario: Flat-map into suspension
 
 - **WHEN** `Effect.flatMap` selects a suspended Effect from an input success
-- **THEN** execution waits for the suspended child and preserves the unioned failure and requirement rows without exposing a pending representation
+- **THEN** execution waits for the suspended child and preserves the ordinarily unioned failure and requirement rows without exposing a pending representation or adding storage channels
