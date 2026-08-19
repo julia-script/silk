@@ -563,7 +563,7 @@ their specific match or field diagnostic while other supplied pattern facts rema
 
 **Status:** Confirmed
 
-Arms are tested in source order. An unguarded nominal arm covers its member. A guarded arm handles
+Arms are tested in source order. An unguarded member arm covers its member. A guarded arm handles
 that member only when its guard evaluates to `true`, so it removes nothing from the remaining
 coverage set. `_` covers every remaining member and makes every following arm unreachable.
 
@@ -598,7 +598,7 @@ guard binding reports `OWN0008` because later arms may still need the unchanged 
 
 **Status:** Confirmed
 
-Inside a nominal arm, bindings and projections use that precise member type. The original
+Inside a member arm, bindings and projections use that precise member type. The original
 scrutinee's declared union type does not change outside the arm. A borrowed match may therefore
 inspect a narrowed member and later continue using the unchanged union owner.
 
@@ -633,7 +633,7 @@ binding reports `OWN0006`.
 **Status:** Confirmed
 
 The type of a match expression is computed from reachable arm results. Equal types remain that
-type. Distinct nominal results form one normalized structural union. An arm of type `never`
+type. Distinct ordinary value types form one normalized structural union. An arm of type `never`
 contributes no result member.
 
 ```silk
@@ -650,13 +650,19 @@ fn preserve(input: Left | Right) -> Left | Right {
 
 The result is the normalized union `Left | Right`, independent of arm order.
 
-**Boundary:** Silk does not invent a union for arbitrary incompatible builtin types. Arms returning
-`i32` and `bool`, arrays of different element types or lengths, or another invalid union mixture make
-the match result unavailable. Source must choose one compatible result contract explicitly.
+**Boundary:** Result joining does not convert any arm result or erase its ownership and lifetime
+properties. If a result type is unavailable or cannot legally be stored in the resulting union, the
+match result is unavailable.
 
-**Diagnostics:** Incompatible reachable arm results report `SEM0049` and list their types. An
-unreachable arm contributes neither a result type nor a second result mismatch. Ownership transfers
-from result expressions remain governed by their arm's access mode.
+**Diagnostics:** An invalid reachable result union reports `SEM0049` and lists the contributing
+types and the precise unavailable member. An unreachable arm contributes neither a result type nor
+a second result mismatch. Ownership transfers from result expressions remain governed by their
+arm's access mode.
+
+**Current compiler:** Match joining accepts distinct nominal results only. General unions require
+the join to accept ordinary value types and require an exact type-pattern form for non-nominal
+members. The type-pattern syntax remains to be stabilized with the pattern language; nominal
+patterns keep the rules in MATCH-002.
 
 **Evidence:** [exhaustive matching specification](../../openspec/specs/bootstrap-exhaustive-matching/spec.md),
 [match result tests](../../packages/compiler/test/ExhaustiveMatching.test.ts).

@@ -18,8 +18,8 @@ These terms have the following meanings throughout the language reference:
 | **`Copy` value** | A value that an ordinary read may duplicate. Reading it does not consume the original binding. |
 | **Affine value** | A value that cannot be duplicated implicitly. It has one owner at a time and must be moved to transfer that ownership. |
 | **Move** | An ownership transfer written as `move value`. The destination becomes responsible for the value, and the source binding is no longer available on that continuing control-flow path. |
-| **Detached value** | An owned value that remains valid independently of the lexical scope and service providers where it was created. It contains no borrowed reference or provider-dependent storage. |
-| **Self-contained allocation** | Storage whose ownership and cleanup authority travel with the value. An owned string or vector may therefore be detached even though it uses allocated memory. |
+| **Detached value** | A value that remains valid independently of the lexical scope and service providers where it was created. It owns everything required to remain valid or refers only to program-lifetime immutable data. It contains no escaping lexical borrow or provider-dependent storage. |
+| **Self-contained allocation** | Storage whose ownership and cleanup authority travel with the value. An owning `String` or vector may therefore be detached even though it uses allocated memory. |
 | **Nominal type** | A type identified by its declaration name rather than only by its representation. Two structs with identical fields remain different nominal types. |
 | **Abortive expression** | An expression that stops the current execution path instead of producing an ordinary value. Statements after an unconditional abortive expression are unreachable. |
 | **`never`** | The success type of an expression that cannot produce a success value. It is compatible with any expected success type because no value reaches that context. |
@@ -41,21 +41,25 @@ These terms have the following meanings throughout the language reference:
 “Detached” does not mean “contains no allocation.” It means that everything required to keep the
 value valid and eventually clean it up travels with the value.
 
-```silk
-struct MessageView { text: &string } // borrowed; not detached
-struct OwnedMessage { text: string } // owns its text; detached
+```silk,ignore
+struct MessageView { text: string } // detached only when the text's backing data is detached
+struct OwnedMessage { text: String } // owns its text; detached
 ```
+
+A text literal has program-lifetime backing data and is detached. A `string` view formed from a
+lexical owner retains that owner's loan and is not detached merely because the view is Copy.
 
 The complete ownership rules are defined under
 [ownership and borrowing](ownership-and-borrowing.md).
 
-## FAIL-001 — Any concrete, owned, detached value may be a typed failure
+## FAIL-001 — Any concrete detached value may be a typed failure
 
 **Status:** Confirmed
 
 A failure payload does not need to conform to `Report`, `Error`, or any other marker interface. Its
 type does not need to be nominal. Built-in values, named structs, and other concrete value types may
-appear as an Effect's failure type when their values are owned and detached.
+appear as an Effect's failure type when the particular payload is detached and can be transferred
+by value. An affine payload transfers ownership; a Copy payload copies its complete valid value.
 
 ```silk
 effect fn read() -> i32 ! string {

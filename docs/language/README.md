@@ -76,12 +76,13 @@ not belong in a language rule unless a program can observe them.
   mutation, captures, cleanup, allocation lifecycles, and returned views.
 - [Functions, callables, and control flow](functions-callables-and-control-flow.md) — named function
   contracts, ordered calls, returns, callable sections, pipelines, conditionals, loops, and matches.
+- [Values and types](values-and-types.md) — foundational scalars, literals, nominal structs, fixed
+  arrays, lexical views, structural unions, precise inference, and compatibility.
 
 The following domains will receive pages only when their first rules are ready:
 
 - remaining syntax and expressions;
 - modules, names, and visibility beyond entry discovery;
-- values and types;
 - generics, interfaces, and specialization;
 - targets, unsafe code, and intrinsics; and
 - standard-library boundaries.

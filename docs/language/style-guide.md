@@ -50,7 +50,7 @@ the convention. Error payloads named `ProcessFailure`, `ParseFailure`, `HostInpu
 implementation reconciliation rather than being preserved as competing conventions. The
 `Failure<F>` result outcome keeps its existing name under this rule.
 
-**Evidence:** [ordinary failure values](typed-failures.md#fail-001--any-concrete-owned-detached-value-may-be-a-typed-failure).
+**Evidence:** [ordinary failure values](typed-failures.md#fail-001--any-concrete-detached-value-may-be-a-typed-failure).
 
 ## STYLE-002 — Public APIs prefer qualified data-first functions
 

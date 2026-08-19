@@ -21,3 +21,5 @@ SLP (direction and coherence)
   — Draft; parked until static schema composition becomes a stabilization priority.
 - [SLP-0002: Explicit non-unit result discard](0002-explicit-result-discard/proposal.md)
   — Draft; records the selected strict explicit-discard model and awaits Candidate review.
+- [SLP-0003: Canonical value types and narrow compatibility](0003-canonical-value-types/proposal.md)
+  — Draft; workbench for the foundational values-and-types stabilization pass.
