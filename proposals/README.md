@@ -36,3 +36,6 @@ SLP (direction and coherence)
 - [SLP-0008: Layered toolchain and ordinary standard library](0008-layered-toolchain-and-standard-library/proposal.md)
   — Candidate; fixed direction for the language/library/runtime boundary, portable distribution
   baseline, target providers, pay-for-use, and toolchain compatibility.
+- [SLP-0009: Explicit stack-safe Effect suspension](0009-explicit-effect-suspension/proposal.md)
+  — Candidate; fixes the explicit recursion boundary, reusable coroutine-frame model, ownership and
+  cleanup guarantees, exact channel preservation, and separation from future runtime parking.
