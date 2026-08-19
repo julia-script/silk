@@ -11,7 +11,7 @@ Return validation is fragmented across declaration completion, expression elabor
 ## Decisions
 
 1. Declaration completion records a resolved return contract before any body can become executable.
-2. Body analysis returns a proof covering explicit returns, final expressions, and reachable fallthrough.
+2. Body analysis returns a proof covering every reachable explicit return and fallthrough path.
 3. Conformance bodies are checked after `Self` and generic substitution but before witness publication.
 4. Reachability treats a declaration lacking the proof as unavailable and preserves the semantic diagnostic as primary.
 5. MIR builders accept only proven bodies and retain an invariant check for hand-built/compiler-bug inputs.

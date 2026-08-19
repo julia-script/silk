@@ -4,7 +4,7 @@ Silk currently allows some function bodies whose result does not satisfy the dec
 
 ## What Changes
 
-- Check explicit returns, fallthrough, and expression-bodied paths against the resolved declared return type for ordinary, effect, generic, and conformance operations.
+- Check every reachable explicit return and fallthrough path against the resolved declared return type for ordinary, effect, generic, and conformance operations.
 - Treat `Effect<A>` as an ordinary value: returning it where `A` is declared is a mismatch, while returning it where `Effect<A>` is declared remains valid.
 - Prevent declarations with unavailable or invalid bodies from entering reachable HIR/MIR and emit one source diagnostic at the mismatching expression or missing return boundary.
 - Add issue 226 and nested-Effect cases as semantic regressions rather than backend tests.

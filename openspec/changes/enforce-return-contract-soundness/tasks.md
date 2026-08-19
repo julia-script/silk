@@ -1,7 +1,7 @@
 ## 1. Semantic return proof
 
-- [ ] 1.1 Inventory every ordinary, effectful, generic, and conformance body path that publishes executable availability.
-- [ ] 1.2 Add one resolved return-contract proof covering explicit returns, final expressions, and reachable fallthrough.
+- [x] 1.1 Inventory every ordinary, effectful, generic, and conformance body path that publishes executable availability.
+- [ ] 1.2 Add one resolved return-contract proof covering every reachable explicit return and fallthrough path.
 - [ ] 1.3 Apply the proof after generic and `Self` substitution for inline and mapped conformance operations.
 - [ ] 1.4 Add precise diagnostics for incompatible values, missing returns, and nested Effect mismatches.
 
