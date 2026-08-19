@@ -27,3 +27,6 @@ SLP (direction and coherence)
   — Draft; workbench for the expressions-and-operators stabilization pass.
 - [SLP-0005: Explicit modules, names, and visibility](0005-modules-names-and-visibility/proposal.md)
   — Draft; workbench for the modules, names, imports, and visibility stabilization pass.
+- [SLP-0006: Static generics and coherent interfaces](0006-static-generics-and-coherent-interfaces/proposal.md)
+  — Candidate; fixed direction for generic inference, interface contracts, conformances,
+  coherence, executable representations, and specialization.

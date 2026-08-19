@@ -36,14 +36,14 @@ Each interface or service operation may be implemented in either of two forms. A
 implementation defines the operation directly inside the `impl` declaration:
 
 ```silk
-interface Decoder<T> {
-  fn decode(value: &T) -> i32
+interface Decoder {
+  fn decode(value: &Self) -> i32
 }
 
 struct Schema {}
 
-impl Decoder<Schema> for Schema {
-  fn decode(value: &Schema) -> i32 {
+impl Decoder for Schema {
+  fn decode(value: &Self) -> i32 {
     return 42
   }
 }
@@ -57,8 +57,8 @@ The preferred public-API form defines behavior as an ordinary actor function and
 operation to that function explicitly:
 
 ```silk
-interface Decoder<T> {
-  fn decode(value: &T) -> i32
+interface Decoder {
+  fn decode(value: &Self) -> i32
 }
 
 struct Schema {}
@@ -67,7 +67,7 @@ fn decodeSchema(value: &Schema) -> i32 {
   return 42
 }
 
-impl Decoder<Schema> for Schema {
+impl Decoder for Schema {
   decode: Schema.decodeSchema
 }
 ```
@@ -75,9 +75,9 @@ impl Decoder<Schema> for Schema {
 One conformance may mix the two forms:
 
 ```silk
-interface SchemaInfo<T> {
-  fn decode(value: &T) -> i32
-  fn width(value: &T) -> i32
+interface SchemaInfo {
+  fn decode(value: &Self) -> i32
+  fn width(value: &Self) -> i32
 }
 
 struct Schema {}
@@ -86,8 +86,8 @@ fn schemaWidth(value: &Schema) -> i32 {
   return 32
 }
 
-impl SchemaInfo<Schema> for Schema {
-  fn decode(value: &Schema) -> i32 {
+impl SchemaInfo for Schema {
+  fn decode(value: &Self) -> i32 {
     return 42
   }
 
@@ -114,7 +114,7 @@ and by mapping, or when its callable contract is incompatible with the declared 
 An inline function with a different name is not matched by position or inferred intent:
 
 ```silk,ignore
-impl Decoder<Schema> for Schema {
+impl Decoder for Schema {
   fn decodeSchema(value: &Schema) -> i32 {
     return 42
   }

@@ -2,7 +2,7 @@
 
 SLP: 0001
 Status: Draft
-Revision: 1
+Revision: 2
 Author: Julia Ortiz
 Created: 2026-08-18
 Updated: 2026-08-18
@@ -69,11 +69,11 @@ pub fn userSchema() -> Schema<User> {
 The syntax is illustrative and not a proposal decision:
 
 ```silk
-interface SchemaOf<T> {
-  fn schema() -> Schema<T>
+interface SchemaOf {
+  fn schema() -> Schema<Self>
 }
 
-impl SchemaOf<User> for User {
+impl SchemaOf for User {
   schema: User.schema
 }
 
@@ -86,7 +86,7 @@ pub const UserSchema: Schema<User> =
 #### Observable result
 
 Another module imports `UserSchema` as an ordinary immutable `Schema<User>` value. Compilation
-selects the `SchemaOf<User>` conformance and validates the composition. Importing the module runs no
+selects the `SchemaOf for User` conformance and validates the composition. Importing the module runs no
 code and creates no observable initialization order.
 
 Whether the resulting value is embedded, inlined, shared as static data, or represented by another
@@ -265,3 +265,4 @@ None while the Draft is parked.
 | Revision | Date | Change or decision |
 | --- | --- | --- |
 | 1 | 2026-08-18 | Parked the module-level static composition goal and illustrative schema case without selecting syntax or semantics. |
+| 2 | 2026-08-19 | Reconciled the illustrative schema interface with SLP-0006's implicit `Self` provider model. Static composition semantics remain parked. |

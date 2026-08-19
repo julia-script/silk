@@ -84,11 +84,13 @@ not belong in a language rule unless a program can observe them.
 - [Modules, names, and visibility](modules-names-and-visibility.md) — path-derived module identity,
   source-root lookup, static imports, cycles, namespace bindings, aliases, collisions, and public
   declaration boundaries, redundancy, explicit standard-library imports, and re-export boundaries.
+- [Generics, interfaces, and specialization](generics-interfaces-and-specialization.md) — generic
+  parameters and inference, compile-time interface contracts, conformances, coherence, and finite
+  static specialization, including exact and opaque callable and Effect representations.
 
 The following domains will receive pages only when their first rules are ready:
 
 - remaining syntax beyond expressions;
-- generics, interfaces, and specialization;
 - targets, unsafe code, and intrinsics; and
 - standard-library boundaries.
 

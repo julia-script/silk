@@ -602,8 +602,8 @@ The relationship is explicit in the operation declaration; an ordinary function 
 `add`, `multiply`, or `lessThan` has no operator meaning by itself.
 
 ```silk,ignore
-interface Multiply<Left, Right, Output> {
-  operator * fn multiply(left: Left, right: Right) -> Output
+interface Multiply<Right, Output> {
+  operator * fn multiply(left: Self, right: Right) -> Output
 }
 ```
 
@@ -616,19 +616,19 @@ The operand and result types may differ. A mathematical library can therefore de
 non-overlapping conformances such as:
 
 ```silk,ignore
-impl Multiply<Vector, f64, Vector> for Vector {
+impl Multiply<f64, Vector> for Vector {
   multiply: Vector.scale
 }
 
-impl Multiply<Vector, Vector, f64> for Vector {
+impl Multiply<Vector, f64> for Vector {
   multiply: Vector.dot
 }
 
-impl Multiply<Matrix, Vector, Vector> for Matrix {
+impl Multiply<Vector, Vector> for Matrix {
   multiply: Matrix.apply
 }
 
-impl Multiply<Matrix, Matrix, Matrix> for Matrix {
+impl Multiply<Matrix, Matrix> for Matrix {
   multiply: Matrix.multiply
 }
 ```

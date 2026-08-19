@@ -69,10 +69,10 @@ Imports never activate behavior. Behavior defined outside a nominal type's sourc
 ordinary data-first function and must be called through an explicitly imported namespace binding or
 selected function binding. Importing its module does not add a method, operator, overload candidate,
 or conformance to another type. A conformance remains legal only in the nominal type's defining
-module. A public conformance is a canonical fact about that type and is available wherever the type
-is used; a private conformance is usable only inside its defining module. Conformances are not
-independently imported. A third-party type/interface combination uses a nominal adapter type owned
-by the adapting module.
+module and has no independent visibility modifier. It is a canonical fact available wherever both
+its provider type and interface application are semantically available; a private endpoint already
+prevents an external module from naming the goal. Conformances are not independently imported. A
+third-party type/interface combination uses a nominal adapter type owned by the adapting module.
 
 Cyclic module imports are valid, including cycles spanning more than two modules. A canonical
 module is interned once, and importing a module performs no initialization. The compiler discovers

@@ -69,7 +69,7 @@ pub struct Point {
   pub y: i32
 }
 
-pub impl Copy for Point
+impl Copy for Point
 
 fn sum(point: Point) -> i32 {
   let again = point

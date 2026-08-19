@@ -2,7 +2,7 @@
 
 SLP: 0004
 Status: Draft
-Revision: 7
+Revision: 8
 Author: Julia Ortiz
 Created: 2026-08-18
 Updated: 2026-08-19
@@ -119,11 +119,11 @@ let scaled = Vector.scale(move vector, 2.0)
 #### Desired Silk
 
 ```silk
-interface Multiply<Left, Right, Output> {
-  operator * fn multiply(left: Left, right: Right) -> Output
+interface Multiply<Right, Output> {
+  operator * fn multiply(left: Self, right: Right) -> Output
 }
 
-impl Multiply<Vector, f64, Vector> for Vector {
+impl Multiply<f64, Vector> for Vector {
   multiply: Vector.scale
 }
 
@@ -456,3 +456,4 @@ the `numeric` and `order` source interfaces that rely on those names, and one
 | 5 | 2026-08-19 | Confirmed explicit operator participation and drafted short-circuit right operands as ordinary conditional branches without a separate purity restriction. |
 | 6 | 2026-08-19 | Confirmed ordinary short-circuit branches and drafted assignment ordering, atomic place replacement, compound-assignment absence, and explicit numeric conversion. |
 | 7 | 2026-08-19 | Confirmed assignment and conversion, expanded every central driving case, refreshed the privilege audit, and recorded the exact OpenSpec/compiler reconciliation frontier. |
+| 8 | 2026-08-19 | Reconciled the operator interface example with SLP-0006's implicit `Self` provider model, leaving only right-operand and output types as explicit `Multiply` arguments. |

@@ -176,7 +176,7 @@ recursion.
 The rest of the accepted surface follows the same low-keyword direction:
 
 - `pub struct Name { ... }` declares nominal data with explicit `pub` fields.
-- `pub impl Copy for Name` requests compiler-sealed Copy conformance and is accepted only when every
+- `impl Copy for Name` requests compiler-sealed Copy conformance and is accepted only when every
   field is Copy and cleanup-free; users cannot supply custom copying behavior.
 - Runtime alternatives retain the visually union-like `A | B` spelling, are normalized by the
   compiler, and widen only from an immediate expected union context.
