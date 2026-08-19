@@ -25,3 +25,5 @@ SLP (direction and coherence)
   — Draft; workbench for the foundational values-and-types stabilization pass.
 - [SLP-0004: Deterministic expressions and ordinary operator dispatch](0004-deterministic-expressions-and-operators/proposal.md)
   — Draft; workbench for the expressions-and-operators stabilization pass.
+- [SLP-0005: Explicit modules, names, and visibility](0005-modules-names-and-visibility/proposal.md)
+  — Draft; workbench for the modules, names, imports, and visibility stabilization pass.

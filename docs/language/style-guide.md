@@ -75,6 +75,8 @@ Supplying the trailing arguments of an ordinary multi-parameter function creates
 waiting for its leading argument, so the same convention supports operations on any value:
 
 ```silk
+import silk.effects as Effect
+
 let specialized = Effect.provide(computation, &clock)
 let piped = computation |> Effect.provide(&clock)
 ```
@@ -117,3 +119,66 @@ and reopening another module or type remain invalid language boundaries, not sty
 [module and conformance coherence](../../wayfinder/bootstrap-language/issues/04-modules-visibility-and-name-resolution.md),
 [automatic leading-argument sections](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md),
 [callable pipeline specification](../../openspec/specs/bootstrap-callable-values/spec.md).
+
+## STYLE-003 — Examples prefer namespace imports and qualified operations
+
+**Status:** Confirmed
+
+Documentation, tutorials, and public API examples should normally import an actor module as a
+namespace and qualify its operations:
+
+```silk
+import model.User
+
+let user = User.make(42)
+let reassigned = User.withId(move user, 43)
+```
+
+This keeps the operation's owner visible where it is used. A reader can identify `make` and
+`withId` as part of the `User` actor without searching the import list or relying on a globally
+distinct function name. It also keeps related APIs visually grouped and matches the qualified,
+data-first convention in STYLE-002.
+
+Prefer this form in ordinary examples:
+
+```silk
+import silk.effects as Effect
+
+let provided = computation |> Effect.provide(&clock)
+return run provided
+```
+
+Selective imports remain valid. Use them when the selected name itself is the subject being taught,
+when an API is conventionally read unqualified, or when repeated qualification would obscure the
+example's actual point:
+
+```silk
+import model.User { User }
+
+fn id(user: &User) -> i32 {
+  return user.id
+}
+```
+
+When two namespaces have the same default name, alias one explicitly and keep its operations
+qualified:
+
+```silk
+import model.User
+import audit.User as UserAudit
+
+let user = User.make(42)
+UserAudit.record(&user)
+```
+
+**Boundary:** This is a documentation and API-style preference, not a compiler restriction.
+Selective imports, member aliases, and hybrid imports have their ordinary language meaning. A
+reference page specifically documenting those forms should show them directly even though general
+examples prefer namespace qualification.
+
+**Tooling:** Formatters do not rewrite between namespace and selective imports. Documentation lint
+may prefer qualification in general examples but must permit selective imports where the example is
+teaching that syntax or naming an imported type directly.
+
+**Evidence:** [namespace imports](modules-names-and-visibility.md#import-001--a-namespace-import-binds-the-targets-final-path-segment),
+[qualified data-first APIs](#style-002--public-apis-prefer-qualified-data-first-functions).

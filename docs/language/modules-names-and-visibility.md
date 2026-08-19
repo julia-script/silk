@@ -1,0 +1,792 @@
+# Modules, names, and visibility
+
+Each Silk source file defines one module. A module's identity comes from its logical path relative
+to the compilation source root, and imports create explicit names for declarations in other
+modules. Imports are compile-time only: they do not run code or create values.
+
+This page defines module identity, source lookup, import bindings, name collisions, and
+cross-module visibility. Declaration-specific contracts remain on their corresponding reference
+pages. Package acquisition and version selection are outside the language.
+
+## Terminology
+
+- A **source root** is the logical directory from which project module identities are derived.
+- A **module identity** is a case-sensitive, extensionless path such as `model/User`.
+- An **import path** is the dotted source spelling of a module identity, such as `model.User`.
+- A **namespace binding** is a local name that qualifies members of one imported module.
+- A **selected binding** is one imported declaration available directly under a local name.
+- An **alias** is an explicit local name replacing a namespace or selected binding's default name.
+- A **qualified name** begins with a namespace binding, as in `User.make`.
+- A **module scope** is the set of top-level declaration and import names visible throughout one
+  module.
+- A **module closure** is the root module and every module reachable through its transitive imports.
+
+## Module identity and loading
+
+### MODULE-001 — One source file defines one path-identified module
+
+**Status:** Confirmed
+
+Each `.silk` source file is one module. Its canonical identity is its case-sensitive,
+extensionless path relative to the compilation source root, written with `/` between path
+segments.
+
+```text
+<source root>/model/User.silk  ->  model/User
+<source root>/app/Main.silk    ->  app/Main
+```
+
+Source code names the same identities with dotted import paths:
+
+```silk
+import model.User
+```
+
+Every segment is exact. `model.User` identifies `model/User.silk`; it does not find
+`model/user.silk`, `model/User/index.silk`, or another extension.
+
+**Boundary:** The identity is logical rather than an absolute host path. Absolute paths, source
+extensions, empty segments, `.`, and `..` are not valid module identities. A source supplied from
+memory still has one explicit logical identity even when it has no filesystem path.
+
+**Diagnostics:** An import whose exact module does not exist reports `MOD0001` at the complete
+import path. A compilation request whose root identity itself is noncanonical is a compiler-client
+error rather than a Silk source diagnostic. A project module attempting to occupy the reserved
+`silk/` standard-library source space reports `MOD0004`.
+
+**Evidence:** [module closure](../../openspec/specs/bootstrap-module-closure/spec.md),
+[source resolution](../../openspec/specs/bootstrap-source-resolution/spec.md),
+[module closure tests](../../packages/compiler/test/ModuleClosure.test.ts).
+
+### MODULE-002 — Source text does not declare or override module identity
+
+**Status:** Confirmed
+
+A Silk file contains declarations and imports but no module declaration. The source resolver assigns
+its identity before parsing the file.
+
+```silk
+// model/User.silk is already module model/User.
+pub struct User { id: i32 }
+```
+
+Moving or renaming the file changes the module identity and therefore the canonical identities of
+its declarations. Imports must name the new path.
+
+**Boundary:** Module documentation, a namespace alias, or a declaration named `User` does not change
+the containing module's identity. Two identical source texts supplied as `model/User` and
+`archive/User` define distinct modules and distinct declarations.
+
+**Diagnostics:** Silk has no module-declaration syntax. A declaration-like spelling attempting to
+introduce one receives the ordinary lexer or parser diagnostic for unsupported syntax. An import
+that still names the old path reports `MOD0001`.
+
+**Evidence:** [canonical module identity](../../openspec/specs/bootstrap-module-closure/spec.md),
+[syntax files](../../openspec/specs/bootstrap-syntax-file/spec.md).
+
+### MODULE-003 — Import paths resolve from the source root, not from the importing file
+
+**Status:** Confirmed
+
+Every project import is absolute within the compilation source root. The same import path identifies
+the same module no matter which module contains it.
+
+```text
+<source root>/app/features/Profile.silk
+<source root>/model/User.silk
+```
+
+```silk
+// app/features/Profile.silk
+import model.User
+```
+
+This resolves `<source root>/model/User.silk`. It does not begin lookup below
+`app/features/`.
+
+By default, the entry file's containing directory is the source root. A project or compiler client
+may select an explicit source root; a nested entry then keeps its path below that root as its module
+identity.
+
+**Boundary:** Silk has no relative import spelling. An import cannot use `.` or `..` to walk from
+the importing module, and resolution does not probe parent directories or alternate file layouts.
+
+**Diagnostics:** A syntactically valid path with no exact source reports `MOD0001`. A file that
+exists but cannot be read produces an operational source-resolution failure rather than pretending
+that the module is absent.
+
+**Evidence:** [filesystem source lookup](../../openspec/specs/bootstrap-source-resolution/spec.md),
+[source resolver tests](../../packages/compiler/test/SourceResolver.test.ts).
+
+### MODULE-004 — Compilation loads only the transitively reachable module closure
+
+**Status:** Confirmed
+
+Compilation begins with one root module and follows its imports transitively. Each reachable module
+identity is resolved and parsed at most once, even when several modules import it.
+
+```text
+app/Main -> feature/Left  -> shared/Value
+         -> feature/Right -> shared/Value
+```
+
+`shared/Value` belongs to the closure once. A source available to the resolver but unreachable from
+`app/Main` is not part of that compilation merely because it exists below the source root.
+
+**Boundary:** Loading a module makes its declarations available for static analysis; it does not
+mean that every function in that module is executable or included in the emitted program. Runtime
+reachability is a separate property beginning at the selected entry point.
+
+**Diagnostics:** Each absent reachable target reports its import diagnostic. A damaged import path
+retains its parser diagnostic without also requesting a fabricated module or emitting `MOD0001`.
+One operational resolution failure does not erase successfully loaded modules, although the
+compilation cannot commit its requested artifact.
+
+**Evidence:** [reachable module closure](../../openspec/specs/bootstrap-module-closure/spec.md),
+[module closure tests](../../packages/compiler/test/ModuleClosure.test.ts),
+[executable closure](../../openspec/specs/bootstrap-intrinsic-target-availability/spec.md).
+
+### MODULE-005 — Imports have no runtime behavior
+
+**Status:** Confirmed
+
+An import contributes names to its containing module's static scope. It does not execute the
+imported source, initialize runtime module state, construct an Effect, allocate storage, or change
+ownership.
+
+```silk
+import logging.Logger
+
+pub fn main() -> i32 {
+  return 42
+}
+```
+
+The import alone performs no logging and creates no `Logger` value or service requirement.
+
+**Boundary:** Calling an imported function, constructing an imported value, or mentioning an
+imported service in an Effect contract has the ordinary behavior of that declaration. The import
+itself contributes none of that behavior.
+
+An import also does not implicitly re-export names or activate unlisted methods, operators,
+overloads, or runtime providers. Interface-conformance availability is defined with interface and
+specialization rules rather than by runtime import side effects.
+
+**Diagnostics:** A valid but unused import is not a compiler error. Tooling may report a removable
+unused-import warning. Invalid bindings retain their import or name-resolution diagnostics even
+when no runtime expression uses them.
+
+**Evidence:** [behavior-neutral imports](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[module semantic surface](../../openspec/specs/bootstrap-module-semantic-surface/spec.md).
+
+### MODULE-006 — Import cycles are valid and do not choose lookup order
+
+**Status:** Confirmed
+
+Distinct modules may import each other. The cycle itself is not an error because all reachable
+top-level declaration headers are known before function bodies resolve.
+
+```silk
+// a/A.silk
+import b.B
+
+pub fn main() -> i32 {
+  return B.answer()
+}
+```
+
+```silk
+// b/B.silk
+import a.A
+
+pub fn answer() -> i32 {
+  return 42
+}
+```
+
+The modules form an import cycle, and `A.main` still resolves `B.answer` canonically.
+
+**Boundary:** Valid import cycles do not make invalid type or value cycles safe. A recursively
+embedded nominal value with no indirection remains invalid under its value-type rules. Calling
+mutually recursive functions can also fail to terminate at runtime even though their names resolve.
+
+**Diagnostics:** An import cycle alone emits no source diagnostic. Each declaration inside it still
+receives its ordinary signature, visibility, type, ownership, and control-flow diagnostics.
+
+**Evidence:** [module cycle facts](../../openspec/specs/bootstrap-module-closure/spec.md),
+[cycle-safe lookup](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[name-resolution cycle tests](../../packages/compiler/test/NameResolution.test.ts).
+
+## Import bindings
+
+### IMPORT-001 — A namespace import binds the target's final path segment
+
+**Status:** Confirmed
+
+A namespace import without an alias creates one local namespace binding. Its default name is the
+last segment of the imported module path.
+
+```silk
+import model.User
+
+pub fn main() -> i32 {
+  let user = User.make(42)
+  return user.id
+}
+```
+
+`model.User` identifies module `model/User` and binds local namespace `User`. `User.make` then
+looks up public member `make` in that module.
+
+**Boundary:** The namespace is not a runtime value and does not import any member as an unqualified
+name. `make(42)` is unresolved unless `make` is local or separately selected into scope.
+
+**Diagnostics:** An unknown target reports `MOD0001` at the import path. A valid namespace with no
+public member named by a qualified lookup reports the unknown-member diagnostic for that member.
+A private member reports `SEM0015` rather than appearing unknown.
+
+**Evidence:** [explicit import bindings](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[namespace lookup tests](../../packages/compiler/test/NameResolution.test.ts).
+
+### IMPORT-002 — A namespace alias replaces the default local name
+
+**Status:** Confirmed
+
+`as` assigns an explicit local name to the imported module namespace.
+
+```silk
+import compiler.Syntax as Tree
+
+pub fn main() -> i32 {
+  return Tree.parse()
+}
+```
+
+The module identity remains `compiler/Syntax`; only this importing module's local binding changes
+from `Syntax` to `Tree`.
+
+**Boundary:** The default name is not retained alongside the alias. `Syntax.parse()` is unresolved
+unless another visible binding independently names `Syntax`. An alias does not rename the imported
+module or any declaration it owns.
+
+A redundant alias such as `import compiler.Syntax as Syntax` is valid under IMPORT-005. Tooling may
+offer to remove the unchanged alias.
+
+**Diagnostics:** A missing alias name receives the parser's missing-token diagnostic without a
+fabricated binding. Binding collisions use the collision rule rather than silently replacing an
+existing name. The current compiler reports redundant aliases as `SEM0013`; that error conflicts
+with IMPORT-005.
+
+**Evidence:** [import aliases](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[alias tests](../../packages/compiler/test/NameResolution.test.ts).
+
+### IMPORT-003 — A selective import binds only its listed public members
+
+**Status:** Confirmed
+
+A selective import creates direct bindings for the declarations listed between braces. It does not
+also create the module's default namespace binding.
+
+```silk
+import compiler.Syntax { Node, node, parse as read }
+
+pub fn main() -> i32 {
+  let value = node(42)
+  return read(move value)
+}
+```
+
+This binds public type `Node` as `Node`, constructor function `node` as `node`, and public function
+`parse` as `read`. It does not bind namespace `Syntax`.
+
+**Boundary:** Selection is explicit and non-recursive. Other public declarations in
+`compiler/Syntax` do not become visible, and a selected declaration does not bring names used by
+its implementation into the importing module.
+
+Selecting a private declaration is distinct from selecting an unknown declaration: the former has
+a known but inaccessible candidate; the latter has no candidate with that name.
+
+**Diagnostics:** An unknown selected member reports `SEM0014` at that member. A private selected
+member reports `SEM0015`. A local spelling claimed by another valid binding reports `SEM0016`
+without choosing a winner.
+
+**Evidence:** [selected import bindings](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[selected import tests](../../packages/compiler/test/NameResolution.test.ts).
+
+### IMPORT-004 — A hybrid import may bind one namespace and selected members together
+
+**Status:** Confirmed
+
+One import may combine a namespace binding with selected-member bindings from the same target.
+
+```silk
+import compiler.Syntax as Tree { Node, node, parse }
+
+pub fn main() -> i32 {
+  return parse(node(20)) + Tree.width(Tree.node(22))
+}
+```
+
+This binds namespace `Tree` and direct members `Node`, `node`, and `parse`. All bindings still
+identify declarations owned by canonical module `compiler/Syntax`.
+
+**Boundary:** The namespace alias affects only the namespace binding. It does not prefix or rename
+the selected members. Each selected member may use its own explicit alias when a different local
+name is needed.
+
+The hybrid form is a compact way to request both namespace and selected bindings. IMPORT-006 also
+permits separate declarations naming the same target when that organization is clearer.
+
+**Diagnostics:** Each binding is checked independently for unknown members, inaccessibility, and
+local collisions. The current compiler reports a second declaration importing the same canonical
+target as `MOD0003`; that error conflicts with IMPORT-006.
+
+**Evidence:** [hybrid import bindings](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[hybrid syntax provenance](../../packages/compiler/test/ModuleClosure.test.ts).
+
+## Names and collisions
+
+### NAME-001 — Top-level declarations are visible throughout their defining module
+
+**Status:** Confirmed
+
+A top-level declaration may be named anywhere in its defining module, including from a declaration
+written earlier in the file. Source order does not control name availability.
+
+```silk
+pub fn main() -> i32 {
+  return answer()
+}
+
+fn answer() -> i32 {
+  return 42
+}
+```
+
+`main` resolves the later `answer` declaration. Every top-level declaration header is collected
+before function bodies resolve.
+
+**Boundary:** This rule applies to top-level declarations, not local values. A local `let` binding,
+parameter, or pattern binding exists only in its lexical scope and cannot be used before its
+declaration. Runtime initialization order is not inferred from top-level source order because
+imports and declarations do not execute module initialization.
+
+**Diagnostics:** A top-level reference with no matching local or imported declaration receives the
+ordinary unknown-name diagnostic for its position. It is not reported merely because the matching
+declaration occurs later in the file.
+
+**Evidence:** [declaration indexing](../../openspec/specs/bootstrap-declaration-index/spec.md),
+[declaration index tests](../../packages/compiler/test/DeclarationIndex.test.ts).
+
+### NAME-002 — One flat module namespace contains top-level declarations and imports
+
+**Status:** Confirmed
+
+Functions, nominal types, constants, services, interfaces, module namespace bindings, and selected
+imports claim names in one flat module scope. Two different bindings cannot use the same local
+spelling merely because they have different declaration kinds.
+
+```silk,ignore
+struct Token {}
+fn Token() -> i32 { return 42 }
+```
+
+The second `Token` is invalid. The language does not choose between a type meaning and a function
+meaning based on the expression's expected kind.
+
+**Boundary:** A namespace and one of its members may legitimately have the same spelling because
+qualification keeps them at different lookup positions. With `import model.User`, `User.User` may
+name public declaration `User` inside module namespace `User`. The two `User` components are not
+competing bindings in one scope.
+
+Generic parameters, function parameters, local bindings, fields, and pattern bindings have their
+own lexical or declaration-local scopes. Their collision rules are defined with those constructs.
+
+**Diagnostics:** A repeated top-level declaration reports `SEM0003` at the later declaration and
+points to the first. Distinct import or declaration bindings claiming one module-scope spelling
+report `SEM0016` without selecting a winner.
+
+**Evidence:** [flat module namespace](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[canonical declaration index](../../openspec/specs/bootstrap-declaration-index/spec.md).
+
+### NAME-003 — A binding collision has no source-order winner
+
+**Status:** Confirmed
+
+When different valid declarations or imports claim the same local spelling, the name is unavailable
+until the source gives the bindings distinct names. Import order, declaration order, and declaration
+kind never select a winner.
+
+```silk,ignore
+import text.Parser { parse }
+import binary.Parser { parse }
+
+pub fn main() -> i32 {
+  return parse()
+}
+```
+
+Both imports claim `parse`, so the call resolves to neither function.
+
+The same rule applies when an imported name collides with a declaration in the importing module:
+
+```silk,ignore
+import text.Parser { parse }
+
+fn parse() -> i32 { return 42 }
+```
+
+**Boundary:** PRELUDE-001 defines no lower-priority standard-library namespace tier. Language
+bindings retain their own reserved or collision rules; they do not let the module's explicit
+bindings shadow one another. Distinct lexical scopes may reuse a spelling only where the
+corresponding local binding rules allow it.
+
+**Diagnostics:** Each colliding module-scope binding reports `SEM0016` with the complete candidate
+set available to diagnostics and tooling. A use through that spelling remains unavailable instead
+of producing a second misleading lookup result.
+
+**Evidence:** [collision decision](../../wayfinder/bootstrap-language/issues/04-modules-visibility-and-name-resolution.md),
+[binding conflict diagnostics](../../openspec/specs/bootstrap-name-resolution/spec.md).
+
+### NAME-004 — Explicit aliases resolve imported-name collisions
+
+**Status:** Confirmed
+
+Give colliding namespaces or selected members distinct local aliases.
+
+```silk
+import text.Parser
+import binary.Parser as BinaryParser
+
+pub fn main() -> i32 {
+  return Parser.parse() + BinaryParser.parse()
+}
+```
+
+Both canonical modules retain their original identities. Only their local names differ.
+
+Selected members may be aliased independently:
+
+```silk
+import text.Parser { parse as parseText }
+import binary.Parser { parse as parseBinary }
+```
+
+**Boundary:** Aliasing changes no declaration identity, type identity, visibility, ownership, or
+runtime behavior. It also does not create an overload set: two functions still need distinct local
+names when both would otherwise claim the same spelling.
+
+**Diagnostics:** An alias that still collides with another binding reports `SEM0016`. A missing alias
+name retains the parser diagnostic. An alias identical to the default spelling is the harmless
+redundancy defined by IMPORT-005.
+
+**Evidence:** [explicit import aliases](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[namespace alias tests](../../packages/compiler/test/NameResolution.test.ts).
+
+## Visibility
+
+### VIS-001 — Declarations are private by default and `pub` exposes them
+
+**Status:** Confirmed
+
+A top-level declaration without `pub` is private to its defining module. `pub` makes the declaration
+eligible for access from another module through an explicit namespace or selected binding.
+
+```silk
+pub fn answer() -> i32 {
+  return hidden()
+}
+
+fn hidden() -> i32 {
+  return 42
+}
+```
+
+Both functions are available inside their defining module. Another module may import or qualify
+`answer` but not `hidden`.
+
+The same default applies to nominal types, constants, services, interfaces, and other top-level
+declarations that support cross-module access. Struct fields have their own `pub` marker under the
+same private-by-default principle.
+
+**Boundary:** `pub` grants name accessibility; it does not import the declaration anywhere,
+re-export it from an importing module, execute it, or weaken its type, Effect, ownership, or target
+contract.
+
+**Diagnostics:** No diagnostic applies merely because a declaration is private or unused. An
+external attempt to select or qualify it reports `SEM0015` at that use.
+
+**Evidence:** [visibility lookup](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[struct visibility](values-and-types.md#struct-001--a-struct-declaration-creates-one-nominal-type),
+[name-resolution tests](../../packages/compiler/test/NameResolution.test.ts).
+
+### VIS-002 — Private declarations remain fully visible inside their defining module
+
+**Status:** Confirmed
+
+Privacy is a module boundary, not a declaration-order or same-file restriction. Any declaration
+body in the defining module may name a unique private declaration.
+
+```silk
+fn normalize(value: i32) -> i32 {
+  return value
+}
+
+pub fn parse(value: i32) -> i32 {
+  return normalize(value)
+}
+```
+
+`parse` may call `normalize` even though callers from another module cannot.
+
+**Boundary:** A nested module is not created by directory structure within one source file. Every
+source file has its own module boundary, so a neighboring file in the same directory does not gain
+private access.
+
+**Diagnostics:** A valid same-module private reference receives no visibility diagnostic. A private
+declaration of the wrong kind still receives the ordinary kind or type diagnostic for its use.
+
+**Evidence:** [defining-module visibility](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[declaration index](../../openspec/specs/bootstrap-declaration-index/spec.md).
+
+### VIS-003 — Unknown and private imported members are different errors
+
+**Status:** Confirmed
+
+Lookup preserves whether an imported member is absent or exists but is private.
+
+```silk,ignore
+import model.User
+
+User.missing() // no declaration named missing
+User.secret()  // declaration exists, but is private
+```
+
+The first lookup is unknown. The second retains the private declaration as an inaccessible candidate
+without making it callable.
+
+This distinction applies equally to namespace qualification and selective imports, and to values,
+types, constants, services, and interfaces.
+
+**Boundary:** Privacy does not deliberately hide the fact that a declaration exists from compiler
+diagnostics or navigation metadata. It prevents semantic access. User-facing diagnostics should
+identify the inaccessible declaration without exposing private implementation details such as
+hidden field sets.
+
+**Diagnostics:** An unknown selected or qualified member reports `SEM0014`. A known private member
+reports `SEM0015`. The compiler does not fall back to another module or prelude declaration after
+either failed lookup.
+
+**Evidence:** [visibility outcomes](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[private import tests](../../packages/compiler/test/NameResolution.test.ts).
+
+### VIS-004 — A public contract cannot expose a private nominal type
+
+**Status:** Confirmed
+
+Every nominal type appearing in a public declaration's externally visible contract must itself be
+public. This includes function parameters and results, public struct fields, and other published
+type positions.
+
+```silk,ignore
+struct Hidden {}
+
+pub fn reveal(value: Hidden) -> Hidden {
+  return move value
+}
+```
+
+`reveal` is invalid because an importing module could name the function but could not name its
+parameter or result type.
+
+A public type may use private representation types behind private fields:
+
+```silk
+struct Storage { value: i32 }
+
+pub struct Counter {
+  storage: Storage
+}
+```
+
+The private field does not enter `Counter`'s externally accessible construction or projection
+contract.
+
+**Boundary:** A private declaration may freely mention other private declarations in its own
+contract. A public function body may also use private types internally as long as they do not escape
+through its published signature.
+
+**Diagnostics:** Each private nominal type exposed by a public contract reports `SEM0019` at the
+type use and retains the referenced declaration identity. The compiler does not pretend the type is
+unknown or silently make it public.
+
+**Evidence:** [nominal visibility](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[struct visibility specification](../../openspec/specs/bootstrap-struct-types/spec.md),
+[private exposure tests](../../packages/compiler/test/DeclarationIndex.test.ts).
+
+## Redundancy, prelude, and publication
+
+### IMPORT-005 — Redundant aliases are semantically harmless
+
+**Status:** Confirmed
+
+An alias equal to the binding's default name does not change the program and should remain valid.
+
+```silk,ignore
+import model.User as User
+
+pub fn main() -> i32 {
+  return User.answer()
+}
+```
+
+This has the same binding and runtime meaning as `import model.User`.
+
+**Boundary:** An alias that claims another binding's spelling is not merely redundant; it is a real
+collision under NAME-003. A missing alias name remains malformed syntax.
+
+**Diagnostics:** The compiler should not reject an unchanged alias. Language tooling may report a
+non-blocking simplification warning and offer to remove `as User`. The current compiler instead
+reports `SEM0013`; that diagnostic should cease to be a compilation error.
+
+**Evidence:** [current alias policy](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[redundant alias tests](../../packages/compiler/test/NameResolution.test.ts).
+
+### IMPORT-006 — The same module may be imported more than once
+
+**Status:** Confirmed
+
+Import declarations are judged by the bindings they create, not by whether another declaration
+names the same target module. Distinct declarations may request separate noncolliding views of one
+module.
+
+```silk,ignore
+import model.User as UserApi
+import model.User { User }
+
+fn reset(user: User) -> User {
+  return UserApi.withId(move user, 0)
+}
+```
+
+Both imports identify canonical module `model/User`. The first binds namespace `UserApi`; the second
+binds public type `User` directly.
+
+**Boundary:** Repeated imports do not permit conflicting local names. Two declarations importing
+different members as the same spelling still report `SEM0016`. Importing an identical binding twice
+is an idempotent redundancy rather than a second declaration identity.
+
+**Diagnostics:** Repeated targets alone should not produce a compiler error. Tooling may suggest
+combining compatible imports into one hybrid declaration or removing an exact duplicate. The
+current compiler reports every later target occurrence as `MOD0003`; that restriction should be
+removed.
+
+**Evidence:** [current repeated-target restriction](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[duplicate import tests](../../packages/compiler/test/NameResolution.test.ts).
+
+### PRELUDE-001 — Only language bindings are implicit
+
+**Status:** Confirmed
+
+Foundational type spellings, language syntax, and the sealed `Intrinsic` namespace are available
+without imports. Ordinary standard-library actor namespaces are not. A module imports every
+standard-library API it names.
+
+```silk
+import silk.option as Option
+
+pub fn main() -> i32 {
+  let value = Option.some<i32>(42)
+  drop value
+  return 42
+}
+```
+
+The type spelling `i32` needs no import because it is part of the language. `Option.some` needs the
+explicit `silk.option` namespace binding because `Option` is an ordinary standard-library actor.
+The same rule applies to `Effect`, `Vector`, `Result`, filesystem services, target providers, and
+primitive actor operations:
+
+```silk
+import silk.effects as Effect
+import silk.i32
+```
+
+`Effect<A ! E ? R>` remains language type syntax. The namespace binding imported as `Effect` names
+ordinary standard-library functions such as `Effect.provide`.
+
+**Boundary:** The toolchain may resolve the reserved `silk/` source origin differently from project
+files, but that packaging privilege does not inject its declarations into every module scope.
+Tooling may add missing imports automatically; auto-import is a source edit, not invisible lookup.
+
+A foundational type spelling does not create an ordinary nominal declaration in the module scope.
+Therefore `import silk.i32` may bind actor namespace `i32` while type positions continue to use the
+closed language spelling `i32`; `import silk.effects as Effect` behaves similarly beside Effect
+type syntax. This does not create general separate type and value namespaces for user declarations.
+
+**Diagnostics:** Naming an unimported standard-library namespace uses the ordinary unknown-name
+diagnostic and may carry an auto-import suggestion. The current compiler injects every manifest
+namespace—including `Option`, `Result`, `Vector`, services, providers, and internal actors—into user
+scope. That implicit prelude conflicts with this confirmed rule and should be removed.
+
+**Evidence:** [current prelude tier](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[standard-library namespace tests](../../packages/compiler/test/StdlibNamespaceAcceptance.test.ts),
+[foundational type names](values-and-types.md#type-001--foundational-type-spellings-are-lowercase-and-distinct).
+
+### EXPORT-001 — Imports do not re-export declarations
+
+**Status:** Confirmed
+
+An import creates bindings only in the importing module. Those bindings are not members that a
+third module can import through it.
+
+```silk
+// api/Public.silk
+import model.User
+
+pub fn makeUser(id: i32) -> User.User {
+  return User.make(id)
+}
+```
+
+Another module may access `Public.makeUser`, but it cannot access `Public.User` merely because
+`api/Public` imported `model/User`.
+
+Silk currently has no explicit re-export declaration. In particular, `pub import` is unsupported:
+
+```silk,ignore
+pub import model.User
+```
+
+**Boundary:** A module may expose ordinary public wrapper functions whose contracts use public
+types from another module. Those types retain their original canonical identities. Wrapping does
+not create a type alias or re-exported namespace.
+
+Explicit re-export syntax is deferred until Silk's native library and package model is designed. At
+that point it must state exactly which declarations become members, preserve their canonical
+identities, define collision behavior, and avoid turning every ordinary import into a public API
+commitment.
+
+**Diagnostics:** Attempting `pub import` receives a parser diagnostic because no such declaration
+exists. Looking up an importing module's private import binding from another module reports an
+unknown member rather than following the import transitively.
+
+**Evidence:** [non-re-exporting imports](../../openspec/specs/bootstrap-name-resolution/spec.md),
+[module semantic surfaces](../../openspec/specs/bootstrap-module-semantic-surface/spec.md).
+
+## Reconciliation ledger
+
+These confirmed rules intentionally disagree with several current artifacts. They define the
+direction for a later OpenSpec handoff; this stabilization pass does not silently edit the compiler
+or normative specifications.
+
+| Area | Current behavior | Confirmed direction |
+| --- | --- | --- |
+| Redundant aliases | `NameResolution` reports `SEM0013`, marks the binding unavailable, and tooling removes the alias. | Keep the binding available; a simplification may remain a non-blocking tooling action. |
+| Repeated targets | `NameResolution` reports `MOD0003`, rejects every later declaration for that target, and tooling removes it. | Resolve every declaration normally; only actual local binding collisions are errors. |
+| Module closure | `Stdlib.requiredModules` lexically scans `Namespace.` tokens and causes `ModuleClosure` to load matching manifest modules without imports. | Follow explicit import syntax only; preserve manifest lookup for source resolution and auto-import discovery. |
+| Module scope | `NameResolution` seeds every loaded manifest namespace and alias as a lower-priority prelude. | Seed only language bindings; standard-library actor names enter scope through imports. |
+| Completion | Qualified completion recognizes a manifest namespace that source never imported. | Offer a source-level auto-import or complete only an already visible namespace. |
+| Specifications | `bootstrap-name-resolution` requires distinct aliases, one declaration per target, and a standard-library prelude tier. | Replace those requirements with binding-based redundancy and explicit standard-library imports. |
+| Tests and examples | `NameResolution.test.ts`, `StdlibNamespaceAcceptance.test.ts`, `StdlibResolution.test.ts`, editor-intelligence tests, and examples encode the old errors or implicit namespaces. | Test explicit imports, harmless redundancy, collision-only rejection, and auto-import edits. |
+| Re-exports | `pub import` is unsupported and ordinary imports are not exported. | Preserve this boundary until native library/package design supplies requirements for explicit re-exports. |

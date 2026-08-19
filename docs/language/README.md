@@ -81,11 +81,13 @@ not belong in a language rule unless a program can observe them.
 - [Expressions and operators](expressions-and-operators.md) — deterministic evaluation, expression
   composition, scalar and explicitly declared custom operators, short-circuiting, assignment,
   atomic replacement, and explicit conversion.
+- [Modules, names, and visibility](modules-names-and-visibility.md) — path-derived module identity,
+  source-root lookup, static imports, cycles, namespace bindings, aliases, collisions, and public
+  declaration boundaries, redundancy, explicit standard-library imports, and re-export boundaries.
 
 The following domains will receive pages only when their first rules are ready:
 
 - remaining syntax beyond expressions;
-- modules, names, and visibility beyond entry discovery;
 - generics, interfaces, and specialization;
 - targets, unsafe code, and intrinsics; and
 - standard-library boundaries.
