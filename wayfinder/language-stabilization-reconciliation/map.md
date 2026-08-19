@@ -74,6 +74,10 @@ handoffs.
   — 27 of 49 rules are implemented. Existing loops, nominal match, module closure, names, and
   visibility are strong; remaining work is one shared-pattern/ordinary-union handoff plus removal
   of redundant-import errors and the implicit standard-library prelude.
+- [Runtime, standard library, targets, termination, and tooling audit](issues/05-runtime-termination-targets-and-tooling.md)
+  — 15 of 44 rules are fully implemented. Intrinsic target closure is strong; remaining work
+  separates catalog/scope/runtime roles, adds source unsafe contracts, removes `Report`, builds one
+  structured termination outcome, normalizes statuses, and completes explicit-import tooling.
 
 ## Not yet specified
 
