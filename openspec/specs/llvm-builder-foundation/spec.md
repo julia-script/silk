@@ -7,7 +7,7 @@ Provide an Effect-native, deterministic foundation for constructing LLVM modules
 ## Requirements
 
 ### Requirement: Effect-native builder lifecycle
-The system SHALL create opaque builder sessions through Effect and SHALL express every public state mutation, validation failure, and finalization operation in the Effect error channel. Recoverable public failures MUST use `SilkError` and MUST NOT throw ordinary exceptions or expose `unknown` as the public error type.
+The system SHALL create opaque builder sessions through Effect and SHALL express every public state mutation, validation failure, and finalization operation in the Effect error channel. Recoverable public failures MUST use `LlvmError` and MUST NOT throw ordinary exceptions or expose `unknown` as the public error type.
 
 #### Scenario: Create and use a builder
 - **WHEN** a caller creates a builder with valid options and performs valid operations
@@ -15,14 +15,14 @@ The system SHALL create opaque builder sessions through Effect and SHALL express
 
 #### Scenario: Reject invalid builder input
 - **WHEN** a caller supplies an invalid option or operation input
-- **THEN** the operation fails with `SilkError` in the Effect error channel
+- **THEN** the operation fails with `LlvmError` in the Effect error channel
 
 ### Requirement: Module-owned values
 The system SHALL associate every public handle with its owning builder or function body and SHALL reject use of a handle in a different owner before mutating state.
 
 #### Scenario: Cross-builder handle use
 - **WHEN** a handle created by one builder is passed to an operation on another builder
-- **THEN** the operation fails with `SilkError` and neither builder is modified
+- **THEN** the operation fails with `LlvmError` and neither builder is modified
 
 ### Requirement: Byte-exact names and wide values
 The system SHALL preserve arbitrary byte sequences used as LLVM names and strings, SHALL offer UTF-8 string convenience inputs, and SHALL represent integer values outside JavaScript's safe-integer range without loss.

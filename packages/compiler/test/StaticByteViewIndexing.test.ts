@@ -181,7 +181,7 @@ it.effect(
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed')
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 201)
+      assert.strictEqual(evaluated.result.value, 201n)
       assert.deepEqual(
         evaluated.trace.flatMap((event) =>
           event._tag === 'PlaceRead'
@@ -208,7 +208,7 @@ it.effect(
       )
       const repeatedResult = Analysis.evaluate(repeated)
       assert.strictEqual(repeatedResult._tag, 'Completed')
-      if (repeatedResult._tag === 'Completed') assert.strictEqual(repeatedResult.result.value, 306)
+      if (repeatedResult._tag === 'Completed') assert.strictEqual(repeatedResult.result.value, 306n)
 
       const empty = yield* Analysis.ofSourceRealized(
         `${moduleName}/empty`,
@@ -216,7 +216,7 @@ it.effect(
       )
       const emptyResult = Analysis.evaluate(empty)
       assert.strictEqual(emptyResult._tag, 'Completed')
-      if (emptyResult._tag === 'Completed') assert.strictEqual(emptyResult.result.value, 0)
+      if (emptyResult._tag === 'Completed') assert.strictEqual(emptyResult.result.value, 0n)
 
       const boundsSource = `pub fn main() -> i32 {
   let bytes = b"\\x99\\x13\\x1d\\x00"

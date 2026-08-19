@@ -17,6 +17,7 @@ const packageRoot = resolve(workspaceRoot, 'packages/llvm')
 const compilerPackageRoot = resolve(workspaceRoot, 'packages/compiler')
 const compilerCliPackageRoot = resolve(workspaceRoot, 'packages/compiler-cli')
 const documentationPackageRoot = resolve(workspaceRoot, 'packages/documentation')
+const inspectorPackageRoot = resolve(workspaceRoot, 'packages/inspector')
 const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
 const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
 const webContainerPackageRoot = resolve(workspaceRoot, 'packages/platform-webcontainer')
@@ -83,7 +84,6 @@ test('the llvm release candidate is a self-contained ESM package', () => {
     expect(existsSync(resolve(packedRoot, 'UPSTREAM.md'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
     expect(existsSync(resolve(packedRoot, 'dist/LlvmError.js'))).toBe(true)
-    expect(existsSync(resolve(packedRoot, 'dist/SilkError.js'))).toBe(false)
     expect(readFileSync(resolve(packedRoot, 'README.md'), 'utf8')).toContain('LlvmError')
     expect(readFileSync(resolve(packedRoot, 'docs/reference/actors.md'), 'utf8')).toContain(
       'WrappedFailure',
@@ -133,7 +133,6 @@ test('the llvm release candidate is a self-contained ESM package', () => {
       './Variable',
       './Verify',
     ])
-    expect(manifest.exports).not.toHaveProperty('./SilkError')
 
     const consumerRoot = resolve(temporary, 'consumer')
     mkdirSync(consumerRoot)
@@ -616,12 +615,6 @@ console.log(
       ),
       rootLookup: api.Elaboration.declarationByName(analysis, 'identity')._tag,
       deepLookup: semanticModule.declarationByName(deepAnalysis, 'missing')._tag,
-      legacyResultFields: ['declaration', 'integerExpression', 'returnCompatibility'].filter(
-        (key) => key in analysis,
-      ),
-      legacyFunctionFields: analysis.functions.map((fact) =>
-        ['integerExpression'].filter((key) => key in fact),
-      ),
     },
     evaluation: {
       rootTag: evaluation._tag,
@@ -874,12 +867,10 @@ console.log(
       wrongArityDiagnosticCodes: ['SEM0078'],
       rootLookup: 'Resolved',
       deepLookup: 'Missing',
-      legacyResultFields: [],
-      legacyFunctionFields: [[], []],
     })
     expect(api.evaluation).toEqual({
       rootTag: 'Completed',
-      rootResult: { _tag: 'I32Value', value: 42 },
+      rootResult: { _tag: 'IntegerValue', type: 'i32', value: 42 },
       rootTrace: [
         'Entry',
         'RegionEntry',
@@ -891,7 +882,7 @@ console.log(
         'Return',
       ],
       deepTag: 'Completed',
-      deepResult: { _tag: 'I32Value', value: 42 },
+      deepResult: { _tag: 'IntegerValue', type: 'i32', value: 42 },
       cycleTag: 'Blocked',
       cycleReason: 'EvaluationLimit',
       cycleNames: [],
@@ -909,7 +900,7 @@ console.log(
       mappingCount: 1,
       type: { _tag: 'Available', type: 'i32' },
       evaluationReason: null,
-      evaluationResult: { _tag: 'I32Value', value: 42 },
+      evaluationResult: { _tag: 'IntegerValue', type: 'i32', value: 42 },
       evaluationTrace: [
         'Entry',
         'RegionEntry',
@@ -1340,6 +1331,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
       compilerCliPackageRoot,
       compilerPackageRoot,
       documentationPackageRoot,
+      inspectorPackageRoot,
       packageRoot,
       wasmPackageRoot,
     ]) {
@@ -1360,8 +1352,10 @@ test('the lsp release candidate installs and answers an initialize request', asy
     const documentationArchive = archives.find((file) =>
       file.startsWith('silk-effect-documentation-'),
     )
+    const inspectorArchive = archives.find((file) => file.startsWith('silk-effect-inspector-'))
     expect(archive).toBeDefined()
     expect(documentationArchive).toBeDefined()
+    expect(inspectorArchive).toBeDefined()
     execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
 
     const packedRoot = resolve(unpackRoot, 'package')
@@ -1372,6 +1366,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
       './Document',
+      './Inspection',
       './LineIndex',
       './Server',
       './Workspace',
@@ -1398,7 +1393,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/inspector': file:${resolve(archiveRoot, inspectorArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
     installConsumer(consumerRoot)
 

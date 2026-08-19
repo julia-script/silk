@@ -116,7 +116,7 @@ it.effect(
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed')
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 127)
+      assert.strictEqual(evaluated.result.value, 127n)
 
       // Six boxes, six acquires, six releases. An unhooked box traces six against two here.
       const traced = counts(Analysis.allocationTraceEventsOf(evaluated))
@@ -188,7 +188,7 @@ it.effect('borrows, mutates, and consumes a boxed value without unsafe code', ()
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
 
     // One box, one acquire, one release. Consuming the box still releases its storage exactly once.
     assert.deepEqual(counts(Analysis.allocationTraceEventsOf(evaluated)), {
@@ -237,7 +237,7 @@ it.effect('releases an owning value held inside a box', () =>
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
 
     // Two allocations, the vector's buffer and the box's storage, and both come back.
     const traced = counts(Analysis.allocationTraceEventsOf(evaluated))
@@ -298,7 +298,7 @@ it.effect('releases every link of a deep box chain', () =>
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
 
     // Sixty-four links, sixty-four allocations, and none of them abandoned by the drop that
     // unwinds them one call frame at a time.

@@ -68,7 +68,7 @@ it.effect('resolves typed constants and lowers only immediate values', () =>
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
     const native = yield* Analysis.codegen(snapshot, { mode: 'release' })
     assert.isAbove(native.bitcode.length, 0)
@@ -144,7 +144,7 @@ it.effect('gives an escaped string constant the same value as the equivalent let
 
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 6)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 6n)
   }),
 )
 
@@ -161,7 +161,7 @@ it.effect('gives a raw string constant the same value as the equivalent let bind
 
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 6)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 6n)
   }),
 )
 
@@ -196,7 +196,7 @@ pub fn main() -> i32 { return usize.toI32(byteLength(greeting)) }`
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 2)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 2n)
 
     const reference = Analysis.semanticOccurrenceAt(snapshot, 'main', main.indexOf('greeting)'))
     assert.strictEqual(reference?.declaration?.module, 'strings')

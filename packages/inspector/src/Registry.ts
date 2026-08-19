@@ -43,27 +43,30 @@ import {
 } from './ProjectSyntax.js'
 import type { RowModel } from './Row.js'
 
-export type ViewId =
-  | 'source'
-  | 'diagnostics'
-  | 'tokens'
-  | 'tree'
-  | 'flow'
-  | 'evaluation'
-  | 'closure'
-  | 'index'
-  | 'resolution'
-  | 'hir'
-  | 'struct-values'
-  | 'array-values'
-  | 'ownership'
-  | 'instances'
-  | 'layout'
-  | 'mir'
+export const viewIds = [
+  'source',
+  'diagnostics',
+  'tokens',
+  'tree',
+  'flow',
+  'evaluation',
+  'closure',
+  'index',
+  'resolution',
+  'hir',
+  'struct-values',
+  'array-values',
+  'ownership',
+  'instances',
+  'layout',
+  'mir',
   // One backend view, not one per backend: the target picks the backend.
-  | 'backend'
-  | 'toolchain'
-  | 'pipeline'
+  'backend',
+  'toolchain',
+  'pipeline',
+] as const
+
+export type ViewId = (typeof viewIds)[number]
 
 /** One cell of a pane's optional 19px fact strip. */
 export interface Fact {
@@ -489,7 +492,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
         interpreted === undefined
           ? undefined
           : interpreted._tag === 'Completed'
-            ? interpreted.result.value
+            ? Number(interpreted.result.value)
             : 'trap'
       const observed =
         execution === undefined
@@ -717,19 +720,9 @@ export const views: ReadonlyArray<ViewDefinition> = [
   },
 ]
 
-const byId = new Map(views.map((view) => [view.id, view]))
+const byId: ReadonlyMap<string, ViewDefinition> = new Map(views.map((view) => [view.id, view]))
 
-/**
- * Views that used to exist, and what replaced them.
- *
- * Layouts live in URLs and in localStorage, so a renamed view id outlives the rename: a link
- * shared before the backend panes merged still names `wasm`, and resolving it to a dead view
- * would turn a working link into an "unknown view" pane.
- */
-const renamed: Readonly<Record<string, ViewId>> = { llvm: 'backend', wasm: 'backend' }
-
-export const viewById = (id: string): ViewDefinition | undefined =>
-  byId.get(id as ViewId) ?? byId.get(renamed[id] as ViewId)
+export const viewById = (id: string): ViewDefinition | undefined => byId.get(id)
 
 /** Sibling phases offered as one-click tabs in a pane header. */
 export const siblingsOf = (view: ViewDefinition): ReadonlyArray<ViewDefinition> =>

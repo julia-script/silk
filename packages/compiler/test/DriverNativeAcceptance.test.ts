@@ -74,9 +74,10 @@ it.effect(
         if (program.expected._tag === 'Completes') {
           assert.strictEqual(interpreted._tag, 'Completed', program.name)
           const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
+          const nativeStatus = run.status === null ? null : BigInt(run.status)
           assert.strictEqual(
-            run.status,
-            interpreted._tag === 'Completed' ? interpreted.result.value : -1,
+            nativeStatus,
+            interpreted._tag === 'Completed' ? interpreted.result.value : -1n,
             `differential divergence on ${program.name}: interpreter ${
               interpreted._tag === 'Completed' ? interpreted.result.value : interpreted._tag
             }, native ${run.status}`,

@@ -38,7 +38,7 @@ pub fn main() -> i32 {
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 20)
+    assert.strictEqual(outcome.result.value, 20n)
     const placeRead = outcome.trace.find((event) => event._tag === 'PlaceRead')
     assert.strictEqual(placeRead?._tag, 'PlaceRead')
     if (placeRead?._tag !== 'PlaceRead') return
@@ -70,7 +70,7 @@ pub fn main() -> i32 { return choose(identity([[1, 2], [3, 4]]), 1, 0) }`)
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 3)
+    assert.strictEqual(outcome.result.value, 3n)
     const binding = outcome.trace.find(
       (event) => event._tag === 'Binding' && event.value._tag === 'ArrayValue',
     )

@@ -182,7 +182,7 @@ it.effect('moves one allocation through RawBuffer and lexical Slot operations', 
     )
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 41)
+    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 41n)
     assert.deepEqual(
       Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag),
       [
@@ -228,7 +228,7 @@ it.effect('reads initialized Copy storage repeatedly through shared RawBuffer bo
     )
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 63)
+    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 63n)
     assert.deepEqual(
       Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag),
       [
@@ -268,7 +268,7 @@ it.effect('reads an all-Copy structural union through a shared RawBuffer borrow'
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'RawBufferRead').length, 1)
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})

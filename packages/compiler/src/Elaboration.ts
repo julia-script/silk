@@ -4933,14 +4933,18 @@ interface BuiltinSignature {
   readonly returnedBorrowParameter?: number
 }
 
-const builtinSignature = (actor: string, operation: string): BuiltinSignature | undefined => {
+const builtinSignature = (
+  actor: string,
+  operation: string,
+  parameterKind: 'Call' | 'Primitive' = 'Call',
+): BuiltinSignature | undefined => {
   const catalog = Intrinsic.findOperation(actor, operation)
-  if (catalog?.rule._tag !== 'BuiltinRule') return undefined
+  if (catalog === undefined || !Intrinsic.isBuiltinOperation(catalog)) return undefined
   return Object.freeze({
     id: catalog.id,
     operation: catalog.rule.operation,
     typeParameters: catalog.rule.typeParameters,
-    parameters: catalog.rule.parameters,
+    parameters: parameterKind === 'Call' ? catalog.callParameters : catalog.rule.parameters,
     result: catalog.rule.result,
     unsafe: catalog.unsafe,
     ...(catalog.returnedBorrowParameter === undefined
@@ -6819,7 +6823,7 @@ const analyzeOperatorExpression = (
         ? selectedFirstType.type
         : Scalar.defaultInteger.spelling
   const target = Operator.target(operator, selectedActor)
-  const signature = builtinSignature(target.actor, target.operation)
+  const signature = builtinSignature(target.actor, target.operation, 'Primitive')
   if (signature === undefined) throw new RangeError('Compiler operator table is inconsistent')
   const genericType = selectedFirstType?._tag === 'Available' ? selectedFirstType.type : undefined
   // A bound operator's contract is the compiler-known operation with the stand-in actor replaced by

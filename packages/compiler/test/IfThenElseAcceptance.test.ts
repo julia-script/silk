@@ -192,7 +192,7 @@ const accept = (
       ).slice(0, 400)}`,
     )
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, expected, `${name} evaluator`)
+    assert.strictEqual(evaluated.result.value, BigInt(expected), `${name} evaluator`)
 
     if (expectedEvents !== undefined) {
       const events = evaluated.trace.flatMap((event) =>
@@ -321,6 +321,6 @@ pub fn main() -> i32 { return run Effect.ifThenElse(true, same, same) }`
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 8)
+    assert.strictEqual(evaluated.result.value, 8n)
   }),
 )

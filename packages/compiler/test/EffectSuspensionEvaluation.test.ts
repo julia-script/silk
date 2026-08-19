@@ -37,7 +37,7 @@ it.effect('executes suspension through the heap activation machine', () =>
     const outcome = yield* evaluate(suspended)
     assert.strictEqual(outcome._tag, 'Completed', inspect(outcome))
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
     const continuation = outcome.trace.filter(
       (event): event is BootstrapEvaluation.ContinuationTraceEvent =>
         event._tag === 'SuspensionOrigin' ||
@@ -93,7 +93,7 @@ pub fn main() -> i32 {
 }`)
     assert.strictEqual(outcome._tag, 'Completed', inspect(outcome))
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
     assert.lengthOf(
       outcome.trace.filter(
         (event) => event._tag === 'SuspensionOrigin' || event._tag === 'ContinuationRequest',
@@ -118,7 +118,7 @@ pub fn main() -> i32 {
 }`)
     assert.strictEqual(outcome._tag, 'Completed', inspect(outcome))
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 7)
+    assert.strictEqual(outcome.result.value, 7n)
     const childCompletions = outcome.trace.filter(
       (event): event is BootstrapEvaluation.ContinuationTraceEvent =>
         event._tag === 'SuspensionChildComplete',
@@ -140,7 +140,7 @@ it.effect('preserves an outer allocator through a stored catch wrapper', () =>
     const outcome = yield* evaluate(storedCatchAllocatorSuspension)
     assert.strictEqual(outcome._tag, 'Completed', inspect(outcome))
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
     assert.isAbove(outcome.trace.filter((event) => event._tag === 'ContinuationRequest').length, 0)
   }),
 )
@@ -186,7 +186,7 @@ it.effect('keeps suspended parents in deterministic logical CallDepth', () =>
 
     const completed = yield* evaluate(recursive, { maxCallDepth: 256, maxSteps: 100_000 })
     assert.strictEqual(completed._tag, 'Completed', inspect(completed))
-    if (completed._tag === 'Completed') assert.strictEqual(completed.result.value, 20)
+    if (completed._tag === 'Completed') assert.strictEqual(completed.result.value, 20n)
   }),
 )
 
@@ -209,6 +209,6 @@ it.effect('blocks self recursion at default CallDepth and completes at a raised 
       maxSteps: 5_000_000,
     })
     assert.strictEqual(completed._tag, 'Completed', inspect(completed))
-    if (completed._tag === 'Completed') assert.strictEqual(completed.result.value, 1_200)
+    if (completed._tag === 'Completed') assert.strictEqual(completed.result.value, 1_200n)
   }),
 )

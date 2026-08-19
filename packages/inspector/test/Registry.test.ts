@@ -93,14 +93,9 @@ describe('view registry', () => {
     ])
   })
 
-  // Layouts live in URLs and in localStorage, so a link shared before the merge still names the
-  // retired ids. Resolving them keeps those links working instead of showing an unknown view.
-  it('still resolves the retired per-backend ids', () => {
-    expect(viewById('llvm')?.id).toBe('backend')
-    expect(viewById('wasm')?.id).toBe('backend')
-  })
-
-  it('reports a genuinely unknown id as missing', () => {
+  it('reports unknown and retired ids as missing', () => {
+    expect(viewById('llvm')).toBeUndefined()
+    expect(viewById('wasm')).toBeUndefined()
     expect(viewById('not-a-view')).toBeUndefined()
   })
 

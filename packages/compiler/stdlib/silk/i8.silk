@@ -283,7 +283,7 @@ pub fn notEquals(left: i8, right: i8) -> bool {
 
 /// Calls the concrete i8 lessThan primitive.
 pub fn lessThan(left: i8, right: i8) -> bool {
-  return Intrinsic.i8LessThan(left, right)
+  return Intrinsic.i8LessThan(&left, &right)
 }
 
 /// Calls the concrete i8 lessOrEqual primitive.

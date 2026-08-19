@@ -175,7 +175,7 @@ it.effect('carries an exit code, captured output, and captured errors as one own
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -201,7 +201,7 @@ it.effect('reports a nonzero exit code as outcome data rather than as a typed fa
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -232,7 +232,7 @@ it.effect('separates termination by a signal from an ordinary exit code', () =>
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -254,7 +254,7 @@ it.effect('routes a provider failure into the typed failure channel', () =>
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     // 70 + notFound(0) + 10 * spawn(0): the start stage reached the typed failure channel.
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 70)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 70n)
   }),
 )
 
@@ -283,7 +283,7 @@ it.effect('retains ordered arguments, an exact environment, and an optional dire
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -320,7 +320,7 @@ it.effect('runs a program that exits zero and owns everything it captured', () =
     ])
     const outcome = Analysis.evaluate(self, { childProcess: host.provider })
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     assert.deepEqual(host.requests(), [
       { program: ascii('/bin/tool'), arguments: [ascii('a')], environment: [] },
     ])
@@ -350,7 +350,7 @@ it.effect('keeps a nonzero exit code on the success channel through the native p
     ])
     const outcome = Analysis.evaluate(self, { childProcess: host.provider })
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -372,7 +372,7 @@ it.effect('turns a missing executable into a typed start failure that retains it
     const outcome = Analysis.evaluate(self, { childProcess: host.provider })
     assert.strictEqual(outcome._tag, 'Completed')
     // 70 + notFound(0) + 10 * spawn(0) + the platform code 2 the failure retained.
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 72)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 72n)
   }),
 )
 
@@ -402,7 +402,7 @@ it.effect('never reads the caller environment and passes exact bytes for what it
     ])
     const outcome = Analysis.evaluate(self, { childProcess: host.provider })
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     // The default request carries no variable at all rather than the caller's own environment, and
     // bytes that are not well-formed text survive both the name and the value unchanged.
     assert.deepEqual(host.requests(), [

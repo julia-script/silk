@@ -1,11 +1,17 @@
 import { assert, it } from '@effect/vitest'
+import type * as Model from '../src/Model.js'
 import * as Prose from '../src/Prose.js'
 
-const text = (value: string) => ({ _tag: 'Text', value })
+const source = Object.freeze({ sourceId: 'docs/main', start: 0, end: 10 })
+const text = (value: string): Model.Inline => Object.freeze({ _tag: 'Text', value, source })
 
 it('escapes documentation text rather than emitting it as markup', () => {
   const rendered = Prose.document([
-    { _tag: 'Paragraph', children: [text('Wraps <script>alert("x")</script> & Vector<T>.')] },
+    {
+      _tag: 'Paragraph',
+      children: [text('Wraps <script>alert("x")</script> & Vector<T>.')],
+      source,
+    },
   ])
   assert.strictEqual(
     rendered,
@@ -16,7 +22,13 @@ it('escapes documentation text rather than emitting it as markup', () => {
 
 it('escapes a code block and its language', () => {
   const rendered = Prose.document([
-    { _tag: 'CodeBlock', language: 'silk', value: 'let a = b < c && d > e' },
+    {
+      _tag: 'CodeBlock',
+      language: 'silk',
+      value: 'let a = b < c && d > e',
+      example: false,
+      source,
+    },
   ])
   assert.strictEqual(
     rendered,
@@ -27,15 +39,20 @@ it('escapes a code block and its language', () => {
 it('renders the block kinds the emitter writes', () => {
   assert.strictEqual(
     Prose.document([
-      { _tag: 'Heading', depth: 1, children: [text('Examples')] },
-      { _tag: 'BlockQuote', children: [{ _tag: 'Paragraph', children: [text('quoted')] }] },
+      { _tag: 'Heading', depth: 1, children: [text('Examples')], source },
+      {
+        _tag: 'BlockQuote',
+        children: [{ _tag: 'Paragraph', children: [text('quoted')], source }],
+        source,
+      },
       {
         _tag: 'List',
         ordered: true,
         start: 3,
-        items: [[{ _tag: 'Paragraph', children: [text('first')] }]],
+        items: [[{ _tag: 'Paragraph', children: [text('first')], source }]],
+        source,
       },
-      { _tag: 'ThematicBreak' },
+      { _tag: 'ThematicBreak', source },
     ]),
     [
       '<h3>Examples</h3>',
@@ -50,11 +67,16 @@ it('renders the inline kinds the emitter writes', () => {
   assert.strictEqual(
     Prose.inline([
       text('a '),
-      { _tag: 'InlineCode', value: 'code' },
-      { _tag: 'Emphasis', children: [text('em')] },
-      { _tag: 'Strong', children: [text('strong')] },
-      { _tag: 'Link', destination: 'https://example.test/?a=1&b=2', children: [text('link')] },
-      { _tag: 'Break' },
+      { _tag: 'InlineCode', value: 'code', source },
+      { _tag: 'Emphasis', children: [text('em')], source },
+      { _tag: 'Strong', children: [text('strong')], source },
+      {
+        _tag: 'Link',
+        destination: 'https://example.test/?a=1&b=2',
+        children: [text('link')],
+        source,
+      },
+      { _tag: 'Break', source },
     ]),
     'a <code>code</code><em>em</em><strong>strong</strong><a href="https://example.test/?a=1&amp;b=2">link</a><br>',
   )
@@ -74,52 +96,29 @@ it('links a resolved symbol and leaves an unresolved one as code', () => {
         {
           _tag: 'SymbolLink',
           spelling: 'unwrapOr',
-          target: { module: 'silk/option', name: 'unwrapOr' },
+          target: {
+            id: 'silk/option::unwrapOr',
+            module: 'silk/option',
+            name: 'unwrapOr',
+            kind: 'Function',
+          },
+          source,
         },
-        { _tag: 'SymbolLink', spelling: 'missing' },
+        { _tag: 'SymbolLink', spelling: 'missing', source },
         {
           _tag: 'SymbolLink',
           spelling: 'elsewhere',
-          target: { module: 'silk/other', name: 'elsewhere' },
+          target: {
+            id: 'silk/other::elsewhere',
+            module: 'silk/other',
+            name: 'elsewhere',
+            kind: 'Function',
+          },
+          source,
         },
       ],
       links,
     ),
     '<a class="symbol" href="silk-option.html#unwrapor"><code>unwrapOr</code></a><code>missing</code><code>elsewhere</code>',
-  )
-})
-
-/**
- * `silk-documentation-json` charters the bootstrap schema as experimental and free to change
- * without migration. A renderer that threw on an unfamiliar tag would turn every schema experiment
- * into a site that does not build, so an unknown node degrades to whatever text it carries.
- */
-it('renders an unrecognized node as its recoverable text and keeps going', () => {
-  assert.strictEqual(
-    Prose.document([
-      { _tag: 'Paragraph', children: [text('before')] },
-      { _tag: 'Table', children: [{ _tag: 'Paragraph', children: [text('inside a new node')] }] },
-      { _tag: 'Footnote', value: 'a leaf added later' },
-      { _tag: 'Empty' },
-      { _tag: 'Paragraph', children: [text('after')] },
-    ]),
-    [
-      '<p>before</p>',
-      '<p>inside a new node</p>',
-      '<p>a leaf added later</p>',
-      '',
-      '<p>after</p>',
-    ].join('\n'),
-  )
-})
-
-it('renders an unrecognized inline node as its recoverable text', () => {
-  assert.strictEqual(
-    Prose.inline([
-      { _tag: 'Strikethrough', children: [text('struck')] },
-      { _tag: 'Footnote', value: 'noted' },
-      { _tag: 'Nothing' },
-    ]),
-    'strucknoted',
   )
 })

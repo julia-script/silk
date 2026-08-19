@@ -2,7 +2,7 @@ import * as CallableFieldRealization from './CallableFieldRealization.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
-import type * as Intrinsic from './Intrinsic.js'
+import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -3062,40 +3062,52 @@ const lowerBoundWitnessCall = (
 }
 
 /**
- * Reads through one shared interface operand only for the legacy value-shaped builtin selected by
- * an intrinsic conformance. The operand may be a fresh borrow or an already-borrowed parameter;
- * ordinary source witnesses never enter this bridge.
+ * Lowers the canonical source-call operands to the target-neutral primitive representation.
+ *
+ * A shared scalar borrow is an authored source contract, not a witness compatibility case. The
+ * primitive consumes the scalar stored at that place, so the representation boundary performs
+ * the read for direct calls and sealed witnesses alike.
  */
-const lowerIntrinsicWitnessOperand = (
+const lowerBuiltinArguments = (
   fn: FunctionLowering,
-  argument: Hir.Expression,
-  operand: DeclarationIndex.InterfaceOperandFact | undefined,
-): LoweredExpression | undefined => {
-  const lowered = lowerExpression(fn, argument)
-  if (lowered === undefined || operand?.type._tag !== 'Resolved') return lowered
-  const contractType = fn.semantic(operand.type.type)
-  const sourceType = fn.localTypes.at(lowered.result.ordinal)
-  if (
-    !Type.isReference(contractType) ||
-    contractType.access !== 'Shared' ||
-    sourceType?._tag !== 'Reference' ||
-    !Type.equals(sourceType.type, contractType)
-  )
-    return lowered
-  const type = fn.type(contractType.target)
-  if (type === undefined) return undefined
-  const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'ReadPlace',
-      destination,
-      root: lowered.result,
-      selectors: Object.freeze([]),
-      type,
-      provenance: generated(argument.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+  intrinsic: Intrinsic.BuiltinOperation,
+): ReadonlyArray<Mir.LocalId> | undefined => {
+  const loweredArguments: Array<Mir.LocalId> = []
+  for (const [ordinal, argument] of expression.arguments.entries()) {
+    const lowered = lowerExpression(fn, argument)
+    if (lowered === undefined) return undefined
+    const actual = fn.localTypes.at(lowered.result.ordinal)
+    const callParameter = intrinsic.callParameters.at(ordinal)
+    const primitiveParameter = intrinsic.rule.parameters.at(ordinal)
+    if (
+      actual?._tag !== 'Reference' ||
+      callParameter === undefined ||
+      primitiveParameter === undefined ||
+      !Type.isReference(callParameter) ||
+      callParameter.access !== 'Shared' ||
+      !Type.equals(actual.type, callParameter) ||
+      !Type.equals(callParameter.target, primitiveParameter)
+    ) {
+      loweredArguments.push(lowered.result)
+      continue
+    }
+    const type = fn.type(callParameter.target)
+    if (type === undefined) return undefined
+    const destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'ReadPlace',
+        destination,
+        root: lowered.result,
+        selectors: Object.freeze([]),
+        type,
+        provenance: generated(argument.span),
+      }),
+    )
+    loweredArguments.push(destination)
+  }
+  return Object.freeze(loweredArguments)
 }
 
 function lowerExpression(
@@ -4650,7 +4662,6 @@ function lowerExpressionInner(
           intrinsic: selected.id,
           typeArguments: Object.freeze([]),
           arguments: expression.arguments,
-          intrinsicWitnessOperands: expression.contract.operands,
           loanEnds: expression.loanEnds,
           heldLoans: Object.freeze([]),
           type: expression.type,
@@ -4660,19 +4671,10 @@ function lowerExpressionInner(
     }
     case 'BuiltinCall': {
       if (expression.witnessEffectSite !== undefined) return lowerWitnessEffect(fn, expression)
-      const argumentLocals: Array<Mir.LocalId> = []
-      for (const [ordinal, argument] of expression.arguments.entries()) {
-        const lowered =
-          expression.intrinsicWitnessOperands === undefined
-            ? lowerExpression(fn, argument)
-            : lowerIntrinsicWitnessOperand(
-                fn,
-                argument,
-                expression.intrinsicWitnessOperands.at(ordinal),
-              )
-        if (lowered === undefined) return undefined
-        argumentLocals.push(lowered.result)
-      }
+      const intrinsic = Intrinsic.findOperationById(expression.intrinsic)
+      if (intrinsic === undefined || !Intrinsic.isBuiltinOperation(intrinsic)) return undefined
+      const argumentLocals = lowerBuiltinArguments(fn, expression, intrinsic)
+      if (argumentLocals === undefined) return undefined
       const finishBuiltin = (result: Mir.LocalId): { readonly result: Mir.LocalId } => {
         const slot = argumentLocals.at(0)
         const inherited =
@@ -7496,7 +7498,6 @@ const lowerWitnessEffectRunner = (
               }),
             ),
           ),
-          intrinsicWitnessOperands: contract.operands,
           loanEnds: Object.freeze([]),
           heldLoans: Object.freeze([]),
           type: spec.type.type.success,

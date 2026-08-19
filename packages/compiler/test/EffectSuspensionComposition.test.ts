@@ -282,7 +282,8 @@ const runAll = Effect.fnUntraced(function* (name: string, source: string, expect
 
   const evaluated = Analysis.evaluate(logical, { maxCallDepth: 1_024, maxSteps: 1_000_000 })
   assert.strictEqual(evaluated._tag, 'Completed', `${name}: ${evaluated._tag}`)
-  if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, expected, name)
+  if (evaluated._tag === 'Completed')
+    assert.strictEqual(evaluated.result.value, BigInt(expected), name)
 
   const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
   const instance = new WebAssembly.Instance(new WebAssembly.Module(wasmArtifact.bytes.slice()), {})
@@ -333,7 +334,7 @@ it.effect('preserves selected allocator refusal on the evaluator and Wasm', () =
     const evaluated = Analysis.evaluate(logical)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag === 'Completed') {
-      assert.strictEqual(evaluated.result.value, 7)
+      assert.strictEqual(evaluated.result.value, 7n)
       assert.lengthOf(
         evaluated.trace.filter((event) => event._tag === 'ContinuationRequest'),
         1,
@@ -362,7 +363,7 @@ it.effect('rolls back an accepted inner frame when a later allocator request ref
     assert.deepEqual(Analysis.diagnostics(logical), [])
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag === 'Completed') {
-      assert.strictEqual(evaluated.result.value, 7)
+      assert.strictEqual(evaluated.result.value, 7n)
       assert.isAtLeast(
         evaluated.trace.filter((event) => event._tag === 'ContinuationRequest').length,
         2,
@@ -402,7 +403,7 @@ const assertCleanupTrace = (source: string, expected: number) =>
     const evaluated = Analysis.evaluate(snapshot, { maxSteps: 1_000_000 })
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, expected)
+    assert.strictEqual(evaluated.result.value, BigInt(expected))
     const hooks = evaluated.trace
       .map((event, index) => ({ event, index }))
       .filter(({ event }) => event._tag === 'Call' && event.target.name.startsWith('drop@impl'))

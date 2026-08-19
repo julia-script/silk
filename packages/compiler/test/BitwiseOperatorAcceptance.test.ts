@@ -129,7 +129,7 @@ it.effect(
         ),
       )
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42)
+      assert.strictEqual(evaluated.result.value, 42n)
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -153,7 +153,7 @@ pub fn main() -> i32 {
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
   }),
 )
 
@@ -199,7 +199,7 @@ pub fn main() -> i32 {
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
 
     assert.deepEqual(
       infixShape('fn masked(a: u32, b: u32, c: u32) -> bool { return a & b == c }'),
@@ -226,7 +226,7 @@ pub fn main() -> i32 {
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
 
     assert.deepEqual(
       infixShape('fn tiered(a: u32, b: u32, c: u32, d: u32) -> u32 { return a | b ^ c & d }'),

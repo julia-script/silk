@@ -15,7 +15,7 @@ The system SHALL construct alloca, load, store, GEP, structured GEP, and address
 
 #### Scenario: Reject an invalid GEP path
 - **WHEN** a GEP index path cannot select a child of the declared source type
-- **THEN** construction fails with `SilkError` before an instruction is added
+- **THEN** construction fails with `LlvmError` before an instruction is added
 
 ### Requirement: Aggregate and vector operations
 The system SHALL construct supported aggregate builds, element extraction/insertion, value extraction/insertion, vector shuffles, and vector splats while preserving fixed and scalable vector semantics.
@@ -33,7 +33,7 @@ The system SHALL construct atomic and volatile loads/stores, fences, compare-exc
 
 #### Scenario: Reject an invalid failure ordering
 - **WHEN** compare-exchange uses a failure ordering forbidden by LLVM
-- **THEN** construction fails with `SilkError`
+- **THEN** construction fails with `LlvmError`
 
 ### Requirement: Instruction flags and call kinds
 The system SHALL preserve supported fast-math, no-wrap, exact, in-bounds, weak, volatile, tail-call, and calling-convention settings and SHALL reject settings that do not apply to the selected operation.

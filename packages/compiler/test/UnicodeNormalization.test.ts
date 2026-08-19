@@ -30,7 +30,11 @@ const onEveryEngine = (name: string, source: string, expected: number) =>
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed', `${name} did not evaluate`)
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, expected, `${name} on the bootstrap evaluator`)
+    assert.strictEqual(
+      evaluated.result.value,
+      BigInt(expected),
+      `${name} on the bootstrap evaluator`,
+    )
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -113,7 +117,7 @@ it.effect(
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed')
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42)
+      assert.strictEqual(evaluated.result.value, 42n)
     }),
   120_000,
 )
@@ -242,7 +246,7 @@ pub fn main() -> i32 {
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 6)
+    assert.strictEqual(evaluated.result.value, 6n)
 
     // And the version the module reports is the version the vendored database was pinned at, so the
     // constant cannot drift away from the data behind it.
@@ -323,7 +327,7 @@ it.effect('reports the typed allocation failure rather than a partial normalizat
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)

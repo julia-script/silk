@@ -123,7 +123,7 @@ it.effect('blocks OS evaluation without an injected adapter and uses one when su
     }
     const evaluated = Analysis.evaluate(snapshot, { osFileSystem: provider })
     assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
   }),
 )
 
@@ -211,7 +211,7 @@ pub fn main() -> i32 {
         osFileSystem: makeProvider([[104, 101], [108, 108, 111], []], false, writes),
       })
       assert.strictEqual(successful._tag, 'Completed')
-      if (successful._tag === 'Completed') assert.strictEqual(successful.result.value, 42)
+      if (successful._tag === 'Completed') assert.strictEqual(successful.result.value, 42n)
       assert.deepEqual(writes, [
         [104, 101, 108, 108, 111],
         [101, 108, 108, 111],
@@ -229,13 +229,13 @@ pub fn main() -> i32 {
         osFileSystem: makeProvider([readFailure], true, []),
       })
       assert.strictEqual(primary._tag, 'Completed')
-      if (primary._tag === 'Completed') assert.strictEqual(primary.result.value, 0)
+      if (primary._tag === 'Completed') assert.strictEqual(primary.result.value, 0n)
 
       const closeFailure = Analysis.evaluate(snapshot, {
         osFileSystem: makeProvider([[]], true, []),
       })
       assert.strictEqual(closeFailure._tag, 'Completed')
-      if (closeFailure._tag === 'Completed') assert.strictEqual(closeFailure.result.value, 2)
+      if (closeFailure._tag === 'Completed') assert.strictEqual(closeFailure.result.value, 2n)
     }),
 )
 
@@ -305,7 +305,7 @@ pub fn main() -> i32 {
     }
     const evaluated = Analysis.evaluate(snapshot, { osFileSystem: directoryProvider })
     assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
     assert.strictEqual(retries, 1)
 
     let invalidPending = true
@@ -323,7 +323,7 @@ pub fn main() -> i32 {
     }
     const invalid = Analysis.evaluate(snapshot, { osFileSystem: invalidDirectoryProvider })
     assert.strictEqual(invalid._tag, 'Completed')
-    if (invalid._tag === 'Completed') assert.strictEqual(invalid.result.value, 10)
+    if (invalid._tag === 'Completed') assert.strictEqual(invalid.result.value, 10n)
   }),
 )
 

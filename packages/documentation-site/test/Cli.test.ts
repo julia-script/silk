@@ -15,6 +15,8 @@ import * as Model from '../src/Model.js'
 
 const temporary = (): string => mkdtempSync(join(tmpdir(), 'silk-documentation-site-'))
 
+const source = Object.freeze({ sourceId: 'project/main', start: 0, end: 10 })
+
 const documentation = {
   schema: Model.schemaName,
   experimental: true,
@@ -29,11 +31,19 @@ const documentation = {
           name: 'add',
           visibility: 'Public',
           signature: { text: 'pub fn add(left: i32, right: i32) -> i32' },
+          source,
           documentation: {
+            _tag: 'Document',
+            source,
             markdown: 'Adds two values.',
             blocks: [
-              { _tag: 'Paragraph', children: [{ _tag: 'Text', value: 'Adds two values.' }] },
+              {
+                _tag: 'Paragraph',
+                source,
+                children: [{ _tag: 'Text', value: 'Adds two values.', source }],
+              },
             ],
+            examples: [],
             fallback: false,
           },
           children: [],

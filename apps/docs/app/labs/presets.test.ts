@@ -305,7 +305,7 @@ describe('preset catalog', () => {
     const evaluation = Analysis.evaluate(native)
     expect(evaluation._tag).toBe('Completed')
     if (evaluation._tag === 'Completed') {
-      expect(evaluation.result.value).toBe(42)
+      expect(evaluation.result.value).toBe(42n)
       expect(evaluation.trace.some((event) => event._tag === 'EffectFailure')).toBe(true)
       expect(evaluation.trace.some((event) => event._tag === 'EffectSuccess')).toBe(true)
     }
@@ -328,7 +328,7 @@ describe('preset catalog', () => {
       const evaluation = Analysis.evaluate(native)
       expect(evaluation._tag, preset.label).toBe('Completed')
       if (evaluation._tag !== 'Completed') continue
-      expect(evaluation.result.value, preset.label).toBe(42)
+      expect(evaluation.result.value, preset.label).toBe(42n)
       expect(
         evaluation.trace.some((event) => event._tag === 'SuspensionOrigin'),
         preset.label,
@@ -355,7 +355,7 @@ describe('preset catalog', () => {
     expect(Analysis.mirOf(wasm)._tag).toBe('Available')
     const evaluation = Analysis.evaluate(native)
     expect(evaluation._tag).toBe('Completed')
-    if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42)
+    if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42n)
     const context = acceptanceContext(loggingPreset, native)
     for (const id of ['closure', 'index', 'hir', 'ownership', 'instances', 'mir', 'evaluation', 'backend']) {
       const view = viewById(id)
@@ -366,10 +366,10 @@ describe('preset catalog', () => {
 
   it('keeps construction, reusable capture, and retry examples executable', () => {
     for (const [preset, expected] of [
-      [eagerEffectPreset, 42],
-      [captureEffectPreset, 12],
-      [retryEffectPreset, 3],
-      [providerEffectPreset, 42],
+      [eagerEffectPreset, 42n],
+      [captureEffectPreset, 12n],
+      [retryEffectPreset, 3n],
+      [providerEffectPreset, 42n],
     ] as const) {
       expect(preset).toBeDefined()
       if (preset === undefined) continue
@@ -390,7 +390,7 @@ describe('preset catalog', () => {
       expect(Analysis.diagnostics(snapshot), label).toEqual([])
       const evaluation = Analysis.evaluate(snapshot)
       expect(evaluation._tag, label).toBe('Completed')
-      if (evaluation._tag === 'Completed') expect(evaluation.result.value, label).toBe(42)
+      if (evaluation._tag === 'Completed') expect(evaluation.result.value, label).toBe(42n)
     }
   })
 
@@ -402,7 +402,7 @@ describe('preset catalog', () => {
       expect(Analysis.diagnostics(snapshot), preset.label).toEqual([])
       const evaluation = Analysis.evaluate(snapshot)
       expect(evaluation._tag, preset.label).toBe('Completed')
-      if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42)
+      if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42n)
       for (const id of ['hir', 'ownership', 'instances', 'layout', 'mir', 'evaluation', 'backend']) {
         expect(viewById(id)?.id, `${preset.label} · ${id}`).toBe(id)
       }
@@ -418,7 +418,7 @@ describe('preset catalog', () => {
     expect(Analysis.diagnostics(layout)).toEqual([])
     const evaluation = Analysis.evaluate(layout)
     expect(evaluation._tag).toBe('Completed')
-    if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42)
+    if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42n)
 
     const allocation = snapshotOf(allocationPreset, 'wasm32-unknown-unknown')
     expect(Analysis.diagnostics(allocation)).toEqual([])
@@ -446,7 +446,7 @@ describe('preset catalog', () => {
         const evaluation = Analysis.evaluate(snapshot)
         expect(evaluation._tag, `${label} · ${target}`).toBe('Completed')
         if (evaluation._tag === 'Completed')
-          expect(evaluation.result.value, `${label} · ${target}`).toBe(42)
+          expect(evaluation.result.value, `${label} · ${target}`).toBe(42n)
       }
     }
   })
@@ -481,7 +481,7 @@ describe('preset catalog', () => {
         const evaluated = Analysis.evaluate(snapshot)
         expect(evaluated._tag, `${label} · ${target}`).toBe('Completed')
         if (evaluated._tag === 'Completed')
-          expect(evaluated.result.value, `${label} · ${target}`).toBe(42)
+          expect(evaluated.result.value, `${label} · ${target}`).toBe(42n)
       }
     }
   })
@@ -534,11 +534,11 @@ describe('preset catalog', () => {
       scannerTrace.flatMap((event) =>
         event._tag === 'Binding' &&
         event.target.name === 'observe' &&
-        event.value._tag === 'I32Value'
+        event.value._tag === 'IntegerValue'
           ? [event.value.value]
           : [],
       ),
-    ).toEqual([1, 2, 3, 1, 2, 3, 1, 2, 3, 1])
+    ).toEqual([1n, 2n, 3n, 1n, 2n, 3n, 1n, 2n, 3n, 1n])
   })
 
   // The boundary is the point of the substrate: raw storage outside `unsafe` has to stay a
@@ -605,7 +605,7 @@ describe('preset catalog', () => {
     expect(Analysis.mirOf(native)._tag).toBe('Available')
     const evaluation = Analysis.evaluate(native)
     expect(evaluation._tag).toBe('Completed')
-    if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42)
+    if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42n)
 
     for (const id of [
       'source',

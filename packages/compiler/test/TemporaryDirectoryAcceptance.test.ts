@@ -349,7 +349,7 @@ it.effect(
 
       const evaluated = Analysis.evaluate(snapshot, { osFileSystem: provider })
       assert.strictEqual(evaluated._tag, 'Completed')
-      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
       // Exactly one short buffer, one creation for it, and one directory removed by the release.
       assert.strictEqual(retries, 1)
       assert.strictEqual(created, 1)
@@ -384,7 +384,7 @@ it.effect('reports the provider failure that stopped a make', () =>
     const evaluated = Analysis.evaluate(snapshot, { osFileSystem: provider })
     assert.strictEqual(evaluated._tag, 'Completed')
     // 100 + PermissionDenied: the provider's reason reaches the caller rather than a generic one.
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 102)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 102n)
   }),
 )
 

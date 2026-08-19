@@ -132,7 +132,7 @@ const owned = (name: string, source: string) =>
     // A value released a second time traps instead of completing, so this is what fails first if
     // the map ever releases something it already handed away.
     assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
-    const bootstrap = evaluated._tag === 'Completed' ? evaluated.result.value : undefined
+    const bootstrap = evaluated._tag === 'Completed' ? Number(evaluated.result.value) : undefined
     const events = allocationEvents(evaluated)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })

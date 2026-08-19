@@ -454,7 +454,16 @@ backing place and clean the displaced value exactly once.
 
 ### Requirement: Evaluation preserves exact usize semantics
 
-The evaluator SHALL represent target-selected `usize` exactly and use canonical unsigned decimal encoding.
+The evaluator SHALL represent every integer with one canonical tagged value containing its scalar
+spelling and an exact `bigint` payload. Entry-point `i32` requirements, raw-buffer `usize` indexes,
+and other width-specific contracts SHALL be validated through that scalar spelling rather than
+through distinct runtime variants. Target-selected `usize` SHALL use canonical unsigned decimal
+encoding.
+
+#### Scenario: Integer values retain their scalar identity
+- **WHEN** one evaluated program binds both `i32` and `usize` integer values
+- **THEN** both values use the same integer discriminator
+- **AND** each value records its own canonical scalar spelling and exact `bigint` payload
 
 #### Scenario: Evaluate native maximum
 

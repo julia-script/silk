@@ -1012,45 +1012,41 @@ export const symbolRows = (
  * in one trace cell.
  */
 const valueText = (value: BootstrapEvaluation.Value): string =>
-  value._tag === 'I32Value'
-    ? String(value.value)
-    : value._tag === 'UsizeValue'
-      ? `${value.value.toString()}usize`
-      : value._tag === 'ScalarIntegerValue'
-        ? `${value.value.toString()}${value.type}`
-        : value._tag === 'CharacterValue'
-          ? `U+${value.value.toString(16).toUpperCase().padStart(4, '0')}`
-          : value._tag === 'FloatValue'
-            ? `${value.type}(bits=0x${value.bits.toString(16)})`
-            : value._tag === 'ArrayValue'
-              ? `${typeText(value.type)} [${value.elements.map(valueText).join(', ')}]`
-              : value._tag === 'SliceValue'
-                ? `slice cell f${value.frame}.c${value.cell} [${value.base}..${value.base + value.length})`
-                : value._tag === 'StaticViewValue'
-                  ? `static ${value.data} · ${value.length} bytes`
-                  : value._tag === 'StringValue'
-                    ? `${JSON.stringify(new TextDecoder().decode(Uint8Array.from(value.bytes)))} · ${value.byteLength} UTF-8 bytes · ${value.storage._tag}`
-                    : value._tag === 'UnionValue'
-                      ? `${typeText(value.type)} <${typeText(value.member)} ${valueText(value.payload)}>`
-                      : value._tag === 'EffectOutcomeValue'
-                        ? `${typeText(value.type)} tag=${value.tag} payload=${valueText(value.payload)}`
-                        : value._tag === 'EffectBorrowValue'
-                          ? `${value.access.toLowerCase()} borrow f${value.frame}.c${value.cell}`
-                          : value._tag === 'EffectValue'
-                            ? `${typeText(value.type)} recipe ${value.runner.name}`
-                            : value._tag === 'CallableBorrowValue'
-                              ? `${value.access.toLowerCase()} callable borrow f${value.frame}.c${value.cell}`
-                              : value._tag === 'CallableValue'
-                                ? `${typeText(value.type)} callable #${value.ticket} · ${value.captures.length} capture${value.captures.length === 1 ? '' : 's'}`
-                                : value._tag === 'AllocationValue'
-                                  ? `${typeText(value.type)} ticket=${value.ticket} · ${value.bytes.toString()} bytes · align ${value.alignment.toString()}`
-                                  : value._tag === 'RawBufferValue'
-                                    ? `${typeText(value.type)} ticket=${value.ticket} · ${value.count.toString()} × ${typeText(value.element)} · stride ${value.stride}`
-                                    : value._tag === 'SlotValue'
-                                      ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
-                                      : value._tag === 'ReferenceValue'
-                                        ? `borrow f${value.frame}.c${value.cell}`
-                                        : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+  value._tag === 'IntegerValue'
+    ? `${value.value.toString()}${value.type}`
+    : value._tag === 'CharacterValue'
+      ? `U+${value.value.toString(16).toUpperCase().padStart(4, '0')}`
+      : value._tag === 'FloatValue'
+        ? `${value.type}(bits=0x${value.bits.toString(16)})`
+        : value._tag === 'ArrayValue'
+          ? `${typeText(value.type)} [${value.elements.map(valueText).join(', ')}]`
+          : value._tag === 'SliceValue'
+            ? `slice cell f${value.frame}.c${value.cell} [${value.base}..${value.base + value.length})`
+            : value._tag === 'StaticViewValue'
+              ? `static ${value.data} · ${value.length} bytes`
+              : value._tag === 'StringValue'
+                ? `${JSON.stringify(new TextDecoder().decode(Uint8Array.from(value.bytes)))} · ${value.byteLength} UTF-8 bytes · ${value.storage._tag}`
+                : value._tag === 'UnionValue'
+                  ? `${typeText(value.type)} <${typeText(value.member)} ${valueText(value.payload)}>`
+                  : value._tag === 'EffectOutcomeValue'
+                    ? `${typeText(value.type)} tag=${value.tag} payload=${valueText(value.payload)}`
+                    : value._tag === 'EffectBorrowValue'
+                      ? `${value.access.toLowerCase()} borrow f${value.frame}.c${value.cell}`
+                      : value._tag === 'EffectValue'
+                        ? `${typeText(value.type)} recipe ${value.runner.name}`
+                        : value._tag === 'CallableBorrowValue'
+                          ? `${value.access.toLowerCase()} callable borrow f${value.frame}.c${value.cell}`
+                          : value._tag === 'CallableValue'
+                            ? `${typeText(value.type)} callable #${value.ticket} · ${value.captures.length} capture${value.captures.length === 1 ? '' : 's'}`
+                            : value._tag === 'AllocationValue'
+                              ? `${typeText(value.type)} ticket=${value.ticket} · ${value.bytes.toString()} bytes · align ${value.alignment.toString()}`
+                              : value._tag === 'RawBufferValue'
+                                ? `${typeText(value.type)} ticket=${value.ticket} · ${value.count.toString()} × ${typeText(value.element)} · stride ${value.stride}`
+                                : value._tag === 'SlotValue'
+                                  ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
+                                  : value._tag === 'ReferenceValue'
+                                    ? `borrow f${value.frame}.c${value.cell}`
+                                    : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {

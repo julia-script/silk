@@ -206,7 +206,7 @@ const accept = (
     // assertion is what fails first if the finalizer's exit duplicates the cleanup it follows.
     assert.strictEqual(evaluated._tag, 'Completed', name)
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, expected, name)
+    assert.strictEqual(evaluated.result.value, BigInt(expected), name)
 
     const events = allocationEvents(evaluated)
     assert.deepEqual(events, expectedEvents, `${name} acquire/release trace`)

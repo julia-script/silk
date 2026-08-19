@@ -288,7 +288,7 @@ it.effect(
       const evaluated32 = Analysis.evaluate(thirtyTwo)
       assert.strictEqual(evaluated32._tag, 'Completed')
       if (evaluated32._tag !== 'Completed') return
-      assert.strictEqual(evaluated32.result.value, 32)
+      assert.strictEqual(evaluated32.result.value, 32n)
 
       const wasm = yield* Analysis.codegenWasm(thirtyTwo, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -304,7 +304,7 @@ it.effect(
       const evaluated64 = Analysis.evaluate(sixtyFour)
       assert.strictEqual(evaluated64._tag, 'Completed')
       if (evaluated64._tag !== 'Completed') return
-      assert.strictEqual(evaluated64.result.value, 64)
+      assert.strictEqual(evaluated64.result.value, 64n)
 
       const compiled = yield* Driver.compile({
         compilation: {

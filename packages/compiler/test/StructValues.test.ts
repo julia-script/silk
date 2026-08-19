@@ -131,7 +131,7 @@ it.effect('plans canonical aggregate lanes and evaluates whole-value calls and p
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 3)
+    assert.strictEqual(outcome.result.value, 3n)
     assert.include(
       outcome.trace.map((event) => event._tag),
       'Construct',
@@ -244,7 +244,7 @@ pub fn main() -> i32 { let token = Model.make(1) return token.kind }`),
     assert.deepEqual(Analysis.diagnostics(valid), [])
     const outcome = Analysis.evaluate(valid)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 1)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 1n)
 
     const raw = yield* multiSnapshot(
       'app/Main',

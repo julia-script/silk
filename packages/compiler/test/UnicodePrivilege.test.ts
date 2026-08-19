@@ -126,7 +126,7 @@ it.effect('lowers a normalizing program to a MIR that names no Unicode operation
     // than of something that happened to lower.
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
 
     const mir = Analysis.mirOf(snapshot)
     assert.strictEqual(mir._tag, 'Available')
@@ -242,7 +242,7 @@ it.effect('treats a Unicode table as ordinary data rather than by its spelling',
     assert.deepEqual(messages(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
   }),
 )
 

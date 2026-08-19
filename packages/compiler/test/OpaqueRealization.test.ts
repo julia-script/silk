@@ -328,7 +328,7 @@ pub fn inner<T>(value: T) -> some<F: once fn(i32) -> T> F { return keep<T>(move 
       'Completed',
       outcome._tag === 'Blocked' ? JSON.stringify(outcome.reason) : outcome._tag,
     )
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 

@@ -741,9 +741,7 @@ const traceOverlay = (draft: ProjectionDraft, outcome: BootstrapEvaluation.Outco
     const eventValue = event._tag === 'Binding' || event._tag === 'Return' ? event.value : undefined
     const evidence = Object.freeze({
       order: index + 1,
-      ...(eventValue?._tag === 'I32Value' || eventValue?._tag === 'UsizeValue'
-        ? { value: eventValue.value }
-        : {}),
+      ...(eventValue?._tag === 'IntegerValue' ? { value: eventValue.value } : {}),
     })
     if (event._tag === 'Call') {
       const group = draft.groups.find((candidate) => sameSpan(candidate.span, event.span))

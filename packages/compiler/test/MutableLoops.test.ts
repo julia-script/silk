@@ -36,7 +36,7 @@ it.effect('mutates a scalar through a structured loop DAG', () =>
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 3)
+    assert.strictEqual(outcome.result.value, 3n)
     assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Iteration').length, 3)
   }),
 )
@@ -57,7 +57,7 @@ it.effect('updates checked array elements and returns the replacement', () =>
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 3)
+    assert.strictEqual(outcome.result.value, 3n)
     assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Replacement').length, 6)
   }),
 )
@@ -111,7 +111,7 @@ it.effect('resolves continue and break to the innermost loop', () =>
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 4)
+    assert.strictEqual(outcome.result.value, 4n)
     assert.isAbove(outcome.trace.filter((event) => event._tag === 'Repeat').length, 0)
     assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Exit').length, 1)
   }),
@@ -211,7 +211,7 @@ pub fn main() -> i32 {
     const result = Analysis.evaluate(self)
     assert.strictEqual(result._tag, 'Completed')
     if (result._tag === 'Completed') {
-      assert.strictEqual(result.result.value, 42)
+      assert.strictEqual(result.result.value, 42n)
       assert.strictEqual(
         result.trace.filter((event) => event._tag === 'ReplacementCleanup').length,
         1,

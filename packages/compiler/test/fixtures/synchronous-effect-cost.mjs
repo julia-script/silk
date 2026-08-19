@@ -404,7 +404,10 @@ const wasmBehavior = (artifact, id) => {
   }
 }
 
-const identity = (value) => JSON.stringify(value)
+const identity = (value) =>
+  JSON.stringify(value, (_, candidate) =>
+    typeof candidate === 'bigint' ? candidate.toString() : candidate,
+  )
 
 const structuralTargets = (region) => {
   switch (region._tag) {
@@ -594,7 +597,7 @@ try {
       const unnormalizedEvaluated = Analysis.evaluate(unnormalizedWasm)
       const evaluatorBehavior =
         evaluated._tag === 'Completed'
-          ? evaluated.result.value
+          ? Number(evaluated.result.value)
           : evaluated.reason._tag === 'Trap'
             ? 'trap'
             : evaluated._tag
@@ -679,7 +682,7 @@ try {
             evaluator: evaluatorBehavior,
             unnormalizedEvaluator:
               unnormalizedEvaluated._tag === 'Completed'
-                ? unnormalizedEvaluated.result.value
+                ? Number(unnormalizedEvaluated.result.value)
                 : unnormalizedEvaluated.reason._tag === 'Trap'
                   ? 'trap'
                   : unnormalizedEvaluated._tag,

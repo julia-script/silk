@@ -93,7 +93,7 @@ it.effect('copies initialized Copy slots without consuming them on the evaluator
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'SlotCopy').length, 2)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
@@ -119,7 +119,7 @@ it.effect(
         JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? `${value}n` : value)),
       )
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 59)
+      assert.strictEqual(evaluated.result.value, 59n)
       assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'SlotCopy').length, 1)
       assert.strictEqual(
         evaluated.trace.filter((event) => event._tag === 'RawBufferRead').length,

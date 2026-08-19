@@ -327,7 +327,7 @@ it.effect(
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed')
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 0)
+      assert.strictEqual(evaluated.result.value, 0n)
 
       // The walk counted every link and the teardown released every one of them: 64 boxes, 64
       // acquires, 64 releases. Borrowing and ownership are unchanged by the depth question.
@@ -458,7 +458,7 @@ it.effect(
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed')
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 0)
+      assert.strictEqual(evaluated.result.value, 0n)
 
       const events = Analysis.allocationTraceEventsOf(evaluated)
       const acquires = events.filter((event) => event._tag === 'AllocationAcquire').length

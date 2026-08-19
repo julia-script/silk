@@ -18,8 +18,8 @@ pub fn main() -> i32 {
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag === 'Completed') {
-      assert.strictEqual(outcome.result._tag, 'I32Value')
-      if (outcome.result._tag === 'I32Value') assert.strictEqual(outcome.result.value, 42)
+      assert.strictEqual(outcome.result._tag, 'IntegerValue')
+      if (outcome.result._tag === 'IntegerValue') assert.strictEqual(outcome.result.value, 42n)
     }
 
     const operations = Analysis.loweredMir(self).functions.flatMap(Mir.operations)

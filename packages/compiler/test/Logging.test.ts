@@ -9,6 +9,7 @@ import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as StandardStreams from '../src/StandardStreams.js'
 import * as Type from '../src/Type.js'
 import { constrainedCallableForwarding } from './support/corpus.js'
+import * as Json from './support/Json.js'
 import { unreachable } from './support/raise.js'
 import * as WasmMain from './support/WasmMain.js'
 
@@ -53,7 +54,7 @@ it.effect('dispatches complete ordered messages through an ordinary source Logge
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
     const hir = Analysis.hirOf(self, 'silk/effects')
     assert.include(hir === undefined ? '' : Hir.encode(hir), 'service-call silk/logging.Logger.log')
@@ -98,7 +99,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -174,7 +175,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
     const capacity = yield* snapshot(`import silk.logging { attempts, length }
 effect fn ignore(error: LogError) -> () { return () }
@@ -192,7 +193,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(capacity), [])
     const capacityOutcome = Analysis.evaluate(capacity)
     assert.strictEqual(capacityOutcome._tag, 'Completed')
-    if (capacityOutcome._tag === 'Completed') assert.strictEqual(capacityOutcome.result.value, 42)
+    if (capacityOutcome._tag === 'Completed') assert.strictEqual(capacityOutcome.result.value, 42n)
   }),
 )
 
@@ -224,7 +225,7 @@ it.effect('adapts complete messages to stdout without making formatting semantic
     assert.deepEqual(Analysis.diagnostics(self), [])
     const memory = StandardStreams.memory()
     const outcome = Analysis.evaluate(self, { standardStreams: memory.provider })
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
     assert.deepEqual(
       memory.events().map((event) => new TextDecoder().decode(Uint8Array.from(event.bytes))),
       ['one\n', 'two'],
@@ -386,9 +387,9 @@ it.effect('carries a provider section through a multi-hop closed forwarding chai
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      evaluated._tag === 'Blocked' ? JSON.stringify(evaluated) : undefined,
+      evaluated._tag === 'Blocked' ? JSON.stringify(evaluated, Json.bigIntReplacer) : undefined,
     )
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
 
     const artifact = yield* Analysis.codegenWasm(frontend, { mode: 'release' })
     assert.strictEqual(yield* WasmMain.invoke(artifact.bytes, 'Logging.invokeForwardingWasm'), 42)
@@ -417,9 +418,11 @@ pub fn main() -> i32 {
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        evaluated._tag === 'Blocked' ? `${name}: ${JSON.stringify(evaluated)}` : name,
+        evaluated._tag === 'Blocked'
+          ? `${name}: ${JSON.stringify(evaluated, Json.bigIntReplacer)}`
+          : name,
       )
-      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42, name)
+      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n, name)
       assert.isFalse(
         Analysis.loweredMir(frontend)
           .functions.flatMap(Mir.operations)
@@ -486,7 +489,7 @@ pub fn main() -> i32 {
       assert.deepEqual(Analysis.diagnostics(frontend), [], name)
       const evaluated = Analysis.evaluate(frontend)
       assert.strictEqual(evaluated._tag, 'Completed', name)
-      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42, name)
+      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n, name)
       const lowered = Analysis.loweredMir(frontend)
       assert.isFalse(
         lowered.functions

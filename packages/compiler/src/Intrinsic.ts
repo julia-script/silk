@@ -94,6 +94,12 @@ export interface Operation {
   readonly rule: Rule
 }
 
+/** A target-neutral primitive with one resolved source-call ownership contract. */
+export interface BuiltinOperation extends Operation {
+  readonly callParameters: ReadonlyArray<Type.Type>
+  readonly rule: Extract<Rule, { readonly _tag: 'BuiltinRule' }>
+}
+
 /** One compiler-provided source actor or namespace. */
 export interface Actor {
   readonly _tag: 'IntrinsicActor'
@@ -164,12 +170,13 @@ const builtin = (options: {
   readonly semanticTypeParameters?: ReadonlyArray<Type.Parameter>
   readonly parameters: ReadonlyArray<ValueParameter>
   readonly semanticParameters: ReadonlyArray<Type.Type>
+  readonly callParameters?: ReadonlyArray<Type.Type>
   readonly result: string
   readonly semanticResult: Type.Type
   readonly unsafe?: boolean
   readonly targets?: ReadonlyArray<ExecutionTarget>
   readonly returnedBorrowParameter?: number
-}): Operation => {
+}): BuiltinOperation => {
   const spelling = intrinsicSpelling(options.actor, options.name)
   return Object.freeze({
     _tag: 'IntrinsicOperation',
@@ -177,6 +184,7 @@ const builtin = (options: {
     spelling,
     typeParameters: Object.freeze((options.typeParameters ?? []).map(typeParameter)),
     parameters: Object.freeze(Array.from(options.parameters)),
+    callParameters: Object.freeze(Array.from(options.callParameters ?? options.semanticParameters)),
     result: options.result,
     unsafe: options.unsafe ?? false,
     admission: admission(options.actor),
@@ -205,6 +213,9 @@ const builtin = (options: {
     }),
   })
 }
+
+export const isBuiltinOperation = (operation: Operation): operation is BuiltinOperation =>
+  operation.rule._tag === 'BuiltinRule' && 'callParameters' in operation
 
 const effect = (options: {
   readonly name: string
@@ -483,16 +494,22 @@ const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Op
     operation.arity === 1 ? Object.freeze(['value']) : Object.freeze(['left', 'right'])
   const semanticParameters =
     operation.parameters ?? Object.freeze(parameterNames.map(() => scalar.spelling))
+  const borrowed = operation.code === 'LessThan'
+  const contractParameters = borrowed
+    ? Object.freeze(semanticParameters.map((type) => Type.reference('Shared', type)))
+    : semanticParameters
   return builtin({
     actor: scalar.spelling,
     name: operation.spelling,
     operation: operation.code,
     parameters: Object.freeze(
-      parameterNames.map((name, ordinal) =>
-        valueParameter(name, semanticParameters.at(ordinal) ?? scalar.spelling),
-      ),
+      parameterNames.map((name, ordinal) => {
+        const type = semanticParameters.at(ordinal) ?? scalar.spelling
+        return valueParameter(name, borrowed ? `&${type}` : type)
+      }),
     ),
     semanticParameters,
+    callParameters: contractParameters,
     result,
     semanticResult,
   })

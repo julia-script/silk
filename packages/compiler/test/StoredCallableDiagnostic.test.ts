@@ -245,7 +245,7 @@ it.effect(
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42, 'evaluator')
+      assert.strictEqual(evaluated.result.value, 42n, 'evaluator')
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -262,6 +262,6 @@ pub fn main() -> i32 { return apply(i32.add(40), 2) }`
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
   }),
 )

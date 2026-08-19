@@ -18,7 +18,7 @@ const evaluated = (source: string) =>
       'Completed',
       JSON.stringify(outcome, (_, value) => (typeof value === 'bigint' ? value.toString() : value)),
     )
-    return outcome._tag === 'Completed' ? outcome.result.value : undefined
+    return outcome._tag === 'Completed' ? Number(outcome.result.value) : undefined
   })
 
 it.effect('narrows a three-way comparison to each of the three results', () =>

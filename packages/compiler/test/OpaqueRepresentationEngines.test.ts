@@ -85,7 +85,7 @@ it.effect(
           `${program.name}: ${interpreted._tag === 'Blocked' ? JSON.stringify(interpreted.reason) : interpreted._tag}`,
         )
         if (interpreted._tag !== 'Completed') continue
-        assert.strictEqual(interpreted.result.value, 42, program.name)
+        assert.strictEqual(interpreted.result.value, 42n, program.name)
 
         const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
         const wasmExecution = yield* executeWasm(wasm.bytes)

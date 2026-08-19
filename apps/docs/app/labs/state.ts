@@ -12,14 +12,18 @@
 
 import { Analysis, Mir, ToolchainPlan } from '@silk-effect/compiler'
 import type { BootstrapEvaluation, Target } from '@silk-effect/compiler'
-import * as Schema from 'effect/Schema'
+import { diagnosticCounts, diagnosticEntries, hirContract } from '@silk-effect/inspector/ProjectSyntax'
+import type { Span } from '@silk-effect/inspector/Row'
 import { KeyValueStore } from 'effect/unstable/persistence'
 import { AsyncResult, Atom } from 'effect/unstable/reactivity'
-import type { Span } from '@silk-effect/inspector'
-import { diagnosticCounts, diagnosticEntries, hirContract } from '@silk-effect/inspector'
 import { presets } from './presets'
 import * as Snapshot from './snapshot'
-import { seededWorkspaces, type Workspace, workspaceStorageKey } from './workspaces'
+import {
+  seededWorkspaces,
+  type Workspace,
+  workspacesSchema,
+  workspaceStorageKey,
+} from './workspaces'
 
 export const initialPreset = presets.find((preset) => preset.label === 'Nested calls') ?? presets[0]
 
@@ -179,34 +183,25 @@ export const trailAtom = Atom.make((get): ReadonlyArray<TrailCell> => {
 const kvsRuntime = Atom.runtime(KeyValueStore.layerStorage(() => window.localStorage))
 
 /**
- * Loose on purpose: a saved workspace is user data that survives deploys, so pane ids from an
- * older build must decode (viewById resolves renamed ids) rather than failing the whole array.
- */
-const savedWorkspacesSchema = Schema.Array(
-  Schema.Struct({ name: Schema.String, panes: Schema.Record(Schema.String, Schema.String) }),
-)
-
-/**
- * Saved workspaces, persisted under the same key and JSON shape the pre-atom workbench wrote.
+ * Saved workspaces use the current exact schema. Invalid or retired data decodes as failure and
+ * the seeded arrangements remain available.
  *
  * Async mode plus a server-initial value keeps hydration honest: the server and the first client
  * render both see no saved workspaces, and the decoded ones arrive as a post-hydration update —
- * the same sequence the old read-in-an-effect produced. A corrupt or legacy-shaped value decodes
- * to a failure, which reads as "no saved workspaces" rather than taking the page down.
+ * a corrupt value reads as "no saved workspaces" rather than taking the page down.
  */
 export const savedWorkspacesAtom = Atom.kvs({
   runtime: kvsRuntime,
   key: workspaceStorageKey,
-  schema: savedWorkspacesSchema,
+  schema: workspacesSchema,
   defaultValue: () => [],
   mode: 'async',
 }).pipe(Atom.withServerValueInitial)
 
-export const savedListAtom = Atom.make(
-  (get): ReadonlyArray<Workspace> =>
-    // Same unchecked narrowing the old defensive JSON read performed: pane ids are resolved (and
-    // renamed ones forwarded) by viewById at use time, not validated here.
-    AsyncResult.getOrElse(get(savedWorkspacesAtom), () => []) as unknown as ReadonlyArray<Workspace>,
+const noSavedWorkspaces: ReadonlyArray<Workspace> = Object.freeze([])
+
+export const savedListAtom = Atom.make((get): ReadonlyArray<Workspace> =>
+  AsyncResult.getOrElse(get(savedWorkspacesAtom), () => noSavedWorkspaces),
 )
 
 /** Seeded arrangements plus saved ones; a saved workspace shadows a seeded one of the same name. */

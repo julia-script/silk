@@ -81,7 +81,7 @@ for (const program of floatMathPrograms) {
         assert.strictEqual(evaluated._tag, 'Completed', program.name)
         // A non-42 result names the first assertion that failed inside the program.
         if (evaluated._tag === 'Completed')
-          assert.strictEqual(evaluated.result.value, 42, `${program.name} on the evaluator`)
+          assert.strictEqual(evaluated.result.value, 42n, `${program.name} on the evaluator`)
 
         const wasm = yield* Analysis.ofSourceRealized(
           `float-math/${program.name}-wasm`,

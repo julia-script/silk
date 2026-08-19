@@ -481,7 +481,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
   }),
 )
 
@@ -502,7 +502,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     assert.strictEqual(
       yield* WasmMain.invoke(artifact.bytes, 'Elaboration.invokeOwnedCopyProviderWasm'),
@@ -528,7 +528,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     assert.strictEqual(
       yield* WasmMain.invoke(artifact.bytes, 'Elaboration.invokeOwnedAffineProviderWasm'),

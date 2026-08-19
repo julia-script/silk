@@ -30,7 +30,7 @@ const run = (label: string, text: string) =>
     const llvm = yield* Effect.exit(Analysis.codegen(native, { mode: 'release' }))
     return {
       diagnostics,
-      result: evaluation._tag === 'Completed' ? evaluation.result.value : evaluation._tag,
+      result: evaluation._tag === 'Completed' ? Number(evaluation.result.value) : evaluation._tag,
       wasmResult,
       llvm: llvm._tag === 'Success' ? 'ok' : String(llvm.cause).slice(0, 240),
     }

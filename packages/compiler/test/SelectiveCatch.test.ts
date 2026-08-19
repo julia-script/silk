@@ -20,6 +20,7 @@ import {
   heterogeneousOwnedFailurePayload,
   heterogeneousOwnedFailureResultDrop,
 } from './support/corpus.js'
+import * as Json from './support/Json.js'
 import { unreachable } from './support/raise.js'
 import * as WasmMain from './support/WasmMain.js'
 
@@ -272,7 +273,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
     assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
   }),
 )
 
@@ -285,8 +286,8 @@ effect fn selective(flag: bool) -> i32 ! B {
 pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
   }),
 )
 
@@ -306,8 +307,8 @@ effect fn selective(flag: bool) -> i32 ! B {
     pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
   }),
 )
 
@@ -363,8 +364,8 @@ pub fn main() -> i32 {
       )
     assert.deepEqual(Mir.verify(Analysis.loweredMir(self)), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
 
     const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
     assert.strictEqual(
@@ -392,7 +393,7 @@ pub fn main() -> i32 { return run Effect.catchAll(direct(), recoverAllocation) }
     const evaluated = Analysis.evaluate(self)
     assert.strictEqual(evaluated._tag, 'Completed', evaluated._tag)
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 10)
+    assert.strictEqual(evaluated.result.value, 10n)
     assert.strictEqual(
       evaluated.trace.filter(
         (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl'),
@@ -418,8 +419,8 @@ pub fn main() -> i32 { return (run completedLeft()) + (run completedRight()) }
 `)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 22)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 22n)
   }),
 )
 
@@ -456,8 +457,8 @@ pub fn main() -> i32 { return (run completed(true)) + (run completed(false)) }
       .map((fn) => `${fn.id.module}.${fn.id.name}`)
     assert.strictEqual(new Set(runnerKeys).size, runnerKeys.length)
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 34)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 34n)
   }),
 )
 
@@ -474,7 +475,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverRest) 
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
     assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 0)
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 0n)
   }),
 )
 
@@ -642,8 +643,8 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
   }),
 )
 
@@ -695,8 +696,12 @@ pub fn main() -> i32 {
         assert.deepEqual(Analysis.diagnostics(self), [])
         assert.deepEqual(Mir.verify(Analysis.loweredMir(self)), [])
         const evaluated = Analysis.evaluate(self)
-        assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-        if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 156)
+        assert.strictEqual(
+          evaluated._tag,
+          'Completed',
+          JSON.stringify(evaluated, Json.bigIntReplacer),
+        )
+        if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 156n)
 
         const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
         assert.strictEqual(
@@ -1124,8 +1129,8 @@ it.effect('requires failure-path loan endings on every MIR run form', () =>
     }
 
     const evaluated = Analysis.evaluate(raw)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 5)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 5n)
     const wasm = yield* Analysis.codegenWasm(raw, { mode: 'release' })
     assert.strictEqual(
       yield* WasmMain.invoke(wasm.bytes, 'SelectiveCatch.invokeFailureLoanRunFormsWasm'),
@@ -1251,8 +1256,12 @@ for (const [label, catch_] of [
           failureRuns.every((operation) => (operation.failureLoanEnds?.length ?? 0) > 0),
         )
         const evaluated = Analysis.evaluate(snapshot)
-        assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-        if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 44)
+        assert.strictEqual(
+          evaluated._tag,
+          'Completed',
+          JSON.stringify(evaluated, Json.bigIntReplacer),
+        )
+        if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 44n)
         const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
         assert.strictEqual(
           yield* WasmMain.invoke(artifact.bytes, 'SelectiveCatch.invokeResidualMatchWasm'),
@@ -1276,8 +1285,12 @@ for (const [label, catch_] of [
         assert.deepEqual(Mir.verify(Analysis.loweredMir(self)), [])
 
         const evaluated = Analysis.evaluate(self)
-        assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-        if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 84)
+        assert.strictEqual(
+          evaluated._tag,
+          'Completed',
+          JSON.stringify(evaluated, Json.bigIntReplacer),
+        )
+        if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 84n)
 
         const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
         assert.strictEqual(
@@ -1574,8 +1587,8 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 23)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 23n)
   }),
 )
 
@@ -1593,8 +1606,12 @@ it.effect(
         1,
       )
       const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+      assert.strictEqual(
+        evaluated._tag,
+        'Completed',
+        JSON.stringify(evaluated, Json.bigIntReplacer),
+      )
+      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
 
       const propagation =
         Analysis.loweredMir(snapshot)
@@ -1789,8 +1806,8 @@ it.effect('repacks heterogeneous failure payload carriers without changing membe
       'expected a propagated run boundary',
     )
     const evaluated = BootstrapEvaluation.evaluate(snapshot.instances, packedModule)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
     const artifact = yield* Backend.emit(WasmBackend.WasmBackend, packedModule, {
       mode: 'release',
     })
@@ -1815,12 +1832,10 @@ it.effect(
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        JSON.stringify(evaluated, (_, value) =>
-          typeof value === 'bigint' ? value.toString() : value,
-        ),
+        JSON.stringify(evaluated, Json.bigIntReplacer),
       )
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42)
+      assert.strictEqual(evaluated.result.value, 42n)
       assert.deepEqual(
         evaluated.trace.flatMap((event) =>
           event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease'
@@ -1845,15 +1860,9 @@ it.effect('releases a reified owned residual directly from a floating union carr
     assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [])
 
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(
-      evaluated._tag,
-      'Completed',
-      JSON.stringify(evaluated, (_, value) =>
-        typeof value === 'bigint' ? value.toString() : value,
-      ),
-    )
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(
       evaluated.trace.flatMap((event) =>
         event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease'
@@ -2047,8 +2056,8 @@ pub fn main() -> i32 { return run Effect.catchAll(selected(1), recoverAll) }`,
       )
     }
     const evaluated = BootstrapEvaluation.evaluate(snapshot.instances, mutated)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 22)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 22n)
     const artifact = yield* Backend.emit(WasmBackend.WasmBackend, mutated, { mode: 'release' })
     assert.strictEqual(artifact._tag, 'WebAssemblyModuleArtifact')
     if (artifact._tag !== 'WebAssemblyModuleArtifact') return
@@ -2229,7 +2238,7 @@ pub fn main() -> i32 { return run Effect.catchAll(layer(), recoverTop) }`,
       const evaluated = Analysis.evaluate(self)
       assert.strictEqual(evaluated._tag, 'Completed', name)
       if (evaluated._tag !== 'Completed') continue
-      assert.strictEqual(evaluated.result.value, expected, name)
+      assert.strictEqual(evaluated.result.value, BigInt(expected), name)
       const hookIndices = evaluated.trace.flatMap((event, index) =>
         event._tag === 'Call' && event.target.name.startsWith('drop@impl') ? [index] : [],
       )

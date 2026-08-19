@@ -93,14 +93,16 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.result.value, 42n)
     assert.deepEqual(
       outcome.trace.flatMap((event) =>
-        event._tag === 'Return' && event.function.name === 'fold' && event.value._tag === 'I32Value'
+        event._tag === 'Return' &&
+        event.function.name === 'fold' &&
+        event.value._tag === 'IntegerValue'
           ? [event.value.value]
           : [],
       ),
-      [40, 42],
+      [40n, 42n],
     )
     assert.strictEqual(
       Analysis.instancesOf(self).instances.filter(
@@ -155,9 +157,9 @@ it.effect('keeps logical native and WebAssembly execution in parity', () =>
     assert.strictEqual(existsSync(native.path), true)
     const nativeRun = spawnSync(native.path, [], { encoding: 'utf8' })
 
-    assert.strictEqual(logical.result.value, 42)
-    assert.strictEqual(wasmMain(), logical.result.value)
-    assert.strictEqual(nativeRun.status, logical.result.value, nativeRun.stderr)
+    assert.strictEqual(logical.result.value, 42n)
+    assert.strictEqual(wasmMain(), Number(logical.result.value))
+    assert.strictEqual(nativeRun.status, Number(logical.result.value), nativeRun.stderr)
     assert.strictEqual(
       nativeArtifact.symbols.filter((entry) => entry.declaration.name === 'fold').length,
       1,

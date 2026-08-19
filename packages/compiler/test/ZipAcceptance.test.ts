@@ -224,7 +224,7 @@ const accept = (
       `${name}: ${evaluated._tag === 'Blocked' ? evaluated.reason._tag : evaluated._tag}`,
     )
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, expected, name)
+    assert.strictEqual(evaluated.result.value, BigInt(expected), name)
 
     const events = allocationEvents(evaluated)
     assert.deepEqual(events, expectedEvents, `${name} acquire/release trace`)
@@ -362,7 +362,7 @@ it.effect('produces the same zipped result on the evaluator, LLVM, and Wasm', ()
       'Completed',
       logical._tag === 'Blocked' ? logical.reason._tag : logical._tag,
     )
-    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42)
+    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42n)
 
     const llvm = yield* Analysis.codegen(native, { mode: 'release' })
     assert.include(llvm.ir, 'define')

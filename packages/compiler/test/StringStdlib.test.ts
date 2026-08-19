@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Stdlib from '../src/Stdlib.js'
+import * as Json from './support/Json.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -56,11 +57,11 @@ it.effect('validates complete UTF-8 and reports the first invalid byte offset', 
               ? mir.value.functions.map((fn) => `${fn.id.module}.${fn.id.name}`)
               : [],
         },
-        (_, value) => (typeof value === 'bigint' ? value.toString() : value),
+        Json.bigIntReplacer,
       ),
     )
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 522)
+    assert.strictEqual(evaluated.result.value, 522n)
   }),
 )
 
@@ -105,11 +106,11 @@ it.effect('copies, appends, views, and drops owned String through ordinary Bytes
               ? mir.value.functions.map((fn) => `${fn.id.module}.${fn.id.name}`)
               : [],
         },
-        (_, value) => (typeof value === 'bigint' ? value.toString() : value),
+        Json.bigIntReplacer,
       ),
     )
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
     assert.isTrue(evaluated.trace.some((event) => event._tag === 'AllocationRelease'))
   }),
 )
@@ -156,15 +157,9 @@ it.effect('rolls append back when growth cannot allocate', () =>
     )
     assert.deepEqual(diagnosticSummary(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(
-      evaluated._tag,
-      'Completed',
-      JSON.stringify(evaluated, (_, value) =>
-        typeof value === 'bigint' ? value.toString() : value,
-      ),
-    )
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.result.value, 42n)
   }),
 )
 
@@ -211,15 +206,9 @@ it.effect('traverses mixed-width Unicode scalars with explicit byte offsets', ()
     const snapshot = yield* Analysis.ofSourceRealized('string-stdlib/scalars', ascii(scalars))
     assert.deepEqual(diagnosticSummary(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(
-      evaluated._tag,
-      'Completed',
-      JSON.stringify(evaluated, (_, value) =>
-        typeof value === 'bigint' ? value.toString() : value,
-      ),
-    )
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 74_967)
+    assert.strictEqual(evaluated.result.value, 74_967n)
   }),
 )
 

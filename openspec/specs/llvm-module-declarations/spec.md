@@ -15,7 +15,7 @@ The system SHALL accept an explicit target triple and LLVM data-layout string, S
 
 #### Scenario: Reject a malformed data layout
 - **WHEN** a caller supplies a malformed or unsupported data-layout component
-- **THEN** builder creation fails with `SilkError` identifying the rejected component
+- **THEN** builder creation fails with `LlvmError` identifying the rejected component
 
 ### Requirement: Structural type interning
 The system SHALL construct and structurally intern every type supported by the pinned Zig builder, including primitive, integer, pointer, function, vector, array, anonymous structure, named structure, opaque, and target-extension types.
@@ -41,7 +41,7 @@ The system SHALL represent supported scalar, aggregate, string, null, zero, unde
 
 #### Scenario: Reject a mismatched aggregate
 - **WHEN** aggregate elements do not match the aggregate type's shape or child types
-- **THEN** construction fails with `SilkError` before module state is changed
+- **THEN** construction fails with `LlvmError` before module state is changed
 
 ### Requirement: Canonical attributes
 The system SHALL support the pinned builder's parameter, return, and function attributes and SHALL canonicalize equivalent attribute sets independent of caller-provided ordering.
@@ -59,7 +59,7 @@ The system SHALL create, query, rename, replace, and configure globals, variable
 
 #### Scenario: Reject a duplicate incompatible global
 - **WHEN** a caller attempts to create an incompatible declaration using an occupied global name
-- **THEN** the operation fails with `SilkError` and preserves the existing declaration
+- **THEN** the operation fails with `LlvmError` and preserves the existing declaration
 
 ### Requirement: Function declarations
 The system SHALL declare functions from function types and SHALL canonicalize repeated compatible declarations under one global identity.

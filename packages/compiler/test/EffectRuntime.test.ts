@@ -5,6 +5,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as Mir from '../src/Mir.js'
 import * as Type from '../src/Type.js'
+import * as Json from './support/Json.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -270,9 +271,9 @@ it.effect('passes, returns, stores, captures, and specializes closed Effect valu
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      `${JSON.stringify(evaluated)}\n${Mir.encode(Analysis.loweredMir(logical))}`,
+      `${JSON.stringify(evaluated, Json.bigIntReplacer)}\n${Mir.encode(Analysis.loweredMir(logical))}`,
     )
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
     const native = yield* Analysis.codegen(logical, { mode: 'release' })
     assert.include(native.ir, 'define')
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
@@ -298,11 +299,11 @@ it.effect('preserves exclusive and take-once Effect access across ordinary calls
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        `${name}: ${JSON.stringify(evaluated)}\n${Mir.encode(Analysis.loweredMir(snapshot))}`,
+        `${name}: ${JSON.stringify(evaluated, Json.bigIntReplacer)}\n${Mir.encode(Analysis.loweredMir(snapshot))}`,
       )
       assert.strictEqual(
         evaluated._tag === 'Completed' ? evaluated.result.value : undefined,
-        expected,
+        BigInt(expected),
         name,
       )
       const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
@@ -349,8 +350,8 @@ it.effect('provides an existing borrowed capability across evaluator and Wasm', 
     assert.deepEqual(Analysis.diagnostics(logical), [])
     assert.deepEqual(Analysis.diagnostics(wasm), [])
     const evaluated = Analysis.evaluate(logical)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
@@ -376,8 +377,8 @@ it.effect('constructs allocation-free OutOfMemory and recovers across evaluator 
       layout._tag === 'Available' ? Analysis.callingShapeOf(logical, Type.outOfMemory) : undefined
     assert.strictEqual(oom?.lanes.length, 0)
     const evaluated = Analysis.evaluate(logical)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated))
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
@@ -405,7 +406,7 @@ it.effect('executes the same handled failure through the evaluator and Wasm', ()
     const main = instance.exports.silk_main as () => number
 
     assert.strictEqual(logical._tag, 'Completed')
-    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42)
+    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42n)
     assert.strictEqual(main(), 42)
     assert.include(wasm.wat, 'call')
     assert.include(wasm.wat, 'if')
@@ -432,7 +433,7 @@ it.effect('keeps callable Effect mapping in evaluator, LLVM, and Wasm parity', (
 
     assert.strictEqual(Mir.encode(Analysis.loweredMir(native)), golden('effect.mir.txt'))
     assert.strictEqual(logical._tag, 'Completed')
-    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42)
+    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42n)
     assert.include(llvm.ir, '@silk_silk_i32_add')
     assert.isFunction(main)
     if (typeof main === 'function') assert.strictEqual(main(), 42)
@@ -453,11 +454,11 @@ it.effect('keeps grouped, reverse, data-first, and stored pipelines equivalent',
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        `${sample.name}: ${JSON.stringify(evaluated)}`,
+        `${sample.name}: ${JSON.stringify(evaluated, Json.bigIntReplacer)}`,
       )
       assert.strictEqual(
         evaluated._tag === 'Completed' ? evaluated.result.value : undefined,
-        sample.expected,
+        BigInt(sample.expected),
         sample.name,
       )
     }
@@ -481,10 +482,10 @@ it.effect('composes flatMap and tap with mapping and provision', () =>
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        `${name}: ${JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? value.toString() : value))}`,
+        `${name}: ${JSON.stringify(evaluated, Json.bigIntReplacer)}`,
       )
       if (evaluated._tag !== 'Completed') continue
-      assert.strictEqual(evaluated.result.value, 42, name)
+      assert.strictEqual(evaluated.result.value, 42n, name)
       assert.isAtLeast(
         evaluated.trace.filter((event) => event._tag === 'Call' && event.target.name === 'observe')
           .length,
@@ -512,11 +513,11 @@ it.effect('continues transforming recovered and retried effects', () =>
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        `${name}: ${JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? value.toString() : value))}`,
+        `${name}: ${JSON.stringify(evaluated, Json.bigIntReplacer)}`,
       )
       assert.strictEqual(
         evaluated._tag === 'Completed' ? evaluated.result.value : undefined,
-        42,
+        42n,
         name,
       )
     }
@@ -537,7 +538,7 @@ it.effect('keeps the success path out of the exact handler on Wasm', () =>
     const main = instance.exports.silk_main as () => number
 
     assert.strictEqual(logical._tag, 'Completed')
-    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42)
+    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42n)
     assert.strictEqual(main(), 42)
     assert.strictEqual(
       logical._tag === 'Completed'
@@ -594,7 +595,7 @@ it.effect('preserves exclusive capture state across evaluator and Wasm runs', ()
     const main = instance.exports.silk_main as () => number
 
     assert.strictEqual(logical._tag, 'Completed')
-    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 12)
+    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 12n)
     assert.strictEqual(main(), 12)
   }),
 )
@@ -619,7 +620,7 @@ it.effect('retries with fresh locals and persistent captures across evaluator an
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     const main = instance.exports.silk_main as () => number
     assert.strictEqual(logical._tag, 'Completed')
-    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 3)
+    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 3n)
     assert.strictEqual(main(), 3)
   }),
 )
@@ -645,8 +646,12 @@ it.effect('flattens one nested Effect layer across evaluator, LLVM, and Wasm', (
       assert.deepEqual(Mir.verify(Analysis.loweredMir(wasm)), [], name)
 
       const logical = Analysis.evaluate(native)
-      assert.strictEqual(logical._tag, 'Completed', `${name}: ${JSON.stringify(logical)}`)
-      assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42, name)
+      assert.strictEqual(
+        logical._tag,
+        'Completed',
+        `${name}: ${JSON.stringify(logical, Json.bigIntReplacer)}`,
+      )
+      assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42n, name)
       const llvm = yield* Analysis.codegen(native, { mode: 'release' })
       assert.include(llvm.ir, 'define', name)
       const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })

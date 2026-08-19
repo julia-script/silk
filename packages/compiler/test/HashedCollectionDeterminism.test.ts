@@ -46,13 +46,13 @@ const threeEngineValue = (name: string, source: string, artifact: string) =>
 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
-    const bootstrap = evaluated._tag === 'Completed' ? evaluated.result.value : undefined
+    const bootstrap = evaluated._tag === 'Completed' ? Number(evaluated.result.value) : undefined
 
     // The same snapshot evaluated a second time: one engine, two runs, before the other two engines
     // are asked the same question.
     const repeated = Analysis.evaluate(snapshot)
     assert.strictEqual(repeated._tag, 'Completed', describe(repeated))
-    const again = repeated._tag === 'Completed' ? repeated.result.value : undefined
+    const again = repeated._tag === 'Completed' ? Number(repeated.result.value) : undefined
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})

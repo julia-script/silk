@@ -87,7 +87,7 @@ const acceptAcrossEngines = (
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed', name)
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, expected, name)
+    assert.strictEqual(evaluated.result.value, BigInt(expected), name)
     assert.deepEqual(allocationEvents(evaluated), expectedEvents, `${name} acquire/release trace`)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })

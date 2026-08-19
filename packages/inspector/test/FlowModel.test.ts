@@ -69,7 +69,7 @@ describe('projectDataFlow', () => {
     expect(new Set(children.map((group) => group.id)).size).toBe(2)
     expect(children.map((group) => group.evaluation?.order)).toEqual([3, 8])
     expect(flow.mode).toBe('Evaluated')
-    expect(flow.nodes.some((item) => item.evaluation?.value === 2)).toBe(true)
+    expect(flow.nodes.some((item) => item.evaluation?.value === 2n)).toBe(true)
   })
 
   it('terminates an unavailable inner type contract without inventing an enclosing result', () => {

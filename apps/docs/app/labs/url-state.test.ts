@@ -1,9 +1,14 @@
-import type { SerializedDockview } from 'dockview'
-import { describe, expect, it } from 'vitest'
+import { assert, describe, it } from '@effect/vitest'
+import { Orientation, type SerializedDockview } from 'dockview'
 import { decodeLayout, decodeSource, encodeLayout, encodeSource } from './url-state'
 
 // A shared link is only worth anything if what comes back out is what went in, so the round trip
 // is the property worth pinning: these encodings are what let a refresh land on the same view.
+
+const defined = <A>(value: A | undefined): A => {
+  assert.isDefined(value)
+  return value
+}
 
 describe('source encoding', () => {
   it('round-trips a program, including newlines and non-ASCII', async () => {
@@ -11,7 +16,7 @@ describe('source encoding', () => {
       root: 'main',
       modules: { main: 'pub fn main() -> i32 { return 42 }\n-- naïve ⇒ ok\n' },
     }
-    expect(await decodeSource((await encodeSource(state)) as string)).toEqual(state)
+    assert.deepEqual(await decodeSource(defined(await encodeSource(state))), state)
   })
 
   it('round-trips a multi-module request', async () => {
@@ -22,7 +27,7 @@ describe('source encoding', () => {
         lib: 'pub fn answer() -> i32 { return 1 }',
       },
     }
-    expect(await decodeSource((await encodeSource(state)) as string)).toEqual(state)
+    assert.deepEqual(await decodeSource(defined(await encodeSource(state))), state)
   })
 
   it('produces no characters that a query string would have to escape', async () => {
@@ -30,7 +35,7 @@ describe('source encoding', () => {
       root: 'main',
       modules: { main: 'pub fn main() -> i32 { return i32.add(1, 41) }' },
     })
-    expect(encoded).toMatch(/^[A-Za-z0-9\-_]*$/)
+    assert.match(defined(encoded), /^[A-Za-z0-9\-_]*$/)
   })
 
   it('carries the target, since the same program lowers differently for each', async () => {
@@ -39,40 +44,40 @@ describe('source encoding', () => {
       modules: { main: 'pub fn main() -> i32 { return 42 }' },
       target: 'wasm32-unknown-unknown',
     }
-    expect(await decodeSource((await encodeSource(state)) as string)).toEqual(state)
+    assert.deepEqual(await decodeSource(defined(await encodeSource(state))), state)
   })
 
   it('keeps an unknown target rather than silently compiling for the default', async () => {
     // `Target.select` turns this into an unavailable selection the panes already render, which is
     // a better answer than quietly emitting for some other target.
-    const encoded = (await encodeSource({
+    const encoded = defined(await encodeSource({
       root: 'main',
       modules: { main: 'pub fn main() -> i32 { return 42 }' },
       target: 'sparc-unknown-none',
-    })) as string
-    expect((await decodeSource(encoded))?.target).toBe('sparc-unknown-none')
+    }))
+    assert.strictEqual((await decodeSource(encoded))?.target, 'sparc-unknown-none')
   })
 
   it('rejects a root that names no module, which would not load', async () => {
-    const encoded = (await encodeSource({
+    const encoded = defined(await encodeSource({
       root: 'absent',
       modules: { main: 'pub fn main() -> i32 { return 42 }' },
-    })) as string
-    expect(await decodeSource(encoded)).toBeUndefined()
+    }))
+    assert.isUndefined(await decodeSource(encoded))
   })
 
   it('reports damaged input rather than throwing', async () => {
-    expect(await decodeSource('!!!not base64!!!')).toBeUndefined()
+    assert.isUndefined(await decodeSource('!!!not base64!!!'))
   })
 })
 
 describe('layout encoding', () => {
-  const layout = {
+  const layout: SerializedDockview = {
     grid: {
       root: { type: 'branch', data: [] },
       width: 1600,
       height: 900,
-      orientation: 'HORIZONTAL',
+      orientation: Orientation.HORIZONTAL,
     },
     panels: {
       'pane-mir-1': {
@@ -82,28 +87,52 @@ describe('layout encoding', () => {
         title: 'MIR control flow',
       },
     },
-  } as unknown as SerializedDockview
+  }
 
   it('round-trips a layout', async () => {
     const encoded = await encodeLayout(layout)
-    expect(encoded).toBeDefined()
-    expect(await decodeLayout(encoded as string)).toEqual(layout)
+    assert.isDefined(encoded)
+    assert.deepEqual(await decodeLayout(defined(encoded)), layout)
   })
 
   it('stays URL-safe and compresses rather than inflating the link', async () => {
-    const encoded = (await encodeLayout(layout)) as string
-    expect(encoded).toMatch(/^[A-Za-z0-9\-_]*$/)
-    expect(encoded.length).toBeLessThan(JSON.stringify(layout).length)
+    const encoded = defined(await encodeLayout(layout))
+    assert.match(encoded, /^[A-Za-z0-9\-_]*$/)
+    assert.isBelow(encoded.length, JSON.stringify(layout).length)
   })
 
   it('rejects a payload that decodes but is not a layout', async () => {
-    // A stale link from an older build must fall back to the default layout, not throw
-    // during render.
-    const notALayout = (await encodeLayout({ nope: true } as unknown as SerializedDockview)) as string
-    expect(await decodeLayout(notALayout)).toBeUndefined()
+    const notALayout: SerializedDockview = {
+      ...layout,
+      panels: { invalid: { id: 'invalid' } },
+    }
+    assert.isUndefined(await decodeLayout(defined(await encodeLayout(notALayout))))
+  })
+
+  it('rejects retired view ids and pre-view source panels', async () => {
+    const retiredView: SerializedDockview = {
+      ...layout,
+      panels: {
+        'pane-llvm': {
+          id: 'pane-llvm',
+          contentComponent: 'view',
+          params: { view: 'llvm' },
+          title: 'LLVM',
+        },
+      },
+    }
+    const sourceComponent: SerializedDockview = {
+      ...layout,
+      panels: {
+        source: { id: 'source', contentComponent: 'source', params: {}, title: 'Source' },
+      },
+    }
+
+    assert.isUndefined(await decodeLayout(defined(await encodeLayout(retiredView))))
+    assert.isUndefined(await decodeLayout(defined(await encodeLayout(sourceComponent))))
   })
 
   it('reports damaged input rather than throwing', async () => {
-    expect(await decodeLayout('!!!not deflate!!!')).toBeUndefined()
+    assert.isUndefined(await decodeLayout('!!!not deflate!!!'))
   })
 })

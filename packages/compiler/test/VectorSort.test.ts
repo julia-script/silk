@@ -64,7 +64,7 @@ const evaluate = (name: string, source: string) =>
 
 const evaluatedValue = (name: string, source: string) =>
   Effect.map(evaluate(name, source), (outcome) =>
-    outcome._tag === 'Completed' ? outcome.result.value : undefined,
+    outcome._tag === 'Completed' ? Number(outcome.result.value) : undefined,
   )
 
 // [9, -3, 5, 1, 0, -8, 7, 2] sorts to [-8, -3, 0, 1, 2, 5, 7, 9], which folds to -19473 in radix 3.
@@ -279,7 +279,7 @@ it.effect(
       const evaluated = Analysis.evaluate(wasmSnapshot)
       assert.strictEqual(evaluated._tag, 'Completed')
       if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, -19473)
+      assert.strictEqual(evaluated.result.value, -19473n)
 
       const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -407,7 +407,7 @@ it.effect('sorts a move-only element type and releases every allocation it acqui
     const outcome = yield* evaluate('vector-sort/move-only-elements', moveOnlyElements)
     if (outcome._tag !== 'Completed') return
     // Keys [3, 1, 2] order to [1, 2, 3]: each element travelled without being duplicated or lost.
-    assert.strictEqual(outcome.result.value, 123)
+    assert.strictEqual(outcome.result.value, 123n)
     const acquires = outcome.trace.filter((event) => event._tag === 'AllocationAcquire')
     const releases = outcome.trace.filter((event) => event._tag === 'AllocationRelease')
     // Each element owns one allocation of its own, so a duplicated element would leak one and a
