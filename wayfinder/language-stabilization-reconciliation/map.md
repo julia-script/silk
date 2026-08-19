@@ -65,6 +65,11 @@ handoffs.
   trailing sections, shared last-use logic for delayed values, ordinary aggregate treatment of
   represented executable fields, and lifecycle work already owned by the Effect, termination, and
   suspension handoffs.
+- [Values, generics, representations, and operators audit](issues/03-values-generics-representations-and-operators.md)
+  — 48 of 60 rules are implemented and exact/opaque representations are fully aligned. Remaining
+  work is ordinary-type unions, public-field struct construction, ordinary text views, complete
+  struct inference, explicit operator declarations, removal of short-circuit purity privilege, and
+  the Copy/failure seams already owned by earlier handoffs.
 
 ## Not yet specified
 
