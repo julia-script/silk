@@ -23,3 +23,5 @@ SLP (direction and coherence)
   — Draft; records the selected strict explicit-discard model and awaits Candidate review.
 - [SLP-0003: Canonical value types and narrow compatibility](0003-canonical-value-types/proposal.md)
   — Draft; workbench for the foundational values-and-types stabilization pass.
+- [SLP-0004: Deterministic expressions and ordinary operator dispatch](0004-deterministic-expressions-and-operators/proposal.md)
+  — Draft; workbench for the expressions-and-operators stabilization pass.

@@ -78,10 +78,13 @@ not belong in a language rule unless a program can observe them.
   contracts, ordered calls, returns, callable sections, pipelines, conditionals, loops, and matches.
 - [Values and types](values-and-types.md) — foundational scalars, literals, nominal structs, fixed
   arrays, lexical views, structural unions, precise inference, and compatibility.
+- [Expressions and operators](expressions-and-operators.md) — deterministic evaluation, expression
+  composition, scalar and explicitly declared custom operators, short-circuiting, assignment,
+  atomic replacement, and explicit conversion.
 
 The following domains will receive pages only when their first rules are ready:
 
-- remaining syntax and expressions;
+- remaining syntax beyond expressions;
 - modules, names, and visibility beyond entry discovery;
 - generics, interfaces, and specialization;
 - targets, unsafe code, and intrinsics; and

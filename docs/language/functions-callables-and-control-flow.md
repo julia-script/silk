@@ -398,8 +398,9 @@ accepted patterns, and interaction with guards remain undefined; ordinary boolea
 implicitly perform that matching today.
 
 An `if` condition cannot be an integer, nominal value, Effect, or other implicitly converted value.
-Conditionally executed Effects must be run inside the selected statement arm rather than placed in
-the skipped side of `&&` or `||`.
+An Effect returning `bool` may be executed conditionally either inside the selected statement arm or
+in the right operand of `&&` or `||`. In both forms its failures, requirements, and ownership follow
+the ordinary enclosing execution contract.
 
 **Diagnostics:** A non-boolean condition reports `SEM0011` at the condition and identifies its actual
 type. Invalid `if` use in expression position receives a parser diagnostic. Each arm retains its own
