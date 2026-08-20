@@ -670,19 +670,18 @@ particular, user declarations cannot redefine `&&`, `||`, `|>`, `run`, assignmen
 control form.
 
 **Diagnostics:** An operator declaration with the wrong arity or a spelling outside its prefix or
-infix category reports a declaration diagnostic at that interface operation. No matching
-conformance reports an operator-applicability diagnostic at the operator. Multiple matching
-operations report an operator-ambiguity diagnostic listing the competing interface operations and
-operand types. Stable codes for these three diagnostics are not yet assigned.
+infix category reports `SEM0134` at that interface operation. No matching conformance reports
+`SEM0135` at the operator. Multiple matching operations report `SEM0136`, listing the competing
+interface operations. Ordinary argument diagnostics remain attached to the operand after a unique
+contract is selected.
 
-**Current compiler:** Disputed. A generic operator currently searches a bound interface for a
-method whose name happens to be the operator's compiler name, such as `add` or `lessThan`, while the
-same operator on the resulting concrete user type is unavailable. Reconciliation must remove this
-name-based path and use only explicit operator declarations for both generic and concrete source.
+**Current compiler:** Aligned. Generic bounds and concrete conformances use the same explicit
+marker, applied interface contract, and static witness selection. Operation spelling has no role in
+eligibility.
 
 **Evidence:** [complete interface contracts](../../openspec/specs/bootstrap-complete-interface-contracts/spec.md),
 [static conformance specialization](../../openspec/specs/bootstrap-conditional-interface-conformance/spec.md),
-[current name-based elaboration](../../packages/compiler/src/Elaboration.ts),
+[operator contract tests](../../packages/compiler/test/OperatorContracts.test.ts),
 [conformance implementation forms](requirements-and-services.md#serv-001--a-conformance-may-define-or-map-each-operation).
 
 ### OP-010 — A short-circuit right operand follows ordinary branch semantics
@@ -747,7 +746,7 @@ diagnostic exists.
 
 **Evidence:** [branch ownership](ownership-and-borrowing.md#flow-001--ownership-is-valid-on-every-path-that-reaches-an-operation),
 [Effect execution boundaries](effects-and-execution.md#eff-006--an-ordinary-function-may-run-only-a-closed-effect),
-[current short-circuit restriction](../../packages/compiler/src/Elaboration.ts),
+[short-circuit elaboration](../../packages/compiler/src/Elaboration.ts),
 [conditional mutation and evaluation tests](../../packages/compiler/test/ShortCircuitOperatorAcceptance.test.ts).
 
 ## Assignment and replacement

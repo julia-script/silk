@@ -324,3 +324,22 @@ pub fn main() -> i32 {
     assert.strictEqual(evaluated.result.value, 42n)
   }),
 )
+
+it.effect('rejects a use reached after one short-circuit path moves its owner', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'short-circuit/conditional-use-after-move',
+      ascii(`struct Flag { value: bool }
+fn unwrap(flag: Flag) -> bool { return flag.value }
+fn invalid(gate: bool, flag: Flag) -> bool {
+  let selected = gate && unwrap(move flag)
+  return selected && flag.value
+}
+pub fn main() -> i32 { return 0 }`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [Diagnostic.useAfterMoveCode],
+    )
+  }),
+)

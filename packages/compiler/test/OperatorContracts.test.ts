@@ -68,6 +68,30 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('preserves a matrix-vector operation’s heterogeneous result type', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`${vectorContracts}
+struct Matrix { scale: i32 }
+
+fn apply(left: Matrix, right: Vector) -> Vector {
+  return Vector { value: left.scale * right.value }
+}
+
+impl Multiply<Vector, Vector> for Matrix { multiply: Matrix.apply }
+
+pub fn main() -> i32 {
+  let matrix = Matrix { scale: 6 }
+  let vector = Vector { value: 7 }
+  let result = move matrix * move vector
+  return result.value
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
 it.effect('does not grant operator syntax to a conventional operation name', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`struct Value { raw: i32 }
@@ -126,6 +150,19 @@ pub fn main() -> i32 {
     assert.deepEqual(
       Analysis.diagnostics(ambiguous).map((diagnostic) => diagnostic.code),
       [Diagnostic.ambiguousOperatorCode],
+    )
+  }),
+)
+
+it.effect('rejects a marker whose arity does not match the operator', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`interface Invalid {
+  operator + fn add(value: Self) -> Self
+}
+pub fn main() -> i32 { return 0 }`)
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      [Diagnostic.invalidOperatorContractCode],
     )
   }),
 )
