@@ -282,7 +282,10 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Existing provider capture',
-    `struct Clock {}
+    `service Clock { effect fn value() -> i32 ? &Clock }
+struct FixedClock { value: i32 }
+effect fn clockValue(self: &FixedClock) -> i32 { return self.value }
+impl Clock for FixedClock { value: FixedClock.clockValue }
 
 effect fn read() -> i32
 ? &Clock@Primary {
@@ -290,7 +293,7 @@ effect fn read() -> i32
 }
 
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { value: 42 }
   let pending = read()
     |> Intrinsic.bindRequirement<&Clock@Primary>(&clock)
   return run pending
@@ -668,15 +671,18 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Piped acquired provider',
-    `struct Clock {}
+    `service Clock { effect fn value() -> i32 ? &mut Clock }
+struct FixedClock { value: i32 }
+effect fn clockValue(self: &mut FixedClock) -> i32 { return self.value }
+impl Clock for FixedClock { value: FixedClock.clockValue }
 
 effect fn read() -> i32
 ? &mut Clock {
   return 40
 }
 
-effect fn acquireClock() -> Clock {
-  return Clock {}
+effect fn acquireClock() -> FixedClock {
+  return FixedClock { value: 40 }
 }
 
 fn increment(value: i32) -> i32 {
@@ -842,7 +848,10 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Effectful Logger tap',
-    `struct TapLogger {}
+    `service TapLogger { effect fn value() -> i32 ? &TapLogger }
+struct FixedLogger { value: i32 }
+effect fn loggerValue(self: &FixedLogger) -> i32 { return self.value }
+impl TapLogger for FixedLogger { value: FixedLogger.loggerValue }
 
 effect fn succeed(value: i32) -> i32 {
   return value
@@ -854,7 +863,7 @@ effect fn log(value: i32) -> i32
 }
 
 pub fn main() -> i32 {
-  let logger = TapLogger {}
+  let logger = FixedLogger { value: 42 }
   let logged = succeed(42)
     |> Effect.tap(log)
   let provided = logged
@@ -2766,8 +2775,8 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'ok · Declared interface over two providers',
-    `interface Area<T> {
-  fn area(value: &T) -> i32
+    `interface Area {
+  fn area(value: &Self) -> i32
 }
 
 pub struct Square {
@@ -2787,11 +2796,11 @@ fn rectArea(value: &Rect) -> i32 {
   return value.width * value.height
 }
 
-impl Area<Square> for Square {
+impl Area for Square {
   area: Square.squareArea
 }
 
-impl Area<Rect> for Rect {
+impl Area for Rect {
   area: Rect.rectArea
 }
 
@@ -2810,9 +2819,9 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'ok · Declared two-operation contract',
-    `interface Span<T> {
-  fn start(self: &T) -> i32
-  fn end(self: &T) -> i32
+    `interface Span {
+  fn start(self: &Self) -> i32
+  fn end(self: &Self) -> i32
 }
 
 pub struct Range {
@@ -2828,7 +2837,7 @@ fn rangeEnd(self: &Range) -> i32 {
   return self.to
 }
 
-impl Span<Range> for Range {
+impl Span for Range {
   start: Range.rangeStart
   end: Range.rangeEnd
 }
@@ -2856,10 +2865,13 @@ pub struct Schema {
   pub offset: i32
 }
 
-struct Clock {}
+service Clock { effect fn value() -> i32 ? &mut Clock }
+struct FixedClock { value: i32 }
+effect fn clockValue(self: &mut FixedClock) -> i32 { return self.value }
+impl Clock for FixedClock { value: FixedClock.clockValue }
 
-interface Decoder<S, Arguments, A, E, ?R> {
-  effect fn decode(self: &S, encoded: Arguments) -> A ! E ? R
+interface Decoder<Arguments, A, E, ?R> {
+  effect fn decode(self: &Self, encoded: Arguments) -> A ! E ? R
 }
 
 effect fn schemaDecode(self: &Schema, encoded: i32) -> i32
@@ -2871,19 +2883,19 @@ effect fn schemaDecode(self: &Schema, encoded: i32) -> i32
   return encoded + self.offset
 }
 
-impl Decoder<Schema, i32, i32, DecodeError ? &Clock> for Schema {
+impl Decoder<i32, i32, DecodeError ? &Clock> for Schema {
   decode: Schema.schemaDecode
 }
 
-effect fn acquireClock() -> Clock {
-  return Clock {}
+effect fn acquireClock() -> FixedClock {
+  return FixedClock { value: 42 }
 }
 
 effect fn recover(problem: DecodeError) -> i32 {
   return 0
 }
 
-effect fn decodeWith<T: Decoder<T, i32, i32, DecodeError ? &Clock>>(schema: &T, encoded: i32) -> i32
+effect fn decodeWith<T: Decoder<i32, i32, DecodeError ? &Clock>>(schema: &T, encoded: i32) -> i32
 ! DecodeError
 ? &Clock {
   let value = run Decoder.decode(schema, encoded)
@@ -2914,7 +2926,7 @@ fn priorityLessThan(left: &Priority, right: &Priority) -> bool {
   return left.rank < right.rank
 }
 
-impl Order<Priority> for Priority {
+impl Order for Priority {
   lessThan: Priority.priorityLessThan
 }
 
@@ -2952,7 +2964,7 @@ fn wordHash(value: &Word, key: &HashSeed) -> u64 {
   return mix(key, value.value)
 }
 
-impl HashKey<Word> for Word {
+impl HashKey for Word {
   equals: Word.wordEquals
   hash: Word.wordHash
 }
@@ -2980,8 +2992,8 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'ok · Conditional conformance over a wrapper',
-    `interface Describe<T> {
-  fn size(value: &T) -> i32
+    `interface Describe {
+  fn size(value: &Self) -> i32
 }
 
 pub struct Leaf {
@@ -2997,7 +3009,7 @@ fn leafSize(value: &Leaf) -> i32 {
   return value.width
 }
 
-impl Describe<Leaf> for Leaf {
+impl Describe for Leaf {
   size: Leaf.leafSize
 }
 
@@ -3005,7 +3017,7 @@ fn labelledSize<T: Describe>(value: &Labelled<T>) -> i32 {
   return Describe.size(&value.inner) + value.tag
 }
 
-impl<T: Describe<T>> Describe<Labelled<T>> for Labelled<T> {
+impl<T: Describe> Describe for Labelled<T> {
   size: Labelled.labelledSize
 }
 
@@ -3027,8 +3039,8 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'fail · Witness demands a stronger receiver',
-    `interface Reader<T> {
-  fn read(self: &T) -> i32
+    `interface Reader {
+  fn read(self: &Self) -> i32
 }
 
 pub struct Cursor {
@@ -3040,7 +3052,7 @@ fn cursorRead(self: &mut Cursor) -> i32 {
   return self.position
 }
 
-impl Reader<Cursor> for Cursor {
+impl Reader for Cursor {
   read: Cursor.cursorRead
 }
 
@@ -3064,7 +3076,7 @@ fn tagEquals(left: &Tag, right: &Tag) -> bool {
   return left.value == right.value
 }
 
-impl HashKey<Tag> for Tag {
+impl HashKey for Tag {
   equals: Tag.tagEquals
 }
 
