@@ -22,7 +22,7 @@ began. Start with [`scalarCursor`](#declaration-73696c6b2f737472696e673a3a736361
 
 Import as `String` with `import silk.string`.
 
-Public declarations: 21.
+Public declarations: 22.
 
 <a id="declaration-73696c6b2f737472696e673a3a537472696e67"></a>
 
@@ -73,6 +73,19 @@ pub struct ScalarStep
 ```
 
 One decoded Unicode scalar and the cursor following it.
+
+<a id="declaration-73696c6b2f737472696e673a3a66726f6d55746638556e636865636b6564"></a>
+
+## `fromUtf8Unchecked`
+
+```silk
+pub unsafe fn fromUtf8Unchecked(values: &[u8]) -> string
+```
+
+Borrows bytes as text without validating their UTF-8 encoding.
+
+The caller must guarantee that the complete byte view is valid UTF-8 for the lifetime of the
+returned string view. Prefer `fromUtf8` when the bytes have not already been validated.
 
 <a id="declaration-73696c6b2f737472696e673a3a66726f6d55746638"></a>
 

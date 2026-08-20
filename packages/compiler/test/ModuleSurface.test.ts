@@ -136,7 +136,7 @@ it.effect('keeps string distinct from an immutable byte view in module surfaces'
     // Pins the canonical surface encoding byte-for-byte; an encoding change must be deliberate.
     assert.strictEqual(
       text.canonical,
-      '13:ModuleSurface12:surface/Main703:5:Array692:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public8:Ordinary7:5:Array11:6:Number1:1130:5:Array119:9:Parameter11:6:Number1:021:11:PresentName5:value67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False24:11:PresentName8:identity67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False6:4:None133:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array137:14:RequirementRow6:4:True7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array',
+      '13:ModuleSurface12:surface/Main712:5:Array701:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public8:Ordinary7:5:False7:5:Array11:6:Number1:1130:5:Array119:9:Parameter11:6:Number1:021:11:PresentName5:value67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False24:11:PresentName8:identity67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False6:4:None133:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array137:14:RequirementRow6:4:True7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array',
     )
   }),
 )

@@ -6667,12 +6667,24 @@ const intrinsicContractReference = (
 ): Extract<CallReferenceFact, { readonly _tag: 'ResolvedIntrinsicContract' }> => {
   if (operation.rule._tag !== 'ContractRule')
     throw new RangeError('intrinsic contract reference requires a contract operation')
+  const contract =
+    operation.rule.contract.unsafe === operation.unsafe
+      ? operation.rule.contract
+      : CallableContract.make({
+          functionKind: operation.rule.contract.functionKind,
+          unsafe: operation.unsafe,
+          binders: operation.rule.contract.binders,
+          parameters: operation.rule.contract.parameters,
+          result: operation.rule.contract.result,
+          constraints: operation.rule.contract.constraints,
+          captures: operation.rule.contract.captures,
+        })
   return Object.freeze({
     _tag: 'ResolvedIntrinsicContract',
     spelling: `Intrinsic.${operation.spelling}`,
     token: operationToken,
     intrinsic: operation,
-    contract: operation.rule.contract,
+    contract,
   })
 }
 

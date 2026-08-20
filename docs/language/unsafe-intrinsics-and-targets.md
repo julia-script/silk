@@ -106,9 +106,9 @@ block. Nesting an unsafe block is valid but adds no stronger permission.
 names the operation whose invariant requires acknowledgement. Other invalid code inside the block
 retains its ordinary primary diagnostic.
 
-**Current compiler:** Aligned for compiler-owned intrinsic calls. The parser represents unsafe as a
-statement block and semantic analysis tests each unsafe intrinsic call against the containing
-lexical span.
+**Current compiler:** Aligned. The parser represents both unsafe statement blocks and single-call
+acknowledgements, and semantic analysis applies the same invocation rule to intrinsic and ordinary
+source callables.
 
 **Evidence:** [intrinsic boundary specification](../../openspec/specs/bootstrap-intrinsic-boundary/spec.md),
 [unsafe parser](../../packages/compiler/src/Parser.ts),
@@ -157,8 +157,8 @@ missing-boundary diagnostic as an unsafe intrinsic and names the selected functi
 passing it where a safe callable is required reports a callable-contract mismatch at the value
 transfer.
 
-**Current compiler:** Missing. `unsafe fn` appears in rendered intrinsic signatures but is not an
-ordinary source declaration form, and callable types do not yet preserve a source unsafe-call bit.
+**Current compiler:** Aligned. Ordinary and effectful source declarations, callable values,
+serialized module surfaces, and tooling presentations preserve the unsafe-call qualifier.
 
 ### UNSAFE-003 — `unsafe call(...)` marks one invocation; `unsafe { ... }` marks a statement region
 
@@ -207,8 +207,8 @@ unsafe call inside an argument receives its own diagnostic even when the outer c
 Tooling may remove a redundant nested block whose complete region is already unsafe, but nesting is
 not a compiler error.
 
-**Current compiler:** Partially aligned. The statement block exists. The single-call prefix and its
-direct-call scoping are not implemented.
+**Current compiler:** Aligned. The statement block grants lexical authority, while the prefix grants
+authority only to its directly wrapped complete call and not to nested argument calls.
 
 **Evidence:** [unsafe block parser](../../packages/compiler/src/Parser.ts),
 [unsafe semantic admission](../../packages/compiler/src/Elaboration.ts),
@@ -253,9 +253,8 @@ on safe code to revalidate an undocumented condition at each run.
 missing-boundary diagnostic at construction. Running the resulting Effect receives only the normal
 Effect, ownership, and execution-boundary diagnostics.
 
-**Current compiler:** Partially aligned. Unsafe intrinsic effect calls are admitted at construction
-inside the existing unsafe boundary, and the resulting Effect runs normally. Source-declared
-unsafe effect functions and the single-call prefix are missing.
+**Current compiler:** Aligned. Source and intrinsic unsafe Effect constructors are acknowledged when
+called, and the resulting ordinary Effect runs without a second unsafe marker.
 
 **Evidence:** [intrinsic Effect catalog](../../packages/compiler/src/Intrinsic.ts),
 [OS intrinsic acceptance](../../packages/compiler/test/IntrinsicCatalog.test.ts),
@@ -314,9 +313,9 @@ identifies safety before reporting secondary representation details. Invoking th
 unsafe generic, interface, or service contract requires acknowledgement even when a selected safe
 implementation is known later.
 
-**Current compiler:** Missing for ordinary source contracts. Compiler intrinsic entries already
-carry a safety bit, but source callable types, generic bounds, interface operations, services, and
-representation parameters do not yet expose the qualifier uniformly.
+**Current compiler:** Aligned. Source callable types, generic substitution, interface and service
+operations, conformance checking, and representation parameters preserve the qualifier. A safe
+witness may satisfy an unsafe operation; the reverse is rejected.
 
 **Evidence:** [callable contracts](functions-callables-and-control-flow.md),
 [interface operation compatibility](generics-interfaces-and-specialization.md#impl-003--each-implementation-must-satisfy-the-substituted-operation-contract),
@@ -418,9 +417,9 @@ diagnostic at its complete application. Prefixing a partial application with `un
 the acknowledgement is misplaced because the operation has not been invoked. Ownership and
 lifetime errors in captured arguments retain their ordinary diagnostics.
 
-**Current compiler:** Missing with source-declared unsafe callables. Intrinsic operations already
-participate in ordinary leading-argument sections, but the compiler does not yet preserve an unsafe
-callable qualifier on the resulting section or support the single-call prefix.
+**Current compiler:** Aligned. Partial application preserves the unsafe qualifier without requiring
+acknowledgement, and every complete invocation through the resulting callable requires one block or
+single-call marker.
 
 **Evidence:** [partial application](functions-callables-and-control-flow.md),
 [callable ownership](ownership-and-borrowing.md),

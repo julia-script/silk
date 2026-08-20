@@ -40,7 +40,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/result`](./result.md) | `Result` | 11 | Completed success-or-failure values that can be inspected and transformed as ordinary data. |
 | [`silk/slot`](./slot.md) | `Slot` | 4 | Explicit initialization-state transitions for one slot selected from raw storage. |
 | [`silk/standard_input`](./standard-input.md) | `StandardInput` | 11 | Portable blocking reads of raw standard-input bytes through an explicit provider. |
-| [`silk/string`](./string.md) | `String` | 21 | Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal. |
+| [`silk/string`](./string.md) | `String` | 22 | Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal. |
 | [`silk/u16`](./u16.md) | `u16` | 57 | Sixteen-bit unsigned integers with explicit arithmetic and conversion failure policies. |
 | [`silk/u32`](./u32.md) | `u32` | 57 | Thirty-two-bit unsigned integers for fixed-width counts, masks, and binary fields. |
 | [`silk/u64`](./u64.md) | `u64` | 57 | Sixty-four-bit unsigned integers for wide masks, counters, hashes, and exact interchange values. |

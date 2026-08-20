@@ -66,6 +66,32 @@ it.effect('validates complete UTF-8 and reports the first invalid byte offset', 
   }),
 )
 
+it.effect('exposes unchecked UTF-8 construction as an unsafe source callable', () =>
+  Effect.gen(function* () {
+    const safe = yield* Analysis.ofSourceRealized(
+      'string-stdlib/unchecked-safe',
+      ascii(`import silk.string { byteLength, fromUtf8Unchecked }
+import silk.usize { toI32 }
+pub fn main() -> i32 { return toI32(byteLength(fromUtf8Unchecked(b"silk"))) }`),
+    )
+    assert.deepEqual(
+      diagnosticSummary(safe).map(({ code }) => code),
+      ['SEM0082'],
+    )
+
+    const acknowledged = yield* Analysis.ofSourceRealized(
+      'string-stdlib/unchecked-acknowledged',
+      ascii(`import silk.string { byteLength, fromUtf8Unchecked }
+import silk.usize { toI32 }
+pub fn main() -> i32 { return toI32(byteLength(unsafe fromUtf8Unchecked(b"silk"))) }`),
+    )
+    assert.deepEqual(diagnosticSummary(acknowledged), [])
+    const evaluated = Analysis.evaluate(acknowledged)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 4n)
+  }),
+)
+
 const owned = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
 import silk.effects as Effect

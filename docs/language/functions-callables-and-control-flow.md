@@ -248,14 +248,19 @@ The result is `42`. Naming `increment` does not call it and does not require emp
 **Boundary:** A function item must satisfy the expected parameter, result, and invocation-mode
 contract. Two functions with the same visible callable signature may retain distinct concrete
 identities for specialization; source cannot erase those identities merely by naming the structural
-callable type.
+callable type. Safety is also part of that contract: an `unsafe fn(A) -> B` value still requires an
+`unsafe` acknowledgement when its complete invocation occurs. A safe callable may satisfy an unsafe
+callable parameter, but an unsafe callable cannot satisfy a safe one. Partial application preserves
+the qualifier until the final invocation; constructing the section itself does not acknowledge the
+eventual call.
 
 **Diagnostics:** Applying a non-callable reports `SEM0075`. An incompatible callable parameter,
 result, or mode reports `SEM0076`. A context that would erase a required concrete callable identity
 reports `SEM0080` or the more specific represented-storage diagnostic.
 
 **Evidence:** [callable specification](../../openspec/specs/bootstrap-callable-values/spec.md),
-[indirect-call tests](../../packages/compiler/test/IndirectCallAcceptance.test.ts).
+[indirect-call tests](../../packages/compiler/test/IndirectCallAcceptance.test.ts),
+[unsafe callable contracts](unsafe-intrinsics-and-targets.md#unsafe-002--source-callable-contracts-carry-an-unsafe-qualifier).
 
 ### CALLABLE-002 — Supplying a trailing argument suffix constructs a section
 

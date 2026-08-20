@@ -118,6 +118,15 @@ fn firstInvalidUtf8(values: &[u8]) -> Option<usize> {
   return none<usize>()
 }
 
+/// Borrows bytes as text without validating their UTF-8 encoding.
+///
+/// The caller must guarantee that the complete byte view is valid UTF-8 for the lifetime of the
+/// returned string view. Prefer `fromUtf8` when the bytes have not already been validated.
+pub unsafe fn fromUtf8Unchecked(values: &[u8]) -> string {
+  unsafe { return Intrinsic.stringFromUtf8Unchecked(values) }
+  return ""
+}
+
 /// Validates a complete byte view and borrows it as text without allocating.
 ///
 /// # Details
@@ -132,10 +141,8 @@ pub fn fromUtf8(values: &[u8]) -> Result<string, InvalidUtf8> {
   if failure <= values.length {
     return failResult<string, InvalidUtf8>(InvalidUtf8 { offset: failure })
   }
-  unsafe {
-    let text = Intrinsic.stringFromUtf8Unchecked(values)
-    return succeed<string, InvalidUtf8>(text)
-  }
+  let text = unsafe fromUtf8Unchecked(values)
+  return succeed<string, InvalidUtf8>(text)
   return failResult<string, InvalidUtf8>(InvalidUtf8 { offset: usize.ZERO })
 }
 
@@ -196,8 +203,7 @@ pub effect fn appendOwned(self: &mut String, value: String) -> () ! OutOfMemoryE
 /// Borrows the complete owned contents as valid text without allocating.
 pub fn view(self: &String) -> string {
   let bytes = bytesAsSlice(&self.bytes)
-  unsafe { return Intrinsic.stringFromUtf8Unchecked(bytes) }
-  return ""
+  return unsafe fromUtf8Unchecked(bytes)
 }
 
 /// Borrows a string's immutable UTF-8 encoding.
