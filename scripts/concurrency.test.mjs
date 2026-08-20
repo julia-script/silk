@@ -7,8 +7,8 @@ const cpuCounts = [1, 2, 4, 8, 16, 64]
 test('a run containing tests keeps the peak within the worker budget', () => {
   for (const cpus of cpuCounts) {
     const workers = workersPerTask(['typecheck', 'test'], cpus)
-    const peak = deriveConcurrency(cpus, workers) * workers
-    assert.ok(peak <= cpus * 2, `peak ${peak} workers exceeds the budget for ${cpus} cores`)
+    const peak = deriveConcurrency(cpus, workers, true) * workers
+    assert.ok(peak <= cpus, `peak ${peak} workers exceeds the budget for ${cpus} cores`)
   }
 })
 
@@ -27,10 +27,11 @@ test('a run of single-process tasks is not held to the test bound', () => {
   assert.equal(deriveConcurrency(4, workersPerTask(['typecheck'], 4)), 8)
 })
 
-test('the run is never serialized down to one task', () => {
-  for (const cpus of cpuCounts) {
-    assert.ok(deriveConcurrency(cpus, workersPerTask(['test'], cpus)) >= 2, `${cpus} cores`)
-  }
+test('a full-machine test suite is serialized while one-worker suites may share the host', () => {
+  assert.equal(deriveConcurrency(10, workersPerTask(['test'], 10), true), 1)
+  assert.equal(deriveConcurrency(4, workersPerTask(['test'], 4), true), 1)
+  assert.equal(deriveConcurrency(2, workersPerTask(['test'], 2), true), 2)
+  assert.equal(deriveConcurrency(1, workersPerTask(['test'], 1), true), 1)
 })
 
 test('tasks are read from the turbo invocation, not from its flags', () => {

@@ -1,20 +1,17 @@
 import { availableParallelism } from 'node:os'
 
 /**
- * How many test workers the workspace may have runnable at once, as a multiple of the host's
- * cores.
+ * How many workers independent single-process tasks may have runnable at once, as a multiple of
+ * the host's cores.
  *
- * Not 1x. A Vitest worker spends a large part of its wall-clock transforming and importing rather
+ * A Vitest worker spends a large part of its wall-clock transforming and importing rather
  * than on the CPU — a 490 s compiler run measured 110 s of import alone — so one extra runnable
- * worker per core is absorbed by that idle time instead of queueing behind it. Beyond 2x it stops
- * being absorbed: at the ~12x this workspace reached before this bound existed, `packages/lsp`'s
- * suite ran 3.4x its idle cost and its slowest test crossed Vitest's 5 s default, which is how a
- * green branch turned red in a package it had not touched.
+ * process per core is useful for builds and typechecks. Full-machine test suites are different:
+ * the compiler and docs suites both perform compiler work in every worker, and running them
+ * together measured slower than running them serially while pushing correctness tests past even
+ * six-minute timeouts. Test tasks therefore share a 1x worker budget; other tasks retain 2x.
  */
 const OVERSUBSCRIPTION = 2
-
-/** Never serialize the run down to a single task — that trades a flaky gate for a slow one. */
-const MINIMUM_CONCURRENCY = 2
 
 export const hostParallelism = () => Math.max(1, availableParallelism())
 
@@ -26,8 +23,14 @@ export const hostParallelism = () => Math.max(1, availableParallelism())
  * and neither factor alone bounds it. `vitest.shared.ts` deliberately lets one suite use every
  * core, so the budget divided by that is how many suites may overlap.
  */
-export const deriveConcurrency = (cpus = hostParallelism(), workersPerTask = cpus) =>
-  Math.max(MINIMUM_CONCURRENCY, Math.floor((cpus * OVERSUBSCRIPTION) / Math.max(1, workersPerTask)))
+export const deriveConcurrency = (
+  cpus = hostParallelism(),
+  workersPerTask = cpus,
+  containsTests = false,
+) => {
+  const workerBudget = cpus * (containsTests ? 1 : OVERSUBSCRIPTION)
+  return Math.max(1, Math.floor(workerBudget / Math.max(1, workersPerTask)))
+}
 
 /**
  * How much of the machine one task of this run takes.

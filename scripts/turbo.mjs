@@ -26,7 +26,7 @@ const hasExplicitConcurrency = args.some(
 
 const cpus = hostParallelism()
 const tasks = tasksOf(args)
-const concurrency = deriveConcurrency(cpus, workersPerTask(tasks, cpus))
+const concurrency = deriveConcurrency(cpus, workersPerTask(tasks, cpus), tasks.includes('test'))
 const turboArgs = hasExplicitConcurrency ? args : [...args, `--concurrency=${concurrency}`]
 
 if (!hasExplicitConcurrency) {
