@@ -4846,70 +4846,70 @@ const interfaceConstraintDiagnostics = (
   const substitution = contract.fact.substitution
   return Object.freeze(
     reference.declaration.typeParameters.flatMap((parameter) => {
-      const bound = parameter.bound
-      if (bound === undefined) return []
       const provider = substitution.get(Type.key(parameter.type))
       if (provider === undefined || !Type.isTypeArgument(provider)) return []
-      if (bound._tag !== 'ResolvedBound')
-        return [
-          Diagnostic.invalidConformance(
-            `unknown interface constraint ${bound.spelling}`,
-            parameter.syntax.span,
-          ),
-        ]
-      const substitutedCapability = Type.substitute(bound.application.capability, substitution)
-      if (!Type.isNominal(substitutedCapability))
-        return [
-          Diagnostic.invalidConformance(
-            `unknown interface constraint ${bound.spelling}`,
-            parameter.syntax.span,
-          ),
-        ]
-      const capability = substitutedCapability
-      if (!bound.application.providerMatches)
-        return [
-          Diagnostic.invalidConformance(
-            `${bound.spelling} cannot bind Self to ${Type.encode(provider)}`,
-            parameter.syntax.span,
-          ),
-        ]
-      // Selection excludes rejected declarations, but a partial declaration still carries the most
-      // useful source error: name the exact operation it failed to map before reporting the broader
-      // missing-witness result.
-      const unmapped = DeclarationIndex.unmappedInterfaceOperations(index, provider, capability)
-      if (unmapped.length > 0)
-        return unmapped.map((operation) =>
-          Diagnostic.invalidConformance(
-            `${Type.encode(provider)} does not implement ${bound.spelling}.${operation}`,
-            span,
-          ),
-        )
-      if (!DeclarationIndex.conforms(index, provider, capability)) {
-        // A conditional header that covers this provider but whose own requirements failed has a
-        // more useful answer than "does not implement": the chain says which requirement is
-        // missing and which wrapper asked for it.
-        const proof = DeclarationIndex.prove(index, provider, capability)
-        if (
-          proof._tag === 'Unproved' &&
-          ConformanceGoal.key(proof.goal) !==
-            ConformanceGoal.key(ConformanceGoal.make(capability, provider))
-        )
+      return parameter.bounds.flatMap((bound): ReadonlyArray<Diagnostic.Diagnostic> => {
+        if (bound._tag !== 'ResolvedBound')
           return [
-            Diagnostic.unprovenConformance(
-              ConformanceGoal.encode(ConformanceGoal.make(capability, provider)),
-              ConformanceGoal.describe(proof.failure),
-              ConformanceGoal.traceLines(proof),
+            Diagnostic.invalidConformance(
+              `unknown interface constraint ${bound.spelling}`,
+              parameter.syntax.span,
+            ),
+          ]
+        const substitutedCapability = Type.substitute(bound.application.capability, substitution)
+        if (!Type.isNominal(substitutedCapability))
+          return [
+            Diagnostic.invalidConformance(
+              `unknown interface constraint ${bound.spelling}`,
+              parameter.syntax.span,
+            ),
+          ]
+        const capability = substitutedCapability
+        if (!bound.application.providerMatches)
+          return [
+            Diagnostic.invalidConformance(
+              `${bound.spelling} cannot bind Self to ${Type.encode(provider)}`,
+              parameter.syntax.span,
+            ),
+          ]
+        // Selection excludes rejected declarations, but a partial declaration still carries the most
+        // useful source error: name the exact operation it failed to map before reporting the broader
+        // missing-witness result.
+        const unmapped = DeclarationIndex.unmappedInterfaceOperations(index, provider, capability)
+        if (unmapped.length > 0)
+          return unmapped.map((operation) =>
+            Diagnostic.invalidConformance(
+              `${Type.encode(provider)} does not implement ${bound.spelling}.${operation}`,
+              span,
+            ),
+          )
+        if (!DeclarationIndex.conforms(index, provider, capability)) {
+          // A conditional header that covers this provider but whose own requirements failed has a
+          // more useful answer than "does not implement": the chain says which requirement is
+          // missing and which wrapper asked for it.
+          const proof = DeclarationIndex.prove(index, provider, capability)
+          if (
+            proof._tag === 'Unproved' &&
+            ConformanceGoal.key(proof.goal) !==
+              ConformanceGoal.key(ConformanceGoal.make(capability, provider))
+          )
+            return [
+              Diagnostic.unprovenConformance(
+                ConformanceGoal.encode(ConformanceGoal.make(capability, provider)),
+                ConformanceGoal.describe(proof.failure),
+                ConformanceGoal.traceLines(proof),
+                span,
+              ),
+            ]
+          return [
+            Diagnostic.invalidConformance(
+              `${Type.encode(provider)} does not implement ${bound.spelling}`,
               span,
             ),
           ]
-        return [
-          Diagnostic.invalidConformance(
-            `${Type.encode(provider)} does not implement ${bound.spelling}`,
-            span,
-          ),
-        ]
-      }
-      return []
+        }
+        return []
+      })
     }),
   )
 }
@@ -5067,10 +5067,9 @@ const boundOperationReference = (
   | undefined => {
   if (interface_.canonical._tag !== 'Canonical') return undefined
   const capability = interface_.canonical.id
-  const bounded = declaration.typeParameters.filter((parameter) => {
-    const bound = parameter.bound
-    return (
-      bound?._tag === 'ResolvedBound' &&
+  const bounded = declaration.typeParameters.flatMap((parameter) =>
+    parameter.bounds.flatMap((bound) =>
+      bound._tag === 'ResolvedBound' &&
       bound.application.declaration.module === capability.module &&
       bound.application.declaration.name === capability.name &&
       bound.application.operations.some(
@@ -5078,22 +5077,23 @@ const boundOperationReference = (
           operation.declaration.name._tag === 'Present' &&
           operation.declaration.name.spelling === member,
       )
-    )
-  })
+        ? [Object.freeze({ parameter, bound })]
+        : [],
+    ),
+  )
   if (bounded.length === 0) return undefined
   if (bounded.length > 1)
     return Object.freeze({
       _tag: 'AmbiguousBound',
       parameters: Object.freeze(
-        bounded.map((parameter) =>
+        bounded.map(({ parameter }) =>
           parameter.name._tag === 'Present' ? parameter.name.spelling : Type.encode(parameter.type),
         ),
       ),
     })
-  const parameter = bounded.at(0)
-  if (parameter === undefined) return undefined
-  const bound = parameter.bound
-  if (bound?._tag !== 'ResolvedBound') return undefined
+  const selected = bounded.at(0)
+  if (selected === undefined) return undefined
+  const { parameter, bound } = selected
   const operation = bound.application.operations.find(
     (candidate) =>
       candidate.declaration.name._tag === 'Present' &&
@@ -6760,25 +6760,26 @@ const analyzeOperatorExpression = (
       : declaration.typeParameters.flatMap((parameter): ReadonlyArray<InterfaceOperationFact> => {
           // Every operation the bound declares is callable on a bound-typed operand, so an operator
           // stays generic exactly when the bound's contract names the operation it spells.
-          const bound = parameter.bound
-          if (!Type.equals(parameter.type, boundOperand) || bound?._tag !== 'ResolvedBound')
-            return []
+          if (!Type.equals(parameter.type, boundOperand)) return []
           const operationName = `${operator.slice(0, 1).toLowerCase()}${operator.slice(1)}`
-          const contract = bound.application.operations.find(
-            (operation) =>
-              operation.declaration.name._tag === 'Present' &&
-              operation.declaration.name.spelling === operationName,
-          )
-          return contract === undefined
-            ? []
-            : [
-                Object.freeze({
-                  capability: bound.application.capability,
-                  provider: boundOperand,
-                  operation: operationName,
-                  contract,
-                }),
-              ]
+          return parameter.bounds.flatMap((bound): ReadonlyArray<InterfaceOperationFact> => {
+            if (bound._tag !== 'ResolvedBound') return []
+            const contract = bound.application.operations.find(
+              (operation) =>
+                operation.declaration.name._tag === 'Present' &&
+                operation.declaration.name.spelling === operationName,
+            )
+            return contract === undefined
+              ? []
+              : [
+                  Object.freeze({
+                    capability: bound.application.capability,
+                    provider: boundOperand,
+                    operation: operationName,
+                    contract,
+                  }),
+                ]
+          })
         })[0]
   const genericInterface = interfaceOperation !== undefined
   const selectedActor: Operator.Actor =

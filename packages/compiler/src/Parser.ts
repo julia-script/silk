@@ -1769,20 +1769,30 @@ const parseTypeParameterList = (
       marker === undefined && nextSignificantKind(name.state) === 'Colon'
         ? expect(name.state, 'Colon', [...typeStarts, 'Comma', 'Greater', ...following])
         : undefined
-    const bound =
-      colon === undefined
-        ? undefined
-        : parseType(colon.state, ['Comma', 'Greater', ...following], true)
+    let boundState = colon?.state
+    let boundElements: ReadonlyArray<SyntaxTree.Element> = Object.freeze([])
+    if (colon !== undefined) {
+      while (boundState !== undefined) {
+        const bound = parseType(boundState, ['Plus', 'Comma', 'Greater', ...following], true)
+        boundElements = Object.freeze([...boundElements, bound.node])
+        boundState = bound.state
+        if (nextSignificantKind(boundState) !== 'Plus') break
+        const plus = expect(boundState, 'Plus', [...typeStarts, 'Comma', 'Greater', ...following])
+        boundElements = Object.freeze([...boundElements, ...plus.elements])
+        boundState = plus.state
+      }
+    }
+    const completedState = boundState ?? name.state
     children = Object.freeze([
       ...children,
-      syntaxNode(bound?.state ?? name.state, 'TypeParameter', [
+      syntaxNode(completedState, 'TypeParameter', [
         ...(marker?.elements ?? []),
         ...name.elements,
         ...(colon?.elements ?? []),
-        ...(bound === undefined ? [] : [bound.node]),
+        ...boundElements,
       ]),
     ])
-    state = bound?.state ?? name.state
+    state = completedState
     if (nextSignificantKind(state) !== 'Comma') break
     const comma = expect(state, 'Comma', [...parameterStarts, 'Greater', ...following])
     children = Object.freeze([...children, ...comma.elements])

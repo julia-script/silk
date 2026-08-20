@@ -376,6 +376,34 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('requires and resolves every member of a bound conjunction', () =>
+  Effect.gen(function* () {
+    const { self, outcome } = yield* evaluate(`interface LeftValue {
+  fn left(value: &Self) -> i32
+}
+interface RightValue {
+  fn right(value: &Self) -> i32
+}
+struct Pair { left: i32 right: i32 }
+impl LeftValue for Pair {
+  fn left(value: &Self) -> i32 { return value.left }
+}
+impl RightValue for Pair {
+  fn right(value: &Self) -> i32 { return value.right }
+}
+fn sum<T: LeftValue + RightValue>(value: &T) -> i32 {
+  return LeftValue.left(value) + RightValue.right(value)
+}
+pub fn main() -> i32 {
+  let pair = Pair { left: 20, right: 22 }
+  return sum(&pair)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
 it.effect('reports a bound operation reachable through two bounded parameters', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`pub interface Mixer {
@@ -412,7 +440,7 @@ it.effect('records the resolved bound contract on the declaration it belongs to'
       ?.declarations.find(
         (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === 'combine',
       )
-    const bound = declaration?.typeParameters.at(0)?.bound
+    const bound = declaration?.typeParameters.at(0)?.bounds.at(0)
     assert.strictEqual(bound?._tag, 'ResolvedBound')
     if (bound?._tag !== 'ResolvedBound') return
     assert.strictEqual(bound.spelling, 'Arith')

@@ -1,10 +1,10 @@
 pub struct DecodeError {}
 pub service Clock {}
 
-pub interface Decoder<S, Arguments, A, E, ?R> {
-  effect fn decode(self: &S, encoded: Arguments) -> A ! E ? R
+pub interface Decoder<Arguments, A, E, ?R> {
+  effect fn decode(self: &Self, encoded: Arguments) -> A ! E ? R
 }
 
-fn generic<S, Arguments, A, E, ?R, T: Decoder<T, Arguments, A, E ? R>>(value: T) -> T {
+fn generic<Arguments, A, E, ?R, T: Decoder<Arguments, A, E ? R>>(value: T) -> T {
   return move value
 }

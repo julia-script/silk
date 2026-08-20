@@ -59,8 +59,8 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       assert.deepEqual(syntax.parserDiagnostics, [])
       const first = yield* Formatter.format(syntax)
       const text = decoder.decode(FormattedDocument.toUint8Array(first))
-      assert.include(text, 'pub interface Decoder<S, Arguments, A, E, ?R>')
-      assert.include(text, 'effect fn decode(self: &S, encoded: Arguments) -> A ! E ? R')
+      assert.include(text, 'pub interface Decoder<Arguments, A, E, ?R>')
+      assert.include(text, 'effect fn decode(self: &Self, encoded: Arguments) -> A ! E ? R')
       const second = yield* Formatter.format(
         Parser.parse(
           Lexer.lex(
@@ -81,11 +81,11 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       assert.strictEqual(declaration?.visibility, 'Public')
       assert.deepEqual(
         declaration?.typeParameters.map((parameter) => parameter.type.kind),
-        ['Value', 'Value', 'Value', 'Value', 'RequirementRow'],
+        ['Value', 'Value', 'Value', 'RequirementRow'],
       )
       const contract = declaration?.operationContracts.at(0)
       assert.strictEqual(contract?.functionKind, 'Effect')
-      assert.deepEqual(contract?.operands.map(encodedOperand), ['&S', 'Arguments'])
+      assert.deepEqual(contract?.operands.map(encodedOperand), ['&Self', 'Arguments'])
       assert.deepEqual(
         contract?.operands.map((operand) => operand.access),
         ['Shared', 'Take'],
@@ -104,10 +104,9 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
         contract?.requirementRow.parameters.map((parameter) => parameter.name),
         ['R'],
       )
-      const bound = namedDeclaration(
-        Analysis.declarationIndex(snapshot),
-        'generic',
-      )?.typeParameters.at(5)?.bound
+      const bound = namedDeclaration(Analysis.declarationIndex(snapshot), 'generic')
+        ?.typeParameters.at(4)
+        ?.bounds.at(0)
       assert.strictEqual(bound?._tag, 'ResolvedBound')
       if (bound?._tag !== 'ResolvedBound') return
       assert.strictEqual(bound.application.available, true)
@@ -130,32 +129,15 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
     }),
   )
 
-  it.effect('records complete applications and makes provider equality explicit', () =>
+  it.effect('substitutes implicit Self in complete interface applications', () =>
     Effect.gen(function* () {
       const snapshot = yield* analyze('provider-equality')
       const index = Analysis.declarationIndex(snapshot)
-      const matching = namedDeclaration(index, 'matching')?.typeParameters.at(0)?.bound
-      const mismatched = namedDeclaration(index, 'mismatched')?.typeParameters.at(0)?.bound
+      const matching = namedDeclaration(index, 'matching')?.typeParameters.at(0)?.bounds.at(0)
       assert.strictEqual(matching?._tag, 'ResolvedBound')
-      assert.strictEqual(mismatched?._tag, 'ResolvedBound')
-      if (matching?._tag !== 'ResolvedBound' || mismatched?._tag !== 'ResolvedBound') return
+      if (matching?._tag !== 'ResolvedBound') return
       assert.strictEqual(matching.application.providerMatches, true)
       assert.strictEqual(matching.application.available, true)
-      assert.strictEqual(mismatched.application.providerMatches, false)
-      assert.strictEqual(mismatched.application.available, false)
-      assert.strictEqual(mismatched.application.operations.length, 1)
-      const mismatchedOperation = mismatched.application.operations.at(0)
-      assert.strictEqual(
-        mismatchedOperation?.declaration.name._tag === 'Present'
-          ? mismatchedOperation.declaration.name.spelling
-          : undefined,
-        'decode',
-      )
-      assert.isTrue(
-        Analysis.diagnostics(snapshot).some((diagnostic) =>
-          diagnostic.message.includes('Decoder must be applied to its own provider'),
-        ),
-      )
       const contract = matching.application.operations.at(0)
       assert.deepEqual(contract?.operands.map(encodedOperand), ['&T', 'i32'])
       assert.strictEqual(
@@ -202,10 +184,9 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       )
       assert.strictEqual(contract?.success._tag, 'Unresolved')
       assert.strictEqual(contract?.requirementRow.available, false)
-      const bound = namedDeclaration(
-        Analysis.declarationIndex(snapshot),
-        'broken',
-      )?.typeParameters.at(0)?.bound
+      const bound = namedDeclaration(Analysis.declarationIndex(snapshot), 'broken')
+        ?.typeParameters.at(0)
+        ?.bounds.at(0)
       assert.strictEqual(bound?._tag, 'ResolvedBound')
       if (bound?._tag !== 'ResolvedBound') return
       assert.strictEqual(bound.application.available, false)
@@ -218,8 +199,10 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
     Effect.gen(function* () {
       const snapshot = yield* analyze('visibility')
       const index = Analysis.declarationIndex(snapshot)
-      const privateBound = namedDeclaration(index, 'privateBound')?.typeParameters.at(0)?.bound
-      const publicBound = namedDeclaration(index, 'publicBound')?.typeParameters.at(0)?.bound
+      const privateBound = namedDeclaration(index, 'privateBound')
+        ?.typeParameters.at(0)
+        ?.bounds.at(0)
+      const publicBound = namedDeclaration(index, 'publicBound')?.typeParameters.at(0)?.bounds.at(0)
       assert.strictEqual(
         privateBound?._tag === 'ResolvedBound' ? privateBound.application.visibility : undefined,
         'Private',

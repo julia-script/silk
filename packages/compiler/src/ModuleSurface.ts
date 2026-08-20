@@ -1633,8 +1633,7 @@ const interfaceApplication = (value: DeclarationIndex.InterfaceApplicationFact):
     array(value.operations.map(interfaceOperationApplication)),
   ])
 
-const bound = (value: DeclarationIndex.BoundFact | undefined): string | undefined => {
-  if (value === undefined) return undefined
+const bound = (value: DeclarationIndex.BoundFact): string => {
   return value._tag === 'ResolvedBound'
     ? record('ResolvedBound', [value.spelling, interfaceApplication(value.application)])
     : record('UnresolvedBound', [value.spelling, declaredType(value.application)])
@@ -1645,7 +1644,7 @@ const typeParameter = (value: DeclarationIndex.TypeParameterFact): string =>
     type(value.type),
     name(value.name),
     optional(value.duplicateOf === undefined ? undefined : type(value.duplicateOf)),
-    optional(bound(value.bound)),
+    array(value.bounds.map(bound)),
   ])
 
 const declaration = (value: DeclarationIndex.DeclarationFact): string =>

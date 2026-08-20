@@ -82,7 +82,7 @@ export interface TypeParameterFact {
   readonly name: DeclaredName
   readonly syntax: SyntaxTree.Node
   readonly duplicateOf?: Type.Parameter
-  readonly bound?: BoundFact
+  readonly bounds: ReadonlyArray<BoundFact>
   readonly representationBound?: {
     readonly _tag: 'RepresentationBound'
     readonly kind: 'Callable' | 'Effect'
@@ -2414,10 +2414,10 @@ const collectTypeParameters = (
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const facts = SyntaxTree.directNodes(list, 'TypeParameter').map((parameterNode, ordinal) => {
     const name = presentName(source, parameterNode)
-    // A bound is the one type node the parameter carries after its colon. Taking the node rather
-    // than the parameter's own identifier keeps a damaged or applied bound from being read as a
-    // bound on the parameter's own name.
-    const boundNode = parameterNode.children.find(SyntaxTree.isNode)
+    // Every direct type node after the colon is one conjunct. Taking only direct children keeps
+    // nested type arguments from being mistaken for sibling bounds.
+    const boundNodes = parameterNode.children.filter(SyntaxTree.isNode)
+    const boundNode = boundNodes.at(0)
     const boundResolution =
       boundNode === undefined ? undefined : analyzeDeclaredType(source, boundNode, environment)
     const effectBoundTarget =
@@ -2432,9 +2432,9 @@ const collectTypeParameters = (
       effectBoundSegment !== undefined &&
       spelling(source, effectBoundSegment) === 'Effect'
     const representationKind: Type.ParameterKind | undefined =
-      boundNode?.kind === 'CallableType'
+      boundNodes.length === 1 && boundNode?.kind === 'CallableType'
         ? 'CallableRepresentation'
-        : effectBound
+        : boundNodes.length === 1 && effectBound
           ? 'EffectRepresentation'
           : undefined
     const representationContract =
@@ -2444,31 +2444,32 @@ const collectTypeParameters = (
         : undefined
     if (representationKind !== undefined && boundResolution !== undefined)
       diagnostics.push(...boundResolution.diagnostics)
-    const boundToken =
-      boundNode === undefined
-        ? undefined
-        : SyntaxTree.tokens(boundNode).find((token) => token.kind === 'Identifier')
-    const bound: BoundFact | undefined =
+    const bounds: ReadonlyArray<BoundFact> =
       representationKind !== undefined ||
-      SyntaxTree.directToken(parameterNode, 'Colon') === undefined ||
-      boundNode === undefined ||
-      boundToken === undefined
-        ? undefined
-        : Object.freeze({
-            _tag: 'UnresolvedBound' as const,
-            spelling: spelling(source, boundToken),
-            path: Object.freeze({
-              _tag: 'TypePath' as const,
-              spelling: spelling(source, boundToken),
-              segments: Object.freeze([
-                Object.freeze({ spelling: spelling(source, boundToken), token: boundToken }),
-              ]),
-              syntax: boundNode,
+      SyntaxTree.directToken(parameterNode, 'Colon') === undefined
+        ? Object.freeze([])
+        : Object.freeze(
+            boundNodes.flatMap((candidate): ReadonlyArray<BoundFact> => {
+              const token = SyntaxTree.tokens(candidate).find((part) => part.kind === 'Identifier')
+              if (token === undefined) return []
+              const resolution = analyzeDeclaredType(source, candidate, environment)
+              return [
+                Object.freeze({
+                  _tag: 'UnresolvedBound' as const,
+                  spelling: spelling(source, token),
+                  path: Object.freeze({
+                    _tag: 'TypePath' as const,
+                    spelling: spelling(source, token),
+                    segments: Object.freeze([
+                      Object.freeze({ spelling: spelling(source, token), token }),
+                    ]),
+                    syntax: candidate,
+                  }),
+                  application: resolution.fact,
+                }),
+              ]
             }),
-            application:
-              boundResolution?.fact ??
-              Object.freeze({ _tag: 'Unavailable' as const, syntax: boundNode }),
-          })
+          )
     const duplicateOf = name._tag === 'Present' ? environment.get(name.spelling) : undefined
     const type =
       duplicateOf ??
@@ -2497,8 +2498,8 @@ const collectTypeParameters = (
       type,
       name,
       syntax: parameterNode,
+      bounds,
       ...(duplicateOf === undefined ? {} : { duplicateOf }),
-      ...(bound === undefined ? {} : { bound }),
       ...(representationKind === undefined ||
       boundNode === undefined ||
       boundResolution === undefined
@@ -3063,19 +3064,18 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       // because a conditional requirement may name any binder the header declares — including the
       // one it bounds — and only the completed environment can resolve those occurrences.
       const requirements = collected.facts.flatMap(
-        (parameter): ReadonlyArray<ConformanceRequirementFact> => {
-          const bound = parameter.bound
-          if (bound === undefined || parameter.duplicateOf !== undefined) return []
-          return Object.freeze([
-            Object.freeze({
-              _tag: 'ConformanceRequirement' as const,
-              parameter: parameter.type,
-              spelling: bound.spelling,
-              capability: analyzeDeclaredType(source, bound.path.syntax, environment).fact,
-              syntax: bound.path.syntax,
-            }),
-          ])
-        },
+        (parameter): ReadonlyArray<ConformanceRequirementFact> =>
+          parameter.duplicateOf !== undefined
+            ? []
+            : parameter.bounds.map((bound) =>
+                Object.freeze({
+                  _tag: 'ConformanceRequirement' as const,
+                  parameter: parameter.type,
+                  spelling: bound.spelling,
+                  capability: analyzeDeclaredType(source, bound.path.syntax, environment).fact,
+                  syntax: bound.path.syntax,
+                }),
+              ),
       )
       const mappedOperations = SyntaxTree.directNodes(node, 'ImplOperation').map((operation) => {
         const name = presentName(source, operation)
@@ -4573,7 +4573,7 @@ const resolveBounds = (
 ): ReadonlyArray<TypeParameterFact> => {
   if (
     typeParameters.every(
-      (parameter) => parameter.bound === undefined && parameter.representationBound === undefined,
+      (parameter) => parameter.bounds.length === 0 && parameter.representationBound === undefined,
     )
   )
     return typeParameters
@@ -4606,8 +4606,7 @@ const resolveBounds = (
           }),
         })
       }
-      const bound = parameter.bound
-      if (bound === undefined) return parameter
+      if (parameter.bounds.length === 0) return parameter
       const parameterName = parameter.name._tag === 'Present' ? parameter.name : undefined
       const boundResolvers: ResolutionSeams.ResolutionSeams =
         parameterName === undefined
@@ -4629,45 +4628,54 @@ const resolveBounds = (
                     })
                   : resolvers.type(candidateModule, path),
             })
-      const unresolvedCapability =
-        bound._tag === 'ResolvedBound'
-          ? bound.application.capability
-          : (() => {
-              const resolved = resolveDeclaredType(
-                module,
-                bound.application,
-                boundResolvers,
-                modules,
-              ).fact
-              if (resolved._tag === 'Resolved' && Type.isNominal(resolved.type))
-                return resolved.type
-              return resolved._tag === 'Unresolved' &&
-                resolved.candidate !== undefined &&
-                Type.isNominal(resolved.candidate)
-                ? resolved.candidate
-                : undefined
-            })()
-      const declaration =
-        unresolvedCapability === undefined
-          ? undefined
-          : memberByNominal(modules, unresolvedCapability)
-      if (
-        unresolvedCapability === undefined ||
-        (declaration?._tag !== 'InterfaceDeclaration' &&
-          declaration?._tag !== 'ServiceDeclaration') ||
-        declaration.canonical._tag !== 'Canonical'
-      )
-        return Object.freeze({ ...parameter, bound })
-      const application = interfaceApplication(declaration, unresolvedCapability, parameter.type)
-      if (application === undefined) return Object.freeze({ ...parameter, bound })
       return Object.freeze({
         ...parameter,
-        bound: Object.freeze({
-          _tag: 'ResolvedBound' as const,
-          spelling: bound.spelling,
-          path: bound.path,
-          application,
-        }),
+        bounds: Object.freeze(
+          parameter.bounds.map((bound): BoundFact => {
+            const unresolvedCapability =
+              bound._tag === 'ResolvedBound'
+                ? bound.application.capability
+                : (() => {
+                    const resolved = resolveDeclaredType(
+                      module,
+                      bound.application,
+                      boundResolvers,
+                      modules,
+                    ).fact
+                    if (resolved._tag === 'Resolved' && Type.isNominal(resolved.type))
+                      return resolved.type
+                    return resolved._tag === 'Unresolved' &&
+                      resolved.candidate !== undefined &&
+                      Type.isNominal(resolved.candidate)
+                      ? resolved.candidate
+                      : undefined
+                  })()
+            const declaration =
+              unresolvedCapability === undefined
+                ? undefined
+                : memberByNominal(modules, unresolvedCapability)
+            if (
+              unresolvedCapability === undefined ||
+              (declaration?._tag !== 'InterfaceDeclaration' &&
+                declaration?._tag !== 'ServiceDeclaration') ||
+              declaration.canonical._tag !== 'Canonical'
+            )
+              return bound
+            const application = interfaceApplication(
+              declaration,
+              unresolvedCapability,
+              parameter.type,
+            )
+            return application === undefined
+              ? bound
+              : Object.freeze({
+                  _tag: 'ResolvedBound' as const,
+                  spelling: bound.spelling,
+                  path: bound.path,
+                  application,
+                })
+          }),
+        ),
       })
     }),
   )
@@ -4680,25 +4688,26 @@ const refreshInterfaceApplications = (
 ): ReadonlyArray<TypeParameterFact> =>
   Object.freeze(
     typeParameters.map((parameter): TypeParameterFact => {
-      const bound = parameter.bound
-      if (bound?._tag !== 'ResolvedBound') return parameter
-      const declaration = memberByNominal(modules, bound.application.capability)
-      if (
-        declaration?._tag !== 'InterfaceDeclaration' &&
-        declaration?._tag !== 'ServiceDeclaration'
-      )
-        return parameter
-      const application = interfaceApplication(
-        declaration,
-        bound.application.capability,
-        parameter.type,
-      )
-      return application === undefined
-        ? parameter
-        : Object.freeze({
-            ...parameter,
-            bound: Object.freeze({ ...bound, application }),
-          })
+      return Object.freeze({
+        ...parameter,
+        bounds: Object.freeze(
+          parameter.bounds.map((bound): BoundFact => {
+            if (bound._tag !== 'ResolvedBound') return bound
+            const declaration = memberByNominal(modules, bound.application.capability)
+            if (
+              declaration?._tag !== 'InterfaceDeclaration' &&
+              declaration?._tag !== 'ServiceDeclaration'
+            )
+              return bound
+            const application = interfaceApplication(
+              declaration,
+              bound.application.capability,
+              parameter.type,
+            )
+            return application === undefined ? bound : Object.freeze({ ...bound, application })
+          }),
+        ),
+      })
     }),
   )
 
@@ -4939,28 +4948,32 @@ const unpromisedWitnessBound = (
   binding: ReturnType<typeof witnessBinding>,
   arguments_: ReadonlyArray<Type.GenericArgument>,
   conformance: ConformanceFact,
-): TypeParameterFact | undefined =>
-  binding.binders.find((binder, position) => {
-    const bound = binder.bound
-    if (bound?._tag !== 'ResolvedBound') return bound !== undefined
+): { readonly binder: TypeParameterFact; readonly bound: BoundFact } | undefined => {
+  for (const [position, binder] of binding.binders.entries()) {
     const argument = arguments_.at(position)
     const header =
       argument !== undefined && Type.isTypeArgument(argument) && Type.isParameter(argument)
         ? conformance.typeParameters.find((parameter) => Type.equals(parameter.type, argument))
             ?.type
         : undefined
-    return (
-      header === undefined ||
-      !conformance.requirements.some(
-        (requirement) =>
-          requirement.capability._tag === 'Resolved' &&
-          Type.isNominal(requirement.capability.type) &&
-          requirement.capability.type.module === bound.application.capability.module &&
-          requirement.capability.type.name === bound.application.capability.name &&
-          Type.equals(requirement.parameter, header),
+    for (const bound of binder.bounds) {
+      if (bound._tag !== 'ResolvedBound') return { binder, bound }
+      if (
+        header === undefined ||
+        !conformance.requirements.some(
+          (requirement) =>
+            requirement.capability._tag === 'Resolved' &&
+            Type.isNominal(requirement.capability.type) &&
+            requirement.capability.type.module === bound.application.capability.module &&
+            requirement.capability.type.name === bound.application.capability.name &&
+            Type.equals(requirement.parameter, header),
+        )
       )
-    )
-  })
+        return { binder, bound }
+    }
+  }
+  return undefined
+}
 
 /** Resolves one retained type fact through a supplied module resolver and complete index. */
 export const resolveTypeFact = (
@@ -6348,7 +6361,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
             if (unpromisedBound !== undefined) {
               diagnostics.push(
                 invalidDiagnostic(
-                  `${target.spelling} requires ${unpromisedBound.bound?.spelling ?? 'a bound'} for ${unpromisedBound.type.name}, which ${capability.name} for ${Type.encode(provider)} does not require`,
+                  `${target.spelling} requires ${unpromisedBound.bound.spelling} for ${unpromisedBound.binder.type.name}, which ${capability.name} for ${Type.encode(provider)} does not require`,
                   mapping.syntax.span,
                 ),
               )
