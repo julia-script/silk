@@ -87,3 +87,15 @@ it('does not attach across blank lines or ordinary comments', () => {
   assert.isUndefined(DocBlock.ofNode(blank, requiredNode(blank, 'FunctionDeclaration')))
   assert.isUndefined(DocBlock.ofNode(ordinary, requiredNode(ordinary, 'FunctionDeclaration')))
 })
+
+it('attaches operation documentation through a contextual operator marker', () => {
+  const source = `interface Add {
+  /// Adds two values.
+  operator + fn add(left: Self, right: Self) -> Self
+}`
+  const syntax = parse(source)
+  assert.deepEqual(
+    spellings(DocBlock.ofNode(syntax, requiredNode(syntax, 'ServiceOperation')), source),
+    ['/// Adds two values.'],
+  )
+})
