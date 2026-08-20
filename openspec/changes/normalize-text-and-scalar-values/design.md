@@ -12,9 +12,17 @@ Text currently crosses semantic and backend seams through dedicated exceptions. 
 
 1. Keep `string` as a logical immutable UTF-8 type and remove compatibility shortcuts.
 2. Create byte views through the generalized ordinary borrow path with source provenance.
-3. Add or reuse a narrow checked integer-to-char primitive exposed through ordinary standard-library source.
+3. Expose `char.fromU32(value) -> Option<char>` and `char.toU32(value) -> u32` as the only
+   integer/scalar conversions in this change. The source wrappers delegate to sealed,
+   target-neutral `Intrinsic.charFromU32` and `Intrinsic.charToU32` operations. The checked
+   conversion accepts values through `0x10ffff` except the surrogate range
+   `0xd800...0xdfff`; the reverse conversion is total.
 4. Keep debug presentation type-directed so text and binary bytes remain visibly distinct.
 5. Use shared UTF-8 traversal source and require evaluator/backend agreement.
+6. Represent `char` in the existing 32-bit scalar lane. Lower the checked conversion as an
+   explicit target-neutral MIR operation whose result is the ordinary `Option<char>` union;
+   evaluators and backends implement the same scalar-validity predicate. This does not make a
+   standard-library declaration compiler-known by spelling.
 
 ## Risks / Trade-offs
 
