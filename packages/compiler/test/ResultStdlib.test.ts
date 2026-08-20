@@ -128,14 +128,20 @@ pub fn main() -> i32 {
   return 42
 }`
 
-const boundRequirements = `struct Clock {}
-struct Config {}
+const boundRequirements = `service Clock { effect fn value() -> i32 ? &Clock }
+service Config { effect fn value() -> i32 ? &Config }
+struct FixedClock { value: i32 }
+struct FixedConfig { value: i32 }
+effect fn clockValue(self: &FixedClock) -> i32 { return self.value }
+effect fn configValue(self: &FixedConfig) -> i32 { return self.value }
+impl Clock for FixedClock { value: FixedClock.clockValue }
+impl Config for FixedConfig { value: FixedConfig.configValue }
 
 effect fn read() -> i32 ? &Clock@Primary | &Config { return 42 }
 
 pub fn main() -> i32 {
-  let clock = Clock {}
-  let config = Config {}
+  let clock = FixedClock { value: 1 }
+  let config = FixedConfig { value: 2 }
   let rest = Intrinsic.bindRequirement<&Clock@Primary>(read(), &clock)
   let closed = rest |> Intrinsic.bindRequirement(&config)
   return run closed
@@ -227,13 +233,16 @@ pub fn main() -> i32 {
   return observe(move success) + observe(move failure) - 2
 }`
 
-const sourceDefinedProvide = `struct Clock {}
+const sourceDefinedProvide = `service Clock { effect fn value() -> i32 ? &mut Clock }
+struct FixedClock { value: i32 }
+effect fn clockValue(self: &mut FixedClock) -> i32 { return self.value }
+impl Clock for FixedClock { value: FixedClock.clockValue }
 
 effect fn read() -> i32 ? &Clock { return 42 }
-effect fn makeClock() -> Clock { return Clock {} }
+effect fn makeClock() -> FixedClock { return FixedClock { value: 42 } }
 
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { value: 42 }
   let direct = run read() |> Effect.provide(&clock)
   let acquired = run read() |> Effect.provideWith(makeClock())
   return direct + acquired - 42

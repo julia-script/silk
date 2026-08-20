@@ -597,8 +597,8 @@ it.effect('resolves explicit Effect contracts and canonical requirement rows', (
       [
         'root',
         `struct Problem {}
-struct FileSystem {}
-struct Allocator {}
+service FileSystem {}
+service Allocator {}
 fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
   return effect { return 1 }
 }

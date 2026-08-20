@@ -64,13 +64,15 @@ pub effect fn main() -> () ! SomeError | OutOfMemoryError {
   return ()
 }`
 
-const providedMapSource = `struct Clock {}
+const providedMapSource = `service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
 effect fn read() -> i32 ? &Clock { return 42 }
 fn verify(value: i32) -> () {
   return ()
 }
 pub effect fn main() -> () {
-  let clock = Clock {}
+  let clock = FixedClock {}
   return run read()
     |> Effect.provide(&clock)
     |> Effect.map(verify)

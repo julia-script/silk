@@ -23,20 +23,22 @@ const prelude = `import silk.effects { Pair, Triple }
 
 struct Problem { code: i32 }
 
-struct Clock { storage: Allocation }
+service Clock {}
+struct FixedClock { storage: Allocation }
+impl Clock for FixedClock {}
 
-effect fn openClock() -> Clock ! OutOfMemoryError {
+effect fn openClock() -> FixedClock ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
-  return Clock { storage: move allocation }
+  return FixedClock { storage: move allocation }
 }
 
-effect fn exhausted(error: OutOfMemoryError) -> Clock ! Problem { fail Problem { code: 9 } }
+effect fn exhausted(error: OutOfMemoryError) -> FixedClock ! Problem { fail Problem { code: 9 } }
 
 /// One owner, acquired and released inside whichever body runs this.
-effect fn acquireClock() -> Clock ! Problem {
+effect fn acquireClock() -> FixedClock ! Problem {
   return run Effect.catchAll(openClock(), exhausted)
 }
 
@@ -139,8 +141,8 @@ pub fn main() -> i32 {
 /** Distinct failure rows and distinct requirement rows on each operand, so both unions show. */
 const zipRowsSource = `struct Left { code: i32 }
 struct Right { code: i32 }
-struct Clock {}
-struct Meter {}
+service Clock {}
+service Meter {}
 effect fn left() -> i32 ! Left ? &Clock { return 40 }
 effect fn right() -> i32 ! Right ? &Meter { return 2 }
 pub fn main() -> i32 {
@@ -151,9 +153,9 @@ pub fn main() -> i32 {
 const zip3RowsSource = `struct Left { code: i32 }
 struct Middle { code: i32 }
 struct Right { code: i32 }
-struct Clock {}
-struct Meter {}
-struct Gauge {}
+service Clock {}
+service Meter {}
+service Gauge {}
 effect fn left() -> i32 ! Left ? &Clock { return 40 }
 effect fn middle() -> i32 ! Middle ? &Meter { return 2 }
 effect fn right() -> i32 ! Right ? &Gauge { return 0 }

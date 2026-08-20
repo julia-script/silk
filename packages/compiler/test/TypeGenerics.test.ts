@@ -609,7 +609,7 @@ it.effect('accepts failure-row and requirement-row arguments in an explicit pref
       'generics/RowPrefix',
       new TextEncoder().encode(`struct First {}
 struct Second {}
-struct Clock {}
+service Clock {}
 effect fn risky() -> i32 ! First | Second { fail First {} }
 effect fn read() -> i32 ? &Clock { return 42 }
 effect fn keepFailures<E>(self: once Effect<i32 ! E>) -> i32 ! E { return run self }

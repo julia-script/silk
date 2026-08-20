@@ -318,12 +318,12 @@ is reached by qualifying through the bound's own name, `Bound.operation(args)`, 
 service operation takes:
 
 ```silk
-pub interface Mixer<T> {
-  fn mix(left: T, right: T) -> T
+pub interface Mixer {
+  fn mix(left: Self, right: Self) -> Self
 }
 
-impl Mixer<i32> for i32 { mix: Intrinsic.i32WrappingAdd }
-impl Mixer<u8> for u8 { mix: Intrinsic.u8SaturatingAdd }
+impl Mixer for i32 { mix: Intrinsic.i32WrappingAdd }
+impl Mixer for u8 { mix: Intrinsic.u8SaturatingAdd }
 
 pub fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.mix(move left, move right) }
 ```

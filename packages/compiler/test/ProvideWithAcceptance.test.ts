@@ -10,14 +10,17 @@ const ascii = (value: string): Uint8Array =>
  * the acquisition count is the count of `AllocationAcquire`, and a provider that outlived the
  * execution which acquired it would show up as an acquire without its release.
  */
-const provider = `struct Clock { storage: Allocation }
+const provider = `service Clock { effect fn value() -> i32 ? &mut Clock }
+struct FixedClock { storage: Allocation }
+effect fn clockValue(self: &mut FixedClock) -> i32 { return 0 }
+impl Clock for FixedClock { value: FixedClock.clockValue }
 
-effect fn openClock() -> Clock ! OutOfMemoryError {
+effect fn openClock() -> FixedClock ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
-  return Clock { storage: move allocation }
+  return FixedClock { storage: move allocation }
 }`
 
 /** Two executions of one provided Effect: each must acquire and release its own provider. */

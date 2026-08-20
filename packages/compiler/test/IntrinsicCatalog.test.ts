@@ -112,21 +112,23 @@ const acceptedSources = Object.freeze([
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(storage(), recover) }`,
   `struct Problem {}
-struct Clock {}
+service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
 effect fn succeed(value: i32) -> i32 { return value }
 effect fn double(value: i32) -> i32 { return value * 2 }
 effect fn observe(value: i32) -> i32 { return value }
 effect fn risky() -> i32 ! Problem { fail Problem {} }
 effect fn recover(error: Problem) -> i32 { return 1 }
 effect fn read() -> i32 ? &Clock { return 20 }
-effect fn acquire() -> Clock { return Clock {} }
+effect fn acquire() -> FixedClock { return FixedClock {} }
 pub fn main() -> i32 {
   let mapped = succeed(1) |> Effect.map(i32.add(1))
   let chained = mapped |> Effect.flatMap(double)
   let tapped = chained |> Effect.tap(observe)
   let retried = tapped |> Effect.retry(1)
   let handled = risky() |> Effect.catchAll(recover)
-  let clock = Clock {}
+  let clock = FixedClock {}
   let provided = read() |> Effect.provide(&clock)
   let acquired = read() |> Effect.provideWith(acquire())
   let retriedValue = run retried
@@ -171,7 +173,7 @@ fn inspectCatch() -> once Effect<i32> {
 pub fn main() -> i32 { return 42 }`,
   `import silk.core { Allocator, OutOfMemoryError }
 struct SuspendProblem {}
-struct SuspendClock {}
+service SuspendClock {}
 effect fn suspendDirect(
   deferred: once Effect<i32 ! SuspendProblem ? &SuspendClock>
 ) -> i32 ! SuspendProblem | OutOfMemoryError ? &SuspendClock | &mut Allocator {
@@ -337,7 +339,7 @@ it.effect('infers the suspension intrinsic exact Effect channels', () =>
   Effect.gen(function* () {
     const module = 'intrinsic/suspend-rows'
     const source = `struct Problem {}
-struct Clock {}
+service Clock {}
 fn suspend(
   deferred: once Effect<i32 ! Problem ? &Clock>
 ) -> once Effect<i32 ! Problem ? &Clock> {

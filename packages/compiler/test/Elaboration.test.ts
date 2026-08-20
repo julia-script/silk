@@ -311,7 +311,7 @@ it.effect(
     Effect.gen(function* () {
       const result = yield* analyzeWithStdlib(
         'effect://logger-tap',
-        `struct TapLogger {}
+        `service TapLogger {}
 effect fn succeed(value: i32) -> i32 { return value }
 effect fn log(value: i32) -> i32 ? &TapLogger { return value }
 fn main() -> i32 {
@@ -371,11 +371,13 @@ effect fn risky(error: OwnedError) -> i32 ! OwnedError {
 it('subtracts a provided capability role from an Effect contract', () => {
   const result = analyzeText(
     'effect://provide-role',
-    `struct Clock {}
+    `service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
 effect fn work() -> i32 ? &Clock@Left | &Clock@Right { return 42 }
 fn main() -> i32 {
-  let left = Clock {}
-  let right = Clock {}
+  let left = FixedClock {}
+  let right = FixedClock {}
   let recipe = work() |> Intrinsic.bindRequirement<&Clock@Left>(&left) |> Intrinsic.bindRequirement<&Clock@Right>(&right)
   return run recipe
 }`,
@@ -387,10 +389,12 @@ it.effect('requires an explicit role when the same capability has multiple requi
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://ambiguous-provide-role',
-      `struct Clock {}
+      `service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
 effect fn work() -> i32 ? &Clock@Left | &Clock@Right { return 42 }
 fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock {}
   let recipe = work() |> Effect.provide(&clock)
   return 0
 }`,
@@ -406,10 +410,11 @@ fn main() -> i32 {
 it('requires an exclusive provider for an exclusive capability requirement', () => {
   const result = analyzeText(
     'effect://exclusive-provider',
-    `struct Allocator {}
+    `service Allocator {}
+struct TestAllocator {}
 effect fn allocate() -> i32 ? &mut Allocator { return 42 }
 fn main() -> i32 {
-  let allocator = Allocator {}
+  let allocator = TestAllocator {}
   let recipe = allocate() |> Intrinsic.bindRequirement(&allocator)
   return 0
 }`,
@@ -424,10 +429,12 @@ fn main() -> i32 {
 it('keeps stored access separate from exclusive provider selection and capture access', () => {
   const result = analyzeText(
     'effect://exclusive-provider-shared-requirement',
-    `struct Clock {}
+    `service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
 effect fn read() -> i32 ? &Clock { return 42 }
 fn main() -> i32 {
-  let mut clock = Clock {}
+  let mut clock = FixedClock {}
   let recipe = read() |> Intrinsic.bindRequirementMut(&mut clock)
   return 0
 }`,
@@ -447,7 +454,7 @@ it.effect('rejects a concrete provideMut provider without the required capabilit
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'effect/provide-mut-conformance',
-      new TextEncoder().encode(`struct Clock {}
+      new TextEncoder().encode(`service Clock {}
 struct Wrong {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
 pub fn main() -> i32 {
@@ -469,10 +476,12 @@ it.effect('type-checks provideMut for a custom service', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'effect/provide-mut-custom-capability',
-      new TextEncoder().encode(`struct Clock {}
+      new TextEncoder().encode(`service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
 pub fn main() -> i32 {
-  let mut clock = Clock {}
+  let mut clock = FixedClock {}
   let recipe = Effect.provideMut(read(), &mut clock)
   return run recipe
 }`),
@@ -487,10 +496,13 @@ pub fn main() -> i32 {
 
 it.effect('executes an owned Copy provider binding', () =>
   Effect.gen(function* () {
-    const source = `struct Clock { tick: i32 }
+    const source = `service Clock { effect fn value() -> i32 ? &mut Clock }
+struct FixedClock { tick: i32 }
+effect fn clockValue(self: &mut FixedClock) -> i32 { return self.tick }
+impl Clock for FixedClock { value: FixedClock.clockValue }
 effect fn read() -> i32 ? &mut Clock { return 42 }
 pub fn main() -> i32 {
-  let clock = Clock { tick: 0 }
+  let clock = FixedClock { tick: 0 }
   return run Intrinsic.bindRequirementOwned(read(), move clock)
 }`
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -513,10 +525,13 @@ pub fn main() -> i32 {
 
 it.effect('executes an owned affine provider binding once', () =>
   Effect.gen(function* () {
-    const source = `struct Clock { label: string }
+    const source = `service Clock { effect fn value() -> i32 ? &mut Clock }
+struct FixedClock { label: string }
+effect fn clockValue(self: &mut FixedClock) -> i32 { return 0 }
+impl Clock for FixedClock { value: FixedClock.clockValue }
 effect fn read() -> i32 ? &mut Clock { return 42 }
 pub fn main() -> i32 {
-  let clock = Clock { label: "owned" }
+  let clock = FixedClock { label: "owned" }
   return run Intrinsic.bindRequirementOwned(read(), move clock)
 }`
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -540,10 +555,12 @@ pub fn main() -> i32 {
 it('copies a moved Copy provider into a repeatable owned-binding wrapper', () => {
   const result = analyzeText(
     'effect://moved-provider',
-    `struct Clock {}
+    `service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
 fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock {}
   let recipe = read() |> Intrinsic.bindRequirementOwned(move clock)
   return 0
 }`,
@@ -566,12 +583,14 @@ fn main() -> i32 {
 it('takes a moved affine provider into a take-once owned-binding wrapper', () => {
   const result = analyzeText(
     'effect://moved-affine-provider',
-    `struct Token { action: once fn() -> i32 }
-struct Clock { token: Token }
+    `service Clock {}
+struct Token { action: once fn() -> i32 }
+struct FixedClock { token: Token }
+impl Clock for FixedClock {}
 fn tick() -> i32 { return 1 }
 effect fn read() -> i32 ? &mut Clock { return 42 }
 fn main() -> i32 {
-  let clock = Clock { token: Token { action: tick } }
+  let clock = FixedClock { token: Token { action: tick } }
   let recipe = read() |> Intrinsic.bindRequirementOwned(move clock)
   return 0
 }`,
@@ -594,10 +613,12 @@ it.effect('keeps per-run provider acquisition distinct and composes its contract
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://provide-with',
-      `struct Clock {}
+      `service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
 struct OpenError {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
-effect fn acquire() -> Clock ! OpenError { return Clock {} }
+effect fn acquire() -> FixedClock ! OpenError { return FixedClock {} }
 fn main() -> i32 {
   let recipe = read() |> Effect.provideWith(acquire())
   return 0

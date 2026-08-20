@@ -193,7 +193,7 @@ pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
       yield* snapshot('pub effect fn main() -> i32 { return 0 }'),
     )
     const requirements = Analysis.instancesOf(
-      yield* snapshot('struct Clock {}\npub effect fn main() -> () ? &mut Clock { return () }'),
+      yield* snapshot('service Clock {}\npub effect fn main() -> () ? &mut Clock { return () }'),
     )
     const unreportable = Analysis.instancesOf(
       yield* snapshot(`struct SomeError { code: i32 }

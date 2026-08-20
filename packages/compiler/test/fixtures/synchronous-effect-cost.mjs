@@ -145,13 +145,15 @@ pub fn main() -> i32 { let clock = Clock { value: 42 } return read(&clock) }`,
     pair: 'provide',
     kind: 'effect',
     expected: 42,
-    source: `struct Clock { value: i32 }
+    source: `service Clock {}
+struct FixedClock { value: i32 }
+impl Clock for FixedClock {}
 effect fn read() -> i32 ? &Clock { return 42 }
 fn adapt<A, E, ?R>(self: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> {
   return move self
 }
 pub fn main() -> i32 {
-  let clock = Clock { value: 42 }
+  let clock = FixedClock { value: 42 }
   return run adapt(read()) |> Effect.provide(&clock)
 }`,
   },
