@@ -2223,10 +2223,7 @@ export const mutableEffectRecipe = (span: SourceSpan.SourceSpan): Diagnostic =>
     span,
   })
 
-export const nonFiniteEffectJoin = (
-  detail: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const nonFiniteEffectJoin = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',

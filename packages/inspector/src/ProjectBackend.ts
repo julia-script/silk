@@ -1042,19 +1042,19 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
                         ? `${typeText(value.type)} recipe ${value.runner.name}`
                         : value._tag === 'EffectCompositeValue'
                           ? `effect choice #${value.alternative} ${valueText(value.effect)}`
-                        : value._tag === 'CallableBorrowValue'
-                          ? `${value.access.toLowerCase()} callable borrow f${value.frame}.c${value.cell}`
-                          : value._tag === 'CallableValue'
-                            ? `${typeText(value.type)} callable #${value.ticket} · ${value.captures.length} capture${value.captures.length === 1 ? '' : 's'}`
-                            : value._tag === 'AllocationValue'
-                              ? `${typeText(value.type)} ticket=${value.ticket} · ${value.bytes.toString()} bytes · align ${value.alignment.toString()}`
-                              : value._tag === 'RawBufferValue'
-                                ? `${typeText(value.type)} ticket=${value.ticket} · ${value.count.toString()} × ${typeText(value.element)} · stride ${value.stride}`
-                                : value._tag === 'SlotValue'
-                                  ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
-                                  : value._tag === 'ReferenceValue'
-                                    ? `borrow f${value.frame}.c${value.cell}`
-                                    : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+                          : value._tag === 'CallableBorrowValue'
+                            ? `${value.access.toLowerCase()} callable borrow f${value.frame}.c${value.cell}`
+                            : value._tag === 'CallableValue'
+                              ? `${typeText(value.type)} callable #${value.ticket} · ${value.captures.length} capture${value.captures.length === 1 ? '' : 's'}`
+                              : value._tag === 'AllocationValue'
+                                ? `${typeText(value.type)} ticket=${value.ticket} · ${value.bytes.toString()} bytes · align ${value.alignment.toString()}`
+                                : value._tag === 'RawBufferValue'
+                                  ? `${typeText(value.type)} ticket=${value.ticket} · ${value.count.toString()} × ${typeText(value.element)} · stride ${value.stride}`
+                                  : value._tag === 'SlotValue'
+                                    ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
+                                    : value._tag === 'ReferenceValue'
+                                      ? `borrow f${value.frame}.c${value.cell}`
+                                      : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {

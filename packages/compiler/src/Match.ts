@@ -128,8 +128,7 @@ export const join = (inputs: ReadonlyArray<Type.Type>): Join => {
       RowAlgebra.concrete(Type.failureRowPolicy(), []),
     )
     const requirementRow = effects.reduce(
-      (row, effect) =>
-        RowAlgebra.union(Type.requirementRowPolicy(), row, effect.requirementRow),
+      (row, effect) => RowAlgebra.union(Type.requirementRowPolicy(), row, effect.requirementRow),
       RowAlgebra.concrete(Type.requirementRowPolicy(), []),
     )
     const access = effects.some((effect) => effect.access === 'Take')

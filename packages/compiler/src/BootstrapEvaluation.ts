@@ -1707,9 +1707,7 @@ function* executeFunction(
     if (cleanup._tag === 'EffectCompositeCleanup') {
       if (owner._tag !== 'EffectCompositeValue') return Object.freeze([])
       const selected = cleanup.alternatives.at(owner.alternative)
-      return selected === undefined
-        ? Object.freeze([])
-        : cleanupMembers(selected, owner.effect)
+      return selected === undefined ? Object.freeze([]) : cleanupMembers(selected, owner.effect)
     }
     if (cleanup._tag === 'RawBufferCleanup') return Object.freeze([cleanup.type])
     if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
@@ -4873,7 +4871,9 @@ function* executeFunction(
                       (candidate) => candidate.source === rawOutcome.tag,
                     )
                     if (mapping === undefined)
-                      throw new RangeError('MIR Effect composite has no alternative failure mapping')
+                      throw new RangeError(
+                        'MIR Effect composite has no alternative failure mapping',
+                      )
                     return Object.freeze({
                       _tag: 'EffectOutcomeValue' as const,
                       type: operation.outcomeType.type,
@@ -5714,9 +5714,7 @@ export const evaluate = (
         (event): event is EffectTraceEvent =>
           event._tag === 'EffectFailure' && event.phase === 'Closed',
       )
-    const failure = program.entry.failures.find(
-      (candidate) => candidate.tag === closedFailure?.tag,
-    )
+    const failure = program.entry.failures.find((candidate) => candidate.tag === closedFailure?.tag)
     if (failure === undefined) {
       const provenance = argumentSpanFallback(fn)
       const frozenTrace = Object.freeze([...trace])

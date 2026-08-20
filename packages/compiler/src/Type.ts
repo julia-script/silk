@@ -928,9 +928,11 @@ export const compositeEffectRepresentationArgument = (
     _tag: 'CompositeEffectRepresentationArgument',
     contract,
     alternatives: Object.freeze(
-      [...new Map(alternatives.map((alternative) => [genericArgumentKey(alternative), alternative])).values()].sort(
-        (left, right) => genericArgumentKey(left).localeCompare(genericArgumentKey(right)),
-      ),
+      [
+        ...new Map(
+          alternatives.map((alternative) => [genericArgumentKey(alternative), alternative]),
+        ).values(),
+      ].sort((left, right) => genericArgumentKey(left).localeCompare(genericArgumentKey(right))),
     ),
   })
 
@@ -1187,15 +1189,15 @@ export const genericArgumentKey = (self: GenericArgument): string =>
                 key(self.contract),
                 Canonical.array(self.alternatives.map(genericArgumentKey)),
               ])
-          : isEffectIdentityArgument(self)
-            ? self.owner === undefined
-              ? `effect-identity:${self.identity}`
-              : `effect-identity:${self.identity}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>`
-            : isCallableIdentityArgument(self)
-              ? callableIdentityKey(self)
-              : isRequirementRowArgument(self)
-                ? `requirement-row:${RowAlgebra.key(requirementRowPolicy(), self.row)}`
-                : key(self)
+            : isEffectIdentityArgument(self)
+              ? self.owner === undefined
+                ? `effect-identity:${self.identity}`
+                : `effect-identity:${self.identity}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>`
+              : isCallableIdentityArgument(self)
+                ? callableIdentityKey(self)
+                : isRequirementRowArgument(self)
+                  ? `requirement-row:${RowAlgebra.key(requirementRowPolicy(), self.row)}`
+                  : key(self)
 
 /** Encodes any erased generic argument for semantic presentation and artifact inspection. */
 export const encodeGenericArgument = (self: GenericArgument): string =>
@@ -1209,21 +1211,21 @@ export const encodeGenericArgument = (self: GenericArgument): string =>
           ? `typeof(${encodeRepresentationOrigin(self.identity)})`
           : isCompositeEffectRepresentationArgument(self)
             ? `oneof(${self.alternatives.map(encodeGenericArgument).join(', ')})`
-          : isEffectIdentityArgument(self)
-            ? `effect@${self.identity}`
-            : isCallableIdentityArgument(self)
-              ? `callable@${self.identity}`
-              : isRequirementRowArgument(self)
-                ? `? ${RowAlgebra.encode(
-                    requirementRowPolicy(),
-                    self.row,
-                    (requirement) =>
-                      `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
-                    (parameter_) => parameter_.name,
-                    (member) =>
-                      `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
-                  )}`
-                : encode(self)
+            : isEffectIdentityArgument(self)
+              ? `effect@${self.identity}`
+              : isCallableIdentityArgument(self)
+                ? `callable@${self.identity}`
+                : isRequirementRowArgument(self)
+                  ? `? ${RowAlgebra.encode(
+                      requirementRowPolicy(),
+                      self.row,
+                      (requirement) =>
+                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
+                      (parameter_) => parameter_.name,
+                      (member) =>
+                        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
+                    )}`
+                  : encode(self)
 
 const encodeRepresentationOrigin = (
   self: EffectIdentityArgument | CallableIdentityArgument,
@@ -2574,46 +2576,46 @@ export const substituteGenericArgument = (
                 ? compositeEffectRepresentationArgument(contract, alternatives)
                 : self
             })()
-        : isExactRepresentationArgument(self)
-          ? (() => {
-              const contract = substitute(self.contract, substitution)
-              if (!isCallable(contract) && !isEffect(contract)) return self
-              const identity = substituteGenericArgument(self.identity, substitution)
-              return isCallableIdentityArgument(identity) || isEffectIdentityArgument(identity)
-                ? exactRepresentationArgument(identity, contract)
-                : self
-            })()
-          : isEffectIdentityArgument(self)
-            ? effectIdentityArgument(
-                self.identity,
-                self.owner === undefined
-                  ? undefined
-                  : {
-                      declaration: self.owner.declaration,
-                      typeArguments: self.owner.typeArguments.map((argument) =>
-                        substituteGenericArgument(argument, substitution),
-                      ),
-                    },
-              )
-            : isCallableIdentityArgument(self)
-              ? callableIdentityArgument(
+          : isExactRepresentationArgument(self)
+            ? (() => {
+                const contract = substitute(self.contract, substitution)
+                if (!isCallable(contract) && !isEffect(contract)) return self
+                const identity = substituteGenericArgument(self.identity, substitution)
+                return isCallableIdentityArgument(identity) || isEffectIdentityArgument(identity)
+                  ? exactRepresentationArgument(identity, contract)
+                  : self
+              })()
+            : isEffectIdentityArgument(self)
+              ? effectIdentityArgument(
                   self.identity,
-                  self.target,
-                  self.typeArguments.map((argument) =>
-                    substituteGenericArgument(argument, substitution),
-                  ),
-                  self.environment === undefined
+                  self.owner === undefined
                     ? undefined
-                    : callableEnvironmentIdentity(self.environment.site, {
-                        declaration: self.environment.owner.declaration,
-                        typeArguments: self.environment.owner.typeArguments.map((argument) =>
+                    : {
+                        declaration: self.owner.declaration,
+                        typeArguments: self.owner.typeArguments.map((argument) =>
                           substituteGenericArgument(argument, substitution),
                         ),
-                      }),
+                      },
                 )
-              : isRequirementRowArgument(self)
-                ? requirementRowArgumentFromRow(substituteRequirementsRow(self.row, substitution))
-                : substitute(self, substitution)
+              : isCallableIdentityArgument(self)
+                ? callableIdentityArgument(
+                    self.identity,
+                    self.target,
+                    self.typeArguments.map((argument) =>
+                      substituteGenericArgument(argument, substitution),
+                    ),
+                    self.environment === undefined
+                      ? undefined
+                      : callableEnvironmentIdentity(self.environment.site, {
+                          declaration: self.environment.owner.declaration,
+                          typeArguments: self.environment.owner.typeArguments.map((argument) =>
+                            substituteGenericArgument(argument, substitution),
+                          ),
+                        }),
+                  )
+                : isRequirementRowArgument(self)
+                  ? requirementRowArgumentFromRow(substituteRequirementsRow(self.row, substitution))
+                  : substitute(self, substitution)
 
 const sameExecutableOwnerDeclaration = (
   left: ExecutableSpecializationOwner,

@@ -143,9 +143,7 @@ const laneKindsOf = (
       ...payloadTypes.map((laneType, slot) =>
         Object.freeze({
           _tag: 'CallingLane' as const,
-          path: Object.freeze([
-            Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
-          ]),
+          path: Object.freeze([Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot })]),
           type: laneType,
         }),
       ),
@@ -321,9 +319,9 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
                 1,
               ),
             })
-        : type === undefined
-          ? undefined
-          : LayoutPlan.entry(plan, Mir.semanticType(type))
+          : type === undefined
+            ? undefined
+            : LayoutPlan.entry(plan, Mir.semanticType(type))
     if (
       type === undefined ||
       type._tag === 'EffectBorrow' ||
@@ -3943,16 +3941,12 @@ const emitOperation = (
             throw new RangeError('Wasm Effect composite lost an alternative capture lane')
           return [
             Instr.localGet(source),
-            ...laneBridge(
-              layout.physicalTypes.at(source) ?? i32,
-              laneValueType(plan, lane),
-            ),
+            ...laneBridge(layout.physicalTypes.at(source) ?? i32, laneValueType(plan, lane)),
           ]
         })
-        const clearUnused = outcomeSlots.slice(sourceOutcomeLanes.length).flatMap((target) => [
-          zeroFor(target),
-          Instr.localSet(target),
-        ])
+        const clearUnused = outcomeSlots
+          .slice(sourceOutcomeLanes.length)
+          .flatMap((target) => [zeroFor(target), Instr.localSet(target)])
         const storeOutcome = [...sourceOutcomeLanes]
           .map((lane, ordinal) => ({ lane, ordinal }))
           .reverse()
@@ -3961,10 +3955,7 @@ const emitOperation = (
             if (target === undefined)
               throw new RangeError('Wasm Effect composite outcome exceeds its joined carrier')
             return [
-              ...laneBridge(
-                laneValueType(plan, lane),
-                layout.physicalTypes.at(target) ?? i32,
-              ),
+              ...laneBridge(laneValueType(plan, lane), layout.physicalTypes.at(target) ?? i32),
               Instr.localSet(target),
             ]
           })
@@ -4001,10 +3992,7 @@ const emitOperation = (
           Instr.ifElse(Instr.emptyBlockType, invokeAlternative(alternative), dispatch),
         ]
       }
-      const success = copy(
-        outcomeSlots.slice(1, 1 + destinationSlots.length),
-        destinationSlots,
-      )
+      const success = copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots)
       const completion = (() => {
         if (operation.propagationType === undefined) return success
         const mapTag = [

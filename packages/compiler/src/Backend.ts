@@ -1038,9 +1038,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           ...payloadTypes.map((laneType, slot) =>
             Object.freeze({
               _tag: 'CallingLane' as const,
-              path: Object.freeze([
-                Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
-              ]),
+              path: Object.freeze([Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot })]),
               type: laneType,
             }),
           ),
@@ -3283,10 +3281,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   throw new RangeError('LLVM Effect composite cleanup lost its tag')
                 const following = yield* LlvmBlock.make(body, `${tag}_effect_composite_following`)
                 for (const [ordinal, alternative] of plan.alternatives.entries()) {
-                  const selected = yield* LlvmBlock.make(
-                    body,
-                    `${tag}_effect_composite_${ordinal}`,
-                  )
+                  const selected = yield* LlvmBlock.make(body, `${tag}_effect_composite_${ordinal}`)
                   const otherwise = yield* LlvmBlock.make(
                     body,
                     `${tag}_effect_composite_${ordinal}_otherwise`,
@@ -3304,7 +3299,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     otherwise,
                   )
                   yield* LlvmBlock.setInsertionPoint(body, selected)
-                  yield* dropThroughPlan(alternative, Object.freeze(values.slice(1)), `${tag}_${ordinal}`)
+                  yield* dropThroughPlan(
+                    alternative,
+                    Object.freeze(values.slice(1)),
+                    `${tag}_${ordinal}`,
+                  )
                   yield* FunctionBody.branch(body, following)
                   yield* LlvmBlock.setInsertionPoint(body, otherwise)
                 }
@@ -7335,7 +7334,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     body,
                     `effect_composite${operation.destination.ordinal}_following`,
                   )
-                  for (const [alternativeOrdinal, alternative] of operation.alternatives.entries()) {
+                  for (const [
+                    alternativeOrdinal,
+                    alternative,
+                  ] of operation.alternatives.entries()) {
                     const selected = yield* LlvmBlock.make(
                       body,
                       `effect_composite${operation.destination.ordinal}_alternative${alternativeOrdinal}`,
@@ -7473,7 +7475,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     break
                   }
                   const tag = outcomeValues.at(0)
-                  if (tag === undefined) throw new RangeError('Effect composite outcome lost its tag')
+                  if (tag === undefined)
+                    throw new RangeError('Effect composite outcome lost its tag')
                   const succeeded = yield* FunctionBody.integerCompare(
                     body,
                     'eq',
@@ -7538,7 +7541,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     )),
                   ]
                   if (entry.suspendable) {
-                    yield* returnStep(0n, Object.freeze(returned), 'propagated_effect_composite_step')
+                    yield* returnStep(
+                      0n,
+                      Object.freeze(returned),
+                      'propagated_effect_composite_step',
+                    )
                   } else {
                     yield* FunctionBody.returnValue(
                       body,
@@ -7997,9 +8004,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     }
                     yield* storeMutable(
                       operation.destination,
-                      Object.freeze([
-                        yield* Constant.integerSigned(builder, i32, 1n),
-                      ]),
+                      Object.freeze([yield* Constant.integerSigned(builder, i32, 1n)]),
                     )
                     yield* FunctionBody.branch(body, following)
                     yield* LlvmBlock.setInsertionPoint(body, otherwise)

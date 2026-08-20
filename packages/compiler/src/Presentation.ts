@@ -313,21 +313,21 @@ export const genericArgument = (
           ? Type.encodeGenericArgument(self)
           : Type.isCompositeEffectRepresentationArgument(self)
             ? Type.encodeGenericArgument(self)
-          : Type.isEffectIdentityArgument(self)
-            ? `effect@${self.identity}`
-            : Type.isCallableIdentityArgument(self)
-              ? `callable@${self.identity}`
-              : Type.isRequirementRowArgument(self)
-                ? `? ${RowAlgebra.encode(
-                    Type.requirementRowPolicy(),
-                    self.row,
-                    (requirement) =>
-                      `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
-                    (parameter_) => parameter_.name,
-                    (member) =>
-                      `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
-                  )}`
-                : type(self, module, scope)
+            : Type.isEffectIdentityArgument(self)
+              ? `effect@${self.identity}`
+              : Type.isCallableIdentityArgument(self)
+                ? `callable@${self.identity}`
+                : Type.isRequirementRowArgument(self)
+                  ? `? ${RowAlgebra.encode(
+                      Type.requirementRowPolicy(),
+                      self.row,
+                      (requirement) =>
+                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
+                      (parameter_) => parameter_.name,
+                      (member) =>
+                        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
+                    )}`
+                  : type(self, module, scope)
 
 export const binding = (
   self: Elaboration.BindingDeclarationFact,

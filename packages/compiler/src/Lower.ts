@@ -77,10 +77,7 @@ interface ProvidedRequirement {
   readonly local?: Mir.LocalId
 }
 
-type ExecutableEffectType = Extract<
-  Mir.Type,
-  { readonly _tag: 'EffectValue' | 'EffectComposite' }
->
+type ExecutableEffectType = Extract<Mir.Type, { readonly _tag: 'EffectValue' | 'EffectComposite' }>
 
 const specializeProvider = (
   fn: FunctionLowering,
@@ -1012,10 +1009,9 @@ const representedValueType = (
   catalog: OpaqueRealization.Catalog,
   type: Type.Type,
   substitution: Type.Substitution,
-): Extract<
-  Mir.Type,
-  { readonly _tag: 'CallableValue' | 'EffectValue' | 'EffectComposite' }
-> | undefined => {
+):
+  | Extract<Mir.Type, { readonly _tag: 'CallableValue' | 'EffectValue' | 'EffectComposite' }>
+  | undefined => {
   const specialized = Type.substitute(type, substitution)
   if (!Type.isRepresented(specialized)) return undefined
   const representation = specialized.representation.argument
@@ -1553,7 +1549,8 @@ const lowerRunEffectComposite = (
       alternative.storage?.realization.runner ??
       Hir.effectRunnerId(alternative.environment.instance.declaration, alternative.site)
     const runnerTypeArguments =
-      alternative.storage?.realization.runnerArguments ?? alternative.environment.instance.typeArguments
+      alternative.storage?.realization.runnerArguments ??
+      alternative.environment.instance.typeArguments
     const tagMappings = Type.failureMembers(alternative.type).flatMap((failure, sourceOrdinal) => {
       const target = Type.failureMembers(effectType.contract).findIndex((candidate) =>
         Type.equals(candidate, failure),
@@ -1573,17 +1570,19 @@ const lowerRunEffectComposite = (
         ]
   })
   if (alternatives.length !== effectType.alternatives.length) return undefined
-  const outerMappings = Type.failureMembers(effectType.contract).flatMap((failure, sourceOrdinal) => {
-    const target =
-      propagationType === undefined
-        ? undefined
-        : Type.failureMembers(propagationType.type).findIndex((candidate) =>
-            Type.equals(candidate, failure),
-          )
-    return target === undefined || target < 0
-      ? []
-      : [Object.freeze({ source: sourceOrdinal + 1, target: target + 1 })]
-  })
+  const outerMappings = Type.failureMembers(effectType.contract).flatMap(
+    (failure, sourceOrdinal) => {
+      const target =
+        propagationType === undefined
+          ? undefined
+          : Type.failureMembers(propagationType.type).findIndex((candidate) =>
+              Type.equals(candidate, failure),
+            )
+      return target === undefined || target < 0
+        ? []
+        : [Object.freeze({ source: sourceOrdinal + 1, target: target + 1 })]
+    },
+  )
   if (outerMappings.length !== Type.failureMembers(effectType.contract).length) return undefined
   const propagationShape =
     propagationType === undefined ? undefined : Layout.callingShape(fn.layout, propagationType.type)
@@ -5782,9 +5781,7 @@ const cleanupForLocal = (
       _tag: 'EffectCompositeCleanup',
       type: localType.type,
       alternatives: Object.freeze(
-        localType.alternatives.map((alternative) =>
-          effectLocalCleanup(fn, alternative, new Set()),
-        ),
+        localType.alternatives.map((alternative) => effectLocalCleanup(fn, alternative, new Set())),
       ),
     })
   }

@@ -219,7 +219,11 @@ it.effect('runs the selected member of a finite Effect join', () =>
     const program = Analysis.loweredMir(snapshot)
     assert.deepEqual(Mir.verify(program), [], Mir.encode(program))
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', outcome._tag === 'Trap' ? outcome.reason : undefined)
+    assert.strictEqual(
+      outcome._tag,
+      'Completed',
+      outcome._tag === 'Trap' ? outcome.reason : undefined,
+    )
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 41n)
     assert.strictEqual(yield* runWasm(snapshot, 'EffectJoin.run'), 41)
   }),
@@ -243,7 +247,11 @@ it.effect('joins Effects returned from distinct finite control-flow branches', (
     const program = Analysis.loweredMir(snapshot)
     assert.deepEqual(Mir.verify(program), [], Mir.encode(program))
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', outcome._tag === 'Trap' ? outcome.reason : undefined)
+    assert.strictEqual(
+      outcome._tag,
+      'Completed',
+      outcome._tag === 'Trap' ? outcome.reason : undefined,
+    )
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     assert.strictEqual(yield* runWasm(snapshot, 'EffectJoin.branches'), 42)
   }),
@@ -254,7 +262,11 @@ it.effect('preserves the selected alternative capture shape', () =>
     const snapshot = yield* snapshotOf('effect-join/captures', captureSource)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', outcome._tag === 'Trap' ? outcome.reason : undefined)
+    assert.strictEqual(
+      outcome._tag,
+      'Completed',
+      outcome._tag === 'Trap' ? outcome.reason : undefined,
+    )
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 83n)
     assert.strictEqual(yield* runWasm(snapshot, 'EffectJoin.captures'), 83)
   }),
@@ -265,7 +277,11 @@ it.effect('normalizes distinct failure channels on a value that can be dropped',
     const snapshot = yield* snapshotOf('effect-join/failures', failureSource)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', outcome._tag === 'Trap' ? outcome.reason : undefined)
+    assert.strictEqual(
+      outcome._tag,
+      'Completed',
+      outcome._tag === 'Trap' ? outcome.reason : undefined,
+    )
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     assert.strictEqual(yield* runWasm(snapshot, 'EffectJoin.failures'), 42)
   }),
@@ -295,7 +311,11 @@ it.effect('cleans up only the selected alternative capture', () =>
     const snapshot = yield* snapshotOf('effect-join/affine-capture', affineCaptureSource)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', outcome._tag === 'Trap' ? outcome.reason : undefined)
+    assert.strictEqual(
+      outcome._tag,
+      'Completed',
+      outcome._tag === 'Trap' ? outcome.reason : undefined,
+    )
     if (outcome._tag === 'Completed') {
       assert.strictEqual(outcome.result.value, 42n)
       assert.deepEqual(
@@ -314,7 +334,11 @@ it.effect('joins shared and exclusive capture access at the stronger access', ()
     const program = Analysis.loweredMir(snapshot)
     assert.deepEqual(Mir.verify(program), [], Mir.encode(program))
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', outcome._tag === 'Trap' ? outcome.reason : undefined)
+    assert.strictEqual(
+      outcome._tag,
+      'Completed',
+      outcome._tag === 'Trap' ? outcome.reason : undefined,
+    )
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     assert.strictEqual(yield* runWasm(snapshot, 'EffectJoin.access'), 42)
   }),
@@ -325,7 +349,11 @@ it.effect('runs the selected capture Drop hook and reclaim exactly once', () =>
     const snapshot = yield* snapshotOf('effect-join/hook-capture', hookCaptureSource)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', outcome._tag === 'Trap' ? outcome.reason : undefined)
+    assert.strictEqual(
+      outcome._tag,
+      'Completed',
+      outcome._tag === 'Trap' ? outcome.reason : undefined,
+    )
     if (outcome._tag === 'Completed') {
       assert.strictEqual(outcome.result.value, 42n)
       assert.strictEqual(

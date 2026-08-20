@@ -2391,10 +2391,7 @@ const shapeNode = (
   }
   if (Type.isRepresented(type)) {
     const argument = type.representation.argument
-    if (
-      Type.isEffect(type.contract) &&
-      Type.isCompositeEffectRepresentationArgument(argument)
-    ) {
+    if (Type.isEffect(type.contract) && Type.isCompositeEffectRepresentationArgument(argument)) {
       const alternatives = argument.alternatives.map((alternative) => {
         if (!Type.isEffectIdentityArgument(alternative.identity))
           throw new RangeError('Effect composite retained a non-Effect alternative')
@@ -2448,7 +2445,8 @@ const shapeNode = (
                 const leftScalar = Scalar.find(left)
                 const rightScalar = Scalar.find(right)
                 const pointerBits = target.pointerSize === 4 ? 32 : 64
-                const leftBits = leftScalar === undefined ? 32 : Scalar.bits(leftScalar, pointerBits)
+                const leftBits =
+                  leftScalar === undefined ? 32 : Scalar.bits(leftScalar, pointerBits)
                 const rightBits =
                   rightScalar === undefined ? 32 : Scalar.bits(rightScalar, pointerBits)
                 return rightBits - leftBits || Type.compare(left, right)
