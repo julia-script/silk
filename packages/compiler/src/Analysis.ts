@@ -493,6 +493,37 @@ const presentationOfIdentity = (
   }
   if (identity._tag === 'PatternBindingIdentity') {
     const key = SemanticOccurrence.identityKey(identity)
+    const findStatementBinding = (
+      statements: ReadonlyArray<Elaboration.StatementFact>,
+    ): Elaboration.PatternBindingFact | undefined => {
+      for (const statement of statements) {
+        if (statement._tag === 'PatternBindStatement' || statement._tag === 'IfLetStatement')
+          for (const binding of statement.selection.bindings)
+            if (
+              SemanticOccurrence.identityKey(
+                Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id }),
+              ) === key
+            )
+              return binding
+        const nested =
+          statement._tag === 'UnsafeStatement'
+            ? statement.statements
+            : statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement'
+              ? [...statement.taken, ...statement.otherwise]
+              : statement._tag === 'WhileStatement'
+                ? statement.body
+                : []
+        const found = findStatementBinding(nested)
+        if (found !== undefined) return found
+      }
+      return undefined
+    }
+    for (const result of self.results.values())
+      for (const fn of result.functions) {
+        const statementBinding = findStatementBinding(fn.statements)
+        if (statementBinding !== undefined)
+          return Presentation.patternBinding(statementBinding, module, scope)
+      }
     for (const result of self.results.values())
       for (const fn of result.functions)
         for (const statement of fn.statements)
@@ -615,6 +646,7 @@ const nestedStatementFacts = (
     case 'UnsafeStatement':
       return Object.freeze([statement, ...statement.statements.flatMap(nestedStatementFacts)])
     case 'IfStatement':
+    case 'IfLetStatement':
       return Object.freeze([
         statement,
         ...statement.taken.flatMap(nestedStatementFacts),

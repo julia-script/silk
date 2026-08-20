@@ -1,7 +1,7 @@
 # Patterns and destructuring
 
-Patterns inspect existing value structure and introduce local bindings. Silk uses the same nominal
-pattern forms in exhaustive `match`, unconditional `let` destructuring, and conditional `if let`.
+Patterns inspect existing value structure and introduce local bindings. Silk uses the same pattern
+grammar in exhaustive `match`, unconditional `let` destructuring, and conditional `if let`.
 The surrounding construct decides whether a pattern must always match or provides a mismatch path.
 
 Patterns are not expressions. They perform no conversion, equality call, interface dispatch,
@@ -300,8 +300,10 @@ or escaped binding. It names the relevant scrutinee type and member or field set
 **Boundary:** One damaged pattern must not erase independent facts or cause later arms,
 declarations, or statements to be parsed as part of the same error.
 
-**Diagnostics:** Existing specific codes remain authoritative where assigned. New contextual
-irrefutability and `if let` codes remain to be assigned rather than borrowing unrelated codes.
+**Diagnostics:** Existing specific codes remain authoritative where assigned. Refutable
+unconditional destructuring reports `SEM0133`; malformed `if let` syntax uses parser-owned
+recovery diagnostics, and its member, field, binding, and ownership failures retain their ordinary
+codes.
 
 **Evidence:** [reference diagnostic policy](README.md),
 [parser recovery contract](../../openspec/specs/bootstrap-syntax/spec.md).
@@ -364,14 +366,15 @@ fn normalize(value: i32 | bool) -> i32 {
 ```
 
 Here `i32 number` selects and binds the complete integer member; `bool flag` selects and binds the
-complete boolean member. The same form applies to admitted array, view, callable, Effect, and other
-ordinary value members when their exact type can be written.
+complete boolean member. The same form applies to admitted arrays, strings, finite represented
+callable or Effect values, and other detached ordinary members when their exact type can be written.
 
 **Boundary:** Field destructuring with `{ ... }` remains nominal-struct behavior. A scalar, array,
-view, callable, or Effect pattern can bind the complete member but exposes no invented fields.
+string, or represented executable pattern can bind the complete member but exposes no invented
+fields. Lexical references are not detached union members and therefore are not selectors.
 
-**Diagnostics:** A type absent from the scrutinee reports the exact requested type and canonical
-member set. No stable general code is assigned.
+**Diagnostics:** A type absent from the scrutinee reports `SEM0042` with the exact requested type
+and canonical member set.
 
 **Evidence:** [ordinary structural unions](values-and-types.md#union-001--a-structural-union-is-a-normalized-set-of-ordinary-value-types),
 [whole-member nominal pattern](#patt-003--nominal-patterns-select-canonical-nominal-identity).

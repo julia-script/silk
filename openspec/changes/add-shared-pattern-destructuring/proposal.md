@@ -21,6 +21,16 @@ Silk has nominal match forms but no single pattern representation shared by matc
 - `bootstrap-ownership`: assign one ownership action and cleanup plan to every binding path.
 - `bootstrap-hir`: carry typed patterns and flow refinements.
 - `bootstrap-mir`: lower deterministic tests, bindings, joins, and cleanup.
+- `bootstrap-evaluation`: execute statement patterns through logical active-member selection.
+- `bootstrap-backend`: preserve statement-pattern selection and cleanup in native and WebAssembly.
+- `bootstrap-semantic-facts`: publish shared typed patterns and lexical binding identities.
+- `bootstrap-analysis-facade`: expose pattern facts, structure, and editor identities.
+- `bootstrap-type-generics`: renormalize exact selectors at complete applications.
+- `bootstrap-diagnostics`: distinguish refutable let from incomplete expression matching.
+- `language-server-completion`: offer pattern locals only in their semantic scopes.
+- `language-server-hover`: render exact narrowed pattern-local types.
+- `language-server-navigation`: navigate pattern uses to their binding tokens.
+- `language-server-structure`: classify pattern identifiers and retain if-let body structure.
 
 ## Impact
 

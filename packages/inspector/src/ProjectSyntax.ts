@@ -366,6 +366,17 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       expression(node.initializer, depth + 1, `${path}.i`)
       return
     }
+    if (node._tag === 'PatternBind') {
+      rows.push({
+        key: `${path}-pattern-bind-${span.start}`,
+        depth,
+        label: `let pattern ${node.selection.universal ? '_' : node.selection.member === undefined ? 'unknown' : hirTypeText(node.selection.member)}`,
+        detail: `${node.selection.access.toLowerCase()} · ${node.selection.bindings.length} binding${node.selection.bindings.length === 1 ? '' : 's'} · r${node.region.ordinal}`,
+        span,
+      })
+      expression(node.selection.subject, depth + 1, `${path}.subject`)
+      return
+    }
     if (node._tag === 'If') {
       rows.push({
         key: `${path}-if-${span.start}`,
@@ -374,6 +385,23 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
         span,
       })
       expression(node.condition, depth + 1, `${path}.c`)
+      node.taken.forEach((inner, index) => {
+        statement(inner, depth + 1, `${path}.t${index}`)
+      })
+      node.otherwise.forEach((inner, index) => {
+        statement(inner, depth + 1, `${path}.e${index}`)
+      })
+      return
+    }
+    if (node._tag === 'IfLet') {
+      rows.push({
+        key: `${path}-if-let-${span.start}`,
+        depth,
+        label: `if let ${node.selection.universal ? '_' : node.selection.member === undefined ? 'unknown' : hirTypeText(node.selection.member)}`,
+        detail: `${node.selection.access.toLowerCase()} · ${node.selection.bindings.length} binding${node.selection.bindings.length === 1 ? '' : 's'} · r${node.region.ordinal}`,
+        span,
+      })
+      expression(node.selection.subject, depth + 1, `${path}.subject`)
       node.taken.forEach((inner, index) => {
         statement(inner, depth + 1, `${path}.t${index}`)
       })
@@ -467,14 +495,15 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       })
       return
     }
+    const terminal = node._tag === 'Evaluate' ? 'evaluate' : node._tag.toLowerCase()
     rows.push({
-      key: `${path}-return-${span.start}`,
+      key: `${path}-${terminal}-${span.start}`,
       depth,
-      label: 'return',
+      label: terminal,
       detail: `r${node.region.ordinal}`,
       span,
     })
-    expression(node.expression, depth + 1, `${path}.r`)
+    expression(node.expression, depth + 1, `${path}.${terminal.at(0) ?? 'x'}`)
   }
 
   hir.functions.forEach((fn, index) => {

@@ -685,6 +685,16 @@ pub fn main() -> i32 {
       const use = Analysis.semanticOccurrenceAt(snapshot, 'main', useOffset)
       assert.strictEqual(declaration?.role, 'Declaration')
       assert.strictEqual(use?.declaration?.selectionSpan.start, declaration?.span.start)
+      assert.strictEqual(
+        Analysis.hoverSubjectAt(snapshot, 'main', useOffset)?.presentation.text,
+        'let value: i32',
+      )
+      assert.strictEqual(
+        Analysis.statementsOf(snapshot, 'main').filter(
+          (statement) => statement._tag === 'BindStatement',
+        ).length,
+        5,
+      )
       return undefined
     }),
   )

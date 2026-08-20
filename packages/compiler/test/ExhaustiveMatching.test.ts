@@ -280,8 +280,14 @@ it.effect('lowers let destructuring and if-let through the shared match operatio
     const self = yield* Analysis.ofSourceRealized(
       'statement-pattern-runtime',
       ascii(`pub struct Point { x: i32 y: i32 }
+pub struct Pair { point: Point extra: i32 }
 fn inspect(value: Point | i32) -> i32 {
   if let Point { x, .. } = move value { return x } else { return 7 }
+}
+fn nested() -> i32 {
+  let pair = Pair { point: Point { x: 1, y: 2 }, extra: 3 }
+  let Pair { point: Point { x, y }, extra } = move pair
+  return x + y + extra
 }
 fn shared(point: Point) -> i32 {
   let Point { x, .. } = &point
@@ -293,7 +299,7 @@ fn sharedIf(point: Point) -> i32 {
 pub fn main() -> i32 {
   let point = Point { x: 20, y: 22 }
   let Point { x, y } = move point
-  return x + y + inspect(1) + shared(Point { x: 1, y: 2 }) + sharedIf(Point { x: 2, y: 4 })
+  return x + y + inspect(1) + nested() + shared(Point { x: 1, y: 2 }) + sharedIf(Point { x: 2, y: 4 })
 }`),
       'wasm32-unknown-unknown',
     )
@@ -307,12 +313,12 @@ pub fn main() -> i32 {
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 54n)
+    assert.strictEqual(outcome.result.value, 60n)
     const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main
     if (typeof main !== 'function') throw new RangeError('pattern program lost silk_main')
-    assert.strictEqual(main(), 54)
+    assert.strictEqual(main(), 60)
   }),
 )
 

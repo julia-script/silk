@@ -1489,6 +1489,45 @@ const semanticTokenAt = (
   return decoded.find((token) => token.line === line && token.character === character)
 }
 
+it.effect('serves shared-pattern bindings through completion hover navigation and tokens', () =>
+  Effect.gen(function* () {
+    const source = `struct Full { value: i32 }
+pub fn main() -> i32 {
+  let first = Full { value: 40 }
+  let Full { value } = move first
+  let second = Full { value: 2 }
+  if let Full inner = &second { return value + inner.value } else { return value }
+}`
+    const { document, snapshot } = yield* open(source)
+    assert.deepEqual(
+      Document.diagnostics(document, snapshot, () => undefined),
+      [],
+    )
+    const finalUse = positionOf(source, 'value', 6)
+    const completion = Document.completion(document, snapshot, {
+      ...finalUse,
+      character: finalUse.character + 3,
+    })
+    assert.include(
+      completion.items.map((item) => item.label),
+      'value',
+    )
+    const hover = Document.hover(document, snapshot, finalUse)
+    assert.include(
+      typeof hover?.contents === 'object' && 'value' in hover.contents ? hover.contents.value : '',
+      'let value: i32',
+    )
+    assert.deepEqual(
+      Document.definition(document, snapshot, finalUse, () => undefined)?.targetSelectionRange
+        .start,
+      positionOf(source, 'value', 2),
+    )
+    const decoded = decodeSemanticTokens(Document.semanticTokens(document, snapshot))
+    assert.strictEqual(semanticTokenAt(decoded, source, 'value', 2)?.type, 'variable')
+    assert.strictEqual(semanticTokenAt(decoded, source, 'inner', 1)?.type, 'variable')
+  }),
+)
+
 it.effect('colors a type name and a variable name with different token types', () =>
   Effect.gen(function* () {
     const source = `pub struct Point { x: i32 }

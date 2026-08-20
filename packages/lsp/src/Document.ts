@@ -1134,7 +1134,9 @@ export const semanticTokens = (
           onSome: (whole) => [...Analysis.semanticOccurrencesInRange(snapshot, self.module, whole)],
         })
   // Occurrences are start-sorted, so one advancing cursor pairs each identifier with its own.
-  const byStart = new Map(occurrences.map((occurrence) => [occurrence.span.start, occurrence]))
+  const byStart = new Map<number, SemanticOccurrence.SemanticOccurrence>()
+  for (const occurrence of occurrences)
+    if (!byStart.has(occurrence.span.start)) byStart.set(occurrence.span.start, occurrence)
   const data: Array<number> = []
   let previousLine = 0
   let previousCharacter = 0
