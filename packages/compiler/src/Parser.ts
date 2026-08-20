@@ -2770,15 +2770,21 @@ const parseImplDeclaration = (initial: State): NodeResult => {
     ...left.elements,
   ])
 
-  if (hasBody && nextSignificantKind(state) === 'FnKeyword') {
-    const hook = parseFunctionDeclaration(state, true)
-    state = hook.state
-    children = Object.freeze([...children, hook.node])
-  } else if (hasBody) {
-    while (nextSignificantKind(state) === 'Identifier') {
-      const operation = parseImplOperation(state)
-      state = operation.state
-      children = Object.freeze([...children, operation.node])
+  if (hasBody) {
+    while (
+      nextSignificantKind(state) === 'Identifier' ||
+      nextSignificantKind(state) === 'FnKeyword' ||
+      nextSignificantKind(state) === 'EffectKeyword'
+    ) {
+      if (nextSignificantKind(state) === 'Identifier') {
+        const operation = parseImplOperation(state)
+        state = operation.state
+        children = Object.freeze([...children, operation.node])
+      } else {
+        const operation = parseFunctionDeclaration(state, true)
+        state = operation.state
+        children = Object.freeze([...children, operation.node])
+      }
     }
   }
 

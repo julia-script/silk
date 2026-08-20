@@ -389,6 +389,12 @@ export interface DeclarationFact {
   readonly requirementRow: RequirementRowFact
   readonly constraints: ReadonlyArray<ConstraintFact>
   readonly constraintContracts: ReadonlyArray<Constraint.Constraint>
+  /** Links one hidden inline conformance body to the declaration whose `Self` it closes over. */
+  readonly conformanceImplementation?: {
+    readonly ordinal: number
+    readonly operation: string
+    readonly self: Type.Parameter
+  }
   readonly syntax: SyntaxTree.Node
 }
 
@@ -836,6 +842,41 @@ const substituteRowExpressionFact = (
   }
 }
 
+const closeConformanceSelf = (
+  declaration: DeclarationFact,
+  provider: Type.Type,
+): DeclarationFact => {
+  const implementation = declaration.conformanceImplementation
+  if (implementation === undefined) return declaration
+  const substitution: Type.Substitution = new Map<string, Type.GenericArgument>([
+    [Type.key(implementation.self), provider],
+  ])
+  const rowsType = Type.substitute(
+    Type.effectWithRows(
+      Type.unit,
+      declaration.failureRow.row,
+      'Shared',
+      declaration.requirementRow.row,
+    ),
+    substitution,
+  )
+  const rows = Type.isEffect(rowsType) ? rowsType : Type.effect(Type.unit, [], 'Shared')
+  return Object.freeze({
+    ...declaration,
+    parameters: Object.freeze(
+      declaration.parameters.map((parameter) =>
+        Object.freeze({
+          ...parameter,
+          declaredType: substituteDeclaredTypeFact(parameter.declaredType, substitution),
+        }),
+      ),
+    ),
+    returnType: substituteDeclaredTypeFact(declaration.returnType, substitution),
+    failureRow: substituteFailureRowFact(declaration.failureRow, substitution, rows),
+    requirementRow: substituteRequirementRowFact(declaration.requirementRow, substitution, rows),
+  })
+}
+
 const failureRowFromEffect = (effect: Type.Effect): Type.FailureRow => effect.failureRow
 
 const requirementRowFromEffect = (effect: Type.Effect): Type.RequirementsRow =>
@@ -1048,6 +1089,7 @@ export interface ConformanceFact {
   readonly _tag: 'ConformanceDeclaration'
   readonly module: string
   readonly ordinal: number
+  readonly self: Type.Parameter
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly requirements: ReadonlyArray<ConformanceRequirementFact>
   readonly capability: DeclaredTypeFact
@@ -1066,6 +1108,7 @@ export interface ConformanceFact {
     readonly contract?: InterfaceOperationApplicationFact
     /** The mapped declaration's binders expressed over this conformance header. */
     readonly targetArguments?: ReadonlyArray<Type.GenericArgument>
+    readonly form: 'Mapped' | 'Inline'
     readonly syntax: SyntaxTree.Node
   }>
   readonly hook?: DropHookFact
@@ -3002,7 +3045,9 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     .map((node, ordinal): ConformanceFact => {
       const collected = collectTypeParameters(source, node, `impl#${ordinal}`)
       diagnostics.push(...collected.diagnostics)
-      const environment = collected.environment
+      const selfType = Type.parameter({ module: source.id, name: `impl#${ordinal}` }, -1, 'Self')
+      const environment = new Map(collected.environment)
+      environment.set('Self', selfType)
       const types = node.children.filter(isDeclaredTypeNode)
       const capabilitySyntax = types.at(0)
       const providerSyntax = types.at(1)
@@ -3032,7 +3077,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
           ])
         },
       )
-      const operations = SyntaxTree.directNodes(node, 'ImplOperation').map((operation) => {
+      const mappedOperations = SyntaxTree.directNodes(node, 'ImplOperation').map((operation) => {
         const name = presentName(source, operation)
         const targetSyntax = SyntaxTree.directNode(operation, 'TypePath')
         const target =
@@ -3055,9 +3100,49 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
                       syntax: targetSyntax,
                     })
               })()
-        return Object.freeze({ name, target, syntax: operation })
+        return Object.freeze({ name, target, form: 'Mapped' as const, syntax: operation })
       })
-      const hookSyntax = SyntaxTree.directNode(node, 'FunctionDeclaration')
+      const inlineOperations = SyntaxTree.directNodes(node, 'FunctionDeclaration').flatMap(
+        (operation): ReadonlyArray<ConformanceFact['operations'][number]> => {
+          if (SyntaxTree.directToken(operation, 'DropKeyword') !== undefined) return []
+          const name = presentName(source, operation)
+          const providerToken = providerSyntax
+            ? SyntaxTree.tokens(providerSyntax).find((token) => token.kind === 'Identifier')
+            : undefined
+          if (name._tag !== 'Present' || providerToken === undefined)
+            return Object.freeze([
+              Object.freeze({
+                name,
+                target: Object.freeze({ _tag: 'Unavailable' as const, syntax: operation }),
+                form: 'Inline' as const,
+                syntax: operation,
+              }),
+            ])
+          const targetName = `impl@${ordinal}.${name.spelling}`
+          return Object.freeze([
+            Object.freeze({
+              name,
+              target: Object.freeze({
+                _tag: 'TypePath' as const,
+                spelling: `${spelling(source, providerToken)}.${targetName}`,
+                segments: Object.freeze([
+                  Object.freeze({
+                    spelling: spelling(source, providerToken),
+                    token: providerToken,
+                  }),
+                  Object.freeze({ spelling: targetName, token: name.token }),
+                ]),
+                syntax: operation,
+              }),
+              form: 'Inline' as const,
+              syntax: operation,
+            }),
+          ])
+        },
+      )
+      const hookSyntax = SyntaxTree.directNodes(node, 'FunctionDeclaration').find(
+        (operation) => SyntaxTree.directToken(operation, 'DropKeyword') !== undefined,
+      )
       const hook =
         hookSyntax === undefined
           ? undefined
@@ -3131,12 +3216,13 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         _tag: 'ConformanceDeclaration',
         module: source.id,
         ordinal,
+        self: selfType,
         typeParameters: collected.facts,
         requirements: Object.freeze(requirements),
         capability,
         provider,
         visibility: 'Public',
-        operations: Object.freeze(operations),
+        operations: Object.freeze([...mappedOperations, ...inlineOperations]),
         ...(hook === undefined ? {} : { hook }),
         // Coherence and termination are program-wide questions, so both stay unanswered until
         // every module's headers have resolved.
@@ -3475,6 +3561,115 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       syntax: node,
     })
   })
+  // Inline conformance operations elaborate and lower as private ordinary declarations. Their
+  // canonical names are implementation identities, not source-visible actor members.
+  const inlineMembers = conformances.flatMap(
+    (conformance, conformanceIndex): ReadonlyArray<MemberFact> =>
+      conformance.operations.flatMap((operation, operationIndex): ReadonlyArray<MemberFact> => {
+        if (operation.form !== 'Inline' || operation.target._tag !== 'TypePath') return []
+        const targetName = operation.target.segments.at(1)?.spelling
+        const targetToken = operation.target.segments.at(1)?.token
+        if (targetName === undefined || targetToken === undefined) return []
+        const node = operation.syntax
+        const id: DeclarationId = Object.freeze({
+          _tag: 'DeclarationId',
+          sourceId: source.id,
+          ordinal: nestedDeclarationOrdinal + conformanceIndex * 1024 + operationIndex,
+        })
+        const collected = collectTypeParameters(
+          source,
+          node,
+          targetName,
+          conformance.typeParameters.length,
+          conformance.typeParameters,
+        )
+        diagnostics.push(...collected.diagnostics)
+        const environment = new Map(collected.environment)
+        environment.set('Self', conformance.self)
+        const parameterList = childNode(node, 'ParameterList')
+        const parameters = SyntaxTree.directNodes(parameterList, 'ParameterDeclaration').map(
+          (parameter, ordinal) => analyzeParameter(source, parameter, id, ordinal, environment),
+        )
+        const returnSyntax = SyntaxTree.directNode(node, 'ReturnType')
+        const returnType =
+          returnSyntax === undefined
+            ? (() => {
+                const token = SyntaxTree.directToken(parameterList, 'RightParenthesis')
+                return token === undefined
+                  ? Object.freeze({
+                      fact: Object.freeze({
+                        _tag: 'Unavailable' as const,
+                        syntax: parameterList,
+                      }),
+                      diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
+                    })
+                  : Object.freeze({
+                      fact: Object.freeze({
+                        _tag: 'Resolved' as const,
+                        type: Type.unit,
+                        spelling: '()',
+                        token,
+                        syntax: parameterList,
+                      }),
+                      diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
+                    })
+              })()
+            : collectReturnType(source, returnSyntax, targetName, collected.facts, environment)
+        const failureRow = collectFailureRow(source, node, environment)
+        const requirementRow = collectRequirementRow(source, node, environment)
+        const constraints = collectConstraints(source, node, environment)
+        const parameterFacts = Object.freeze(parameters.map((parameter) => parameter.fact))
+        diagnostics.push(
+          ...parameters.flatMap((parameter) => parameter.diagnostics),
+          ...duplicateParameterDiagnostics(parameterFacts),
+          ...returnType.diagnostics,
+          ...failureRow.diagnostics,
+          ...requirementRow.diagnostics,
+          ...constraints.diagnostics,
+        )
+        return [
+          Object.freeze({
+            _tag: 'FunctionDeclaration' as const,
+            id,
+            canonical: Object.freeze({
+              _tag: 'Canonical' as const,
+              id: Object.freeze({
+                _tag: 'CanonicalDeclarationId' as const,
+                module: source.id,
+                name: targetName,
+              }),
+            }),
+            visibility: 'Private' as const,
+            functionKind:
+              SyntaxTree.directToken(node, 'EffectKeyword') === undefined
+                ? ('Ordinary' as const)
+                : ('Effect' as const),
+            typeParameters: collected.facts,
+            parameterCount: parameterFacts.length,
+            parameters: parameterFacts,
+            name: Object.freeze({
+              _tag: 'Present' as const,
+              spelling: targetName,
+              token: operation.name._tag === 'Present' ? operation.name.token : targetToken,
+            }),
+            returnType: returnType.fact,
+            ...('opaqueResult' in returnType && returnType.opaqueResult !== undefined
+              ? { opaqueResult: returnType.opaqueResult }
+              : {}),
+            failureRow: failureRow.fact,
+            requirementRow: requirementRow.fact,
+            constraints: constraints.facts,
+            constraintContracts: Object.freeze([]),
+            conformanceImplementation: Object.freeze({
+              ordinal: conformance.ordinal,
+              operation: operation.name._tag === 'Present' ? operation.name.spelling : targetName,
+              self: conformance.self,
+            }),
+            syntax: node,
+          }),
+        ]
+      }),
+  )
   // Drop hook bodies elaborate as hidden generic functions: each accepted hook joins the member
   // list under a non-identifier canonical name, carrying the impl's type parameters, so ordinary
   // elaboration, ownership, and lowering machinery compile it without a hook-shaped special case.
@@ -3485,7 +3680,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     const id: DeclarationId = Object.freeze({
       _tag: 'DeclarationId',
       sourceId: source.id,
-      ordinal: nestedDeclarationOrdinal + hookIndex,
+      ordinal: nestedDeclarationOrdinal + inlineMembers.length + hookIndex,
     })
     const environment = new Map<string, Type.Parameter>(
       conformance.typeParameters.flatMap((parameter) =>
@@ -3532,7 +3727,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       }),
     ]
   })
-  const members = [...ownMembers, ...hookMembers]
+  const members = [...ownMembers, ...inlineMembers, ...hookMembers]
   return Object.freeze({
     _tag: 'ModuleHeaders',
     module: source.id,
@@ -5649,25 +5844,44 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         ...(hook === undefined ? {} : { hook }),
       })
     })
+    const conformanceProviders = new Map(
+      conformances.flatMap((conformance) =>
+        conformance.provider._tag === 'Resolved'
+          ? [[conformance.ordinal, conformance.provider.type] as const]
+          : [],
+      ),
+    )
+    const closedMembers = members.map((member): MemberFact => {
+      if (member._tag !== 'FunctionDeclaration' || member.conformanceImplementation === undefined)
+        return member
+      const provider = conformanceProviders.get(member.conformanceImplementation.ordinal)
+      return provider === undefined ? member : closeConformanceSelf(member, provider)
+    })
     return Object.freeze({
       ...module,
-      members: Object.freeze(members),
+      members: Object.freeze(closedMembers),
       declarations: Object.freeze(
-        members.filter(
+        closedMembers.filter(
           (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
         ),
       ),
       structs: Object.freeze(
-        members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+        closedMembers.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
       ),
       services: Object.freeze(
-        members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),
+        closedMembers.filter(
+          (member): member is ServiceFact => member._tag === 'ServiceDeclaration',
+        ),
       ),
       interfaces: Object.freeze(
-        members.filter((member): member is InterfaceFact => member._tag === 'InterfaceDeclaration'),
+        closedMembers.filter(
+          (member): member is InterfaceFact => member._tag === 'InterfaceDeclaration',
+        ),
       ),
       constants: Object.freeze(
-        members.filter((member): member is ConstantFact => member._tag === 'ConstantDeclaration'),
+        closedMembers.filter(
+          (member): member is ConstantFact => member._tag === 'ConstantDeclaration',
+        ),
       ),
       conformances: Object.freeze(conformances),
     })

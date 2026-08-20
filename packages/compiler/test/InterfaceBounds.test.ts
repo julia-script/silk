@@ -331,6 +331,51 @@ pub fn main() -> i32 { return Integer.add(40, 2) }`)
   }),
 )
 
+it.effect('executes an inline conformance operation with Self bound to its provider', () =>
+  Effect.gen(function* () {
+    const { self, outcome } = yield* evaluate(`interface Decoder {
+  fn decode(value: &Self) -> i32
+}
+struct Schema { value: i32 }
+impl Decoder for Schema {
+  fn decode(value: &Self) -> i32 { return value.value }
+}
+fn decode<T: Decoder>(value: &T) -> i32 { return Decoder.decode(value) }
+pub fn main() -> i32 {
+  let schema = Schema { value: 42 }
+  return decode(&schema)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
+it.effect('combines inline and mapped operations in one complete conformance', () =>
+  Effect.gen(function* () {
+    const { self, outcome } = yield* evaluate(`interface PairValue {
+  fn left(value: &Self) -> i32
+  fn right(value: &Self) -> i32
+}
+struct Pair { left: i32 right: i32 }
+fn pairRight(value: &Pair) -> i32 { return value.right }
+impl PairValue for Pair {
+  fn left(value: &Self) -> i32 { return value.left }
+  right: Pair.pairRight
+}
+fn sum<T: PairValue>(value: &T) -> i32 {
+  return PairValue.left(value) + PairValue.right(value)
+}
+pub fn main() -> i32 {
+  let pair = Pair { left: 20, right: 22 }
+  return sum(&pair)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
 it.effect('reports a bound operation reachable through two bounded parameters', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`pub interface Mixer {
