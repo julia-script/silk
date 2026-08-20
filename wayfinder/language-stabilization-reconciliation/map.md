@@ -2,6 +2,13 @@
 
 Status: complete
 
+> [!IMPORTANT]
+> This map is the pre-implementation reconciliation snapshot that produced the stabilization
+> roadmap. Its per-rule `Partial`, `Contradicted`, and `Not implemented` classifications describe
+> the compiler at that audit point; they are not current implementation status. See the
+> [post-implementation completion audit](../language-stabilization-implementation/audit.md) for the
+> implemented, synchronized, and verified end state.
+
 ## Destination
 
 Make it possible to answer, for every confirmed programmer-visible Silk rule, whether the current
