@@ -53,28 +53,28 @@ it.effect(
   'specializes a conditional generic service witness and its unused proof dependency',
   () =>
     Effect.gen(function* () {
-      const source = `interface Marker<T> { fn mark(value: &T) -> i32 }
+      const source = `interface Marker { fn mark(value: &Self) -> i32 }
 
 struct Token {}
 fn markToken(value: &Token) -> i32 { return 1 }
-impl Marker<Token> for Token { mark: Token.markToken }
+impl Marker for Token { mark: Token.markToken }
 
-interface Decoder<T> { fn decode(value: &T) -> i32 }
+interface Decoder { fn decode(value: &Self) -> i32 }
 struct Schema { tag: i32 }
 fn schemaDecode(value: &Schema) -> i32 { return value.tag }
-impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
+impl Decoder for Schema { decode: Schema.schemaDecode }
 
 struct Mapped<S> { source: S }
 fn mappedDecode<S: Decoder>(value: &Mapped<S>) -> i32 {
   return Decoder.decode(&value.source) + 1
 }
-impl<S: Decoder<S>> Decoder<Mapped<S>> for Mapped<S> { decode: Mapped.mappedDecode }
+impl<S: Decoder> Decoder for Mapped<S> { decode: Mapped.mappedDecode }
 
 struct Optional<S> { source: S }
 fn optionalDecode<S: Decoder>(value: &Optional<S>) -> i32 {
   return Decoder.decode(&value.source) + 1
 }
-impl<S: Decoder<S>> Decoder<Optional<S>> for Optional<S> { decode: Optional.optionalDecode }
+impl<S: Decoder> Decoder for Optional<S> { decode: Optional.optionalDecode }
 
 fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(&value) }
 
@@ -88,7 +88,7 @@ effect fn get<S: Marker>(self: &Fixed<S>, value: &S) -> i32 {
     source: Mapped<Schema> { source: Schema { tag: 40 } }
   })
 }
-impl<S: Marker<S>> Counter<i32, S> for Fixed<S> { get: Fixed.get }
+impl<S: Marker> Counter<i32, S> for Fixed<S> { get: Fixed.get }
 
 effect fn read(value: &Token) -> i32 ? &Counter<i32, Token> {
   return run Counter.get<i32, Token>(value)
@@ -612,6 +612,31 @@ pub effect fn main() -> () ! Problem { return () }`)
     assert.strictEqual(entry._tag, 'Resolved')
     if (entry._tag === 'Resolved' && entry.kind === 'Effect')
       assert.deepEqual(entry.requirements, [])
+  }),
+)
+
+it.effect('rejects an ordinary interface as an Effect dependency', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`interface Clock { fn now(value: &Self) -> i32 }
+effect fn read() -> i32 ? &Clock { return 42 }
+pub fn main() -> i32 { return 0 }`)
+    assert.isTrue(
+      Analysis.diagnostics(self).some(
+        (diagnostic) => diagnostic.code === 'SEM0070' && diagnostic.message.includes('Clock'),
+      ),
+    )
+  }),
+)
+
+it.effect('allows a service to participate in an ordinary compile-time bound', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`service Clock { effect fn now() -> i32 ? &Clock }
+struct Fixed {}
+effect fn now(self: &Fixed) -> i32 { return 42 }
+impl Clock for Fixed { now: Fixed.now }
+fn preserve<T: Clock>(value: T) -> T { return move value }
+pub fn main() -> i32 { return 0 }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
   }),
 )
 

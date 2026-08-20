@@ -1772,14 +1772,14 @@ export const invalidFailureType = (type: string, span: SourceSpan.SourceSpan): D
     span,
   })
 
-/** Creates the diagnostic for a requirement that cannot name one concrete capability type. */
+/** Creates the diagnostic for a requirement that cannot name one dependency-eligible service. */
 export const invalidRequirementType = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidRequirementTypeCode,
     severity: 'error',
-    message: `Effect requirement ${type} must be one concrete nominal capability type`,
+    message: `Effect requirement ${type} must be one concrete service type`,
     reason: Object.freeze({ _tag: 'InvalidRequirementType', type }),
     span,
   })

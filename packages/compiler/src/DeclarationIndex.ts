@@ -4538,6 +4538,17 @@ const memberByNominal = (
   )
 }
 
+const dependencyEligible = (
+  modules: ReadonlyArray<ModuleHeaders>,
+  capability: Type.Nominal,
+): boolean => {
+  const member = memberByNominal(modules, capability)
+  return (
+    (member?._tag === 'InterfaceDeclaration' || member?._tag === 'ServiceDeclaration') &&
+    member.dependencyEligible
+  )
+}
+
 /** Converts one resolved source type to the erased argument kind its declaration parameter owns. */
 const genericArgumentForParameter = (
   parameter: Type.Parameter | undefined,
@@ -4628,55 +4639,66 @@ const resolveBounds = (
                     })
                   : resolvers.type(candidateModule, path),
             })
-      return Object.freeze({
-        ...parameter,
-        bounds: Object.freeze(
-          parameter.bounds.map((bound): BoundFact => {
-            const unresolvedCapability =
-              bound._tag === 'ResolvedBound'
-                ? bound.application.capability
-                : (() => {
-                    const resolved = resolveDeclaredType(
-                      module,
-                      bound.application,
-                      boundResolvers,
-                      modules,
-                    ).fact
-                    if (resolved._tag === 'Resolved' && Type.isNominal(resolved.type))
-                      return resolved.type
-                    return resolved._tag === 'Unresolved' &&
-                      resolved.candidate !== undefined &&
-                      Type.isNominal(resolved.candidate)
-                      ? resolved.candidate
-                      : undefined
-                  })()
-            const declaration =
-              unresolvedCapability === undefined
-                ? undefined
-                : memberByNominal(modules, unresolvedCapability)
-            if (
-              unresolvedCapability === undefined ||
-              (declaration?._tag !== 'InterfaceDeclaration' &&
-                declaration?._tag !== 'ServiceDeclaration') ||
-              declaration.canonical._tag !== 'Canonical'
-            )
-              return bound
-            const application = interfaceApplication(
-              declaration,
-              unresolvedCapability,
-              parameter.type,
-            )
-            return application === undefined
-              ? bound
-              : Object.freeze({
-                  _tag: 'ResolvedBound' as const,
-                  spelling: bound.spelling,
-                  path: bound.path,
-                  application,
-                })
-          }),
-        ),
-      })
+      const bounds = Object.freeze(
+        parameter.bounds.map((bound): BoundFact => {
+          const unresolvedCapability =
+            bound._tag === 'ResolvedBound'
+              ? bound.application.capability
+              : (() => {
+                  const resolved = resolveDeclaredType(
+                    module,
+                    bound.application,
+                    boundResolvers,
+                    modules,
+                  ).fact
+                  if (resolved._tag === 'Resolved' && Type.isNominal(resolved.type))
+                    return resolved.type
+                  return resolved._tag === 'Unresolved' &&
+                    resolved.candidate !== undefined &&
+                    Type.isNominal(resolved.candidate)
+                    ? resolved.candidate
+                    : undefined
+                })()
+          const declaration =
+            unresolvedCapability === undefined
+              ? undefined
+              : memberByNominal(modules, unresolvedCapability)
+          if (
+            unresolvedCapability === undefined ||
+            (declaration?._tag !== 'InterfaceDeclaration' &&
+              declaration?._tag !== 'ServiceDeclaration') ||
+            declaration.canonical._tag !== 'Canonical'
+          )
+            return bound
+          const application = interfaceApplication(
+            declaration,
+            unresolvedCapability,
+            parameter.type,
+          )
+          return application === undefined
+            ? bound
+            : Object.freeze({
+                _tag: 'ResolvedBound' as const,
+                spelling: bound.spelling,
+                path: bound.path,
+                application,
+              })
+        }),
+      )
+      const seen = new Set<string>()
+      for (const bound of bounds) {
+        if (bound._tag !== 'ResolvedBound') continue
+        const key = Type.key(bound.application.capability)
+        if (seen.has(key))
+          diagnostics.push(
+            Diagnostic.invalidConformance(
+              `duplicate bound ${bound.spelling}`,
+              bound.path.syntax.span,
+            ),
+          )
+        else seen.add(key)
+      }
+      return Object.freeze({ ...parameter, bounds })
     }),
   )
 }
@@ -5256,7 +5278,8 @@ const resolveRequirementRow = (
   for (const entry of entries) {
     if (
       entry.capability._tag === 'Resolved' &&
-      (Type.isNominal(entry.capability.type) ||
+      ((Type.isNominal(entry.capability.type) &&
+        dependencyEligible(modules, entry.capability.type)) ||
         (Type.isParameter(entry.capability.type) && entry.capability.type.kind === 'Value'))
     ) {
       requirements.push(
@@ -6016,6 +6039,11 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           // error; leaving termination unavailable keeps the fact out of coherence and proof search.
           if (requirements.length !== conformance.requirements.length)
             return Object.freeze({ ...conformance, head })
+          if (
+            Type.isNominal(conformance.provider.type) &&
+            conformance.provider.type.module !== module.module
+          )
+            return Object.freeze({ ...conformance, head })
           const failures = ConformanceHead.terminationFailures(head)
           if (failures.length > 0)
             diagnostics.push(
@@ -6156,6 +6184,15 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
       }
       const capability = conformance.capability.type
       const provider = conformance.provider.type
+      if (Type.isNominal(provider) && provider.module !== conformance.module) {
+        diagnostics.push(
+          invalidDiagnostic(
+            `implementation for ${Type.encode(provider)} must be declared in ${provider.module}, the provider's module`,
+            conformance.syntax.span,
+          ),
+        )
+        continue
+      }
       const sourceMember = memberByNominal(modules, capability)
       const sourceContract =
         sourceMember?._tag === 'InterfaceDeclaration' || sourceMember?._tag === 'ServiceDeclaration'

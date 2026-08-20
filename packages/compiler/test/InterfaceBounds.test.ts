@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 
 const encoder = new TextEncoder()
 
@@ -401,6 +403,37 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
+it.effect('rejects a repeated normalized member of a bound conjunction', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`interface Display { fn display(value: &Self) -> i32 }
+fn inspect<T: Display + Display>(value: &T) -> i32 { return Display.display(value) }
+pub fn main() -> i32 { return 0 }`)
+    assert.include(messages(self), 'Invalid conformance: duplicate bound Display')
+  }),
+)
+
+it.effect('rejects a conformance outside the provider module', () =>
+  Effect.gen(function* () {
+    const model = encoder.encode(`pub interface Shape { fn area(value: &Self) -> i32 }
+pub struct Rectangle {}`)
+    const root = SourceFile.make(
+      'consumer',
+      encoder.encode(`import model { Shape, Rectangle }
+impl Shape for Rectangle {
+  fn area(value: &Self) -> i32 { return 42 }
+}
+pub fn main() -> i32 { return 0 }`),
+    )
+    const self = yield* Analysis.make({ root }).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['model', model]]))),
+    )
+    assert.include(
+      messages(self),
+      "Invalid conformance: implementation for model.Rectangle must be declared in model, the provider's module",
+    )
   }),
 )
 
