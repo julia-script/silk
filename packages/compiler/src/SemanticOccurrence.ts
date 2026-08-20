@@ -1080,6 +1080,7 @@ const collectMember = (
     }
     return
   }
+  if (member._tag === 'RoleDeclaration') return
   for (const field of member.fields) {
     if (field.name._tag === 'Present')
       push(

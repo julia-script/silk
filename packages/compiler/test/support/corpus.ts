@@ -90,7 +90,7 @@ fn forwardAgain<F>(value: F) -> F {
 }
 pub fn main() -> i32 {
   let fixed = Fixed { value: 42 }
-  let bind = forwardAgain(Effect.provide<&Counter>(&fixed))
+  let bind = forwardAgain(Effect.provide<Counter>(&fixed))
   return run bind(read())
 }`
 

@@ -574,6 +574,15 @@ const printNode = (
     case 'ImportPath':
     case 'TypePath':
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
+    case 'RequirementSelector': {
+      const [capability, role] = directNodes(node)
+      if (capability === undefined || role === undefined)
+        return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
+      return FormatDocument.concat(
+        printNode(context, capability, prefix, preserveBlank),
+        printNode(context, role, FormatDocument.text(' at ')),
+      )
+    }
     case 'TypeArgumentList': {
       const nodes = directNodes(node)
       const failure = nodes.find((child) => child.kind === 'FailureRow')
@@ -682,6 +691,21 @@ const printNode = (
     case 'ServiceDeclaration':
     case 'InterfaceDeclaration':
       return printServiceDeclaration(context, node, prefix)
+    case 'RoleDeclaration': {
+      const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
+      return FormatDocument.concat(
+        ...(publicKeyword === undefined
+          ? []
+          : [printToken(context, publicKeyword, prefix, preserveBlank), FormatDocument.text(' ')]),
+        printToken(
+          context,
+          tokenOf(node, 'RoleKeyword'),
+          publicKeyword === undefined ? prefix : FormatDocument.empty,
+          preserveBlank,
+        ),
+        printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+      )
+    }
     case 'ServiceOperation':
       return printServiceOperation(context, node, prefix)
     case 'ServiceInvalidMember':
@@ -878,14 +902,16 @@ const printNode = (
     }
     case 'Requirement': {
       const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
-      const at = directTokens(node).find((token) => token.kind === 'At')
-      const role = directTokens(node).find((token) => token.kind === 'Identifier')
+      const at = directTokens(node).find((token) => token.kind === 'Identifier')
+      const nodes = directNodes(node)
+      const capability = nodes.at(0) ?? nodeOf(node, 'TypePath')
+      const role = at === undefined ? undefined : nodes.at(-1)
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'Ampersand'), prefix, preserveBlank),
         ...(mut === undefined ? [] : [printToken(context, mut), FormatDocument.text(' ')]),
-        printNode(context, nodeOf(node, 'TypePath')),
-        ...(at === undefined ? [] : [printToken(context, at)]),
-        ...(role === undefined ? [] : [printToken(context, role)]),
+        printNode(context, capability),
+        ...(at === undefined ? [] : [printToken(context, at, FormatDocument.text(' '))]),
+        ...(role === undefined ? [] : [printNode(context, role, FormatDocument.text(' '))]),
       )
     }
     case 'RowWithout': {

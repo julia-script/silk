@@ -510,24 +510,24 @@ it('bounds a damaged unsafe call before the following statement and declaration'
 it('parses an explicit selected requirement row in a provision pipeline', () => {
   const result = parseText(
     'memory://provider-role.silk',
-    'fn main() -> i32 { let recipe = work() |> Effect.provide<&Clock@Scratch>(&clock) return 0 }',
+    'fn main() -> i32 { let recipe = work() |> Effect.provide<Clock at Scratch>(&clock) return 0 }',
   )
   assert.deepEqual(result.parserDiagnostics, [])
   assert.include(
     descendants(result.root)
       .filter(SyntaxTree.isNode)
       .map((node) => node.kind),
-    'ReferenceType',
+    'RequirementSelector',
   )
 })
 
 it('parses explicit Effect contracts and declaration requirement rows', () => {
   const result = parseText(
     'memory://effect-contract-rows.silk',
-    `fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
+    `fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator at Scratch> {
   return effect { return 1 }
 }
-effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator@Scratch { return 1 }`,
+effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator at Scratch { return 1 }`,
   )
   assert.deepEqual(result.parserDiagnostics, [])
   const kinds = descendants(result.root)

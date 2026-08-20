@@ -123,6 +123,8 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ReferenceType',
   'Requirement',
   'RequirementRow',
+  'RequirementSelector',
+  'RoleDeclaration',
   'PatternField',
   'ReturnStatement',
   'RunExpression',
@@ -453,13 +455,13 @@ it.effect('formats bounded conditional conformances canonically and idempotently
 
 it.effect('formats explicit Effect and declaration requirement rows', () =>
   Effect.gen(function* () {
-    const source = `fn later()->Effect<i32!Problem?&FileSystem|&mut Allocator@Scratch>{return effect{return 1}}
-effect fn work()->i32!Problem?&FileSystem|&mut Allocator@Scratch{return 1}`
+    const source = `fn later()->Effect<i32!Problem?&FileSystem|&mut Allocator at Scratch>{return effect{return 1}}
+effect fn work()->i32!Problem?&FileSystem|&mut Allocator at Scratch{return 1}`
     const first = yield* Formatter.format(parse('memory://effect-requirement-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
-      `fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
+      `fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator at Scratch> {
   return effect {
     return 1
   }
@@ -467,7 +469,7 @@ effect fn work()->i32!Problem?&FileSystem|&mut Allocator@Scratch{return 1}`
 
 effect fn work() -> i32
 ! Problem
-? &FileSystem | &mut Allocator@Scratch {
+? &FileSystem | &mut Allocator at Scratch {
   return 1
 }
 `,
@@ -499,12 +501,12 @@ where &mut P provides S from R, S in R {
 
 it.effect('preserves nested row-difference precedence and selected-row call prefixes', () =>
   Effect.gen(function* () {
-    const source = `effect fn transform<?S,A,P,E,F,?R,?Q>(self:once Effect<A!E|F?R|Q>,provider:&mut P)->A!Without<E|F,First|Third>?Without<R|Q,S> where &mut P provides S from R|Q{return run Intrinsic.bindRequirementMut<&mut Logger@Audit>(move self,provider)}`
+    const source = `effect fn transform<?S,A,P,E,F,?R,?Q>(self:once Effect<A!E|F?R|Q>,provider:&mut P)->A!Without<E|F,First|Third>?Without<R|Q,S> where &mut P provides S from R|Q{return run Intrinsic.bindRequirementMut<Logger at Audit>(move self,provider)}`
     const first = yield* Formatter.format(parse('memory://nested-row-format.silk', source))
     const text = formattedText(first)
     assert.include(text, '! Without<E | F, First | Third>')
     assert.include(text, '? Without<R | Q, S>')
-    assert.include(text, 'Intrinsic.bindRequirementMut<&mut Logger@Audit>')
+    assert.include(text, 'Intrinsic.bindRequirementMut<Logger at Audit>')
     const second = yield* Formatter.format(parse('memory://nested-row-format.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
@@ -846,6 +848,7 @@ pub struct Pair {
 pub struct Span { start: i32 end: i32 }
 pub struct Token { span: Span }
 pub struct End {}
+pub role Clock
 fn helper(value: i32, other: i32) -> i32 {
   let mut moved = move value
   while moved < other {
@@ -868,12 +871,12 @@ effect fn delayed(problem: Token) -> i32 ! Token {
   if false { fail move problem }
   return 1
 }
-effect fn timed() -> i32 ? &End@Clock { return 1 }
-fn execute(problem: Token) -> i32 {
+effect fn timed() -> i32 ? &End at Clock { return 1 }
+fn execute(problem: Token, borrowed: &End) -> i32 {
   let local = effect { return 2 }
   drop local
   let pending = delayed(move problem)
-  let timed = timed() |> End.provide<&End@Clock>(&local)
+  let timed = timed() |> End.provide<End at Clock>(&local)
   return run pending
 }
 fn selected() -> typeof(helper) {

@@ -50,6 +50,29 @@ it.effect('assigns distinct canonical identities to same-named declarations acro
   }),
 )
 
+it.effect('keeps same-spelled dependency roles distinct across modules', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `import left
+import right
+service Clock {}
+effect fn compare() -> i32 ? &Clock at left.Audit | &Clock at right.Audit { return 0 }`,
+      ],
+      ['left', 'pub role Audit'],
+      ['right', 'pub role Audit'],
+    ])
+    const declaration = index.modules.find((module) => module.module === 'root')?.declarations.at(0)
+
+    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(
+      declaration?.requirementRow.requirements.map((requirement) => requirement.role),
+      ['left::Audit', 'right::Audit'],
+    )
+  }),
+)
+
 it.effect('indexes source services and their operation contracts as distinct canonical facts', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
@@ -599,10 +622,11 @@ it.effect('resolves explicit Effect contracts and canonical requirement rows', (
         `struct Problem {}
 service FileSystem {}
 service Allocator {}
-fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
+role Scratch
+fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator at Scratch> {
   return effect { return 1 }
 }
-effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator@Scratch { return 1 }`,
+effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator at Scratch { return 1 }`,
       ],
     ])
     const [later, work] = index.modules.at(0)?.declarations ?? []
@@ -619,7 +643,7 @@ effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator@Scratch { retur
         access: requirement.access,
       })),
       [
-        { capability: 'Allocator', role: 'Scratch', access: 'Exclusive' },
+        { capability: 'Allocator', role: 'root::Scratch', access: 'Exclusive' },
         { capability: 'FileSystem', role: 'DefaultRole', access: 'Shared' },
       ],
     )

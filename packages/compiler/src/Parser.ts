@@ -1712,8 +1712,23 @@ const parseTypeArgumentList = (
     !following.includes(nextSignificantKind(state) ?? 'EndOfFile')
   ) {
     const argument = parseType(state, ['Comma', 'Bang', 'Question', 'Greater', ...following])
-    children = Object.freeze([...children, argument.node])
-    state = argument.state
+    if (kind === 'CallTypeArgumentList' && hasContextualSpelling(argument.state, 'at')) {
+      const at = expect(argument.state, 'Identifier', [
+        'Identifier',
+        'Comma',
+        'Greater',
+        ...following,
+      ])
+      const role = parseTypePath(at.state, ['Comma', 'Greater', ...following])
+      children = Object.freeze([
+        ...children,
+        syntaxNode(role.state, 'RequirementSelector', [argument.node, ...at.elements, role.node]),
+      ])
+      state = role.state
+    } else {
+      children = Object.freeze([...children, argument.node])
+      state = argument.state
+    }
     if (nextSignificantKind(state) !== 'Comma') break
     const comma = expect(state, 'Comma', [...typeStarts, 'Greater', ...following])
     children = Object.freeze([...children, ...comma.elements])
@@ -2121,15 +2136,14 @@ const parseRequirement = (
     nextSignificantKind(ampersand.state) === 'MutKeyword'
       ? expect(ampersand.state, 'MutKeyword', ['Identifier', ...following])
       : undefined
-  const capability = parseTypePrimary(mut?.state ?? ampersand.state, ['At', ...following])
-  const role =
-    nextSignificantKind(capability.state) === 'At'
-      ? (() => {
-          const at = expect(capability.state, 'At', ['Identifier', ...following])
-          const name = expect(at.state, 'Identifier', following)
-          return Object.freeze({ state: name.state, elements: [...at.elements, ...name.elements] })
-        })()
-      : undefined
+  const capability = parseTypePrimary(mut?.state ?? ampersand.state, following)
+  const role = hasContextualSpelling(capability.state, 'at')
+    ? (() => {
+        const at = expect(capability.state, 'Identifier', ['Identifier', ...following])
+        const path = parseTypePath(at.state, following)
+        return Object.freeze({ state: path.state, elements: [...at.elements, path.node] })
+      })()
+    : undefined
   return Object.freeze({
     state: role?.state ?? capability.state,
     node: syntaxNode(role?.state ?? capability.state, 'Requirement', [
@@ -2309,6 +2323,7 @@ const topLevelFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'StructKeyword',
   'ServiceKeyword',
   'InterfaceKeyword',
+  'RoleKeyword',
   'FnKeyword',
   'EffectKeyword',
   'ImplKeyword',
@@ -2424,6 +2439,7 @@ const beginsTopLevelDeclaration = (state: State): boolean => {
     kind === 'StructKeyword' ||
     kind === 'ServiceKeyword' ||
     kind === 'InterfaceKeyword' ||
+    kind === 'RoleKeyword' ||
     kind === 'ImplKeyword'
   )
     return true
@@ -2435,6 +2451,7 @@ const beginsTopLevelDeclaration = (state: State): boolean => {
     following === 'StructKeyword' ||
     following === 'ServiceKeyword' ||
     following === 'InterfaceKeyword' ||
+    following === 'RoleKeyword' ||
     following === 'ConstKeyword'
   )
 }
@@ -2464,6 +2481,23 @@ const parseConstantDeclaration = (initial: State): NodeResult => {
       type.node,
       ...equals.elements,
       initializer.node,
+    ]),
+  })
+}
+
+const parseRoleDeclaration = (initial: State): NodeResult => {
+  const hasPublicModifier = nextSignificantKind(initial) === 'PubKeyword'
+  const pubKeyword = hasPublicModifier
+    ? expect(initial, 'PubKeyword', ['RoleKeyword', 'Identifier', ...topLevelFollowing])
+    : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const keyword = expect(pubKeyword.state, 'RoleKeyword', ['Identifier', ...topLevelFollowing])
+  const name = expect(keyword.state, 'Identifier', topLevelFollowing)
+  return Object.freeze({
+    state: name.state,
+    node: syntaxNode(name.state, 'RoleDeclaration', [
+      ...pubKeyword.elements,
+      ...keyword.elements,
+      ...name.elements,
     ]),
   })
 }
@@ -2812,21 +2846,25 @@ const parseTopLevelDeclaration = (state: State): NodeResult =>
         (nextSignificantKind(state) === 'PubKeyword' &&
           significantKindAfter(state, 1) === 'ConstKeyword')
       ? parseConstantDeclaration(state)
-      : nextSignificantKind(state) === 'ImplKeyword'
-        ? parseImplDeclaration(state)
-        : nextSignificantKind(state) === 'InterfaceKeyword' ||
-            (nextSignificantKind(state) === 'PubKeyword' &&
-              significantKindAfter(state, 1) === 'InterfaceKeyword')
-          ? parseInterfaceDeclaration(state)
-          : nextSignificantKind(state) === 'ServiceKeyword' ||
+      : nextSignificantKind(state) === 'RoleKeyword' ||
+          (nextSignificantKind(state) === 'PubKeyword' &&
+            significantKindAfter(state, 1) === 'RoleKeyword')
+        ? parseRoleDeclaration(state)
+        : nextSignificantKind(state) === 'ImplKeyword'
+          ? parseImplDeclaration(state)
+          : nextSignificantKind(state) === 'InterfaceKeyword' ||
               (nextSignificantKind(state) === 'PubKeyword' &&
-                significantKindAfter(state, 1) === 'ServiceKeyword')
-            ? parseServiceDeclaration(state)
-            : nextSignificantKind(state) === 'StructKeyword' ||
+                significantKindAfter(state, 1) === 'InterfaceKeyword')
+            ? parseInterfaceDeclaration(state)
+            : nextSignificantKind(state) === 'ServiceKeyword' ||
                 (nextSignificantKind(state) === 'PubKeyword' &&
-                  significantKindAfter(state, 1) === 'StructKeyword')
-              ? parseStructDeclaration(state)
-              : parseFunctionDeclaration(state)
+                  significantKindAfter(state, 1) === 'ServiceKeyword')
+              ? parseServiceDeclaration(state)
+              : nextSignificantKind(state) === 'StructKeyword' ||
+                  (nextSignificantKind(state) === 'PubKeyword' &&
+                    significantKindAfter(state, 1) === 'StructKeyword')
+                ? parseStructDeclaration(state)
+                : parseFunctionDeclaration(state)
 
 const parseFunctionDeclaration = (initial: State, allowDropName = false): NodeResult => {
   let lookahead = initial.index
@@ -2839,6 +2877,7 @@ const parseFunctionDeclaration = (initial: State, allowDropName = false): NodeRe
     lookaheadToken.kind !== 'StructKeyword' &&
     lookaheadToken.kind !== 'ServiceKeyword' &&
     lookaheadToken.kind !== 'InterfaceKeyword' &&
+    lookaheadToken.kind !== 'RoleKeyword' &&
     lookaheadToken.kind !== 'ConstKeyword' &&
     lookaheadToken.kind !== 'EndOfFile'
   ) {

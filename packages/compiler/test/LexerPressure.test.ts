@@ -97,6 +97,7 @@ const tokenKinds = [
   'AmpersandAmpersand',
   'PipePipe',
   'CharLiteral',
+  'RoleKeyword',
 ] as const satisfies ReadonlyArray<Token.TokenKind>
 
 const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
@@ -176,6 +177,7 @@ const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
   AmpersandAmpersand: 73,
   PipePipe: 74,
   CharLiteral: 75,
+  RoleKeyword: 76,
 })
 
 interface ExpectedToken {

@@ -16,6 +16,7 @@ import * as NameResolution from './NameResolution.js'
 import * as Operator from './Operator.js'
 import * as Presentation from './Presentation.js'
 import * as ProviderSelection from './ProviderSelection.js'
+import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Scalar from './Scalar.js'
 import * as SourceFile from './SourceFile.js'
@@ -859,8 +860,8 @@ export interface TypeArgumentFact {
   readonly syntax: SyntaxTree.Node
   readonly declared: DeclaredTypeFact
   readonly type?: SemanticType
-  /** Requirement-row singleton role retained when a call prefix is written as `&T@Role`. */
-  readonly requirementRole?: string
+  /** Canonical role of an access-independent requirement selector such as `T at Role`. */
+  readonly requirementRole?: Type.Requirement['role']
 }
 
 /** Why a call contract cannot be established. */
@@ -3880,7 +3881,8 @@ const analyzeCallTypeArguments = (
   const nodes = list.children.filter(
     (element): element is SyntaxTree.Node =>
       SyntaxTree.isNode(element) &&
-      (element.kind === 'TypePath' ||
+      (element.kind === 'RequirementSelector' ||
+        element.kind === 'TypePath' ||
         element.kind === 'AppliedType' ||
         element.kind === 'FixedArrayType' ||
         element.kind === 'SliceType' ||
@@ -3890,9 +3892,15 @@ const analyzeCallTypeArguments = (
         element.kind === 'UnionType'),
   )
   const analyzed = nodes.map((node, ordinal) => {
+    const selectorNodes =
+      node.kind === 'RequirementSelector'
+        ? node.children.filter(SyntaxTree.isNode)
+        : Object.freeze<ReadonlyArray<SyntaxTree.Node>>([])
+    const argumentNode = selectorNodes.at(0) ?? node
+    const roleNode = selectorNodes.at(1)
     const directToken =
-      node.kind === 'TypePath'
-        ? SyntaxTree.tokens(node).find((token) => token.kind === 'Identifier')
+      argumentNode.kind === 'TypePath'
+        ? SyntaxTree.tokens(argumentNode).find((token) => token.kind === 'Identifier')
         : undefined
     const directParameter =
       directToken === undefined ? undefined : environment.get(spelling(source, directToken))
@@ -3917,7 +3925,43 @@ const analyzeCallTypeArguments = (
         }),
         diagnostics: Object.freeze([]),
       })
-    const raw = DeclarationIndex.analyzeDeclaredType(source, node, environment)
+    const roleSegments =
+      roleNode?.kind === 'TypePath'
+        ? SyntaxTree.tokens(roleNode)
+            .filter((token) => token.kind === 'Identifier')
+            .map((token) => Object.freeze({ spelling: spelling(source, token), token }))
+        : []
+    const rolePath =
+      roleNode?.kind === 'TypePath' && roleSegments.length > 0
+        ? Object.freeze({
+            _tag: 'TypePath' as const,
+            spelling: roleSegments.map((segment) => segment.spelling).join('.'),
+            segments: Object.freeze(roleSegments),
+            syntax: roleNode,
+          })
+        : undefined
+    const roleResolution =
+      rolePath === undefined
+        ? undefined
+        : NameResolution.resolveItem(nameResolution, resolution.index, source.id, rolePath)
+    const roleDeclaration =
+      roleResolution?._tag === 'Resolved' && roleResolution.declaration._tag === 'RoleDeclaration'
+        ? roleResolution.declaration
+        : undefined
+    const requirementRole =
+      roleDeclaration?.canonical._tag === 'Canonical'
+        ? RequirementRow.declaredRole(
+            roleDeclaration.canonical.id.module,
+            roleDeclaration.canonical.id.name,
+          )
+        : undefined
+    const roleDiagnostics =
+      rolePath === undefined || requirementRole !== undefined
+        ? Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([])
+        : Object.freeze([
+            Diagnostic.invalidRequirementType(`role ${rolePath.spelling}`, rolePath.syntax.span),
+          ])
+    const raw = DeclarationIndex.analyzeDeclaredType(source, argumentNode, environment)
     const resolved = DeclarationIndex.resolveTypeFact(
       resolution.index,
       source.id,
@@ -3937,24 +3981,17 @@ const analyzeCallTypeArguments = (
         ordinal,
         syntax: node,
         declared: resolved.fact,
-        ...(node.kind === 'ReferenceType'
-          ? (() => {
-              const tokens = SyntaxTree.tokens(node)
-              const at = tokens.findIndex((token) => token.kind === 'At')
-              const role =
-                at < 0
-                  ? undefined
-                  : tokens.slice(at + 1).find((token) => token.kind === 'Identifier')
-              return role === undefined ? {} : { requirementRole: spelling(source, role) }
-            })()
-          : {}),
-        ...(resolved.fact._tag === 'Resolved' && invalidBorrow === undefined
+        ...(requirementRole === undefined ? {} : { requirementRole }),
+        ...(resolved.fact._tag === 'Resolved' &&
+        invalidBorrow === undefined &&
+        roleDiagnostics.length === 0
           ? { type: resolved.fact.type }
           : {}),
       }),
       diagnostics: Diagnostic.merge(
         raw.diagnostics,
         resolved.diagnostics,
+        roleDiagnostics,
         ...(invalidBorrow === undefined ? [] : [[invalidBorrow]]),
       ),
     })
@@ -4116,29 +4153,29 @@ const seededSpecialization = (
       parameter.kind === 'Value' && Type.isTypeArgument(writtenType)
         ? writtenType
         : parameter.kind === 'RequirementRow'
-          ? Type.isReference(writtenType) &&
-            (Type.isNominal(writtenType.target) || Type.isParameter(writtenType.target))
-            ? Type.isParameter(writtenType.target)
-              ? Type.requirementRowArgumentFromRow(
-                  RowAlgebra.singleton(
-                    Type.requirementRowPolicy(),
-                    Type.requirementMemberShape(
-                      writtenType.target,
-                      writtenType.access,
-                      fact.requirementRole ?? 'DefaultRole',
+          ? Type.isParameter(writtenType) && writtenType.kind === 'RequirementRow'
+            ? Type.requirementRowArgument([], [writtenType])
+            : Type.isNominal(writtenType) ||
+                (Type.isParameter(writtenType) && writtenType.kind === 'Value')
+              ? Type.isParameter(writtenType)
+                ? Type.requirementRowArgumentFromRow(
+                    RowAlgebra.singleton(
+                      Type.requirementRowPolicy(),
+                      Type.requirementMemberShape(
+                        writtenType,
+                        'Shared',
+                        fact.requirementRole ?? RequirementRow.defaultRole,
+                      ),
+                      fact.syntax.span,
                     ),
-                    fact.syntax.span,
-                  ),
-                )
-              : Type.requirementRowArgument([
-                  Object.freeze({
-                    capability: writtenType.target,
-                    role: fact.requirementRole ?? 'DefaultRole',
-                    access: writtenType.access,
-                  }),
-                ])
-            : Type.isParameter(writtenType) && writtenType.kind === 'RequirementRow'
-              ? Type.requirementRowArgument([], [writtenType])
+                  )
+                : Type.requirementRowArgument([
+                    Object.freeze({
+                      capability: writtenType,
+                      role: fact.requirementRole ?? RequirementRow.defaultRole,
+                      access: 'Shared',
+                    }),
+                  ])
               : undefined
           : undefined
     if (argument === undefined) {
@@ -4147,7 +4184,7 @@ const seededSpecialization = (
           diagnostic: Diagnostic.genericParameterKindMismatch(
             parameter.name,
             parameter.kind,
-            Type.isReference(writtenType) ? 'RequirementRow' : 'Value',
+            Type.isNominal(writtenType) ? 'RequirementRow' : 'Value',
             fact.syntax.span,
           ),
         }),

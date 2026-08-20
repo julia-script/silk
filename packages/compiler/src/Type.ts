@@ -119,7 +119,7 @@ export interface FailureMemberShape {
 export interface RequirementMemberShape {
   readonly capability: Parameter
   readonly access: Requirement['access']
-  readonly role: string
+  readonly role: RequirementRow.Role
 }
 
 export type FailureRow = RowAlgebra.Row<Type, Parameter, FailureMemberShape>
@@ -685,7 +685,7 @@ export function requirementRowPolicy(): RowAlgebra.Policy<
     symbolicMemberKey: (member: RequirementMemberShape) =>
       Canonical.record('RequirementMemberShape', [
         member.access,
-        member.role,
+        RequirementRow.roleKey(member.role),
         key(member.capability),
       ]),
     symbolicMemberParameters: (member: RequirementMemberShape) =>
@@ -694,7 +694,7 @@ export function requirementRowPolicy(): RowAlgebra.Policy<
     memberWellFormedKey: (member: RequirementMemberShape) =>
       Canonical.record('RequirementMemberWellFormed', [
         member.access,
-        member.role,
+        RequirementRow.roleKey(member.role),
         key(member.capability),
       ]),
     allowsSetCancellation: false,
@@ -707,7 +707,7 @@ export const failureMemberShape = (parameter_: Parameter): FailureMemberShape =>
 export const requirementMemberShape = (
   capability: Parameter,
   access: Requirement['access'],
-  role: string,
+  role: RequirementRow.Role,
 ): RequirementMemberShape => Object.freeze({ capability, access, role })
 
 /** Constructs an Effect directly from symbolic channel rows. */
@@ -1185,10 +1185,10 @@ export const encodeGenericArgument = (self: GenericArgument): string =>
                     requirementRowPolicy(),
                     self.row,
                     (requirement) =>
-                      `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+                      `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
                     (parameter_) => parameter_.name,
                     (member) =>
-                      `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === 'DefaultRole' ? '' : `@${member.role}`}`,
+                      `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
                   )}`
                 : encode(self)
 
@@ -1921,10 +1921,10 @@ export const encode = (self: Type): string => {
       requirementRowPolicy(),
       self.requirementRow,
       (requirement) =>
-        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
       (parameter_) => parameter_.name,
       (member) =>
-        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === 'DefaultRole' ? '' : `@${member.role}`}`,
+        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
     )
     const requirements = requirementMembers.length === 0 ? '' : ` ? ${requirementMembers}`
     return `${access}Effect<${encode(self.success)}${row}${requirements}>`

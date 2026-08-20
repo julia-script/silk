@@ -17,6 +17,7 @@ export type TokenKind =
   | 'StructKeyword'
   | 'ServiceKeyword'
   | 'InterfaceKeyword'
+  | 'RoleKeyword'
   | 'EffectKeyword'
   | 'FnKeyword'
   | 'RunKeyword'
@@ -95,6 +96,7 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   StructKeyword: '`struct`',
   ServiceKeyword: '`service`',
   InterfaceKeyword: '`interface`',
+  RoleKeyword: '`role`',
   EffectKeyword: '`effect`',
   FnKeyword: '`fn`',
   RunKeyword: '`run`',

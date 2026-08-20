@@ -55,14 +55,15 @@ pub fn main() -> i32 {
   let handled = retrying() |> Effect.catchAll(recover)
   return run handled
 }`
-const providerSource = `service Clock { effect fn tick() -> i32 ? &Clock }
+const providerSource = `role Primary
+service Clock { effect fn tick() -> i32 ? &Clock }
 struct FixedClock { marker: i32 }
 effect fn tick(self: &FixedClock) -> i32 { return self.marker }
 impl Clock for FixedClock { tick: FixedClock.tick }
-effect fn read() -> i32 ? &Clock@Primary { return 42 }
+effect fn read() -> i32 ? &Clock at Primary { return 42 }
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
-  let provided = read() |> Intrinsic.bindRequirement<&Clock@Primary>(&clock)
+  let provided = read() |> Intrinsic.bindRequirement<Clock at Primary>(&clock)
   return run provided
 }`
 const callableMapSource = `effect fn succeed(value: i32) -> i32 { return value }

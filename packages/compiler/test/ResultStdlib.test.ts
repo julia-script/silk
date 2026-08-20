@@ -128,7 +128,8 @@ pub fn main() -> i32 {
   return 42
 }`
 
-const boundRequirements = `service Clock { effect fn value() -> i32 ? &Clock }
+const boundRequirements = `role Primary
+service Clock { effect fn value() -> i32 ? &Clock }
 service Config { effect fn value() -> i32 ? &Config }
 struct FixedClock { value: i32 }
 struct FixedConfig { value: i32 }
@@ -137,12 +138,12 @@ effect fn configValue(self: &FixedConfig) -> i32 { return self.value }
 impl Clock for FixedClock { value: FixedClock.clockValue }
 impl Config for FixedConfig { value: FixedConfig.configValue }
 
-effect fn read() -> i32 ? &Clock@Primary | &Config { return 42 }
+effect fn read() -> i32 ? &Clock at Primary | &Config { return 42 }
 
 pub fn main() -> i32 {
   let clock = FixedClock { value: 1 }
   let config = FixedConfig { value: 2 }
-  let rest = Intrinsic.bindRequirement<&Clock@Primary>(read(), &clock)
+  let rest = Intrinsic.bindRequirement<Clock at Primary>(read(), &clock)
   let closed = rest |> Intrinsic.bindRequirement(&config)
   return run closed
 }`

@@ -138,8 +138,8 @@ pub fn main() -> i32 {
   let alphaProvider = Fixed { value: 3 }
   let betaProvider = Fixed { value: 4 }
   let chosen = Effect.ifThenElse(${condition}, fromAlpha, fromBeta)
-  let provided = Effect.provide<&Beta>(
-    Effect.provide<&Alpha>(move chosen, &alphaProvider),
+  let provided = Effect.provide<Beta>(
+    Effect.provide<Alpha>(move chosen, &alphaProvider),
     &betaProvider,
   )
   return run provided

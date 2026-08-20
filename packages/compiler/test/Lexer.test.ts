@@ -593,7 +593,7 @@ it('recognizes once only as a complete callable-mode keyword', () => {
 
 it('recognizes requirement-row and role punctuation', () => {
   const result = Lexer.lex(
-    SourceFile.make('memory://effect-requirements.silk', ascii('? &Allocator@Scratch')),
+    SourceFile.make('memory://effect-requirements.silk', ascii('? &Allocator at Scratch')),
   )
   assert.deepEqual(
     result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),

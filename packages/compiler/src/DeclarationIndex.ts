@@ -11,6 +11,7 @@ import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
 import type * as ModuleClosure from './ModuleClosure.js'
+import * as RequirementRow from './RequirementRow.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as SourceFile from './SourceFile.js'
@@ -127,6 +128,17 @@ export interface TypePathFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** Source and resolution state of one optional nominal dependency role. */
+export type RequirementRoleFact =
+  | { readonly _tag: 'DefaultRole' }
+  | { readonly _tag: 'UnresolvedRole'; readonly path: TypePathFact }
+  | {
+      readonly _tag: 'ResolvedRole'
+      readonly role: Type.Requirement['role']
+      readonly path: TypePathFact
+      readonly declaration: CanonicalId
+    }
+
 /** The normalized or unavailable decimal length retained by fixed-array type syntax. */
 export type ArrayLengthFact =
   | {
@@ -212,7 +224,7 @@ export type DeclaredTypeFact =
       readonly requirementRow?: {
         readonly requirements: ReadonlyArray<{
           readonly capability: DeclaredTypeFact
-          readonly role: string
+          readonly role: RequirementRoleFact
           readonly access: Type.Requirement['access']
           readonly syntax: SyntaxTree.Node
         }>
@@ -231,7 +243,7 @@ export type DeclaredTypeFact =
       readonly failures: ReadonlyArray<DeclaredTypeFact>
       readonly requirements: ReadonlyArray<{
         readonly capability: DeclaredTypeFact
-        readonly role: string
+        readonly role: RequirementRoleFact
         readonly access: Type.Requirement['access']
         readonly syntax: SyntaxTree.Node
       }>
@@ -301,7 +313,7 @@ export type RowExpressionFact =
       readonly _tag: 'RequirementMemberExpression'
       readonly capability: DeclaredTypeFact
       readonly access: Type.Requirement['access']
-      readonly role: string
+      readonly role: RequirementRoleFact
       readonly syntax: SyntaxTree.Node
     }
   | {
@@ -351,7 +363,7 @@ export interface RequirementRowFact {
   readonly _tag: 'RequirementRow'
   readonly entries: ReadonlyArray<{
     readonly capability: DeclaredTypeFact
-    readonly role: string
+    readonly role: RequirementRoleFact
     readonly access: Type.Requirement['access']
     readonly syntax: SyntaxTree.Node
   }>
@@ -485,6 +497,17 @@ export interface ConstantFact {
   readonly declaredType: DeclaredTypeFact
   readonly literal: ConstantLiteralFact
   readonly initializer: SyntaxTree.Node
+  readonly syntax: SyntaxTree.Node
+}
+
+/** One nominal compile-time dependency role declaration. */
+export interface RoleFact {
+  readonly _tag: 'RoleDeclaration'
+  readonly id: DeclarationId
+  readonly canonical: CanonicalState
+  readonly visibility: 'Public' | 'Private'
+  readonly typeParameters: ReadonlyArray<TypeParameterFact>
+  readonly name: DeclaredName
   readonly syntax: SyntaxTree.Node
 }
 
@@ -821,11 +844,12 @@ const substituteRowExpressionFact = (
         ...fact,
         member: substituteDeclaredTypeFact(fact.member, substitution),
       })
-    case 'RequirementMemberExpression':
+    case 'RequirementMemberExpression': {
       return Object.freeze({
         ...fact,
         capability: substituteDeclaredTypeFact(fact.capability, substitution),
       })
+    }
     case 'UnionRowExpression':
       return Object.freeze({
         ...fact,
@@ -1169,7 +1193,13 @@ export type ConformanceWitness =
     }
 
 /** Any declaration kind occupying the shared module-level namespace. */
-export type MemberFact = DeclarationFact | StructFact | ServiceFact | InterfaceFact | ConstantFact
+export type MemberFact =
+  | DeclarationFact
+  | StructFact
+  | ServiceFact
+  | InterfaceFact
+  | ConstantFact
+  | RoleFact
 
 export type ParameterLookup =
   | { readonly _tag: 'Resolved'; readonly spelling: string; readonly parameter: ParameterFact }
@@ -1267,6 +1297,45 @@ const spelling = (source: SourceFile.SourceFile, token: Token.Token): string =>
     SourceFile.spelling(source, token.span),
     () => new RangeError(`Header token span does not belong to source ${source.id}`),
   )
+
+const retainedTypePath = (
+  source: SourceFile.SourceFile,
+  syntax: SyntaxTree.Node,
+): TypePathFact | undefined => {
+  const segments = SyntaxTree.tokens(syntax)
+    .filter((token) => token.kind === 'Identifier')
+    .map((token) => Object.freeze({ spelling: spelling(source, token), token }))
+  return segments.length === 0
+    ? undefined
+    : Object.freeze({
+        _tag: 'TypePath',
+        spelling: segments.map((segment) => segment.spelling).join('.'),
+        segments: Object.freeze(segments),
+        syntax,
+      })
+}
+
+const collectedRequirementRole = (
+  source: SourceFile.SourceFile,
+  requirement: SyntaxTree.Node,
+): RequirementRoleFact => {
+  const at = SyntaxTree.directToken(requirement, 'Identifier')
+  const roleSyntax =
+    at === undefined ? undefined : SyntaxTree.directNodes(requirement, 'TypePath').at(-1)
+  const path = roleSyntax?.kind === 'TypePath' ? retainedTypePath(source, roleSyntax) : undefined
+  return path === undefined
+    ? Object.freeze({ _tag: 'DefaultRole' })
+    : Object.freeze({ _tag: 'UnresolvedRole', path })
+}
+
+const requirementRoleIdentity = (
+  role: RequirementRoleFact,
+): Type.Requirement['role'] | undefined =>
+  role._tag === 'DefaultRole'
+    ? RequirementRow.defaultRole
+    : role._tag === 'ResolvedRole'
+      ? role.role
+      : undefined
 
 const childNode = (parent: SyntaxTree.Node, kind: SyntaxTree.NodeKind): SyntaxTree.Node => {
   const child = SyntaxTree.directNode(parent, kind)
@@ -1859,10 +1928,9 @@ export const analyzeDeclaredType = (
                     diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
                   })
                 : analyzeDeclaredType(source, capability, typeParameters)
-            const role = SyntaxTree.directToken(requirement, 'Identifier')
             return Object.freeze({
               capability: analyzed,
-              role: role === undefined ? 'DefaultRole' : spelling(source, role),
+              role: collectedRequirementRole(source, requirement),
               access:
                 SyntaxTree.directToken(requirement, 'MutKeyword') === undefined
                   ? ('Shared' as const)
@@ -1938,13 +2006,14 @@ export const analyzeDeclaredType = (
       )
       const resolvedRequirements = requirements.flatMap((requirement) =>
         requirement.capability.fact._tag === 'Resolved' &&
+        requirementRoleIdentity(requirement.role) !== undefined &&
         (Type.isNominal(requirement.capability.fact.type) ||
           (Type.isParameter(requirement.capability.fact.type) &&
             requirement.capability.fact.type.kind === 'Value'))
           ? [
               Object.freeze({
                 capability: requirement.capability.fact.type,
-                role: requirement.role,
+                role: requirementRoleIdentity(requirement.role) ?? RequirementRow.defaultRole,
                 access: requirement.access,
               }),
             ]
@@ -2049,10 +2118,9 @@ export const analyzeDeclaredType = (
                   diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
                 })
               : analyzeDeclaredType(source, capability, typeParameters)
-          const role = SyntaxTree.directToken(requirement, 'Identifier')
           return Object.freeze({
             capability: analyzed,
-            role: role === undefined ? 'DefaultRole' : spelling(source, role),
+            role: collectedRequirementRole(source, requirement),
             access:
               SyntaxTree.directToken(requirement, 'MutKeyword') === undefined
                 ? ('Shared' as const)
@@ -2274,7 +2342,10 @@ const analyzeParameter = (
   functionId: DeclarationId,
   ordinal: number,
   typeParameters: ReadonlyMap<string, Type.Parameter> = new Map(),
-): { readonly fact: ParameterFact; readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic> } => {
+): {
+  readonly fact: ParameterFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
   const colonIndex = node.children.findIndex((element) => isSeparator(element, 'Colon'))
   const nameElements = colonIndex < 0 ? node.children : node.children.slice(0, colonIndex)
   const nameToken = identifierToken(nameElements)
@@ -2284,7 +2355,11 @@ const analyzeParameter = (
           _tag: 'Unavailable',
           syntax: SyntaxTree.unavailableElement(nameElements, node),
         })
-      : Object.freeze({ _tag: 'Present', spelling: spelling(source, nameToken), token: nameToken })
+      : Object.freeze({
+          _tag: 'Present',
+          spelling: spelling(source, nameToken),
+          token: nameToken,
+        })
   const type = analyzeDeclaredType(source, declaredTypeNode(node), typeParameters)
   return Object.freeze({
     fact: Object.freeze({
@@ -2727,13 +2802,12 @@ const collectRequirementRowExpression = (
       diagnostics: Object.freeze([]),
     })
   const analyzed = analyzeDeclaredType(source, capabilitySyntax, typeParameters)
-  const roleToken = SyntaxTree.directToken(syntax, 'Identifier')
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'RequirementMemberExpression',
       capability: analyzed.fact,
       access: SyntaxTree.directToken(syntax, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive',
-      role: roleToken === undefined ? 'DefaultRole' : spelling(source, roleToken),
+      role: collectedRequirementRole(source, syntax),
       syntax,
     }),
     diagnostics: analyzed.diagnostics,
@@ -2880,10 +2954,9 @@ const collectRequirementRow = (
           })
         : analyzeDeclaredType(source, capabilitySyntax, typeParameters)
     diagnostics.push(...analyzed.diagnostics)
-    const roleToken = SyntaxTree.directToken(requirement, 'Identifier')
     return Object.freeze({
       capability: analyzed.fact,
-      role: roleToken === undefined ? 'DefaultRole' : spelling(source, roleToken),
+      role: collectedRequirementRole(source, requirement),
       access:
         SyntaxTree.directToken(requirement, 'MutKeyword') === undefined
           ? ('Shared' as const)
@@ -3034,6 +3107,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         element.kind === 'StructDeclaration' ||
         element.kind === 'ServiceDeclaration' ||
         element.kind === 'InterfaceDeclaration' ||
+        element.kind === 'RoleDeclaration' ||
         element.kind === 'ConstantDeclaration'),
   )
   const first = new Map<string, { readonly id: CanonicalId; readonly token: Token.Token }>()
@@ -3234,7 +3308,11 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     })
   let nestedDeclarationOrdinal = nodes.length
   const ownMembers = nodes.map((node, ordinal): MemberFact => {
-    const id: DeclarationId = Object.freeze({ _tag: 'DeclarationId', sourceId: source.id, ordinal })
+    const id: DeclarationId = Object.freeze({
+      _tag: 'DeclarationId',
+      sourceId: source.id,
+      ordinal,
+    })
     const name = presentName(source, node)
     let canonical: CanonicalState
     if (name._tag !== 'Present') canonical = Object.freeze({ _tag: 'Unidentified' })
@@ -3288,6 +3366,17 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         declaredType: declaredType.fact,
         literal: constantLiteral(source, initializer),
         initializer,
+        syntax: node,
+      })
+    }
+    if (node.kind === 'RoleDeclaration') {
+      return Object.freeze({
+        _tag: 'RoleDeclaration',
+        id,
+        canonical,
+        visibility,
+        typeParameters: Object.freeze([]),
+        name,
         syntax: node,
       })
     }
@@ -3991,16 +4080,19 @@ const resolveDeclaredType = (
     const failures = fact.failures.map((failure) =>
       resolveDeclaredType(module, failure, resolvers, modules),
     )
-    const requirements = fact.requirements.map((requirement) =>
-      Object.freeze({
+    const requirements = fact.requirements.map((requirement) => {
+      const role = resolveRequirementRole(module, requirement.role, resolvers)
+      return Object.freeze({
         ...requirement,
         capability: resolveDeclaredType(module, requirement.capability, resolvers, modules),
-      }),
-    )
+        role,
+      })
+    })
     const diagnostics: Array<Diagnostic.Diagnostic> = [
       ...success.diagnostics,
       ...failures.flatMap((failure) => failure.diagnostics),
       ...requirements.flatMap((requirement) => requirement.capability.diagnostics),
+      ...requirements.flatMap((requirement) => requirement.role.diagnostics),
     ]
     const failureTypes: Array<Type.Type> = []
     const symbolicFailureTypes: Array<{
@@ -4034,6 +4126,7 @@ const resolveDeclaredType = (
     for (const requirement of requirements) {
       if (
         requirement.capability.fact._tag === 'Resolved' &&
+        requirementRoleIdentity(requirement.role.fact) !== undefined &&
         (Type.isNominal(requirement.capability.fact.type) ||
           (Type.isParameter(requirement.capability.fact.type) &&
             requirement.capability.fact.type.kind === 'Value'))
@@ -4041,7 +4134,7 @@ const resolveDeclaredType = (
         requirementTypes.push(
           Object.freeze({
             capability: requirement.capability.fact.type,
-            role: requirement.role,
+            role: requirementRoleIdentity(requirement.role.fact) ?? RequirementRow.defaultRole,
             access: requirement.access,
           }),
         )
@@ -4107,7 +4200,11 @@ const resolveDeclaredType = (
         failures: Object.freeze(failures.map((failure) => failure.fact)),
         requirements: Object.freeze(
           requirements.map((requirement) =>
-            Object.freeze({ ...requirement, capability: requirement.capability.fact }),
+            Object.freeze({
+              ...requirement,
+              capability: requirement.capability.fact,
+              role: requirement.role.fact,
+            }),
           ),
         ),
         ...(cause === undefined ? {} : { cause: Diagnostic.identity(cause) }),
@@ -4124,16 +4221,19 @@ const resolveDeclaredType = (
       resolveDeclaredType(module, argument, resolvers, modules),
     )
     const requirements =
-      fact.requirementRow?.requirements.map((requirement) =>
-        Object.freeze({
+      fact.requirementRow?.requirements.map((requirement) => {
+        const role = resolveRequirementRole(module, requirement.role, resolvers)
+        return Object.freeze({
           ...requirement,
           capability: resolveDeclaredType(module, requirement.capability, resolvers, modules),
-        }),
-      ) ?? []
+          role,
+        })
+      }) ?? []
     const diagnostics = [
       ...target.diagnostics,
       ...arguments_.flatMap((argument) => argument.diagnostics),
       ...requirements.flatMap((requirement) => requirement.capability.diagnostics),
+      ...requirements.flatMap((requirement) => requirement.role.diagnostics),
     ]
     if (target.fact._tag === 'Resolved' && Type.isNominal(target.fact.type)) {
       const declaration = memberByNominal(modules, target.fact.type)
@@ -4155,13 +4255,18 @@ const resolveDeclaredType = (
             ? [
                 Object.freeze({
                   capability: requirement.capability.fact.type,
-                  role: requirement.role,
+                  role:
+                    requirementRoleIdentity(requirement.role.fact) ?? RequirementRow.defaultRole,
                   access: requirement.access,
                 }),
               ]
             : [],
       )
-      const requirementsAvailable = requirementTypes.length === requirements.length
+      const requirementsAvailable =
+        requirementTypes.length === requirements.length &&
+        requirements.every(
+          (requirement) => requirementRoleIdentity(requirement.role.fact) !== undefined,
+        )
       const rowArguments: ReadonlyArray<Type.GenericArgument | undefined> = Object.freeze([
         ...(fact.requirementRow === undefined
           ? []
@@ -5011,6 +5116,48 @@ export const resolveTypeFact = (
     index.modules,
   )
 
+const resolveRequirementRole = (
+  module: string,
+  role: RequirementRoleFact,
+  resolvers: ResolutionSeams.ResolutionSeams,
+): {
+  readonly fact: RequirementRoleFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  if (role._tag !== 'UnresolvedRole')
+    return Object.freeze({ fact: role, diagnostics: Object.freeze([]) })
+  const resolution = resolvers.item(module, role.path)
+  const declaration =
+    resolution._tag === 'Resolved' || resolution._tag === 'Inaccessible'
+      ? resolution.declaration
+      : resolution._tag === 'Unavailable'
+        ? resolution.declaration
+        : undefined
+  if (
+    resolution._tag === 'Resolved' &&
+    declaration?._tag === 'RoleDeclaration' &&
+    declaration.canonical._tag === 'Canonical'
+  )
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'ResolvedRole',
+        role: RequirementRow.declaredRole(
+          declaration.canonical.id.module,
+          declaration.canonical.id.name,
+        ),
+        path: role.path,
+        declaration: declaration.canonical.id,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  return Object.freeze({
+    fact: role,
+    diagnostics: Object.freeze([
+      Diagnostic.invalidRequirementType(`role ${role.path.spelling}`, role.path.syntax.span),
+    ]),
+  })
+}
+
 const resolveRowExpressionFact = (
   module: string,
   fact: RowExpressionFact,
@@ -5034,9 +5181,10 @@ const resolveRowExpressionFact = (
     }
     case 'RequirementMemberExpression': {
       const capability = resolveDeclaredType(module, fact.capability, resolvers, modules)
+      const role = resolveRequirementRole(module, fact.role, resolvers)
       return Object.freeze({
-        fact: Object.freeze({ ...fact, capability: capability.fact }),
-        diagnostics: capability.diagnostics,
+        fact: Object.freeze({ ...fact, capability: capability.fact, role: role.fact }),
+        diagnostics: Object.freeze([...capability.diagnostics, ...role.diagnostics]),
       })
     }
     case 'UnionRowExpression': {
@@ -5136,24 +5284,27 @@ const semanticRequirementRow = (fact: RowExpressionFact): Type.RequirementsRow =
             fact.parameter,
           )
         : RowAlgebra.concrete(Type.requirementRowPolicy(), [])
-    case 'RequirementMemberExpression':
+    case 'RequirementMemberExpression': {
       if (fact.capability._tag !== 'Resolved')
         return RowAlgebra.concrete(Type.requirementRowPolicy(), [])
+      const role = requirementRoleIdentity(fact.role)
+      if (role === undefined) return RowAlgebra.concrete(Type.requirementRowPolicy(), [])
       if (Type.isNominal(fact.capability.type))
         return RowAlgebra.concrete(Type.requirementRowPolicy(), [
           Object.freeze({
             capability: fact.capability.type,
             access: fact.access,
-            role: fact.role,
+            role,
           }),
         ])
       if (Type.isParameter(fact.capability.type) && fact.capability.type.kind === 'Value')
         return RowAlgebra.singleton(
           Type.requirementRowPolicy(),
-          Type.requirementMemberShape(fact.capability.type, fact.access, fact.role),
+          Type.requirementMemberShape(fact.capability.type, fact.access, role),
           fact.syntax.span,
         )
       return RowAlgebra.concrete(Type.requirementRowPolicy(), [])
+    }
     case 'UnionRowExpression':
       return fact.operands.reduce<Type.RequirementsRow>(
         (row, operand) =>
@@ -5270,14 +5421,16 @@ const resolveRequirementRow = (
   // The entry pass below owns diagnostics for these same source nodes.
   const entries = row.entries.map((entry) => {
     const capability = resolveDeclaredType(module, entry.capability, resolvers, modules)
-    diagnostics.push(...capability.diagnostics)
-    return Object.freeze({ ...entry, capability: capability.fact })
+    const role = resolveRequirementRole(module, entry.role, resolvers)
+    diagnostics.push(...capability.diagnostics, ...role.diagnostics)
+    return Object.freeze({ ...entry, capability: capability.fact, role: role.fact })
   })
   const requirements: Array<Type.Requirement> = []
   let available = row.parameters.length === 0
   for (const entry of entries) {
     if (
       entry.capability._tag === 'Resolved' &&
+      requirementRoleIdentity(entry.role) !== undefined &&
       ((Type.isNominal(entry.capability.type) &&
         dependencyEligible(modules, entry.capability.type)) ||
         (Type.isParameter(entry.capability.type) && entry.capability.type.kind === 'Value'))
@@ -5285,7 +5438,7 @@ const resolveRequirementRow = (
       requirements.push(
         Object.freeze({
           capability: entry.capability.type,
-          role: entry.role,
+          role: requirementRoleIdentity(entry.role) ?? RequirementRow.defaultRole,
           access: entry.access,
         }),
       )
@@ -5784,6 +5937,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           operationContracts: interfaceOperationContracts(completed, operations),
         })
       }
+      if (member._tag === 'RoleDeclaration') return member
       const fields = member.fields.map((field) => {
         const resolved = resolveDeclaredType(
           module.module,
@@ -6642,6 +6796,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         }
         continue
       }
+      if (member._tag === 'RoleDeclaration') continue
       for (const field of member.fields) {
         if (
           field.declaredType._tag === 'Resolved' &&
@@ -6712,6 +6867,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           operationContracts: interfaceOperationContracts(exposed, operations),
         })
       }
+      if (member._tag === 'RoleDeclaration') return member
       const fields = member.fields.map((field) =>
         field.visibility === 'Public'
           ? Object.freeze({

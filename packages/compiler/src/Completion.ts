@@ -243,7 +243,9 @@ const namespaceCandidates = (
                   ? 'Function'
                   : declaration._tag === 'ConstantDeclaration'
                     ? 'Constant'
-                    : 'Type',
+                    : declaration._tag === 'RoleDeclaration'
+                      ? 'Type'
+                      : 'Type',
               label: declaration.name.spelling,
               detail:
                 declaration._tag === 'FunctionDeclaration'
@@ -253,7 +255,9 @@ const namespaceCandidates = (
                     : declaration._tag === 'ServiceDeclaration' ||
                         declaration._tag === 'InterfaceDeclaration'
                       ? PresentationRenderer.serviceDeclaration(declaration)
-                      : PresentationRenderer.structDeclaration(declaration),
+                      : declaration._tag === 'RoleDeclaration'
+                        ? PresentationRenderer.roleDeclaration(declaration)
+                        : PresentationRenderer.structDeclaration(declaration),
               sortGroup: 0,
             }),
           ],
@@ -480,7 +484,9 @@ const expressionCandidates = (
                 : declaration._tag === 'ServiceDeclaration' ||
                     declaration._tag === 'InterfaceDeclaration'
                   ? 'Type'
-                  : 'Constructor',
+                  : declaration._tag === 'RoleDeclaration'
+                    ? 'Type'
+                    : 'Constructor',
           label: declaration.name.spelling,
           detail:
             declaration._tag === 'FunctionDeclaration'
@@ -490,7 +496,9 @@ const expressionCandidates = (
                 : declaration._tag === 'ServiceDeclaration' ||
                     declaration._tag === 'InterfaceDeclaration'
                   ? PresentationRenderer.serviceDeclaration(declaration)
-                  : PresentationRenderer.structDeclaration(declaration),
+                  : declaration._tag === 'RoleDeclaration'
+                    ? PresentationRenderer.roleDeclaration(declaration)
+                    : PresentationRenderer.structDeclaration(declaration),
           sortGroup: 2,
         }),
       )
@@ -509,7 +517,9 @@ const expressionCandidates = (
                 : declaration._tag === 'ServiceDeclaration' ||
                     declaration._tag === 'InterfaceDeclaration'
                   ? 'Type'
-                  : 'Constructor',
+                  : declaration._tag === 'RoleDeclaration'
+                    ? 'Type'
+                    : 'Constructor',
           label: binding.spelling,
           detail:
             declaration._tag === 'FunctionDeclaration'
@@ -519,7 +529,9 @@ const expressionCandidates = (
                 : declaration._tag === 'ServiceDeclaration' ||
                     declaration._tag === 'InterfaceDeclaration'
                   ? PresentationRenderer.serviceDeclaration(declaration)
-                  : PresentationRenderer.structDeclaration(declaration),
+                  : declaration._tag === 'RoleDeclaration'
+                    ? PresentationRenderer.roleDeclaration(declaration)
+                    : PresentationRenderer.structDeclaration(declaration),
           sortGroup: 3,
         }),
       )

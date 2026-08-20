@@ -14,6 +14,8 @@ export type NodeKind =
   | 'StructDeclaration'
   | 'ServiceDeclaration'
   | 'InterfaceDeclaration'
+  | 'RoleDeclaration'
+  | 'RequirementSelector'
   | 'ServiceOperation'
   | 'ServiceInvalidMember'
   | 'ConstantDeclaration'

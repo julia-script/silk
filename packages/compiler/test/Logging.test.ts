@@ -409,7 +409,7 @@ effect fn read() -> i32 ? &mut Logger { return 42 }
 
 pub fn main() -> i32 {
   let mut logger = InMemoryLogger.memory()
-  let direct = Intrinsic.bindRequirementMut<&mut Logger>(&mut logger)
+  let direct = Intrinsic.bindRequirementMut<Logger>(&mut logger)
   ${aliases}
   return run bind(read())
 }`)
@@ -447,7 +447,7 @@ effect fn read() -> i32 ? &mut Logger { return 42 }
 
 pub fn main() -> i32 {
   let mut logger = InMemoryLogger.memory()
-  let bind = observeThenForward(Effect.provideMut<&mut Logger>(&mut logger))
+  let bind = observeThenForward(Effect.provideMut<Logger>(&mut logger))
   return run bind(read())
 }`)
     assert.include(
@@ -461,16 +461,16 @@ pub fn main() -> i32 {
 it.effect('erases dropped constrained provider sections without materializing a callable', () =>
   Effect.gen(function* () {
     for (const [name, bindings] of [
-      ['ordinary wrapper', 'let bind = forward(Effect.provideMut<&mut Logger>(&mut logger))'],
-      ['direct intrinsic', 'let bind = Intrinsic.bindRequirementMut<&mut Logger>(&mut logger)'],
+      ['ordinary wrapper', 'let bind = forward(Effect.provideMut<Logger>(&mut logger))'],
+      ['direct intrinsic', 'let bind = Intrinsic.bindRequirementMut<Logger>(&mut logger)'],
       [
         'single-hop direct intrinsic alias',
-        `let direct = Intrinsic.bindRequirementMut<&mut Logger>(&mut logger)
+        `let direct = Intrinsic.bindRequirementMut<Logger>(&mut logger)
   let bind = move direct`,
       ],
       [
         'multi-hop direct intrinsic alias',
-        `let direct = Intrinsic.bindRequirementMut<&mut Logger>(&mut logger)
+        `let direct = Intrinsic.bindRequirementMut<Logger>(&mut logger)
   let first = move direct
   let bind = move first`,
       ],
@@ -511,13 +511,13 @@ it.effect(
 }
 pub fn main() -> i32 {
   let mut logger = InMemoryLogger.memory()
-  let escaped = store(Effect.provideMut<&mut Logger>(&mut logger))
+  let escaped = store(Effect.provideMut<Logger>(&mut logger))
   return 42
 }`,
         `fn consume<F>(value: F) -> () { return () }
 pub fn main() -> i32 {
   let mut logger = InMemoryLogger.memory()
-  let consumed = consume(Effect.provideMut<&mut Logger>(&mut logger))
+  let consumed = consume(Effect.provideMut<Logger>(&mut logger))
   return 42
 }`,
         `fn invoke<A, E, ?R, F: fn(once Effect<A ! E ? R>) -> Effect<A ! E>>(operation: F, value: once Effect<A ! E ? R>) -> Effect<A ! E> {
@@ -525,7 +525,7 @@ pub fn main() -> i32 {
 }
 pub fn main() -> i32 {
   let mut logger = InMemoryLogger.memory()
-  let operation = invoke(Effect.provideMut<&mut Logger>(&mut logger), Effect.log("indirect"))
+  let operation = invoke(Effect.provideMut<Logger>(&mut logger), Effect.log("indirect"))
   return 42
 }`,
       ]

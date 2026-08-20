@@ -167,7 +167,9 @@ pub fn main() -> i32 { return run seed(41) |> Effect.map(increment) }`
   }),
 )
 
-const suspendingAllocator = `struct SuspendingAllocator {}
+const suspendingAllocator = `role SharedAudit
+role ExclusiveAudit
+struct SuspendingAllocator {}
 
 effect fn allocate(
   self: &mut SuspendingAllocator,
@@ -186,7 +188,7 @@ it.effect('keeps shared non-default Allocator demands out of private coroutine s
     const self = yield* snapshot(`${suspendingAllocator}
 
 effect fn work() -> i32
-? &Allocator@SharedAudit | &Allocator@ExclusiveAudit {
+? &Allocator at SharedAudit | &Allocator at ExclusiveAudit {
   return run Effect.suspend(effect { return 42 })
 }
 
@@ -194,8 +196,8 @@ pub fn main() -> i32 {
   let sharedAudit = SuspendingAllocator {}
   let mut exclusiveAudit = SuspendingAllocator {}
   return run (work()
-    |> Effect.provide<&Allocator@SharedAudit>(&sharedAudit)
-    |> Effect.provideMut<&Allocator@ExclusiveAudit>(&mut exclusiveAudit))
+    |> Effect.provide<Allocator at SharedAudit>(&sharedAudit)
+    |> Effect.provideMut<Allocator at ExclusiveAudit>(&mut exclusiveAudit))
 }`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])

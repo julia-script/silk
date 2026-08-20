@@ -353,7 +353,7 @@ effect fn twice() -> i32 ? &mut Counter {
 }
 pub fn main() -> i32 {
   let cell = Cell { value: 20 }
-  return run Effect.bindRequirementOwned<&mut Counter>(twice(), move cell)
+  return run Effect.bindRequirementOwned<Counter>(twice(), move cell)
 }`
     const self = yield* snapshot(source, 'wasm32-unknown-unknown')
     assert.deepEqual(Analysis.diagnostics(self), [])
@@ -449,8 +449,8 @@ effect fn program() -> i32 ? &mut Value | &mut Allocator {
 pub fn main() -> i32 {
   let mut fixed = Fixed { value: 42 }
   let mut allocator = SystemAllocator.make()
-  return run Effect.provideMut<&mut Allocator>(
-    Effect.provideMut<&mut Value>(program(), &mut fixed),
+  return run Effect.provideMut<Allocator>(
+    Effect.provideMut<Value>(program(), &mut fixed),
     &mut allocator,
   )
 }`
@@ -519,7 +519,7 @@ effect fn acquire() -> Provider ! Problem { return run Effect.catchAll(open(), e
 effect fn use() -> i32 ? &mut Value { return run Value.read() }
 effect fn body() -> i32 ! Problem {
   let provider = run acquire()
-  return run Intrinsic.bindRequirementOwned<&mut Value>(use(), move provider)
+  return run Intrinsic.bindRequirementOwned<Value>(use(), move provider)
 }
 effect fn recover(error: Problem) -> i32 { return -1 }
 pub fn main() -> i32 { return run Effect.catchAll(body(), recover) }`
@@ -540,15 +540,17 @@ pub fn main() -> i32 { return run Effect.catchAll(body(), recover) }`
 
 it.effect('selects service roles and provider replacements without dynamic lookup', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`service Values {
-  effect fn left() -> i32 ? &Values@Left
-  effect fn right() -> i32 ? &Values@Right
+    const { self, outcome } = yield* evaluate(`role Left
+role Right
+service Values {
+  effect fn left() -> i32 ? &Values at Left
+  effect fn right() -> i32 ? &Values at Right
 }
 struct Fixed { value: i32 }
 effect fn left(self: &Fixed) -> i32 { return self.value }
 effect fn right(self: &Fixed) -> i32 { return self.value }
 impl Values for Fixed { left: Fixed.left right: Fixed.right }
-effect fn total() -> i32 ? &Values@Left | &Values@Right {
+effect fn total() -> i32 ? &Values at Left | &Values at Right {
   let leftValue = run Values.left()
   let rightValue = run Values.right()
   return leftValue * 10 + rightValue
@@ -557,8 +559,8 @@ pub fn main() -> i32 {
   let left = Fixed { value: 4 }
   let right = Fixed { value: 2 }
   let selected = total()
-    |> Intrinsic.bindRequirement<&Values@Left>(&left)
-    |> Intrinsic.bindRequirement<&Values@Right>(&right)
+    |> Intrinsic.bindRequirement<Values at Left>(&left)
+    |> Intrinsic.bindRequirement<Values at Right>(&right)
   return run selected
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])

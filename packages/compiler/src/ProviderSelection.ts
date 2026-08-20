@@ -7,6 +7,11 @@ import * as Type from './Type.js'
 
 export type CandidateStatus =
   | { readonly _tag: 'Unique'; readonly match: Constraint.ProviderMatch }
+  | {
+      readonly _tag: 'AccessMismatch'
+      readonly provider: RequirementRow.ProviderAccess
+      readonly required: RequirementRow.Access
+    }
   | { readonly _tag: 'Ambiguous'; readonly witnesses: ReadonlyArray<Constraint.WitnessIdentity> }
   | { readonly _tag: 'Invalid'; readonly reason: string }
 
@@ -53,6 +58,13 @@ export type SelectionProblem =
   | {
       readonly _tag: 'ProviderNoMatch'
       readonly constraintKey: string
+    }
+  | {
+      readonly _tag: 'ProviderAccessMismatch'
+      readonly memberKey: string
+      readonly constraintKey: string
+      readonly provider: RequirementRow.ProviderAccess
+      readonly required: RequirementRow.Access
     }
   | {
       readonly _tag: 'JointSelectionConflict'
@@ -142,17 +154,20 @@ const candidateStatus = (
   member: Type.Requirement,
   oracle: ConformanceOracle,
 ): CandidateStatus | undefined => {
-  if (!RequirementRow.providerCanSelect(providerAccess(wanted.mode), member.access))
-    return undefined
+  const access = providerAccess(wanted.mode)
   if (Type.equals(wanted.provider, member.capability))
-    return Object.freeze({ _tag: 'Unique', match: Object.freeze({ _tag: 'Identity' }) })
+    return RequirementRow.providerCanSelect(access, member.access)
+      ? Object.freeze({ _tag: 'Unique', match: Object.freeze({ _tag: 'Identity' }) })
+      : Object.freeze({ _tag: 'AccessMismatch', provider: access, required: member.access })
   if (!Type.isNominal(member.capability)) return undefined
   const outcome = oracle.match(wanted.provider, member.capability)
   switch (outcome._tag) {
     case 'NoMatch':
       return undefined
     case 'Unique':
-      return Object.freeze({ _tag: 'Unique', match: outcome.match })
+      return RequirementRow.providerCanSelect(access, member.access)
+        ? Object.freeze({ _tag: 'Unique', match: outcome.match })
+        : Object.freeze({ _tag: 'AccessMismatch', provider: access, required: member.access })
     case 'Ambiguous':
       return Object.freeze({
         _tag: 'Ambiguous',
@@ -328,6 +343,19 @@ export const solve = (options: {
   for (const key of surviving)
     for (const relation of considered) {
       const status = candidateAt(relation, key).status
+      if (status._tag === 'AccessMismatch')
+        statusDiagnostics.push(
+          diagnostic(
+            {
+              _tag: 'ProviderAccessMismatch',
+              memberKey: key,
+              constraintKey: relation.constraintKey,
+              provider: status.provider,
+              required: status.required,
+            },
+            locations([relation], options.responsible),
+          ),
+        )
       if (status._tag === 'Ambiguous')
         statusDiagnostics.push(
           diagnostic(

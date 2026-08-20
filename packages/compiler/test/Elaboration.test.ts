@@ -372,13 +372,15 @@ it('subtracts a provided capability role from an Effect contract', () => {
   const result = analyzeText(
     'effect://provide-role',
     `service Clock {}
+role Left
+role Right
 struct FixedClock {}
 impl Clock for FixedClock {}
-effect fn work() -> i32 ? &Clock@Left | &Clock@Right { return 42 }
+effect fn work() -> i32 ? &Clock at Left | &Clock at Right { return 42 }
 fn main() -> i32 {
   let left = FixedClock {}
   let right = FixedClock {}
-  let recipe = work() |> Intrinsic.bindRequirement<&Clock@Left>(&left) |> Intrinsic.bindRequirement<&Clock@Right>(&right)
+  let recipe = work() |> Intrinsic.bindRequirement<Clock at Left>(&left) |> Intrinsic.bindRequirement<Clock at Right>(&right)
   return run recipe
 }`,
   )
@@ -390,9 +392,11 @@ it.effect('requires an explicit role when the same capability has multiple requi
     const result = yield* analyzeWithStdlib(
       'effect://ambiguous-provide-role',
       `service Clock {}
+role Left
+role Right
 struct FixedClock {}
 impl Clock for FixedClock {}
-effect fn work() -> i32 ? &Clock@Left | &Clock@Right { return 42 }
+effect fn work() -> i32 ? &Clock at Left | &Clock at Right { return 42 }
 fn main() -> i32 {
   let clock = FixedClock {}
   let recipe = work() |> Effect.provide(&clock)
@@ -412,6 +416,7 @@ it('requires an exclusive provider for an exclusive capability requirement', () 
     'effect://exclusive-provider',
     `service Allocator {}
 struct TestAllocator {}
+impl Allocator for TestAllocator {}
 effect fn allocate() -> i32 ? &mut Allocator { return 42 }
 fn main() -> i32 {
   let allocator = TestAllocator {}
@@ -422,7 +427,7 @@ fn main() -> i32 {
 
   assert.include(
     result.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0123',
+    'SEM0131',
   )
 })
 

@@ -234,6 +234,8 @@ export const invalidProviderConformanceCode = 'SEM0128' as const
 export const returnTypeMismatchCode = 'SEM0129' as const
 /** Stable code for a reachable non-unit function fallthrough. */
 export const missingReturnCode = 'SEM0130' as const
+/** Stable code for a provider whose key matches but whose access cannot satisfy the requirement. */
+export const providerAccessMismatchCode = 'SEM0131' as const
 /** Stable code for a `typeof` item that resolves to no declaration in scope. */
 export const unresolvedExactRepresentationItemCode = 'SEM0108' as const
 /** Stable code for a `typeof` item whose name belongs to more than one declaration. */
@@ -415,6 +417,7 @@ export type Code =
   | typeof invalidProviderConformanceCode
   | typeof returnTypeMismatchCode
   | typeof missingReturnCode
+  | typeof providerAccessMismatchCode
   | typeof unresolvedExactRepresentationItemCode
   | typeof ambiguousExactRepresentationItemCode
   | typeof uncallableExactRepresentationItemCode
@@ -3115,6 +3118,19 @@ const providerNoMatch = (
     ...providerSelectionFields(problem, locations),
   })
 
+const providerAccessMismatch = (
+  problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ProviderAccessMismatch' }>,
+  locations: ProviderSelection.DiagnosticLocations,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: providerAccessMismatchCode,
+    severity: 'error',
+    message: `${problem.provider.toLowerCase()} provider access cannot satisfy an ${problem.required.toLowerCase()} requirement`,
+    ...providerSelectionFields(problem, locations),
+  })
+
 const jointProviderSelectionConflict = (
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'JointSelectionConflict' }>,
   locations: ProviderSelection.DiagnosticLocations,
@@ -3188,6 +3204,8 @@ export const providerSelection = (
   switch (problem._tag) {
     case 'ProviderNoMatch':
       return providerNoMatch(problem, diagnostic.locations)
+    case 'ProviderAccessMismatch':
+      return providerAccessMismatch(problem, diagnostic.locations)
     case 'JointSelectionConflict':
       return jointProviderSelectionConflict(problem, diagnostic.locations)
     case 'ProviderAmbiguity':

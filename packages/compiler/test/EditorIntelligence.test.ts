@@ -724,7 +724,7 @@ pub struct Other {}`
       )
       assert.strictEqual(
         Presentation.type(effect, 'main', scope),
-        'Effect<&mut Schema.Box<i32> ! Problem | E ? &mut Allocator@Heap | R>',
+        'Effect<&mut Schema.Box<i32> ! Problem | E ? &mut Allocator at Heap | R>',
       )
       assert.strictEqual(
         Presentation.genericArgument(Type.failureValue([problem]), 'main', scope),
@@ -738,7 +738,7 @@ pub struct Other {}`
           'main',
           scope,
         ),
-        '? &mut Allocator@Heap',
+        '? &mut Allocator at Heap',
       )
       const union = Type.union(Object.freeze([problem, Type.outOfMemoryError]))
       assert.strictEqual(

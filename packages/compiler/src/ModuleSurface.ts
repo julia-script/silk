@@ -1400,6 +1400,19 @@ const arrayLength = (value: DeclarationIndex.ArrayLengthFact): string => {
   }
 }
 
+const requirementRoleFact = (value: DeclarationIndex.RequirementRoleFact): string => {
+  switch (value._tag) {
+    case 'DefaultRole':
+      return record('DefaultRole')
+    case 'UnresolvedRole':
+      return record('UnresolvedRole', [typePath(value.path)])
+    case 'ResolvedRole':
+      return record('ResolvedRole', [value.role])
+    default:
+      return exhaustive(value)
+  }
+}
+
 const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
   switch (value._tag) {
     case 'Resolved':
@@ -1444,7 +1457,7 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
                   value.requirementRow.requirements.map((requirement) =>
                     record('Requirement', [
                       declaredType(requirement.capability),
-                      requirement.role,
+                      requirementRoleFact(requirement.role),
                       requirement.access,
                     ]),
                   ),
@@ -1462,7 +1475,7 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
           value.requirements.map((requirement) =>
             record('Requirement', [
               declaredType(requirement.capability),
-              requirement.role,
+              requirementRoleFact(requirement.role),
               requirement.access,
             ]),
           ),
@@ -1519,7 +1532,7 @@ const rowExpression = (value: DeclarationIndex.RowExpressionFact): string => {
       return record('RequirementMemberExpression', [
         declaredType(value.capability),
         value.access,
-        value.role,
+        requirementRoleFact(value.role),
       ])
     case 'UnionRowExpression':
       return record('UnionRowExpression', [array(value.operands.map(rowExpression))])
@@ -1564,7 +1577,11 @@ const requirementRow = (value: DeclarationIndex.RequirementRowFact): string =>
     boolean(value.available),
     array(
       value.entries.map((entry) =>
-        record('RequirementEntry', [declaredType(entry.capability), entry.role, entry.access]),
+        record('RequirementEntry', [
+          declaredType(entry.capability),
+          requirementRoleFact(entry.role),
+          entry.access,
+        ]),
       ),
     ),
     rowExpression(value.expression),
@@ -1794,6 +1811,13 @@ const member = (value: DeclarationIndex.MemberFact): string => {
       return service(value)
     case 'ConstantDeclaration':
       return constant(value)
+    case 'RoleDeclaration':
+      return record('RoleDeclaration', [
+        declarationIdOrdinal(value.id),
+        canonicalState(value.canonical),
+        value.visibility,
+        name(value.name),
+      ])
     default:
       return exhaustive(value)
   }

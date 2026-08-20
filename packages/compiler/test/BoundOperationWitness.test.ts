@@ -331,7 +331,7 @@ impl Combined for Cell { add: Cell.cellAdd }
 
 effect fn branch<Self: Combined>(flag: bool, left: Self, right: Self) -> i32 {
   let fixed = Fixed {}
-  let pending = Intrinsic.bindRequirement<&Counter>(Counter.read(left + right), &fixed)
+  let pending = Intrinsic.bindRequirement<Counter>(Counter.read(left + right), &fixed)
   if flag {
     return run move pending
   }

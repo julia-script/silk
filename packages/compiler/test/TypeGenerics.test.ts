@@ -618,7 +618,7 @@ effect fn useFailures() -> i32 ! First | Second {
   return run keepFailures<First | Second>(risky())
 }
 effect fn useRequirements() -> i32 ? &Clock {
-  return run keepRequirements<&Clock>(read())
+  return run keepRequirements<Clock>(read())
 }
 pub fn main() -> i32 { return 0 }`),
     )
@@ -635,7 +635,7 @@ it.effect('rejects a borrowed explicit failure type', () =>
 struct Clock {}
 effect fn risky() -> i32 ! Problem { fail Problem {} }
 effect fn keepFailures<E>(self: once Effect<i32 ! E>) -> i32 ! E { return run self }
-effect fn invalid() -> i32 ! Problem { return run keepFailures<&Clock>(risky()) }
+effect fn invalid() -> i32 ! Problem { return run keepFailures<Clock>(risky()) }
 pub fn main() -> i32 { return 0 }`),
     )
 

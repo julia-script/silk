@@ -3,6 +3,7 @@ import type * as Elaboration from './Elaboration.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as IntrinsicCatalog from './Intrinsic.js'
 import type * as NameResolution from './NameResolution.js'
+import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Type from './Type.js'
 
@@ -18,6 +19,7 @@ export type Presentation =
     })
   | (Base & { readonly _tag: 'StructPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ServicePresentation'; readonly name: string })
+  | (Base & { readonly _tag: 'RolePresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ServiceOperationPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ConstantPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ParameterPresentation'; readonly name: string })
@@ -40,6 +42,16 @@ export type Presentation =
 const declaredType = (fact: DeclarationIndex.DeclaredTypeFact): string =>
   fact._tag === 'Unavailable' ? '_' : fact.spelling
 
+const requirementRole = (fact: DeclarationIndex.RequirementRoleFact): string => {
+  switch (fact._tag) {
+    case 'DefaultRole':
+      return ''
+    case 'UnresolvedRole':
+    case 'ResolvedRole':
+      return ` at ${fact.path.spelling}`
+  }
+}
+
 const rowExpression = (fact: DeclarationIndex.RowExpressionFact): string => {
   switch (fact._tag) {
     case 'EmptyRowExpression':
@@ -49,7 +61,7 @@ const rowExpression = (fact: DeclarationIndex.RowExpressionFact): string => {
     case 'FailureMemberExpression':
       return declaredType(fact.member)
     case 'RequirementMemberExpression':
-      return `${fact.access === 'Exclusive' ? '&mut ' : '&'}${declaredType(fact.capability)}${fact.role === 'DefaultRole' ? '' : `@${fact.role}`}`
+      return `${fact.access === 'Exclusive' ? '&mut ' : '&'}${declaredType(fact.capability)}${requirementRole(fact.role)}`
     case 'UnionRowExpression':
       return fact.operands.map(rowExpression).join(' | ')
     case 'WithoutRowExpression':
@@ -134,6 +146,17 @@ export const serviceDeclaration = (
     _tag: 'ServicePresentation',
     name,
     text: `${visibility}${self._tag === 'ServiceDeclaration' ? 'service' : 'interface'} ${name}${typeParameters}`,
+  })
+}
+
+/** Renders one nominal dependency role declaration. */
+export const roleDeclaration = (self: DeclarationIndex.RoleFact): Presentation => {
+  const name = self.name._tag === 'Present' ? self.name.spelling : '_'
+  const visibility = self.visibility === 'Public' ? 'pub ' : ''
+  return Object.freeze({
+    _tag: 'RolePresentation',
+    name,
+    text: `${visibility}role ${name}`,
   })
 }
 
@@ -262,10 +285,10 @@ export const type = (
       Type.requirementRowPolicy(),
       self.requirementRow,
       (requirement) =>
-        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
       (parameter_) => parameter_.name,
       (member) =>
-        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === 'DefaultRole' ? '' : `@${member.role}`}`,
+        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
     )
     const requirements = requirementText.length === 0 ? '' : ` ? ${requirementText}`
     return `Effect<${type(self.success, module, scope)}${failures}${requirements}>`
@@ -297,10 +320,10 @@ export const genericArgument = (
                     Type.requirementRowPolicy(),
                     self.row,
                     (requirement) =>
-                      `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+                      `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
                     (parameter_) => parameter_.name,
                     (member) =>
-                      `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === 'DefaultRole' ? '' : `@${member.role}`}`,
+                      `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
                   )}`
                 : type(self, module, scope)
 

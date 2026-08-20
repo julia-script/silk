@@ -6,10 +6,21 @@ export type Access = 'Shared' | 'Exclusive'
 /** Access used by a provider-selection constraint. */
 export type ProviderAccess = Access | 'Take'
 
+/** Opaque canonical identity of one dependency role. */
+export type Role = string
+
+export const defaultRole: Role = 'DefaultRole'
+
+export const declaredRole = (module: string, name: string): Role => `${module}::${name}`
+
+export const roleKey = (role: Role): string => role
+
+export const roleName = (role: Role): string => role.split('::').at(-1) ?? role
+
 /** One requirement key plus the access demanded at that key. */
 export interface Member<Capability> {
   readonly capability: Capability
-  readonly role: string
+  readonly role: Role
   readonly access: Access
 }
 
@@ -17,7 +28,7 @@ export interface Member<Capability> {
 export const key = <Capability>(
   capabilityKey: (capability: Capability) => string,
   member: Pick<Member<Capability>, 'capability' | 'role'>,
-): string => `${capabilityKey(member.capability)}@${member.role}`
+): string => `${capabilityKey(member.capability)}@${roleKey(member.role)}`
 
 /** Constructs the finite-row policy for a capability identity domain. */
 export const policy = <Capability>(
@@ -26,7 +37,7 @@ export const policy = <Capability>(
   Object.freeze({
     collisionKey: (member: Member<Capability>) => key(capabilityKey, member),
     memberKey: (member: Member<Capability>) =>
-      `${capabilityKey(member.capability)}@${member.role}:${member.access}`,
+      `${capabilityKey(member.capability)}@${roleKey(member.role)}:${member.access}`,
     differenceKey: (member: Member<Capability>) => key(capabilityKey, member),
     merge: (left: Member<Capability>, right: Member<Capability>): Member<Capability> =>
       Object.freeze({
