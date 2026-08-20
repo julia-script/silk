@@ -16,5 +16,5 @@
 - [x] 3.1 Expose structured integrity outcomes consistently through driver, CLI, embeddings, and tooling.
 - [x] 3.2 Add stale catalog/source, mismatched intrinsic, missing promised runtime, unsupported target, and valid subset tests.
 - [x] 3.3 Add fresh-process deterministic digest coverage in the designated global canary rather than per feature.
-- [ ] 3.4 Update canonical specs, toolchain/CLI docs, diagnostics, generated artifacts, and release validation.
-- [ ] 3.5 Run typecheck, Biome, full tests, release-candidate checks, and `pnpm check`.
+- [x] 3.4 Update canonical specs, toolchain/CLI docs, diagnostics, generated artifacts, and release validation.
+- [x] 3.5 Run typecheck, Biome, full tests, release-candidate checks, and `pnpm check`.
