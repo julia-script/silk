@@ -149,6 +149,14 @@ pub effect fn insert<T>(self: &mut silk/vector.Vector<T>, index: usize, value: T
 
 Inserts one owned value at an index, shifting later elements without requiring T to be Copy.
 
+<a id="declaration-73696c6b2f766563746f723a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `Copy for silk/vector.Read<T>`
+
+```silk
+impl Copy for silk/vector.Read<T>
+```
+
 <a id="declaration-73696c6b2f766563746f723a3a676574"></a>
 
 ## `get`

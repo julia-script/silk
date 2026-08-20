@@ -968,7 +968,10 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
     assert.isDefined(DeclarationIndex.witness(index, guard, Type.dropCapability))
     assert.isTrue(DeclarationIndex.conforms(index, guard, Type.dropCapability))
     for (const accepted of [copyValue, Type.nominal('drop-hooks', 'UnionHolder')]) {
-      assert.strictEqual(DeclarationIndex.prove(index, accepted, Type.dropCapability)._tag, 'Proved')
+      assert.strictEqual(
+        DeclarationIndex.prove(index, accepted, Type.dropCapability)._tag,
+        'Proved',
+      )
       assert.isTrue(DeclarationIndex.conforms(index, accepted, Type.dropCapability))
     }
     assert.deepEqual(
@@ -1041,7 +1044,14 @@ impl Clock for FixedClock {}`,
             Type.equals(conformance.capability.type, Type.copyCapability),
         )
         .map((conformance) => conformance.validity._tag),
-      ['ValidConformance', 'ValidConformance', 'InvalidConformance', 'InvalidConformance', 'InvalidConformance', 'ValidConformance'],
+      [
+        'ValidConformance',
+        'ValidConformance',
+        'InvalidConformance',
+        'InvalidConformance',
+        'InvalidConformance',
+        'ValidConformance',
+      ],
     )
     assert.strictEqual(
       index.diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0083').length,

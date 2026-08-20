@@ -706,6 +706,7 @@ export const callableFieldRealizations = (
   index: DeclarationIndex.Index,
 ): CallableFieldRealization.Index =>
   CallableFieldRealization.realize(
+    index,
     RepresentationField.resolveFields(index, representedNominals(self, index)),
     self.callables,
     self.effects,
@@ -2447,6 +2448,7 @@ const concreteEffects = (
   suspendableEffects: ReadonlySet<string>,
   results: ReadonlyMap<string, Elaboration.Result>,
   index: DeclarationIndex.Index,
+  callables: ReadonlyArray<CallableInstance>,
 ): ReadonlyArray<EffectInstance> => {
   const effects = new Map<string, EffectInstance>()
   for (const instance of instances) {
@@ -2482,8 +2484,10 @@ const concreteEffects = (
           })
         : undefined
     for (const block of blocks) {
-      const type = specializeInstanceType(block.type, instance.key, [instance.substitution])
-      if (!Type.isEffect(type) || !Type.isRuntimeConcrete(type)) continue
+      const specializedType = specializeInstanceType(block.type, instance.key, [
+        instance.substitution,
+      ])
+      if (!Type.isEffect(specializedType) || !Type.isRuntimeConcrete(specializedType)) continue
       const captures = block.captures.flatMap((capture, ordinal) => {
         const source = capture.binding === undefined ? 'Parameter' : 'Binding'
         const sourceOrdinal = capture.binding?.ordinal ?? capture.parameter?.ordinal
@@ -2559,7 +2563,7 @@ const concreteEffects = (
           runner: Hir.effectRunnerId(instance.key.declaration, block.site),
           typeArguments: Object.freeze([...instance.key.typeArguments]),
           captures: Object.freeze(captures),
-          type,
+          type: specializedType,
           suspendable: suspendableEffects.has(identity),
         }),
       )
@@ -2627,8 +2631,71 @@ const concreteEffects = (
       )
     }
   }
+  const callableFor = (identity: Type.CallableIdentityArgument): CallableInstance | undefined =>
+    callables.find(
+      (candidate) =>
+        identity.environment !== undefined &&
+        Type.equalsCallableEnvironmentIdentity(
+          identity.environment,
+          Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
+        ) &&
+        Hir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
+        identity.typeArguments.length === candidate.typeArguments.length &&
+        identity.typeArguments.every((argument, ordinal) => {
+          const expected = candidate.typeArguments.at(ordinal)
+          return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+        }),
+    )
+  let refined = new Map(effects)
+  for (let pass = 0; pass <= effects.size; pass += 1) {
+    let changed = false
+    const next = new Map(refined)
+    for (const [identity, effect] of refined) {
+      if (effect.site.ordinal !== -1) continue
+      const captures = effect.captures.map((capture) => {
+        if (capture.source !== 'Parameter' || capture.access !== 'Take') return capture
+        const capturedEffect =
+          capture.effectIdentity === undefined ? undefined : refined.get(capture.effectIdentity)
+        const capturedCallable =
+          capture.callableIdentity === undefined ? undefined : callableFor(capture.callableIdentity)
+        const copy =
+          capturedEffect?.type.access === 'Shared' ||
+          capturedCallable?.mode === 'Shared' ||
+          (capture.effectIdentity === undefined &&
+            capture.callableIdentity === undefined &&
+            DeclarationIndex.copyType(index, capture.type))
+        return copy ? Object.freeze({ ...capture, access: 'Copy' as const }) : capture
+      })
+      const access = captures.some((capture) => capture.access === 'Take')
+        ? 'Take'
+        : captures.some((capture) => capture.access === 'Exclusive')
+          ? 'Exclusive'
+          : 'Shared'
+      if (
+        access === effect.type.access &&
+        captures.every((capture, ordinal) => capture === effect.captures.at(ordinal))
+      )
+        continue
+      changed = true
+      next.set(
+        identity,
+        Object.freeze({
+          ...effect,
+          captures: Object.freeze(captures),
+          type: Type.effectWithRows(
+            effect.type.success,
+            effect.type.failureRow,
+            access,
+            effect.type.requirementRow,
+          ),
+        }),
+      )
+    }
+    refined = next
+    if (!changed) break
+  }
   return Object.freeze(
-    [...effects.values()].sort((left, right) => left.identity.localeCompare(right.identity)),
+    [...refined.values()].sort((left, right) => left.identity.localeCompare(right.identity)),
   )
 }
 
@@ -3195,7 +3262,13 @@ export const discover = (
     entry,
     instances,
     callables: Object.freeze([...recordedCallables.values()]),
-    effects: concreteEffects(instances, new Set(suspendableEffectIdentities), results, index),
+    effects: concreteEffects(
+      instances,
+      new Set(suspendableEffectIdentities),
+      results,
+      index,
+      Object.freeze([...recordedCallables.values()]),
+    ),
     calls: callInstances,
     intrinsics: reachableIntrinsics(instances, index),
     suspendableExecutions: Object.freeze(

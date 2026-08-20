@@ -96,7 +96,7 @@ it.effect('realizes a named callable field with a static target and no capture l
     assert.deepEqual(realization.cleanup.lanes, [])
     assert.strictEqual(realization.cleanup.consumedByInvocation, false)
     assert.strictEqual(realization.invocation, 'Shared')
-    assert.strictEqual(realization.liveness.moveOnly, true)
+    assert.strictEqual(realization.liveness.moveOnly, false)
     assert.strictEqual(realization.liveness.ownedLanes, 0)
   }),
 )
@@ -401,6 +401,7 @@ pub fn main() -> i32 {
         Type.requirementRowArgument([requirement]),
       ])
       const support = CallableFieldRealization.realizeField(
+        snapshot.index,
         Object.freeze({
           ...resolution,
           argument: Type.exactRepresentationArgument(resolution.argument.identity, contract),
@@ -504,6 +505,7 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
       ) ?? unreachable('expected an unavailable representation field resolution')
     assert.strictEqual(openResolution._tag, 'UnavailableRepresentationField')
     const open = CallableFieldRealization.realizeField(
+      snapshot.index,
       openResolution,
       snapshot.instances.callables,
       snapshot.instances.effects,
@@ -517,6 +519,7 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
     // An Effect identity without its canonical discovered runner stays explicitly unsupported.
     const effect = Type.effect('i32', [])
     const stored = CallableFieldRealization.realizeField(
+      snapshot.index,
       Object.freeze({
         _tag: 'ResolvedRepresentationField',
         id: plan.id,
@@ -539,6 +542,7 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
 
     // A section identity whose specialized environment was never discovered stays unsupported.
     const missing = CallableFieldRealization.realizeField(
+      snapshot.index,
       Object.freeze({
         _tag: 'ResolvedRepresentationField',
         id: plan.id,
@@ -749,7 +753,7 @@ it.effect('mints the represented Effect origin in exactly one frontend module', 
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
-it.effect('rejects extracting an owned callable field with its own diagnostic', () =>
+it.effect('rejects extracting an owned callable field as an ordinary partial move', () =>
   Effect.gen(function* () {
     const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
 fn decode(value: i32) -> i32 { return value }
@@ -760,17 +764,10 @@ pub fn main() -> i32 {
 }`
     const snapshot = yield* realized('callable-field/extraction', source)
     const diagnostic = Analysis.diagnostics(snapshot).find(
-      (candidate) => candidate.code === 'OWN0013',
+      (candidate) => candidate.code === 'OWN0002',
     )
 
-    // The representation-bearing field names its own rejection instead of the general partial-move
-    // rule, so the reason records the aggregate, the field, and the callable contract.
-    assert.strictEqual(diagnostic?.reason._tag, 'RepresentationFieldExtraction')
-    assert.include(diagnostic?.message ?? '', 'cleaned with the whole aggregate')
-    assert.notInclude(
-      Analysis.diagnostics(snapshot).map((candidate) => candidate.code),
-      'OWN0002',
-    )
+    assert.strictEqual(diagnostic?.reason._tag, 'PartialMove')
   }),
 )
 
@@ -787,7 +784,6 @@ pub fn main() -> i32 {
     const codes = Analysis.diagnostics(snapshot).map((candidate) => candidate.code)
 
     assert.include(codes, 'OWN0002')
-    assert.notInclude(codes, 'OWN0013')
   }),
 )
 

@@ -5204,7 +5204,7 @@ function lowerExpressionInner(
             element: semanticElement,
             stride:
               Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
-            retainsSource: Mir.isStructurallyCopy(fn.layout, semanticElement),
+            retainsSource: Mir.isCopy(fn.layout, semanticElement),
             type,
             provenance: authored(expression.span),
           }),
@@ -5919,7 +5919,7 @@ const callableLocalCleanup = (
       [...environment.fields]
         .reverse()
         .flatMap((field) =>
-          field.access === 'Take' && !copyType(field.type)
+          field.access === 'Take' && !Mir.isCopy(fn.layout, field.type)
             ? [Object.freeze({ ordinal: field.ordinal, cleanup: concreteCleanup(fn, field.type) })]
             : [],
         ),
@@ -5973,9 +5973,6 @@ const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined
     )
   }
 }
-
-const copyType = (type: Type.Type): boolean =>
-  Type.isBuiltin(type) || (Type.isFixedArray(type) && copyType(type.element))
 
 const effectContract = (type: Type.Type): Type.Effect | undefined => {
   const contract = Type.isRepresented(type) ? type.contract : type
@@ -6490,7 +6487,7 @@ const lowerSequence = (
           rootType,
           type,
           mutable: true,
-          replacement: copyType(fn.semantic(statement.place.type)) ? 'Copy' : 'Owned',
+          replacement: Mir.isCopy(fn.layout, fn.semantic(statement.place.type)) ? 'Copy' : 'Owned',
           commit: 'AfterCleanup',
           provenance: authored(statement.span),
         }),

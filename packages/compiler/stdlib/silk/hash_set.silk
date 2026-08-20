@@ -50,6 +50,8 @@ pub struct Member<T> {
   value: T
 }
 
+impl<T: Copy> Copy for Member<T> {}
+
 /// Allocation-free storage state used before the set creates its first table.
 pub struct Unseeded<T> {
   anchor: [Member<T>; 0]
@@ -531,21 +533,21 @@ fn evict<T>(owned: &mut Slots<T>, index: usize) -> T {
 /// # Details
 ///
 /// Reads a copy out of the set, so it answers for a set whose element type is `Copy`.
-pub fn elementAt<T>(self: &HashSet<T>, index: usize) -> T {
+pub fn elementAt<T: Copy>(self: &HashSet<T>, index: usize) -> T {
   if !occupiedAt<T>(self, index) {
     let boom = 1 / 0
   }
   return keep<T>(readMember<T>(self, index))
 }
 
-fn readMember<T>(self: &HashSet<T>, index: usize) -> Member<T> {
+fn readMember<T: Copy>(self: &HashSet<T>, index: usize) -> Member<T> {
   return match &self.storage {
     Unseeded<T> nothing => absurd<Member<T>>()
     Slots<T> { members, states } => readAt<T>(&members, index)
   }
 }
 
-fn readAt<T>(members: &RawBuffer<Member<T>>, index: usize) -> Member<T> {
+fn readAt<T: Copy>(members: &RawBuffer<Member<T>>, index: usize) -> Member<T> {
   unsafe {
     return RawBuffer.read<Member<T>>(members, index)
   }

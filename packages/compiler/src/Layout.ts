@@ -1,5 +1,5 @@
 import * as CallableFieldRealization from './CallableFieldRealization.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -124,6 +124,8 @@ export type Representation =
 export interface Entry {
   readonly _tag: 'LayoutEntry'
   readonly type: DeclarationIndex.SemanticType
+  /** Concrete sealed Copy evidence carried unchanged into MIR and every backend. */
+  readonly copy: boolean
   readonly size: number
   readonly alignment: number
   readonly representation: Representation
@@ -469,6 +471,7 @@ const scalarEntry = (target: Target.Target, type: Type.Builtin): Entry => {
   return Object.freeze({
     _tag: 'LayoutEntry',
     type,
+    copy: true,
     size: layout.size,
     alignment: layout.alignment,
     representation,
@@ -485,6 +488,7 @@ const repeatedEntry = (type: Type.FixedArray, element: Entry): Entry | undefined
   return Object.freeze({
     _tag: 'LayoutEntry',
     type,
+    copy: element.copy,
     size,
     alignment: element.alignment,
     representation: Object.freeze({
@@ -505,6 +509,7 @@ const sliceEntry = (target: Target.Target, type: Type.Slice, element: Entry): En
   return Object.freeze({
     _tag: 'LayoutEntry',
     type,
+    copy: type.access === 'Shared',
     size,
     alignment,
     representation: Object.freeze({
@@ -533,6 +538,7 @@ const stringEntry = (target: Target.Target): Entry => {
   return Object.freeze({
     _tag: 'LayoutEntry',
     type: Type.string,
+    copy: true,
     size,
     alignment,
     representation: Object.freeze({
@@ -559,6 +565,7 @@ const referenceEntry = (target: Target.Target, type: Type.Reference): Entry =>
   Object.freeze({
     _tag: 'LayoutEntry',
     type,
+    copy: type.access === 'Shared',
     size: target.pointerSize,
     alignment: target.pointerAlignment,
     representation: Object.freeze({
@@ -586,6 +593,7 @@ const unionEntry = (type: Type.StructuralUnion, members: ReadonlyArray<Entry>): 
   return Object.freeze({
     _tag: 'LayoutEntry',
     type,
+    copy: members.every((member) => member.copy),
     size,
     alignment,
     representation: Object.freeze({
@@ -618,6 +626,7 @@ const neverEntry = (): Entry =>
   Object.freeze({
     _tag: 'LayoutEntry',
     type: 'never',
+    copy: true,
     size: 0,
     alignment: 1,
     representation: Object.freeze({
@@ -689,6 +698,7 @@ export const catalog = (
 
   interface InlineEnvironmentLayout {
     readonly fields: ReadonlyArray<StoredEffectEnvironmentField>
+    readonly copy: boolean
     readonly size: number
     readonly alignment: number
     readonly tailPadding: number
@@ -700,6 +710,7 @@ export const catalog = (
   ): InlineEnvironmentLayout | undefined => {
     let cursor = 0
     let environmentAlignment = 1
+    let copy = true
     const fields: Array<StoredEffectEnvironmentField> = []
     for (const slot of slots) {
       const nestedEffect =
@@ -723,7 +734,9 @@ export const catalog = (
         nestedEffect === undefined &&
         nestedCallable === undefined &&
         !stableDescriptor
-      let nestedLayout: { readonly size: number; readonly alignment: number } | undefined
+      let nestedLayout:
+        | { readonly size: number; readonly alignment: number; readonly copy: boolean }
+        | undefined
       if (nestedEffect !== undefined) {
         if (active.has(nestedEffect.identity)) return undefined
         nestedLayout = layoutEffectSlots(
@@ -733,6 +746,7 @@ export const catalog = (
       } else if (nestedCallable !== undefined) {
         let callableCursor = 0
         let callableAlignment = 1
+        let callableCopy = true
         for (const capture of nestedCallable.captures) {
           const captureBorrowed = capture.access === 'Shared' || capture.access === 'Exclusive'
           const captureLayout = captureBorrowed ? undefined : layoutType(capture.type)
@@ -743,10 +757,17 @@ export const catalog = (
             : (captureLayout?.alignment ?? 1)
           callableCursor = alignUp(callableCursor, alignment) + size
           callableAlignment = Math.max(callableAlignment, alignment)
+          callableCopy =
+            callableCopy &&
+            capture.access !== 'Exclusive' &&
+            (capture.access === 'Copy' ||
+              capture.access === 'Shared' ||
+              captureLayout?.copy === true)
         }
         nestedLayout = Object.freeze({
           size: alignUp(callableCursor, callableAlignment),
           alignment: callableAlignment,
+          copy: callableCopy,
         })
       } else if (!borrowed) {
         const candidate = layoutType(slot.type)
@@ -756,6 +777,12 @@ export const catalog = (
       const size = borrowed ? target.pointerSize : (nestedLayout?.size ?? 0)
       const alignment = borrowed ? target.pointerAlignment : (nestedLayout?.alignment ?? 1)
       const offset = alignUp(cursor, alignment)
+      copy =
+        copy &&
+        slot.access !== 'Exclusive' &&
+        (slot.access === 'Copy' ||
+          (slot.access === 'Shared' && borrowed) ||
+          nestedLayout?.copy === true)
       fields.push(
         Object.freeze({
           capture: slot.ordinal,
@@ -783,6 +810,7 @@ export const catalog = (
     const size = alignUp(cursor, environmentAlignment)
     return Object.freeze({
       fields: Object.freeze(fields),
+      copy,
       size,
       alignment: environmentAlignment,
       tailPadding: size - cursor,
@@ -798,6 +826,7 @@ export const catalog = (
     if (existing !== undefined) return existing
     let cursor = 0
     let environmentAlignment = 1
+    let copy = true
     const fields: Array<CallableEnvironmentField> = []
     for (const capture of realization.captures) {
       const borrowed = capture.access === 'Shared' || capture.access === 'Exclusive'
@@ -815,6 +844,10 @@ export const catalog = (
       const size = borrowed ? target.pointerSize : (valueLayout?.size ?? 0)
       const alignment = borrowed ? target.pointerAlignment : (valueLayout?.alignment ?? 1)
       const offset = alignUp(cursor, alignment)
+      copy =
+        copy &&
+        capture.access !== 'Exclusive' &&
+        (capture.access === 'Copy' || capture.access === 'Shared' || valueLayout?.copy === true)
       fields.push(
         Object.freeze({
           ordinal: capture.ordinal,
@@ -835,6 +868,7 @@ export const catalog = (
     const result: Entry = Object.freeze({
       _tag: 'LayoutEntry',
       type,
+      copy,
       size,
       alignment: environmentAlignment,
       representation: Object.freeze({
@@ -870,6 +904,7 @@ export const catalog = (
     const result: Entry = Object.freeze({
       _tag: 'LayoutEntry',
       type,
+      copy: environment.copy,
       size: environment.size,
       alignment: environment.alignment,
       representation: Object.freeze({
@@ -965,6 +1000,7 @@ export const catalog = (
       const entry: Entry = Object.freeze({
         _tag: 'LayoutEntry',
         type,
+        copy: Type.equals(type, Type.unit),
         size,
         alignment,
         representation: Object.freeze({
@@ -1013,6 +1049,7 @@ export const catalog = (
 
     visiting.add(key)
     const fields: Array<Field> = []
+    let fieldsCopy = true
     let cursor = 0
     let aggregateAlignment = 1
     let failure: UnavailableEntry | undefined
@@ -1103,6 +1140,7 @@ export const catalog = (
         break
       }
       const offset = alignUp(cursor, fieldLayout.alignment)
+      fieldsCopy = fieldsCopy && fieldLayout.copy
       fields.push(
         Object.freeze({
           _tag: 'LayoutField',
@@ -1128,6 +1166,10 @@ export const catalog = (
     const entry: Entry = Object.freeze({
       _tag: 'LayoutEntry',
       type,
+      copy:
+        DeclarationIndex.hasCopyDeclaration(index, type) &&
+        fieldsCopy &&
+        cleanup._tag !== 'HookCleanup',
       size,
       alignment: aggregateAlignment,
       representation: Object.freeze({

@@ -31,7 +31,7 @@ pub fn count<T>(buffer: &RawBuffer<T>) -> usize {
 }
 
 /// Reads an unchecked initialized element. The caller proves initialization and bounds.
-pub fn read<T>(buffer: &RawBuffer<T>, index: usize) -> T {
+pub fn read<T: Copy>(buffer: &RawBuffer<T>, index: usize) -> T {
   unsafe { return Intrinsic.rawBufferRead<T>(buffer, index) }
 }
 

@@ -138,8 +138,19 @@ runtime generic dictionaries, type descriptors, or unbounded polymorphic closure
 
 The compiler SHALL elaborate and check each generic body once over its canonical type parameters.
 Concrete specialization MUST substitute the verified generic facts and MUST NOT enable undeclared
-operations through concrete duck typing or type-directed source branching. Copyability and cleanup
-SHALL remain compiler-owned type properties available to generic ownership checking.
+operations through concrete duck typing or type-directed source branching. A type parameter SHALL
+carry compiler-owned Copy evidence only when its declaration has an explicit `Copy` bound, and that
+symbolic evidence SHALL propagate through nested generic calls.
+
+#### Scenario: Propagate Copy evidence through a generic call
+
+- **WHEN** `outer<T: Copy>` calls `inner<T>` whose parameter is also bounded by `Copy`
+- **THEN** constraint solving forwards the caller's symbolic evidence and accepts the call without concrete specialization
+
+#### Scenario: Reject an unbounded structural guess
+
+- **WHEN** an unconstrained type parameter is used where `Copy` is required
+- **THEN** generic checking rejects the use even if one later specialization would contain only Copy fields
 
 #### Scenario: Preserve a generic whole-value move
 - **WHEN** `identity<T>(value: T)` returns `move value`

@@ -63,6 +63,8 @@ pub struct Entry<K, V> {
   value: V
 }
 
+impl<K: Copy, V: Copy> Copy for Entry<K, V> {}
+
 /// Allocation-free storage state used before the map creates its first table.
 pub struct Unallocated<K, V> {
   anchor: [Entry<K, V>; 0]
@@ -531,7 +533,7 @@ pub fn indexOf<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> Option<usize> {
 ///
 /// Reads a complete entry copy, so it answers only when both stored key and value types are `Copy`.
 /// Use [`indexOf`] for a non-moving presence check and [`remove`] to transfer a move-only value.
-pub fn get<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> Option<V> {
+pub fn get<K: HashKey + Copy, V: Copy>(self: &HashMap<K, V>, key: K) -> Option<V> {
   if self.capacity == usize.ZERO {
     return Option.none<V>()
   }
@@ -607,7 +609,7 @@ pub fn remove<K: HashKey, V>(self: &mut HashMap<K, V>, key: K) -> Option<V> {
 /// # Details
 ///
 /// Reads a complete entry copy, so both stored key and value types must be `Copy`.
-pub fn keyAt<K, V>(self: &HashMap<K, V>, index: usize) -> K {
+pub fn keyAt<K: Copy, V: Copy>(self: &HashMap<K, V>, index: usize) -> K {
   if !occupiedAt<K, V>(self, index) {
     let boom = 1 / 0
   }
@@ -619,21 +621,21 @@ pub fn keyAt<K, V>(self: &HashMap<K, V>, index: usize) -> K {
 /// # Details
 ///
 /// Reads a complete entry copy, so both stored key and value types must be `Copy`.
-pub fn valueAt<K, V>(self: &HashMap<K, V>, index: usize) -> V {
+pub fn valueAt<K: Copy, V: Copy>(self: &HashMap<K, V>, index: usize) -> V {
   if !occupiedAt<K, V>(self, index) {
     let boom = 1 / 0
   }
   return unwrapValue<K, V>(readEntry<K, V>(self, index))
 }
 
-fn readEntry<K, V>(self: &HashMap<K, V>, index: usize) -> Entry<K, V> {
+fn readEntry<K: Copy, V: Copy>(self: &HashMap<K, V>, index: usize) -> Entry<K, V> {
   return match &self.storage {
     Unallocated<K, V> nothing => absurd<Entry<K, V>>()
     Table<K, V> { entries, states } => readAt<K, V>(&entries, index)
   }
 }
 
-fn readAt<K, V>(entries: &RawBuffer<Entry<K, V>>, index: usize) -> Entry<K, V> {
+fn readAt<K: Copy, V: Copy>(entries: &RawBuffer<Entry<K, V>>, index: usize) -> Entry<K, V> {
   unsafe {
     return RawBuffer.read<Entry<K, V>>(entries, index)
   }

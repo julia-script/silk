@@ -156,9 +156,14 @@ const assertOwnershipFacts = (
 ): void => {
   assert.isTrue('environment' in realization && 'cleanup' in realization, name)
   if (!('environment' in realization) || !('cleanup' in realization)) return
-  if (name === 'shared' || name === 'exclusive') {
+  if (
+    name === 'shared' ||
+    name === 'exclusive' ||
+    name === 'provided' ||
+    name === 'provided-moved'
+  ) {
     assert.isTrue(
-      name === 'shared'
+      name !== 'exclusive'
         ? realization.environment.every((slot) => !slot.owned)
         : realization.environment.some((slot) => slot.borrowed),
       name,
@@ -235,11 +240,25 @@ pub fn main() -> i32 {
   return run deferred.operation
 }`
 
+const providedMoved = `service Counter { effect fn get() -> i32 ? &Counter }
+struct Fixed { value: i32 }
+effect fn get(self: &Fixed) -> i32 { return self.value }
+impl Counter for Fixed { get: Fixed.get }
+effect fn count() -> i32 ? &Counter { return run Counter.get() }
+struct Deferred<F: once Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let fixed = Fixed { value: 42 }
+  let operation = count()
+  let deferred = Deferred { operation: move operation |> Effect.provide(&fixed) }
+  return run deferred.operation
+}`
+
 const runtimeMatrix = [
   { name: 'shared', source: shared, result: 42, access: 'Shared' },
   { name: 'exclusive', source: exclusive, result: 43, access: 'Exclusive' },
   { name: 'consuming', source: consuming, result: 42, access: 'Take' },
-  { name: 'provided', source: provided, result: 42, access: 'Take' },
+  { name: 'provided', source: provided, result: 42, access: 'Shared' },
+  { name: 'provided-moved', source: providedMoved, result: 42, access: 'Shared' },
 ] as const
 
 it.effect('executes stored Effects with exact runner, rows, access, and ownership transport', () =>

@@ -124,9 +124,10 @@ pub fn main() -> i32 { return 0 }`,
       [
         'drop-hook-on-a-copy-type',
         `struct CopyValue { value: i32 }
+impl Copy for CopyValue {}
 impl Drop for CopyValue { fn drop(self: &mut CopyValue) -> () { return () } }
 pub fn main() -> i32 { return 0 }`,
-        'SEM0084',
+        'SEM0083',
       ],
     ]
 

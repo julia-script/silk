@@ -423,7 +423,7 @@ const runtimeMatrix = [
   { name: 'shared', source: shared, result: 42, access: 'Shared' },
   { name: 'exclusive', source: exclusive, result: 43, access: 'Exclusive' },
   { name: 'consuming', source: consuming, result: 42, access: 'Take' },
-  { name: 'provided', source: provided, result: 42, access: 'Take' },
+  { name: 'provided', source: provided, result: 42, access: 'Shared' },
 ] as const
 
 layer(NodeServices.layer)('stored Effect engine parity', (it) => {

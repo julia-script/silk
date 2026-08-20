@@ -394,6 +394,7 @@ it.effect('reads a zero-sized Copy element through a shared vector on the evalua
   Effect.gen(function* () {
     const source = `import silk.vector { Vector, make, append, get }
 struct Marker {}
+impl Copy for Marker {}
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut values = make<Marker>()
@@ -427,10 +428,12 @@ it.effect(
     Effect.gen(function* () {
       const source = `import silk.vector { Vector, make, append, get }
 struct Step { value: i32 }
+impl Copy for Step {}
 struct Diagnostic {
   marker: u8
   value: i32
 }
+impl Copy for Diagnostic {}
 fn observe(event: Step | Diagnostic) -> i32 {
   return match move event {
     Step { value: stepValue } => stepValue
@@ -499,18 +502,9 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
       'vector-acceptance/move-only-union-read',
       ascii(source),
     )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Blocked')
-    if (evaluated._tag !== 'Blocked') return
-    assert.strictEqual(evaluated.reason._tag, 'InvalidMir')
-    if (evaluated.reason._tag !== 'InvalidMir') return
-    assert.isTrue(
-      evaluated.reason.violations.some(
-        (violation) =>
-          violation.rule === 'InvalidRawStorageOperation' &&
-          violation.detail.includes('RawBuffer.read'),
-      ),
+    assert.include(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      'SEM0083',
     )
   }),
 )

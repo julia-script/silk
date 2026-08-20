@@ -299,7 +299,7 @@ const accessOf = (
 ): Access =>
   type._tag === 'Reference' || type._tag === 'Slice' || type._tag === 'EffectBorrow'
     ? borrowOf(fn, definitions, local)
-    : Mir.isStructurallyCopy(program.layout, Mir.semanticType(type))
+    : Mir.isCopy(program.layout, Mir.semanticType(type))
       ? Object.freeze({ _tag: 'Copy' })
       : Object.freeze({
           _tag: 'AffineTransfer',

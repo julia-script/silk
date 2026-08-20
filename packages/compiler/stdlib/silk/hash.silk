@@ -37,6 +37,8 @@ pub struct HashSeed {
   pub value: u64
 }
 
+impl Copy for HashSeed {}
+
 /// Constructs a seed from one value.
 pub fn seed(value: u64) -> HashSeed {
   return HashSeed { value: value }
@@ -98,6 +100,8 @@ pub struct Word {
   /// The integer this key stands for.
   pub value: u64
 }
+
+impl Copy for Word {}
 
 /// Constructs an integer key.
 pub fn word(value: u64) -> Word {

@@ -254,6 +254,8 @@ it.effect('declares metrics as a cleanup-free Copy value', () =>
 
 struct Ledger { metrics: AllocationMetrics }
 
+impl Copy for Ledger {}
+
 impl Drop for Ledger {
   fn drop(self: &mut Ledger) -> () { return () }
 }
@@ -269,7 +271,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(
       Analysis.diagnostics(rejected).map((diagnostic) => diagnostic.code),
-      ['SEM0084'],
+      ['SEM0083'],
     )
 
     const plain = `import silk.metrics {

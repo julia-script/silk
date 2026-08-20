@@ -42,6 +42,14 @@ pub struct Entry<K, V>
 
 Internal key-value record exposed by the current table representation.
 
+<a id="declaration-73696c6b2f686173685f6d61703a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Copy for silk/hash_map.Entry<K, V>`
+
+```silk
+impl Copy for silk/hash_map.Entry<K, V>
+```
+
 <a id="declaration-73696c6b2f686173685f6d61703a3a556e616c6c6f6361746564"></a>
 
 ## `Unallocated`
@@ -117,7 +125,7 @@ pub fn occupiedAt<K, V>(self: &silk/hash_map.HashMap<K, V>, index: usize) -> boo
 
 Reports whether one bucket holds an entry. Out-of-range buckets hold nothing.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `Drop for silk/hash_map.HashMap<K, V>`
 

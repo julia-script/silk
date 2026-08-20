@@ -25,10 +25,14 @@ struct Step {
   top: i32
 }
 
+impl Copy for Step {}
+
 struct VmDiagnostic {
   pc: usize
   code: usize
 }
+
+impl Copy for VmDiagnostic {}
 
 struct Executed {
   events: Vector<Step | VmDiagnostic>

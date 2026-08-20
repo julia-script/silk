@@ -52,6 +52,14 @@ pub value: u64
 
 The seed value handed to every hash the collection computes.
 
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Copy for HashSeed`
+
+```silk
+impl Copy for HashSeed
+```
+
 <a id="declaration-73696c6b2f686173683a3a73656564"></a>
 
 ## `seed`
@@ -157,6 +165,14 @@ pub value: u64
 
 The integer this key stands for.
 
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `Copy for Word`
+
+```silk
+impl Copy for Word
+```
+
 <a id="declaration-73696c6b2f686173683a3a776f7264"></a>
 
 ## `word`
@@ -167,7 +183,7 @@ pub fn word(value: u64) -> Word
 
 Constructs an integer key.
 
-<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a32"></a>
 
 ## Implementation `HashKey for Word`
 
@@ -175,7 +191,7 @@ Constructs an integer key.
 impl HashKey for Word
 ```
 
-<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `equals`
 
@@ -183,7 +199,7 @@ impl HashKey for Word
 equals = Word.wordEquals
 ```
 
-<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a31"></a>
 
 ### Operation `hash`
 

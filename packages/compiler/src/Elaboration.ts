@@ -2838,26 +2838,10 @@ const hiddenEffectArguments = (
   )
 
 const exactEffectApplicationContract = (
-  declaration: DeclarationFact,
-  substitution: Type.Substitution,
+  _declaration: DeclarationFact,
+  _substitution: Type.Substitution,
   contract: Type.Effect,
-): Type.Effect => {
-  const accesses = declaration.parameters.flatMap((parameter) => {
-    const declared = parameter.declaredType
-    if (declared._tag !== 'Resolved') return []
-    const specialized = Type.substitute(declared.type, substitution)
-    const captured = Type.isRepresented(specialized) ? specialized.contract : specialized
-    if (Type.isEffect(captured)) return [captured.access]
-    if (Type.isCallable(captured)) return [captured.mode]
-    return []
-  })
-  const access = accesses.includes('Take')
-    ? 'Take'
-    : accesses.includes('Exclusive')
-      ? 'Exclusive'
-      : contract.access
-  return Type.effectWithRows(contract.success, contract.failureRow, access, contract.requirementRow)
-}
+): Type.Effect => contract
 
 const effectCallableApplicationRepresentation = (
   expression: CallableApplyExpressionFact,
@@ -4917,6 +4901,7 @@ const interfaceConstraintDiagnostics = (
   reference: CallReferenceFact,
   contract: CallContractResult,
   index: DeclarationIndex.Index,
+  caller: DeclarationFact,
   span: SourceSpan.SourceSpan,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   if (reference._tag !== 'Resolved' || contract.fact._tag !== 'Compatible') return Object.freeze([])
@@ -4942,6 +4927,10 @@ const interfaceConstraintDiagnostics = (
             ),
           ]
         const capability = substitutedCapability
+        const callerCopyAssumptions = copyAssumptionsOf(caller)
+        const assumedByCaller =
+          Type.equals(capability, Type.copyCapability) &&
+          DeclarationIndex.copyType(index, provider, callerCopyAssumptions)
         if (!bound.application.providerMatches)
           return [
             Diagnostic.invalidConformance(
@@ -4960,7 +4949,7 @@ const interfaceConstraintDiagnostics = (
               span,
             ),
           )
-        if (!DeclarationIndex.conforms(index, provider, capability)) {
+        if (!assumedByCaller && !DeclarationIndex.conforms(index, provider, capability)) {
           // A conditional header that covers this provider but whose own requirements failed has a
           // more useful answer than "does not implement": the chain says which requirement is
           // missing and which wrapper asked for it.
@@ -4990,6 +4979,19 @@ const interfaceConstraintDiagnostics = (
     }),
   )
 }
+
+const copyAssumptionsOf = (declaration: DeclarationFact): ReadonlySet<string> =>
+  new Set(
+    declaration.typeParameters.flatMap((parameter) =>
+      parameter.bounds.some(
+        (candidate) =>
+          candidate._tag === 'ResolvedBound' &&
+          Type.equals(candidate.application.capability, Type.copyCapability),
+      )
+        ? [Type.key(parameter.type)]
+        : [],
+    ),
+  )
 
 interface BuiltinSignature {
   readonly id: Intrinsic.OperationId
@@ -5518,18 +5520,20 @@ const analyzeSectionContract = (
   })
 }
 
-const copyCaptureType = (type: Type.Type): boolean =>
-  Type.isBuiltin(type) || (Type.isFixedArray(type) && copyCaptureType(type.element))
-
-const captureAccess = (expression: ExpressionFact): CallableCaptureFact['access'] => {
+const captureAccess = (
+  expression: ExpressionFact,
+  index: DeclarationIndex.Index | undefined,
+  assumptions: ReadonlySet<string> = new Set(),
+): CallableCaptureFact['access'] => {
   if (expression._tag === 'Move')
     return expression.subject.type._tag === 'Available' &&
-      copyCaptureType(expression.subject.type.type)
+      index !== undefined &&
+      DeclarationIndex.copyType(index, expression.subject.type.type, assumptions)
       ? 'Copy'
       : 'Take'
   if (expression._tag === 'Borrow')
     return expression.access === 'Exclusive' ? 'Exclusive' : 'Shared'
-  if (expression._tag === 'Grouped') return captureAccess(expression.expression)
+  if (expression._tag === 'Grouped') return captureAccess(expression.expression, index, assumptions)
   if (expression.type._tag === 'Available' && Type.isCallable(expression.type.type))
     return expression.type.type.mode === 'Shared' ? 'Copy' : expression.type.type.mode
   if (expression.type._tag === 'Available' && Type.isEffect(expression.type.type))
@@ -5540,12 +5544,13 @@ const captureAccess = (expression: ExpressionFact): CallableCaptureFact['access'
 const ownedProviderCaptureAccess = (
   expression: ExpressionFact,
   index: DeclarationIndex.Index,
+  assumptions: ReadonlySet<string> = new Set(),
 ): CallableCaptureFact['access'] =>
   expression._tag === 'Move' &&
   expression.subject.type._tag === 'Available' &&
-  DeclarationIndex.copyType(index, expression.subject.type.type)
+  DeclarationIndex.copyType(index, expression.subject.type.type, assumptions)
     ? 'Copy'
-    : captureAccess(expression)
+    : captureAccess(expression, index, assumptions)
 
 const concreteCallableIdentity = (expression: ExpressionFact): boolean => {
   if (expression._tag === 'Grouped' || expression._tag === 'Move') {
@@ -5675,6 +5680,7 @@ const finishCallableSection = (
   argumentsResult: ArgumentsResult,
   callTypeArguments: CallTypeArgumentsResult,
   resolution: ResolutionContext,
+  caller: DeclarationFact,
 ): ExpressionResult => {
   const contract = analyzeSectionContract(node, reference, argumentsResult.facts, callTypeArguments)
   const captures = Object.freeze(
@@ -5690,8 +5696,12 @@ const finishCallableSection = (
           reference.intrinsic.rule._tag === 'ContractRule' &&
           reference.intrinsic.rule.post === 'BindRequirement' &&
           reference.intrinsic.rule.providerMode === 'Take'
-            ? ownedProviderCaptureAccess(argument.expression, resolution.index)
-            : captureAccess(argument.expression),
+            ? ownedProviderCaptureAccess(
+                argument.expression,
+                resolution.index,
+                copyAssumptionsOf(caller),
+              )
+            : captureAccess(argument.expression, resolution.index, copyAssumptionsOf(caller)),
       }),
     ),
   )
@@ -5891,8 +5901,16 @@ const finishCallableApplication = (
             strongestEffectAccess(
               result.access,
               callable.mode,
-              effectExpressionAccess(callee.fact),
-              effectCaptureAccess(argumentsResult.facts),
+              effectExpressionAccess(
+                callee.fact,
+                resolution?.index,
+                caller === undefined ? new Set() : copyAssumptionsOf(caller),
+              ),
+              effectCaptureAccess(
+                argumentsResult.facts,
+                resolution?.index,
+                caller === undefined ? new Set() : copyAssumptionsOf(caller),
+              ),
             ),
             result.requirementRow,
           )
@@ -6240,7 +6258,7 @@ const effectBindingProvider = (
       index !== undefined &&
       DeclarationIndex.copyType(index, provider.subject.type.type)
         ? 'Copy'
-        : captureAccess(provider),
+        : captureAccess(provider, index),
     span,
   })
 }
@@ -6296,7 +6314,12 @@ const finishIntrinsicContractCall = (
           Type.effectWithRows(
             substitutedResult.success,
             substitutedResult.failureRow,
-            intrinsicEffectCaptureAccess(operation, argumentsResult.facts, resolution.index),
+            intrinsicEffectCaptureAccess(
+              operation,
+              argumentsResult.facts,
+              resolution.index,
+              copyAssumptionsOf(caller),
+            ),
             substitutedResult.requirementRow,
           ),
         )
@@ -6445,6 +6468,7 @@ function analyzeBuiltinCall(
       argumentsResult,
       typeArguments,
       resolution,
+      caller,
     )
   if (operation?.rule._tag === 'ContractRule')
     return finishIntrinsicContractCall(
@@ -6554,7 +6578,14 @@ function analyzeBuiltinCall(
     reference.parameters.length >= 2 &&
     argumentsResult.facts.length === reference.parameters.length - 1
   ) {
-    return finishCallableSection(call, reference, argumentsResult, typeArguments, resolution)
+    return finishCallableSection(
+      call,
+      reference,
+      argumentsResult,
+      typeArguments,
+      resolution,
+      caller,
+    )
   }
   const callContract = analyzeCallContract(call, reference, argumentsResult.facts)
   const expressionType =
@@ -7001,7 +7032,11 @@ const analyzePipelineExpression = (
   )
 }
 
-const effectExpressionAccess = (expression: ExpressionFact): Type.Effect['access'] => {
+const effectExpressionAccess = (
+  expression: ExpressionFact,
+  index: DeclarationIndex.Index | undefined,
+  assumptions: ReadonlySet<string> = new Set(),
+): Type.Effect['access'] => {
   if (expression._tag === 'Move') {
     if (expression.subject.type._tag === 'Available' && Type.isEffect(expression.subject.type.type))
       return expression.subject.type.type.access
@@ -7012,14 +7047,16 @@ const effectExpressionAccess = (expression: ExpressionFact): Type.Effect['access
       return expression.subject.type.type.mode
     if (
       expression.subject.type._tag === 'Available' &&
-      copyCaptureType(expression.subject.type.type)
+      index !== undefined &&
+      DeclarationIndex.copyType(index, expression.subject.type.type, assumptions)
     )
       return 'Shared'
     return 'Take'
   }
   if (expression._tag === 'Borrow')
     return expression.access === 'Exclusive' ? 'Exclusive' : 'Shared'
-  if (expression._tag === 'Grouped') return effectExpressionAccess(expression.expression)
+  if (expression._tag === 'Grouped')
+    return effectExpressionAccess(expression.expression, index, assumptions)
   if (expression._tag === 'CallableSection') return expression.mode
   if (expression.type._tag === 'Available' && Type.isEffect(expression.type.type))
     return expression.type.type.access
@@ -7028,8 +7065,14 @@ const effectExpressionAccess = (expression: ExpressionFact): Type.Effect['access
   return 'Shared'
 }
 
-const effectCaptureAccess = (arguments_: ReadonlyArray<ArgumentFact>): Type.Effect['access'] => {
-  const accesses = arguments_.map((argument) => effectExpressionAccess(argument.expression))
+const effectCaptureAccess = (
+  arguments_: ReadonlyArray<ArgumentFact>,
+  index: DeclarationIndex.Index | undefined,
+  assumptions: ReadonlySet<string> = new Set(),
+): Type.Effect['access'] => {
+  const accesses = arguments_.map((argument) =>
+    effectExpressionAccess(argument.expression, index, assumptions),
+  )
   return accesses.includes('Take')
     ? 'Take'
     : accesses.includes('Exclusive')
@@ -7041,17 +7084,18 @@ const intrinsicEffectCaptureAccess = (
   operation: Intrinsic.Operation,
   arguments_: ReadonlyArray<ArgumentFact>,
   index: DeclarationIndex.Index,
+  assumptions: ReadonlySet<string> = new Set(),
 ): Type.Effect['access'] => {
   if (
     operation.rule._tag !== 'ContractRule' ||
     operation.rule.post !== 'BindRequirement' ||
     operation.rule.providerMode !== 'Take'
   )
-    return effectCaptureAccess(arguments_)
+    return effectCaptureAccess(arguments_, index, assumptions)
   const accesses = arguments_.map((argument, ordinal) =>
     ordinal === 1
-      ? ownedProviderCaptureAccess(argument.expression, index)
-      : effectExpressionAccess(argument.expression),
+      ? ownedProviderCaptureAccess(argument.expression, index, assumptions)
+      : effectExpressionAccess(argument.expression, index, assumptions),
   )
   return accesses.includes('Take')
     ? 'Take'
@@ -7174,6 +7218,8 @@ const analyzeEffectResult = (
 const effectCaptureFacts = (
   statements: ReadonlyArray<StatementFact>,
   firstLocalBinding: number,
+  index?: DeclarationIndex.Index,
+  assumptions: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<EffectCaptureFact> => {
   const captures = new Map<string, EffectCaptureFact>()
   const rank = (access: EffectCaptureFact['access']): number =>
@@ -7204,7 +7250,11 @@ const effectCaptureFacts = (
       reference,
       requested,
       fact.syntax.span,
-      fact.type._tag === 'Available' && typeof fact.type.type === 'string',
+      fact.type._tag === 'Available' &&
+        !Type.containsViewBorrow(fact.type.type) &&
+        (index === undefined
+          ? typeof fact.type.type === 'string'
+          : DeclarationIndex.copyType(index, fact.type.type, assumptions)),
     )
   }
   const expression = (
@@ -7398,7 +7448,12 @@ function analyzeExpression(
     }
     collectTerminals(statements)
     const success = returned.at(-1)?.type
-    const captures = effectCaptureFacts(statements, firstLocalBinding)
+    const captures = effectCaptureFacts(
+      statements,
+      firstLocalBinding,
+      resolution.index,
+      copyAssumptionsOf(declaration),
+    )
     const access = captures.some((capture) => capture.access === 'Take')
       ? 'Take'
       : captures.some((capture) => capture.access === 'Exclusive')
@@ -8115,7 +8170,14 @@ function analyzeExpression(
     reference.declaration.parameters.length >= 2 &&
     argumentsResult.facts.length === reference.declaration.parameters.length - 1
   ) {
-    return finishCallableSection(node, reference, argumentsResult, callTypeArguments, resolution)
+    return finishCallableSection(
+      node,
+      reference,
+      argumentsResult,
+      callTypeArguments,
+      resolution,
+      declaration,
+    )
   }
   const callContract = analyzeCallContract(
     node,
@@ -8130,6 +8192,7 @@ function analyzeExpression(
     reference,
     callContract,
     resolution.index,
+    declaration,
     node.span,
   )
   const syntaxAvailable = hasAvailableCallSyntax(node)
@@ -8151,14 +8214,22 @@ function analyzeExpression(
                 ? Type.effectWithRows(
                     success.success,
                     success.failureRow,
-                    effectCaptureAccess(argumentsResult.facts),
+                    effectCaptureAccess(
+                      argumentsResult.facts,
+                      resolution.index,
+                      copyAssumptionsOf(declaration),
+                    ),
                     success.requirementRow,
                   )
                 : success
             return Type.effectWithRows(
               success,
               Type.substituteFailureRow(reference.declaration.failureRow.row, substitution),
-              effectCaptureAccess(argumentsResult.facts),
+              effectCaptureAccess(
+                argumentsResult.facts,
+                resolution.index,
+                copyAssumptionsOf(declaration),
+              ),
               Type.substituteRequirementsRow(
                 reference.declaration.requirementRow.row,
                 substitution,
@@ -8210,6 +8281,7 @@ const finishDeclarationCall = (
       argumentsResult,
       callTypeArguments,
       resolution,
+      caller,
     )
     return diagnostic === undefined
       ? section
@@ -8231,6 +8303,7 @@ const finishDeclarationCall = (
     reference,
     callContract,
     resolution.index,
+    caller,
     node.span,
   )
   const callable = sourceCallable(reference)
@@ -8252,14 +8325,22 @@ const finishDeclarationCall = (
                 ? Type.effectWithRows(
                     success.success,
                     success.failureRow,
-                    effectCaptureAccess(argumentsResult.facts),
+                    effectCaptureAccess(
+                      argumentsResult.facts,
+                      resolution.index,
+                      copyAssumptionsOf(caller),
+                    ),
                     success.requirementRow,
                   )
                 : success
             return Type.effectWithRows(
               success,
               Type.substituteFailureRow(callable.failureRow.row, substitution),
-              effectCaptureAccess(argumentsResult.facts),
+              effectCaptureAccess(
+                argumentsResult.facts,
+                resolution.index,
+                copyAssumptionsOf(caller),
+              ),
               Type.substituteRequirementsRow(callable.requirementRow.row, substitution),
             )
           })(),
@@ -11222,13 +11303,24 @@ export const elaborateModule = (input: Input): Result => {
             fact.declaration.returnType._tag === 'Resolved' &&
             baseContract._tag === 'Contract'
           ) {
-            const captures = effectCaptureFacts(fact.statements, 0).map((capture) => {
+            const captures = effectCaptureFacts(
+              fact.statements,
+              0,
+              index,
+              copyAssumptionsOf(fact.declaration),
+            ).map((capture) => {
               if (capture.reference._tag !== 'ParameterDeclaration') return capture
               const declared = capture.reference.declaredType
               if (declared._tag !== 'Resolved' || Type.isSlice(declared.type)) return capture
               return Object.freeze({
                 ...capture,
-                access: copyCaptureType(declared.type) ? ('Copy' as const) : ('Take' as const),
+                access: DeclarationIndex.copyType(
+                  index,
+                  declared.type,
+                  copyAssumptionsOf(fact.declaration),
+                )
+                  ? ('Copy' as const)
+                  : ('Take' as const),
               })
             })
             const semanticCaptureAccess = (

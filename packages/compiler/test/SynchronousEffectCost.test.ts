@@ -186,7 +186,7 @@ it('captures synchronous Effect entry structure', () => {
   }
 
   const runners = report.cases.flatMap((sample) => sample.runners)
-  assert.strictEqual(runners.length, 21)
+  assert.strictEqual(runners.length, 22)
   assert.isTrue(runners.every((runner) => runner.estimatedClonedSize > 0))
   assert.isTrue(runners.every((runner) => !runner.prototypeEligible))
   assert.deepEqual(

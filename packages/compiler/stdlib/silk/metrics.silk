@@ -32,6 +32,8 @@ pub struct AllocationMetrics {
   pub peakLive: usize
 }
 
+impl Copy for AllocationMetrics {}
+
 /// Constructs the zeroed counts a provider starts from.
 pub fn make() -> AllocationMetrics {
   return AllocationMetrics { acquired: usize.ZERO, released: usize.ZERO, peakLive: usize.ZERO }

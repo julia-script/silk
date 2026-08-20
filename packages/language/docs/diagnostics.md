@@ -17,10 +17,10 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `PAR` | Parser | 3 |
 | `MOD` | Module | 4 |
 | `SEM` | Semantic | 128 |
-| `OWN` | Ownership | 15 |
+| `OWN` | Ownership | 14 |
 | `LAY` | Layout | 1 |
 
-There are 158 codes in total.
+There are 157 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -200,7 +200,6 @@ There are 158 codes in total.
 | `OWN0010` |  | `<requested> slice loan conflicts with an active <toLowerCase> loan` |
 | `OWN0011` |  | `<toLowerCase> access to <spelling> conflicts with an active slice loan` |
 | `OWN0012` |  | `A non-Copy value cannot be moved out through a borrowed slice place` |
-| `OWN0013` | Stable code for extracting one owned representation-bearing field out of its aggregate. | `Cannot move field <field> out of <aggregate>: it stores the executable representation <contract>, whose captures are cleaned with the whole aggregate` |
 | `OWN0014` | Stable code for invoking a stored callable through too weak an aggregate receiver access. | `Cannot invoke field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
 | `OWN0015` | Stable code for running a stored Effect through too weak an aggregate receiver access. | `Cannot run field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
 

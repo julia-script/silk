@@ -6737,7 +6737,12 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         conformance.provider.type,
         copyAssumptions(conformance),
       )
-      if (proof._tag === 'Copy') continue
+      if (
+        proof._tag === 'Copy' ||
+        (proof._tag === 'UnavailableCopy' &&
+          proof.reason.includes('executable Copy depends on its concrete realized captures'))
+      )
+        continue
       invalidCopyKeys.add(`${module.module}\u0000${conformance.ordinal}`)
       diagnostics.push(
         Diagnostic.invalidConformance(
@@ -7125,6 +7130,10 @@ const copyAssumptions = (conformance: ConformanceFact): ReadonlySet<string> =>
 const hasDropConformance = (self: Index, provider: Type.Type): boolean =>
   conformanceCandidates(self, ConformanceGoal.make(Type.dropCapability, provider)).length > 0
 
+/** Reports whether one concrete nominal has exactly one admitted empty `Copy` declaration. */
+export const hasCopyDeclaration = (self: Index, provider: Type.Type): boolean =>
+  conformanceCandidates(self, ConformanceGoal.make(Type.copyCapability, provider)).length === 1
+
 /**
  * Proves whether one semantic type duplicates without user code or cleanup.
  *
@@ -7162,11 +7171,43 @@ export const copyProof = (
     }
     return provedCopy
   }
-  if (Type.isRepresented(type))
+  if (Type.isRepresented(type)) {
+    const argument = type.representation.argument
+    if (Type.isExactRepresentationArgument(argument)) {
+      if (Type.isCallable(argument.contract))
+        return argument.contract.mode === 'Shared'
+          ? provedCopy
+          : Object.freeze({
+              _tag: 'NotCopy',
+              reason: `${argument.contract.mode.toLowerCase()} callable captures are affine`,
+            })
+      if (Type.isEffect(argument.contract))
+        return argument.contract.access === 'Shared'
+          ? provedCopy
+          : Object.freeze({
+              _tag: 'NotCopy',
+              reason: `${argument.contract.access.toLowerCase()} Effect captures are affine`,
+            })
+      return Object.freeze({
+        _tag: 'UnavailableCopy',
+        reason: 'the executable representation contract is damaged',
+      })
+    }
+    if (Type.isCompositeEffectRepresentationArgument(argument)) {
+      for (const alternative of argument.alternatives) {
+        if (!Type.isEffect(alternative.contract) || alternative.contract.access !== 'Shared')
+          return Object.freeze({
+            _tag: 'NotCopy',
+            reason: 'a selected Effect alternative has affine captures',
+          })
+      }
+      return provedCopy
+    }
     return Object.freeze({
       _tag: 'UnavailableCopy',
       reason: 'executable Copy depends on its concrete realized captures',
     })
+  }
   if (Type.isCallable(type) || Type.isEffect(type))
     return Object.freeze({
       _tag: 'UnavailableCopy',
@@ -7181,10 +7222,7 @@ export const copyProof = (
       _tag: 'UnavailableCopy',
       reason: `recursive Copy proof for ${Type.encode(type)}`,
     })
-  const candidates = conformanceCandidates(
-    self,
-    ConformanceGoal.make(Type.copyCapability, type),
-  )
+  const candidates = conformanceCandidates(self, ConformanceGoal.make(Type.copyCapability, type))
   const selected = candidates.at(0)
   if (candidates.length !== 1 || selected === undefined)
     return Object.freeze({
@@ -7397,8 +7435,8 @@ export const conforms = (self: Index, provider: Type.Type, capability: Type.Nomi
   Type.equals(capability, Type.copyCapability)
     ? copyType(self, provider)
     : contractByCapability(self, capability) !== undefined
-    ? prove(self, provider, capability)._tag === 'Proved'
-    : witness(self, provider, capability) !== undefined
+      ? prove(self, provider, capability)._tag === 'Proved'
+      : witness(self, provider, capability) !== undefined
 
 /**
  * Returns, in declaration order, the operations one interface declares that the provider's selected

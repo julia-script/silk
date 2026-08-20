@@ -186,6 +186,8 @@ const copyInstantiation = `struct Holder<T> {
   value: T
 }
 
+impl<T: Copy> Copy for Holder<T> {}
+
 impl<T> Drop for Holder<T> {
   fn drop(self: &mut Holder<T>) -> () { return () }
 }
@@ -197,7 +199,7 @@ fn keep<T>(value: T) -> i32 {
 
 pub fn main() -> i32 { return keep<i32>(41) + 1 }`
 
-it.effect('rejects a parametric Drop instantiated at a Copy provider', () =>
+it.effect('rejects conflicting parametric Copy and Drop declarations', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'drop-hook/copy-instantiation',
@@ -205,8 +207,8 @@ it.effect('rejects a parametric Drop instantiated at a Copy provider', () =>
       'wasm32-unknown-unknown',
     )
     assert.include(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message),
-      'Invalid Drop hook: Copy type drop-hook/copy-instantiation.Holder<i32> cannot implement Drop',
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      'SEM0083',
     )
   }),
 )

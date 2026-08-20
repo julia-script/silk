@@ -26,7 +26,7 @@ pub fn take<T>(slot: Slot<T>) -> T {
 }
 
 /// Copies an initialized Copy value out of one selected raw slot.
-pub fn copy<T>(slot: Slot<T>) -> T {
+pub fn copy<T: Copy>(slot: Slot<T>) -> T {
   unsafe { return Intrinsic.slotCopy<T>(move slot) }
 }
 

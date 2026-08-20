@@ -57,10 +57,21 @@ Invalid elements or length disagreement SHALL preserve each element fact but pro
 
 ### Requirement: Array ownership and cleanup derive from elements
 
-An array SHALL be Copy exactly when its element type is Copy; otherwise it SHALL be a move-only
-whole value. Moving or returning one indexed non-Copy element SHALL be rejected as a partial move,
-while moving the complete array SHALL transfer one ownership obligation. Cleanup SHALL visit live
-elements exactly once in ascending index order and recursively use each element's canonical cleanup.
+An array SHALL be Copy exactly when its element type has the compiler's sealed Copy property;
+otherwise it SHALL be an affine whole value. Moving or returning one indexed affine element SHALL
+be rejected as a partial move, while moving the complete array SHALL transfer one ownership
+obligation. Cleanup SHALL visit live elements exactly once in ascending index order and recursively
+use each element's canonical cleanup.
+
+#### Scenario: Copy an explicitly Copy nominal array
+
+- **WHEN** `Token` validly declares `impl Copy` and source reads an `Array<Token, 3>`
+- **THEN** the complete array is copied and the source remains live
+
+#### Scenario: Keep a field-only nominal array affine
+
+- **WHEN** `Token` has only Copy fields but declares no `impl Copy`
+- **THEN** `Array<Token, 3>` remains affine and whole-value transfer requires `move`
 
 #### Scenario: Copy a scalar array
 

@@ -22,10 +22,14 @@ struct Token {
   end: usize
 }
 
+impl Copy for Token {}
+
 struct LexicalDiagnostic {
   start: usize
   end: usize
 }
+
+impl Copy for LexicalDiagnostic {}
 
 struct Lexed {
   tokens: Vector<Token>

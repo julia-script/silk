@@ -5,6 +5,8 @@ struct QueueEntry {
   distance: usize
 }
 
+impl Copy for QueueEntry {}
+
 effect fn search() -> usize ! OutOfMemoryError ? &mut Allocator {
   let mut visited = [
     false, false, false, false, false,

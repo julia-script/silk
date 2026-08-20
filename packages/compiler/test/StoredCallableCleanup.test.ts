@@ -394,7 +394,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('records a distinct symbolic cleanup obligation for a stored Effect', () =>
+it.effect('omits cleanup for a stored Effect whose exact environment is Copy', () =>
   Effect.gen(function* () {
     const module = 'stored-callable-cleanup/effect'
     const snapshot = yield* realized(
@@ -407,6 +407,6 @@ pub fn main() -> i32 {
     )
     const stored = fieldCleanup(bindingCleanup(snapshot, module, 'deferred'), 0)
 
-    assert.strictEqual(stored._tag, 'RepresentedEffectCleanup')
+    assert.strictEqual(stored._tag, 'NoCleanup')
   }),
 )

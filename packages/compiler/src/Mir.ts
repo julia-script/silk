@@ -100,39 +100,9 @@ export const semanticType = (self: Type): DeclarationIndex.SemanticType => {
 }
 
 const typeText = (self: Type): string => SilkType.encode(semanticType(self))
-const isCopyType = (type: DeclarationIndex.SemanticType): boolean =>
-  SilkType.isBuiltin(type) ||
-  SilkType.isString(type) ||
-  (SilkType.isFixedArray(type) && isCopyType(type.element))
-
-/**
- * Reports whether every reachable field of one element type is Copy, so duplicating its bytes
- * duplicates no ownership. Lowering, verification, and evaluation all decide the same way.
- */
-export const isStructurallyCopy = (
-  layout: Layout.Plan,
-  type: DeclarationIndex.SemanticType,
-  visiting = new Set<string>(),
-): boolean => {
-  if (
-    SilkType.isBuiltin(type) ||
-    SilkType.isString(type) ||
-    SilkType.isReference(type) ||
-    SilkType.isSlice(type)
-  )
-    return true
-  if (SilkType.isFixedArray(type)) return isStructurallyCopy(layout, type.element, visiting)
-  if (SilkType.isUnion(type))
-    return type.members.every((member) => isStructurallyCopy(layout, member, visiting))
-  if (SilkType.equals(type, SilkType.unit)) return true
-  if (!SilkType.isNominal(type) || SilkType.isIntrinsicNominal(type)) return false
-  const key = SilkType.key(type)
-  if (visiting.has(key)) return false
-  const entry = Layout.entry(layout, type)
-  if (entry?.representation._tag !== 'Aggregate') return false
-  const next = new Set(visiting).add(key)
-  return entry.representation.fields.every((field) => isStructurallyCopy(layout, field.type, next))
-}
+/** Reads the concrete sealed Copy verdict published by target layout. */
+export const isCopy = (layout: Layout.Plan, type: DeclarationIndex.SemanticType): boolean =>
+  Layout.entry(layout, type)?.copy === true
 
 const callingScalarEquals = (left: Layout.CallingScalar, right: Layout.CallingScalar): boolean =>
   typeof left === 'string'
@@ -2149,12 +2119,12 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
       const declared = fn.localTypes.at(slot.local.ordinal)
       const accessValid =
         slot.access._tag === 'Copy'
-          ? isStructurallyCopy(layout, semanticType(slot.type))
+          ? isCopy(layout, semanticType(slot.type))
           : slot.access._tag === 'BorrowedDependency'
             ? slot.type._tag === 'Reference' ||
               slot.type._tag === 'Slice' ||
               slot.type._tag === 'EffectBorrow'
-            : !isStructurallyCopy(layout, semanticType(slot.type))
+            : !isCopy(layout, semanticType(slot.type))
       if (
         declared === undefined ||
         !SilkType.equals(semanticType(declared), semanticType(slot.type)) ||
@@ -2597,7 +2567,7 @@ const callableEnvironmentCleanupValid = (
   if (active.has(key)) return false
   const expected = [...environment.fields]
     .reverse()
-    .filter((field) => field.access === 'Take' && !isCopyType(field.type))
+    .filter((field) => field.access === 'Take' && !isCopy(layout, field.type))
   const next = new Set(active).add(key)
   return (
     SilkType.equals(cleanup.type, expectedType) &&
@@ -2691,6 +2661,8 @@ const cleanupMatchesSemanticType = (
   type: DeclarationIndex.SemanticType,
   seen: ReadonlySet<string> = new Set(),
 ): boolean => {
+  if (isCopy(layout, type))
+    return cleanup._tag === 'NoCleanup' && SilkType.equals(cleanup.type, type)
   if (SilkType.isRepresented(type)) {
     const composite = type.representation.argument
     if (SilkType.isCompositeEffectRepresentationArgument(composite)) {
@@ -4653,7 +4625,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             bufferElement === undefined ||
             !SilkType.equals(bufferElement, operation.element) ||
             !SilkType.equals(semanticType(destination), operation.element) ||
-            !isStructurallyCopy(self.layout, operation.element)
+            !isCopy(self.layout, operation.element)
           )
             violations.push(
               Object.freeze({
@@ -4732,7 +4704,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !SilkType.equals(bufferElement, operation.element) ||
             !SilkType.equals(source.type.element, operation.element) ||
             operation.stride !== expectedStride ||
-            operation.retainsSource !== isStructurallyCopy(self.layout, operation.element)
+            operation.retainsSource !== isCopy(self.layout, operation.element)
           ) {
             violations.push(
               Object.freeze({
@@ -4798,7 +4770,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !(operation._tag === 'SlotTake' || operation._tag === 'SlotCopy') ||
             (destination !== undefined &&
               SilkType.equals(semanticType(destination), operation.element) &&
-              (operation._tag !== 'SlotCopy' || isStructurallyCopy(self.layout, operation.element)))
+              (operation._tag !== 'SlotCopy' || isCopy(self.layout, operation.element)))
           const writeValue =
             operation._tag !== 'SlotWrite' ||
             (() => {
@@ -5106,7 +5078,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               ) &&
               (() => {
                 const expected = dropped.environment.fields
-                  .filter((field) => field.access === 'Take' && !isCopyType(field.type))
+                  .filter((field) => field.access === 'Take' && !isCopy(self.layout, field.type))
                   .map((field) => field.ordinal)
                   .reverse()
                 return (
@@ -5339,7 +5311,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             selected === undefined ||
             !SilkType.equals(selected, semanticType(operation.type)) ||
             (operation._tag === 'ReadPlace' &&
-              !isStructurallyCopy(self.layout, selected) &&
+              !isCopy(self.layout, selected) &&
               operation.consume !== true &&
               !sharedMatchProjection &&
               !sharedBorrowProjection &&
@@ -5888,7 +5860,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(outcome.type, operation.outcomeType.type) &&
             SilkType.equals(semanticType(destination), semanticType(operation.type)) &&
             ((runner?.result._tag === 'EffectOutcome' &&
-              SilkType.equals(runner.result.type, operation.outcomeType.type)) ||
+              SilkType.representationAdmissibility(runner.result.type, operation.outcomeType.type)
+                ._tag === 'Admitted') ||
               (suspensionRunner !== undefined &&
                 SilkType.equals(suspensionRunner.outcome, operation.outcomeType.type))) &&
             storedContractValid &&

@@ -69,7 +69,7 @@ pub struct Point {
   pub y: i32
 }
 
-impl Copy for Point
+impl Copy for Point {}
 
 fn sum(point: Point) -> i32 {
   let again = point
@@ -93,12 +93,8 @@ allocate new storage, fail, or require an allocator, and returns a genuinely ind
 raw non-owning pointer may be Copy, but copying that pointer neither copies nor owns its allocation.
 
 **Diagnostics:** Using an affine value where an implicit copy would be required reports `OWN0003`
-and suggests an explicit move when ownership transfer is valid. An invalid `impl Copy` must identify
-the first affine or cleanup-bearing reason; a stable diagnostic code for that declaration error has
-not yet been assigned.
-
-**Current compiler:** The accepted `impl Copy` marker has not yet been reconciled with the current
-nominal-type implementation, which still treats user-defined structs as affine.
+and suggests an explicit move when ownership transfer is valid. An invalid `impl Copy` reports
+`SEM0083` and identifies the first affine, cleanup-bearing, cyclic, or unavailable reason.
 
 **Evidence:** [prototype syntax decision](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md),
 [ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md).
@@ -1457,10 +1453,9 @@ OWN-004. A Copy executable field may be read like any other Copy field. Compiler
 layout choices must not force an otherwise Copy, cleanup-free source value to become affine.
 
 **Diagnostics:** Insufficient access to a stored callable reports `OWN0014`; insufficient access to
-a stored Effect reports `OWN0015`. Direct affine field extraction should report the ordinary
-`OWN0002` partial-move diagnostic. The current compiler instead uses `OWN0013` for executable
-representation fields and treats all representation-bearing nominals as move-only; both behaviors
-require reconciliation with ordinary aggregate ownership.
+a stored Effect reports `OWN0015`. Direct affine field extraction reports the ordinary `OWN0002`
+partial-move diagnostic. Executable representation does not introduce another diagnostic or
+ownership category.
 
 **Evidence:** [nominal callable storage specification](../../openspec/specs/bootstrap-nominal-callable-storage/spec.md),
 [nominal Effect storage specification](../../openspec/specs/bootstrap-nominal-effect-storage/spec.md),

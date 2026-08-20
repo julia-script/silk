@@ -71,7 +71,9 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 const unionReadSource = `struct Left { value: i32 }
+impl Copy for Left {}
 struct Right { value: i32 }
+impl Copy for Right {}
 fn left(value: i32) -> Left | Right { return Left { value: value } }
 effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
@@ -285,18 +287,9 @@ it.effect('rejects shared RawBuffer reads of move-only nominal and union element
         `owned-allocation/read-${name}`,
         ascii(source),
       )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [])
-      const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(evaluated._tag, 'Blocked')
-      if (evaluated._tag !== 'Blocked') continue
-      assert.strictEqual(evaluated.reason._tag, 'InvalidMir')
-      if (evaluated.reason._tag !== 'InvalidMir') continue
-      assert.isTrue(
-        evaluated.reason.violations.some(
-          (violation) =>
-            violation.rule === 'InvalidRawStorageOperation' &&
-            violation.detail.includes('RawBuffer.read'),
-        ),
+      assert.include(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        'SEM0083',
       )
     }
   }),

@@ -405,31 +405,6 @@ const placeSite = (expression: Hir.Expression): BindingSite | undefined => {
 }
 
 /**
- * Names the dedicated extraction rejection when a place resolves to a field holding a concrete
- * executable representation. Extracting one would leave the aggregate owning a partially released
- * environment, so its captures could be cleaned twice; consuming invocation or execution takes the
- * whole aggregate instead. Every other partial move keeps the general struct-field rejection.
- */
-const representationFieldExtraction = (
-  place: Hir.Expression,
-  span: SourceSpan.SourceSpan,
-): Diagnostic.Diagnostic | undefined => {
-  if (place._tag !== 'Project') return undefined
-  const type = place.type
-  if (
-    !Type.isRepresented(type) ||
-    (!Type.isCallable(type.contract) && !Type.isEffect(type.contract))
-  )
-    return undefined
-  return Diagnostic.representationFieldExtraction(
-    Type.encode(place.nominal),
-    `#${place.field.ordinal}`,
-    Type.encode(type.contract),
-    span,
-  )
-}
-
-/**
  * The callable contract one place stores, when the place is a nominal field holding a callable.
  *
  * A monomorphic body projects a `Represented` field and a generic body projects the field's
@@ -695,10 +670,7 @@ const checkExpression = (
     case 'Move': {
       if (expression.subject._tag === 'Project' || expression.subject._tag === 'IndexPlace') {
         checkExpression(state, live, expression.subject, false, guard, escaping)
-        state.diagnostics.push(
-          representationFieldExtraction(expression.subject, expression.span) ??
-            Diagnostic.partialMove(expression.span),
-        )
+        state.diagnostics.push(Diagnostic.partialMove(expression.span))
         return
       }
       const site = useSite(expression.subject)
@@ -745,10 +717,7 @@ const checkExpression = (
         consuming &&
         categoryOf(state.index, expression.type, state.copyAssumptions)._tag === 'MoveOnly'
       ) {
-        state.diagnostics.push(
-          representationFieldExtraction(expression, expression.span) ??
-            Diagnostic.partialMove(expression.span),
-        )
+        state.diagnostics.push(Diagnostic.partialMove(expression.span))
       }
       return
     }
@@ -984,9 +953,7 @@ const checkExpression = (
         scrutineeSite === undefined ? undefined : state.bindings.get(siteKey(scrutineeSite))
       if (expression.access === 'Copy') {
         checkExpression(state, live, expression.scrutinee, false, guard, false)
-        if (
-          categoryOf(state.index, scrutineeType, state.copyAssumptions)._tag === 'MoveOnly'
-        ) {
+        if (categoryOf(state.index, scrutineeType, state.copyAssumptions)._tag === 'MoveOnly') {
           state.diagnostics.push(
             Diagnostic.explicitMoveRequired(scrutineeBinding?.name ?? '?', expression.span),
           )
@@ -1052,10 +1019,8 @@ const checkExpression = (
                 }),
                 ...arm.bindings.flatMap((binding) => {
                   const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: binding.id })
-                  return (
-                    armLive.has(siteKey(site)) &&
+                  return armLive.has(siteKey(site)) &&
                     categoryOf(state.index, binding.type, state.copyAssumptions)._tag === 'MoveOnly'
-                  )
                     ? [
                         Object.freeze({
                           path: binding.path,
@@ -2138,6 +2103,7 @@ export const cleanupPlan = (
   if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isString(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (DeclarationIndex.copyType(index, type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
   if (Type.isSlice(type) || Type.isReference(type))
     return Object.freeze({ _tag: 'NoCleanup', type })

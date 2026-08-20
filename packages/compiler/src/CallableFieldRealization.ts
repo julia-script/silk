@@ -1,3 +1,4 @@
+import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as RepresentationField from './RepresentationField.js'
@@ -229,23 +230,36 @@ const loansOf = (captures: ReadonlyArray<CaptureSlot>): ReadonlyArray<LoanDepend
     ),
   )
 
-const livenessOf = (captures: ReadonlyArray<CaptureSlot>): Liveness => {
+const livenessOf = (
+  index: DeclarationIndex.Index,
+  captures: ReadonlyArray<CaptureSlot>,
+): Liveness => {
   const ownedLanes = captures.filter((capture) => capture.owned).length
   const borrowedLanes = captures.filter((capture) => capture.borrowed).length
   return Object.freeze({
     _tag: 'CallableFieldLiveness' as const,
-    // This milestone keeps every representation-bearing nominal move-only, including the zero-lane
-    // named-callable case, so borrow and move rules never depend on capture arity.
-    moveOnly: true,
+    moveOnly: captures.some(
+      (capture) =>
+        capture.access === 'Exclusive' ||
+        (capture.access === 'Take' && !DeclarationIndex.copyType(index, capture.type)),
+    ),
     ownedLanes,
     borrowedLanes,
   })
 }
 
-const cleanupOf = (captures: ReadonlyArray<CaptureSlot>, invocation: ReceiverAccess): Cleanup =>
+const cleanupOf = (
+  index: DeclarationIndex.Index,
+  captures: ReadonlyArray<CaptureSlot>,
+  invocation: ReceiverAccess,
+): Cleanup =>
   Object.freeze({
     _tag: 'CallableFieldCleanup' as const,
-    lanes: Object.freeze(captures.flatMap((capture) => (capture.owned ? [capture.ordinal] : []))),
+    lanes: Object.freeze(
+      captures.flatMap((capture) =>
+        capture.owned && !DeclarationIndex.copyType(index, capture.type) ? [capture.ordinal] : [],
+      ),
+    ),
     consumedByInvocation: invocation === 'Take',
   })
 
@@ -411,6 +425,7 @@ type ResolvedField = Extract<
 >
 
 const realizeCallableField = (
+  index: DeclarationIndex.Index,
   resolution: ResolvedField,
   identity: Type.CallableIdentityArgument,
   callables: ReadonlyArray<Instances.CallableInstance>,
@@ -459,8 +474,8 @@ const realizeCallableField = (
       captures: slots,
       invocation,
       loans: loansOf(slots),
-      liveness: livenessOf(slots),
-      cleanup: cleanupOf(slots, invocation),
+      liveness: livenessOf(index, slots),
+      cleanup: cleanupOf(index, slots, invocation),
     }),
   })
 }
@@ -532,7 +547,7 @@ const realizeEffectField = (
       resolution.instance,
       Object.freeze({ _tag: 'AmbiguousEffectRunner', identity: identity.identity }),
     )
-  if (!Type.equals(selected.type, contract))
+  if (Type.representationAdmissibility(selected.type, contract)._tag !== 'Admitted')
     return unsupported(
       resolution.id,
       resolution.instance,
@@ -571,6 +586,7 @@ const realizeEffectField = (
  * This function never inspects initializer syntax and never invents a second field identity.
  */
 export const realizeField = (
+  index: DeclarationIndex.Index,
   resolution: RepresentationField.Resolution,
   callables: ReadonlyArray<Instances.CallableInstance>,
   effects: ReadonlyArray<Instances.EffectInstance>,
@@ -583,12 +599,13 @@ export const realizeField = (
     )
   const identity = resolution.argument.identity
   return Type.isCallableIdentityArgument(identity)
-    ? realizeCallableField(resolution, identity, callables)
+    ? realizeCallableField(index, resolution, identity, callables)
     : realizeEffectField(resolution, identity, effects)
 }
 
 /** Realizes every executable field of one resolved field index in deterministic key order. */
 export const realize = (
+  index: DeclarationIndex.Index,
   fields: RepresentationField.Index,
   callables: ReadonlyArray<Instances.CallableInstance>,
   effects: ReadonlyArray<Instances.EffectInstance>,
@@ -602,7 +619,7 @@ export const realize = (
       Object.freeze({
         _tag: 'CallableFieldRealizationEntry' as const,
         key: entryKey,
-        support: realizeField(resolution, callables, effects),
+        support: realizeField(index, resolution, callables, effects),
       }),
     )
   }

@@ -331,9 +331,11 @@ struct Read<T> {
   value: T
 }
 
+impl<T: Copy> Copy for Read<T> {}
+
 // Checked read for Copy element types: out-of-range access traps identically on every engine.
 /// Copies the element at one index and traps when the index is out of range.
-pub fn get<T>(self: &Vector<T>, index: usize) -> T {
+pub fn get<T: Copy>(self: &Vector<T>, index: usize) -> T {
   if self.length <= index {
     let boom = 1 / 0
   }
@@ -346,7 +348,7 @@ pub fn get<T>(self: &Vector<T>, index: usize) -> T {
   }
 }
 
-fn readAt<T>(buffer: &RawBuffer<T>, index: usize) -> T {
+fn readAt<T: Copy>(buffer: &RawBuffer<T>, index: usize) -> T {
   unsafe {
     return RawBuffer.read<T>(buffer, index)
   }

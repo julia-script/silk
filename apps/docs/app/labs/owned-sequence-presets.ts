@@ -223,6 +223,8 @@ struct Token {
   kind: i32
 }
 
+impl Copy for Token {}
+
 fn observe(kind: i32) -> i32 {
   return kind
 }

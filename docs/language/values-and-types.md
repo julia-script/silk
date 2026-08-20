@@ -474,11 +474,8 @@ reference rather than by field shape alone.
 **Boundary:** A field-only scalar struct does not become Copy automatically. An owner of allocated
 memory cannot request Copy merely because its physical representation contains a copyable pointer.
 
-**Diagnostics:** Invalid implicit copying reports `OWN0003`. An invalid `impl Copy` must identify the
-first affine or cleanup-bearing reason; it does not yet have a stable declaration diagnostic code.
-
-**Current compiler:** The nominal implementation still derives Copy recursively from fields. That
-behavior conflicts with this confirmed rule and must be reconciled.
+**Diagnostics:** Invalid implicit copying reports `OWN0003`. An invalid `impl Copy` reports
+`SEM0083` and identifies the first affine, cleanup-bearing, cyclic, or unavailable reason.
 
 **Evidence:** [owned value classification](ownership-and-borrowing.md#own-001--every-value-type-is-either-copy-or-affine).
 

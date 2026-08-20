@@ -65,6 +65,14 @@ pub peakLive: usize
 
 Greatest number of simultaneously live allocations observed so far.
 
+<a id="declaration-73696c6b2f6d6574726963733a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Copy for AllocationMetrics`
+
+```silk
+impl Copy for AllocationMetrics
+```
+
 <a id="declaration-73696c6b2f6d6574726963733a3a6d616b65"></a>
 
 ## `make`

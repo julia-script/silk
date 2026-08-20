@@ -82,26 +82,31 @@ serialization promise.
 
 ### Requirement: Union values obey affine ownership
 
-Moving a non-Copy nominal payload into an owned union SHALL consume that payload. A union SHALL be
-Copy only when every member is recursively Copy and cleanup-free; copying that union SHALL preserve
-exactly one canonical active member and its complete payload without consuming or mutating the
-source. Otherwise the union SHALL remain one move-only owner. Borrowed values SHALL NOT be stored as
-union members, and cleanup SHALL act on exactly the active payload once.
+Moving an affine nominal payload into an owned union SHALL consume that payload. A union SHALL be
+Copy only when every member has the compiler's sealed Copy property; copying that union SHALL
+preserve exactly one canonical active member and its complete payload without consuming or mutating
+the source. Otherwise the union SHALL remain one affine owner. Borrowed values SHALL NOT be stored
+as union members, and cleanup SHALL act on exactly the active payload once.
 
 #### Scenario: Consume an injected owner
 
-- **WHEN** a move-only `Token` is injected into `Token | End`
+- **WHEN** an affine `Token` is injected into `Token | End`
 - **THEN** the original owner becomes unavailable and the union owns the complete `Token`
 
-#### Scenario: Copy an all-Copy union
+#### Scenario: Copy an explicitly all-Copy union
 
-- **WHEN** a `Step | VmDiagnostic` value whose two nominal members contain only Copy fields is copied
+- **WHEN** every nominal member of a structural union validly declares `impl Copy`
 - **THEN** the copy and source retain the same canonical active member and complete payload and neither acquires a cleanup obligation
 
-#### Scenario: Reject a partly move-only union copy
+#### Scenario: Reject structural Copy inference for a union member
 
-- **WHEN** one member of a structural union owns a move-only or Drop-bearing field
-- **THEN** the complete union remains move-only and a requested whole-value copy is rejected
+- **WHEN** one nominal member contains only Copy fields but declares no `impl Copy`
+- **THEN** the complete union remains affine
+
+#### Scenario: Reject a partly affine union copy
+
+- **WHEN** one member of a structural union owns an affine or Drop-bearing field
+- **THEN** the complete union remains affine and a requested whole-value copy is rejected
 
 #### Scenario: Reject a stored borrow
 

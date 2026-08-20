@@ -30,11 +30,14 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 /** Slot and shared-buffer copies preserve the active member across distinct union payload shapes. */
 const unionCopyRead = `struct Left { value: i32 }
+impl Copy for Left {}
 struct Right {
   marker: u8
   value: i32
 }
+impl Copy for Right {}
 struct EmptyEvent {}
+impl Copy for EmptyEvent {}
 
 fn left(value: i32) -> EmptyEvent | Left | Right { return Left { value: value } }
 fn right(marker: u8, value: i32) -> EmptyEvent | Left | Right {
