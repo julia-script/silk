@@ -296,7 +296,7 @@ it('keeps fixed-array element type and length in recursive structural identity',
   assert.strictEqual(Object.isFrozen(three), true)
 })
 
-it('normalizes structural unions as canonical nominal sets', () => {
+it('normalizes structural unions as canonical ordinary sets', () => {
   const token = Type.nominal('model/Token', 'Token')
   const end = Type.nominal('model/End', 'End')
   const first = Type.union([token, end, token])
@@ -343,6 +343,36 @@ it('normalizes empty, singleton, scalar, and aggregate union members', () => {
       Type.encode(aggregate.type),
       'Array<model/Token.Token, 2> | i32 | model/Token.Token',
     )
+})
+
+it('admits only detached union storage and proves generic members remain distinct', () => {
+  const owner = { module: 'model/GenericUnion', name: 'choose' }
+  const left = Type.parameter(owner, 0, 'L')
+  const right = Type.parameter(owner, 1, 'R')
+  const box = (type: Type.Type): Type.Nominal => Type.nominal('model/GenericUnion', 'Box', [type])
+  const other = (type: Type.Type): Type.Nominal =>
+    Type.nominal('model/GenericUnion', 'Other', [type])
+
+  const borrowed = Type.slice('Shared', 'i32')
+  assert.deepEqual(Type.union(['i32', borrowed]), {
+    _tag: 'InvalidMembers',
+    members: [borrowed],
+  })
+
+  assert.deepEqual(
+    Type.indistinctUnionMemberPairs([left, right]).map(({ left: first, right: second }) => [
+      Type.encode(first),
+      Type.encode(second),
+    ]),
+    [['L', 'R']],
+  )
+  assert.strictEqual(Type.indistinctUnionMemberPairs([box(left), box(right)]).length, 1)
+  assert.deepEqual(Type.indistinctUnionMemberPairs([box(left), other(right)]), [])
+  assert.deepEqual(
+    Type.indistinctUnionMemberPairs([Type.fixedArray(left, 1), Type.fixedArray(right, 2)]),
+    [],
+  )
+  assert.deepEqual(Type.indistinctUnionMemberPairs([left, box(left)]), [])
 })
 
 it('normalizes compiler-private effect contract identity and traverses substitutions', () => {

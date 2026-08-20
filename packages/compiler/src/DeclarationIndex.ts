@@ -1617,8 +1617,21 @@ export const analyzeDeclaredType = (
         (fact): fact is Extract<DeclaredTypeFact, { readonly _tag: 'Resolved' }> =>
           fact._tag === 'Resolved',
       )
+      const indistinct = Type.indistinctUnionMemberPairs(resolved.map((fact) => fact.type))
+      if (indistinct.length > 0) {
+        for (const pair of indistinct) {
+          const sourceFact = resolved.find((fact) => Type.equals(fact.type, pair.right))
+          diagnostics.push(
+            Diagnostic.indistinctUnionMembers(
+              Type.encode(pair.left),
+              Type.encode(pair.right),
+              sourceFact?.syntax.span ?? syntax.span,
+            ),
+          )
+        }
+      }
       const normalized = Type.union(resolved.map((fact) => fact.type))
-      if (normalized._tag === 'Normalized') {
+      if (normalized._tag === 'Normalized' && indistinct.length === 0) {
         return Object.freeze({
           fact: Object.freeze({
             _tag: 'Resolved',
@@ -1636,14 +1649,16 @@ export const analyzeDeclaredType = (
           diagnostics: Object.freeze(diagnostics),
         })
       }
-      for (const invalid of normalized.members) {
-        const sourceFact = resolved.find((fact) => Type.equals(fact.type, invalid))
-        diagnostics.push(
-          Diagnostic.invalidUnionMember(
-            Type.encode(invalid),
-            sourceFact?.syntax.span ?? syntax.span,
-          ),
-        )
+      if (normalized._tag === 'InvalidMembers') {
+        for (const invalid of normalized.members) {
+          const sourceFact = resolved.find((fact) => Type.equals(fact.type, invalid))
+          diagnostics.push(
+            Diagnostic.invalidUnionMember(
+              Type.encode(invalid),
+              sourceFact?.syntax.span ?? syntax.span,
+            ),
+          )
+        }
       }
     }
     const cause = diagnostics.at(-1)
@@ -4514,14 +4529,16 @@ const resolveDeclaredType = (
           diagnostics: Object.freeze(diagnostics),
         })
       }
-      for (const invalid of normalized.members) {
-        const sourceFact = available.find((member) => Type.equals(member.type, invalid))
-        diagnostics.push(
-          Diagnostic.invalidUnionMember(
-            Type.encode(invalid),
-            sourceFact?.syntax.span ?? fact.syntax.span,
-          ),
-        )
+      if (normalized._tag === 'InvalidMembers') {
+        for (const invalid of normalized.members) {
+          const sourceFact = available.find((member) => Type.equals(member.type, invalid))
+          diagnostics.push(
+            Diagnostic.invalidUnionMember(
+              Type.encode(invalid),
+              sourceFact?.syntax.span ?? fact.syntax.span,
+            ),
+          )
+        }
       }
     }
     const cause = diagnostics.at(-1)

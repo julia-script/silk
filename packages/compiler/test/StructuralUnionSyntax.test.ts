@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Diagnostic from '../src/Diagnostic.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -77,5 +78,19 @@ pub fn main() -> i32 { return 0 }`),
     assert.strictEqual(Type.equals(parameter.type, result.type), true)
     assert.strictEqual(Type.encode(result.type), 'model/Types.End | model/Types.Token')
     assert.strictEqual(parameter.unionSource?.members.length, 2)
+  }),
+)
+
+it.effect('requires generic union members to remain distinct after specialization', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'union-syntax/generic',
+      ascii(`fn unstable<L, R>(value: L | R) -> i32 { return 0 }
+pub fn main() -> i32 { return 0 }`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [Diagnostic.indistinctUnionMembersCode],
+    )
   }),
 )

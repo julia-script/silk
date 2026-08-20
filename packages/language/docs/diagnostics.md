@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 3 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 127 |
+| `SEM` | Semantic | 128 |
 | `OWN` | Ownership | 14 |
 | `LAY` | Layout | 1 |
 
-There are 156 codes in total.
+There are 157 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -93,7 +93,7 @@ There are 156 codes in total.
 | `SEM0036` |  | `Assignment requires a writable binding, field, or indexed place` |
 | `SEM0037` |  | `Assignment expected <expected> but received <actual>` |
 | `SEM0038` |  | `<transfer> is only valid inside a loop` |
-| `SEM0039` |  | `Structural union members must be nominal types, found <type>` |
+| `SEM0039` |  | `Structural union members must be detached ordinary types, found <type>` |
 | `SEM0040` |  | `<source> cannot widen to <target>; missing <join>` |
 | `SEM0041` |  | `Cannot match non-nominal type <actual>` |
 | `SEM0042` |  | `<member> is not a member of <scrutinee>` |
@@ -182,6 +182,7 @@ There are 156 codes in total.
 | `SEM0130` | Stable code for a reachable non-unit function fallthrough. | `A reachable path must return <expected>` |
 | `SEM0131` | Stable code for a provider whose key matches but whose access cannot satisfy the requirement. | `<toLowerCase> provider access cannot satisfy an <toLowerCase> requirement` |
 | `SEM0132` | Stable code for an Effect join whose alternatives cannot be represented as a finite composite. | `Cannot form a finite Effect join: <detail>` |
+| `SEM0133` | Stable code for union members that may collapse to one type after specialization. | `Structural union members <left> and <right> may become identical after specialization` |
 
 ## Ownership (`OWN`)
 

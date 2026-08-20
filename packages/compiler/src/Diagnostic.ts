@@ -162,6 +162,8 @@ export const callableIdentityErasureCode = 'SEM0080' as const
 export const unknownOwnedCallableReturnCode = 'SEM0081' as const
 /** Stable code for an Effect join whose alternatives cannot be represented as a finite composite. */
 export const nonFiniteEffectJoinCode = 'SEM0132' as const
+/** Stable code for union members that may collapse to one type after specialization. */
+export const indistinctUnionMembersCode = 'SEM0133' as const
 /** Stable code for a raw storage operation outside lexical unsafe authority. */
 export const missingUnsafeBoundaryCode = 'SEM0082' as const
 /** Stable code for an invalid source-declared capability implementation. */
@@ -377,6 +379,7 @@ export type Code =
   | typeof callableIdentityErasureCode
   | typeof unknownOwnedCallableReturnCode
   | typeof nonFiniteEffectJoinCode
+  | typeof indistinctUnionMembersCode
   | typeof missingUnsafeBoundaryCode
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
@@ -742,6 +745,7 @@ export type Reason =
     }
   | { readonly _tag: 'TransferOutsideLoop'; readonly transfer: 'break' | 'continue' }
   | { readonly _tag: 'InvalidUnionMember'; readonly type: string }
+  | { readonly _tag: 'IndistinctUnionMembers'; readonly left: string; readonly right: string }
   | {
       readonly _tag: 'IncompatibleUnionConversion'
       readonly source: string
@@ -2478,8 +2482,23 @@ export const invalidUnionMember = (type: string, span: SourceSpan.SourceSpan): D
     phase: 'semantic',
     code: invalidUnionMemberCode,
     severity: 'error',
-    message: `Structural union members must be nominal types, found ${type}`,
+    message: `Structural union members must be detached ordinary types, found ${type}`,
     reason: Object.freeze({ _tag: 'InvalidUnionMember', type }),
+    span,
+  })
+
+export const indistinctUnionMembers = (
+  left: string,
+  right: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: indistinctUnionMembersCode,
+    severity: 'error',
+    message: `Structural union members ${left} and ${right} may become identical after specialization`,
+    reason: Object.freeze({ _tag: 'IndistinctUnionMembers', left, right }),
     span,
   })
 

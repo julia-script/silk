@@ -1263,7 +1263,157 @@ export const hashGenericArgument = (self: GenericArgument): number => {
   return hash >>> 0
 }
 
-/** Normalizes a finite union of ordinary type leaves. */
+/** Tests whether one ordinary value type can be stored without a lexical borrow wrapper. */
+export const isDetachedUnionMember = (self: Type): boolean => {
+  if (isSlice(self) || isReference(self) || isSlot(self)) return false
+  if (isFixedArray(self)) return isDetachedUnionMember(self.element)
+  if (isNominal(self))
+    return self.arguments.every(
+      (argument) => !isTypeArgument(argument) || isDetachedUnionMember(argument),
+    )
+  if (isUnion(self)) return self.members.every(isDetachedUnionMember)
+  return true
+}
+
+type UnionUnification = Map<string, Type>
+
+const resolveUnionParameter = (self: Type, inferred: UnionUnification): Type => {
+  let current = self
+  const seen = new Set<string>()
+  while (isParameter(current)) {
+    const identity = key(current)
+    if (seen.has(identity)) return current
+    seen.add(identity)
+    const replacement = inferred.get(identity)
+    if (replacement === undefined) return current
+    current = replacement
+  }
+  return current
+}
+
+const unionOccurs = (parameter_: Parameter, self: Type, inferred: UnionUnification): boolean => {
+  const resolved = resolveUnionParameter(self, inferred)
+  if (isParameter(resolved)) return key(parameter_) === key(resolved)
+  if (isNominal(resolved))
+    return resolved.arguments.some(
+      (argument) => isTypeArgument(argument) && unionOccurs(parameter_, argument, inferred),
+    )
+  if (isFixedArray(resolved)) return unionOccurs(parameter_, resolved.element, inferred)
+  if (isSlice(resolved)) return unionOccurs(parameter_, resolved.element, inferred)
+  if (isReference(resolved)) return unionOccurs(parameter_, resolved.target, inferred)
+  if (isCallable(resolved))
+    return (
+      resolved.parameters.some((type) => unionOccurs(parameter_, type, inferred)) ||
+      unionOccurs(parameter_, resolved.result, inferred)
+    )
+  if (isEffect(resolved))
+    return (
+      unionOccurs(parameter_, resolved.success, inferred) ||
+      failureMembers(resolved).some((type) => unionOccurs(parameter_, type, inferred)) ||
+      requirementMembers(resolved).some((requirement) =>
+        unionOccurs(parameter_, requirement.capability, inferred),
+      )
+    )
+  if (isRepresented(resolved)) return unionOccurs(parameter_, resolved.contract, inferred)
+  if (isUnion(resolved))
+    return resolved.members.some((type) => unionOccurs(parameter_, type, inferred))
+  return false
+}
+
+const bindUnionParameter = (
+  parameter_: Parameter,
+  value: Type,
+  inferred: UnionUnification,
+): boolean => {
+  const identity = key(parameter_)
+  const existing = inferred.get(identity)
+  if (existing !== undefined) return unifyUnionMembers(existing, value, inferred)
+  const resolved = resolveUnionParameter(value, inferred)
+  if (isParameter(resolved) && identity === key(resolved)) return true
+  if (unionOccurs(parameter_, resolved, inferred)) return false
+  inferred.set(identity, resolved)
+  return true
+}
+
+const unifyUnionArguments = (
+  left: GenericArgument,
+  right: GenericArgument,
+  inferred: UnionUnification,
+): boolean => {
+  if (isTypeArgument(left) && isTypeArgument(right)) return unifyUnionMembers(left, right, inferred)
+  return genericArgumentKey(left) === genericArgumentKey(right)
+}
+
+const unifyUnionMembers = (
+  leftInput: Type,
+  rightInput: Type,
+  inferred: UnionUnification,
+): boolean => {
+  const left = resolveUnionParameter(leftInput, inferred)
+  const right = resolveUnionParameter(rightInput, inferred)
+  if (isParameter(left)) return bindUnionParameter(left, right, inferred)
+  if (isParameter(right)) return bindUnionParameter(right, left, inferred)
+  if (typeof left === 'string' || typeof right === 'string') return left === right
+  if (isNominal(left) && isNominal(right))
+    return (
+      left.module === right.module &&
+      left.name === right.name &&
+      left.arguments.length === right.arguments.length &&
+      left.arguments.every((argument, ordinal) => {
+        const supplied = right.arguments.at(ordinal)
+        return supplied !== undefined && unifyUnionArguments(argument, supplied, inferred)
+      })
+    )
+  if (isFixedArray(left) && isFixedArray(right))
+    return left.length === right.length && unifyUnionMembers(left.element, right.element, inferred)
+  if (isSlice(left) && isSlice(right))
+    return left.access === right.access && unifyUnionMembers(left.element, right.element, inferred)
+  if (isReference(left) && isReference(right))
+    return left.access === right.access && unifyUnionMembers(left.target, right.target, inferred)
+  if (isCallable(left) && isCallable(right))
+    return (
+      left.mode === right.mode &&
+      left.parameters.length === right.parameters.length &&
+      left.parameters.every((parameter_, ordinal) => {
+        const supplied = right.parameters.at(ordinal)
+        return supplied !== undefined && unifyUnionMembers(parameter_, supplied, inferred)
+      }) &&
+      unifyUnionMembers(left.result, right.result, inferred)
+    )
+  if (isEffect(left) && isEffect(right)) return left.access === right.access && equals(left, right)
+  if (isRepresented(left) && isRepresented(right))
+    return (
+      unifyUnionMembers(left.contract, right.contract, inferred) &&
+      genericArgumentKey(left.representation.argument) ===
+        genericArgumentKey(right.representation.argument)
+    )
+  return false
+}
+
+/** Tests whether two unequal open members could become identical after specialization. */
+export const unionMembersMayCollide = (left: Type, right: Type): boolean =>
+  !equals(left, right) && unifyUnionMembers(left, right, new Map())
+
+/** Finds source-declared member pairs whose identity is not stable under specialization. */
+export const indistinctUnionMemberPairs = (
+  inputs: ReadonlyArray<Type>,
+): ReadonlyArray<{ readonly left: Type; readonly right: Type }> => {
+  const normalized = FiniteRow.make<Type>(
+    { collisionKey: key, memberKey: key, merge: (left) => left },
+    inputs.flatMap((input) => (isUnion(input) ? input.members : input === 'never' ? [] : [input])),
+  ).members
+  return Object.freeze(
+    normalized.flatMap((left, leftOrdinal) =>
+      normalized
+        .slice(leftOrdinal + 1)
+        .flatMap((right) =>
+          unionMembersMayCollide(left, right) ? [Object.freeze({ left, right })] : [],
+        ),
+    ),
+  )
+}
+
+/** Normalizes a finite union of detached ordinary type leaves. */
 export const union = (inputs: ReadonlyArray<Type>): UnionNormalization => {
   const members: Array<Type> = []
   const invalid: Array<Type> = []
@@ -1273,7 +1423,7 @@ export const union = (inputs: ReadonlyArray<Type>): UnionNormalization => {
       for (const member of input.members) visit(member)
       return
     }
-    if (isRepresented(input)) {
+    if (!isDetachedUnionMember(input)) {
       invalid.push(input)
       return
     }
