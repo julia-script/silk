@@ -614,9 +614,14 @@ required runtime artifacts report one deterministic broken-toolchain diagnostic 
 and observed component identities. The compiler does not continue with fallback copies, an older
 runtime, or a user module shadowing the missing standard source.
 
-**Current toolchain:** Largely aligned through generated source and intrinsic inventories, although
-the full compiler/source/runtime digest relationship is not yet presented as one public integrity
-check.
+**Current toolchain:** Aligned. [`ToolchainIntegrity`](../../packages/compiler/src/ToolchainIntegrity.ts)
+publishes one normalized `silk-toolchain-v1` graph covering the compiler, catalog, exact source
+bytes, sealed intrinsic inventory, target providers, and per-target runtime support. Its SHA-256
+identities exclude absolute paths, timestamps, directory enumeration order, and other checkout
+state. The driver validates the compiler/catalog/source/intrinsic set before project resolution,
+then validates only providers and runtime support reached by the prepared program before emission.
+Compiled artifacts retain the graph identity, and language-tooling inventories expose the same
+graph and validation result.
 
 **Evidence:** [standard-library manifest](../../packages/compiler/stdlib/manifest.json),
 [intrinsic inventory](../../packages/compiler/test/fixtures/intrinsic-inventory.json),
@@ -649,9 +654,12 @@ consequence.
 component and points to the earliest actionable source location when one exists. Stable wording and
 codes belong to the diagnostic catalog; this table fixes their semantic classification.
 
-**Current compiler:** Mixed. Dedicated diagnostics exist for many individual cases, but current
-stdlib discovery, entry reporting, and backend fallthrough can misclassify failures or surface an
-internal error after the real boundary was crossed.
+**Current compiler:** Aligned at the bootstrap driver boundary. A malformed, unreadable, or
+mismatched distribution produces the structured `ToolchainFailed` outcome; unsupported reachable
+intrinsics produce `TargetFailed`; missing project imports remain `SourceResolutionFailed`; open or
+invalid entries remain `NoEntry`; source diagnostics remain `Rejected`; backend construction and
+external tool execution retain their own outcomes. The CLI renders these classes separately and
+does not reinterpret a broken installation as a source or backend error.
 
 **Evidence:** [module diagnostics](modules-names-and-visibility.md),
 [entry diagnostics](program-entry.md),

@@ -44,6 +44,13 @@ export interface IntegrityFailure {
         readonly detail: string
       }
     | {
+        readonly _tag: 'DependencyMismatch'
+        readonly kind: ComponentKind
+        readonly id: string
+        readonly expected: ReadonlyArray<string>
+        readonly observed: ReadonlyArray<string>
+      }
+    | {
         readonly _tag: 'DigestMismatch'
         readonly kind: ComponentKind
         readonly id: string
@@ -256,6 +263,7 @@ const installedComponents = (): ReadonlyArray<Component> => {
         id: runtimeId(target, entry.operation),
         digest: contentDigest(
           JSON.stringify({
+            compiler: compilerDigest,
             target,
             operation: entry.operation,
             evaluator: entry.evaluator,
@@ -264,7 +272,7 @@ const installedComponents = (): ReadonlyArray<Component> => {
             ...(entry.hostImport === undefined ? {} : { hostImport: entry.hostImport }),
           }),
         ),
-        dependencies: Object.freeze([intrinsic.id]),
+        dependencies: Object.freeze([compiler.id, intrinsic.id]),
       }),
     ),
   )
@@ -310,6 +318,25 @@ const validateShape = (
     failures.push(
       failure(boundary, { _tag: 'MalformedGraph', detail: 'components are not normalized' }),
     )
+  const identities = new Set(candidate.components.map((component) => component.id))
+  for (const component of candidate.components) {
+    const dependencies = [...component.dependencies].sort()
+    if (dependencies.some((dependency, index) => dependency !== component.dependencies[index]))
+      failures.push(
+        failure(boundary, {
+          _tag: 'MalformedGraph',
+          detail: `${component.id} dependencies are not normalized`,
+        }),
+      )
+    for (const dependency of component.dependencies)
+      if (!identities.has(dependency))
+        failures.push(
+          failure(boundary, {
+            _tag: 'MalformedGraph',
+            detail: `${component.id} references missing dependency ${dependency}`,
+          }),
+        )
+  }
   const observedDigest = graphDigest(candidate.components)
   if (observedDigest !== candidate.digest)
     failures.push(
@@ -356,7 +383,16 @@ const compareSelection = (
           observed: found.digest,
         }),
       )
-    }
+    } else if (JSON.stringify(found.dependencies) !== JSON.stringify(component.dependencies))
+      failures.push(
+        failure(boundary, {
+          _tag: 'DependencyMismatch',
+          kind: component.kind,
+          id: component.id,
+          expected: component.dependencies,
+          observed: found.dependencies,
+        }),
+      )
   }
   for (const [key, component] of observed)
     if (!expected.has(key))
@@ -483,6 +519,16 @@ export const validateTarget = (
           observed: found.digest,
         }),
       )
+    else if (JSON.stringify(found.dependencies) !== JSON.stringify(component.dependencies))
+      failures.push(
+        failure('Target', {
+          _tag: 'DependencyMismatch',
+          kind: component.kind,
+          id: component.id,
+          expected: component.dependencies,
+          observed: found.dependencies,
+        }),
+      )
   }
   if (failures.length > 0)
     return Object.freeze({ _tag: 'Invalid', failures: Object.freeze(failures) })
@@ -506,6 +552,8 @@ export const formatFailure = (self: IntegrityFailure): string => {
       return `unexpected ${self.reason.kind} ${self.reason.id}`
     case 'UnreadableComponent':
       return `cannot read ${self.reason.kind} ${self.reason.id}: ${self.reason.detail}`
+    case 'DependencyMismatch':
+      return `${self.reason.kind} ${self.reason.id} dependency mismatch: expected ${self.reason.expected.join(', ')}, observed ${self.reason.observed.join(', ')}`
     case 'DigestMismatch':
       return `${self.reason.kind} ${self.reason.id} digest mismatch: expected ${self.reason.expected}, observed ${self.reason.observed}`
   }

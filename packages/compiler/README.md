@@ -48,6 +48,14 @@ The MIR evaluator is the semantic oracle used by differential tests. It is not t
 runtime: native builds use deterministic LLVM bitcode and a pinned Clang toolchain, while the direct
 WebAssembly backend emits instantiable modules without external tools.
 
+`Driver.compile` owns artifact-producing builds. Before it resolves project imports, it validates
+the compiler, generated catalog, every packaged standard-library source, and the sealed intrinsic
+inventory against the normalized graph published by `ToolchainIntegrity.installed()`. After the
+reachable program is known, it validates only the selected providers and runtime implementations
+that program needs. A damaged or mixed installation returns `ToolchainFailed`; an unavailable
+target, unresolved entry, source rejection, backend failure, and external process failure remain
+distinct outcomes. Successful artifacts retain the exact toolchain graph digest.
+
 ## Implemented language surface
 
 The bootstrap language currently includes:
@@ -122,4 +130,5 @@ models belong to `@silk-effect/documentation` so ordinary compilation does not p
 
 Ordinary source errors remain typed facts. Lexer and parser recovery always make progress, preserve
 the original token stream, and keep later declarations independently analyzable. Operational
-resolver, backend, and toolchain failures stay in Effect's typed error channel.
+resolver failures stay in Effect's typed error channel; artifact-producing driver outcomes retain
+target, distribution, backend, and external-tool failures as separate structured data.
