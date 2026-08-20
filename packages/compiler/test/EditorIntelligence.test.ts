@@ -382,7 +382,11 @@ pub fn main() -> i32 { return 42 }`
       for (const [spelling, ordinal, expected] of [
         ['stat', 0, ['effect fn stat(', '! FileError ? &mut FileSystem']],
         ['exists', 1, ['pub effect fn exists(', '-> bool ! FileError ? &mut FileSystem']],
-        ['resolve', 1, ['pub effect fn resolve(', '! FileError | OutOfMemoryError ? &mut Allocator']],
+        [
+          'resolve',
+          1,
+          ['pub effect fn resolve(', '! FileError | OutOfMemoryError ? &mut Allocator'],
+        ],
       ] as const) {
         const occurrence = occurrenceAt(snapshot, source, spelling, ordinal)
         assert.strictEqual(occurrence?.declaration?.module, 'silk/filesystem', spelling)

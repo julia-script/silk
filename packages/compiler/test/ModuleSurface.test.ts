@@ -555,7 +555,6 @@ it.effect('rejects parameter kinds and builtin operations forged into incompatib
     const noFailures = RowAlgebra.concrete(Type.failureRowPolicy(), [])
     const noRequirements = RowAlgebra.concrete(Type.requirementRowPolicy(), [])
     const valueParameter = Type.parameter(owner, 0, 'Value')
-    const failureParameter = Type.parameter(owner, 1, 'Failure')
     const requirementParameter = Type.parameter(owner, 2, 'Requirements', 'RequirementRow')
     const callable = Type.callable([], Type.unit)
     const effect = Type.effect(Type.unit, [])

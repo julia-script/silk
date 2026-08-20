@@ -4347,7 +4347,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidAllocationOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'allocation does not preserve Layout, Allocation, or OutOfMemoryError contracts',
+                detail:
+                  'allocation does not preserve Layout, Allocation, or OutOfMemoryError contracts',
               }),
             )
         }

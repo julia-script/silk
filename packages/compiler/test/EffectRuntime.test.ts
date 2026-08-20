@@ -358,31 +358,39 @@ it.effect('provides an existing borrowed capability across evaluator and Wasm', 
   }),
 )
 
-it.effect('constructs allocation-free OutOfMemoryError and recovers across evaluator and Wasm', () =>
-  Effect.gen(function* () {
-    const logical = yield* Analysis.ofSourceRealized(
-      'effect-runtime/oom-logical',
-      ascii(outOfMemoryErrorSource),
-      'aarch64-apple-darwin',
-    )
-    const wasm = yield* Analysis.ofSourceRealized(
-      'effect-runtime/oom-wasm',
-      ascii(outOfMemoryErrorSource),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(logical), [])
-    assert.deepEqual(Analysis.diagnostics(wasm), [])
-    const layout = Analysis.layoutOf(logical)
-    const oom =
-      layout._tag === 'Available' ? Analysis.callingShapeOf(logical, Type.outOfMemoryError) : undefined
-    assert.strictEqual(oom?.lanes.length, 0)
-    const evaluated = Analysis.evaluate(logical)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
-    const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-  }),
+it.effect(
+  'constructs allocation-free OutOfMemoryError and recovers across evaluator and Wasm',
+  () =>
+    Effect.gen(function* () {
+      const logical = yield* Analysis.ofSourceRealized(
+        'effect-runtime/oom-logical',
+        ascii(outOfMemoryErrorSource),
+        'aarch64-apple-darwin',
+      )
+      const wasm = yield* Analysis.ofSourceRealized(
+        'effect-runtime/oom-wasm',
+        ascii(outOfMemoryErrorSource),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(logical), [])
+      assert.deepEqual(Analysis.diagnostics(wasm), [])
+      const layout = Analysis.layoutOf(logical)
+      const oom =
+        layout._tag === 'Available'
+          ? Analysis.callingShapeOf(logical, Type.outOfMemoryError)
+          : undefined
+      assert.strictEqual(oom?.lanes.length, 0)
+      const evaluated = Analysis.evaluate(logical)
+      assert.strictEqual(
+        evaluated._tag,
+        'Completed',
+        JSON.stringify(evaluated, Json.bigIntReplacer),
+      )
+      assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
+      const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+    }),
 )
 
 it.effect('executes the same handled failure through the evaluator and Wasm', () =>
