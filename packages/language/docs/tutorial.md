@@ -70,8 +70,9 @@ Three rules are already visible:
 - `pub` makes a declaration visible outside its module. Without it a declaration is private to the
   file.
 - `let` binds a name. The type is inferred; an unconstrained integer literal is `i32`.
-- **`return` is required.** Silk has no trailing-expression return. A function body that reaches
-  its closing brace without a `return` is a `PAR0004` error.
+- **A non-unit path must return.** Silk has no trailing-expression return. Every reachable path of
+  a function returning a value must end in `return` or another terminal operation; fallthrough is
+  a `SEM0130` error.
 
 Check the program without running it:
 
@@ -287,6 +288,6 @@ logger: a caller supplies them with `provide`, and the row shrinks as they are s
   and ownership, and the effect system.
 - The [standard library reference](./stdlib/) lists every module and public declaration.
 - The [diagnostic index](./diagnostics.md) explains every error code, including the `OWN0001` and
-  `PAR0004` mentioned above.
+  `SEM0130` mentioned above.
 - `examples/algorithms/` in the repository holds larger programs — quicksort, FFT, CRC-32,
   game of life — that compile and run today.

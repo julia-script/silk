@@ -246,8 +246,9 @@ initializer.
 ```
 
 An omitted return type means `()`. Parameters are `name: Type` and a trailing comma is allowed.
-Every function body must end in a `return`; a body that falls off its closing brace is a `PAR0004`
-error with a recovered return.
+Every reachable path of a non-unit body must end in a compatible `return` or another terminal
+operation. An incompatible return reports `SEM0129`; reachable non-unit fallthrough reports
+`SEM0130`. A trailing `return` is unnecessary when all branches are already terminal.
 
 ### 2.4 Structs
 

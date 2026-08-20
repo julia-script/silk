@@ -85,11 +85,11 @@ it.effect('reports a final expression separately from its missing terminal retur
           },
         },
         {
-          code: 'PAR0004',
-          message: 'Expected return statement',
+          code: 'SEM0130',
+          message: 'A reachable path must return i32',
           range: {
-            start: { line: 1, character: 11 },
-            end: { line: 1, character: 11 },
+            start: { line: 2, character: 0 },
+            end: { line: 2, character: 1 },
           },
         },
       ],
