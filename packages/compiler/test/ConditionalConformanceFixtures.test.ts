@@ -145,5 +145,4 @@ impl<S: Decoder> Decoder for Wrapper<S> {
       assert.strictEqual(proof._tag, 'Unproved')
     }),
   )
-
 })
