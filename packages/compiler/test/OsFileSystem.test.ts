@@ -11,6 +11,7 @@ import type * as OsFileSystemHost from '../src/OsFileSystemHost.js'
 import * as OsRuntime from '../src/OsRuntime.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as WasmBackend from '../src/WasmBackend.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -358,6 +359,20 @@ it.effect(
           ['SEM0093'],
         )
       }
+
+      const driven = yield* Driver.compile({
+        compilation: {
+          root: SourceFile.make('os-filesystem/driver-wasm', ascii(lowLevelSource)),
+          target: 'wasm32-unknown-unknown',
+        },
+        backend: WasmBackend.WasmBackend,
+        toolchain: { _tag: 'Toolchain', clang: '' },
+        profile: 'release',
+        destination: join(destinationRoot, 'unsupported.wasm'),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(driven._tag, 'TargetFailed')
+      if (driven._tag === 'TargetFailed')
+        assert.strictEqual(driven.error.operation, 'Target.validateInventory')
     }),
 )
 
