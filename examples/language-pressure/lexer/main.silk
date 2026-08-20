@@ -16,6 +16,7 @@ const tokenTilde: u8 = 72
 const tokenAmpersandAmpersand: u8 = 73
 const tokenPipePipe: u8 = 74
 const tokenCharLiteral: u8 = 75
+const tokenRole: u8 = 76
 
 struct Token {
   kind: u8
@@ -193,6 +194,7 @@ fn keywordKind(source: &[u8], start: usize, end: usize) -> u8 {
   if matches(source, start, end, b"const") { return tokenConst }
   if matches(source, start, end, b"service") { return tokenService }
   if matches(source, start, end, b"interface") { return tokenInterface }
+  if matches(source, start, end, b"role") { return tokenRole }
   return tokenIdentifier
 }
 

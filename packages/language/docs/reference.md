@@ -796,7 +796,7 @@ effect fn read() -> i32 ! LogError ? &mut Clock | &mut Logger {
 
 effect fn withLogger() -> i32 ! LogError ? &mut Clock {
   let mut logger = StdoutLogger.stdout()
-  return run Effect.provideMut<&mut Logger>(read(), &mut logger)
+  return run Effect.provideMut<Logger>(read(), &mut logger)
 }
 ```
 

@@ -282,7 +282,11 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Existing provider capture',
-    `service Clock {
+    `import silk.effects as Effect
+
+role Primary
+
+service Clock {
   effect fn value() -> i32 ? &Clock
 }
 
@@ -299,14 +303,14 @@ impl Clock for FixedClock {
 }
 
 effect fn read() -> i32
-? &Clock@Primary {
+? &Clock at Primary {
   return 42
 }
 
 pub fn main() -> i32 {
   let clock = FixedClock {value: 42}
   let pending = read()
-    |> Intrinsic.bindRequirement<&Clock@Primary>(&clock)
+    |> Effect.provide<Clock at Primary>(&clock)
   return run pending
 }
 `,

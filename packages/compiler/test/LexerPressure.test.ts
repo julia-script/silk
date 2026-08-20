@@ -306,7 +306,7 @@ const corpus = [
   Object.freeze({
     id: 'keywords',
     input:
-      'pub struct service interface effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false const name _x2',
+      'pub struct service interface role effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false const name _x2',
   }),
   Object.freeze({ id: 'numbers', input: '0 42 1.25 2e3 3E+4 4e- 5..6' }),
   Object.freeze({
