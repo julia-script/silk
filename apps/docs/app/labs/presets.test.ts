@@ -579,6 +579,7 @@ describe('preset catalog', () => {
       'compiler/Coverage',
       'compiler/Member',
       'silk/bytes',
+      'silk/char',
       'silk/core',
       'silk/format',
       'silk/i32',
