@@ -12,7 +12,7 @@ requires [`ChildProcess`](./child-process.md#declaration-73696c6b2f6368696c645f7
 ## Details
 
 The provider owns no persistent state. It translates low-level spawn and capture reasons into
-portable [`ProcessError`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734661696c757265) data, preserves a native numeric code, and copies the complete stdout
+portable [`ProcessError`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72) data, preserves a native numeric code, and copies the complete stdout
 and stderr captures into independently owned [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573) values. Exit status and signal
 termination remain ordinary [`ProcessOutcome`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65) data.
 

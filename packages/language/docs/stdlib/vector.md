@@ -14,7 +14,7 @@ fixed array when the length is part of the type, and `silk.bytes.Bytes` for bulk
 [`make`](#declaration-73696c6b2f766563746f723a3a6d616b65) is allocation-free. The first growth reserves four elements and later growth doubles
 capacity; [`reserve`](#declaration-73696c6b2f766563746f723a3a72657365727665) can move that cost ahead of mutation. Growth completes in replacement
 storage before committing, so [`append`](#declaration-73696c6b2f766563746f723a3a617070656e64) and [`reserve`](#declaration-73696c6b2f766563746f723a3a72657365727665) leave the vector unchanged on
-[`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279). Removing, clearing, and truncating drop exactly the elements they discard while
+[`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72). Removing, clearing, and truncating drop exactly the elements they discard while
 retaining capacity.
 
 [`sort`](#declaration-73696c6b2f766563746f723a3a736f7274) is stable, deterministic, and supports move-only elements, but allocates scratch space.

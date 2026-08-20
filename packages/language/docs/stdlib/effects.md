@@ -12,8 +12,9 @@ must run after a typed outcome. Direct `run` remains clearest for simple sequent
 
 ## Details
 
-These operations are ordinary Silk built from a small intrinsic core. Failure rows are nominal
-sets. Requirement rows are maps keyed by capability and role, with shared or exclusive access;
+These operations are ordinary Silk built from a small intrinsic core. Failure channels contain
+ordinary detached types and structural unions. Requirement rows are maps keyed by capability and
+role, with shared or exclusive access;
 union joins a shared/exclusive collision to exclusive. Membership and `Without<R, S>` compare the
 stored access exactly, independently of whether a stronger provider can satisfy a weaker demand.
 `Without` is forward-only: its input rows are inferred first, then exact members in `S` are
@@ -67,7 +68,7 @@ Dispatches one complete message at the selected level through the provided Logge
 ## `result`
 
 ```silk
-pub effect fn result<A, !E, ?R>(protected: once Effect<A ! E ? R>) -> silk/result.Result<A, Row<! E>> ? R
+pub effect fn result<A, E, ?R>(protected: once Effect<A ! E ? R>) -> silk/result.Result<A, E> ? R
 ```
 
 Reifies one Effect execution into Result data while preserving its requirements.
@@ -77,7 +78,7 @@ Reifies one Effect execution into Result data while preserving its requirements.
 ## `mapBoth`
 
 ```silk
-pub effect fn mapBoth<A, B, !E, !F, ?R>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> B, onFailure: once fn(Row<! E>) -> Row<! F>) -> B ! F ? R
+pub effect fn mapBoth<A, B, E, F, ?R>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> B, onFailure: once fn(E) -> F) -> B ! F ? R
 ```
 
 Transforms both the success and typed-failure channels of an Effect.
@@ -87,7 +88,7 @@ Transforms both the success and typed-failure channels of an Effect.
 ## `map`
 
 ```silk
-pub effect fn map<A, B, !E, ?R>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> B) -> B ! E ? R
+pub effect fn map<A, B, E, ?R>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> B) -> B ! E ? R
 ```
 
 Transforms the success channel of an Effect.
@@ -97,7 +98,7 @@ Transforms the success channel of an Effect.
 ## `mapError`
 
 ```silk
-pub effect fn mapError<A, !E, !F, ?R>(self: once Effect<A ! E ? R>, onFailure: once fn(Row<! E>) -> Row<! F>) -> A ! F ? R
+pub effect fn mapError<A, E, F, ?R>(self: once Effect<A ! E ? R>, onFailure: once fn(E) -> F) -> A ! F ? R
 ```
 
 Transforms the typed-failure channel of an Effect.
@@ -107,7 +108,7 @@ Transforms the typed-failure channel of an Effect.
 ## `flatMap`
 
 ```silk
-pub effect fn flatMap<A, B, !E, !F, ?R, ?S>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> Effect<B ! F ? S>) -> B ! E | F ? R | S
+pub effect fn flatMap<A, B, E, F, ?R, ?S>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> Effect<B ! F ? S>) -> B ! E | F ? R | S
 ```
 
 Continues an Effect with an effectful success callback.
@@ -117,7 +118,7 @@ Continues an Effect with an effectful success callback.
 ## `flatten`
 
 ```silk
-pub effect fn flatten<A, !E, !F, ?R, ?S>(self: once Effect<Effect<A ! F ? S> ! E ? R>) -> A ! E | F ? R | S
+pub effect fn flatten<A, E, F, ?R, ?S>(self: once Effect<Effect<A ! F ? S> ! E ? R>) -> A ! E | F ? R | S
 ```
 
 Removes one Effect layer from a nested Effect.
@@ -197,7 +198,7 @@ The third Effect's success value.
 ## `zip`
 
 ```silk
-pub effect fn zip<A, B, !E, !F, ?R, ?S>(self: once Effect<A ! E ? R>, other: once Effect<B ! F ? S>) -> silk/effects.Pair<A, B> ! E | F ? R | S
+pub effect fn zip<A, B, E, F, ?R, ?S>(self: once Effect<A ! E ? R>, other: once Effect<B ! F ? S>) -> silk/effects.Pair<A, B> ! E | F ? R | S
 ```
 
 Runs two Effects in declaration order and collects both success values.
@@ -210,7 +211,7 @@ success. A typed failure from the first Effect therefore propagates out of this 
 second Effect is ever executed, and the unrun second Effect is released by the ordinary local
 cleanup of the frame the propagation leaves.
 
-Both failure rows and both requirement rows are unioned, so the result is `! E | F ? R | S`. The
+Both failure unions and both requirement rows are joined, so the result is `! E | F ? R | S`. The
 fields are `pub`, so a caller in another module can project `first` and `second` directly.
 
 This combinator is fixed-arity by construction. Each operand is a distinct parameter, so no
@@ -221,7 +222,7 @@ Effect is ever stored in a collection — see the note on `zip3` for why that ma
 ## `zip3`
 
 ```silk
-pub effect fn zip3<A, B, C, !E, !F, !G, ?R, ?S, ?T>(self: once Effect<A ! E ? R>, second: once Effect<B ! F ? S>, third: once Effect<C ! G ? T>) -> silk/effects.Triple<A, B, C> ! E | F | G ? R | S | T
+pub effect fn zip3<A, B, C, E, F, G, ?R, ?S, ?T>(self: once Effect<A ! E ? R>, second: once Effect<B ! F ? S>, third: once Effect<C ! G ? T>) -> silk/effects.Triple<A, B, C> ! E | F | G ? R | S | T
 ```
 
 Runs three Effects in declaration order and collects all three success values.
@@ -239,7 +240,7 @@ hidden-identity specialization path, where it is erased before lowering.
 ## `tap`
 
 ```silk
-pub effect fn tap<A, !E, !F, ?R, ?S>(self: once Effect<A ! E ? R>, callback: once fn(A) -> Effect<A ! F ? S>) -> A ! E | F ? R | S
+pub effect fn tap<A, E, F, ?R, ?S>(self: once Effect<A ! E ? R>, callback: once fn(A) -> Effect<A ! F ? S>) -> A ! E | F ? R | S
 ```
 
 Runs an effectful callback while preserving its returned success value.
@@ -249,15 +250,15 @@ Runs an effectful callback while preserving its returned success value.
 ## `catchAll`
 
 ```silk
-pub effect fn catchAll<A, !E, !F, ?R, ?S>(self: once Effect<A ! E ? R>, onFailure: once fn(Row<! E>) -> Effect<A ! F ? S>) -> A ! F ? R | S
+pub effect fn catchAll<A, B, E, F, ?R, ?S>(self: once Effect<A ! E ? R>, onFailure: once fn(E) -> Effect<B ! F ? S>) -> A | B ! F ? R | S
 ```
 
 Recovers every typed failure in the protected row with another Effect.
 
 ### Details
 
-The handler receives the whole row as one value and always runs on failure, so the protected
-row is removed in full and only the handler's own failures remain. Success bypasses the
+The handler receives the whole failure type as one value and always runs on failure, so the
+protected failure channel is removed in full and only the handler's own failures remain. Success bypasses the
 handler. Use `catch<E>` to recover a single member and leave the rest propagating.
 
 <a id="declaration-73696c6b2f656666656374733a3a6361746368"></a>
@@ -265,7 +266,7 @@ handler. Use `catch<E>` to recover a single member and leave the rest propagatin
 ## `catch`
 
 ```silk
-pub effect fn catch<S, A, !E, !F, ?R, ?Q>(self: once Effect<A ! E ? R>, onFailure: once fn(S) -> Effect<A ! F ? Q>) -> A ! Without<E, S> | F ? R | Q where S in E
+pub effect fn catch<S, A, B, E, F, ?R, ?Q>(self: once Effect<A ! E ? R>, onFailure: once fn(S) -> Effect<B ! F ? Q>) -> A | B ! Without<E, S> | F ? R | Q where S in E
 ```
 
 Recovers one selected typed failure.
@@ -276,17 +277,17 @@ Recovers one selected typed failure.
 only for that member, its own failures join the result row, and every nonmatching member of
 the protected row propagates unchanged as the residual. Success bypasses the handler.
 
-The residual row is expressed by ordinary row algebra. Runtime dispatch is executable on the
+The residual failure is expressed by ordinary union difference. Runtime dispatch is executable on the
 evaluator, WebAssembly, and native targets: success bypasses the handler, the selected failure
 invokes it once, and every nonmatching failure propagates unchanged. Use [`catchAll`](#declaration-73696c6b2f656666656374733a3a6361746368416c6c) when the
-handler should receive and recover the whole reified failure row.
+handler should receive and recover the complete ordinary failure value.
 
 <a id="declaration-73696c6b2f656666656374733a3a656e737572696e67"></a>
 
 ## `ensuring`
 
 ```silk
-pub effect fn ensuring<A, !E, ?R, ?S>(self: once Effect<A ! E ? R>, finalizer: once Effect<() ? S>) -> A ! E ? R | S
+pub effect fn ensuring<A, E, ?R, ?S>(self: once Effect<A ! E ? R>, finalizer: once Effect<() ? S>) -> A ! E ? R | S
 ```
 
 Runs a finalizer after the Effect completes, whatever its outcome, and preserves that outcome.
@@ -312,7 +313,7 @@ every Drop hook.
 ## `ifThenElse`
 
 ```silk
-pub effect fn ifThenElse<A, !E, !F, ?R, ?S>(condition: bool, onTrue: once fn() -> Effect<A ! E ? R>, onFalse: once fn() -> Effect<A ! F ? S>) -> A ! E | F ? R | S
+pub effect fn ifThenElse<A, E, F, ?R, ?S>(condition: bool, onTrue: once fn() -> Effect<A ! E ? R>, onFalse: once fn() -> Effect<A ! F ? S>) -> A ! E | F ? R | S
 ```
 
 Runs exactly one of two suspended branches, selected by a condition.
@@ -342,7 +343,7 @@ raw-identifier form, so the declaration itself could not be spelled `if`.
 ## `retry`
 
 ```silk
-pub effect fn retry<A, !E, ?R>(self: mut Effect<A ! E ? R>, retries: usize) -> A ! E ? R
+pub effect fn retry<A, E, ?R>(self: mut Effect<A ! E ? R>, retries: usize) -> A ! E ? R
 ```
 
 Repeats a reusable Effect after typed failure up to the requested count.
@@ -352,7 +353,7 @@ Repeats a reusable Effect after typed failure up to the requested count.
 ## `bindRequirement`
 
 ```silk
-pub effect fn bindRequirement<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: &P) -> A ! E ? Without<R, S> where &P provides S from R
+pub effect fn bindRequirement<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: &P) -> A ! E ? Without<R, S> where &P provides S from R
 ```
 
 Satisfies one shared typed service requirement with an existing provider.
@@ -368,7 +369,7 @@ requirement. Subtraction removes that exact stored capability-role-access member
 ## `bindRequirementMut`
 
 ```silk
-pub effect fn bindRequirementMut<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A ! E ? Without<R, S> where &mut P provides S from R
+pub effect fn bindRequirementMut<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A ! E ? Without<R, S> where &mut P provides S from R
 ```
 
 Satisfies one exclusive typed service requirement with an existing provider.
@@ -384,7 +385,7 @@ a synthesized `&mut Logger`.
 ## `bindRequirementOwned`
 
 ```silk
-pub effect fn bindRequirementOwned<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: P) -> A ! E ? Without<R, S> where P provides S from R
+pub effect fn bindRequirementOwned<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: P) -> A ! E ? Without<R, S> where P provides S from R
 ```
 
 Satisfies one typed service requirement by taking ownership of its provider.
@@ -400,7 +401,7 @@ repeatable.
 ## `provide`
 
 ```silk
-pub effect fn provide<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: &P) -> A ! E ? Without<R, S> where &P provides S from R
+pub effect fn provide<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: &P) -> A ! E ? Without<R, S> where &P provides S from R
 ```
 
 Satisfies one shared typed service requirement with an existing provider.
@@ -410,7 +411,7 @@ Satisfies one shared typed service requirement with an existing provider.
 ## `provideMut`
 
 ```silk
-pub effect fn provideMut<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A ! E ? Without<R, S> where &mut P provides S from R
+pub effect fn provideMut<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A ! E ? Without<R, S> where &mut P provides S from R
 ```
 
 Satisfies one typed service requirement with an existing exclusive provider.
@@ -449,7 +450,7 @@ effect fn withLogger() -> i32 ! LogError ? &mut Clock {
 ## `provideWith`
 
 ```silk
-pub effect fn provideWith<?S, A, P, !E, !F, ?R, ?Q>(self: once Effect<A ! E ? R>, acquire: Effect<P ! F ? Q>) -> A ! E | F ? Without<R, S> | Q where &mut P provides S from R
+pub effect fn provideWith<?S, A, P, E, F, ?R, ?Q>(self: once Effect<A ! E ? R>, acquire: Effect<P ! F ? Q>) -> A ! E | F ? Without<R, S> | Q where &mut P provides S from R
 ```
 
 Acquires and lexically provides one typed service requirement.

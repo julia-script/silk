@@ -51,7 +51,7 @@ pub struct OutOfRange
 
 A well-formed decimal number whose value does not fit the requested type.
 
-<a id="declaration-73696c6b2f666f726d61743a3a50617273654661696c757265"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a50617273654572726f72"></a>
 
 ## `ParseError`
 
@@ -61,7 +61,7 @@ pub struct ParseError
 
 Why decimal text did not produce a value, narrowed with `match`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a50617273654661696c7572653a3a6669656c643a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a50617273654572726f723a3a6669656c643a30"></a>
 
 ### Field `reason`
 

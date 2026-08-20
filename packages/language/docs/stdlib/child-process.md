@@ -17,8 +17,8 @@ begins empty, the working directory is inherited unless [`requestWithin`](#decla
 standard input is closed. `ChildProcess.execute` blocks until termination and owns complete
 stdout and stderr captures in [`ProcessOutcome`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65). A nonzero exit is ordinary outcome data.
 
-[`ProcessError`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734661696c757265) is reserved for failing to spawn, wait, or capture; it carries a stable
-portable reason and may retain a provider code. Execution also reports [`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279) when
+[`ProcessError`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72) is reserved for failing to spawn, wait, or capture; it carries a stable
+portable reason and may retain a provider code. Execution also reports [`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72) when
 captured output cannot be owned.
 
 Import as `ChildProcess` with `import silk.child_process`.
@@ -65,7 +65,7 @@ pub code: i32
 
 Stable code identifying the portable recovery reason.
 
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734661696c757265"></a>
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72"></a>
 
 ## `ProcessError`
 
@@ -79,7 +79,7 @@ An allocation-free typed failure to start, to wait for, or to capture one child.
 
 A child that ran and exited nonzero is not a failure: that is `ProcessOutcome` data.
 
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734661696c7572653a3a6669656c643a30"></a>
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f723a3a6669656c643a30"></a>
 
 ### Field `operation`
 
@@ -89,7 +89,7 @@ pub operation: ProcessOperation
 
 The execution stage that failed.
 
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734661696c7572653a3a6669656c643a31"></a>
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f723a3a6669656c643a31"></a>
 
 ### Field `reason`
 

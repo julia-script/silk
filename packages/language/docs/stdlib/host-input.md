@@ -13,9 +13,9 @@ lossless pass-through.
 ## Details
 
 Arguments include the program name at index zero and retain host order. A missing argument index
-or unset variable is [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65), while [`HostInputError`](#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744661696c757265) means the provider could not answer.
+or unset variable is [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65), while [`HostInputError`](#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744572726f72) means the provider could not answer.
 Returned [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573) values are independently owned, so lookup operations also carry explicit
-[`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279) and [`Allocator`](./core.md#declaration-73696c6b2f636f72653a3a416c6c6f6361746f72) channels.
+[`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72) and [`Allocator`](./core.md#declaration-73696c6b2f636f72653a3a416c6c6f6361746f72) channels.
 
 The service is read-only and never mutates environment variables or the process working
 directory. No ambient global is consulted after a provider is supplied.
@@ -24,7 +24,7 @@ Import as `HostInput` with `import silk.host_input`.
 
 Public declarations: 10.
 
-<a id="declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744661696c757265"></a>
+<a id="declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744572726f72"></a>
 
 ## `HostInputError`
 

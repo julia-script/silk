@@ -46,11 +46,11 @@ impl Reader<ScalarPlan> for ScalarPlan {
   decode: ScalarPlan.numberDecode
 }
 
-impl CompleteReader<ScalarPlan, i32, i32 ! DecodeProblem ? &Pulse> for ScalarPlan {
+impl CompleteReader<ScalarPlan, i32, i32, DecodeProblem ? &Pulse> for ScalarPlan {
   decode: ScalarPlan.completeNumberDecode
 }
 
-fn pendingComplete<T: CompleteReader<T, i32, i32 ! DecodeProblem ? &Pulse>>(value: &T) -> Effect<i32 ! DecodeProblem ? &Pulse> {
+fn pendingComplete<T: CompleteReader<T, i32, i32, DecodeProblem ? &Pulse>>(value: &T) -> Effect<i32 ! DecodeProblem ? &Pulse> {
   return CompleteReader.decode(value, 0)
 }
 

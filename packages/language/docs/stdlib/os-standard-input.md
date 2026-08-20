@@ -13,7 +13,7 @@ code. Use a scripted provider in tests to control partial reads, end-of-input, a
 
 The provider owns no persistent state and commits each host read directly into the caller's
 buffer. A zero-length host transfer becomes the outcome selected by [`endOfInput`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a656e644f66496e707574); only a host
-read error becomes [`StreamReadError`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644661696c757265). Partial transfer counts are preserved exactly.
+read error becomes [`StreamReadError`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72). Partial transfer counts are preserved exactly.
 
 ## Gotchas
 

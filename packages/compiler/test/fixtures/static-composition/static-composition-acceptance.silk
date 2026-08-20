@@ -46,11 +46,11 @@ impl Decoder<NumberSchema> for NumberSchema {
   decode: NumberSchema.numberDecode
 }
 
-impl CompleteDecoder<NumberSchema, i32, i32 ! DecodeProblem ? &Clock> for NumberSchema {
+impl CompleteDecoder<NumberSchema, i32, i32, DecodeProblem ? &Clock> for NumberSchema {
   decode: NumberSchema.completeNumberDecode
 }
 
-fn pendingComplete<T: CompleteDecoder<T, i32, i32 ! DecodeProblem ? &Clock>>(value: &T) -> Effect<i32 ! DecodeProblem ? &Clock> {
+fn pendingComplete<T: CompleteDecoder<T, i32, i32, DecodeProblem ? &Clock>>(value: &T) -> Effect<i32 ! DecodeProblem ? &Clock> {
   return CompleteDecoder.decode(value, 0)
 }
 

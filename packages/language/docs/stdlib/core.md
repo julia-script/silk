@@ -14,14 +14,14 @@ structured logging belongs in `silk.logging`.
 
 Both capabilities are ordinary source-declared services. Their requirements remain in an
 Effect until a caller supplies a provider, so tests and applications can replace process-backed
-implementations lexically. Allocation failure is typed as [`OutOfMemoryError`](#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279), and stream failure as
-[`StreamWriteError`](#declaration-73696c6b2f636f72653a3a53747265616d57726974654661696c757265).
+implementations lexically. Allocation failure is typed as [`OutOfMemoryError`](#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72), and stream failure as
+[`StreamWriteError`](#declaration-73696c6b2f636f72653a3a53747265616d57726974654572726f72).
 
 Import as `Allocator` with `import silk.core`.
 
 Public declarations: 12.
 
-<a id="declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279"></a>
+<a id="declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72"></a>
 
 ## `OutOfMemoryError`
 
@@ -39,7 +39,7 @@ Reports that an allocator could not satisfy a storage request.
 pub effect fn outOfMemory() -> never ! OutOfMemoryError
 ```
 
-Fails immediately with [`OutOfMemoryError`](#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279), for translating checked sizing failures.
+Fails immediately with [`OutOfMemoryError`](#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72), for translating checked sizing failures.
 
 <a id="declaration-73696c6b2f636f72653a3a416c6c6f6361746f72"></a>
 
@@ -97,7 +97,7 @@ impl Allocator for SystemAllocator
 allocate = SystemAllocator.allocate
 ```
 
-<a id="declaration-73696c6b2f636f72653a3a53747265616d57726974654661696c757265"></a>
+<a id="declaration-73696c6b2f636f72653a3a53747265616d57726974654572726f72"></a>
 
 ## `StreamWriteError`
 

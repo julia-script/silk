@@ -13,7 +13,7 @@ text separately so invalid input can be handled without losing its original byte
 
 Each read writes only a prefix of the caller's mutable buffer and reports the exact committed
 count, which may be smaller than the buffer length. [`EndOfInput`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a456e644f66496e707574) is ordinary outcome data and
-promises that no later read will produce bytes; [`StreamReadError`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644661696c757265) is reserved for a provider
+promises that no later read will produce bytes; [`StreamReadError`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72) is reserved for a provider
 that could not complete a read.
 
 This service is separate from `StandardStreams`: output commits a complete message or fails,
@@ -23,7 +23,7 @@ Import as `StandardInput` with `import silk.standard_input`.
 
 Public declarations: 11.
 
-<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644661696c757265"></a>
+<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72"></a>
 
 ## `StreamReadError`
 
