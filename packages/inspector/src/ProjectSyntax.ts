@@ -162,9 +162,7 @@ export const hirContract = (contract: Hir.ContractFact): string =>
           ? ` ! ${
               contract.failureRow === undefined
                 ? 'empty'
-                : Type.failureMembers(Type.failureRowArgumentFromRow(contract.failureRow))
-                    .map(hirTypeText)
-                    .join(' | ') || 'empty'
+                : hirTypeText(Type.failureType(contract.failureRow))
             }`
           : ''
       }`
@@ -198,19 +196,17 @@ const hirTypeText = (type: Type.Type): string =>
             ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${hirTypeText(type.element)}]`
             : type._tag === 'EffectType'
               ? `Effect<${hirTypeText(type.success)}${
-                  Type.failureMembers(type).length === 0
+                  Type.failureType(type) === 'never'
                     ? ''
-                    : ` ! ${Type.failureMembers(type).map(hirTypeText).join(' | ')}`
+                    : ` ! ${hirTypeText(Type.failureType(type))}`
                 }> ${type.access.toLowerCase()}`
               : type._tag === 'CallableType'
                 ? `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
                 : type._tag === 'ReferenceType'
                   ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${hirTypeText(type.target)}`
-                  : type._tag === 'FailureProjectionType'
-                    ? `Row<!${type.parameter.name}>`
-                    : type._tag === 'RepresentedType'
-                      ? Type.encode(type)
-                      : type.members.map(hirTypeText).join(' | ')
+                  : type._tag === 'RepresentedType'
+                    ? Type.encode(type)
+                    : type.members.map(hirTypeText).join(' | ')
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {

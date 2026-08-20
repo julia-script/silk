@@ -18,19 +18,15 @@ const typeText = (type: Type.Type): string =>
             ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
             : type._tag === 'EffectType'
               ? `Effect<${typeText(type.success)}${
-                  Type.failureMembers(type).length === 0
-                    ? ''
-                    : ` ! ${Type.failureMembers(type).map(typeText).join(' | ')}`
+                  Type.failureType(type) === 'never' ? '' : ` ! ${typeText(Type.failureType(type))}`
                 }> ${type.access.toLowerCase()}`
               : type._tag === 'CallableType'
                 ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
                 : type._tag === 'ReferenceType'
                   ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
-                  : type._tag === 'FailureProjectionType'
-                    ? `Row<!${type.parameter.name}>`
-                    : type._tag === 'RepresentedType'
-                      ? Type.encode(type)
-                      : type.members.map(typeText).join(' | ')
+                  : type._tag === 'RepresentedType'
+                    ? Type.encode(type)
+                    : type.members.map(typeText).join(' | ')
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'
