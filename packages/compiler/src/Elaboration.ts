@@ -4186,8 +4186,6 @@ const callArityDiagnostic = (
 ): Diagnostic.Diagnostic => {
   if (expectedCount === 1 && actualCount === 0)
     return Diagnostic.redundantUnaryEmptyCall(reference.spelling, span)
-  if (expectedCount >= 2 && actualCount < expectedCount - 1)
-    return Diagnostic.deeperUnderApplication(reference.spelling, expectedCount, actualCount, span)
   return Diagnostic.wrongCallArity(
     reference._tag === 'ResolvedBuiltin'
       ? Object.freeze({

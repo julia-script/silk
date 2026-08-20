@@ -302,7 +302,7 @@ it('diagnoses unknown actors and unknown operations distinctly', () => {
   )
   assert.deepEqual(
     arity.diagnostics.map((diagnostic) => diagnostic.code),
-    ['SEM0079'],
+    ['SEM0007'],
   )
   for (const result of [actor, operation, arity]) {
     const fn = result.hir.functions.at(0)

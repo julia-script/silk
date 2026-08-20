@@ -70,8 +70,9 @@ let piped = Counter { value: 40 } |> Counter.increment(1)
 ```
 
 The direct and piped forms have the same meaning. This is not special treatment for Effect APIs.
-Supplying the trailing arguments of an ordinary multi-parameter function creates a unary callable
-waiting for its leading argument, so the same convention supports operations on any value:
+Supplying a non-empty trailing suffix of an ordinary multi-parameter function creates a callable
+waiting for its remaining leading arguments, so the same convention supports operations on any
+value:
 
 ```silk
 import silk.effects as Effect

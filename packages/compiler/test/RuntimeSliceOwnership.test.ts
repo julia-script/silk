@@ -126,6 +126,28 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('retains a callable capture loan when the callable is stored after invocation', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`fn inspect(value: i32, values: &[i32]) -> i32 {
+  return value + values[0]
+}
+pub fn main() -> i32 {
+  let mut values = [1]
+  let callback = inspect(&values)
+  let observed = callback(1)
+  let stored = callback
+  values[0] = 40
+  drop stored
+  return observed + values[0]
+}`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['OWN0011'],
+    )
+  }),
+)
+
 it.effect('cleans a hidden temporary owner after its loan ends', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`struct Guard { value: i32 }

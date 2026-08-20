@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 3 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 128 |
+| `SEM` | Semantic | 127 |
 | `OWN` | Ownership | 14 |
 | `LAY` | Layout | 1 |
 
-There are 157 codes in total.
+There are 156 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -131,7 +131,6 @@ There are 157 codes in total.
 | `SEM0076` |  | `Callable <actual> cannot satisfy <expected>` |
 | `SEM0077` |  | `Callable invocation requires <toLowerCase> access` |
 | `SEM0078` |  | `<target> is unary; name it directly instead of calling it with no arguments` |
-| `SEM0079` |  | `<target> only permits binding its <expectedCount1> trailing arguments; received <actualCount>` |
 | `SEM0080` |  | `Cannot merge callable values from different construction sites without explicit erasure` |
 | `SEM0081` |  | `Cannot return an owned callable whose concrete environment identity is unknown` |
 | `SEM0082` | Stable code for a raw storage operation outside lexical unsafe authority. | `<operation> requires a lexical unsafe block` |

@@ -174,6 +174,24 @@ pub fn main() -> i32 { return combine(3)(2)(1) }`)
   }),
 )
 
+it.effect('moves affine staged captures exactly once', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`struct Token { value: i32 }
+fn combine(a: i32, b: Token, c: Token) -> i32 {
+  return a * 100 + b.value * 10 + c.value
+}
+pub fn main() -> i32 {
+  let two = Token { value: 2 }
+  let three = Token { value: 3 }
+  return combine(move three)(move two)(1)
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 123n)
+  }),
+)
+
 it.effect('reuses an exclusive callable after each synchronous invocation completes', () =>
   Effect.gen(function* () {
     const outcome = yield* evaluateSource(`fn write(value: i32, values: &mut [i32]) -> i32 {

@@ -623,9 +623,8 @@ Passing a fixed array directly where a slice is expected reports `SEM0059` and r
 borrow. A temporary-derived view that escapes its hidden owner reports the applicable returned-view
 or stored-borrow diagnostic at the escape boundary.
 
-**Current compiler:** The compiler currently rejects temporary and indexed slice operands with
-`SEM0056`. Those cases must create or retain the appropriate owner and loan instead; `SEM0056`
-remains appropriate only for operands that cannot denote or produce owned storage.
+The compiler materializes temporary owners and retains indexed-place selectors through HIR and MIR.
+`SEM0056` remains appropriate only for operands that cannot denote or produce owned storage.
 
 **Evidence:** [runtime-slice specification](../../openspec/specs/bootstrap-runtime-slices/spec.md),
 [slice semantics tests](../../packages/compiler/test/RuntimeSliceSemantics.test.ts).
@@ -1222,13 +1221,9 @@ identifies the remaining callable parameters. A supplied argument with the wrong
 ordinary argument-type diagnostic. Invalid ownership at construction reports the corresponding
 move or borrow diagnostic.
 
-**Current compiler:** The compiler currently permits only the special case `K = N - 1`, which
-creates a unary callable. A deeper partial application such as `combine(3)` currently reports
-`SEM0079`; this implementation restriction does not match the confirmed rule.
-
-**Conflicting artifact:** The
-[callable specification](../../openspec/specs/bootstrap-callable-values/spec.md) retains the older
-unary-only rule and requires reconciliation after the language-definition pass.
+The compiler represents the complete ordered remaining-parameter prefix and captured trailing
+suffix. Successive direct stages retain capture evaluation order while invocation orders values by
+their original parameter positions.
 
 **Evidence:** [indirect-call acceptance tests](../../packages/compiler/test/IndirectCallAcceptance.test.ts),
 [operator pipeline tests](../../packages/compiler/test/OperatorPipeline.test.ts).

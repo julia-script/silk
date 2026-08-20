@@ -158,7 +158,6 @@ export const nonCallableApplicationCode = 'SEM0075' as const
 export const incompatibleCallableSignatureCode = 'SEM0076' as const
 export const invalidCallableInvocationAccessCode = 'SEM0077' as const
 export const redundantUnaryEmptyCallCode = 'SEM0078' as const
-export const deeperUnderApplicationCode = 'SEM0079' as const
 export const callableIdentityErasureCode = 'SEM0080' as const
 export const unknownOwnedCallableReturnCode = 'SEM0081' as const
 /** Stable code for an Effect join whose alternatives cannot be represented as a finite composite. */
@@ -375,7 +374,6 @@ export type Code =
   | typeof incompatibleCallableSignatureCode
   | typeof invalidCallableInvocationAccessCode
   | typeof redundantUnaryEmptyCallCode
-  | typeof deeperUnderApplicationCode
   | typeof callableIdentityErasureCode
   | typeof unknownOwnedCallableReturnCode
   | typeof nonFiniteEffectJoinCode
@@ -687,12 +685,6 @@ export type Reason =
       readonly required: 'Shared' | 'Exclusive' | 'Take'
     }
   | { readonly _tag: 'RedundantUnaryEmptyCall'; readonly target: string }
-  | {
-      readonly _tag: 'DeeperUnderApplication'
-      readonly target: string
-      readonly expectedCount: number
-      readonly actualCount: number
-    }
   | { readonly _tag: 'RedundantAlias'; readonly spelling: string }
   | { readonly _tag: 'UnknownImportedMember'; readonly module: string; readonly spelling: string }
   | {
@@ -3400,27 +3392,6 @@ export const redundantUnaryEmptyCall = (target: string, span: SourceSpan.SourceS
     severity: 'error',
     message: `${target} is unary; name it directly instead of calling it with no arguments`,
     reason: Object.freeze({ _tag: 'RedundantUnaryEmptyCall', target }),
-    span,
-  })
-
-export const deeperUnderApplication = (
-  target: string,
-  expectedCount: number,
-  actualCount: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: deeperUnderApplicationCode,
-    severity: 'error',
-    message: `${target} only permits binding its ${expectedCount - 1} trailing arguments; received ${actualCount}`,
-    reason: Object.freeze({
-      _tag: 'DeeperUnderApplication',
-      target,
-      expectedCount,
-      actualCount,
-    }),
     span,
   })
 

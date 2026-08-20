@@ -1,6 +1,6 @@
 ## Why
 
-Borrowing is currently limited by implementation-shaped roots, while callable sections support only one omitted leading argument and reusable captures often remain borrowed until explicit drop. The stabilized rules require stable temporary/subplace identities, lexical borrow values, arbitrary leading-argument sections, and last-use loan endings shared by Effects and callables.
+Borrowing is currently limited by implementation-shaped roots, while callable sections support only one omitted leading argument and reusable captures often remain borrowed until explicit drop. The stabilized rules require stable temporary/subplace identities, lexical borrow values, arbitrary non-empty trailing-suffix sections, and last-use loan endings shared by Effects and callables.
 
 ## What Changes
 

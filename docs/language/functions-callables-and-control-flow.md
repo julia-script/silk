@@ -287,13 +287,9 @@ use the function name as a callable value. Supplying more than the remaining ari
 callable used where its eventual result is required reports a type mismatch naming the remaining
 callable contract. Capture ownership errors occur when the section is constructed.
 
-**Current compiler:** The compiler currently constructs a section only when exactly one leading
-parameter remains. Deeper under-application such as `combine(3)` reports `SEM0079`; that restriction
-conflicts with this confirmed rule and with the ownership reference.
-
-**Conflicting artifact:** The
-[callable specification](../../openspec/specs/bootstrap-callable-values/spec.md) still retains the
-older unary-section-only model and requires reconciliation.
+The compiler carries every remaining leading parameter and captured trailing argument through
+semantic facts, HIR, MIR, and each execution engine. `combine(3)(2)(1)` therefore preserves both
+source evaluation order and the final positional call `combine(1, 2, 3)`.
 
 **Evidence:** [captured callable rule](ownership-and-borrowing.md#callable-001--named-functions-support-trailing-partial-application),
 [pipeline syntax decision](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md).
