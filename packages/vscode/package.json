@@ -54,13 +54,15 @@
     "install:cursor": "node scripts/install-local.mjs",
     "install:code": "node scripts/install-local.mjs --vscode-only",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "@silk-effect/lsp": "workspace:*",
+    "effect": "catalog:",
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
     "@types/node": "^24.10.1",
     "@types/vscode": "^1.90.0"
   }

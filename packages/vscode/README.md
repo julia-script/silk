@@ -75,4 +75,9 @@ while the host is open.
 | Change | Action |
 | --- | --- |
 | Retargeted install, grammar (`sync:vscode`), or `extension.ts` / `package.json` contributions | **Developer: Reload Window** (main Cursor or the EDH guest) |
-| Rebuilt `@silk-effect/lsp` only, same extension path | **Silk: Restart Language Server** — picks up the new `dist` without a window reload |
+| Rebuilt `@silk-effect/lsp` only, same extension path | **Silk: Restart Language Server** — retires the current client and starts a fresh server from the new `dist` without a window reload |
+
+**Silk: Restart Language Server** also recovers automatically when the old server is unresponsive:
+if its normal stop reaches the client timeout, the extension retires that client and still starts a
+fresh one. Use **Developer: Reload Window** only for extension-host changes in the first row, or if
+the extension itself cannot execute commands; an LSP stop-timeout no longer requires a reload.

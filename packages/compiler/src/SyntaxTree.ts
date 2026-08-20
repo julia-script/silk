@@ -78,6 +78,7 @@ export type NodeKind =
   | 'MatchExpression'
   | 'MatchAccess'
   | 'MatchArm'
+  | 'ErrorPattern'
   | 'NominalPattern'
   | 'BindingPattern'
   | 'UniversalPattern'

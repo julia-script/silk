@@ -46,6 +46,31 @@ it.effect('answers multi-module queries from one snapshot', () =>
   }),
 )
 
+it.effect('constructs frontend snapshots for deterministic damaged-source edits', () =>
+  Effect.gen(function* () {
+    const accepted = `pub fn inspect(value: i32) -> i32 {
+  return match value { Token {} => 0 }
+}`
+    const damaged = [
+      accepted.slice(0, accepted.indexOf('Token')),
+      accepted.replace('Token {}', '['),
+      accepted.replace('Token {}', '&'),
+      accepted.replace('Token {}', '('),
+      accepted.replace('Token {}', 'fn() -> i32 {}'),
+      accepted.replace('Token {}', 'Without<i32, i32> {}'),
+      accepted.replace('Token {}', 'Token {'),
+      accepted.replace('=> 0', ''),
+    ]
+
+    for (const [ordinal, source] of damaged.entries()) {
+      const self = yield* Analysis.make({
+        root: SourceFile.make(`damaged-${ordinal}`, ascii(source)),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(Analysis.rootAnalysis(self).syntax.source.id, `damaged-${ordinal}`)
+    }
+  }),
+)
+
 it.effect('resolves imported declarations as stored callable values', () =>
   Effect.gen(function* () {
     const source =

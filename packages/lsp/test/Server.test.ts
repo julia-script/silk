@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assert, it } from '@effect/vitest'
 import * as Document from '../src/Document.js'
 import {
@@ -13,6 +13,10 @@ import {
   publishedDiagnostics,
   response,
 } from './StdioClient.js'
+
+const controlledBinPath = fileURLToPath(
+  new URL('./fixtures/controlled-server.mjs', import.meta.url),
+)
 
 it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_000 }, async () => {
   assert.isTrue(existsSync(binPath), 'dist/bin.js missing; run pnpm build first')
@@ -141,6 +145,184 @@ pub fn main() -> i32 {
     )
   } finally {
     await client.close()
+  }
+})
+
+it('keeps a committed project live while another project accepts rapid slow edits', {
+  timeout: 30_000,
+}, async () => {
+  const client = connect(controlledBinPath)
+  try {
+    client.send({
+      id: 1,
+      method: 'initialize',
+      params: { processId: null, rootUri: null, capabilities: {} },
+    })
+    await client.waitFor((message) => response(message, 1))
+    client.send({ method: 'initialized', params: {} })
+
+    const readyUri = 'file:///silk-lsp-e2e/ready/Main.silk'
+    const readyText = `pub fn main() -> i32 {
+  let value = 42
+  return value
+}`
+    didOpen(client, readyUri, readyText)
+    await client.waitFor((message) => {
+      const report = publishedDiagnosticReport(message, readyUri)
+      return report?.version === 1 ? report : undefined
+    })
+
+    const slowUri = 'file:///silk-lsp-e2e/slow/Main.silk'
+    didOpen(client, slowUri, 'pub fn main() -> i32 { return 1 }')
+    await client.waitFor((message) => {
+      const report = publishedDiagnosticReport(message, slowUri)
+      return report?.version === 1 ? report : undefined
+    })
+
+    const marker = client.messages.length
+    client.send({
+      method: 'textDocument/didChange',
+      params: {
+        textDocument: { uri: slowUri, version: 2 },
+        contentChanges: [{ text: 'pub fn main() -> i32 { return 2 }' }],
+      },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 15))
+    client.send({
+      id: 2,
+      method: 'textDocument/hover',
+      params: {
+        textDocument: { uri: readyUri },
+        position: { line: 1, character: '  let value = '.length },
+      },
+    })
+    const hover = (await client.waitFor((message) => response(message, 2))) as {
+      contents: { value: string }
+    }
+    assert.include(hover.contents.value, 'i32')
+    const hoverIndex = client.messages.findIndex((message) => response(message, 2) !== undefined)
+    const slowTwoIndex = client.messages.findIndex((message) => {
+      const report = publishedDiagnosticReport(message, slowUri)
+      return report?.version === 2
+    })
+    assert.isAtLeast(hoverIndex, marker)
+    assert.strictEqual(slowTwoIndex, -1)
+
+    for (let version = 3; version <= 5; version += 1) {
+      client.send({
+        method: 'textDocument/didChange',
+        params: {
+          textDocument: { uri: slowUri, version },
+          contentChanges: [{ text: `pub fn main() -> i32 { return ${version} }` }],
+        },
+      })
+    }
+    client.send({
+      id: 3,
+      method: 'textDocument/inlayHint',
+      params: {
+        textDocument: { uri: readyUri },
+        range: { start: { line: 0, character: 0 }, end: { line: 3, character: 1 } },
+      },
+    })
+    const hints = (await client.waitFor((message) => response(message, 3))) as Array<{
+      label: string
+    }>
+    assert.deepEqual(
+      hints.map((hint) => hint.label),
+      [': i32'],
+    )
+    await client.waitFor((message) => {
+      const report = publishedDiagnosticReport(message, slowUri)
+      return report?.version === 5 ? report : undefined
+    })
+    const rapidReports = client.messages.slice(marker).flatMap((message) => {
+      const report = publishedDiagnosticReport(message, slowUri)
+      return report?.version === undefined ? [] : [report.version]
+    })
+    assert.deepEqual(rapidReports, [5])
+  } finally {
+    await client.close()
+  }
+})
+
+it('clears a failed version, recovers on the next edit, and shuts down after the defect', {
+  timeout: 30_000,
+}, async () => {
+  const client = connect(controlledBinPath)
+  let exited = false
+  try {
+    client.send({
+      id: 1,
+      method: 'initialize',
+      params: { processId: null, rootUri: null, capabilities: {} },
+    })
+    await client.waitFor((message) => response(message, 1))
+    client.send({ method: 'initialized', params: {} })
+
+    const uri = 'file:///silk-lsp-e2e/failure/Main.silk'
+    didOpen(client, uri, '// LSP_TEST_DEFECT\npub fn main() -> i32 { return 1 }')
+    const failed = await client.waitFor((message) => {
+      const report = publishedDiagnosticReport(message, uri)
+      return report?.version === 1 ? report : undefined
+    })
+    assert.deepEqual(failed.diagnostics, [])
+    await client.waitFor((message) =>
+      message.method === 'window/logMessage' &&
+      JSON.stringify(message.params).includes('controlled LSP analysis defect')
+        ? message
+        : undefined,
+    )
+
+    client.send({
+      method: 'textDocument/didChange',
+      params: {
+        textDocument: { uri, version: 2 },
+        contentChanges: [{ text: 'pub fn main() -> i32 { return missing() }' }],
+      },
+    })
+    const recovered = await client.waitFor((message) => {
+      const report = publishedDiagnosticReport(message, uri)
+      return report?.version === 2 ? report : undefined
+    })
+    assert.deepEqual(
+      recovered.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0004'],
+    )
+
+    client.send({ id: 4, method: 'shutdown' })
+    await client.waitFor((message) => response(message, 4))
+    const exit = new Promise<void>((resolve) => client.child.once('exit', () => resolve()))
+    client.send({ method: 'exit' })
+    await exit
+    exited = true
+  } finally {
+    if (!exited) await client.close()
+  }
+})
+
+it('completes stdio shutdown during controlled active analysis', { timeout: 30_000 }, async () => {
+  const client = connect(controlledBinPath)
+  let exited = false
+  try {
+    client.send({
+      id: 1,
+      method: 'initialize',
+      params: { processId: null, rootUri: null, capabilities: {} },
+    })
+    await client.waitFor((message) => response(message, 1))
+    client.send({ method: 'initialized', params: {} })
+    didOpen(client, 'file:///silk-lsp-e2e/shutdown/Main.silk', 'pub fn main() -> i32 { return 1 }')
+    await new Promise((resolve) => setTimeout(resolve, 15))
+
+    client.send({ id: 2, method: 'shutdown' })
+    await client.waitFor((message) => response(message, 2))
+    const exit = new Promise<void>((resolve) => client.child.once('exit', () => resolve()))
+    client.send({ method: 'exit' })
+    await exit
+    exited = true
+  } finally {
+    if (!exited) await client.close()
   }
 })
 

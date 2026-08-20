@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import * as ModuleTooling from './ModuleTooling.js'
@@ -18,7 +19,7 @@ export interface FrontendTooling {
 }
 
 /** Builds compiler-owned editor indexes, reusing modules backed by exact shared semantics. */
-export const make = (
+export const make = Effect.fn('FrontendTooling.make')(function* (
   frontend: {
     readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
     readonly index: DeclarationIndex.Index
@@ -26,16 +27,19 @@ export const make = (
     readonly report: ReadonlyArray<PhaseReport.PhaseReport>
   },
   previous?: ReadonlyMap<string, ModuleTooling.ModuleTooling>,
-): FrontendTooling => {
+): Effect.fn.Return<FrontendTooling> {
   const toolingModules = new Map<string, ModuleTooling.ModuleTooling>()
   let occurrenceElapsedMs = 0
   let expressionElapsedMs = 0
   let reused = 0
+  let ordinal = 0
   for (const [module, semantics] of frontend.semantics) {
+    if (ordinal > 0 && ordinal % 8 === 0) yield* Effect.yieldNow
     const prior = previous?.get(module)
     if (prior?.module === module && prior.semantics === semantics) {
       toolingModules.set(module, prior)
       reused += 1
+      ordinal += 1
       continue
     }
     const occurrenceStartedAt = performance.now()
@@ -52,6 +56,7 @@ export const make = (
       module,
       ModuleTooling.fromIndexes(semantics, semanticOccurrences, anonymousExpressions),
     )
+    ordinal += 1
   }
 
   const occurrenceModules = new Map(
@@ -95,4 +100,4 @@ export const make = (
     anonymousExpressions,
     report: Object.freeze(report),
   })
-}
+})

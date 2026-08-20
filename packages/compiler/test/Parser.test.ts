@@ -2283,6 +2283,38 @@ pub fn inspect(event: Token | End) -> i32 {
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
+it('retains damaged patterns explicitly in every pattern position', () => {
+  const sources = [
+    `pub fn inspect(value: i32) -> i32 {
+  return match value { [ => 0 }
+}`,
+    `pub fn inspect(value: i32) -> i32 {
+  let [ = value
+  return 0
+}`,
+    `pub fn inspect(value: i32) -> i32 {
+  if let [ = value { return 1 }
+  return 0
+}`,
+  ]
+
+  for (const [ordinal, source] of sources.entries()) {
+    const result = parseText(`memory/damaged-pattern-${ordinal}`, source)
+    assert.strictEqual(
+      descendants(result.root).filter(
+        (element) => SyntaxTree.isNode(element) && element.kind === 'ErrorPattern',
+      ).length,
+      1,
+    )
+    assert.deepEqual(
+      result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+      ['PAR0002'],
+    )
+    assertOriginalTokenTraversal(result)
+    assert.deepEqual(reconstructedBytes(result), ascii(source))
+  }
+})
+
 it('parses bare, shared, and exclusive matches in expression positions', () => {
   const source = `import silk.i32 as i32
 pub struct Token { kind: i32 }

@@ -1,7 +1,9 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
+import * as Fiber from 'effect/Fiber'
 import * as Analysis from '../src/Analysis.js'
+import * as FrontendTooling from '../src/FrontendTooling.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceOrigin from '../src/SourceOrigin.js'
@@ -36,6 +38,15 @@ const projectViewIsNotSingleRoot: ProjectAnalysis.View extends Analysis.SingleRo
 const assertProjectViewNotRealizable = (view: ProjectAnalysis.View): void => {
   assert.strictEqual(view.realization, 'ProjectView')
   assert.isTrue(projectViewIsNotSingleRoot)
+}
+
+class TrackingMap<K, V> extends Map<K, V> {
+  readonly reads: Array<K> = []
+
+  override get(key: K): V | undefined {
+    this.reads.push(key)
+    return super.get(key)
+  }
 }
 
 it.effect('analyzes a shared dependency once and derives structurally shared root views', () =>
@@ -148,6 +159,40 @@ it.effect('keeps project facts deterministic when root supply order changes', ()
       Analysis.diagnostics(ProjectAnalysis.view(first, 'app/A') ?? raise('missing app/A')),
       Analysis.diagnostics(ProjectAnalysis.view(second, 'app/A') ?? raise('missing app/A')),
     )
+  }),
+)
+
+it.effect('interrupts cooperative tooling batches before processing remaining modules', () =>
+  Effect.gen(function* () {
+    const batchRoots = Object.freeze(
+      Array.from({ length: 9 }, (_, ordinal) =>
+        SourceFile.make(
+          `batch/M${ordinal.toString().padStart(2, '0')}`,
+          ascii(`pub fn value${ordinal}() -> i32 { return ${ordinal} }`),
+        ),
+      ),
+    )
+    const project = yield* ProjectAnalysis.make(batchRoots).pipe(
+      Effect.provide(SourceResolver.empty),
+    )
+    const firstRoot = batchRoots.at(0) ?? raise('missing first batch root')
+    const view = ProjectAnalysis.view(project, firstRoot.id) ?? raise('missing first batch view')
+    const interruptedReads = new TrackingMap(project.toolingModules)
+    const fiber = yield* Effect.forkChild(FrontendTooling.make(view, interruptedReads), {
+      startImmediately: true,
+    })
+    yield* Fiber.interrupt(fiber)
+    const interrupted = yield* Fiber.await(fiber)
+
+    assert.isTrue(Exit.isFailure(interrupted))
+    assert.strictEqual(interruptedReads.reads.length, 8)
+
+    const completedReads = new TrackingMap(project.toolingModules)
+    const rebuilt = yield* FrontendTooling.make(view, completedReads)
+    assert.strictEqual(completedReads.reads.length, 9)
+    assert.deepEqual([...rebuilt.toolingModules.keys()], [...project.toolingModules.keys()])
+    assert.deepEqual(rebuilt.semanticOccurrences, view.semanticOccurrences)
+    assert.deepEqual(rebuilt.anonymousExpressions, view.anonymousExpressions)
   }),
 )
 

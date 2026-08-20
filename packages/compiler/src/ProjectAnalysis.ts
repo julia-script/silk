@@ -83,12 +83,14 @@ const analyze = Effect.fnUntraced(function* (
           environment: previous.semanticEnvironment,
         },
   )
-  const tooling = FrontendTooling.make(frontend, previous?.toolingModules)
+  yield* Effect.yieldNow
+  const tooling = yield* FrontendTooling.make(frontend, previous?.toolingModules)
   const previousModules = new Map(
     previous?.closure.modules.map((module) => [module.name, module.syntax]),
   )
   const syntaxRevisions = new Map<string, SyntaxRevision>()
-  for (const module of frontend.closure.modules) {
+  for (const [ordinal, module] of frontend.closure.modules.entries()) {
+    if (ordinal > 0 && ordinal % 8 === 0) yield* Effect.yieldNow
     const previousSyntax = previousModules.get(module.name)
     if (previousSyntax === undefined) {
       syntaxRevisions.set(
@@ -124,7 +126,8 @@ const analyze = Effect.fnUntraced(function* (
   }
   const report = tooling.report
   const views = new Map<string, View>()
-  for (const rootModule of frontend.closure.rootModules) {
+  for (const [ordinal, rootModule] of frontend.closure.rootModules.entries()) {
+    if (ordinal > 0 && ordinal % 8 === 0) yield* Effect.yieldNow
     const closure = ModuleClosure.view(frontend.closure, rootModule)
     if (closure === undefined)
       throw new RangeError(`Project analysis lost requested root ${rootModule}`)

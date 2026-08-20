@@ -160,27 +160,27 @@ const measured = <A>(
   return result.value
 }
 
-const measuredModuleWork = <A>(
+const measuredModuleWork = Effect.fnUntraced(function* <A, E, R>(
   report: Array<PhaseReport.PhaseReport>,
   phase: string,
   modules: number,
   reused: number,
-  run: () => A,
+  run: () => Effect.Effect<A, E, R>,
   outputs: (value: A) => number,
   diagnostics: (value: A) => number,
   options: Options,
-): A => {
-  const result = PhaseReport.measure(
-    phase,
-    modules - reused,
-    run,
-    outputs,
-    diagnostics,
-    options.heapBytes,
-  )
+): Effect.fn.Return<A, E, R> {
+  const startedAt = performance.now()
+  const value = yield* run()
+  const observedHeap = options.heapBytes?.()
   report.push(
     PhaseReport.make({
-      ...result.report,
+      phase,
+      elapsedMs: performance.now() - startedAt,
+      inputs: modules - reused,
+      outputs: outputs(value),
+      diagnostics: diagnostics(value),
+      ...(observedHeap === undefined ? {} : { heapBytes: observedHeap }),
       counters: Object.freeze({
         _tag: 'ModuleReuseCounters',
         reused,
@@ -188,8 +188,14 @@ const measuredModuleWork = <A>(
       }),
     }),
   )
-  return result.value
-}
+  return value
+})
+
+const moduleBatchSize = 8
+
+const checkpointModuleBatch = Effect.fnUntraced(function* (ordinal: number) {
+  if (ordinal > 0 && ordinal % moduleBatchSize === 0) yield* Effect.yieldNow
+})
 
 const hasInvalidGenericBody = (
   index: DeclarationIndex.Index,
@@ -214,11 +220,11 @@ interface HeaderFacts {
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
 }
 
-const analyzeHeaders = (
+const analyzeHeaders = Effect.fnUntraced(function* (
   closure: ModuleClosure.Facts,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
-): HeaderFacts => {
+): Effect.fn.Return<HeaderFacts> {
   const collected = measured(
     report,
     'declaration-collection',
@@ -228,6 +234,7 @@ const analyzeHeaders = (
     (value) => value.diagnostics.length,
     options,
   )
+  yield* Effect.yieldNow
   const index = measured(
     report,
     'declaration-index',
@@ -246,6 +253,7 @@ const analyzeHeaders = (
     (value) => value.diagnostics.length,
     options,
   )
+  yield* Effect.yieldNow
   const resolution = measured(
     report,
     'name-resolution',
@@ -255,6 +263,7 @@ const analyzeHeaders = (
     (value) => value.diagnostics.length,
     options,
   )
+  yield* Effect.yieldNow
   const surfaces = measured(
     report,
     'module-surface',
@@ -265,22 +274,23 @@ const analyzeHeaders = (
     options,
   )
   return Object.freeze({ index, resolution, surfaces })
-}
+})
 
 interface ElaboratedModules {
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly computed: ReadonlyMap<string, Elaboration.Result>
 }
 
-const elaborateModules = (
+const elaborateModules = Effect.fnUntraced(function* (
   closure: ModuleClosure.Facts,
   headers: HeaderFacts,
   retained: ReadonlyMap<string, Elaboration.Result> = new Map(),
   precomputed: ReadonlyMap<string, Elaboration.Result> = new Map(),
-): ElaboratedModules => {
+): Effect.fn.Return<ElaboratedModules> {
   const results = new Map<string, Elaboration.Result>()
   const computed = new Map<string, Elaboration.Result>()
-  for (const module of closure.modules) {
+  for (const [ordinal, module] of closure.modules.entries()) {
+    yield* checkpointModuleBatch(ordinal)
     const reused = retained.get(module.name) ?? precomputed.get(module.name)
     if (reused !== undefined) {
       results.set(module.name, reused)
@@ -302,9 +312,9 @@ const elaborateModules = (
     computed.set(module.name, result)
   }
   return Object.freeze({ results, computed })
-}
+})
 
-const analyzeSemantics = (
+const analyzeSemantics = Effect.fnUntraced(function* (
   closure: ModuleClosure.Facts,
   headers: HeaderFacts,
   report: Array<PhaseReport.PhaseReport>,
@@ -317,14 +327,15 @@ const analyzeSemantics = (
     readonly results: ReadonlyMap<string, Elaboration.Result>
     readonly opaqueRealizations?: OpaqueRealization.Catalog
   },
-): Omit<FrontendFacts, keyof HeaderFacts | 'report'> => {
+): Effect.fn.Return<Omit<FrontendFacts, keyof HeaderFacts | 'report'>> {
   const reusable = new Set(
     reuse?.invalidation.observations.flatMap((observation) =>
       observation._tag === 'Reusable' ? [observation.module] : [],
     ) ?? [],
   )
   const retained = new Map<string, ModuleSemantics.ModuleSemantics>()
-  for (const module of closure.modules) {
+  for (const [ordinal, module] of closure.modules.entries()) {
+    yield* checkpointModuleBatch(ordinal)
     if (!reusable.has(module.name)) continue
     const artifact = reuse?.previous.semantics.get(module.name)
     if (
@@ -337,28 +348,38 @@ const analyzeSemantics = (
   const retainedElaborations = new Map(
     [...retained].map(([module, semantics]) => [module, semantics.elaboration]),
   )
-  const results = measuredModuleWork(
+  const results = yield* measuredModuleWork(
     report,
     'elaboration',
     closure.modules.length,
     retained.size,
-    () => elaborateModules(closure, headers, retainedElaborations, precomputed?.results).results,
+    () =>
+      elaborateModules(closure, headers, retainedElaborations, precomputed?.results).pipe(
+        Effect.map((elaborated) => elaborated.results),
+      ),
     (value) => [...value.values()].reduce((sum, module) => sum + module.functions.length, 0),
     (value) => [...value.values()].reduce((sum, module) => sum + module.diagnostics.length, 0),
     options,
   )
-  const ownership = measuredModuleWork(
+  const ownership = yield* measuredModuleWork(
     report,
     'ownership',
     results.size,
     retained.size,
     () =>
-      new Map(
-        [...results.entries()].map(([name, result]) => [
-          name,
-          retained.get(name)?.ownership ?? Ownership.checkModule(result, headers.index),
-        ]),
-      ),
+      Effect.gen(function* () {
+        const ownership = new Map<string, Ownership.ModuleOwnership>()
+        let ordinal = 0
+        for (const [name, result] of results) {
+          yield* checkpointModuleBatch(ordinal)
+          ownership.set(
+            name,
+            retained.get(name)?.ownership ?? Ownership.checkModule(result, headers.index),
+          )
+          ordinal += 1
+        }
+        return ownership
+      }),
     (value) => [...value.values()].reduce((sum, module) => sum + module.functions.length, 0),
     (value) => [...value.values()].reduce((sum, module) => sum + module.diagnostics.length, 0),
     options,
@@ -374,16 +395,20 @@ const analyzeSemantics = (
       (value) => value.diagnostics.length,
       options,
     )
-  const semantics = new Map(
-    [...results.entries()].map(([module, elaboration]) => {
-      const reused = retained.get(module)
-      if (reused !== undefined) return [module, reused] as const
+  const semantics = new Map<string, ModuleSemantics.ModuleSemantics>()
+  let semanticOrdinal = 0
+  for (const [module, elaboration] of results) {
+    yield* checkpointModuleBatch(semanticOrdinal)
+    const reused = retained.get(module)
+    if (reused !== undefined) semantics.set(module, reused)
+    else {
       const moduleOwnership = ownership.get(module)
       if (moduleOwnership === undefined)
         throw new RangeError(`Pipeline lost ownership facts for ${module}`)
-      return [module, ModuleSemantics.make(module, elaboration, moduleOwnership)] as const
-    }),
-  )
+      semantics.set(module, ModuleSemantics.make(module, elaboration, moduleOwnership))
+    }
+    semanticOrdinal += 1
+  }
   const diagnostics = Diagnostic.merge(
     ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
     ...closure.modules.map((module) => module.syntax.parserDiagnostics),
@@ -402,20 +427,20 @@ const analyzeSemantics = (
     }),
     opaqueRealizations,
   )
-}
+})
 
-const analyzeFrontend = (
+const analyzeFrontend = Effect.fnUntraced(function* (
   closure: ModuleClosure.Facts,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
-): FrontendFacts => {
-  const headers = analyzeHeaders(closure, report, options)
-  const semantics = analyzeSemantics(closure, headers, report, options)
+): Effect.fn.Return<FrontendFacts> {
+  const headers = yield* analyzeHeaders(closure, report, options)
+  const semantics = yield* analyzeSemantics(closure, headers, report, options)
   return OpaqueRealization.withCatalog(
     Object.freeze({ ...headers, ...semantics, report: Object.freeze([...report]) }),
     OpaqueRealization.catalogOf(semantics),
   )
-}
+})
 
 /** Constructs the complete recoverable compiler frontend for one compilation request. */
 export const frontend = Effect.fn('Pipeline.frontend')(function* (
@@ -436,7 +461,8 @@ export const frontend = Effect.fn('Pipeline.frontend')(function* (
       ...(closureHeap === undefined ? {} : { heapBytes: closureHeap }),
     }),
   )
-  const facts = analyzeFrontend(closure, report, options)
+  yield* Effect.yieldNow
+  const facts = yield* analyzeFrontend(closure, report, options)
   return OpaqueRealization.withCatalog(
     Object.freeze({
       closure,
@@ -467,7 +493,8 @@ export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
       ...(closureHeap === undefined ? {} : { heapBytes: closureHeap }),
     }),
   )
-  const headers = analyzeHeaders(closure, report, options)
+  yield* Effect.yieldNow
+  const headers = yield* analyzeHeaders(closure, report, options)
   const syntaxRetained = new Map(
     closure.modules.flatMap((module) => {
       const artifact = previous?.semantics.get(module.name)
@@ -476,9 +503,10 @@ export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
         : []
     }),
   )
-  const currentElaboration = elaborateModules(closure, headers, syntaxRetained)
+  const currentElaboration = yield* elaborateModules(closure, headers, syntaxRetained)
   const currentResults = currentElaboration.results
   const currentOpaqueRealizations = OpaqueRealization.analyze(currentResults)
+  yield* Effect.yieldNow
   const previousSyntax = new Map(
     previous?.closure.modules.map((module) => [module.name, module.syntax]),
   )
@@ -540,7 +568,8 @@ export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
       }),
     }),
   )
-  const semantics = analyzeSemantics(
+  yield* Effect.yieldNow
+  const semantics = yield* analyzeSemantics(
     closure,
     headers,
     report,

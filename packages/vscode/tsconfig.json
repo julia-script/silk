@@ -10,5 +10,5 @@
     "verbatimModuleSyntax": false,
     "types": ["node", "vscode"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.mts"]
 }

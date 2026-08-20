@@ -79,6 +79,30 @@ const analyzeWithStdlib = Effect.fnUntraced(function* (id: string, source: strin
   return Analysis.rootAnalysis(yield* Analysis.ofSource(module, ascii(source)))
 })
 
+it('keeps damaged pattern type prefixes parser-owned and semantically unavailable', () => {
+  const patterns = ['[', '&', '(', 'fn() -> i32 {}', 'Without<i32, i32> {}']
+
+  for (const [ordinal, pattern] of patterns.entries()) {
+    const result = analyzeText(
+      `fixture://damaged-pattern-${ordinal}.silk`,
+      `pub fn inspect(value: i32) -> i32 {
+  return match value { ${pattern} => 0 }
+}`,
+    )
+    assert.deepEqual(
+      result.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
+      ['PAR0002'],
+    )
+    assert.deepEqual(result.diagnostics, [])
+    const match = result.functions.at(0)?.returnedExpression
+    assert.strictEqual(match?._tag, 'Match')
+    assert.strictEqual(
+      match?._tag === 'Match' ? match.arms.at(0)?.pattern._tag : undefined,
+      'UnavailablePattern',
+    )
+  }
+})
+
 it('diagnoses invalid effect origins, runs, mutability, and escape explicitly', () => {
   const ordinaryFail = analyzeText(
     'effect://ordinary-fail',

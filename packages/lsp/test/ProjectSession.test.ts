@@ -52,7 +52,7 @@ it.effect('coalesces a burst into the latest pending project revision', () =>
   Effect.gen(function* () {
     const analyzedRevisions: Array<ReadonlyArray<string>> = []
     const publishedVersions: Array<number> = []
-    const project = ProjectSession.make({
+    const project = yield* ProjectSession.make({
       workspace: 'project:/workspace/silk.toml',
       sourceRoot: '/workspace',
       debounce: 10,
@@ -85,7 +85,9 @@ it.effect('coalesces a burst into the latest pending project revision', () =>
     yield* Fiber.join(first)
     yield* Fiber.join(second)
     yield* Fiber.join(latest)
+    const committed = yield* project.acquire('file:///workspace/Main.silk', 2)
 
+    assert.isTrue(Option.isSome(committed))
     assert.deepEqual(analyzedRevisions, [['Main@2', 'Util@1']])
     assert.deepEqual(publishedVersions, [2, 1])
   }),
@@ -107,38 +109,51 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
     const toolingArtifacts = new Map<number, unknown>()
     let active = 0
     let maximumActive = 0
-    const project = ProjectSession.make({
+    const project = yield* ProjectSession.make({
       workspace: 'project:/workspace/silk.toml',
       sourceRoot: '/workspace',
       debounce: 10,
       analyze: Effect.fnUntraced(function* (documents, previous) {
         const self = documents.at(0)
         if (self === undefined) return new Map()
-        active += 1
-        maximumActive = Math.max(maximumActive, active)
-        analyzedVersions.push(self.version)
-        priorVersions.push([...previous.values()].map((session) => session.document.version))
-        if (self.version === 1) {
-          yield* Deferred.succeed(started, undefined)
-          yield* Deferred.await(release)
-        }
-        const result = yield* analyzed(documents, previous)
-        const observation = result
-          .values()
-          .next()
-          .value?.project.semanticInvalidation.observations.at(0)
-        if (observation !== undefined)
-          semanticPlans.push({
-            version: self.version,
-            tag: observation._tag,
-            reasons: observation._tag === 'Recomputed' ? observation.reasons : [],
-          })
-        const artifact = result.values().next().value?.project.semantics.get('Main')
-        if (artifact !== undefined) semanticArtifacts.set(self.version, artifact)
-        const toolingArtifact = result.values().next().value?.project.toolingModules.get('Main')
-        if (toolingArtifact !== undefined) toolingArtifacts.set(self.version, toolingArtifact)
-        active -= 1
-        return result
+        return yield* Effect.acquireUseRelease(
+          Effect.sync(() => {
+            active += 1
+            maximumActive = Math.max(maximumActive, active)
+          }),
+          () =>
+            Effect.gen(function* () {
+              analyzedVersions.push(self.version)
+              priorVersions.push([...previous.values()].map((session) => session.document.version))
+              if (self.version === 1) {
+                yield* Deferred.succeed(started, undefined)
+                yield* Deferred.await(release)
+              }
+              const result = yield* analyzed(documents, previous)
+              const observation = result
+                .values()
+                .next()
+                .value?.project.semanticInvalidation.observations.at(0)
+              if (observation !== undefined)
+                semanticPlans.push({
+                  version: self.version,
+                  tag: observation._tag,
+                  reasons: observation._tag === 'Recomputed' ? observation.reasons : [],
+                })
+              const artifact = result.values().next().value?.project.semantics.get('Main')
+              if (artifact !== undefined) semanticArtifacts.set(self.version, artifact)
+              const toolingArtifact = result
+                .values()
+                .next()
+                .value?.project.toolingModules.get('Main')
+              if (toolingArtifact !== undefined) toolingArtifacts.set(self.version, toolingArtifact)
+              return result
+            }),
+          () =>
+            Effect.sync(() => {
+              active -= 1
+            }),
+        )
       }),
       publish: Effect.fnUntraced(function* (session) {
         yield* Effect.sync(() => {
@@ -161,6 +176,8 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
     yield* TestClock.adjust(10)
     yield* Fiber.join(first)
     yield* Fiber.join(second)
+    const secondSession = yield* project.acquire('file:///workspace/Main.silk', 2)
+    assert.isTrue(Option.isSome(secondSession))
 
     const third = yield* Effect.forkChild(
       project.open(document('file:///workspace/Main.silk', 3, 'pub fn main() -> i32 { return 1 }')),
@@ -168,12 +185,13 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
     )
     yield* TestClock.adjust(10)
     yield* Fiber.join(third)
+    const thirdSession = yield* project.acquire('file:///workspace/Main.silk', 3)
 
+    assert.isTrue(Option.isSome(thirdSession))
     assert.strictEqual(maximumActive, 1)
     assert.deepEqual(analyzedVersions, [1, 2, 3])
     assert.deepEqual(priorVersions, [[], [], [2]])
     assert.deepEqual(semanticPlans, [
-      { version: 1, tag: 'Recomputed', reasons: ['Fresh'] },
       { version: 2, tag: 'Recomputed', reasons: ['Fresh'] },
       { version: 3, tag: 'Recomputed', reasons: ['LocalChange'] },
     ])
@@ -187,7 +205,7 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
 
 it.effect('settles superseded and closed exact-version waiters without a session', () =>
   Effect.gen(function* () {
-    const project = ProjectSession.make({
+    const project = yield* ProjectSession.make({
       workspace: 'project:/workspace/silk.toml',
       sourceRoot: '/workspace',
       debounce: 10,
@@ -251,8 +269,8 @@ it.effect('allows independent projects to analyze concurrently', () =>
           yield* Effect.succeed(undefined)
         }),
       })
-    const left = makeProject('left')
-    const right = makeProject('right')
+    const left = yield* makeProject('left')
+    const right = yield* makeProject('right')
     const leftFiber = yield* Effect.forkChild(left.open(document('file:///left/Main.silk', 1)), {
       startImmediately: true,
     })
@@ -271,7 +289,7 @@ it.effect('allows independent projects to analyze concurrently', () =>
 it.effect('coalesces structured dirty paths and rediscovery with document priority', () =>
   Effect.gen(function* () {
     const accepted: Array<ProjectSession.AcceptedInvalidation> = []
-    const project = ProjectSession.make({
+    const project = yield* ProjectSession.make({
       workspace: 'project:/workspace/silk.toml',
       sourceRoot: '/workspace',
       debounce: 10,
@@ -315,5 +333,183 @@ it.effect('coalesces structured dirty paths and rediscovery with document priori
         rediscover: true,
       },
     ])
+  }),
+)
+
+it.effect('returns document mutations before controlled analysis completes', () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    const published: Array<number> = []
+    const project = yield* ProjectSession.make({
+      workspace: 'project:/workspace/silk.toml',
+      sourceRoot: '/workspace',
+      debounce: 10,
+      analyze: Effect.fnUntraced(function* (documents) {
+        yield* Deferred.succeed(started, undefined)
+        yield* Deferred.await(release)
+        return yield* analyzed(documents)
+      }),
+      publish: Effect.fnUntraced(function* (session) {
+        published.push(session.document.version)
+      }),
+    })
+
+    yield* project.open(document('file:///workspace/Main.silk', 1))
+    assert.isFalse(yield* Deferred.isDone(started))
+    yield* TestClock.adjust(10)
+    yield* Deferred.await(started)
+    assert.deepEqual(published, [])
+    yield* Deferred.succeed(release, undefined)
+    const session = yield* project.acquire('file:///workspace/Main.silk', 1)
+
+    assert.isTrue(Option.isSome(session))
+    assert.deepEqual(published, [1])
+    yield* project.shutdown()
+  }),
+)
+
+it.effect('resets trailing debounce and starts only the final captured revision', () =>
+  Effect.gen(function* () {
+    const analyzedVersions: Array<number> = []
+    const project = yield* ProjectSession.make({
+      workspace: 'project:/workspace/silk.toml',
+      sourceRoot: '/workspace',
+      debounce: 10,
+      analyze: Effect.fnUntraced(function* (documents) {
+        const current = documents.at(0)
+        if (current !== undefined) analyzedVersions.push(current.version)
+        return yield* analyzed(documents)
+      }),
+      publish: Effect.fnUntraced(function* () {}),
+    })
+
+    yield* project.open(document('file:///workspace/Main.silk', 1))
+    yield* Effect.yieldNow
+    yield* TestClock.adjust(9)
+    yield* project.open(document('file:///workspace/Main.silk', 2))
+    yield* TestClock.adjust(1)
+    assert.deepEqual(analyzedVersions, [])
+    yield* TestClock.adjust(9)
+    const session = yield* project.acquire('file:///workspace/Main.silk', 2)
+
+    assert.isTrue(Option.isSome(session))
+    assert.deepEqual(analyzedVersions, [2])
+    yield* project.shutdown()
+  }),
+)
+
+it.effect('settles a defective revision and publishes a later valid revision', () =>
+  Effect.gen(function* () {
+    const failedVersions: Array<number> = []
+    const publishedVersions: Array<number> = []
+    const previousVersions: Array<ReadonlyArray<number>> = []
+    const project = yield* ProjectSession.make({
+      workspace: 'project:/workspace/silk.toml',
+      sourceRoot: '/workspace',
+      debounce: 10,
+      analyze: Effect.fnUntraced(function* (documents, previous) {
+        const current = documents.at(0)
+        if (current === undefined) return new Map()
+        previousVersions.push([...previous.values()].map((entry) => entry.document.version))
+        if (current.version === 1) return yield* Effect.die(new Error('controlled analysis defect'))
+        return yield* analyzed(documents, previous)
+      }),
+      publish: Effect.fnUntraced(function* (session) {
+        publishedVersions.push(session.document.version)
+      }),
+      failed: Effect.fnUntraced(function* (failure) {
+        failedVersions.push(failure.document.version)
+      }),
+    })
+
+    yield* project.open(document('file:///workspace/Main.silk', 1))
+    const failedWaiter = yield* Effect.forkChild(
+      project.acquire('file:///workspace/Main.silk', 1),
+      { startImmediately: true },
+    )
+    yield* TestClock.adjust(10)
+    assert.isTrue(Option.isNone(yield* Fiber.join(failedWaiter)))
+
+    yield* project.open(document('file:///workspace/Main.silk', 2))
+    yield* TestClock.adjust(10)
+    const recovered = yield* project.acquire('file:///workspace/Main.silk', 2)
+
+    assert.isTrue(Option.isSome(recovered))
+    assert.deepEqual(previousVersions, [[], []])
+    assert.deepEqual(failedVersions, [1])
+    assert.deepEqual(publishedVersions, [2])
+    yield* project.shutdown()
+  }),
+)
+
+it.effect('treats publication failure as an uncommitted revision and recovers', () =>
+  Effect.gen(function* () {
+    const failedVersions: Array<number> = []
+    const publishedVersions: Array<number> = []
+    const previousVersions: Array<ReadonlyArray<number>> = []
+    const project = yield* ProjectSession.make({
+      workspace: 'project:/workspace/silk.toml',
+      sourceRoot: '/workspace',
+      debounce: 10,
+      analyze: Effect.fnUntraced(function* (documents, previous) {
+        previousVersions.push([...previous.values()].map((entry) => entry.document.version))
+        return yield* analyzed(documents, previous)
+      }),
+      publish: Effect.fnUntraced(function* (session) {
+        if (session.document.version === 1)
+          return yield* Effect.die(new Error('controlled publication defect'))
+        publishedVersions.push(session.document.version)
+      }),
+      failed: Effect.fnUntraced(function* (failure) {
+        failedVersions.push(failure.document.version)
+      }),
+    })
+
+    yield* project.open(document('file:///workspace/Main.silk', 1))
+    const failedWaiter = yield* Effect.forkChild(
+      project.acquire('file:///workspace/Main.silk', 1),
+      { startImmediately: true },
+    )
+    yield* TestClock.adjust(10)
+    assert.isTrue(Option.isNone(yield* Fiber.join(failedWaiter)))
+
+    yield* project.open(document('file:///workspace/Main.silk', 2))
+    yield* TestClock.adjust(10)
+    const recovered = yield* project.acquire('file:///workspace/Main.silk', 2)
+
+    assert.isTrue(Option.isSome(recovered))
+    assert.deepEqual(previousVersions, [[], []])
+    assert.deepEqual(failedVersions, [1])
+    assert.deepEqual(publishedVersions, [2])
+    yield* project.shutdown()
+  }),
+)
+
+it.effect('closes its scope during active analysis and after a prior defect', () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>()
+    const project = yield* ProjectSession.make({
+      workspace: 'project:/workspace/silk.toml',
+      sourceRoot: '/workspace',
+      debounce: 10,
+      analyze: Effect.fnUntraced(function* () {
+        yield* Deferred.succeed(started, undefined)
+        return yield* Effect.never
+      }),
+      publish: Effect.fnUntraced(function* () {}),
+    })
+
+    yield* project.open(document('file:///workspace/Main.silk', 1))
+    const waiter = yield* Effect.forkChild(project.acquire('file:///workspace/Main.silk', 1), {
+      startImmediately: true,
+    })
+    yield* TestClock.adjust(10)
+    yield* Deferred.await(started)
+    yield* project.shutdown()
+
+    assert.isTrue(Option.isNone(yield* Fiber.join(waiter)))
+    assert.deepEqual(project.documents(), [])
+    yield* project.shutdown()
   }),
 )

@@ -373,6 +373,15 @@ export interface PatternFieldFact {
 
 export type PatternFact =
   | {
+      readonly _tag: 'UnavailablePattern'
+      readonly id: Match.PatternId
+      readonly member?: undefined
+      readonly bindings: ReadonlyArray<PatternBindingFact>
+      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
+      readonly complete: false
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
       readonly _tag: 'TypePattern'
       readonly id: Match.PatternId
       readonly member?: Type.Type
@@ -2410,6 +2419,19 @@ const analyzePattern = (
     ordinal: counters.pattern,
   })
   counters.pattern += 1
+  if (node.kind === 'ErrorPattern') {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'UnavailablePattern',
+        id,
+        bindings: Object.freeze([]),
+        omitted: Object.freeze([]),
+        complete: false,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
   if (node.kind === 'UniversalPattern') {
     return Object.freeze({
       fact: Object.freeze({
@@ -2723,6 +2745,7 @@ const analyzeMatch = (
   const preliminary = SyntaxTree.directNodes(node, 'MatchArm').map((armNode, ordinal) => {
     const armId: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal })
     const patternNode =
+      SyntaxTree.directNode(armNode, 'ErrorPattern') ??
       SyntaxTree.directNode(armNode, 'NominalPattern') ??
       SyntaxTree.directNode(armNode, 'BindingPattern') ??
       SyntaxTree.directNode(armNode, 'UniversalPattern')
@@ -2773,7 +2796,11 @@ const analyzeMatch = (
           pattern.syntax.span,
         ),
       )
-    } else if (!transition.reachable && (members?.length ?? 0) > 0) {
+    } else if (
+      pattern._tag !== 'UnavailablePattern' &&
+      !transition.reachable &&
+      (members?.length ?? 0) > 0
+    ) {
       diagnostics.push(
         Diagnostic.unreachableMatchArm(
           pattern._tag === 'UniversalPattern'
@@ -2833,7 +2860,11 @@ const analyzeMatch = (
       syntax: armNode,
     })
   })
-  if (members !== undefined && !coverage.exhaustive) {
+  if (
+    members !== undefined &&
+    !coverage.exhaustive &&
+    !preliminary.some(({ pattern }) => pattern._tag === 'UnavailablePattern')
+  ) {
     diagnostics.push(Diagnostic.incompleteMatch(coverage.missing.map(Type.encode), node.span))
   }
   const reachableTypes = arms.flatMap((arm) =>
@@ -2934,8 +2965,9 @@ const analyzeMatch = (
     arms.every(
       (arm) =>
         arm.reachable &&
-        ((arm.pattern._tag !== 'NominalPattern' && arm.pattern._tag !== 'TypePattern') ||
-          arm.pattern.complete),
+        (arm.pattern._tag === 'UniversalPattern' ||
+          ((arm.pattern._tag === 'NominalPattern' || arm.pattern._tag === 'TypePattern') &&
+            arm.pattern.complete)),
     ) &&
     !unavailableReachableResult &&
     !hasInvalidGuard &&
@@ -9366,6 +9398,7 @@ const analyzeStatements = (
     })
     const arm: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal: 0 })
     const patternNode =
+      SyntaxTree.directNode(element, 'ErrorPattern') ??
       SyntaxTree.directNode(element, 'NominalPattern') ??
       SyntaxTree.directNode(element, 'BindingPattern') ??
       SyntaxTree.directNode(element, 'UniversalPattern')
@@ -9615,7 +9648,7 @@ const analyzeStatements = (
               selection.pattern.syntax.span,
             ),
           )
-      } else if (!selection.irrefutable) {
+      } else if (selection.pattern._tag !== 'UnavailablePattern' && !selection.irrefutable) {
         const selected = selection.pattern.member
         context.diagnostics.push(
           Diagnostic.refutableLetPattern(

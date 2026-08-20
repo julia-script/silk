@@ -1,4 +1,6 @@
 import { NodeServices } from '@effect/platform-node'
+import * as Cause from 'effect/Cause'
+import type * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import type * as FileSystem from 'effect/FileSystem'
 import * as ManagedRuntime from 'effect/ManagedRuntime'
@@ -16,27 +18,32 @@ import {
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import * as Document from './Document.js'
+import * as DocumentUpdates from './DocumentUpdates.js'
 import * as Inspection from './Inspection.js'
 import * as ProjectSession from './ProjectSession.js'
 import * as Workspace from './Workspace.js'
 
 const encoder = new TextEncoder()
 
+/** Injectable scheduler boundaries used by protocol tests and alternate hosts. */
+export interface Options {
+  readonly debounce?: Duration.Input
+  readonly analyze?: ProjectSession.Options<FileSystem.FileSystem | Path.Path>['analyze']
+}
+
 /**
  * The external protocol boundary. `vscode-languageserver` is callback-driven, so this module
  * is the application edge: each handler builds one Effect and runs it against the Node
  * platform services, keeping every module inward of this file effectful and platform-free.
  */
-export const start = (): void => {
+export const start = (options: Options = {}): void => {
   const connection = createConnection(ProposedFeatures.all, process.stdin, process.stdout)
   const documents = new TextDocuments(TextDocument)
-  const projects = new Map<
-    string,
-    ProjectSession.ProjectSession<FileSystem.FileSystem | Path.Path>
-  >()
+  const projects = new Map<string, ProjectSession.ProjectSession>()
   const projectByUri = new Map<string, string>()
   const inFlight = new Set<Promise<unknown>>()
-  const documentUpdates = new Set<Promise<unknown>>()
+  const documentUpdates = DocumentUpdates.make()
+  let shuttingDown = false
   let supportsDynamicWatchers = false
   let watcherRegistration: { readonly dispose: () => void } | undefined
 
@@ -92,14 +99,12 @@ export const start = (): void => {
       })
   })
 
-  const publishProject = (
-    workspace: string,
-    sourceRoot: string,
-  ): ProjectSession.ProjectSession<FileSystem.FileSystem | Path.Path> => {
-    const project = ProjectSession.make({
+  const publishProject = Effect.fnUntraced(function* (workspace: string, sourceRoot: string) {
+    const project = yield* ProjectSession.make({
       workspace,
       sourceRoot,
-      analyze: Workspace.analyzeProject,
+      ...(options.debounce === undefined ? {} : { debounce: options.debounce }),
+      analyze: options.analyze ?? Workspace.analyzeProject,
       publish: Effect.fnUntraced(function* (session) {
         yield* Effect.promise(() =>
           connection.sendDiagnostics({
@@ -122,15 +127,32 @@ export const start = (): void => {
           } satisfies Inspection.InvalidatedParameters),
         )
       }),
+      failed: Effect.fnUntraced(function* (failure) {
+        yield* Effect.sync(() => {
+          connection.console.error(
+            `silk-lsp project analysis failed for ${failure.document.uri}@${failure.document.version}: ${Cause.pretty(failure.cause)}`,
+          )
+        })
+        yield* Effect.promise(() =>
+          connection.sendDiagnostics({
+            uri: failure.document.uri,
+            version: failure.document.version,
+            diagnostics: [],
+          }),
+        )
+      }),
     })
     projects.set(workspace, project)
     return project
-  }
+  })
 
-  const projectFor = (workspace: string, sourceRoot: string) =>
-    projects.get(workspace) ?? publishProject(workspace, sourceRoot)
+  const projectFor = Effect.fnUntraced(function* (workspace: string, sourceRoot: string) {
+    const existing = projects.get(workspace)
+    return existing ?? (yield* publishProject(workspace, sourceRoot))
+  })
 
   const synchronize = Effect.fnUntraced(function* (text: TextDocument) {
+    if (shuttingDown) return
     const document = yield* Workspace.open({
       uri: text.uri,
       version: text.version,
@@ -153,51 +175,79 @@ export const start = (): void => {
       projects.delete(document.workspace)
     }
     projectByUri.set(text.uri, document.workspace)
-    yield* projectFor(document.workspace, document.sourceRoot).open(document)
+    const project = yield* projectFor(document.workspace, document.sourceRoot)
+    yield* project.open(document)
   })
 
   documents.onDidChangeContent(({ document }) => {
-    const update = run(synchronize(document))
-    documentUpdates.add(update)
-    update.finally(() => documentUpdates.delete(update)).catch(() => undefined)
+    const update = run(
+      DocumentUpdates.enqueue(
+        documentUpdates,
+        document.uri,
+        document.version,
+        synchronize(document),
+      ),
+    )
     update.catch((error) => {
       connection.console.error(`silk-lsp failed to analyze ${document.uri}: ${String(error)}`)
     })
   })
 
   documents.onDidClose(({ document }) => {
-    const workspace = projectByUri.get(document.uri)
-    projectByUri.delete(document.uri)
-    if (workspace !== undefined) {
-      const project = projects.get(workspace)
-      if (project !== undefined) {
-        const update = run(
-          Effect.gen(function* () {
-            yield* project.close(document.uri)
-            if (project.documents().length === 0) {
-              yield* project.shutdown()
-              projects.delete(workspace)
+    const update = run(
+      DocumentUpdates.enqueue(
+        documentUpdates,
+        document.uri,
+        document.version,
+        Effect.gen(function* () {
+          const workspace = projectByUri.get(document.uri)
+          projectByUri.delete(document.uri)
+          if (workspace !== undefined) {
+            const project = projects.get(workspace)
+            if (project !== undefined) {
+              yield* project.close(document.uri)
+              if (project.documents().length === 0) {
+                yield* project.shutdown()
+                projects.delete(workspace)
+              }
             }
-          }),
-        )
-        documentUpdates.add(update)
-        update.finally(() => documentUpdates.delete(update)).catch(() => undefined)
-        update.catch((error) => {
-          connection.console.error(`silk-lsp failed to close ${document.uri}: ${String(error)}`)
-        })
-      }
-    }
+          }
+        }),
+      ),
+    )
+    update.catch((error) => {
+      connection.console.error(`silk-lsp failed to close ${document.uri}: ${String(error)}`)
+    })
     void connection.sendDiagnostics({ uri: document.uri, diagnostics: [] })
   })
 
+  const awaitProjectUpdates = Effect.fnUntraced(function* (project: ProjectSession.ProjectSession) {
+    const path = yield* Path.Path
+    for (const text of documents.all()) {
+      const documentPath = yield* Effect.try({
+        try: () => new URL(text.uri),
+        catch: (cause) => cause,
+      }).pipe(
+        Effect.flatMap((url) => path.fromFileUrl(url)),
+        Effect.option,
+      )
+      if (Option.isNone(documentPath)) continue
+      const relative = path.relative(project.sourceRoot, documentPath.value)
+      if (relative === '..' || relative.startsWith(`..${path.sep}`)) continue
+      yield* DocumentUpdates.awaitCurrent(documentUpdates, text.uri)
+    }
+  })
+
   const acquire = async (uri: string) => {
-    await Promise.all([...documentUpdates])
     const text = documents.get(uri)
+    if (text === undefined) return Option.none<ProjectSession.AnalyzedDocument>()
+    const version = text.version
+    await run(DocumentUpdates.awaitCurrent(documentUpdates, uri))
     const workspace = projectByUri.get(uri)
     const project = workspace === undefined ? undefined : projects.get(workspace)
-    return text === undefined || project === undefined
-      ? Option.none<ProjectSession.AnalyzedDocument>()
-      : await run(project.acquire(uri, text.version))
+    if (project === undefined) return Option.none<ProjectSession.AnalyzedDocument>()
+    await run(awaitProjectUpdates(project))
+    return await run(project.acquire(uri, version))
   }
 
   connection.onHover(async (parameters) => {
@@ -320,11 +370,12 @@ export const start = (): void => {
     const data = Document.parseAutoImportData(action.data)
     if (data === undefined)
       return Document.disableCodeAction(action, 'The source action descriptor is invalid')
-    await Promise.all([...documentUpdates])
+    await run(DocumentUpdates.awaitCurrent(documentUpdates, data.uri))
     const workspace = projectByUri.get(data.uri)
     const project = workspace === undefined ? undefined : projects.get(workspace)
     if (project === undefined)
       return Document.disableCodeAction(action, 'The source revision is no longer available')
+    await run(awaitProjectUpdates(project))
     const session = await run(project.acquire(data.uri, data.version))
     if (Option.isNone(session))
       return Document.disableCodeAction(action, 'The source revision is no longer available')
@@ -441,8 +492,6 @@ export const start = (): void => {
         }
       }),
     )
-    documentUpdates.add(update)
-    update.finally(() => documentUpdates.delete(update)).catch(() => undefined)
     update.catch((error) => {
       connection.console.error(`silk-lsp failed to process watched files: ${String(error)}`)
     })
@@ -472,8 +521,10 @@ export const start = (): void => {
   })
 
   connection.onShutdown(async () => {
+    shuttingDown = true
     watcherRegistration?.dispose()
     watcherRegistration = undefined
+    await runtime.runPromise(DocumentUpdates.drain(documentUpdates))
     await Promise.all(
       [...projects.values()].map((project) => runtime.runPromise(project.shutdown())),
     )

@@ -13,8 +13,8 @@ export interface Client {
   readonly close: () => Promise<void>
 }
 
-export const connect = (): Client => {
-  const child = spawn(process.execPath, [binPath], { stdio: ['pipe', 'pipe', 'pipe'] })
+export const connect = (entryPath = binPath): Client => {
+  const child = spawn(process.execPath, [entryPath], { stdio: ['pipe', 'pipe', 'pipe'] })
   const messages: Array<Record<string, unknown>> = []
   let buffer = Buffer.alloc(0)
   child.stdout.on('data', (chunk: Buffer) => {

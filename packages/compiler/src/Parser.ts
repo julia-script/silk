@@ -831,7 +831,55 @@ const isNominalPatternStart = (state: State): boolean => {
   return following === 'Dot' && significantKindAfter(state, 3) === 'LeftBrace'
 }
 
-function parsePattern(initial: State): NodeResult {
+const parseErrorPattern = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+): NodeResult => {
+  const leading = consumeTrivia(initial)
+  let state = leading.state
+  let unexpected: ReadonlyArray<Token.Token> = Object.freeze([])
+  let token = currentToken(state)
+  let braceDepth = 0
+
+  while (
+    token !== undefined &&
+    token.kind !== 'EndOfFile' &&
+    !(
+      following.includes(nextSignificantKind(state) ?? 'EndOfFile') &&
+      (nextSignificantKind(state) !== 'RightBrace' || braceDepth === 0)
+    )
+  ) {
+    unexpected = Object.freeze([...unexpected, token])
+    if (token.kind === 'LeftBrace') braceDepth += 1
+    else if (token.kind === 'RightBrace' && braceDepth > 0) braceDepth -= 1
+    state = advance(state)
+    token = currentToken(state)
+  }
+
+  if (unexpected.length === 0) {
+    const missing = missingToken(state, 'Identifier')
+    return Object.freeze({
+      state: addDiagnostic(state, Diagnostic.missingToken('Identifier', missing.span)),
+      node: syntaxNode(state, 'ErrorPattern', [...leading.elements, missing]),
+    })
+  }
+
+  const error = syntaxNode(state, 'Error', unexpected)
+  return Object.freeze({
+    state: addDiagnostic(
+      state,
+      Diagnostic.unexpectedTokens(
+        unexpected.map((item) => item.kind),
+        'syntax',
+        ['a nominal pattern', '`_`'],
+        error.span,
+      ),
+    ),
+    node: syntaxNode(state, 'ErrorPattern', [...leading.elements, error]),
+  })
+}
+
+function parsePattern(initial: State, following: ReadonlyArray<Token.TokenKind>): NodeResult {
   if (isUniversalPatternStart(initial)) {
     const identifier = expect(initial, 'Identifier', ['IfKeyword', 'FatArrow', 'RightBrace'])
     return Object.freeze({
@@ -839,7 +887,20 @@ function parsePattern(initial: State): NodeResult {
       node: syntaxNode(identifier.state, 'UniversalPattern', identifier.elements),
     })
   }
-  return parseNominalPattern(initial)
+  const kind = nextSignificantKind(initial)
+  const nonNominalTypePrimary =
+    kind === 'Ampersand' ||
+    kind === 'LeftBracket' ||
+    kind === 'LeftParenthesis' ||
+    kind === 'FnKeyword' ||
+    kind === 'UnsafeKeyword' ||
+    ((kind === 'MutKeyword' || kind === 'OnceKeyword') &&
+      significantKindAfter(initial, 1) !== 'Identifier') ||
+    isRowWithoutStart(initial) ||
+    isExactRepresentationStart(initial)
+  return nonNominalTypePrimary
+    ? parseErrorPattern(initial, following)
+    : parseNominalPattern(initial)
 }
 
 function parseNominalPattern(initial: State): NodeResult {
@@ -929,7 +990,7 @@ function parseNominalPattern(initial: State): NodeResult {
 }
 
 function parseMatchArm(initial: State, reservedForEnclosingCalls: number): NodeResult {
-  const pattern = parsePattern(initial)
+  const pattern = parsePattern(initial, ['IfKeyword', 'FatArrow', 'RightBrace'])
   let state = pattern.state
   let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([pattern.node])
 
@@ -1420,7 +1481,7 @@ const startsPatternBindingStatement = (initial: State): boolean => {
 
 const parsePatternBindingStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'LetKeyword', ['Identifier', 'LeftBracket', 'Equals'])
-  const pattern = parsePattern(keyword.state)
+  const pattern = parsePattern(keyword.state, ['Equals', 'RightBrace'])
   const equals = expect(pattern.state, 'Equals', [...expressionStarts, 'RightBrace'])
   const expression = parseExpression(equals.state, 0, 'Identifier')
   return Object.freeze({
@@ -1467,7 +1528,7 @@ function parseConditionalStatement(initial: State): NodeResult {
   const keyword = expect(initial, 'IfKeyword', [...expressionStarts, 'LeftBrace', 'RightBrace'])
   if (nextSignificantKind(keyword.state) === 'LetKeyword') {
     const letKeyword = expect(keyword.state, 'LetKeyword', ['Identifier', 'LeftBracket', 'Equals'])
-    const pattern = parsePattern(letKeyword.state)
+    const pattern = parsePattern(letKeyword.state, ['Equals', 'LeftBrace', 'RightBrace'])
     const equals = expect(pattern.state, 'Equals', [...expressionStarts, 'LeftBrace'])
     const subject = parseExpression(equals.state, 0, 'Identifier', false)
     const taken = parseBlock(subject.state, false)

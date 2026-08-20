@@ -1278,6 +1278,7 @@ const printNode = (
         ),
       )
     }
+    case 'ErrorPattern':
     case 'UniversalPattern':
     case 'RestPattern':
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)

@@ -127,7 +127,8 @@ export const make = Effect.fn('Analysis.make')(function* (
   request: ModuleClosure.CompilationRequest,
 ): Effect.fn.Return<SingleRootFrontendSnapshot, never, SourceResolver.SourceResolver> {
   const frontend = yield* Pipeline.frontend(request)
-  const tooling = FrontendTooling.make(frontend)
+  yield* Effect.yieldNow
+  const tooling = yield* FrontendTooling.make(frontend)
   return OpaqueRealization.withCatalog(
     Object.freeze({
       _tag: 'AnalysisSnapshot',
