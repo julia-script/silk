@@ -16,4 +16,4 @@
 - [x] 3.1 Migrate completed interface witness/bound call-surface behavior into the unified path and delete narrower branches.
 - [x] 3.2 Add user interface, service, mixed operation, conjunction, visibility, overlap, and locality tests.
 - [x] 3.3 Update diagnostics, semantic inspectors, canonical specs, docs, and reconciliation evidence.
-- [ ] 3.4 Run typecheck, Biome, focused analysis/evaluation tests, full tests, and `pnpm check`.
+- [x] 3.4 Run typecheck, Biome, focused analysis/evaluation tests, full tests, and `pnpm check`.
