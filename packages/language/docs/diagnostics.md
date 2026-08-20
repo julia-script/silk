@@ -75,7 +75,7 @@ There are 157 codes in total.
 | `SEM0018` |  | `Expected a type, found <spelling>` |
 | `SEM0019` |  | `Public declaration exposes private type <type>` |
 | `SEM0020` |  | `Inline recursive struct layout: <join>` |
-| `SEM0021` |  | `Cannot construct <type> because one or more required fields are not visible` |
+| `SEM0021` |  | `Cannot construct <type> because its raw constructor is not available at this site` |
 | `SEM0022` |  | `<type> has no field <field>` |
 | `SEM0023` |  | `Field <field> is initialized more than once` |
 | `SEM0024` |  | `Missing initializer for <type>.<field>` |

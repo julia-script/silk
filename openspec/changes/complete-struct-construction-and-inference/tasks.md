@@ -15,4 +15,4 @@
 
 - [x] 3.1 Add external public construction, private field rejection, factories, reordered fields, explicit prefixes, conflicts, and ambiguities.
 - [x] 3.2 Update canonical specs, diagnostics, language docs, and existing construction fixtures.
-- [ ] 3.3 Run typecheck, Biome, focused compiler/LSP tests, full tests, and `pnpm check`.
+- [x] 3.3 Run typecheck, Biome, focused compiler/LSP tests, full tests, and `pnpm check`.

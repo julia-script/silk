@@ -1501,7 +1501,7 @@ export const inaccessibleStructConstruction = (
     phase: 'semantic',
     code: inaccessibleStructConstructionCode,
     severity: 'error',
-    message: `Cannot construct ${type} because one or more required fields are not visible`,
+    message: `Cannot construct ${type} because its raw constructor is not available at this site`,
     reason: Object.freeze({ _tag: 'InaccessibleStructConstruction', type }),
     span,
   })

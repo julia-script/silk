@@ -8,10 +8,12 @@ or other externally nameable public declaration MUST NOT expose a private nomina
 fields MAY use private types. Visibility failure SHALL preserve the referenced type identity and
 produce one diagnostic at the exposing type use rather than pretending the type is unknown.
 
-Field visibility SHALL also be the sole raw-construction boundary. A public struct whose required
-fields are all public MAY be constructed from another module. Any private required field SHALL
-retain construction control for the defining module without changing the visibility of the type or
-its other fields.
+For source-declared structs, field visibility SHALL be the raw-construction boundary. A public
+struct whose required fields are all public MAY be constructed from another module. Any private
+required field SHALL retain construction control for the defining module without changing the
+visibility of the type or its other fields. A nominal type that has no source struct declaration,
+such as an opaque runtime handle, SHALL NOT become constructible merely because its semantic type
+fact exposes no fields.
 
 #### Scenario: Keep default-private fields inaccessible
 
@@ -32,3 +34,8 @@ its other fields.
 
 - **WHEN** another module can name a public struct but one required field is private
 - **THEN** raw construction remains unavailable while visible factory functions remain callable
+
+#### Scenario: Preserve a declarationless opaque type
+
+- **WHEN** a public nominal runtime type has semantic type facts but no source struct declaration
+- **THEN** raw construction remains unavailable even though no source fields are visible

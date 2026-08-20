@@ -12,7 +12,10 @@ otherwise public fields permit named construction from importing modules.
 
 ### Requirement: Struct construction authority is field-based
 
-Source MAY construct a nominal struct from any module when every supplied or required initialized field is visible at the construction site. A private field SHALL preserve the type's construction boundary; visibility of another field or the type name SHALL NOT grant access to it.
+Source MAY construct a source-declared nominal struct from any module when every supplied or
+required initialized field is visible at the construction site. A private field SHALL preserve the
+type's construction boundary; visibility of another field or the type name SHALL NOT grant access
+to it. A declarationless opaque nominal type SHALL remain non-constructible.
 
 Every literal SHALL initialize every required visible field exactly once. Initializers SHALL
 evaluate in source order, while the complete value SHALL retain canonical declaration field order.
@@ -34,6 +37,11 @@ reveal the hidden field's name or type.
 
 - **WHEN** a literal supplies visible fields in an order different from their declaration order
 - **THEN** expressions evaluate in source order and the complete value maps them into canonical declaration order
+
+#### Scenario: Reject declarationless opaque construction
+
+- **WHEN** source writes a literal for a nominal runtime type that has no source struct declaration
+- **THEN** construction is rejected without granting it an invented zero-field constructor
 
 ### Requirement: Ordinary struct parameters infer from all supplied fields
 

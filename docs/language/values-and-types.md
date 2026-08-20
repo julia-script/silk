@@ -389,14 +389,17 @@ constructor functions when external construction is intended.
 
 **Boundary:** Unknown, duplicate, missing, inaccessible, or mistyped initializers produce no
 partially initialized value. Construction never fills omitted fields with defaults. A diagnostic
-for hidden required fields does not expose their names or types.
+for hidden required fields does not expose their names or types. A declarationless opaque nominal
+type, such as a runtime handle, has no source constructor; an empty semantic field list does not
+turn it into an ordinary zero-field struct.
 
 **Diagnostics:** Unknown fields report `SEM0022`; duplicates `SEM0023`; missing visible fields
 `SEM0024`; incompatible field values `SEM0025`. Inaccessible construction needs one stable semantic
 code that does not reveal hidden field details.
 
 **Current compiler:** Aligned. Construction resolves every named initializer to its canonical field,
-checks that field's visibility, and uses `SEM0021` only when a required field is inaccessible.
+checks that field's visibility, and uses `SEM0021` when a required field is inaccessible or the
+nominal type has no source struct declaration.
 
 **Evidence:** [struct value tests](../../packages/compiler/test/StructValues.test.ts),
 [struct literal elaboration](../../packages/compiler/src/Elaboration.ts).
