@@ -1454,6 +1454,12 @@ const addExpressionTypes = (
     addExpressionTypes(types, expression.slice, substitution)
     addExpressionTypes(types, expression.index, substitution)
   }
+  if (
+    (expression._tag === 'SliceBorrow' || expression._tag === 'ValueBorrow') &&
+    expression.root._tag === 'TemporarySliceRoot'
+  ) {
+    addExpressionTypes(types, expression.root.value, substitution)
+  }
   if (expression._tag === 'Construct') {
     for (const field of expression.fields) addExpressionTypes(types, field.value, substitution)
   }

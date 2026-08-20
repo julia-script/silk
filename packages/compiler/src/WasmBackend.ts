@@ -3139,51 +3139,92 @@ const emitOperation = (
       } else {
         const rootType = layout.types.at(operation.root.ordinal)
         const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
-        const staticSelectors = operation.selectors.map((selector) => selector.field)
-        if (rootSemantic !== undefined && SilkType.isReference(rootSemantic)) {
-          const rootAddress = scalar(operation.root)
-          const [address, length] = slots(operation.destination)
-          const offset = LayoutPlan.laneOffset(plan, rootSemantic.target, staticSelectors)
-          if (address === undefined || offset === undefined) {
-            throw new RangeError('Wasm projected borrow lost its reference address')
+        let selected =
+          rootSemantic !== undefined && SilkType.isReference(rootSemantic)
+            ? rootSemantic.target
+            : rootSemantic
+        let staticOffset = 0
+        const dynamicOffsets: Array<{
+          readonly local: Mir.LocalId
+          readonly stride: number
+          readonly length: number
+        }> = []
+        for (const selector of operation.selectors) {
+          const selectedLayout =
+            selected === undefined ? undefined : LayoutPlan.entry(plan, selected)
+          if (selector._tag === 'FieldSelector') {
+            if (selectedLayout?.representation._tag !== 'Aggregate')
+              throw new RangeError('Wasm borrow field selector lost its aggregate layout')
+            const field = selectedLayout.representation.fields.find(
+              (candidate) =>
+                candidate.id.ordinal === selector.field.ordinal &&
+                candidate.id.struct.sourceId === selector.field.struct.sourceId &&
+                candidate.id.struct.ordinal === selector.field.struct.ordinal,
+            )
+            if (field === undefined)
+              throw new RangeError('Wasm borrow field selector lost its field layout')
+            staticOffset += field.offset
+            selected = field.type
+            continue
           }
-          if (operation.type._tag !== 'Reference') {
-            throw new RangeError('Wasm projected reference borrow produced a non-reference')
+          if (
+            selector._tag !== 'ElementSelector' ||
+            selectedLayout?.representation._tag !== 'Repeated'
+          ) {
+            throw new RangeError('Wasm borrow element selector lost its repeated layout')
           }
-          return [
-            Instr.localGet(rootAddress),
-            Instr.i32Const(offset),
-            Instr.op('i32.add'),
-            Instr.localSet(address),
-            ...(length === undefined ? [] : [Instr.i32Const(0), Instr.localSet(length)]),
-          ]
+          if (selector.index._tag === 'Proven') {
+            staticOffset += selector.index.value * selectedLayout.representation.stride
+          } else {
+            dynamicOffsets.push(
+              Object.freeze({
+                local: selector.index.local,
+                stride: selectedLayout.representation.stride,
+                length: selector.length,
+              }),
+            )
+          }
+          selected = selectedLayout.representation.element
         }
         const planned = memory?.frame.roots.get(operation.root.ordinal)
         const [address, length] = slots(operation.destination)
-        const rootOffset =
-          rootSemantic === undefined
-            ? undefined
-            : LayoutPlan.laneOffset(plan, rootSemantic, staticSelectors)
-        if (planned === undefined || address === undefined) {
+        if (
+          rootSemantic === undefined ||
+          address === undefined ||
+          (!SilkType.isReference(rootSemantic) && planned === undefined)
+        ) {
           throw new RangeError('Wasm borrow formation lost its frame root or address lane')
         }
-        if (rootOffset === undefined) {
-          throw new RangeError('Wasm borrow formation lost its projected root offset')
+        const instructions: Array<Instr.Instr> = []
+        for (const offset of dynamicOffsets) {
+          instructions.push(
+            Instr.localGet(scalar(offset.local)),
+            Instr.i32Const(offset.length),
+            Instr.op('i32.lt_u'),
+            Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+          )
         }
-        if (operation.type._tag === 'Reference') {
-          return [
-            ...materializeRoot(operation.root),
-            ...frameAddress(planned.offset + rootOffset),
-            Instr.localSet(address),
-          ]
+        instructions.push(
+          ...(SilkType.isReference(rootSemantic)
+            ? [Instr.localGet(scalar(operation.root))]
+            : [...materializeRoot(operation.root), ...frameAddress(planned?.offset ?? 0)]),
+          ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
+        )
+        for (const offset of dynamicOffsets) {
+          instructions.push(
+            Instr.localGet(scalar(offset.local)),
+            Instr.i32Const(offset.stride),
+            Instr.op('i32.mul'),
+            Instr.op('i32.add'),
+          )
         }
+        instructions.push(Instr.localSet(address))
+        if (operation.type._tag === 'Reference') return instructions
         if (length === undefined || operation.sourceType._tag !== 'FixedArray') {
           throw new RangeError('Wasm slice formation lost its length lane or array root')
         }
         return [
-          ...materializeRoot(operation.root),
-          ...frameAddress(planned.offset + rootOffset),
-          Instr.localSet(address),
+          ...instructions,
           Instr.i32Const(operation.sourceType.type.length),
           Instr.localSet(length),
         ]

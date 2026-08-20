@@ -72,6 +72,11 @@ export interface SliceValue {
   readonly cell: number
   readonly base: number
   readonly length: number
+  /** Place path from the backing cell to the fixed array viewed by this slice. */
+  readonly selectors?: ReadonlyArray<
+    Extract<Mir.PlaceSelector, { readonly _tag: 'FieldSelector' | 'ElementSelector' }>
+  >
+  readonly indexes?: ReadonlyArray<number>
   /** Present only for a zero-copy RawBuffer-backed slice. */
   readonly ticket?: number
 }
@@ -113,7 +118,7 @@ export interface ReferenceValue {
   readonly _tag: 'ReferenceValue'
   readonly frame: number
   readonly cell: number
-  readonly selectors: ReadonlyArray<Extract<Mir.PlaceSelector, { readonly _tag: 'FieldSelector' }>>
+  readonly selectors: ReadonlyArray<Mir.PlaceSelector>
 }
 
 export interface UnionValue {
@@ -977,6 +982,37 @@ function* executeFunction(
     return found
   }
 
+  const selectStoredPlace = (
+    root: Value,
+    selectors: NonNullable<SliceValue['selectors']>,
+    indexes: ReadonlyArray<number>,
+  ): Value => {
+    let selected = root
+    for (const [ordinal, selector] of selectors.entries()) {
+      const index = indexes.at(ordinal)
+      if (index === undefined) throw new RangeError('Stored slice place omitted a checked index')
+      if (selector._tag === 'FieldSelector') {
+        if (selected._tag !== 'AggregateValue')
+          throw new RangeError('Stored slice field selects a non-aggregate')
+        const field = selected.fields.find(
+          (candidate) =>
+            candidate.field.ordinal === selector.field.ordinal &&
+            candidate.field.struct.sourceId === selector.field.struct.sourceId &&
+            candidate.field.struct.ordinal === selector.field.struct.ordinal,
+        )
+        if (field === undefined) throw new RangeError('Stored slice field is missing')
+        selected = field.value
+      } else {
+        if (selected._tag !== 'ArrayValue')
+          throw new RangeError('Stored slice element selects a non-array')
+        const element = selected.elements.at(index)
+        if (element === undefined) throw new RangeError('Stored slice element is missing')
+        selected = element
+      }
+    }
+    return selected
+  }
+
   const referenced = (local: Mir.LocalId): LocalState => {
     const reference = read(local).value
     if (reference._tag !== 'ReferenceValue') {
@@ -987,16 +1023,28 @@ function* executeFunction(
       throw new RangeError('MIR reference points at a missing evaluator cell')
     let selected = found.value
     for (const selector of reference.selectors) {
-      if (selected._tag !== 'AggregateValue')
-        throw new RangeError('MIR reference selector points at a non-struct value')
-      const field = selected.fields.find(
-        (candidate) =>
-          candidate.field.ordinal === selector.field.ordinal &&
-          candidate.field.struct.sourceId === selector.field.struct.sourceId &&
-          candidate.field.struct.ordinal === selector.field.struct.ordinal,
-      )
-      if (field === undefined) throw new RangeError('MIR reference selector lost its field')
-      selected = field.value
+      if (selector._tag === 'FieldSelector') {
+        if (selected._tag !== 'AggregateValue')
+          throw new RangeError('MIR reference selector points at a non-struct value')
+        const field = selected.fields.find(
+          (candidate) =>
+            candidate.field.ordinal === selector.field.ordinal &&
+            candidate.field.struct.sourceId === selector.field.struct.sourceId &&
+            candidate.field.struct.ordinal === selector.field.struct.ordinal,
+        )
+        if (field === undefined) throw new RangeError('MIR reference selector lost its field')
+        selected = field.value
+        continue
+      }
+      if (selector._tag !== 'ElementSelector' || selected._tag !== 'ArrayValue')
+        throw new RangeError('MIR reference selector points at an unsupported place')
+      const index =
+        selector.index._tag === 'Proven'
+          ? selector.index.value
+          : Number(readInteger(selector.index.local, 'usize').value)
+      const element = selected.elements.at(index)
+      if (element === undefined) throw new RangeError('MIR reference selector lost its element')
+      selected = element
     }
     return Object.freeze({ value: selected, fromCall: found.fromCall })
   }
@@ -1823,7 +1871,11 @@ function* executeFunction(
           selected = element
           continue
         }
-        const backing = cell(selected).value
+        const backing = selectStoredPlace(
+          cell(selected).value,
+          selected.selectors ?? Object.freeze([]),
+          selected.indexes ?? Object.freeze([]),
+        )
         if (backing._tag !== 'ArrayValue') {
           throw new RangeError('MIR slice cell does not contain an array value')
         }
@@ -1906,15 +1958,18 @@ function* executeFunction(
         return current
       }
       const backing = cell(current)
-      if (backing.value._tag !== 'ArrayValue') {
+      const prefixSelectors = current.selectors ?? Object.freeze([])
+      const prefixIndexes = current.indexes ?? Object.freeze([])
+      const selectedBacking = selectStoredPlace(backing.value, prefixSelectors, prefixIndexes)
+      if (selectedBacking._tag !== 'ArrayValue') {
         throw new RangeError('Invalid slice backing cell replacement')
       }
       const absolute = current.base + ordinal
       const updated: ArrayValue = Object.freeze({
         _tag: 'ArrayValue',
-        type: backing.value.type,
+        type: selectedBacking.type,
         elements: Object.freeze(
-          backing.value.elements.map((element, index) =>
+          selectedBacking.elements.map((element, index) =>
             index === absolute
               ? replacePlace(element, selectors, indexes, replacement, depth + 1)
               : element,
@@ -1922,7 +1977,7 @@ function* executeFunction(
         ),
       })
       state.cells.set(cellKey(current.frame, current.cell), {
-        value: updated,
+        value: replacePlace(backing.value, prefixSelectors, prefixIndexes, updated),
         fromCall: backing.fromCall,
       })
       return current
@@ -1953,7 +2008,16 @@ function* executeFunction(
       value: replacePlace(
         target.value,
         reference.selectors,
-        Object.freeze(reference.selectors.map((selector) => selector.field.ordinal)),
+        Object.freeze(
+          reference.selectors.map((selector) => {
+            if (selector._tag === 'FieldSelector') return selector.field.ordinal
+            if (selector._tag === 'ElementSelector')
+              return selector.index._tag === 'Proven'
+                ? selector.index.value
+                : Number(readInteger(selector.index.local, 'usize').value)
+            throw new RangeError('OS intrinsic output cannot target a slice element')
+          }),
+        ),
         replacement,
       ),
       fromCall: target.fromCall,
@@ -2523,9 +2587,10 @@ function* executeFunction(
                     if (operation.sourceType._tag !== 'FixedArray') {
                       throw new RangeError('MIR verifier allowed a non-array slice root')
                     }
-                    if (source.value._tag !== 'ArrayValue') {
-                      throw new RangeError('MIR verifier allowed borrowing a non-array value')
-                    }
+                    const resolved = resolvePlace(operation.root, operation.selectors)
+                    if (resolved._tag === 'Blocked') return resolved
+                    if (resolved.selected._tag !== 'ArrayValue')
+                      throw new RangeError('MIR verifier allowed borrowing a non-array place')
                     const key = cellKey(frame, operation.root.ordinal)
                     if (!state.cells.has(key)) state.cells.set(key, source)
                     return Object.freeze({
@@ -2534,8 +2599,20 @@ function* executeFunction(
                       cell: operation.root.ordinal,
                       base: 0,
                       length: operation.sourceType.type.length,
+                      selectors: Object.freeze(
+                        operation.selectors.filter(
+                          (
+                            selector,
+                          ): selector is Extract<
+                            Mir.PlaceSelector,
+                            { readonly _tag: 'FieldSelector' | 'ElementSelector' }
+                          > => selector._tag !== 'SliceElementSelector',
+                        ),
+                      ),
+                      indexes: resolved.indexes,
                     })
                   })()
+            if (slice._tag === 'Blocked') return slice.step
             if (slice._tag !== 'SliceValue') {
               throw new RangeError('MIR verifier allowed reborrowing a non-slice value')
             }

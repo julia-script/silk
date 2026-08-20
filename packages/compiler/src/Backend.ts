@@ -4933,7 +4933,17 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const rootType = entry.fn.localTypes.at(operation.root.ordinal)
                   const rootSemantic =
                     rootType === undefined ? undefined : Mir.semanticType(rootType)
-                  const staticSelectors = operation.selectors.map((selector) => selector.field)
+                  const staticSelectors = operation.selectors.map((selector): Layout.Selector => {
+                    if (selector._tag === 'FieldSelector') return selector.field
+                    if (selector._tag === 'ElementSelector' && selector.index._tag === 'Proven')
+                      return Object.freeze({
+                        _tag: 'ElementSelector',
+                        index: selector.index.value,
+                      })
+                    throw new RangeError(
+                      'LLVM borrow formation requires a statically selected place',
+                    )
+                  })
                   if (rootSemantic !== undefined && SilkType.isReference(rootSemantic)) {
                     const address = readLocal(operation.root).at(0)
                     const offset = Layout.laneOffset(

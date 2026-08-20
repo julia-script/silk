@@ -24,6 +24,7 @@ export type BindingSite =
   | { readonly _tag: 'Parameter'; readonly parameter: DeclarationIndex.ParameterId }
   | { readonly _tag: 'Let'; readonly binding: Hir.BindingId }
   | { readonly _tag: 'Pattern'; readonly binding: Match.BindingId }
+  | { readonly _tag: 'Temporary'; readonly owner: Hir.TemporaryOwnerId }
 
 /** One binding's ownership fact: site, category, live range, and consuming move if any. */
 export interface BindingFact {
@@ -359,7 +360,9 @@ const siteKey = (site: BindingSite): string =>
     ? `p${site.parameter.ordinal}`
     : site._tag === 'Let'
       ? `b${site.binding.ordinal}`
-      : `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+      : site._tag === 'Pattern'
+        ? `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+        : `t${site.owner.span.sourceId}:${site.owner.span.start}:${site.owner.span.end}:${site.owner.ordinal}`
 
 interface MutableBinding {
   readonly site: BindingSite
@@ -734,6 +737,10 @@ const checkExpression = (
     }
     case 'SliceBorrow':
     case 'ValueBorrow': {
+      if (expression.root._tag === 'TemporarySliceRoot') {
+        checkExpression(state, live, expression.root.value, true, guard, escaping)
+        return
+      }
       const site: BindingSite =
         expression.root._tag === 'BindingSliceRoot'
           ? Object.freeze({ _tag: 'Let', binding: expression.root.binding })
@@ -1182,7 +1189,9 @@ const borrowSite = (root: Elaboration.BorrowRootFact): BindingSite =>
     ? Object.freeze({ _tag: 'Let', binding: root.binding.id })
     : root._tag === 'ParameterRoot'
       ? Object.freeze({ _tag: 'Parameter', parameter: root.parameter.id })
-      : Object.freeze({ _tag: 'Pattern', binding: root.binding.id })
+      : root._tag === 'PatternRoot'
+        ? Object.freeze({ _tag: 'Pattern', binding: root.binding.id })
+        : Object.freeze({ _tag: 'Temporary', owner: root.owner })
 
 const sameSite = (left: BindingSite, right: BindingSite): boolean =>
   siteKey(left) === siteKey(right)
@@ -3078,7 +3087,9 @@ const siteText = (site: BindingSite): string =>
     ? `p${site.parameter.ordinal}`
     : site._tag === 'Let'
       ? `b${site.binding.ordinal}`
-      : `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+      : site._tag === 'Pattern'
+        ? `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+        : `t${site.owner.span.start}.${site.owner.ordinal}`
 
 const cleanupText = (cleanup: CleanupPlan): string => {
   if (cleanup._tag === 'NoCleanup') return `none:${Type.encode(cleanup.type)}`

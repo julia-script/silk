@@ -303,14 +303,18 @@ export const resolutionRows = (resolution: NameResolution.Resolution): ReadonlyA
 const bindingSiteText = (fact: Ownership.BindingFact): string =>
   fact.site._tag === 'Parameter'
     ? `parameter #${fact.site.parameter.ordinal}`
-    : `let b${fact.site.binding.ordinal}`
+    : fact.site._tag === 'Temporary'
+      ? `temporary @${fact.site.owner.span.start}`
+      : `let b${fact.site.binding.ordinal}`
 
 const loanSiteText = (site: Ownership.BindingSite): string =>
   site._tag === 'Parameter'
     ? `parameter #${site.parameter.ordinal}`
     : site._tag === 'Let'
       ? `let b${site.binding.ordinal}`
-      : `pattern b${site.binding.ordinal}`
+      : site._tag === 'Pattern'
+        ? `pattern b${site.binding.ordinal}`
+        : `temporary @${site.owner.span.start}`
 
 const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
   switch (cleanup._tag) {

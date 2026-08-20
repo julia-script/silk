@@ -121,6 +121,14 @@ class FunctionLowering {
     number,
     Extract<Mir.Operation, { readonly _tag: 'MakeCallable' }>
   >()
+  readonly temporaryBorrowOwners = new Map<
+    string,
+    {
+      readonly local: Mir.LocalId
+      readonly cleanup: Ownership.CleanupPlan
+      readonly span: SourceSpan.SourceSpan
+    }
+  >()
   private operations: Array<Mir.Operation> = []
   private syntheticBorrowOrdinal = 0
   private replayBorrowSubstitution: Map<string, Hir.BorrowId> | undefined
@@ -225,8 +233,24 @@ class FunctionLowering {
       )
       if (parent !== undefined) this.loanParents.set(key, parent[0])
       this.loanIds.set(key, operation.borrow)
-    } else if (operation._tag === 'EndLoan')
+    } else if (operation._tag === 'EndLoan') {
       this.loanIds.set(borrowKey(operation.borrow), operation.borrow)
+      const temporary = this.temporaryBorrowOwners.get(borrowKey(operation.borrow))
+      if (temporary !== undefined) {
+        const localType = this.localTypes.at(temporary.local.ordinal)
+        if (localType !== undefined) {
+          this.operations.push(
+            Object.freeze({
+              _tag: 'Drop',
+              local: temporary.local,
+              cleanup: cleanupForLocal(this, temporary.cleanup, localType),
+              provenance: generated(temporary.span),
+            }),
+          )
+        }
+        this.temporaryBorrowOwners.delete(borrowKey(operation.borrow))
+      }
+    }
     if (operation._tag === 'MakeCallable')
       this.callableDefinitions.set(operation.destination.ordinal, operation)
     if (operation._tag === 'Move') {
@@ -4746,12 +4770,18 @@ function lowerExpressionInner(
       return lowerPlace(fn, expression)
     }
     case 'SliceBorrow': {
+      const temporary =
+        expression.root._tag === 'TemporarySliceRoot'
+          ? lowerExpression(fn, expression.root.value)
+          : undefined
       const root =
         expression.root._tag === 'BindingSliceRoot'
           ? fn.bindingLocals.get(expression.root.binding.ordinal)
           : expression.root._tag === 'ParameterSliceRoot'
             ? local(expression.root.parameter.ordinal)
-            : fn.patternLocals.get(patternKey(expression.root.binding))
+            : expression.root._tag === 'PatternSliceRoot'
+              ? fn.patternLocals.get(patternKey(expression.root.binding))
+              : temporary?.result
       const sourceType = fn.type(expression.source)
       const type = fn.type(expression.type)
       if (
@@ -4763,13 +4793,15 @@ function lowerExpressionInner(
       }
       const destination = fn.alloc(type)
       const borrow = fn.beginRecipeBorrow(expression.borrow)
+      const selectors = lowerBorrowSelectors(fn, expression.selectors)
+      if (selectors === undefined) return undefined
       fn.emit(
         Object.freeze({
           _tag: 'BeginLoan',
           borrow,
           destination,
           root,
-          selectors: Object.freeze([]),
+          selectors,
           sourceType,
           type,
           access: expression.access,
@@ -4778,16 +4810,32 @@ function lowerExpressionInner(
           provenance: authored(expression.span),
         }),
       )
+      if (expression.root._tag === 'TemporarySliceRoot') {
+        fn.temporaryBorrowOwners.set(
+          borrowKey(borrow),
+          Object.freeze({
+            local: root,
+            cleanup: Ownership.cleanupPlan(fn.index, fn.semantic(expression.source)),
+            span: expression.root.owner.span,
+          }),
+        )
+      }
       fn.loanLocals.set(borrowKey(borrow), destination)
       return Object.freeze({ result: destination })
     }
     case 'ValueBorrow': {
+      const temporary =
+        expression.root._tag === 'TemporarySliceRoot'
+          ? lowerExpression(fn, expression.root.value)
+          : undefined
       const root =
         expression.root._tag === 'BindingSliceRoot'
           ? fn.bindingLocals.get(expression.root.binding.ordinal)
           : expression.root._tag === 'ParameterSliceRoot'
             ? local(expression.root.parameter.ordinal)
-            : fn.patternLocals.get(patternKey(expression.root.binding))
+            : expression.root._tag === 'PatternSliceRoot'
+              ? fn.patternLocals.get(patternKey(expression.root.binding))
+              : temporary?.result
       const sourceType = fn.type(expression.source)
       const type = fn.type(expression.type)
       if (root === undefined || sourceType === undefined || type?._tag !== 'Reference') {
@@ -4795,21 +4843,15 @@ function lowerExpressionInner(
       }
       const destination = fn.alloc(type)
       const borrow = fn.beginRecipeBorrow(expression.borrow)
+      const selectors = lowerBorrowSelectors(fn, expression.selectors)
+      if (selectors === undefined) return undefined
       fn.emit(
         Object.freeze({
           _tag: 'BeginLoan',
           borrow,
           destination,
           root,
-          selectors: Object.freeze(
-            expression.path.map((field) =>
-              Object.freeze({
-                _tag: 'FieldSelector' as const,
-                field,
-                provenance: authored(expression.span),
-              }),
-            ),
-          ),
+          selectors,
           sourceType,
           type,
           access: expression.access,
@@ -4818,6 +4860,16 @@ function lowerExpressionInner(
           provenance: authored(expression.span),
         }),
       )
+      if (expression.root._tag === 'TemporarySliceRoot') {
+        fn.temporaryBorrowOwners.set(
+          borrowKey(borrow),
+          Object.freeze({
+            local: root,
+            cleanup: Ownership.cleanupPlan(fn.index, fn.semantic(expression.source)),
+            span: expression.root.owner.span,
+          }),
+        )
+      }
       fn.loanLocals.set(borrowKey(borrow), destination)
       return Object.freeze({ result: destination })
     }
@@ -5960,7 +6012,9 @@ const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined
     const dropped =
       site._tag === 'Parameter'
         ? fn.parameterLocals.get(site.parameter.ordinal)
-        : fn.bindingLocals.get(site.binding.ordinal)
+        : site._tag === 'Temporary'
+          ? undefined
+          : fn.bindingLocals.get(site.binding.ordinal)
     if (dropped === undefined) continue
     const localType = fn.localTypes.at(dropped.ordinal)
     if (localType === undefined) continue
@@ -5992,6 +6046,44 @@ const authored = (span: SourceSpan.SourceSpan): Mir.Provenance =>
 const lowerWriteSelectors = (
   fn: FunctionLowering,
   selectors: ReadonlyArray<Hir.WriteSelector>,
+): ReadonlyArray<Mir.PlaceSelector> | undefined => {
+  const lowered: Array<Mir.PlaceSelector> = []
+  for (const selector of selectors) {
+    if (selector._tag === 'Field') {
+      lowered.push(
+        Object.freeze({
+          _tag: 'FieldSelector',
+          field: selector.field,
+          provenance: authored(selector.span),
+        }),
+      )
+      continue
+    }
+    const index =
+      selector.bounds._tag === 'Proven'
+        ? Object.freeze({ _tag: 'Proven' as const, value: selector.bounds.index })
+        : (() => {
+            const expression = lowerExpression(fn, selector.index)
+            return expression === undefined
+              ? undefined
+              : Object.freeze({ _tag: 'Runtime' as const, local: expression.result })
+          })()
+    if (index === undefined) return undefined
+    lowered.push(
+      Object.freeze({
+        _tag: 'ElementSelector',
+        length: selector.array.length,
+        index,
+        provenance: authored(selector.span),
+      }),
+    )
+  }
+  return Object.freeze(lowered)
+}
+
+const lowerBorrowSelectors = (
+  fn: FunctionLowering,
+  selectors: ReadonlyArray<Hir.BorrowSelector>,
 ): ReadonlyArray<Mir.PlaceSelector> | undefined => {
   const lowered: Array<Mir.PlaceSelector> = []
   for (const selector of selectors) {

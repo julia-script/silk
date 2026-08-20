@@ -265,21 +265,41 @@ export interface MoveExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
+export type BorrowSelectorFact =
+  | {
+      readonly _tag: 'Field'
+      readonly field: DeclarationIndex.FieldId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Index'
+      readonly index: ExpressionFact
+      readonly array: Type.FixedArray
+      readonly bounds: Extract<BoundsFact, { readonly _tag: 'Proven' | 'Runtime' }>
+      readonly span: SourceSpan.SourceSpan
+    }
+
 export type BorrowRootFact =
   | {
       readonly _tag: 'BindingRoot'
       readonly binding: BindingDeclarationFact
-      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+      readonly path: ReadonlyArray<BorrowSelectorFact>
     }
   | {
       readonly _tag: 'ParameterRoot'
       readonly parameter: ParameterFact
-      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+      readonly path: ReadonlyArray<BorrowSelectorFact>
     }
   | {
       readonly _tag: 'PatternRoot'
       readonly binding: PatternBindingFact
-      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+      readonly path: ReadonlyArray<BorrowSelectorFact>
+    }
+  | {
+      readonly _tag: 'TemporaryRoot'
+      readonly owner: Hir.TemporaryOwnerId
+      readonly value: ExpressionFact
+      readonly path: ReadonlyArray<BorrowSelectorFact>
     }
 
 export type BorrowFormationFact =
@@ -1694,7 +1714,39 @@ const borrowRoot = (subject: ExpressionFact): BorrowRootFact | undefined => {
     const root = borrowRoot(subject.subject)
     return root === undefined
       ? undefined
-      : Object.freeze({ ...root, path: Object.freeze([...root.path, subject.state.field.id]) })
+      : Object.freeze({
+          ...root,
+          path: Object.freeze([
+            ...root.path,
+            Object.freeze({
+              _tag: 'Field' as const,
+              field: subject.state.field.id,
+              span: subject.syntax.span,
+            }),
+          ]),
+        })
+  }
+  if (
+    subject._tag === 'IndexProjection' &&
+    subject.array !== undefined &&
+    (subject.bounds._tag === 'Proven' || subject.bounds._tag === 'Runtime')
+  ) {
+    const root = borrowRoot(subject.subject)
+    return root === undefined
+      ? undefined
+      : Object.freeze({
+          ...root,
+          path: Object.freeze([
+            ...root.path,
+            Object.freeze({
+              _tag: 'Index' as const,
+              index: subject.index,
+              array: subject.array,
+              bounds: subject.bounds,
+              span: subject.syntax.span,
+            }),
+          ]),
+        })
   }
   if (subject._tag !== 'Identifier') return undefined
   if (subject.reference._tag === 'ResolvedBinding') {
@@ -1722,6 +1774,7 @@ const borrowRoot = (subject: ExpressionFact): BorrowRootFact | undefined => {
 }
 
 const exclusiveBorrowRoot = (root: BorrowRootFact): boolean =>
+  root._tag === 'TemporaryRoot' ||
   (root._tag === 'BindingRoot' && root.binding.mutability === 'Mutable') ||
   (root._tag === 'PatternRoot' && root.binding.access === 'Exclusive') ||
   (root._tag === 'ParameterRoot' &&
@@ -1784,8 +1837,22 @@ const analyzeBorrow = (
       Diagnostic.invalidBorrowPosition(node.span),
     )
   }
-  const root = borrowRoot(subject)
   const sourceType = subjectResult?.type
+  const root =
+    borrowRoot(subject) ??
+    (sourceType === undefined
+      ? undefined
+      : Object.freeze({
+          _tag: 'TemporaryRoot' as const,
+          owner: Object.freeze({
+            _tag: 'TemporaryOwnerId' as const,
+            function: declaration.id,
+            span: subject.syntax.span,
+            ordinal: 0,
+          }),
+          value: subject,
+          path: Object.freeze([]),
+        }))
   if (root === undefined || sourceType === undefined) {
     return unavailableBorrow(
       node,
@@ -9226,6 +9293,7 @@ const analyzeFunctionBody = (
       const root = expression.formation.root
       if (root._tag === 'ParameterRoot') return root.parameter
       if (root._tag === 'BindingRoot') return originOf(root.binding.initializer, patternOrigins)
+      if (root._tag === 'TemporaryRoot') return undefined
       const id = root.binding.id
       return patternOrigins.get(`${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`)
     }
@@ -10081,16 +10149,48 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
               _tag: 'ParameterSliceRoot',
               parameter: fact.formation.root.parameter.id,
             })
-          : Object.freeze({
-              _tag: 'PatternSliceRoot',
-              binding: fact.formation.root.binding.id,
-            })
+          : fact.formation.root._tag === 'PatternRoot'
+            ? Object.freeze({
+                _tag: 'PatternSliceRoot',
+                binding: fact.formation.root.binding.id,
+              })
+            : Object.freeze({
+                _tag: 'TemporarySliceRoot',
+                owner: fact.formation.root.owner,
+                value: hirExpression(fact.formation.root.value),
+              })
+    const selectors: Array<Hir.BorrowSelector> = []
+    for (const selector of fact.formation.root.path) {
+      if (selector._tag === 'Field') {
+        selectors.push(
+          Object.freeze({
+            _tag: 'Field',
+            field: selector.field,
+            span: selector.span,
+          }),
+        )
+        continue
+      }
+      const index = hirExpression(selector.index)
+      if (index._tag === 'Unavailable') {
+        return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+      }
+      selectors.push(
+        Object.freeze({
+          _tag: 'Index',
+          index,
+          array: selector.array,
+          bounds: selector.bounds,
+          span: selector.span,
+        }),
+      )
+    }
     if (fact.formation._tag === 'ValueBorrow' && Type.isReference(fact.type.type)) {
       return Object.freeze({
         _tag: 'ValueBorrow',
         borrow,
         root,
-        path: fact.formation.root.path,
+        selectors: Object.freeze(selectors),
         source: fact.formation.source,
         access: fact.access,
         type: fact.type.type,
@@ -10105,6 +10205,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       _tag: 'SliceBorrow',
       borrow,
       root,
+      selectors: Object.freeze(selectors),
       source:
         fact.formation._tag === 'FixedArrayBorrow' ? fact.formation.array : fact.formation.parent,
       access: fact.access,

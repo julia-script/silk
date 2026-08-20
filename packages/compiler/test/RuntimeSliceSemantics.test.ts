@@ -144,7 +144,7 @@ pub fn main() -> i32 { return 0 }`)
   assert.include(codes, 'SEM0054')
 })
 
-it('admits lexical borrow bindings while rejecting decay, invalid exclusivity, temporaries, and unstable subplaces', () => {
+it('admits lexical and temporary owners while rejecting decay, invalid exclusivity, and unstable subplaces', () => {
   const result = analyze(`fn read(values: &[i32]) -> i32 { return 1 }
 fn edit(values: &mut [i32]) -> i32 { return 2 }
 fn decay() -> i32 { let values = [1, 2] return read(values) }
@@ -156,14 +156,102 @@ pub fn main() -> i32 { return 0 }`)
 
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
-    ['SEM0059', 'SEM0057', 'SEM0056', 'SEM0056'],
+    ['SEM0059', 'SEM0057'],
   )
   const temporary = returnedCall(result, 5).arguments.at(0)?.expression
   assert.strictEqual(
     temporary?._tag === 'Borrow' ? temporary.formation._tag : undefined,
-    'Unavailable',
+    'FixedArrayBorrow',
   )
+  if (temporary?._tag === 'Borrow' && temporary.formation._tag !== 'Unavailable') {
+    assert.strictEqual(temporary.formation.root._tag, 'TemporaryRoot')
+  }
+  const subplace = returnedCall(result, 6).arguments.at(0)?.expression
+  if (subplace?._tag === 'Borrow' && subplace.formation._tag !== 'Unavailable') {
+    assert.strictEqual(subplace.formation.root._tag, 'BindingRoot')
+    assert.strictEqual(subplace.formation.root.path.at(0)?._tag, 'Index')
+  } else {
+    assert.fail('expected a borrow retaining indexed-place provenance')
+  }
 })
+
+it.effect('keeps a borrowed temporary alive through the call on the evaluator and Wasm', () =>
+  Effect.gen(function* () {
+    const source = `fn sum(values: &[i32]) -> i32 { return values[0] + values[1] }
+pub fn main() -> i32 { return sum(&[40, 2]) }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'slices/temporary-owner',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(
+      evaluated._tag,
+      'Completed',
+      JSON.stringify(evaluated, (_, value) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      ),
+    )
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('borrows an indexed subplace without copying it on the evaluator and Wasm', () =>
+  Effect.gen(function* () {
+    const source = `fn edit(values: &mut [i32]) -> () { values[0] = 40 }
+pub fn main() -> i32 {
+  let mut matrix = [[1, 2], [3, 4]]
+  edit(&mut matrix[0])
+  return matrix[0][0] + matrix[0][1]
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'slices/indexed-place',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('retains runtime indexed-place provenance on the evaluator and Wasm', () =>
+  Effect.gen(function* () {
+    const source = `fn edit(values: &mut [i32]) -> () { values[0] = 40 }
+fn change(index: usize) -> i32 {
+  let mut matrix = [[1, 2], [3, 4]]
+  edit(&mut matrix[index])
+  return matrix[index][0] + matrix[index][1]
+}
+pub fn main() -> i32 { return change(0) }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'slices/runtime-indexed-place',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
 
 it.effect('executes a lexical shared slice binding on the evaluator and Wasm', () =>
   Effect.gen(function* () {

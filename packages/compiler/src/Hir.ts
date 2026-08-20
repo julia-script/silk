@@ -68,6 +68,14 @@ export interface BorrowId {
   readonly ordinal: number
 }
 
+/** Stable compiler-owned identity for one materialized borrowable temporary. */
+export interface TemporaryOwnerId {
+  readonly _tag: 'TemporaryOwnerId'
+  readonly function: DeclarationIndex.DeclarationId
+  readonly span: SourceSpan.SourceSpan
+  readonly ordinal: number
+}
+
 const borrowText = (borrow: BorrowId): string =>
   `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
 
@@ -256,6 +264,25 @@ export type SliceRoot =
       readonly parameter: DeclarationIndex.ParameterId
     }
   | { readonly _tag: 'PatternSliceRoot'; readonly binding: Match.BindingId }
+  | {
+      readonly _tag: 'TemporarySliceRoot'
+      readonly owner: TemporaryOwnerId
+      readonly value: Expression
+    }
+
+export type BorrowSelector =
+  | {
+      readonly _tag: 'Field'
+      readonly field: DeclarationIndex.FieldId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Index'
+      readonly index: Expression
+      readonly array: Type.FixedArray
+      readonly bounds: BoundsMode
+      readonly span: SourceSpan.SourceSpan
+    }
 
 /** One selector in a writable place, retained in source evaluation order. */
 export type WriteSelector =
@@ -491,6 +518,7 @@ export type Expression =
       readonly _tag: 'SliceBorrow'
       readonly borrow: BorrowId
       readonly root: SliceRoot
+      readonly selectors: ReadonlyArray<BorrowSelector>
       readonly source: Type.FixedArray | Type.Slice
       readonly access: Type.Slice['access']
       readonly reborrow: boolean
@@ -502,7 +530,7 @@ export type Expression =
       readonly _tag: 'ValueBorrow'
       readonly borrow: BorrowId
       readonly root: SliceRoot
-      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+      readonly selectors: ReadonlyArray<BorrowSelector>
       readonly source: Type.Type
       readonly access: Type.Reference['access']
       readonly type: Type.Reference
@@ -879,6 +907,14 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
         return [expression.slice]
       case 'SliceIndexPlace':
         return [expression.slice, expression.index]
+      case 'SliceBorrow':
+      case 'ValueBorrow':
+        return [
+          ...(expression.root._tag === 'TemporarySliceRoot' ? [expression.root.value] : []),
+          ...expression.selectors.flatMap((selector) =>
+            selector._tag === 'Index' ? [selector.index] : [],
+          ),
+        ]
       case 'Construct':
         return expression.fields.map((field) => field.value)
       case 'ArrayConstruct':
@@ -1387,6 +1423,19 @@ const contractText = (contract: ContractFact): string =>
     ? `(${contract.parameters.map(Type.encode).join(', ')}) -> ${Type.encode(contract.result)}`
     : 'contract-unavailable'
 
+const sliceRootText = (root: SliceRoot): string => {
+  switch (root._tag) {
+    case 'BindingSliceRoot':
+      return `b${root.binding.ordinal}`
+    case 'ParameterSliceRoot':
+      return `p${root.parameter.ordinal}`
+    case 'PatternSliceRoot':
+      return `a${root.binding.arm.ordinal}.b${root.binding.ordinal}`
+    case 'TemporarySliceRoot':
+      return `t${root.owner.span.start}.${root.owner.ordinal}`
+  }
+}
+
 const encodeExpression = (expression: Expression, depth: number): string => {
   const indent = '  '.repeat(depth)
   switch (expression._tag) {
@@ -1551,9 +1600,9 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         encodeExpression(expression.index, depth + 1),
       ].join('\n')
     case 'SliceBorrow':
-      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${expression.root._tag === 'BindingSliceRoot' ? `b${expression.root.binding.ordinal}` : expression.root._tag === 'ParameterSliceRoot' ? `p${expression.root.parameter.ordinal}` : `a${expression.root.binding.arm.ordinal}.b${expression.root.binding.ordinal}`} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
+      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
     case 'ValueBorrow':
-      return `${indent}borrow-value l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${expression.root._tag === 'BindingSliceRoot' ? `b${expression.root.binding.ordinal}` : expression.root._tag === 'ParameterSliceRoot' ? `p${expression.root.parameter.ordinal}` : `a${expression.root.binding.arm.ordinal}.b${expression.root.binding.ordinal}`} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}borrow-value l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'SliceLength':
       return [
         `${indent}slice-length : i32 ${spanText(expression.span)}`,
