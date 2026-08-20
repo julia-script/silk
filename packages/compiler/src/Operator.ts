@@ -75,13 +75,7 @@ export const isShortCircuit = (self: Prefix | Infix): self is ShortCircuit =>
 /** True when an eager infix operator always returns `bool` rather than its operand type. */
 export const isPredicate = (
   self: Prefix | Infix,
-): self is
-  | 'LessThan'
-  | 'LessOrEqual'
-  | 'GreaterThan'
-  | 'GreaterOrEqual'
-  | 'Equals'
-  | 'NotEquals' =>
+): self is 'LessThan' | 'LessOrEqual' | 'GreaterThan' | 'GreaterOrEqual' | 'Equals' | 'NotEquals' =>
   self === 'LessThan' ||
   self === 'LessOrEqual' ||
   self === 'GreaterThan' ||

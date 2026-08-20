@@ -1220,10 +1220,7 @@ export const invalidConstant = (detail: string, span: SourceSpan.SourceSpan): Di
   })
 
 /** Creates the declaration diagnostic for an invalid interface operator marker. */
-export const invalidOperatorContract = (
-  detail: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const invalidOperatorContract = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',

@@ -351,7 +351,8 @@ const printServiceOperation = (
   prefix: FormatDocument.Document,
 ): FormatDocument.Document => {
   const operatorMarker = directNodes(node).find((child) => child.kind === 'OperatorMarker')
-  const operatorKeyword = operatorMarker === undefined ? undefined : tokenOf(operatorMarker, 'Identifier')
+  const operatorKeyword =
+    operatorMarker === undefined ? undefined : tokenOf(operatorMarker, 'Identifier')
   const operatorToken =
     operatorMarker === undefined
       ? undefined

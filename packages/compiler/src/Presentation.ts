@@ -165,7 +165,8 @@ export const roleDeclaration = (self: DeclarationIndex.RoleFact): Presentation =
 export const serviceOperation = (self: DeclarationIndex.ServiceOperationFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const kind = self.functionKind === 'Effect' ? 'effect fn' : 'fn'
-  const operator = self.operator === undefined ? '' : `operator ${Operator.spelling(self.operator.operator)} `
+  const operator =
+    self.operator === undefined ? '' : `operator ${Operator.spelling(self.operator.operator)} `
   const typeParameters =
     self.typeParameters.length === 0
       ? ''
