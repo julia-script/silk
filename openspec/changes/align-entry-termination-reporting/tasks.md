@@ -18,4 +18,4 @@
 - [x] 3.1 Add ordinary/effect success, typed failure, trap, private main, open requirement, recovery history, and suspension trace tests.
 - [x] 3.2 Add evaluator/native/Wasm parity and trivial-program pay-for-use structural checks.
 - [x] 3.3 Update diagnostics, canonical specs, language docs, CLI docs, and generated artifacts.
-- [ ] 3.4 Run typecheck, Biome, full compiler tests, native acceptance, release-candidate checks where package output changes, and `pnpm check`.
+- [x] 3.4 Run typecheck, Biome, full compiler tests, native acceptance, release-candidate checks where package output changes, and `pnpm check`.

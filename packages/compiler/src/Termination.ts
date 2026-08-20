@@ -55,6 +55,20 @@ export type Outcome<Value, Trace = never> =
   | UnhandledFailure<Trace>
   | Trap<Trace>
 
+/** Whether a target-neutral runtime outcome completed successfully. */
+export const isCompleted = <Value, Trace>(
+  outcome: Outcome<Value, Trace>,
+): outcome is Completed<Value, Trace> => outcome._tag === 'Completed'
+
+/** Whether a target-neutral runtime outcome escaped through the typed failure channel. */
+export const isUnhandledFailure = <Value, Trace>(
+  outcome: Outcome<Value, Trace>,
+): outcome is UnhandledFailure<Trace> => outcome._tag === 'UnhandledFailure'
+
+/** Whether a target-neutral runtime outcome terminated through a fatal trap. */
+export const isTrap = <Value, Trace>(outcome: Outcome<Value, Trace>): outcome is Trap<Trace> =>
+  outcome._tag === 'Trap'
+
 /** Static adapter data needed to interpret one target's private scalar entry ABI. */
 export interface Contract {
   readonly _tag: 'EntryTermination'
