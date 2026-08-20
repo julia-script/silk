@@ -1138,6 +1138,14 @@ function* executeFunction(
         }
         return undefined
       }
+      case 'EffectCompositeCleanup': {
+        if (owner._tag !== 'EffectCompositeValue')
+          throw new RangeError('Effect composite cleanup lost its selected alternative')
+        const selected = cleanup.alternatives.at(owner.alternative)
+        if (selected === undefined)
+          throw new RangeError('Effect composite cleanup selected an absent alternative')
+        return yield* releaseThroughPlan(selected, owner.effect, provenance, localOrdinal)
+      }
       case 'HookCleanup': {
         const target = functionFor(program, cleanup.hook, cleanup.typeArguments)
         if (target === undefined) {
@@ -1695,6 +1703,13 @@ function* executeFunction(
           return capture === undefined ? [] : cleanupMembers(slot.cleanup, capture)
         }),
       )
+    }
+    if (cleanup._tag === 'EffectCompositeCleanup') {
+      if (owner._tag !== 'EffectCompositeValue') return Object.freeze([])
+      const selected = cleanup.alternatives.at(owner.alternative)
+      return selected === undefined
+        ? Object.freeze([])
+        : cleanupMembers(selected, owner.effect)
     }
     if (cleanup._tag === 'RawBufferCleanup') return Object.freeze([cleanup.type])
     if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
@@ -5080,7 +5095,7 @@ function* executeFunction(
               }),
             )
             write(operation.destination, {
-              value: integerValue('i32', failure.tag),
+              value: integerValue('i32', 1),
               fromCall: true,
             })
             break
@@ -5693,7 +5708,15 @@ export const evaluate = (
   const status = result.value
   const statusCode = Number(status.value)
   if (program.entry._tag === 'EffectEntry' && statusCode !== 0) {
-    const failure = program.entry.failures.find((candidate) => candidate.tag === statusCode)
+    const closedFailure = [...trace]
+      .reverse()
+      .find(
+        (event): event is EffectTraceEvent =>
+          event._tag === 'EffectFailure' && event.phase === 'Closed',
+      )
+    const failure = program.entry.failures.find(
+      (candidate) => candidate.tag === closedFailure?.tag,
+    )
     if (failure === undefined) {
       const provenance = argumentSpanFallback(fn)
       const frozenTrace = Object.freeze([...trace])
@@ -5703,7 +5726,7 @@ export const evaluate = (
         classification: 'Trap',
         entry,
         status: 2,
-        reason: `effect entry returned invalid failure tag ${status.value}`,
+        reason: 'effect entry returned failure status without a closed typed failure',
         provenance,
         logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
         history,

@@ -185,6 +185,12 @@ export type CleanupPlan =
       readonly contract: Type.Effect
     }
   | {
+      /** Releases only the runtime-selected member of one finite Effect representation. */
+      readonly _tag: 'EffectCompositeCleanup'
+      readonly type: Type.Represented
+      readonly alternatives: ReadonlyArray<CleanupPlan>
+    }
+  | {
       readonly _tag: 'EffectCleanup'
       readonly type: Type.Effect
       readonly site: Hir.EffectSiteId
@@ -205,6 +211,8 @@ export const cleanupHasHook = (self: CleanupPlan): boolean =>
   (self._tag === 'UnionCleanup' && self.cases.some((entry) => cleanupHasHook(entry.cleanup))) ||
   ((self._tag === 'CallableCleanup' || self._tag === 'EffectCleanup') &&
     self.slots.some((slot) => cleanupHasHook(slot.cleanup))) ||
+  (self._tag === 'EffectCompositeCleanup' &&
+    self.alternatives.some((alternative) => cleanupHasHook(alternative))) ||
   (self._tag === 'RawBufferCleanup' && cleanupHasHook(self.allocation))
 
 /** Tests whether one cleanup plan consumes a reclaim ticket at any nesting depth. */
@@ -216,7 +224,9 @@ export const cleanupReclaims = (self: CleanupPlan): boolean =>
   (self._tag === 'ArrayCleanup' && cleanupReclaims(self.element)) ||
   (self._tag === 'UnionCleanup' && self.cases.some((entry) => cleanupReclaims(entry.cleanup))) ||
   ((self._tag === 'CallableCleanup' || self._tag === 'EffectCleanup') &&
-    self.slots.some((slot) => cleanupReclaims(slot.cleanup)))
+    self.slots.some((slot) => cleanupReclaims(slot.cleanup))) ||
+  (self._tag === 'EffectCompositeCleanup' &&
+    self.alternatives.some((alternative) => cleanupReclaims(alternative)))
 
 /** Tests whether one cleanup plan has any observable runtime effect. */
 export const cleanupHasEffect = (self: CleanupPlan): boolean =>
@@ -2376,6 +2386,18 @@ export const specializeCleanup = (
           ),
         ),
       })
+    case 'EffectCompositeCleanup':
+      if (!Type.isRepresented(type) || !Type.isEffect(type.contract))
+        return Object.freeze({ _tag: 'NoCleanup', type })
+      return Object.freeze({
+        _tag: 'EffectCompositeCleanup',
+        type,
+        alternatives: Object.freeze(
+          cleanup.alternatives.map((alternative) =>
+            specializeCleanup(alternative, substitution, resolveConcrete),
+          ),
+        ),
+      })
     case 'RepresentedCallableCleanup': {
       if (!Type.isRepresented(type) || !Type.isCallable(type.contract))
         return Object.freeze({ _tag: 'NoCleanup', type })
@@ -3049,6 +3071,9 @@ const cleanupText = (cleanup: CleanupPlan): string => {
   }
   if (cleanup._tag === 'EffectCleanup') {
     return `effect:${Type.encode(cleanup.type)} site=${Hir.executableSiteLabel(cleanup.site)} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
+  }
+  if (cleanup._tag === 'EffectCompositeCleanup') {
+    return `effect-composite:${Type.encode(cleanup.type)} alternatives=${cleanup.alternatives.map((alternative, ordinal) => `${ordinal}(${cleanupText(alternative)})`).join(',')}`
   }
   if (cleanup._tag === 'RepresentedCallableCleanup') {
     return `represented-callable:${Type.encode(cleanup.contract)}`

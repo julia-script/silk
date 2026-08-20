@@ -5681,7 +5681,17 @@ const concreteCleanup = (
         : callableLocalCleanup(fn, value)
       : value?._tag === 'EffectValue'
         ? effectLocalCleanup(fn, value, new Set())
-        : undefined
+        : value?._tag === 'EffectComposite'
+          ? Object.freeze({
+              _tag: 'EffectCompositeCleanup' as const,
+              type: value.type,
+              alternatives: Object.freeze(
+                value.alternatives.map((alternative) =>
+                  effectLocalCleanup(fn, alternative, new Set()),
+                ),
+              ),
+            })
+          : undefined
   }
   const realized = resolveRepresented(specialized)
   if (realized !== undefined) return realized
@@ -5766,6 +5776,17 @@ const cleanupForLocal = (
   const specialized = specializedCleanup(fn, cleanup)
   if (localType._tag === 'EffectValue') {
     return effectLocalCleanup(fn, localType, new Set())
+  }
+  if (localType._tag === 'EffectComposite') {
+    return Object.freeze({
+      _tag: 'EffectCompositeCleanup',
+      type: localType.type,
+      alternatives: Object.freeze(
+        localType.alternatives.map((alternative) =>
+          effectLocalCleanup(fn, alternative, new Set()),
+        ),
+      ),
+    })
   }
   if (localType._tag !== 'CallableValue') {
     return specialized

@@ -344,6 +344,10 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
       return `${typeText(cleanup.type)} captures ${cleanup.slots
         .map(({ ordinal, cleanup: slot }) => `#${ordinal}:${cleanupText(slot)}`)
         .join(' → ')}`
+    case 'EffectCompositeCleanup':
+      return `${typeText(cleanup.type)} selected Effect alternative · ${cleanup.alternatives
+        .map((alternative, ordinal) => `${ordinal}:${cleanupText(alternative)}`)
+        .join(', ')}`
     case 'RepresentedCallableCleanup':
       return `${typeText(cleanup.type)} stored ${typeText(cleanup.contract)} · lanes resolved at the complete instance`
   }

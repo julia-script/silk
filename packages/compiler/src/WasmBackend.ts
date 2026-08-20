@@ -286,6 +286,7 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
           ? [operation]
           : operation._tag === 'RunEffect' ||
               operation._tag === 'RunEffectValue' ||
+              operation._tag === 'RunEffectComposite' ||
               operation._tag === 'RunStaticEffect'
             ? (operation.releases ?? [])
             : []
@@ -309,6 +310,17 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
     const storage =
       type?._tag === 'EffectValue'
         ? Object.freeze({ size: type.environment.size, alignment: type.environment.alignment })
+        : type?._tag === 'EffectComposite'
+          ? Object.freeze({
+              size: type.alternatives.reduce(
+                (maximum, alternative) => Math.max(maximum, alternative.environment.size),
+                0,
+              ),
+              alignment: type.alternatives.reduce(
+                (maximum, alternative) => Math.max(maximum, alternative.environment.alignment),
+                1,
+              ),
+            })
         : type === undefined
           ? undefined
           : LayoutPlan.entry(plan, Mir.semanticType(type))
@@ -318,7 +330,9 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
       type._tag === 'EffectOutcome' ||
       storage === undefined
     ) {
-      throw new RangeError(`Wasm frame lost address-taken root %${local}`)
+      throw new RangeError(
+        `Wasm frame ${fn.id.module}.${fn.id.name} lost address-taken root %${local}${type === undefined ? '' : ` (${SilkType.encode(Mir.semanticType(type))})`}`,
+      )
     }
     cursor = alignUp(cursor, storage.alignment)
     roots.set(local, Object.freeze({ local, offset: cursor, type }))
@@ -2001,33 +2015,32 @@ const emitOperation = (
           return []
       }
     }
+    const environmentOffsets = (
+      environment: Extract<LayoutPlan.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
+      base = 0,
+    ): ReadonlyArray<number> =>
+      environment.fields.flatMap((field) => {
+        if (field.representation === 'Borrow') return [base + field.offset]
+        if (field.effectIdentity !== undefined) {
+          const nested = memory.plan.effectEnvironments.find(
+            (candidate) =>
+              candidate._tag === 'EffectEnvironment' &&
+              Instances.effectIdentity(candidate.instance, candidate.site) === field.effectIdentity,
+          )
+          return nested?._tag === 'EffectEnvironment'
+            ? environmentOffsets(nested, base + field.offset)
+            : []
+        }
+        const shape = LayoutPlan.callingShape(memory.plan, field.type)
+        return (
+          shape?.lanes.flatMap((lane) => {
+            const offset = LayoutPlan.laneOffset(memory.plan, field.type, lane.path)
+            return offset === undefined ? [] : [base + field.offset + offset]
+          }) ?? []
+        )
+      })
     const localType = layout.types.at(local.ordinal)
     if (cleanup._tag === 'EffectCleanup' && localType?._tag === 'EffectValue') {
-      const environmentOffsets = (
-        environment: Extract<LayoutPlan.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
-        base = 0,
-      ): ReadonlyArray<number> =>
-        environment.fields.flatMap((field) => {
-          if (field.representation === 'Borrow') return [base + field.offset]
-          if (field.effectIdentity !== undefined) {
-            const nested = memory.plan.effectEnvironments.find(
-              (candidate) =>
-                candidate._tag === 'EffectEnvironment' &&
-                Instances.effectIdentity(candidate.instance, candidate.site) ===
-                  field.effectIdentity,
-            )
-            return nested?._tag === 'EffectEnvironment'
-              ? environmentOffsets(nested, base + field.offset)
-              : []
-          }
-          const shape = LayoutPlan.callingShape(memory.plan, field.type)
-          return (
-            shape?.lanes.flatMap((lane) => {
-              const offset = LayoutPlan.laneOffset(memory.plan, field.type, lane.path)
-              return offset === undefined ? [] : [base + field.offset + offset]
-            }) ?? []
-          )
-        })
       const offsets = environmentOffsets(localType.environment)
       const rootSlots = slots(local)
       const rootLanes = layout.lanes.at(local.ordinal) ?? []
@@ -2047,6 +2060,61 @@ const emitOperation = (
         return field === undefined ? [] : walk(slot.cleanup, field.offset)
       })
       return [...stores, ...hooks]
+    }
+    if (cleanup._tag === 'EffectCompositeCleanup' && localType?._tag === 'EffectComposite') {
+      const rootSlots = slots(local)
+      const choice = rootSlots.at(0)
+      if (choice === undefined) throw new RangeError('Wasm Effect composite hook lost its tag')
+      return cleanup.alternatives.flatMap((alternativeCleanup, ordinal) => {
+        if (!Ownership.cleanupHasHook(alternativeCleanup)) return []
+        if (alternativeCleanup._tag !== 'EffectCleanup') {
+          throw new RangeError('Wasm Effect composite hook lost its alternative environment')
+        }
+        const alternative = localType.alternatives.at(ordinal)
+        if (alternative === undefined)
+          throw new RangeError('Wasm Effect composite hook lost its alternative type')
+        const offsets = environmentOffsets(alternative.environment)
+        const lanes = laneKindsOf(plan, alternative)
+        const payloadSlots = rootSlots.slice(1)
+        const stores = lanes.flatMap((lane, laneOrdinal) => {
+          const offset = offsets.at(laneOrdinal)
+          const source = payloadSlots.at(laneOrdinal)
+          if (offset === undefined || source === undefined) {
+            throw new RangeError('Wasm Effect composite hook lost an environment lane')
+          }
+          const physical = layout.physicalTypes.at(source)
+          return [
+            ...frameAddress(planned.offset + offset),
+            Instr.localGet(source),
+            ...(physical === undefined ? [] : laneBridge(physical, laneValueType(plan, lane))),
+            Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
+          ]
+        })
+        const hooks = alternativeCleanup.slots.flatMap((slot) => {
+          const field = alternative.environment.fields.at(slot.ordinal)
+          return field === undefined ? [] : walk(slot.cleanup, field.offset)
+        })
+        const reloads = lanes.flatMap((lane, laneOrdinal) => {
+          const offset = offsets.at(laneOrdinal)
+          const destination = payloadSlots.at(laneOrdinal)
+          if (offset === undefined || destination === undefined) {
+            throw new RangeError('Wasm Effect composite hook lost a reload lane')
+          }
+          const physical = layout.physicalTypes.at(destination)
+          return [
+            ...frameAddress(planned.offset + offset),
+            Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
+            ...(physical === undefined ? [] : laneBridge(laneValueType(plan, lane), physical)),
+            Instr.localSet(destination),
+          ]
+        })
+        return [
+          Instr.localGet(choice),
+          Instr.i32Const(ordinal),
+          Instr.op('i32.eq'),
+          Instr.ifElse(Instr.emptyBlockType, [...stores, ...hooks, ...reloads], []),
+        ]
+      })
     }
     return [...materializeRoot(local), ...walk(cleanup, 0), ...reloadRoot(local.ordinal)]
   }
@@ -2176,6 +2244,21 @@ const emitOperation = (
             values.slice(slot.laneOffset, slot.laneOffset + slot.laneCount),
           ),
         )
+      case 'EffectCompositeCleanup': {
+        const tag = values.at(0)
+        if (tag === undefined) throw new RangeError('Wasm Effect composite cleanup lost its tag')
+        return cleanup.alternatives.flatMap((alternative, ordinal) => {
+          const inner = reclaimReleaseInstructions(alternative, values.slice(1))
+          return inner.length === 0
+            ? []
+            : [
+                ...tag,
+                Instr.i32Const(ordinal),
+                Instr.op('i32.eq'),
+                Instr.ifElse(Instr.emptyBlockType, inner, []),
+              ]
+        })
+      }
       case 'StructCleanup': {
         const lanes = semanticLanesOf(cleanup.type)
         return cleanup.fields.flatMap((field) =>
@@ -4083,7 +4166,7 @@ const emitOperation = (
             [
               ...copy(selected, payload),
               ...releaseInstructions(failure.cleanup, failure.payload),
-              Instr.i32Const(failure.tag),
+              Instr.i32Const(1),
               Instr.localSet(destination),
             ],
             failureBranch(ordinal + 1),

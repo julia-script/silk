@@ -3277,6 +3277,41 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   )
                 }
                 return
+              case 'EffectCompositeCleanup': {
+                const choice = values.at(0)
+                if (choice === undefined)
+                  throw new RangeError('LLVM Effect composite cleanup lost its tag')
+                const following = yield* LlvmBlock.make(body, `${tag}_effect_composite_following`)
+                for (const [ordinal, alternative] of plan.alternatives.entries()) {
+                  const selected = yield* LlvmBlock.make(
+                    body,
+                    `${tag}_effect_composite_${ordinal}`,
+                  )
+                  const otherwise = yield* LlvmBlock.make(
+                    body,
+                    `${tag}_effect_composite_${ordinal}_otherwise`,
+                  )
+                  yield* FunctionBody.conditionalBranch(
+                    body,
+                    yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      choice,
+                      yield* Constant.integerSigned(builder, i32, BigInt(ordinal)),
+                      `${tag}_effect_composite_is_${ordinal}`,
+                    ),
+                    selected,
+                    otherwise,
+                  )
+                  yield* LlvmBlock.setInsertionPoint(body, selected)
+                  yield* dropThroughPlan(alternative, Object.freeze(values.slice(1)), `${tag}_${ordinal}`)
+                  yield* FunctionBody.branch(body, following)
+                  yield* LlvmBlock.setInsertionPoint(body, otherwise)
+                }
+                yield* FunctionBody.branch(body, following)
+                yield* LlvmBlock.setInsertionPoint(body, following)
+                return
+              }
               case 'AllocationCleanup':
               case 'RawBufferCleanup': {
                 const context = values.at(4)
@@ -7963,7 +7998,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     yield* storeMutable(
                       operation.destination,
                       Object.freeze([
-                        yield* Constant.integerSigned(builder, i32, BigInt(failure.tag)),
+                        yield* Constant.integerSigned(builder, i32, 1n),
                       ]),
                     )
                     yield* FunctionBody.branch(body, following)

@@ -2524,6 +2524,11 @@ const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Ty
     case 'CallableCleanup':
     case 'EffectCleanup':
       return [cleanup.type, ...cleanup.slots.flatMap((slot) => cleanupTypes(slot.cleanup))]
+    case 'EffectCompositeCleanup':
+      return [
+        cleanup.type,
+        ...cleanup.alternatives.flatMap((alternative) => cleanupTypes(alternative)),
+      ]
     case 'RepresentedCallableCleanup':
     case 'RepresentedEffectCleanup':
       return [cleanup.type, cleanup.contract]
@@ -2687,6 +2692,46 @@ const cleanupMatchesSemanticType = (
   seen: ReadonlySet<string> = new Set(),
 ): boolean => {
   if (SilkType.isRepresented(type)) {
+    const composite = type.representation.argument
+    if (SilkType.isCompositeEffectRepresentationArgument(composite)) {
+      if (
+        cleanup._tag !== 'EffectCompositeCleanup' ||
+        !SilkType.equals(cleanup.type, type) ||
+        cleanup.alternatives.length !== composite.alternatives.length
+      )
+        return false
+      return composite.alternatives.every((alternative, ordinal) => {
+        if (!SilkType.isEffectIdentityArgument(alternative.identity)) return false
+        const identity = alternative.identity
+        const environment = layout.effectEnvironments.find(
+          (candidate): candidate is EffectEnvironment =>
+            candidate._tag === 'EffectEnvironment' &&
+            Hir.effectRepresentationIdentity(candidate.site) === identity.identity &&
+            identity.owner !== undefined &&
+            candidate.instance.declaration.module === identity.owner.declaration.module &&
+            candidate.instance.declaration.name === identity.owner.declaration.name &&
+            candidate.instance.typeArguments.length === identity.owner.typeArguments.length &&
+            candidate.instance.typeArguments.every((argument, argumentOrdinal) => {
+              const expected = identity.owner?.typeArguments.at(argumentOrdinal)
+              return (
+                expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
+              )
+            }),
+        )
+        const selected = cleanup.alternatives.at(ordinal)
+        return (
+          environment !== undefined &&
+          selected !== undefined &&
+          effectEnvironmentCleanupValid(
+            layout,
+            Instances.effectIdentity(environment.instance, environment.site),
+            environment,
+            selected,
+            seen,
+          )
+        )
+      })
+    }
     const representation = Layout.entry(layout, type)?.representation
     const contractValid = TypeCompatibility.isCompatible(
       TypeCompatibility.check(type.contract, cleanup.type),
@@ -3552,7 +3597,13 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
 }
 type PropagatingRun = Extract<
   Operation,
-  { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'RunStaticEffect' }
+  {
+    readonly _tag:
+      | 'RunEffect'
+      | 'RunEffectValue'
+      | 'RunEffectComposite'
+      | 'RunStaticEffect'
+  }
 >
 
 /** Validates the one canonical success/failure outcome boundary shared by every run form. */
@@ -5075,6 +5126,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               (dropped.storage === undefined
                 ? Hir.sameExecutableSite(cleanup.site, dropped.site)
                 : storedEffectCleanupValid(self.layout, dropped, cleanup)))
+          const compositeCleanupValid =
+            cleanup._tag !== 'EffectCompositeCleanup' ||
+            (dropped?._tag === 'EffectComposite' &&
+              cleanup.alternatives.length === dropped.alternatives.length)
           const storedAggregateCleanupValid =
             droppedSemantic !== undefined &&
             (!SilkType.containsEffectRepresentation(droppedSemantic) ||
@@ -5085,6 +5140,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !unionCasesValid ||
             !callableCleanupValid ||
             !effectCleanupValid ||
+            !compositeCleanupValid ||
             !storedAggregateCleanupValid
           ) {
             violations.push(
