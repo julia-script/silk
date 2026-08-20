@@ -349,7 +349,10 @@ it.effect('keeps OsHandle opaque, affine, consuming, and unsafe-only', () =>
   Effect.gen(function* () {
     const construct = yield* Analysis.ofSourceRealized(
       'os-filesystem/construct-handle',
-      ascii(`pub fn main() -> i32 { let handle = OsHandle {}; return 0 }`),
+      ascii(`pub fn main() -> i32 {
+  let handle = OsHandle {}
+  return 0
+}`),
     )
     assert.include(
       Analysis.diagnostics(construct).map((diagnostic) => diagnostic.code),

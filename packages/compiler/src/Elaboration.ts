@@ -3197,10 +3197,8 @@ const analyzeStructLiteral = (
   const definingModule = nominal?.module
   const authorized =
     definingModule !== undefined &&
-    (struct?.fields.every(
-      (field) => field.visibility === 'Public' || definingModule === source.id,
-    ) ??
-      false)
+    struct?.syntax.kind === 'StructDeclaration' &&
+    struct.fields.every((field) => field.visibility === 'Public' || definingModule === source.id)
   const accessDiagnostic =
     nominal !== undefined && !authorized
       ? Diagnostic.inaccessibleStructConstruction(Type.encode(nominal), node.span)
