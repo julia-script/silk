@@ -144,7 +144,10 @@ it('keys exact generic callable specializations by their complete normalized ins
     Type.key(Type.nominal('representation/type', 'Parser', [concrete])),
   )
   assert.include(Type.genericArgumentKey(concrete), 'arguments=<builtin:i32>')
-  assert.include(Type.genericArgumentKey(concrete), 'callable:Shared<(builtin:i32)->builtin:i32>')
+  assert.include(
+    Type.genericArgumentKey(concrete),
+    'callable:safe:Shared<(builtin:i32)->builtin:i32>',
+  )
 })
 
 it('preserves an exact intrinsic contract when substituting a narrower contextual use bound', () => {
