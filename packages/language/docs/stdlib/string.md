@@ -84,6 +84,8 @@ pub unsafe fn fromUtf8Unchecked(values: &[u8]) -> string
 
 Borrows bytes as text without validating their UTF-8 encoding.
 
+### Gotchas
+
 The caller must guarantee that the complete byte view is valid UTF-8 for the lifetime of the
 returned string view. Prefer `fromUtf8` when the bytes have not already been validated.
 
