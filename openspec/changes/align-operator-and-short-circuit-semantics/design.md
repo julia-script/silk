@@ -10,11 +10,18 @@ Operator selection is partly name-based, while short-circuit right operands are 
 
 ## Decisions
 
-1. Record an optional closed operator marker on interface operations and validate allowed arity/shape.
+1. Parse the contextual form `operator <token> fn` on contract operations and retain its token as
+   optional semantic metadata. Only interfaces may use it. The closed eligible set is unary
+   `-`, `!`, `~` and eager binary `*`, `/`, `%`, `+`, `-`, `&`, `^`, `|`, `<`, `<=`, `>`, `>=`,
+   `==`, `!=`; arity disambiguates unary and binary `-`.
 2. Resolve an operator by ordinary visible conformance evidence; spelling does not participate.
-3. Carry selected operation identity and substituted signature into HIR before specialization.
+3. Carry the selected operation as the same applied interface contract and witness question used by
+   a named bound-operation call; concrete user types and bounded parameters share that path.
 4. Lower `&&` and `||` as existing conditional control with a boolean join.
 5. Run standard path-local ownership, Effect, and cleanup analysis on the right region.
+6. Retire `SEM0096`. Use stable declaration, no-applicable-operation, and ambiguity diagnostics for
+   invalid operator contracts and selection failures; ordinary operand diagnostics remain attached
+   to operands once one operation is selected.
 
 ## Risks / Trade-offs
 
