@@ -1,4 +1,5 @@
-//! Named equality and scalar-order comparisons for Unicode scalar `char` values.
+//! Checked construction, integer inspection, equality, and ordering for Unicode scalar `char`
+//! values.
 //!
 //! # When to use
 //! Prefer comparison operators in direct expressions. Import these functions when comparison must
@@ -8,6 +9,18 @@
 //! Ordering compares scalar values, not locale collation, normalization, grapheme clusters, or UTF-8
 //! byte sequences. These allocation-free functions call the same primitives as the corresponding
 //! operators and introduce no Effect channels.
+
+import silk.option { Option }
+
+/// Converts an integer to a Unicode scalar, returning None for surrogates or out-of-range values.
+pub fn fromU32(value: u32) -> Option<char> {
+  return Intrinsic.charFromU32(value)
+}
+
+/// Returns the exact integer value of an already valid Unicode scalar.
+pub fn toU32(value: char) -> u32 {
+  return Intrinsic.charToU32(value)
+}
 
 /// Calls the concrete char equals primitive.
 pub fn equals(left: char, right: char) -> bool {

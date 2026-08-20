@@ -762,6 +762,7 @@ pub fn main() -> i32 {
   nextCursor
 }
 import silk.option { Some, None }
+import silk.char { toU32 as charToU32 }
 
 fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
   return match move nextScalar(value, move cursor) {
@@ -771,7 +772,7 @@ fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
 }
 
 fn continueSum(value: string, step: ScalarStep) -> u32 {
-  let scalar = scalarValue(&step)
+  let scalar = charToU32(scalarValue(&step))
   let cursor = nextCursor(move step)
   return scalar + scalarSum(value, move cursor)
 }

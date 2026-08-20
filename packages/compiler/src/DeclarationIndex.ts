@@ -1676,17 +1676,6 @@ export const analyzeDeclaredType = (
     const access: Type.Slice['access'] =
       SyntaxTree.directToken(syntax, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
     const element = analyzeDeclaredType(source, elementSyntax, typeParameters)
-    if (element.fact._tag === 'Resolved' && Type.isString(element.fact.type)) {
-      const diagnostic = Diagnostic.invalidStringViewType('slice', syntax.span)
-      return Object.freeze({
-        fact: Object.freeze({
-          _tag: 'Unavailable',
-          syntax,
-          cause: Diagnostic.identity(diagnostic),
-        }),
-        diagnostics: Object.freeze([...element.diagnostics, diagnostic]),
-      })
-    }
     if (element.fact._tag === 'Resolved') {
       const type = Type.slice(access, element.fact.type)
       return Object.freeze({
@@ -1728,17 +1717,6 @@ export const analyzeDeclaredType = (
     const access: 'Shared' | 'Exclusive' =
       SyntaxTree.directToken(syntax, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
     const target = analyzeDeclaredType(source, targetSyntax, typeParameters)
-    if (target.fact._tag === 'Resolved' && Type.isString(target.fact.type)) {
-      const diagnostic = Diagnostic.invalidStringViewType('reference', syntax.span)
-      return Object.freeze({
-        fact: Object.freeze({
-          _tag: 'Unavailable',
-          syntax,
-          cause: Diagnostic.identity(diagnostic),
-        }),
-        diagnostics: Object.freeze([...target.diagnostics, diagnostic]),
-      })
-    }
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Reference',

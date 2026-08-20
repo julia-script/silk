@@ -174,6 +174,7 @@ const scalars = `import silk.string {
   nextCursor
 }
 import silk.option { Option, Some, None }
+import silk.char { toU32 as charToU32 }
 
 fn walk(value: string, cursor: ScalarCursor, expectedOffset: usize) -> u32 {
   if cursorByteOffset(&cursor) == expectedOffset {} else { return u32.toU32(1) }
@@ -185,7 +186,7 @@ fn walk(value: string, cursor: ScalarCursor, expectedOffset: usize) -> u32 {
 
 fn continueWalk(value: string, step: ScalarStep) -> u32 {
   let offset = scalarByteOffset(&step)
-  let scalar = scalarValue(&step)
+  let scalar = charToU32(scalarValue(&step))
   let next = nextCursor(move step)
   return scalar + walk(value, move next, offset + stringWidth(scalar))
 }

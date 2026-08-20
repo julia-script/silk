@@ -370,7 +370,7 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
-      readonly _tag: 'CheckedInteger'
+      readonly _tag: 'CheckedScalar'
       readonly operation: Scalar.OperationCode
       readonly destination: LocalId
       readonly operands: ReadonlyArray<LocalId>
@@ -2183,7 +2183,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'FloatUnary':
     case 'FloatTranscendental':
       return [operation.destination, operation.source]
-    case 'CheckedInteger':
+    case 'CheckedScalar':
       return [operation.destination, ...operation.operands]
     case 'ValidateLayout':
       return [operation.destination, operation.bytes, operation.alignment]
@@ -2884,7 +2884,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'FloatUnary':
     case 'FloatTranscendental':
       return [semanticType(operation.sourceType), semanticType(operation.type)]
-    case 'CheckedInteger':
+    case 'CheckedScalar':
       return [
         semanticType(operation.sourceType),
         semanticType(operation.valueType),
@@ -3059,7 +3059,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'FloatUnary':
     case 'FloatTranscendental':
       return [operation.source]
-    case 'CheckedInteger':
+    case 'CheckedScalar':
       return operation.operands
     case 'ValidateLayout':
       return [operation.bytes, operation.alignment]
@@ -4368,14 +4368,19 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               }),
             )
         }
-        if (operation._tag === 'CheckedInteger') {
+        if (operation._tag === 'CheckedScalar') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const operands = operation.operands.map((operand) => fn.localTypes.at(operand.ordinal))
           const sourceScalar = Scalar.find(operation.sourceType._tag)
           const valueScalar = Scalar.find(operation.valueType._tag)
+          const characterConversion =
+            operation.operation === 'CheckedConvertToChar' &&
+            sourceScalar?.spelling === 'u32' &&
+            valueScalar?.category === 'Character'
+          const integerOperation =
+            sourceScalar?.category === 'Integer' && valueScalar?.category === 'Integer'
           if (
-            sourceScalar?.category !== 'Integer' ||
-            valueScalar?.category !== 'Integer' ||
+            (!characterConversion && !integerOperation) ||
             destination === undefined ||
             operands.length < 1 ||
             operands.some(
@@ -4397,7 +4402,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidIntegerOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'checked integer operation has inconsistent operands or Option result',
+                detail: 'checked scalar operation has inconsistent operands or Option result',
               }),
             )
         }
@@ -6252,7 +6257,7 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'FloatTranscendental':
       return `${localText(operation.destination)} = float-${operation.operation.toLowerCase()} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'CheckedInteger':
+    case 'CheckedScalar':
       return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${operation.operands.map(localText).join(', ')} ${typeText(operation.sourceType)} -> ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ValidateLayout':
       return `${localText(operation.destination)} = layout-make bytes=${localText(operation.bytes)} alignment=${localText(operation.alignment)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`

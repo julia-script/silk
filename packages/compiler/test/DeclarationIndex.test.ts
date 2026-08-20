@@ -395,7 +395,7 @@ pub fn identity(value: string, boxed: Box<string>) -> string { return value }`,
   }),
 )
 
-it.effect('rejects reference and slice wrappers around the canonical string view', () =>
+it.effect('resolves references and slices around string through ordinary type facts', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
       [
@@ -407,19 +407,9 @@ it.effect('rejects reference and slice wrappers around the canonical string view
 
     assert.deepEqual(
       declaration?.parameters.map((parameter) => parameter.declaredType._tag),
-      ['Unavailable', 'Unavailable', 'Unavailable'],
+      ['Resolved', 'Resolved', 'Resolved'],
     )
-    assert.deepEqual(
-      index.diagnostics.map((diagnostic) => ({
-        code: diagnostic.code,
-        reason: diagnostic.reason,
-      })),
-      [
-        { code: 'SEM0094', reason: { _tag: 'InvalidStringViewType', form: 'reference' } },
-        { code: 'SEM0094', reason: { _tag: 'InvalidStringViewType', form: 'reference' } },
-        { code: 'SEM0094', reason: { _tag: 'InvalidStringViewType', form: 'slice' } },
-      ],
-    )
+    assert.deepEqual(index.diagnostics, [])
   }),
 )
 

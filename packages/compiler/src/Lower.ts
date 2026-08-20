@@ -3768,11 +3768,17 @@ function lowerExpressionInner(
         Scalar.isCheckedOperation(realizedTarget.operation) &&
         type._tag === 'Union'
       ) {
-        const sourceScalar = Scalar.find(realizedTarget.actor)
-        const valueScalar = Scalar.conversionTarget(realizedTarget.operation) ?? sourceScalar
-        const scalarOperation = sourceScalar?.operations.find(
+        const actorScalar = Scalar.find(realizedTarget.actor)
+        const scalarOperation = actorScalar?.operations.find(
           (operation) => operation.code === realizedTarget.operation,
         )
+        const sourceScalar = Scalar.find(
+          scalarOperation?.parameters?.at(0) ?? actorScalar?.spelling ?? '',
+        )
+        const valueScalar =
+          realizedTarget.operation === 'CheckedConvertToChar'
+            ? actorScalar
+            : (Scalar.conversionTarget(realizedTarget.operation) ?? actorScalar)
         const realizedCaptures = definition?.captures ?? captures
         const ordered: Array<Mir.LocalId | undefined> = Array.from({
           length: scalarOperation?.arity ?? 0,
@@ -3787,7 +3793,7 @@ function lowerExpressionInner(
         const sourceType = first === undefined ? undefined : fn.localTypes.at(first.ordinal)
         if (
           sourceScalar?.category !== 'Integer' ||
-          valueScalar?.category !== 'Integer' ||
+          (valueScalar?.category !== 'Integer' && valueScalar?.category !== 'Character') ||
           scalarOperation === undefined ||
           operands.length !== scalarOperation.arity ||
           sourceType?._tag !== sourceScalar.spelling ||
@@ -3799,7 +3805,7 @@ function lowerExpressionInner(
         const destination = fn.alloc(type)
         fn.emit(
           Object.freeze({
-            _tag: 'CheckedInteger' as const,
+            _tag: 'CheckedScalar' as const,
             operation: scalarOperation.code,
             destination,
             operands: Object.freeze(operands),
@@ -5429,12 +5435,15 @@ function lowerExpressionInner(
         const semanticSource = sourceType === undefined ? undefined : Mir.semanticType(sourceType)
         const sourceScalar =
           typeof semanticSource === 'string' ? Scalar.find(semanticSource) : undefined
-        const valueScalar = conversionTarget ?? sourceScalar
+        const valueScalar =
+          expression.operation === 'CheckedConvertToChar'
+            ? Scalar.character
+            : (conversionTarget ?? sourceScalar)
         const targetType = fn.type(expression.type)
         if (
           first === undefined ||
           sourceScalar?.category !== 'Integer' ||
-          valueScalar?.category !== 'Integer' ||
+          (valueScalar?.category !== 'Integer' && valueScalar?.category !== 'Character') ||
           sourceType?._tag !== sourceScalar.spelling ||
           targetType?._tag !== 'Union' ||
           argumentLocals.some((local) => fn.localTypes.at(local.ordinal)?._tag !== sourceType._tag)
@@ -5450,7 +5459,7 @@ function lowerExpressionInner(
         const destination = fn.alloc(targetType)
         fn.emit(
           Object.freeze({
-            _tag: 'CheckedInteger' as const,
+            _tag: 'CheckedScalar' as const,
             operation: expression.operation,
             destination,
             operands: Object.freeze(argumentLocals),
@@ -5473,7 +5482,8 @@ function lowerExpressionInner(
         const targetType = fn.type(expression.type)
         if (
           source === undefined ||
-          (sourceScalar?.category !== 'Integer' && sourceScalar?.category !== 'Floating') ||
+          sourceScalar === undefined ||
+          sourceScalar?.category === 'Boolean' ||
           sourceType?._tag !== sourceScalar.spelling ||
           targetType?._tag !== conversionTarget.spelling
         )

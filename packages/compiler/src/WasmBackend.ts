@@ -4596,6 +4596,8 @@ const emitOperation = (
         throw new RangeError('Wasm scalar conversion lost its types')
       const sourceSlot = scalar(operation.source)
       const targetSlot = scalar(operation.destination)
+      if (source.category === 'Character' && target.spelling === 'u32')
+        return [Instr.localGet(sourceSlot), Instr.localSet(targetSlot)]
       if (source.category === 'Floating' && target.category === 'Floating') {
         if (source.spelling === target.spelling)
           return [Instr.localGet(sourceSlot), Instr.localSet(targetSlot)]
@@ -4910,7 +4912,7 @@ const emitOperation = (
         Instr.localSet(destination),
       ]
     }
-    case 'CheckedInteger': {
+    case 'CheckedScalar': {
       const destination = slots(operation.destination)
       const tag = destination.at(0)
       const payload = destination.at(1)
@@ -4919,13 +4921,52 @@ const emitOperation = (
       const source = Scalar.find(operation.sourceType._tag)
       const target = Scalar.find(operation.valueType._tag)
       if (
+        operation.operation === 'CheckedConvertToChar' &&
+        tag !== undefined &&
+        payload !== undefined &&
+        left !== undefined &&
+        source?.spelling === 'u32' &&
+        target?.category === 'Character'
+      ) {
+        const successOrdinal = operation.type.type.members.findIndex((member) =>
+          SilkType.equals(member, operation.success),
+        )
+        const failureOrdinal = operation.type.type.members.findIndex((member) =>
+          SilkType.equals(member, operation.failure),
+        )
+        if (successOrdinal < 0 || failureOrdinal < 0)
+          throw new RangeError('Wasm checked char operation lost its Option members')
+        const leftSlot = scalar(left)
+        return [
+          Instr.localGet(leftSlot),
+          Instr.i32Const(0x10ffff),
+          Instr.op('i32.gt_u'),
+          Instr.localGet(leftSlot),
+          Instr.i32Const(0xd800),
+          Instr.op('i32.ge_u'),
+          Instr.localGet(leftSlot),
+          Instr.i32Const(0xdfff),
+          Instr.op('i32.le_u'),
+          Instr.op('i32.and'),
+          Instr.op('i32.or'),
+          Instr.localSet(tag),
+          Instr.i32Const(failureOrdinal),
+          Instr.i32Const(successOrdinal),
+          Instr.localGet(tag),
+          Instr.op('select'),
+          Instr.localSet(tag),
+          Instr.localGet(leftSlot),
+          Instr.localSet(payload),
+        ]
+      }
+      if (
         tag === undefined ||
         payload === undefined ||
         left === undefined ||
         source?.category !== 'Integer' ||
         target?.category !== 'Integer'
       )
-        throw new RangeError('Wasm checked integer operation lost its Option lanes')
+        throw new RangeError('Wasm checked scalar operation lost its Option lanes')
       const leftSlot = scalar(left)
       const rightSlot = right === undefined ? undefined : scalar(right)
       const pointerBits = plan.target.pointerSize === 4 ? 32 : 64
@@ -4944,7 +4985,7 @@ const emitOperation = (
         SilkType.equals(member, operation.failure),
       )
       if (successOrdinal < 0 || failureOrdinal < 0)
-        throw new RangeError('Wasm checked integer operation lost its Option members')
+        throw new RangeError('Wasm checked scalar operation lost its Option members')
       const setTag = [
         Instr.i32Const(failureOrdinal),
         Instr.i32Const(successOrdinal),

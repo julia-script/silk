@@ -110,7 +110,16 @@ it('resolves fixed and target-width scalar facts without phase-specific cases', 
   )
   assert.deepEqual(
     Scalar.character.operations.map((candidate) => candidate.spelling),
-    ['equals', 'notEquals', 'lessThan', 'lessOrEqual', 'greaterThan', 'greaterOrEqual'],
+    [
+      'fromU32',
+      'toU32',
+      'equals',
+      'notEquals',
+      'lessThan',
+      'lessOrEqual',
+      'greaterThan',
+      'greaterOrEqual',
+    ],
   )
   assert.deepEqual(Scalar.character.width, { _tag: 'FixedWidth', bits: 32 })
   assert.deepEqual(Scalar.resolveLayout(Scalar.character, 8, 8), { size: 4, alignment: 4 })

@@ -186,8 +186,6 @@ export const invalidReturnedBorrowSignatureCode = 'SEM0091' as const
 export const invalidReturnedBorrowOriginCode = 'SEM0092' as const
 /** Stable code for one reachable intrinsic unavailable on the requested execution target. */
 export const intrinsicTargetUnavailableCode = 'SEM0093' as const
-/** Stable code for wrapping the already-borrowed string view in another reference or slice. */
-export const invalidStringViewTypeCode = 'SEM0094' as const
 /** Stable code for a float literal spelling no floating-point value can represent. */
 export const invalidFloatLiteralCode = 'SEM0095' as const
 /** Stable code for an effect site or a move inside the conditional right operand of `&&` or `||`. */
@@ -392,7 +390,6 @@ export type Code =
   | typeof invalidReturnedBorrowSignatureCode
   | typeof invalidReturnedBorrowOriginCode
   | typeof intrinsicTargetUnavailableCode
-  | typeof invalidStringViewTypeCode
   | typeof invalidFloatLiteralCode
   | typeof impureShortCircuitOperandCode
   | typeof ambiguousBoundOperationCode
@@ -853,7 +850,6 @@ export type Reason =
       readonly _tag: 'SliceTypePosition'
       readonly position: 'parameter' | 'return' | 'field' | 'type argument'
     }
-  | { readonly _tag: 'InvalidStringViewType'; readonly form: 'reference' | 'slice' }
   | { readonly _tag: 'InvalidBorrowPosition' }
   | { readonly _tag: 'InvalidBorrowOperand' }
   | { readonly _tag: 'ExclusiveBorrowRequiresMutable'; readonly spelling: string }
@@ -2912,23 +2908,6 @@ export const sliceTypePosition = (
         ? 'A slice must be the complete type of an ordinary function parameter'
         : `A slice cannot appear in a ${position} type`,
     reason: Object.freeze({ _tag: 'SliceTypePosition', position }),
-    span,
-  })
-
-export const invalidStringViewType = (
-  form: 'reference' | 'slice',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: invalidStringViewTypeCode,
-    severity: 'error',
-    message:
-      form === 'reference'
-        ? '`string` is already a borrowed immutable view and cannot be referenced again'
-        : '`string` cannot be the element of another borrowed slice view',
-    reason: Object.freeze({ _tag: 'InvalidStringViewType', form }),
     span,
   })
 

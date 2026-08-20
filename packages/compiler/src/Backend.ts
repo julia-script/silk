@@ -402,7 +402,7 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'StringEqualsExact':
     case 'Binary':
     case 'ConvertInteger':
-    case 'CheckedInteger':
+    case 'CheckedScalar':
     case 'Move':
     case 'BeginLoan':
     case 'SliceLength':
@@ -5846,6 +5846,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   )
                     throw new RangeError('LLVM scalar conversion lost its types')
                   const sourceValue = readScalar(operation.source)
+                  if (source.category === 'Character' && target.spelling === 'u32') {
+                    locals.set(operation.destination.ordinal, Object.freeze([sourceValue]))
+                    break
+                  }
                   const destinationType =
                     target.category === 'Floating'
                       ? target.spelling === 'f32'
@@ -6364,17 +6368,21 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(operation.destination.ordinal, Object.freeze([result]))
                   break
                 }
-                case 'CheckedInteger': {
+                case 'CheckedScalar': {
                   const leftLocal = operation.operands.at(0)
                   const rightLocal = operation.operands.at(1)
                   const source = Scalar.find(operation.sourceType._tag)
                   const target = Scalar.find(operation.valueType._tag)
+                  const characterConversion =
+                    operation.operation === 'CheckedConvertToChar' &&
+                    source?.spelling === 'u32' &&
+                    target?.category === 'Character'
                   if (
                     leftLocal === undefined ||
                     source?.category !== 'Integer' ||
-                    target?.category !== 'Integer'
+                    (target?.category !== 'Integer' && !characterConversion)
                   )
-                    throw new RangeError('LLVM checked integer operation lost its scalar types')
+                    throw new RangeError('LLVM checked scalar operation lost its scalar types')
                   const left = readScalar(leftLocal)
                   const right = rightLocal === undefined ? undefined : readScalar(rightLocal)
                   const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
@@ -6385,7 +6393,61 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const name = `checked${operation.destination.ordinal}`
                   let result: Value.Input
                   let invalid: Value.Input
-                  if (operation.operation.startsWith('CheckedConvertTo')) {
+                  if (characterConversion) {
+                    const maximum = yield* Constant.integerUnsigned(
+                      builder,
+                      sourcePhysical,
+                      0x10ffffn,
+                    )
+                    const surrogateMinimum = yield* Constant.integerUnsigned(
+                      builder,
+                      sourcePhysical,
+                      0xd800n,
+                    )
+                    const surrogateMaximum = yield* Constant.integerUnsigned(
+                      builder,
+                      sourcePhysical,
+                      0xdfffn,
+                    )
+                    const aboveMaximum = yield* FunctionBody.integerCompare(
+                      body,
+                      'ugt',
+                      left,
+                      maximum,
+                      `${name}_above`,
+                    )
+                    const atLeastSurrogate = yield* FunctionBody.integerCompare(
+                      body,
+                      'uge',
+                      left,
+                      surrogateMinimum,
+                      `${name}_surrogate_minimum`,
+                    )
+                    const atMostSurrogate = yield* FunctionBody.integerCompare(
+                      body,
+                      'ule',
+                      left,
+                      surrogateMaximum,
+                      `${name}_surrogate_maximum`,
+                    )
+                    const surrogate = yield* FunctionBody.binary(
+                      body,
+                      'and',
+                      atLeastSurrogate,
+                      atMostSurrogate,
+                      `${name}_surrogate`,
+                    )
+                    invalid = yield* FunctionBody.binary(
+                      body,
+                      'or',
+                      aboveMaximum,
+                      surrogate,
+                      `${name}_invalid`,
+                    )
+                    result = left
+                  } else if (operation.operation.startsWith('CheckedConvertTo')) {
+                    if (target.category !== 'Integer')
+                      throw new RangeError('LLVM checked conversion lost its integer target')
                     const sourceRange = Scalar.range(source, pointerBits)
                     const targetRange = Scalar.range(target, pointerBits)
                     const checks: Array<Value.Input> = []
@@ -6463,6 +6525,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     operation.operation === 'CheckedSubtract' ||
                     operation.operation === 'CheckedMultiply'
                   ) {
+                    if (target.category !== 'Integer')
+                      throw new RangeError('LLVM checked arithmetic lost its integer target')
                     if (right === undefined)
                       throw new RangeError('LLVM checked arithmetic lost its right operand')
                     const signatures =
@@ -6497,6 +6561,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     result = yield* FunctionBody.extractValue(body, pair, [0], `${name}_value`)
                     invalid = yield* FunctionBody.extractValue(body, pair, [1], `${name}_invalid`)
                   } else {
+                    if (target.category !== 'Integer')
+                      throw new RangeError('LLVM checked division lost its integer target')
                     if (right === undefined)
                       throw new RangeError('LLVM checked division lost its right operand')
                     const zero = yield* Constant.integerUnsigned(builder, targetPhysical, 0n)
@@ -6577,7 +6643,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     SilkType.equals(member, operation.failure),
                   )
                   if (successOrdinal < 0 || failureOrdinal < 0)
-                    throw new RangeError('LLVM checked integer operation lost its Option members')
+                    throw new RangeError('LLVM checked scalar operation lost its Option members')
                   const successTag = yield* Constant.integerSigned(
                     builder,
                     i32,
@@ -6598,7 +6664,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const valueLane = lanesFor(operation.valueType).at(0)
                   const payloadLane = lanesFor(operation.type).at(1)
                   if (valueLane === undefined || payloadLane === undefined)
-                    throw new RangeError('LLVM checked integer operation lost its payload lane')
+                    throw new RangeError('LLVM checked scalar operation lost its payload lane')
                   const payload = yield* coerceLane(
                     result,
                     valueLane,

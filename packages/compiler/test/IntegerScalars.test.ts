@@ -71,6 +71,51 @@ it.effect('lowers checked integer outcomes through LLVM and direct Wasm', () =>
   }),
 )
 
+const characters = `import silk.char { fromU32, toU32 }
+import silk.option { Some, None }
+
+fn value(input: u32) -> u32 {
+  return match move fromU32(input) {
+    Some<char> { value } => toU32(value)
+    None {} => u32.toU32(0)
+  }
+}
+
+pub fn main() -> i32 {
+  let ascii = value(u32.toU32(65))
+  let emoji = value(u32.toU32(128640))
+  let surrogate = value(u32.toU32(55296))
+  let above = value(u32.toU32(1114112))
+  return u32.toI32(ascii + emoji + surrogate + above - u32.toU32(128663))
+}`
+
+it.effect('checks Unicode scalar construction and preserves total char-to-u32 conversion', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'scalar/character-conversion',
+      new TextEncoder().encode(characters),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+
+    const native = yield* Analysis.ofSourceRealized(
+      'scalar/character-conversion-native',
+      new TextEncoder().encode(characters),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    assert.isAbove((yield* Analysis.codegen(native, { mode: 'debug' })).bitcode.length, 0)
+  }),
+)
+
 const integerArguments = (operation: Scalar.Operation): string => {
   switch (operation.code) {
     case 'Subtract':

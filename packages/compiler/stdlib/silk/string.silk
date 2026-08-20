@@ -23,6 +23,7 @@ import silk.bytes {
 }
 import silk.option { Option, none, some }
 import silk.result { Result, failResult, succeed }
+import silk.char { fromU32 as charFromU32 }
 
 /// An owned sequence of valid UTF-8 bytes.
 pub struct String {
@@ -42,7 +43,7 @@ pub struct ScalarCursor {
 
 /// One decoded Unicode scalar and the cursor following it.
 pub struct ScalarStep {
-  scalar: u32
+  scalar: char
   byteOffset: usize
   next: ScalarCursor
 }
@@ -221,7 +222,7 @@ pub fn cursorByteOffset(cursor: &ScalarCursor) -> usize {
 }
 
 /// Returns the decoded Unicode scalar value for one step.
-pub fn scalarValue(step: &ScalarStep) -> u32 {
+pub fn scalarValue(step: &ScalarStep) -> char {
   return step.scalar
 }
 
@@ -269,9 +270,12 @@ pub fn nextScalar(value: string, cursor: ScalarCursor) -> Option<ScalarStep> {
       }
     }
   }
-  return some<ScalarStep>(ScalarStep {
-    scalar: scalar,
-    byteOffset: offset,
-    next: ScalarCursor { byteOffset: offset + width }
-  })
+  return match move charFromU32(scalar) {
+    Some<char> { value: decoded } => some<ScalarStep>(ScalarStep {
+      scalar: decoded,
+      byteOffset: offset,
+      next: ScalarCursor { byteOffset: offset + width }
+    })
+    None {} => none<ScalarStep>()
+  }
 }

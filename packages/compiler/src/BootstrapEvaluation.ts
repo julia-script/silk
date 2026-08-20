@@ -1406,6 +1406,39 @@ function* executeFunction(
       )
       return Object.freeze({ _tag: 'Value', value: floatValue(floatTarget.spelling, encoded.bits) })
     }
+    if (operation === 'CheckedConvertToChar') {
+      const subject = arguments_.at(0)
+      if (actorScalar?.category !== 'Character' || subject?._tag !== 'IntegerValue')
+        throw new RangeError('MIR verifier allowed an invalid checked char callable')
+      const exact = BigInt(subject.value)
+      const succeeded = Scalar.isUnicodeScalarValue(exact)
+      const semantic = Type.option('char')
+      if (!Type.isUnion(semantic))
+        throw new RangeError('Canonical Option did not normalize to a structural union')
+      const member = succeeded ? Type.some('char') : Type.none
+      const entry = program.layout.entries.find((candidate) => Type.equals(candidate.type, member))
+      if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
+        throw new RangeError('Target plan omitted a canonical callable Option member')
+      return Object.freeze({
+        _tag: 'Value',
+        value: Object.freeze({
+          _tag: 'UnionValue',
+          type: semantic,
+          member,
+          payload: Object.freeze({
+            _tag: 'AggregateValue',
+            type: member,
+            fields: Object.freeze(
+              succeeded
+                ? entry.representation.fields.map((field) =>
+                    Object.freeze({ field: field.id, value: characterValue(Number(exact)) }),
+                  )
+                : [],
+            ),
+          }),
+        }),
+      })
+    }
     if (Scalar.isCheckedOperation(operation)) {
       const source = Scalar.find(target.actor)
       const resultScalar = conversionTarget ?? source
@@ -1470,6 +1503,11 @@ function* executeFunction(
     }
     if (conversionTarget !== undefined) {
       const subject = arguments_.at(0)
+      if (actorScalar?.category === 'Character' && subject?._tag === 'CharacterValue')
+        return Object.freeze({
+          _tag: 'Value',
+          value: integerValue(conversionTarget.spelling, BigInt(subject.value)),
+        })
       if (subject === undefined || subject._tag !== 'IntegerValue')
         throw new RangeError('MIR verifier allowed a non-integer conversion argument')
       const exact = BigInt(subject.value)
@@ -4000,6 +4038,13 @@ function* executeFunction(
           case 'ConvertScalar': {
             const sourceType = Scalar.find(operation.sourceType._tag)
             const targetType = Scalar.find(operation.type._tag)
+            if (sourceType?.category === 'Character' && targetType?.spelling === 'u32') {
+              write(operation.destination, {
+                value: integerValue('u32', BigInt(readCharacter(operation.source).value)),
+                fromCall: false,
+              })
+              break
+            }
             if (sourceType?.category === 'Floating' && targetType?.category === 'Floating') {
               const source = readFloat(operation.source)
               const encoded = FloatingPoint.fromNumber(
@@ -4078,18 +4123,22 @@ function* executeFunction(
             })
             break
           }
-          case 'CheckedInteger': {
+          case 'CheckedScalar': {
             const operands = operation.operands.map((operand) => BigInt(readInteger(operand).value))
             const left = operands.at(0)
             const right = operands.at(1)
             const source = Scalar.find(operation.sourceType._tag)
             const target = Scalar.find(operation.valueType._tag)
+            const characterConversion =
+              operation.operation === 'CheckedConvertToChar' &&
+              source?.spelling === 'u32' &&
+              target?.category === 'Character'
             if (
               left === undefined ||
               source?.category !== 'Integer' ||
-              target?.category !== 'Integer'
+              (target?.category !== 'Integer' && !characterConversion)
             )
-              throw new RangeError('MIR verifier allowed an invalid checked integer operation')
+              throw new RangeError('MIR verifier allowed an invalid checked scalar operation')
             const arithmetic = operation.operation.startsWith('CheckedConvertTo')
               ? left
               : operation.operation === 'CheckedAdd'
@@ -4107,9 +4156,18 @@ function* executeFunction(
                           ? undefined
                           : left % right
                         : undefined
-            const range = Scalar.range(target, program.layout.target.pointerSize === 4 ? 32 : 64)
             const success =
-              arithmetic !== undefined && arithmetic >= range.minimum && arithmetic <= range.maximum
+              arithmetic !== undefined &&
+              (characterConversion
+                ? Scalar.isUnicodeScalarValue(arithmetic)
+                : target?.category === 'Integer' &&
+                  (() => {
+                    const range = Scalar.range(
+                      target,
+                      program.layout.target.pointerSize === 4 ? 32 : 64,
+                    )
+                    return arithmetic >= range.minimum && arithmetic <= range.maximum
+                  })())
             const member = success ? operation.success : operation.failure
             const entry = program.layout.entries.find((candidate) =>
               Type.equals(candidate.type, member),
@@ -4124,7 +4182,10 @@ function* executeFunction(
                   ? entry.representation.fields.map((field) =>
                       Object.freeze({
                         field: field.id,
-                        value: integerValue(target.spelling, arithmetic),
+                        value:
+                          target.category === 'Character'
+                            ? characterValue(Number(arithmetic))
+                            : integerValue(target.spelling, arithmetic),
                       }),
                     )
                   : [],
