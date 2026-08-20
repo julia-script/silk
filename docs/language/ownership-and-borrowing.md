@@ -700,10 +700,6 @@ ownership escape diagnostic at the escaping use. Escape through a callable, Effe
 boundary reports that boundary's specific diagnostic rather than silently extending the owner's
 lifetime.
 
-**Current compiler:** The compiler currently reports `SEM0055` for a direct local borrow expression.
-That restriction must be replaced with the same provenance and loan tracking already used for local
-returned views.
-
 **Evidence:** [ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md),
 [runtime-slice specification](../../openspec/specs/bootstrap-runtime-slices/spec.md),
 [slice semantics tests](../../packages/compiler/test/RuntimeSliceSemantics.test.ts).
