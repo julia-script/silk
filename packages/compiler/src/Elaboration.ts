@@ -420,6 +420,20 @@ export interface MatchExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** One statement-form pattern decision shared by irrefutable let and refutable if-let. */
+export interface PatternSelectionFact {
+  readonly _tag: 'PatternSelection'
+  readonly id: Match.MatchId
+  readonly arm: Match.ArmId
+  readonly access: Match.Access
+  readonly subject: ExpressionFact
+  readonly members: ReadonlyArray<Type.Type>
+  readonly pattern: PatternFact
+  readonly bindings: ReadonlyArray<PatternBindingFact>
+  readonly irrefutable: boolean
+  readonly syntax: SyntaxTree.Node
+}
+
 export type StructTargetFact =
   | {
       readonly _tag: 'Resolved'
@@ -963,6 +977,12 @@ export type StatementFact =
       readonly region: Hir.RegionId
     }
   | {
+      readonly _tag: 'PatternBindStatement'
+      readonly selection: PatternSelectionFact
+      readonly region: Hir.RegionId
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
       readonly _tag: 'ExpressionStatement'
       readonly expression: ExpressionFact
       readonly region: Hir.RegionId
@@ -971,6 +991,14 @@ export type StatementFact =
   | {
       readonly _tag: 'IfStatement'
       readonly condition: ExpressionFact
+      readonly taken: ReadonlyArray<StatementFact>
+      readonly otherwise: ReadonlyArray<StatementFact>
+      readonly region: Hir.RegionId
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'IfLetStatement'
+      readonly selection: PatternSelectionFact
       readonly taken: ReadonlyArray<StatementFact>
       readonly otherwise: ReadonlyArray<StatementFact>
       readonly region: Hir.RegionId
@@ -7617,11 +7645,19 @@ const effectCaptureFacts = (
         case 'BindStatement':
           expression(statement.binding.initializer)
           break
+        case 'PatternBindStatement':
+          expression(statement.selection.subject)
+          break
         case 'ExpressionStatement':
           expression(statement.expression)
           break
         case 'IfStatement':
           expression(statement.condition)
+          visit(statement.taken)
+          visit(statement.otherwise)
+          break
+        case 'IfLetStatement':
+          expression(statement.selection.subject)
           visit(statement.taken)
           visit(statement.otherwise)
           break
@@ -7709,7 +7745,7 @@ function analyzeExpression(
           Type.isNominal(statement.failure)
         )
           failures.push(statement.failure)
-        else if (statement._tag === 'IfStatement') {
+        else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
           collectTerminals(statement.taken)
           collectTerminals(statement.otherwise)
         } else if (statement._tag === 'WhileStatement') collectTerminals(statement.body)
@@ -8816,6 +8852,100 @@ const analyzeStatements = (
     return region
   }
 
+  const analyzePatternSelection = (
+    element: SyntaxTree.Node,
+    selectionScope: Scope,
+  ): PatternSelectionFact => {
+    const initializerNode = statementExpressionNode(element)
+    const initializer = analyzeExpression(
+      context.source,
+      initializerNode,
+      context.declarations,
+      context.declaration,
+      selectionScope,
+      context.resolution,
+      undefined,
+      true,
+    )
+    if (initializer === undefined) {
+      throw new RangeError(`Semantic analysis cannot analyze ${initializerNode.kind}`)
+    }
+    context.diagnostics.push(...initializer.diagnostics)
+    const access: Match.Access =
+      initializer.fact._tag === 'Move'
+        ? 'Move'
+        : initializer.fact._tag === 'Borrow'
+          ? initializer.fact.access
+          : 'Copy'
+    const subject =
+      initializer.fact._tag === 'Move' || initializer.fact._tag === 'Borrow'
+        ? initializer.fact.subject
+        : initializer.fact
+    const id: Match.MatchId = Object.freeze({
+      _tag: 'MatchId',
+      function: context.declaration.id,
+      span: element.span,
+    })
+    const arm: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal: 0 })
+    const patternNode =
+      SyntaxTree.directNode(element, 'NominalPattern') ??
+      SyntaxTree.directNode(element, 'BindingPattern') ??
+      SyntaxTree.directNode(element, 'UniversalPattern')
+    if (patternNode === undefined) throw new RangeError('Pattern statement requires a pattern')
+    const pattern = analyzePattern(
+      context.source,
+      patternNode,
+      arm,
+      access,
+      selectionScope,
+      context.resolution,
+      context.declaration,
+      { pattern: 0, binding: 0, invalid: false },
+    )
+    context.diagnostics.push(...pattern.diagnostics)
+    const members = subject.type._tag === 'Available' ? Match.membersOf(subject.type.type) : []
+    const member =
+      pattern.fact._tag === 'NominalPattern' || pattern.fact._tag === 'TypePattern'
+        ? pattern.fact.member
+        : undefined
+    if (
+      member !== undefined &&
+      subject.type._tag === 'Available' &&
+      !members.some((candidate) => Type.equals(candidate, member))
+    ) {
+      context.diagnostics.push(
+        Diagnostic.matchMemberNotInScrutinee(
+          Type.encode(member),
+          Type.encode(subject.type.type),
+          pattern.fact.syntax.span,
+        ),
+      )
+    }
+    const coverage = Match.cover(
+      members,
+      Object.freeze([
+        Object.freeze({
+          ...(member === undefined ? {} : { member }),
+          universal: pattern.fact._tag === 'UniversalPattern',
+          guarded: false,
+        }),
+      ]),
+    )
+    const complete = pattern.fact._tag === 'UniversalPattern' ? true : pattern.fact.complete
+    return Object.freeze({
+      _tag: 'PatternSelection',
+      id,
+      arm,
+      access,
+      subject,
+      members: Object.freeze(members),
+      pattern: pattern.fact,
+      bindings: pattern.fact.bindings,
+      irrefutable: coverage.exhaustive && complete,
+      syntax: element,
+    })
+  }
+
   const analyzeConditional = (
     element: SyntaxTree.Node,
     armScope: Scope,
@@ -8860,6 +8990,45 @@ const analyzeStatements = (
     return Object.freeze({
       _tag: 'IfStatement',
       condition: condition.fact,
+      taken: Object.freeze([...taken]),
+      otherwise: Object.freeze([...otherwise]),
+      region,
+      syntax: element,
+    })
+  }
+
+  const analyzePatternConditional = (
+    element: SyntaxTree.Node,
+    armScope: Scope,
+    armLoopStack: ReadonlyArray<Hir.LoopId>,
+  ): StatementFact => {
+    const region = nextRegion()
+    const selection = analyzePatternSelection(element, armScope)
+    const takenScope: Scope = Object.freeze({
+      parameters: armScope.parameters,
+      bindings: armScope.bindings,
+      patternBindings: Object.freeze([...armScope.patternBindings, ...selection.bindings]),
+    })
+    const arms = SyntaxTree.directNodes(element, 'Block')
+    const taken =
+      arms.at(0) === undefined
+        ? []
+        : analyzeStatements(context, arms[0] as SyntaxTree.Node, takenScope, armLoopStack)
+    const chained =
+      SyntaxTree.directNode(element, 'ConditionalStatement') ??
+      SyntaxTree.directNode(element, 'PatternConditionalStatement')
+    const otherwiseArm = arms.at(1)
+    const otherwise =
+      chained?.kind === 'PatternConditionalStatement'
+        ? [analyzePatternConditional(chained, armScope, armLoopStack)]
+        : chained !== undefined
+          ? [analyzeConditional(chained, armScope, armLoopStack)]
+          : otherwiseArm === undefined
+            ? []
+            : analyzeStatements(context, otherwiseArm, armScope, armLoopStack)
+    return Object.freeze({
+      _tag: 'IfLetStatement',
+      selection,
       taken: Object.freeze([...taken]),
       otherwise: Object.freeze([...otherwise]),
       region,
@@ -8951,6 +9120,54 @@ const analyzeStatements = (
       continue
     }
 
+    if (element.kind === 'PatternBindingStatement') {
+      const region = nextRegion()
+      const selection = analyzePatternSelection(element, scope)
+      if (selection.pattern._tag === 'UniversalPattern') {
+        if (selection.subject.type._tag === 'Available')
+          context.diagnostics.push(
+            Diagnostic.expressionStatementResult(
+              Presentation.type(
+                selection.subject.type.type,
+                context.source.id,
+                context.resolution.scope,
+              ),
+              selection.pattern.syntax.span,
+            ),
+          )
+      } else if (!selection.irrefutable) {
+        const selected = selection.pattern.member
+        context.diagnostics.push(
+          Diagnostic.incompleteMatch(
+            selection.members
+              .filter((member) => selected === undefined || !Type.equals(member, selected))
+              .map(Type.encode),
+            selection.pattern.syntax.span,
+          ),
+        )
+      }
+      facts.push(
+        Object.freeze({
+          _tag: 'PatternBindStatement',
+          selection,
+          region,
+          syntax: element,
+        }),
+      )
+      for (const binding of selection.bindings) {
+        if (binding.name._tag !== 'Present') continue
+        const originalSpan = blockBindings.get(binding.name.spelling)
+        if (originalSpan === undefined)
+          blockBindings.set(binding.name.spelling, binding.name.token.span)
+      }
+      scope = Object.freeze({
+        parameters: scope.parameters,
+        bindings: scope.bindings,
+        patternBindings: Object.freeze([...scope.patternBindings, ...selection.bindings]),
+      })
+      continue
+    }
+
     if (element.kind === 'ExpressionStatement') {
       const region = nextRegion()
       const expressionNode = statementExpressionNode(element)
@@ -8991,6 +9208,11 @@ const analyzeStatements = (
 
     if (element.kind === 'ConditionalStatement') {
       facts.push(analyzeConditional(element, scope, loopStack))
+      continue
+    }
+
+    if (element.kind === 'PatternConditionalStatement') {
+      facts.push(analyzePatternConditional(element, scope, loopStack))
       continue
     }
 
@@ -9334,8 +9556,8 @@ const returnFlowOf = (
       fallsThrough = nested.fallsThrough
       continue
     }
-    if (statement._tag === 'IfStatement') {
-      if (expressionNever(statement.condition)) {
+    if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
+      if (statement._tag === 'IfStatement' && expressionNever(statement.condition)) {
         fallsThrough = false
         continue
       }
@@ -9358,11 +9580,16 @@ const returnFlowOf = (
       fallsThrough = !expressionNever(statement.binding.initializer)
       continue
     }
+    if (statement._tag === 'PatternBindStatement') {
+      fallsThrough = !expressionNever(statement.selection.subject)
+      continue
+    }
     if (statement._tag === 'ExpressionStatement' || statement._tag === 'DropStatement') {
       fallsThrough = !expressionNever(statement.expression)
       continue
     }
-    fallsThrough = !expressionNever(statement.destination) && !expressionNever(statement.value)
+    if (statement._tag === 'WriteStatement')
+      fallsThrough = !expressionNever(statement.destination) && !expressionNever(statement.value)
   }
   return Object.freeze({ fallsThrough, returns: Object.freeze(returns) })
 }
@@ -9516,7 +9743,7 @@ const analyzeFunctionBody = (
           }
         } else if (statement._tag === 'UnsafeStatement') {
           validateReturns(statement.statements)
-        } else if (statement._tag === 'IfStatement') {
+        } else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
           validateReturns(statement.taken)
           validateReturns(statement.otherwise)
         } else if (statement._tag === 'WhileStatement') {
@@ -9535,7 +9762,7 @@ const analyzeFunctionBody = (
       if (statement._tag === 'UnsafeStatement') {
         const nested = terminalOf(statement.statements)
         if (nested !== undefined) return nested
-      } else if (statement._tag === 'IfStatement') {
+      } else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
         const nested = terminalOf(statement.otherwise) ?? terminalOf(statement.taken)
         if (nested !== undefined) return nested
       }
@@ -9642,6 +9869,43 @@ const hirReference = (
   })
 }
 
+const hirPatternSelection = (selection: PatternSelectionFact): Hir.PatternSelection => {
+  const member =
+    selection.pattern._tag === 'NominalPattern' || selection.pattern._tag === 'TypePattern'
+      ? selection.pattern.member
+      : undefined
+  return Object.freeze({
+    id: selection.id,
+    arm: selection.arm,
+    access: selection.access,
+    subject: hirExpression(selection.subject),
+    members: selection.members,
+    ...(member === undefined ? {} : { member }),
+    universal: selection.pattern._tag === 'UniversalPattern',
+    bindings: Object.freeze(
+      selection.bindings.flatMap(
+        (binding): ReadonlyArray<Hir.PatternBinding> =>
+          binding.type._tag === 'Available'
+            ? [
+                Object.freeze({
+                  id: binding.id,
+                  ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
+                  ...(binding.field === undefined ? {} : { field: binding.field.id }),
+                  path: binding.path,
+                  type: binding.type.type,
+                  access: binding.access,
+                  span: binding.syntax.span,
+                }),
+              ]
+            : [],
+      ),
+    ),
+    cleanup: selection.pattern.omitted,
+    irrefutable: selection.irrefutable,
+    span: selection.syntax.span,
+  })
+}
+
 const hirEffectStatements = (
   facts: ReadonlyArray<StatementFact>,
   resultType?: SemanticType,
@@ -9666,6 +9930,13 @@ const hirEffectStatements = (
           region: statement.region,
           span: statement.binding.syntax.span,
         })
+      if (statement._tag === 'PatternBindStatement')
+        return Object.freeze({
+          _tag: 'PatternBind',
+          selection: hirPatternSelection(statement.selection),
+          region: statement.region,
+          span: statement.syntax.span,
+        })
       if (statement._tag === 'ExpressionStatement')
         return Object.freeze({
           _tag: 'Evaluate',
@@ -9677,6 +9948,15 @@ const hirEffectStatements = (
         return Object.freeze({
           _tag: 'If',
           condition: hirExpression(statement.condition),
+          taken: hirEffectStatements(statement.taken, resultType),
+          otherwise: hirEffectStatements(statement.otherwise, resultType),
+          region: statement.region,
+          span: statement.syntax.span,
+        })
+      if (statement._tag === 'IfLetStatement')
+        return Object.freeze({
+          _tag: 'IfLet',
+          selection: hirPatternSelection(statement.selection),
           taken: hirEffectStatements(statement.taken, resultType),
           otherwise: hirEffectStatements(statement.otherwise, resultType),
           region: statement.region,
@@ -11033,6 +11313,8 @@ const directStatementExpressions = (statement: StatementFact): ReadonlyArray<Exp
   switch (statement._tag) {
     case 'BindStatement':
       return Object.freeze([statement.binding.initializer])
+    case 'PatternBindStatement':
+      return Object.freeze([statement.selection.subject])
     case 'ExpressionStatement':
       return Object.freeze([statement.expression])
     case 'ReturnStatement':
@@ -11042,6 +11324,8 @@ const directStatementExpressions = (statement: StatementFact): ReadonlyArray<Exp
     case 'IfStatement':
     case 'WhileStatement':
       return Object.freeze([statement.condition])
+    case 'IfLetStatement':
+      return Object.freeze([statement.selection.subject])
     case 'WriteStatement':
       return Object.freeze([statement.destination, statement.value])
     case 'UnsafeStatement':
@@ -11140,7 +11424,7 @@ export const visitStatementFacts = (
       for (const expression of directStatementExpressions(statement))
         visitExpressionFact(expression, visitor)
     if (statement._tag === 'UnsafeStatement') visitStatementFacts(statement.statements, visitor)
-    else if (statement._tag === 'IfStatement') {
+    else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
       visitStatementFacts(statement.taken, visitor)
       visitStatementFacts(statement.otherwise, visitor)
     } else if (statement._tag === 'WhileStatement') visitStatementFacts(statement.body, visitor)
@@ -11390,6 +11674,9 @@ const lexicalScopesOf = (
         bindings: statements.flatMap((statement) =>
           statement._tag === 'BindStatement' ? [statement.binding] : [],
         ),
+        patternBindings: statements.flatMap((statement) =>
+          statement._tag === 'PatternBindStatement' ? statement.selection.bindings : [],
+        ),
       })
       for (const statement of statements) {
         for (const expression of directStatementExpressions(statement))
@@ -11398,6 +11685,14 @@ const lexicalScopesOf = (
           visitStatements(statement.statements, current, statement.syntax.span)
         else if (statement._tag === 'IfStatement') {
           visitStatements(statement.taken, current, statement.syntax.span)
+          visitStatements(statement.otherwise, current, statement.syntax.span)
+        } else if (statement._tag === 'IfLetStatement') {
+          const takenScope = add({
+            parent: current,
+            span: statement.syntax.span,
+            patternBindings: statement.selection.bindings,
+          })
+          visitStatements(statement.taken, takenScope, statement.syntax.span)
           visitStatements(statement.otherwise, current, statement.syntax.span)
         } else if (statement._tag === 'WhileStatement')
           visitStatements(statement.body, current, statement.syntax.span)
@@ -11487,6 +11782,14 @@ export const elaborateModule = (input: Input): Result => {
               span: statement.binding.syntax.span,
             })
           }
+          if (statement._tag === 'PatternBindStatement') {
+            return Object.freeze({
+              _tag: 'PatternBind' as const,
+              selection: hirPatternSelection(statement.selection),
+              region: statement.region,
+              span: statement.syntax.span,
+            })
+          }
           if (statement._tag === 'ExpressionStatement') {
             return Object.freeze({
               _tag: 'Evaluate' as const,
@@ -11499,6 +11802,16 @@ export const elaborateModule = (input: Input): Result => {
             return Object.freeze({
               _tag: 'If' as const,
               condition: hirExpression(statement.condition),
+              taken: hirStatements(statement.taken, resultType, functionId),
+              otherwise: hirStatements(statement.otherwise, resultType, functionId),
+              region: statement.region,
+              span: statement.syntax.span,
+            })
+          }
+          if (statement._tag === 'IfLetStatement') {
+            return Object.freeze({
+              _tag: 'IfLet' as const,
+              selection: hirPatternSelection(statement.selection),
               taken: hirStatements(statement.taken, resultType, functionId),
               otherwise: hirStatements(statement.otherwise, resultType, functionId),
               region: statement.region,

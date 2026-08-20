@@ -332,6 +332,31 @@ export interface BorrowedWritePlace {
 
 export type WritePlace = OwnedWritePlace | BorrowedWritePlace
 
+export interface PatternBinding {
+  readonly id: Match.BindingId
+  readonly name?: string
+  /** Absent for a whole-member binding, which observes or owns the entire selected payload. */
+  readonly field?: DeclarationIndex.FieldId
+  readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+  readonly type: DeclarationIndex.SemanticType
+  readonly access: Match.Access
+  readonly span: SourceSpan.SourceSpan
+}
+
+export interface PatternSelection {
+  readonly id: Match.MatchId
+  readonly arm: Match.ArmId
+  readonly access: Match.Access
+  readonly subject: Expression
+  readonly members: ReadonlyArray<Type.Type>
+  readonly member?: Type.Type
+  readonly universal: boolean
+  readonly bindings: ReadonlyArray<PatternBinding>
+  readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
+  readonly irrefutable: boolean
+  readonly span: SourceSpan.SourceSpan
+}
+
 /** One typed core semantic operation with exact source provenance. */
 export type Expression =
   | {
@@ -441,16 +466,7 @@ export type Expression =
         readonly id: Match.ArmId
         readonly member?: Type.Type
         readonly universal: boolean
-        readonly bindings: ReadonlyArray<{
-          readonly id: Match.BindingId
-          readonly name?: string
-          /** Absent for a whole-member binding, which owns the entire payload. */
-          readonly field?: DeclarationIndex.FieldId
-          readonly path: ReadonlyArray<DeclarationIndex.FieldId>
-          readonly type: DeclarationIndex.SemanticType
-          readonly access: Match.Access
-          readonly span: SourceSpan.SourceSpan
-        }>
+        readonly bindings: ReadonlyArray<PatternBinding>
         readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
         readonly guard?: Expression
         readonly result: Expression
@@ -768,6 +784,12 @@ export type Statement =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'PatternBind'
+      readonly selection: PatternSelection
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'Evaluate'
       readonly expression: Expression
       readonly region: RegionId
@@ -776,6 +798,14 @@ export type Statement =
   | {
       readonly _tag: 'If'
       readonly condition: Expression
+      readonly taken: ReadonlyArray<Statement>
+      readonly otherwise: ReadonlyArray<Statement>
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'IfLet'
+      readonly selection: PatternSelection
       readonly taken: ReadonlyArray<Statement>
       readonly otherwise: ReadonlyArray<Statement>
       readonly region: RegionId
@@ -858,6 +888,8 @@ export const statementExpressions = (statement: Statement): ReadonlyArray<Expres
       return statement.statements.flatMap(statementExpressions)
     case 'Bind':
       return [statement.initializer]
+    case 'PatternBind':
+      return [statement.selection.subject]
     case 'Evaluate':
       return [statement.expression]
     case 'Write':
@@ -880,6 +912,12 @@ export const statementExpressions = (statement: Statement): ReadonlyArray<Expres
     case 'If':
       return [
         statement.condition,
+        ...statement.taken.flatMap(statementExpressions),
+        ...statement.otherwise.flatMap(statementExpressions),
+      ]
+    case 'IfLet':
+      return [
+        statement.selection.subject,
         ...statement.taken.flatMap(statementExpressions),
         ...statement.otherwise.flatMap(statementExpressions),
       ]
@@ -1699,6 +1737,8 @@ const encodeStatement = (statement: Statement, depth: number): string => {
         `${indent}bind ${statement.mutability.toLowerCase()} b${statement.binding.ordinal} ${statement.name ?? '?'} r${statement.region.ordinal} ${spanText(statement.span)}`,
         encodeExpression(statement.initializer, depth + 1),
       ].join('\n')
+    case 'PatternBind':
+      return `${indent}pattern-bind ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Type.encode).join(',')} r${statement.region.ordinal} ${spanText(statement.span)}`
     case 'Evaluate':
       return [
         `${indent}evaluate r${statement.region.ordinal} ${spanText(statement.span)}`,
@@ -1731,6 +1771,12 @@ const encodeStatement = (statement: Statement, depth: number): string => {
               `${indent}else`,
               ...statement.otherwise.map((inner) => encodeStatement(inner, depth + 1)),
             ]),
+      ].join('\n')
+    case 'IfLet':
+      return [
+        `${indent}if-let ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Type.encode).join(',')} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        ...statement.taken.map((inner) => encodeStatement(inner, depth + 1)),
+        ...statement.otherwise.map((inner) => encodeStatement(inner, depth + 1)),
       ].join('\n')
     case 'While':
       return [

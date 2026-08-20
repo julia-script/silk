@@ -1112,6 +1112,8 @@ const statementRootExpressions = (statement: Hir.Statement): ReadonlyArray<Hir.E
   switch (statement._tag) {
     case 'Bind':
       return [statement.initializer]
+    case 'PatternBind':
+      return [statement.selection.subject]
     case 'Evaluate':
       return [statement.expression]
     case 'Return':
@@ -1128,6 +1130,8 @@ const statementRootExpressions = (statement: Hir.Statement): ReadonlyArray<Hir.E
     case 'If':
     case 'While':
       return [statement.condition]
+    case 'IfLet':
+      return [statement.selection.subject]
     default:
       return []
   }
@@ -1420,11 +1424,19 @@ const analyzeLoans = (
         case 'BindStatement':
           scanRunEnds(statement.binding.initializer, statement.region)
           break
+        case 'PatternBindStatement':
+          scanRunEnds(statement.selection.subject, statement.region)
+          break
         case 'ExpressionStatement':
           scanRunEnds(statement.expression, statement.region)
           break
         case 'IfStatement':
           scanRunEnds(statement.condition, statement.region)
+          scanStatementRunEnds(statement.taken)
+          scanStatementRunEnds(statement.otherwise)
+          break
+        case 'IfLetStatement':
+          scanRunEnds(statement.selection.subject, statement.region)
           scanStatementRunEnds(statement.taken)
           scanStatementRunEnds(statement.otherwise)
           break
@@ -2113,8 +2125,26 @@ const analyzeLoans = (
         case 'ExpressionStatement':
           inspect(statement.expression, statement.region, [], naturalAccess(statement.expression))
           break
+        case 'PatternBindStatement':
+          inspect(
+            statement.selection.subject,
+            statement.region,
+            [],
+            statement.selection.access === 'Move' ? 'Move' : 'Read',
+          )
+          break
         case 'IfStatement':
           inspect(statement.condition, statement.region, [])
+          statements(statement.taken)
+          statements(statement.otherwise)
+          break
+        case 'IfLetStatement':
+          inspect(
+            statement.selection.subject,
+            statement.region,
+            [],
+            statement.selection.access === 'Move' ? 'Move' : 'Read',
+          )
           statements(statement.taken)
           statements(statement.otherwise)
           break
@@ -2531,7 +2561,7 @@ const borrowedReplacements = (
   const replacements: Array<BorrowedReplacementFact> = []
   const walk = (statements: ReadonlyArray<Elaboration.StatementFact>): void => {
     for (const statement of statements) {
-      if (statement._tag === 'IfStatement') {
+      if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
         walk(statement.taken)
         walk(statement.otherwise)
         continue
@@ -2657,6 +2687,97 @@ const checkFunction = (
   ): ReadonlyArray<string> =>
     [...frames].reverse().flatMap((frame) => [...frame].reverse().filter((site) => live.has(site)))
 
+  const checkPatternSubject = (selection: Hir.PatternSelection, live: Set<string>): void => {
+    const subjectType =
+      selection.subject._tag === 'Unavailable' ? undefined : selection.subject.type
+    const subjectSite = placeSite(selection.subject)
+    const subjectBinding =
+      subjectSite === undefined ? undefined : state.bindings.get(siteKey(subjectSite))
+    if (selection.access === 'Copy') {
+      checkExpression(state, live, selection.subject, false)
+      if (categoryOf(index, subjectType, copyAssumptions)._tag === 'MoveOnly')
+        state.diagnostics.push(
+          Diagnostic.explicitMoveRequired(subjectBinding?.name ?? '?', selection.span),
+        )
+      return
+    }
+    if (selection.access === 'Move') {
+      if (subjectSite === undefined) checkExpression(state, live, selection.subject, true)
+      else checkUse(state, live, subjectSite, selection.span, true)
+      return
+    }
+    checkExpression(state, live, selection.subject, false)
+    if (selection.access === 'Exclusive') {
+      if (subjectSite === undefined)
+        state.diagnostics.push(Diagnostic.invalidMatchScrutineePlace('Exclusive', selection.span))
+      else if (subjectBinding?.mutability !== 'Mutable')
+        state.diagnostics.push(
+          Diagnostic.exclusiveMatchRequiresMutable(subjectBinding?.name ?? '?', selection.span),
+        )
+    }
+  }
+
+  const introducePatternBindings = (
+    selection: Hir.PatternSelection,
+    live: Set<string>,
+    frame: Array<string>,
+    liveTo: SourceSpan.SourceSpan,
+  ): ReadonlyArray<BindingSite> => {
+    const sites: Array<BindingSite> = []
+    for (const pattern of selection.bindings) {
+      const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: pattern.id })
+      const mutable: MutableBinding = {
+        site,
+        name: pattern.name,
+        mutability: pattern.access === 'Exclusive' ? 'Mutable' : 'Immutable',
+        liveFrom: pattern.span,
+        liveTo,
+        category: categoryOf(index, pattern.type, copyAssumptions),
+        type: pattern.type,
+        matchAccess: pattern.access,
+      }
+      const key = siteKey(site)
+      state.bindings.set(key, mutable)
+      state.order.push(mutable)
+      frame.push(key)
+      live.add(key)
+      sites.push(site)
+    }
+    return Object.freeze(sites)
+  }
+
+  const patternSelectionCleanup = (
+    selection: Hir.PatternSelection,
+    live: ReadonlySet<string>,
+    includeBindings: boolean,
+  ): MatchOwnership['arms'][number]['cleanup'] =>
+    selection.access === 'Move'
+      ? Object.freeze([
+          ...selection.cleanup.flatMap((path) => {
+            const subjectType =
+              selection.subject._tag === 'Unavailable' ? undefined : selection.subject.type
+            const type = cleanupTypeAtPath(index, selection.member ?? subjectType ?? 'never', path)
+            return type === undefined
+              ? []
+              : [Object.freeze({ path, cleanup: cleanupPlan(index, type) })]
+          }),
+          ...(includeBindings
+            ? selection.bindings.flatMap((binding) => {
+                const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: binding.id })
+                return live.has(siteKey(site)) &&
+                  categoryOf(index, binding.type, copyAssumptions)._tag === 'MoveOnly'
+                  ? [
+                      Object.freeze({
+                        path: binding.path,
+                        cleanup: cleanupPlan(index, binding.type),
+                      }),
+                    ]
+                  : []
+              })
+            : []),
+        ])
+      : Object.freeze([])
+
   const walkStatements = (
     statements: ReadonlyArray<Hir.Statement>,
     enclosingSpan: SourceSpan.SourceSpan,
@@ -2765,6 +2886,32 @@ const checkFunction = (
         live.add(key)
         continue
       }
+      if (statement._tag === 'PatternBind') {
+        checkPatternSubject(statement.selection, live)
+        const frame = frames.at(-1) ?? []
+        const sites = introducePatternBindings(statement.selection, live, frame, enclosingSpan)
+        state.matches.push(
+          Object.freeze({
+            _tag: 'MatchOwnership',
+            id: statement.selection.id,
+            access: statement.selection.access,
+            span: statement.span,
+            arms: Object.freeze([
+              Object.freeze({
+                id: statement.selection.arm,
+                ...(statement.selection.member === undefined
+                  ? {}
+                  : { member: statement.selection.member }),
+                universal: statement.selection.universal,
+                provisionalGuard: false,
+                bindings: sites,
+                cleanup: patternSelectionCleanup(statement.selection, live, false),
+              }),
+            ]),
+          }),
+        )
+        continue
+      }
       if (statement._tag === 'Evaluate') {
         checkExpression(state, live, statement.expression, true)
         continue
@@ -2801,6 +2948,64 @@ const checkFunction = (
             continuing.every((candidate) => candidate.has(site)),
           ),
         )
+        continue
+      }
+      if (statement._tag === 'IfLet') {
+        checkPatternSubject(statement.selection, live)
+        const continuing: Array<Set<string>> = []
+        let selectedSites: ReadonlyArray<BindingSite> = Object.freeze([])
+        for (const [arm, body] of [
+          ['Taken', statement.taken],
+          ['Otherwise', statement.otherwise],
+        ] as const) {
+          const armFrames = [...frames.map((frame) => [...frame]), []]
+          const armLive = new Set(live)
+          if (arm === 'Taken')
+            selectedSites = introducePatternBindings(
+              statement.selection,
+              armLive,
+              armFrames.at(-1) ?? [],
+              statement.span,
+            )
+          const result = walkStatements(body, statement.span, armLive, armFrames, loopScopes)
+          const frame = armFrames.at(-1) ?? []
+          if (!result.returned && frame.length > 0)
+            exits.push(
+              Object.freeze({
+                kind: 'ArmEnd' as const,
+                span: statement.span,
+                region: statement.region,
+                arm,
+                sites: Object.freeze([...frame].reverse().filter((site) => result.live.has(site))),
+              }),
+            )
+          if (!result.returned) {
+            for (const site of frame) result.live.delete(site)
+            continuing.push(result.live)
+          }
+        }
+        state.matches.push(
+          Object.freeze({
+            _tag: 'MatchOwnership',
+            id: statement.selection.id,
+            access: statement.selection.access,
+            span: statement.span,
+            arms: Object.freeze([
+              Object.freeze({
+                id: statement.selection.arm,
+                ...(statement.selection.member === undefined
+                  ? {}
+                  : { member: statement.selection.member }),
+                universal: statement.selection.universal,
+                provisionalGuard: false,
+                bindings: selectedSites,
+                cleanup: patternSelectionCleanup(statement.selection, live, false),
+              }),
+            ]),
+          }),
+        )
+        if (continuing.length === 0) return Object.freeze({ returned: true, live })
+        live = intersection(continuing)
         continue
       }
       if (statement._tag === 'Write') {

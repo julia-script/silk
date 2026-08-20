@@ -4,7 +4,7 @@ import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
-import type * as Match from './Match.js'
+import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Ownership from './Ownership.js'
@@ -5880,7 +5880,9 @@ const propagationReleases = (
           ? fn.bindingLocals.get(site.binding.ordinal)
           : site._tag === 'Parameter'
             ? fn.parameterLocals.get(site.parameter.ordinal)
-            : undefined
+            : site._tag === 'Pattern'
+              ? fn.patternLocals.get(patternKey(site.binding))
+              : undefined
       const localType = local === undefined ? undefined : fn.localTypes.at(local.ordinal)
       if (local === undefined || localType === undefined) return []
       return [
@@ -6004,7 +6006,9 @@ const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined
         ? fn.parameterLocals.get(site.parameter.ordinal)
         : site._tag === 'Temporary'
           ? undefined
-          : fn.bindingLocals.get(site.binding.ordinal)
+          : site._tag === 'Pattern'
+            ? fn.patternLocals.get(patternKey(site.binding))
+            : fn.bindingLocals.get(site.binding.ordinal)
     if (dropped === undefined) continue
     const localType = fn.localTypes.at(dropped.ordinal)
     if (localType === undefined) continue
@@ -6296,6 +6300,189 @@ const withDelayedFailureLoanEndings = (
     }),
   )
 
+interface LoweredPatternSelection {
+  readonly result: Mir.LocalId
+  readonly bindings: ReadonlyArray<Match.BindingId>
+}
+
+const lowerPatternSelection = (
+  fn: FunctionLowering,
+  selection: Hir.PatternSelection,
+  result: 'Unit' | 'Bool',
+): LoweredPatternSelection | undefined => {
+  if (selection.subject._tag === 'Unavailable') return undefined
+  const subject = lowerExpression(fn, selection.subject)
+  const semanticSubject = fn.semantic(selection.subject.type)
+  const subjectType = fn.type(selection.subject.type)
+  // Statement selections need only one compiler-private branch bit. Keeping that result as bool
+  // avoids manufacturing a source-visible unit value and gives both statement forms one lowering.
+  const resultSemantic = 'bool' as const
+  const resultType = fn.type(resultSemantic)
+  if (subject === undefined || subjectType === undefined || resultType === undefined)
+    return undefined
+  const members = Match.membersOf(semanticSubject)
+  const member = selection.member === undefined ? undefined : fn.semantic(selection.member)
+  const selected =
+    selection.universal ||
+    (member !== undefined && members.some((candidate) => Type.equals(candidate, member)))
+  const literal = (value: boolean): LoweredExpression | undefined =>
+    lowerExpression(
+      fn,
+      Object.freeze({
+        _tag: 'BooleanLiteral' as const,
+        value,
+        type: 'bool' as const,
+        span: selection.span,
+      }),
+    )
+  const bindingIds = Object.freeze(selection.bindings.map((binding) => binding.id))
+
+  if (subjectType._tag !== 'Nominal' && subjectType._tag !== 'Union') {
+    if (result === 'Unit' && (!selection.irrefutable || !selected)) return undefined
+    if (selected) {
+      for (const binding of selection.bindings) {
+        if (binding.path.length !== 0) return undefined
+        const type = fn.type(binding.type)
+        if (type === undefined) return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'Move' as const,
+            destination,
+            source: subject.result,
+            provenance: authored(binding.span),
+          }),
+        )
+        fn.patternLocals.set(patternKey(binding.id), destination)
+      }
+    }
+    const lowered = literal(selected)
+    return lowered === undefined
+      ? undefined
+      : Object.freeze({ result: lowered.result, bindings: bindingIds })
+  }
+
+  if (result === 'Unit' && !selection.irrefutable) return undefined
+  const subjectShape = Layout.callingShape(fn.layout, semanticSubject)
+  const resultShape = Layout.callingShape(fn.layout, resultSemantic)
+  if (subjectShape === undefined || resultShape === undefined) return undefined
+  const ownership = fn.ownership?.matches.find(
+    (candidate) =>
+      candidate.id.span.start === selection.id.span.start &&
+      candidate.id.span.end === selection.id.span.end,
+  )
+  const selectedBindings: Array<Mir.MatchBinding> = []
+  for (const binding of selection.bindings) {
+    const type = fn.type(binding.type)
+    if (type === undefined) return undefined
+    const destination = fn.alloc(type)
+    fn.patternLocals.set(patternKey(binding.id), destination)
+    selectedBindings.push(
+      Object.freeze({
+        id: binding.id,
+        destination,
+        path: binding.path,
+        type,
+        access: binding.access,
+        provenance: authored(binding.span),
+      }),
+    )
+  }
+  const [selectedResult, selectedOperations] = fn.capture(() => literal(true))
+  if (selectedResult === undefined) return undefined
+  const selectedAfter = selection.universal
+    ? Object.freeze<Type.Type[]>([])
+    : Object.freeze(
+        members.filter((candidate) => member === undefined || !Type.equals(candidate, member)),
+      )
+  const ownedArm = ownership?.arms.find(
+    (candidate) => candidate.id.ordinal === selection.arm.ordinal,
+  )
+  const selectedArm: Mir.MatchArm = Object.freeze({
+    id: selection.arm,
+    ...(member === undefined ? {} : { member }),
+    universal: selection.universal,
+    before: members,
+    after: selectedAfter,
+    bindings: Object.freeze(selectedBindings),
+    selected: Object.freeze({
+      access: selection.access,
+      operations: selectedOperations,
+      result: selectedResult.result,
+      cleanup: Object.freeze(
+        (ownedArm?.cleanup ?? []).map((release) =>
+          Object.freeze({
+            path: release.path,
+            cleanup: specializedCleanup(fn, release.cleanup),
+          }),
+        ),
+      ),
+      endBorrow: false,
+    }),
+    provenance: authored(selection.span),
+  })
+  const fallbackId: Match.ArmId = Object.freeze({
+    _tag: 'MatchArmId',
+    match: selection.id,
+    ordinal: 1,
+  })
+  const [fallbackResult, fallbackOperations] = fn.capture(() => literal(false))
+  if (fallbackResult === undefined) return undefined
+  const fallbackArm: Mir.MatchArm = Object.freeze({
+    id: fallbackId,
+    universal: true,
+    before: selectedAfter,
+    after: Object.freeze([]),
+    bindings: Object.freeze([]),
+    selected: Object.freeze({
+      access: selection.access,
+      operations: fallbackOperations,
+      result: fallbackResult.result,
+      cleanup: Object.freeze([]),
+      endBorrow: false,
+    }),
+    provenance: authored(selection.span),
+  })
+  const arms =
+    result === 'Unit' || selection.universal
+      ? Object.freeze([selectedArm])
+      : Object.freeze([selectedArm, fallbackArm])
+  const destination = fn.alloc(resultType)
+  fn.emit(
+    Object.freeze({
+      _tag: 'Match' as const,
+      id: selection.id,
+      destination,
+      scrutinee: subject.result,
+      scrutineeType: subjectType,
+      scrutineeShape: subjectShape,
+      access: selection.access,
+      members,
+      decisions: Object.freeze(
+        members.map((candidate) =>
+          Object.freeze({
+            member: candidate,
+            candidates: Object.freeze(
+              selection.universal
+                ? [selection.arm]
+                : member !== undefined && Type.equals(candidate, member)
+                  ? result === 'Unit'
+                    ? [selection.arm]
+                    : [selection.arm, fallbackId]
+                  : [fallbackId],
+            ),
+          }),
+        ),
+      ),
+      arms,
+      type: resultType,
+      resultShape,
+      provenance: authored(selection.span),
+    }),
+  )
+  return Object.freeze({ result: destination, bindings: bindingIds })
+}
+
 const lowerSequence = (
   fn: FunctionLowering,
   statements: ReadonlyArray<Hir.Statement>,
@@ -6494,6 +6681,30 @@ const lowerSequence = (
       return destination
     })
     if (initializer === undefined) return undefined
+    const following = fn.reserve()
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations,
+        outcome: Object.freeze({
+          _tag: 'Forward',
+          target: following,
+          provenance: generated(statement.span),
+        }),
+      }),
+    )
+    return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
+      ? undefined
+      : id
+  }
+
+  if (statement._tag === 'PatternBind') {
+    const [selection, operations] = fn.capture(() =>
+      lowerPatternSelection(fn, statement.selection, 'Unit'),
+    )
+    if (selection === undefined) return undefined
     const following = fn.reserve()
     fn.publish(
       Object.freeze({
@@ -6764,12 +6975,16 @@ const lowerSequence = (
     return id
   }
 
-  if (statement._tag === 'If') {
+  if (statement._tag === 'If' || statement._tag === 'IfLet') {
     const conditional = fn.reserve()
     const taken = fn.reserve()
     const otherwise = fn.reserve()
     const following = fn.reserve()
-    const [condition, operations] = fn.capture(() => lowerExpression(fn, statement.condition))
+    const [condition, operations] = fn.capture(() =>
+      statement._tag === 'If'
+        ? lowerExpression(fn, statement.condition)
+        : lowerPatternSelection(fn, statement.selection, 'Bool'),
+    )
     if (condition === undefined) return undefined
     fn.publish(
       Object.freeze({
@@ -6818,6 +7033,9 @@ const lowerSequence = (
     const takenRegions = fn.regions.flatMap((region) =>
       region !== undefined && !beforeTaken.has(region.id.ordinal) ? [region.id.ordinal] : [],
     )
+    if (statement._tag === 'IfLet')
+      for (const binding of statement.selection.bindings)
+        fn.patternLocals.delete(patternKey(binding.id))
     restoreDelayedEffectState(fn, branchState)
     const beforeOtherwise = new Set(
       fn.regions.flatMap((region) => (region === undefined ? [] : [region.id.ordinal])),

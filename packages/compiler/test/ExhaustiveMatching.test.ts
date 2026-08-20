@@ -1,7 +1,10 @@
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
 import type * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
+import * as Mir from '../src/Mir.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -11,6 +14,9 @@ import { raise } from './support/raise.js'
 
 const analyze = (id: string, source: string): Elaboration.Result =>
   elaborate(Parser.parse(Lexer.lex(SourceFile.make(id, new TextEncoder().encode(source)))))
+
+const ascii = (value: string): Uint8Array =>
+  Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const returnedMatch = (
   result: Elaboration.Result,
@@ -240,6 +246,68 @@ it('selects exact non-nominal members with whole-value bindings', () => {
     ['i32', 'string'],
   )
 })
+
+it('rejects refutable let and wildcard discard while accepting scoped if-let bindings', () => {
+  const result = analyze(
+    'statement-pattern-diagnostics',
+    `pub struct Point { x: i32 y: i32 }
+pub fn inspect(value: Point | i32) -> i32 {
+  let Point { x, .. } = move value
+  let _ = x
+  if let i32 number = value { return number } else { return 0 }
+}`,
+  )
+
+  assert.include(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0044',
+  )
+  assert.include(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0087',
+  )
+  const statement = result.functions
+    .at(0)
+    ?.statements.find((candidate) => candidate._tag === 'IfLetStatement')
+  assert.strictEqual(statement?._tag, 'IfLetStatement')
+  if (statement?._tag !== 'IfLetStatement') return
+  assert.strictEqual(statement.selection.bindings[0]?.name._tag, 'Present')
+  assert.strictEqual(statement.taken[0]?._tag, 'ReturnStatement')
+})
+
+it.effect('lowers let destructuring and if-let through the shared match operation', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'statement-pattern-runtime',
+      ascii(`pub struct Point { x: i32 y: i32 }
+fn inspect(value: Point | i32) -> i32 {
+  if let Point { x, .. } = move value { return x } else { return 7 }
+}
+pub fn main() -> i32 {
+  let point = Point { x: 20, y: 22 }
+  let Point { x, y } = move point
+  return x + y + inspect(1)
+}`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const hir = Analysis.hirOf(self, 'statement-pattern-runtime')
+    assert.notStrictEqual(hir, undefined)
+    if (hir === undefined) return
+    assert.deepEqual(Hir.verify(hir), [], Hir.encode(hir))
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(Mir.verify(mir), [], Mir.encode(mir))
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 49n)
+    const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    const main = instance.exports.silk_main
+    if (typeof main !== 'function') throw new RangeError('pattern program lost silk_main')
+    assert.strictEqual(main(), 49)
+  }),
+)
 
 it('keeps borrowed owners live, consumes move matches, and requires mutable exclusive roots', () => {
   const shared = analyze(

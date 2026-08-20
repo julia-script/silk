@@ -81,7 +81,9 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ArgumentList',
   'ArrayLiteralExpression',
   'AssignmentStatement',
+  'BindingPattern',
   'BindingStatement',
+  'PatternBindingStatement',
   'Block',
   'BooleanLiteralExpression',
   'BorrowExpression',
@@ -89,6 +91,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'CallExpression',
   'CallTypeArgumentList',
   'ConditionalStatement',
+  'PatternConditionalStatement',
   'ContinueStatement',
   'ConstantDeclaration',
   'DropStatement',
@@ -138,6 +141,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'StructLiteralExpression',
   'TypePath',
   'UnionType',
+  'UnitExpression',
   'UniversalPattern',
   'WhileStatement',
 ])
@@ -860,6 +864,10 @@ fn helper(value: i32, other: i32) -> i32 {
 }
 fn inspect(event: Token | End) -> i32 {
   return match &mut event { Token { span: Span { start: offset, .. }, .. } if true => offset _ => 0 }
+}
+fn destructure(pair: Pair, event: Token | End) -> i32 {
+  let Pair { left, .. } = move pair
+  if let Token whole = &event { return left[0] } else { return 0 }
 }
 fn scan(values: &[i32], output: &mut [i32]) -> i32 {
   return helper(usize.toI32(values.length), output[0])

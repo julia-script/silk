@@ -1627,6 +1627,13 @@ export const catalog = (
     for (const statement of instance.function.statements) {
       for (const expression of Hir.statementExpressions(statement))
         addSpecializedExpression(expression)
+      if (statement._tag === 'PatternBind' || statement._tag === 'IfLet') {
+        addReferenced('bool')
+        for (const member of statement.selection.members)
+          addReferenced(Type.substitute(member, substitution))
+        for (const binding of statement.selection.bindings)
+          addReferenced(Type.substitute(binding.type, substitution))
+      }
     }
   }
   for (const type of referenced.values()) {
@@ -1787,12 +1794,38 @@ const addStatementTypes = (
   for (const statement of statements) {
     if (statement._tag === 'Unsafe') addStatementTypes(types, statement.statements, substitution)
     if (statement._tag === 'Bind') addExpressionTypes(types, statement.initializer, substitution)
+    if (statement._tag === 'PatternBind') {
+      types.set(Type.key('bool'), 'bool')
+      addExpressionTypes(types, statement.selection.subject, substitution)
+      for (const member of statement.selection.members) {
+        const type = Type.substitute(member, substitution)
+        types.set(Type.key(type), type)
+      }
+      for (const binding of statement.selection.bindings) {
+        const type = Type.substitute(binding.type, substitution)
+        types.set(Type.key(type), type)
+      }
+    }
     if (statement._tag === 'Evaluate') addExpressionTypes(types, statement.expression, substitution)
     if (statement._tag === 'Return') addExpressionTypes(types, statement.expression, substitution)
     if (statement._tag === 'Fail' || statement._tag === 'Drop')
       addExpressionTypes(types, statement.expression, substitution)
     if (statement._tag === 'If') {
       addExpressionTypes(types, statement.condition, substitution)
+      addStatementTypes(types, statement.taken, substitution)
+      addStatementTypes(types, statement.otherwise, substitution)
+    }
+    if (statement._tag === 'IfLet') {
+      types.set(Type.key('bool'), 'bool')
+      addExpressionTypes(types, statement.selection.subject, substitution)
+      for (const member of statement.selection.members) {
+        const type = Type.substitute(member, substitution)
+        types.set(Type.key(type), type)
+      }
+      for (const binding of statement.selection.bindings) {
+        const type = Type.substitute(binding.type, substitution)
+        types.set(Type.key(type), type)
+      }
       addStatementTypes(types, statement.taken, substitution)
       addStatementTypes(types, statement.otherwise, substitution)
     }
@@ -1873,7 +1906,7 @@ const effectEnvironments = (
               statement.binding.ordinal,
               Type.substitute(statement.initializer.type, instance.substitution),
             )
-          } else if (statement._tag === 'If') {
+          } else if (statement._tag === 'If' || statement._tag === 'IfLet') {
             collectBindings(statement.taken)
             collectBindings(statement.otherwise)
           } else if (statement._tag === 'While') collectBindings(statement.body)

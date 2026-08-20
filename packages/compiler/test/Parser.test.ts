@@ -2299,6 +2299,31 @@ pub fn exclusive(event: Token) -> i32 { let value = match &mut event { _ => 0 } 
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
+it('reuses the pattern tree for let and if-let statements', () => {
+  const source = `pub struct Point { x: i32 y: i32 }
+pub fn inspect(value: Point | i32) -> i32 {
+  let Point { x, y } = move value
+  if let i32 number = value { return number } else { return x }
+}`
+  const result = parseText('memory/statement-patterns', source)
+
+  assert.strictEqual(
+    descendants(result.root).filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'PatternBindingStatement',
+    ).length,
+    1,
+  )
+  assert.strictEqual(
+    descendants(result.root).filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'PatternConditionalStatement',
+    ).length,
+    1,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('keeps a missing match arm arrow local to its arm', () => {
   const source = `pub struct Token { kind: i32 }
 pub struct End {}

@@ -947,6 +947,10 @@ const collectStatement = (
         )
       collectExpression(statement.binding.initializer, index, scope, pending)
       return
+    case 'PatternBindStatement':
+      collectPattern(statement.selection.pattern, index, scope, pending)
+      collectExpression(statement.selection.subject, index, scope, pending)
+      return
     case 'ExpressionStatement':
       collectExpression(statement.expression, index, scope, pending)
       return
@@ -957,6 +961,12 @@ const collectStatement = (
       return
     case 'IfStatement':
       collectExpression(statement.condition, index, scope, pending)
+      for (const nested of statement.taken) collectStatement(nested, index, scope, pending)
+      for (const nested of statement.otherwise) collectStatement(nested, index, scope, pending)
+      return
+    case 'IfLetStatement':
+      collectPattern(statement.selection.pattern, index, scope, pending)
+      collectExpression(statement.selection.subject, index, scope, pending)
       for (const nested of statement.taken) collectStatement(nested, index, scope, pending)
       for (const nested of statement.otherwise) collectStatement(nested, index, scope, pending)
       return

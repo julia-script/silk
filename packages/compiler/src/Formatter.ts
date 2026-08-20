@@ -999,6 +999,19 @@ const printNode = (
         ),
       )
     }
+    case 'PatternBindingStatement': {
+      const nodes = directNodes(node)
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'LetKeyword'), prefix, preserveBlank),
+        printNode(context, nodes[0] ?? nodeOf(node, 'UniversalPattern'), FormatDocument.text(' ')),
+        printToken(context, tokenOf(node, 'Equals'), FormatDocument.text(' ')),
+        printNode(
+          context,
+          nodes[1] ?? nodeOf(node, 'IdentifierExpression'),
+          FormatDocument.text(' '),
+        ),
+      )
+    }
     case 'AssignmentStatement': {
       const nodes = directNodes(node)
       return FormatDocument.concat(
@@ -1027,6 +1040,28 @@ const printNode = (
           : [
               printToken(context, elseKeyword, FormatDocument.text(' ')),
               printNode(context, nodes[2] ?? nodeOf(node, 'Block', 1), FormatDocument.text(' ')),
+            ]),
+      )
+    }
+    case 'PatternConditionalStatement': {
+      const nodes = directNodes(node)
+      const elseKeyword = directTokens(node).find((token) => token.kind === 'ElseKeyword')
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'IfKeyword'), prefix, preserveBlank),
+        printToken(context, tokenOf(node, 'LetKeyword'), FormatDocument.text(' ')),
+        printNode(context, nodes[0] ?? nodeOf(node, 'UniversalPattern'), FormatDocument.text(' ')),
+        printToken(context, tokenOf(node, 'Equals'), FormatDocument.text(' ')),
+        printNode(
+          context,
+          nodes[1] ?? nodeOf(node, 'IdentifierExpression'),
+          FormatDocument.text(' '),
+        ),
+        printNode(context, nodes[2] ?? nodeOf(node, 'Block'), FormatDocument.text(' ')),
+        ...(elseKeyword === undefined
+          ? []
+          : [
+              printToken(context, elseKeyword, FormatDocument.text(' ')),
+              printNode(context, nodes[3] ?? nodeOf(node, 'Block', 1), FormatDocument.text(' ')),
             ]),
       )
     }
@@ -1188,7 +1223,9 @@ const printNode = (
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
     case 'PatternField': {
       const identifiers = directTokens(node).filter((token) => token.kind === 'Identifier')
-      const nested = directNodes(node).find((child) => child.kind === 'NominalPattern')
+      const nested = directNodes(node).find(
+        (child) => child.kind === 'NominalPattern' || child.kind === 'BindingPattern',
+      )
       const colon = directTokens(node).find((token) => token.kind === 'Colon')
       const name = identifiers[0] ?? tokenOf(node, 'Identifier')
       if (colon === undefined) return printToken(context, name, prefix, preserveBlank)

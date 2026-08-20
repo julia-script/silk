@@ -1395,6 +1395,30 @@ const parseBindingStatement = (initial: State): NodeResult => {
   })
 }
 
+const startsPatternBindingStatement = (initial: State): boolean => {
+  if (significantKindAfter(initial, 1) === 'MutKeyword') return false
+  if (significantKindAfter(initial, 1) === 'Equals') return false
+  if (significantKindAfter(initial, 1) !== 'Identifier') return true
+  const keyword = expect(initial, 'LetKeyword', ['Identifier', 'Equals'])
+  return isUniversalPatternStart(keyword.state) || significantKindAfter(initial, 2) !== 'Equals'
+}
+
+const parsePatternBindingStatement = (initial: State): NodeResult => {
+  const keyword = expect(initial, 'LetKeyword', ['Identifier', 'LeftBracket', 'Equals'])
+  const pattern = parsePattern(keyword.state)
+  const equals = expect(pattern.state, 'Equals', [...expressionStarts, 'RightBrace'])
+  const expression = parseExpression(equals.state, 0, 'Identifier')
+  return Object.freeze({
+    state: expression.state,
+    node: syntaxNode(expression.state, 'PatternBindingStatement', [
+      ...keyword.elements,
+      pattern.node,
+      ...equals.elements,
+      expression.node,
+    ]),
+  })
+}
+
 const parseAssignmentStatement = (initial: State): NodeResult => {
   const place = parseProjectionChain(parseIdentifierExpression(initial))
   const equals = expect(place.state, 'Equals', [
@@ -1426,6 +1450,35 @@ const startsAssignmentStatement = (state: State): boolean => {
 
 function parseConditionalStatement(initial: State): NodeResult {
   const keyword = expect(initial, 'IfKeyword', [...expressionStarts, 'LeftBrace', 'RightBrace'])
+  if (nextSignificantKind(keyword.state) === 'LetKeyword') {
+    const letKeyword = expect(keyword.state, 'LetKeyword', ['Identifier', 'LeftBracket', 'Equals'])
+    const pattern = parsePattern(letKeyword.state)
+    const equals = expect(pattern.state, 'Equals', [...expressionStarts, 'LeftBrace'])
+    const subject = parseExpression(equals.state, 0, 'Identifier', false)
+    const taken = parseBlock(subject.state, false)
+    let state = taken.state
+    let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+      ...keyword.elements,
+      ...letKeyword.elements,
+      pattern.node,
+      ...equals.elements,
+      subject.node,
+      taken.node,
+    ])
+    if (nextSignificantKind(state) === 'ElseKeyword') {
+      const elseKeyword = expect(state, 'ElseKeyword', ['LeftBrace', 'IfKeyword'])
+      const otherwise =
+        nextSignificantKind(elseKeyword.state) === 'IfKeyword'
+          ? parseConditionalStatement(elseKeyword.state)
+          : parseBlock(elseKeyword.state, false)
+      state = otherwise.state
+      children = Object.freeze([...children, ...elseKeyword.elements, otherwise.node])
+    }
+    return Object.freeze({
+      state,
+      node: syntaxNode(state, 'PatternConditionalStatement', children),
+    })
+  }
   const condition = parseExpression(keyword.state, 0, 'Identifier', false)
   const taken = parseBlock(condition.state, false)
   let state = taken.state
@@ -1602,7 +1655,9 @@ function parseBlock(
   while (!endsBlock(state)) {
     const statement =
       kind === 'LetKeyword'
-        ? parseBindingStatement(state)
+        ? startsPatternBindingStatement(state)
+          ? parsePatternBindingStatement(state)
+          : parseBindingStatement(state)
         : kind === 'IfKeyword'
           ? parseConditionalStatement(state)
           : kind === 'WhileKeyword'
