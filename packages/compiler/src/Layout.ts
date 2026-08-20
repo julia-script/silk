@@ -3520,6 +3520,32 @@ const representationEquals = (left: Representation, right: Representation): bool
   )
 }
 
+const executablePlanEquals = (left: Entry['executable'], right: Entry['executable']): boolean =>
+  left === undefined
+    ? right === undefined
+    : right !== undefined &&
+      left._tag === right._tag &&
+      left.fields.length === right.fields.length &&
+      left.fields.every((field, ordinal) => {
+        const other = right.fields.at(ordinal)
+        return (
+          other !== undefined &&
+          field.capture === other.capture &&
+          Type.equals(field.type, other.type) &&
+          field.access === other.access &&
+          field.representation === other.representation &&
+          field.offset === other.offset &&
+          field.size === other.size &&
+          field.alignment === other.alignment &&
+          field.padding === other.padding &&
+          field.effectIdentity === other.effectIdentity &&
+          (field.callableIdentity === undefined
+            ? other.callableIdentity === undefined
+            : other.callableIdentity !== undefined &&
+              Type.equalsGenericArgument(field.callableIdentity, other.callableIdentity))
+        )
+      })
+
 const invalid = (
   rule: Violation['rule'],
   type: DeclarationIndex.SemanticType,
@@ -4284,9 +4310,11 @@ export const verifyAgainstCatalog = (self: Plan, catalog: Catalog): ReadonlyArra
         return []
       const expected = catalogEntry(catalog, candidate.type)
       return expected?._tag === 'LayoutEntry' &&
+        candidate.copy === expected.copy &&
         candidate.size === expected.size &&
         candidate.alignment === expected.alignment &&
-        representationEquals(candidate.representation, expected.representation)
+        representationEquals(candidate.representation, expected.representation) &&
+        executablePlanEquals(candidate.executable, expected.executable)
         ? []
         : [
             invalid(
@@ -4332,7 +4360,7 @@ const representationText = (representation: Representation): string =>
                           } tail-padding=${representation.tailPadding}`
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
-  `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
+  `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}${candidate.executable === undefined ? '' : ` executable=${candidate.executable._tag.toLowerCase()}`}`,
   ...(candidate.executable !== undefined
     ? candidate.executable.fields.map(
         (field) =>

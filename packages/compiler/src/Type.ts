@@ -1269,10 +1269,10 @@ export const isDetachedUnionMember = (self: Type): boolean => {
   if (isCallable(self) || isEffect(self)) return false
   if (isRepresented(self)) return self.representation.admissibility._tag !== 'Unavailable'
   if (isFixedArray(self)) return isDetachedUnionMember(self.element)
-  if (isNominal(self))
-    return self.arguments.every(
-      (argument) => !isTypeArgument(argument) || isDetachedUnionMember(argument),
-    )
+  // A nominal member has its own finite identity. Whether one concrete application can be stored
+  // depends on its declared fields and representation evidence, so layout/ownership must retain
+  // that later diagnostic boundary instead of rejecting the type argument here.
+  if (isNominal(self)) return true
   if (isUnion(self)) return self.members.every(isDetachedUnionMember)
   return true
 }

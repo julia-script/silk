@@ -613,7 +613,9 @@ uses `SEM0058`; implicit array decay uses `SEM0059`.
 `A | B` denotes a finite, unordered, duplicate-free set of canonical ordinary value types. Nested
 unions flatten, member order does not affect identity, duplicate members disappear, `never` is the
 empty union, and a one-member union normalizes to that member. Members need not be nominal: scalars,
-arrays, `string`, callables, Effects, and other concrete value types use the same union operation.
+arrays, `string`, and other detached concrete value types use the same union operation. A callable
+or Effect member must additionally retain one finite exact, opaque, or composite representation;
+its bare structural contract has no standalone storage layout.
 
 ```silk
 struct Token { kind: i32 }
@@ -629,7 +631,7 @@ fn next(done: bool) -> Token | End {
 
 `Token | End`, `End | Token`, and `Token | (End | Token)` are the same type.
 
-```silk,ignore
+```silk
 fn describe(code: i32) -> i32 | string {
   if code == 0 {
     return "none"
@@ -638,24 +640,37 @@ fn describe(code: i32) -> i32 | string {
 }
 ```
 
-The second example is valid language but remains ignored until the compiler implements general
-union members.
+Executable members use their ordinary representation syntax:
+
+```silk
+fn add(left: i32, right: i32) -> i32 { return left + right }
+
+fn selected() -> typeof(add) | i32 {
+  return add
+}
+```
+
+`typeof(add)` contributes the callable's exact finite environment plan. An opaque result binder can
+do the same for an Effect construction without exposing its private runner identity. By contrast,
+`fn(i32) -> i32 | i32` and `Effect<i32> | i32` are invalid: those structural contracts alone do not
+identify storage.
 
 **Boundary:** Union formation does not erase ownership, lifetime, Effect requirements, callable
-access, or another member property. Injecting or storing a borrowed member remains valid only where
-the ownership rules permit that borrowed value; a union never makes it detached. Requirement rows
-remain capability rows rather than value unions.
+access, or another member property. A lexical borrow cannot become an owned union member; a union
+never makes it detached. Requirement rows remain capability rows rather than value unions.
+
+Generic unions normalize again after monomorphic substitution. If `A | B` specializes with both
+parameters equal to `i32`, the instance carries `i32`, not two indistinguishable tags. HIR retains
+the authored mapping and MIR deterministically recomputes the concrete mapping and canonical order.
 
 **Diagnostics:** An unresolved or otherwise unavailable member reports that member's ordinary type
-diagnostic. A valid non-nominal member produces no diagnostic.
+diagnostic. A borrow or bare executable contract reports `SEM0039` because it has no detached finite
+storage plan. A valid non-nominal or represented executable member produces no diagnostic.
 
-**Current compiler:** Union normalization accepts only nominal members and reports `SEM0039` for
-ordinary types such as `i32` and `string`. That restriction conflicts with this confirmed rule and
-must be removed.
-
-**Conflicting artifact:** The current
-[structural union specification](../../openspec/specs/bootstrap-structural-unions/spec.md) defines
-nominal-only unions and must be reconciled.
+**Current compiler:** Aligned. Normalization, compatibility, target layout, ownership, cleanup,
+HIR/MIR mappings, evaluation, LLVM, and Wasm consume canonical ordinary member identities. Exact and
+opaque executable representations remain compiler-private while their public contract spelling is
+preserved.
 
 **Evidence:** [union normalization](../../packages/compiler/src/Type.ts),
 [ordinary failure values](typed-failures.md#fail-001--any-concrete-detached-value-may-be-a-typed-failure).

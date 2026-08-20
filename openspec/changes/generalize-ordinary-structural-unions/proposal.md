@@ -7,7 +7,7 @@ Structural unions are normalized as ordinary types in the stabilized language, b
 - Normalize finite structural unions over every detached ordinary value type, flattening and deduplicating members deterministically.
 - Compute compatibility, layout, tags, Copy, ownership, cleanup, and specialization from the normalized members.
 - Carry exact member identity through HIR/MIR, evaluation, LLVM, and Wasm without nominal-only tests.
-- Support injection, narrowing, return and branch joins, and diagnostics for ambiguous or non-detached members.
+- Support injection, narrowing, return and branch joins, and diagnostics for non-detached or non-finite members.
 - Provide the exact-type membership evidence consumed by shared patterns and failure recovery.
 
 ## Capabilities
@@ -17,6 +17,10 @@ Structural unions are normalized as ordinary types in the stabilized language, b
 - `bootstrap-structural-unions`: admit and normalize ordinary detached member types.
 - `bootstrap-type-generics`: preserve concrete finite unions through inference and specialization.
 - `bootstrap-ownership`: derive union ownership and cleanup from all normalized members.
+- `bootstrap-instances`: discover storage, calling-shape, and cleanup dependencies for every normalized member.
+- `bootstrap-target-layout`: plan deterministic tags and payload storage for every finite represented member.
+- `bootstrap-semantic-facts`: expose exact ordinary source and canonical member evidence.
+- `bootstrap-analysis-facade`: publish ordinary-member facts across the compiler pipeline.
 - `bootstrap-hir`: carry exact member mappings without nominal restriction.
 - `bootstrap-mir`: encode deterministic ordinary-member tags and payload plans.
 - `bootstrap-evaluation`: evaluate injection and projection for every admitted member.
@@ -24,4 +28,4 @@ Structural unions are normalized as ordinary types in the stabilized language, b
 
 ## Impact
 
-Depends on `normalize-effect-failure-types` and `define-copy-and-executable-ownership`. It replaces nominal-only union assumptions across the compiler and tests without adding open unions, runtime type reflection, or specialization-dependent membership.
+Depends on `normalize-effect-failure-types` and `define-copy-and-executable-ownership`. It replaces nominal-only union assumptions across the compiler and tests without adding open runtime unions or runtime type reflection. Generic instances substitute and renormalize their closed member sets deterministically.

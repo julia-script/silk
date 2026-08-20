@@ -16,7 +16,7 @@ A structural union SHALL accept finite detached ordinary value types, including 
 
 ### Requirement: Union behavior is derived from normalized members
 
-Compatibility, layout, Copy, ownership, cleanup, matching evidence, HIR/MIR tags, evaluation, LLVM, and Wasm SHALL consume one normalized member plan. Generic specialization SHALL NOT change whether two declared member types are distinct unless the generic declaration proved that distinction.
+Compatibility, layout, Copy, ownership, cleanup, matching evidence, HIR/MIR tags, evaluation, LLVM, and Wasm SHALL consume one normalized member plan. Monomorphic generic specialization SHALL substitute and normalize that plan again: members that become identical SHALL collapse, canonical order and mappings SHALL be recomputed deterministically, and no indistinguishable runtime tags SHALL remain.
 
 #### Scenario: Clean the active ordinary member
 
@@ -27,3 +27,8 @@ Compatibility, layout, Copy, ownership, cleanup, matching evidence, HIR/MIR tags
 
 - **WHEN** equivalent member sets are written in different orders
 - **THEN** their normalized semantic and emitted representations are identical
+
+#### Scenario: Collapse equal specialized members
+
+- **WHEN** `A | B` is instantiated with both parameters equal to `i32`
+- **THEN** the concrete instance carries `i32` and conversions recompute against that singleton without retaining two tags

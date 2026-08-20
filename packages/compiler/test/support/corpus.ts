@@ -1326,6 +1326,17 @@ pub fn main() -> i32 {
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
+  // A non-nominal active payload still owns and releases every droppable element exactly once.
+  {
+    name: 'ordinary-union-droppable-array',
+    source: `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+fn accept(value: i32 | [Token; 2]) -> i32 { drop value return 42 }
+pub fn main() -> i32 {
+  return accept([Token { value: 1 }, Token { value: 2 }])
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // One program covers success bypass, selected recovery, and residual propagation. Keeping the
   // complete branch matrix in the shared corpus proves native execution without a feature-local
   // compile/link test.

@@ -4,9 +4,9 @@ Union normalization is shared by values, failures, branch joins, and patterns, b
 
 ## Goals / Non-Goals
 
-**Goals:** ordinary detached members; deterministic normalization; exact ownership/layout/tagging; generic stability; engine parity.
+**Goals:** ordinary detached members; deterministic normalization; exact ownership/layout/tagging; deterministic monomorphic renormalization; engine parity.
 
-**Non-goals:** open unions, runtime reflection, borrowed union storage, or specialization-dependent source meaning.
+**Non-goals:** open runtime unions, runtime reflection, borrowed union storage, or source-visible representation identities.
 
 ## Decisions
 
@@ -14,7 +14,7 @@ Union normalization is shared by values, failures, branch joins, and patterns, b
 2. Require detached storable members and preserve executable finite representations as ordinary members.
 3. Derive one member plan containing tags, payload layout, Copy/cleanup, and exact membership evidence.
 4. Carry the plan through HIR/MIR and consume it unchanged in evaluation and backends.
-5. Require generic declarations to prove member distinctness before specialization.
+5. Substitute and renormalize generic unions at every monomorphic instance, collapsing equal members and recomputing mappings before runtime.
 
 ## Risks / Trade-offs
 
