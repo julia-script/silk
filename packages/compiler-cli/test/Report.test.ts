@@ -93,6 +93,19 @@ it('explains a missing entry in terms of the declaration the user must add', () 
   )
 })
 
+it('identifies private main visibility instead of blaming its resolved result', () => {
+  const outcome: Driver.Outcome = {
+    _tag: 'NoEntry',
+    reason: 'PrivateEntry',
+    diagnostics: [],
+    report: [],
+  }
+  assert.strictEqual(
+    Report.outcome(outcome, source('fn main() -> () { return () }'), 'main.silk'),
+    'No entry point: `main` must be public',
+  )
+})
+
 it('names the executable, target, and symbol count on success', () => {
   const outcome: Driver.Outcome = {
     _tag: 'Compiled',

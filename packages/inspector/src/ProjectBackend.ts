@@ -1314,18 +1314,27 @@ export const evaluationRows = (
             key: 'outcome',
             dot: 'warning',
             label: 'Unhandled failure',
-            detail: `${outcome.report} · tag ${outcome.tag}`,
+            detail: `${outcome.identity} · tag ${outcome.tag}`,
             head: true,
             tone: 'warning',
           }
-        : {
-            key: 'outcome',
-            dot: 'warning',
-            label: 'Blocked',
-            detail: blockedReasonText(outcome.reason),
-            head: true,
-            tone: 'warning',
-          },
+        : outcome._tag === 'Trap'
+          ? {
+              key: 'outcome',
+              dot: 'warning',
+              label: 'Fatal trap',
+              detail: outcome.reason,
+              head: true,
+              tone: 'warning',
+            }
+          : {
+              key: 'outcome',
+              dot: 'warning',
+              label: 'Blocked',
+              detail: blockedReasonText(outcome.reason),
+              head: true,
+              tone: 'warning',
+            },
   )
 
   return rows

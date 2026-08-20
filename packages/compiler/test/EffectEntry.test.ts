@@ -97,6 +97,21 @@ it.effect('maps an ordinary unit entry to status zero on every engine', () =>
     const main = instance.exports.silk_main
     assert.isFunction(main)
     if (typeof main === 'function') assert.strictEqual(main(), 0)
+
+    const compiled = yield* Driver.compile({
+      compilation: {
+        root: SourceFile.make('entry/ordinary-unit', ascii(source)),
+      },
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      profile: 'release',
+      destination: join(destinationRoot, 'ordinary-unit'),
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.strictEqual(compiled._tag, 'Compiled')
+    if (compiled._tag === 'Compiled') {
+      const native = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      assert.strictEqual(native.status, 0, native.stderr)
+      assert.strictEqual(native.stderr, '')
+    }
   }),
 )
 
@@ -117,6 +132,34 @@ it.effect('runs an effect entry once and retains deterministic unhandled-failure
     assert.strictEqual(outcome.tag, 1)
     assert.strictEqual(outcome.identity, 'effect-entry/failure.SomeError')
     assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Call').length, 2)
+  }),
+)
+
+it.effect('retains an earlier failure as causal history when its handler fails', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'effect-entry/causal',
+      ascii(`pub struct FirstError {}
+pub struct SecondError {}
+effect fn first() -> i32 ! FirstError { fail FirstError {} }
+effect fn recover(error: FirstError) -> i32 ! SecondError { fail SecondError {} }
+pub effect fn main() -> () ! SecondError {
+  let value = run Effect.catchAll(first(), recover)
+  drop value
+  return ()
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'UnhandledFailure')
+    if (outcome._tag !== 'UnhandledFailure') return
+    assert.strictEqual(outcome.identity, 'effect-entry/causal.SecondError')
+    assert.lengthOf(outcome.history, 2)
+    assert.strictEqual(outcome.history.at(0)?.recovered, true)
+    assert.strictEqual(outcome.history.at(0)?.identity, 'effect-entry/causal.FirstError')
+    assert.strictEqual(outcome.history.at(1)?.recovered, false)
+    assert.strictEqual(outcome.history.at(1)?.identity, 'effect-entry/causal.SecondError')
   }),
 )
 

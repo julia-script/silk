@@ -158,9 +158,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
     return Object.freeze({
       _tag: 'NoEntry',
       reason: preparation.reason,
-      ...(preparation.requirements === undefined
-        ? {}
-        : { requirements: preparation.requirements }),
+      ...(preparation.requirements === undefined ? {} : { requirements: preparation.requirements }),
       diagnostics: preparation.diagnostics,
       report: Object.freeze([...report]),
     })

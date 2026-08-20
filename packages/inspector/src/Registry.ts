@@ -451,12 +451,17 @@ export const views: ReadonlyArray<ViewDefinition> = [
           : evaluation._tag === 'UnhandledFailure'
             ? [
                 { text: 'Unhandled failure', tone: 'warning' },
-                { text: `${evaluation.report} · tag ${evaluation.tag}`, tone: 'muted' },
+                { text: `${evaluation.identity} · tag ${evaluation.tag}`, tone: 'muted' },
               ]
-            : [
-                { text: 'Blocked', tone: 'warning' },
-                { text: evaluation.reason._tag, tone: 'muted' },
-              ]
+            : evaluation._tag === 'Trap'
+              ? [
+                  { text: 'Fatal trap', tone: 'warning' },
+                  { text: evaluation.reason, tone: 'muted' },
+                ]
+              : [
+                  { text: 'Blocked', tone: 'warning' },
+                  { text: evaluation.reason._tag, tone: 'muted' },
+                ]
       return { rows, facts, meta: `${evaluation.trace.length} steps` }
     },
   },

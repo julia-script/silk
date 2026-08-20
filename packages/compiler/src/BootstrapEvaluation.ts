@@ -401,6 +401,8 @@ export interface ControlTraceEvent {
 
 export interface EffectTraceEvent {
   readonly _tag: 'EffectSuccess' | 'EffectFailure'
+  readonly phase: 'Produced' | 'Propagated' | 'Closed'
+  readonly identity?: string
   readonly frame: number
   readonly depth: number
   readonly function: DeclarationIndex.CanonicalId
@@ -572,6 +574,12 @@ export type Outcome = Completed | UnhandledFailure | Trap | Blocked
 const isPhysicalEntryAdapter = (name: string): boolean =>
   name === '$effect-entry' || name === '$unit-entry'
 
+const failureIdentity = (type: Type.Effect | Type.FailureRow, tag: number): string => {
+  const failure = Type.failureMembers(type).at(tag - 1)
+  if (failure === undefined) throw new RangeError(`Effect failure tag ${tag} has no type identity`)
+  return Type.encode(failure)
+}
+
 const logicalPathAt = (
   trace: ReadonlyArray<TraceEvent>,
   through: number,
@@ -605,7 +613,7 @@ const causalHistory = (
   terminalIdentity?: string,
 ): ReadonlyArray<Termination.CausalFailure> => {
   const failures = trace.flatMap((event, index) =>
-    event._tag === 'EffectFailure'
+    event._tag === 'EffectFailure' && event.phase === 'Produced'
       ? [
           Object.freeze({
             event,
@@ -619,17 +627,17 @@ const causalHistory = (
     (failure, index) => failures.findIndex((candidate) => candidate.key === failure.key) === index,
   )
   return Object.freeze(
-    distinct.map(({ event, index }, ordinal) =>
-      Object.freeze({
+    distinct.map(({ event, index }, ordinal) => {
+      const identity =
+        event.identity ?? (ordinal === distinct.length - 1 ? terminalIdentity : undefined)
+      return Object.freeze({
         tag: event.tag,
-        ...(terminalIdentity === undefined || ordinal !== distinct.length - 1
-          ? {}
-          : { identity: terminalIdentity }),
+        ...(identity === undefined ? {} : { identity }),
         provenance: event.span,
         logicalPath: logicalPathAt(trace, index),
         recovered: terminal !== 'TypedFailure' || ordinal !== distinct.length - 1,
-      }),
-    ),
+      })
+    }),
   )
 }
 
@@ -4538,10 +4546,16 @@ function* executeFunction(
             trace.push(
               Object.freeze({
                 _tag: operation.tag === 0 ? 'EffectSuccess' : 'EffectFailure',
+                phase: 'Produced',
                 frame,
                 depth: activation.depth,
                 function: fn.id,
                 tag: operation.tag,
+                ...(operation.tag === 0
+                  ? {}
+                  : {
+                      identity: failureIdentity(operation.type.type, operation.tag),
+                    }),
                 span: operation.provenance.span,
               }),
             )
@@ -4581,10 +4595,12 @@ function* executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'EffectFailure',
+                phase: 'Produced',
                 frame,
                 depth: activation.depth,
                 function: fn.id,
                 tag: mapping.target,
+                identity: failureIdentity(operation.type.type, mapping.target),
                 span: operation.provenance.span,
               }),
             )
@@ -4721,6 +4737,7 @@ function* executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'EffectFailure',
+                phase: 'Propagated',
                 frame,
                 depth: activation.depth,
                 function: fn.id,
@@ -4980,10 +4997,12 @@ function* executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'EffectFailure',
+                phase: 'Closed',
                 frame,
                 depth: activation.depth,
                 function: fn.id,
                 tag: failure.tag,
+                identity: failure.identity,
                 span: operation.provenance.span,
               }),
             )
