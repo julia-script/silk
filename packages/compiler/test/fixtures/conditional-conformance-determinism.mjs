@@ -18,8 +18,8 @@ import * as Type from '../../dist/Type.js'
  * specialization that reached the wrong witness cannot produce the expected number by accident.
  */
 const module_ = 'fixture/conditional-conformance-determinism'
-const source = `interface Decoder<T> {
-  fn decode(value: &T) -> i32
+const source = `interface Decoder {
+  fn decode(value: &Self) -> i32
 }
 
 struct OptionalSchema<S> { source: S }
@@ -28,7 +28,7 @@ fn optionalDecode<S: Decoder>(value: &OptionalSchema<S>) -> i32 {
   return Decoder.decode(&value.source) + 2
 }
 
-impl<S: Decoder<S>> Decoder<OptionalSchema<S>> for OptionalSchema<S> {
+impl<S: Decoder> Decoder for OptionalSchema<S> {
   decode: OptionalSchema.optionalDecode
 }
 
@@ -38,7 +38,7 @@ fn mappedDecode<S: Decoder>(value: &MappedSchema<S>) -> i32 {
   return Decoder.decode(&value.source) + 1
 }
 
-impl<S: Decoder<S>> Decoder<MappedSchema<S>> for MappedSchema<S> {
+impl<S: Decoder> Decoder for MappedSchema<S> {
   decode: MappedSchema.mappedDecode
 }
 
@@ -48,13 +48,13 @@ struct Tally { count: i32 }
 
 fn tallyDecode(value: &Tally) -> i32 { return value.count }
 
-impl Decoder<Tally> for Tally { decode: Tally.tallyDecode }
+impl Decoder for Tally { decode: Tally.tallyDecode }
 
 struct Schema { tag: i32 }
 
 fn schemaDecode(value: &Schema) -> i32 { return value.tag }
 
-impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
+impl Decoder for Schema { decode: Schema.schemaDecode }
 
 fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(&value) }
 
@@ -81,7 +81,7 @@ const nativeArtifact = await Effect.runPromise(Analysis.codegen(native, { mode: 
 
 const index = Analysis.declarationIndex(wasm)
 const nominal = (name, arguments_ = []) => Type.nominal(module_, name, arguments_)
-const decoder = (provider) => nominal('Decoder', [provider])
+const decoder = () => nominal('Decoder')
 const schema = nominal('Schema')
 const tally = nominal('Tally')
 const loose = nominal('Loose')

@@ -39,12 +39,12 @@ it.effect('reaches a different witness per specialization for the non-operator o
     // `digest` with instructions that are not each other's width-neutral form.
     const value = yield* evaluatedValue(
       'hash-key-bound/per-specialization',
-      `pub interface HashKey<T> {
-  fn equals(left: T, right: T) -> bool
-  fn digest(left: T, right: T) -> T
+      `pub interface HashKey {
+  fn equals(left: Self, right: Self) -> bool
+  fn digest(left: Self, right: Self) -> Self
 }
-impl HashKey<i32> for i32 { equals: Intrinsic.i32Equals digest: Intrinsic.i32WrappingAdd }
-impl HashKey<u8> for u8 { equals: Intrinsic.u8Equals digest: Intrinsic.u8SaturatingAdd }
+impl HashKey for i32 { equals: Intrinsic.i32Equals digest: Intrinsic.i32WrappingAdd }
+impl HashKey for u8 { equals: Intrinsic.u8Equals digest: Intrinsic.u8SaturatingAdd }
 pub fn digestOf<T: HashKey>(left: T, right: T) -> T {
   return HashKey.digest(move left, move right)
 }
@@ -64,9 +64,9 @@ pub fn main() -> i32 {
  * The same two-operation bound at a user-defined key. Only the equivalence half is exercised, which
  * is the half an operator spells; the digest is declared and mapped so the conformance is complete.
  */
-const userKey = `interface HashKey<T> {
-  fn equals(left: &T, right: &T) -> bool
-  fn digest(left: &T, right: &T) -> u64
+const userKey = `interface HashKey {
+  fn equals(left: &Self, right: &Self) -> bool
+  fn digest(left: &Self, right: &Self) -> u64
 }
 
 struct Cell { weight: i32 }
@@ -74,7 +74,7 @@ struct Cell { weight: i32 }
 fn cellEquals(left: &Cell, right: &Cell) -> bool { return left.weight == right.weight }
 fn cellDigest(left: &Cell, right: &Cell) -> u64 { return 7 }
 
-impl HashKey<Cell> for Cell { equals: Cell.cellEquals digest: Cell.cellDigest }`
+impl HashKey for Cell { equals: Cell.cellEquals digest: Cell.cellDigest }`
 
 it.effect('reaches the operator-spelled half of a two-operation bound at a user key', () =>
   Effect.gen(function* () {
@@ -98,11 +98,11 @@ it.effect('refuses a source witness for a scalar provider', () =>
     // being added, a scalar key has no honest `hash` witness to name.
     const snapshot = yield* analyzed(
       'hash-key-bound/scalar-source-witness',
-      `interface HashKey<T> {
-  fn digest(left: &T, right: &T) -> u64
+      `interface HashKey {
+  fn digest(left: &Self, right: &Self) -> u64
 }
 fn u64Digest(left: &u64, right: &u64) -> u64 { return 7 }
-impl HashKey<u64> for u64 { digest: u64.u64Digest }
+impl HashKey for u64 { digest: u64.u64Digest }
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(messages(snapshot), [
@@ -118,9 +118,9 @@ pub fn main() -> i32 { return 0 }`,
  */
 const seededKey = `struct HashSeed { value: u64 }
 
-interface HashKey<T> {
-  fn equals(left: &T, right: &T) -> bool
-  fn hash(value: &T, seed: &HashSeed) -> u64
+interface HashKey {
+  fn equals(left: &Self, right: &Self) -> bool
+  fn hash(value: &Self, seed: &HashSeed) -> u64
 }
 
 struct Cell { weight: i32 }
@@ -133,7 +133,7 @@ it.effect('admits a witness for a contract operand of a fixed non-parameter type
     const snapshot = yield* analyzed(
       'hash-key-bound/seeded-contract',
       `${seededKey}
-impl HashKey<Cell> for Cell { equals: Cell.cellEquals hash: Cell.cellHash }
+impl HashKey for Cell { equals: Cell.cellEquals hash: Cell.cellHash }
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(messages(snapshot), [])
@@ -147,7 +147,7 @@ it.effect('rejects a value witness when the interface explicitly promises a shar
       'hash-key-bound/by-value-operand',
       `${seededKey}
 fn cellHashByValue(value: &Cell, seed: HashSeed) -> u64 { return seed.value }
-impl HashKey<Cell> for Cell { equals: Cell.cellEquals hash: Cell.cellHashByValue }
+impl HashKey for Cell { equals: Cell.cellEquals hash: Cell.cellHashByValue }
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(messages(snapshot), [

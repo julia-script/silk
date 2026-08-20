@@ -153,9 +153,9 @@ it.effect('treats HashKey as an ordinary interface rather than by its spelling',
       'hashed-privilege/renamed',
       `import silk.hash { HashSeed }
 
-interface Whatever<T> {
-  fn equals(left: &T, right: &T) -> bool
-  fn hash(value: &T, seed: &HashSeed) -> u64
+interface Whatever {
+  fn equals(left: &Self, right: &Self) -> bool
+  fn hash(value: &Self, seed: &HashSeed) -> u64
 }
 
 struct Tag { value: u64 }
@@ -163,7 +163,7 @@ struct Tag { value: u64 }
 fn tagEquals(left: &Tag, right: &Tag) -> bool { return left.value == right.value }
 fn tagHash(value: &Tag, seed: &HashSeed) -> u64 { return HashKey.mix(seed, value.value) }
 
-impl Whatever<Tag> for Tag { equals: Tag.tagEquals hash: Tag.tagHash }
+impl Whatever for Tag { equals: Tag.tagEquals hash: Tag.tagHash }
 
 fn hashOf<T: Whatever>(value: T, seed: HashSeed) -> u64 { return Whatever.hash(&value, &seed) }
 

@@ -320,7 +320,7 @@ fn itemLess(left: &Item, right: &Item) -> bool {
   return left.key < right.key
 }
 
-impl Order<Item> for Item { lessThan: Item.itemLess }
+impl Order for Item { lessThan: Item.itemLess }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
@@ -370,7 +370,7 @@ fn trackedLess(left: &Tracked, right: &Tracked) -> bool {
   return left.key < right.key
 }
 
-impl Order<Tracked> for Tracked { lessThan: Tracked.trackedLess }
+impl Order for Tracked { lessThan: Tracked.trackedLess }
 
 effect fn hold(key: i32) -> Tracked ! OutOfMemoryError ? &mut Allocator {
   let mut payload = make<i32>()

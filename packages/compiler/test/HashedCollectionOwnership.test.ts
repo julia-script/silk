@@ -66,7 +66,7 @@ fn handleHash(value: &Handle, seed: &HashSeed) -> u64 {
   return HashKey.mix(seed, i32.toU64(value.tag))
 }
 
-impl HashKey<Handle> for Handle { equals: Handle.handleEquals hash: Handle.handleHash }
+impl HashKey for Handle { equals: Handle.handleEquals hash: Handle.handleHash }
 
 effect fn handle(tag: i32) -> Handle ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<[i32; 2]>()

@@ -64,9 +64,9 @@ const twoEngineValue = (name: string, source: string) =>
  * digest none does. Both witnesses are ordinary Silk, so the digest is reached only by naming the
  * bound and can only be answered by the provider's own function.
  */
-const userKey = `interface Keyed<T> {
-  fn equals(left: &T, right: &T) -> bool
-  fn digest(left: &T, right: &T) -> u64
+const userKey = `interface Keyed {
+  fn equals(left: &Self, right: &Self) -> bool
+  fn digest(left: &Self, right: &Self) -> u64
 }
 
 struct Cell { weight: i32 }
@@ -76,7 +76,7 @@ fn cellDigest(left: &Cell, right: &Cell) -> u64 {
   return u64.wrappingAdd(i32.toU64(left.weight), i32.toU64(right.weight))
 }
 
-impl Keyed<Cell> for Cell { equals: Cell.cellEquals digest: Cell.cellDigest }
+impl Keyed for Cell { equals: Cell.cellEquals digest: Cell.cellDigest }
 
 fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(&left, &right) }`
 
@@ -106,8 +106,8 @@ it.effect('reaches each provider’s own witness from one bound-operation call s
     // single body cannot serve both by lowering the operation width-neutrally.
     const value = yield* evaluatedValue(
       'bound-operation-witness/per-specialization',
-      `interface Keyed<T> {
-  fn digest(left: &T, right: &T) -> u64
+      `interface Keyed {
+  fn digest(left: &Self, right: &Self) -> u64
 }
 
 struct Cell { weight: i32 }
@@ -116,8 +116,8 @@ struct Tag { code: u64 }
 fn cellDigest(left: &Cell, right: &Cell) -> u64 { return 10 }
 fn tagDigest(left: &Tag, right: &Tag) -> u64 { return u64.wrappingAdd(left.code, right.code) }
 
-impl Keyed<Cell> for Cell { digest: Cell.cellDigest }
-impl Keyed<Tag> for Tag { digest: Tag.tagDigest }
+impl Keyed for Cell { digest: Cell.cellDigest }
+impl Keyed for Tag { digest: Tag.tagDigest }
 
 fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(&left, &right) }
 
@@ -139,15 +139,15 @@ it.effect('forwards value operands to a source witness without inserting hidden 
     // ordinary witness receives values and the generic call site consumes them exactly once.
     const value = yield* evaluatedValue(
       'bound-operation-witness/value-operands',
-      `interface Combined<T> {
-  fn combine(left: T, right: T) -> i32
+      `interface Combined {
+  fn combine(left: Self, right: Self) -> i32
 }
 
 struct Cell { weight: i32 }
 
 fn cellCombine(left: Cell, right: Cell) -> i32 { return left.weight + right.weight }
 
-impl Combined<Cell> for Cell { combine: Cell.cellCombine }
+impl Combined for Cell { combine: Cell.cellCombine }
 
 fn combineOf<T: Combined>(left: T, right: T) -> i32 {
   return Combined.combine(move left, move right)
@@ -163,15 +163,15 @@ it.effect('rejects a borrowed source witness for a value-owned interface contrac
   Effect.gen(function* () {
     const snapshot = yield* analyzed(
       'bound-operation-witness/value-contract-borrowed-witness',
-      `interface Decoder<T> {
-  fn decode(value: T) -> i32
+      `interface Decoder {
+  fn decode(value: Self) -> i32
 }
 
 struct Cell { code: i32 }
 
 fn decodeCell(value: &Cell) -> i32 { return value.code }
 
-impl Decoder<Cell> for Cell { decode: Cell.decodeCell }
+impl Decoder for Cell { decode: Cell.decodeCell }
 
 pub fn main() -> i32 { return 0 }`,
     )
@@ -190,8 +190,8 @@ it.effect('requires explicit moves for operator-spelled value operands', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyzed(
       'bound-operation-witness/operator-value-ownership',
-      `interface Combined<T> {
-  fn add(left: T, right: T) -> T
+      `interface Combined {
+  fn add(left: Self, right: Self) -> Self
 }
 
 struct Token { code: i32 }
@@ -200,7 +200,7 @@ fn tokenAdd(left: Token, right: Token) -> Token {
   return Token { code: left.code + right.code }
 }
 
-impl Combined<Token> for Token { add: Token.tokenAdd }
+impl Combined for Token { add: Token.tokenAdd }
 
 fn implicitTwice<T: Combined>(left: T, right: T) -> T {
   let first = left + right
@@ -222,15 +222,15 @@ it.effect('weakens exclusive contract operands only at a selected source witness
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'bound-operation-witness/weaker-source-access',
-      `interface Observe<T> {
-  fn inspect(value: &mut T) -> i32
+      `interface Observe {
+  fn inspect(value: &mut Self) -> i32
 }
 
 struct Cell { code: i32 }
 
 fn inspectCell(value: &Cell) -> i32 { return value.code }
 
-impl Observe<Cell> for Cell { inspect: Cell.inspectCell }
+impl Observe for Cell { inspect: Cell.inspectCell }
 
 fn inspectOf<T: Observe>(value: &mut T) -> i32 { return Observe.inspect(value) }
 
@@ -253,8 +253,8 @@ it.effect(
 
 pub struct Problem { code: i32 }
 
-interface Decoder<T> {
-  effect fn decode(value: &mut T) -> i32 ! Problem
+interface Decoder {
+  effect fn decode(value: &mut Self) -> i32 ! Problem
 }
 
 struct Cell { code: i32 }
@@ -263,7 +263,7 @@ effect fn decodeCell(value: &Cell) -> i32 ! Problem {
   fail Problem { code: 1 }
 }
 
-impl Decoder<Cell> for Cell { decode: Cell.decodeCell }
+impl Decoder for Cell { decode: Cell.decodeCell }
 
 fn pending<T: Decoder>(value: &mut T) -> Effect<i32 ! Problem> {
   return Decoder.decode(value)
@@ -294,8 +294,8 @@ it.effect('weakens implicit operator borrows to a source witness demand', () =>
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'bound-operation-witness/weaker-operator-access',
-      `interface Combined<T> {
-  fn add(left: &mut T, right: &mut T) -> T
+      `interface Combined {
+  fn add(left: &mut Self, right: &mut Self) -> Self
 }
 
 struct Cell { code: i32 }
@@ -304,7 +304,7 @@ fn cellAdd(left: &Cell, right: &Cell) -> Cell {
   return Cell { code: left.code + right.code }
 }
 
-impl Combined<Cell> for Cell { add: Cell.cellAdd }
+impl Combined for Cell { add: Cell.cellAdd }
 
 fn combine<T: Combined>(left: T, right: T) -> T { return left + right }
 
@@ -324,12 +324,12 @@ struct Fixed {}
 effect fn read(self: &Fixed, number: i32) -> i32 { return number }
 impl Counter for Fixed { read: Fixed.read }
 
-interface Combined<T> { fn add(left: &mut T, right: &mut T) -> i32 }
+interface Combined { fn add(left: &mut Self, right: &mut Self) -> i32 }
 struct Cell { code: i32 }
 fn cellAdd(left: &Cell, right: &Cell) -> i32 { return left.code + right.code }
-impl Combined<Cell> for Cell { add: Cell.cellAdd }
+impl Combined for Cell { add: Cell.cellAdd }
 
-effect fn branch<T: Combined>(flag: bool, left: T, right: T) -> i32 {
+effect fn branch<Self: Combined>(flag: bool, left: Self, right: Self) -> i32 {
   let fixed = Fixed {}
   let pending = Intrinsic.bindRequirement<&Counter>(Counter.read(left + right), &fixed)
   if flag {
@@ -359,15 +359,15 @@ it.effect('widens a pure source witness to the exact interface Effect contract',
 
 pub struct Problem {}
 
-interface Decoder<T> {
-  effect fn decode(value: &T) -> i32 ! Problem
+interface Decoder {
+  effect fn decode(value: &Self) -> i32 ! Problem
 }
 
 struct Cell { code: i32 }
 
 fn decodeCell(value: &Cell) -> i32 { return value.code }
 
-impl Decoder<Cell> for Cell { decode: Cell.decodeCell }
+impl Decoder for Cell { decode: Cell.decodeCell }
 
 fn pending<T: Decoder>(value: &T) -> Effect<i32 ! Problem> {
   return Decoder.decode(value)
@@ -488,15 +488,15 @@ it.effect('widens a smaller Effect witness row at the interface boundary', () =>
 pub struct Problem {}
 pub struct Extra {}
 
-interface Decoder<T> {
-  effect fn decode(value: &T) -> i32 ! Problem | Extra
+interface Decoder {
+  effect fn decode(value: &Self) -> i32 ! Problem | Extra
 }
 
 struct Cell { code: i32 }
 
 effect fn decodeCell(value: &Cell) -> i32 ! Problem { return value.code }
 
-impl Decoder<Cell> for Cell { decode: Cell.decodeCell }
+impl Decoder for Cell { decode: Cell.decodeCell }
 
 fn pending<T: Decoder>(value: &T) -> Effect<i32 ! Problem | Extra> {
   return Decoder.decode(value)
@@ -528,11 +528,15 @@ it.effect('retains exact caller requirements while widening witness access and r
     const module = 'bound-operation-witness/requirement-access-widening'
     const snapshot = yield* analyzed(
       module,
-      `struct Clock {}
-struct Meter {}
+      `service Clock {}
+service Meter {}
+struct FixedClock { token: i32 }
+struct FixedMeter { token: i32 }
+impl Clock for FixedClock {}
+impl Meter for FixedMeter {}
 
-interface Decoder<T> {
-  effect fn decode(value: &mut T) -> i32 ? &mut Clock | &Meter
+interface Decoder {
+  effect fn decode(value: &mut Self) -> i32 ? &mut Clock | &Meter
 }
 
 struct Cell { code: i32 }
@@ -543,7 +547,7 @@ effect fn decodeCell(value: &Cell) -> i32 ? &Clock {
   return run readClock()
 }
 
-impl Decoder<Cell> for Cell { decode: Cell.decodeCell }
+impl Decoder for Cell { decode: Cell.decodeCell }
 
 fn pending<T: Decoder>(value: &mut T) -> Effect<i32 ? &mut Clock | &Meter> {
   return Decoder.decode(value)
@@ -551,8 +555,8 @@ fn pending<T: Decoder>(value: &mut T) -> Effect<i32 ? &mut Clock | &Meter> {
 
 pub fn main() -> i32 {
   let mut cell = Cell { code: 0 }
-  let mut clock = Clock {}
-  let meter = Meter {}
+  let mut clock = FixedClock { token: 0 }
+  let meter = FixedMeter { token: 0 }
   let provided = pending<Cell>(&mut cell)
     |> Effect.provideMut(&mut clock)
     |> Effect.provide(&meter)
@@ -607,8 +611,8 @@ it.effect('wraps an operator-spelled pure source witness in Effect', () =>
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'bound-operation-witness/effect-operator-boundary',
-      `interface Combined<T> {
-  effect fn add(left: &T, right: &T) -> T
+      `interface Combined {
+  effect fn add(left: &Self, right: &Self) -> Self
 }
 
 struct Cell { code: i32 }
@@ -617,7 +621,7 @@ fn cellAdd(left: &Cell, right: &Cell) -> Cell {
   return Cell { code: left.code + right.code }
 }
 
-impl Combined<Cell> for Cell { add: Cell.cellAdd }
+impl Combined for Cell { add: Cell.cellAdd }
 fn combined<T: Combined>(left: T, right: T) -> T { return run (left + right) }
 
 pub fn main() -> i32 {
@@ -633,8 +637,8 @@ it.effect('lets one bound operation select an intrinsic witness and a source wit
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'bound-operation-witness/mixed-witnesses',
-      `interface Ranked<T> {
-  fn lessThan(left: &T, right: &T) -> bool
+      `interface Ranked {
+  fn lessThan(left: &Self, right: &Self) -> bool
 }
 
 struct Cell { weight: i32 }
@@ -643,8 +647,8 @@ fn cellLessThan(left: &Cell, right: &Cell) -> bool {
   return left.weight < right.weight
 }
 
-impl Ranked<Cell> for Cell { lessThan: Cell.cellLessThan }
-impl Ranked<i32> for i32 { lessThan: Intrinsic.i32LessThan }
+impl Ranked for Cell { lessThan: Cell.cellLessThan }
+impl Ranked for i32 { lessThan: Intrinsic.i32LessThan }
 
 fn ranksBelow<T: Ranked>(left: T, right: T) -> bool { return left < right }
 
@@ -668,8 +672,8 @@ it.effect('borrows a bound operand whose type the interface never parameterizes'
       'bound-operation-witness/seeded-operand',
       `struct Seed { value: u64 }
 
-interface Keyed<T> {
-  fn hash(value: &T, seed: &Seed) -> u64
+interface Keyed {
+  fn hash(value: &Self, seed: &Seed) -> u64
 }
 
 struct Cell { weight: i32 }
@@ -678,7 +682,7 @@ fn cellHash(value: &Cell, seed: &Seed) -> u64 {
   return u64.wrappingAdd(i32.toU64(value.weight), seed.value)
 }
 
-impl Keyed<Cell> for Cell { hash: Cell.cellHash }
+impl Keyed for Cell { hash: Cell.cellHash }
 
 fn hashOf<T: Keyed>(value: T, seed: Seed) -> u64 { return Keyed.hash(&value, &seed) }
 
@@ -727,15 +731,15 @@ pub fn main() -> i32 {
  */
 const module = 'bound-operation-witness/unlowerable'
 
-const witnessed = `interface Keyed<T> {
-  fn digest(left: &T, right: &T) -> u64
+const witnessed = `interface Keyed {
+  fn digest(left: &Self, right: &Self) -> u64
 }
 
 struct Cell { weight: i32 }
 
 fn cellDigest(left: &Cell, right: &Cell) -> u64 { return 7 }
 
-impl Keyed<Cell> for Cell { digest: Cell.cellDigest }
+impl Keyed for Cell { digest: Cell.cellDigest }
 
 fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(&left, &right) }
 
@@ -777,11 +781,11 @@ it.effect('reports nothing for either witness kind a conformance may name', () =
     const sourceWitness = yield* analyzed(module, witnessed)
     const intrinsicWitness = yield* analyzed(
       'bound-operation-witness/intrinsic-unlowerable',
-      `interface Keyed<T> {
-  fn digest(left: T, right: T) -> T
+      `interface Keyed {
+  fn digest(left: Self, right: Self) -> Self
 }
 
-impl Keyed<i32> for i32 { digest: Intrinsic.i32WrappingAdd }
+impl Keyed for i32 { digest: Intrinsic.i32WrappingAdd }
 
 fn digestOf<T: Keyed>(left: T, right: T) -> T {
   return Keyed.digest(move left, move right)

@@ -102,8 +102,8 @@ it.effect(
       assert.deepEqual(
         conditional.map((conformance) => conformance.encoded),
         [
-          `${qualified('Decoder')}<${qualified('OptionalSchema')}<%0>> for ${qualified('OptionalSchema')}<%0>`,
-          `${qualified('Decoder')}<${qualified('MappedSchema')}<%0>> for ${qualified('MappedSchema')}<%0>`,
+          `${qualified('Decoder')} for ${qualified('OptionalSchema')}<%0>`,
+          `${qualified('Decoder')} for ${qualified('MappedSchema')}<%0>`,
         ],
       )
       assert.strictEqual(
