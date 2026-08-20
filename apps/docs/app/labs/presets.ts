@@ -282,10 +282,21 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Existing provider capture',
-    `service Clock { effect fn value() -> i32 ? &Clock }
-struct FixedClock { value: i32 }
-effect fn clockValue(self: &FixedClock) -> i32 { return self.value }
-impl Clock for FixedClock { value: FixedClock.clockValue }
+    `service Clock {
+  effect fn value() -> i32 ? &Clock
+}
+
+struct FixedClock {
+  value: i32
+}
+
+effect fn clockValue(self: &FixedClock) -> i32 {
+  return self.value
+}
+
+impl Clock for FixedClock {
+  value: FixedClock.clockValue
+}
 
 effect fn read() -> i32
 ? &Clock@Primary {
@@ -293,7 +304,7 @@ effect fn read() -> i32
 }
 
 pub fn main() -> i32 {
-  let clock = FixedClock { value: 42 }
+  let clock = FixedClock {value: 42}
   let pending = read()
     |> Intrinsic.bindRequirement<&Clock@Primary>(&clock)
   return run pending
@@ -671,10 +682,21 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Piped acquired provider',
-    `service Clock { effect fn value() -> i32 ? &mut Clock }
-struct FixedClock { value: i32 }
-effect fn clockValue(self: &mut FixedClock) -> i32 { return self.value }
-impl Clock for FixedClock { value: FixedClock.clockValue }
+    `service Clock {
+  effect fn value() -> i32 ? &mut Clock
+}
+
+struct FixedClock {
+  value: i32
+}
+
+effect fn clockValue(self: &mut FixedClock) -> i32 {
+  return self.value
+}
+
+impl Clock for FixedClock {
+  value: FixedClock.clockValue
+}
 
 effect fn read() -> i32
 ? &mut Clock {
@@ -682,7 +704,7 @@ effect fn read() -> i32
 }
 
 effect fn acquireClock() -> FixedClock {
-  return FixedClock { value: 40 }
+  return FixedClock {value: 40}
 }
 
 fn increment(value: i32) -> i32 {
@@ -848,10 +870,21 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Effectful Logger tap',
-    `service TapLogger { effect fn value() -> i32 ? &TapLogger }
-struct FixedLogger { value: i32 }
-effect fn loggerValue(self: &FixedLogger) -> i32 { return self.value }
-impl TapLogger for FixedLogger { value: FixedLogger.loggerValue }
+    `service TapLogger {
+  effect fn value() -> i32 ? &TapLogger
+}
+
+struct FixedLogger {
+  value: i32
+}
+
+effect fn loggerValue(self: &FixedLogger) -> i32 {
+  return self.value
+}
+
+impl TapLogger for FixedLogger {
+  value: FixedLogger.loggerValue
+}
 
 effect fn succeed(value: i32) -> i32 {
   return value
@@ -863,7 +896,7 @@ effect fn log(value: i32) -> i32
 }
 
 pub fn main() -> i32 {
-  let logger = FixedLogger { value: 42 }
+  let logger = FixedLogger {value: 42}
   let logged = succeed(42)
     |> Effect.tap(log)
   let provided = logged
@@ -2865,10 +2898,21 @@ pub struct Schema {
   pub offset: i32
 }
 
-service Clock { effect fn value() -> i32 ? &mut Clock }
-struct FixedClock { value: i32 }
-effect fn clockValue(self: &mut FixedClock) -> i32 { return self.value }
-impl Clock for FixedClock { value: FixedClock.clockValue }
+service Clock {
+  effect fn value() -> i32 ? &mut Clock
+}
+
+struct FixedClock {
+  value: i32
+}
+
+effect fn clockValue(self: &mut FixedClock) -> i32 {
+  return self.value
+}
+
+impl Clock for FixedClock {
+  value: FixedClock.clockValue
+}
 
 interface Decoder<Arguments, A, E, ?R> {
   effect fn decode(self: &Self, encoded: Arguments) -> A ! E ? R
@@ -2888,7 +2932,7 @@ impl Decoder<i32, i32, DecodeError ? &Clock> for Schema {
 }
 
 effect fn acquireClock() -> FixedClock {
-  return FixedClock { value: 42 }
+  return FixedClock {value: 42}
 }
 
 effect fn recover(problem: DecodeError) -> i32 {
