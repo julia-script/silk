@@ -1652,11 +1652,18 @@ const lowerEffectCatch = (
   const selected = fn.semantic(expression.selected)
   const protectedEffect = fn.semantic(expression.protected.type)
   const resultEffect = fn.semantic(expression.type)
-  if (!Type.isNominal(selected) || !Type.isEffect(protectedEffect) || !Type.isEffect(resultEffect))
+  if (Type.isNever(selected) || !Type.isEffect(protectedEffect) || !Type.isEffect(resultEffect))
     return undefined
   const protectedFailures = Type.failureMembers(protectedEffect)
-  const selectedOrdinal = protectedFailures.findIndex((failure) => Type.equals(failure, selected))
-  if (selectedOrdinal < 0) return undefined
+  const selectedMembers: ReadonlyArray<Type.Type> = Type.isUnion(selected)
+    ? selected.members
+    : Object.freeze([selected])
+  if (
+    selectedMembers.some(
+      (member) => !protectedFailures.some((failure) => Type.equals(failure, member)),
+    )
+  )
+    return undefined
 
   const reified = reifyEffectValue(
     fn,
@@ -1759,10 +1766,40 @@ const lowerEffectCatch = (
       ordinal: 0,
     })
     const memberType = fn.type(member)
-    if (memberType?._tag !== 'Nominal') return undefined
+    if (memberType === undefined || memberType._tag === 'EffectOutcome') return undefined
     const bound = fn.alloc(memberType)
     const [selectedResult, selectedOperations] = fn.capture(() => {
-      if (Type.equals(member, selected)) {
+      if (selectedMembers.some((candidate) => Type.equals(candidate, member))) {
+        let handlerArgument = bound
+        if (!Type.equals(member, selected)) {
+          const selectedType = fn.type(selected)
+          const sourceShape = Layout.callingShape(fn.layout, member)
+          const targetShape = Layout.callingShape(fn.layout, selected)
+          const conversion = TypeCompatibility.check(member, selected)
+          if (
+            selectedType?._tag !== 'Union' ||
+            sourceShape === undefined ||
+            targetShape === undefined ||
+            conversion._tag !== 'Inject'
+          )
+            return undefined
+          handlerArgument = fn.alloc(selectedType)
+          fn.emit(
+            Object.freeze({
+              _tag: 'ConvertUnion' as const,
+              destination: handlerArgument,
+              source: bound,
+              sourceType: memberType,
+              targetType: selectedType,
+              conversion: 'Inject' as const,
+              mappings: conversion.mappings,
+              sourceShape,
+              targetShape,
+              access: 'Owned' as const,
+              provenance: generated(expression.span),
+            }),
+          )
+        }
         const applied = fn.alloc(handlerEffectType)
         fn.emit(
           Object.freeze({
@@ -1774,7 +1811,7 @@ const lowerEffectCatch = (
               handlerType.storage?.realization.targetArguments ??
               Object.freeze([]),
             captures: Object.freeze([]),
-            arguments: Object.freeze([bound]),
+            arguments: Object.freeze([handlerArgument]),
             callableType: handlerType.type,
             access: handlerType.type.mode,
             evaluation: 'CalleeThenArguments' as const,
@@ -4159,13 +4196,21 @@ function lowerExpressionInner(
       if (expression.conversion === 'EffectAccess') return source
       const sourceType = fn.type(expression.sourceType)
       const targetType = fn.type(expression.target)
+      const substituted = TypeCompatibility.check(
+        fn.semantic(expression.sourceType),
+        fn.semantic(expression.target),
+      )
+      // An open `A | B` conversion may disappear when both parameters specialize to the same
+      // concrete type. The specialized program then carries no runtime union tag at this site.
+      if (substituted._tag === 'Exact' || substituted._tag === 'Bottom') return source
       const sourceShape = Layout.callingShape(fn.layout, fn.semantic(expression.sourceType))
       const targetShape = Layout.callingShape(fn.layout, fn.semantic(expression.target))
       if (
         source === undefined ||
         sourceShape === undefined ||
         targetShape === undefined ||
-        (sourceType?._tag !== 'Nominal' && sourceType?._tag !== 'Union') ||
+        sourceType === undefined ||
+        sourceType._tag === 'EffectOutcome' ||
         targetType?._tag !== 'Union'
       ) {
         return undefined
@@ -4173,10 +4218,6 @@ function lowerExpressionInner(
       const destination = fn.alloc(targetType)
       // Canonical union member order can change under substitution (parameter keys sort
       // differently from concrete keys), so the mapping recomputes at the instantiation.
-      const substituted = TypeCompatibility.check(
-        fn.semantic(expression.sourceType),
-        fn.semantic(expression.target),
-      )
       const mappings =
         substituted._tag === 'Inject' || substituted._tag === 'Widen'
           ? substituted.mappings
@@ -6739,14 +6780,9 @@ const lowerSequence = (
     const [failedValue, operations] = fn.capture(() => {
       const failed = lowerExpression(fn, statement.expression)
       const outcomeType = fn.effectOutcome === undefined ? undefined : fn.type(fn.effectOutcome)
-      if (
-        failed === undefined ||
-        outcomeType?._tag !== 'EffectOutcome' ||
-        (!Type.isNominal(specializedFailure) && !Type.isUnion(specializedFailure))
-      )
-        return undefined
+      if (failed === undefined || outcomeType?._tag !== 'EffectOutcome') return undefined
       const destination = fn.alloc(outcomeType)
-      if (Type.isNominal(specializedFailure)) {
+      if (!Type.isUnion(specializedFailure)) {
         const tag = Type.failureMembers(outcomeType.type).findIndex((failure) =>
           Type.equals(failure, specializedFailure),
         )
@@ -7794,6 +7830,12 @@ export const lowerProgram = (
         cleanup: Ownership.cleanupPlan(index, failure.type),
       }),
     )
+    const failurePayloadTypes = failures.map((failure) => {
+      const type = mirType(failure.type)
+      if (type === undefined)
+        throw new RangeError(`Effect entry failure ${Type.encode(failure.type)} has no MIR type`)
+      return type
+    })
     const effect = local(1)
     const outcome = local(2)
     const status = local(0)
@@ -7803,14 +7845,7 @@ export const lowerProgram = (
         id: adapterId,
         instance: adapterKey,
         parameterCount: 0,
-        localTypes: Object.freeze([
-          i32,
-          target.result,
-          runner.result,
-          ...failures.map((failure) =>
-            Object.freeze({ _tag: 'Nominal' as const, type: failure.type }),
-          ),
-        ]),
+        localTypes: Object.freeze([i32, target.result, runner.result, ...failurePayloadTypes]),
         result: i32,
         entry: Object.freeze({ _tag: 'Region', ordinal: 0 }),
         regions: Object.freeze([

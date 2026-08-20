@@ -374,7 +374,8 @@ it.effect('plans one hook call per box rather than inlining the held value', () 
     const kind = shape?._tag === 'StructCleanup' ? shape.fields.at(0)?.cleanup : undefined
     const branch =
       kind?._tag === 'UnionCleanup'
-        ? kind.cases.find((entry) => entry.member.name === 'Branch')?.cleanup
+        ? kind.cases.find((entry) => Type.isNominal(entry.member) && entry.member.name === 'Branch')
+            ?.cleanup
         : undefined
     const left = branch?._tag === 'StructCleanup' ? branch.fields.at(0)?.cleanup : undefined
     assert.strictEqual(left?._tag, 'HookCleanup')

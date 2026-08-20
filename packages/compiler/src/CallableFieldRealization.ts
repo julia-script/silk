@@ -105,7 +105,7 @@ export interface EffectEnvironmentSlot {
 /** Exact compile-time rows carried by one concrete stored Effect. */
 export interface EffectRows {
   readonly _tag: 'EffectFieldRows'
-  readonly failures: ReadonlyArray<Type.Nominal>
+  readonly failures: ReadonlyArray<Type.Type>
   readonly requirements: ReadonlyArray<Type.Requirement>
 }
 

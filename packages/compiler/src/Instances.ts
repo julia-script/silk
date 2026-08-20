@@ -147,7 +147,7 @@ export interface IntrinsicCall {
 
 /** One normalized reportable failure retained by an effectful user entry. */
 export interface EntryFailure {
-  readonly type: Type.Nominal
+  readonly type: Type.Type
   readonly report: string
 }
 

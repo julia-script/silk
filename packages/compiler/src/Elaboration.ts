@@ -984,7 +984,7 @@ export type StatementFact =
   | {
       readonly _tag: 'FailStatement'
       readonly expression: ExpressionFact
-      readonly failure?: Type.Nominal | Type.FailureProjection
+      readonly failure?: Type.Type
       readonly transfer: 'Copy' | 'Move'
       readonly region: Hir.RegionId
       readonly syntax: SyntaxTree.Node
@@ -5862,8 +5862,8 @@ const finishCallableApplication = (
       const wanted = section.reference.contract.constraints
         .map((constraint) => Constraint.substitute(constraint, inferred))
         .find(
-          (constraint): constraint is Constraint.NominalMember =>
-            constraint._tag === 'NominalMemberConstraint',
+          (constraint): constraint is Constraint.FailureSubset =>
+            constraint._tag === 'FailureSubsetConstraint',
         )
       const wantedKey = wanted === undefined ? undefined : Constraint.key(wanted)
       const proved =
@@ -5871,23 +5871,11 @@ const finishCallableApplication = (
         evidence.some(
           (candidate) =>
             (candidate._tag === 'Assumed' && candidate.wantedKey === wantedKey) ||
-            (candidate._tag === 'Member' &&
+            (candidate._tag === 'FailureSubset' &&
               wanted !== undefined &&
-              Type.equals(candidate.selected, wanted.selected) &&
+              RowAlgebra.equals(Type.failureRowPolicy(), candidate.selected, wanted.selected) &&
               RowAlgebra.equals(Type.failureRowPolicy(), candidate.source, wanted.source)),
         )
-      const selectedRow =
-        wanted === undefined
-          ? RowAlgebra.concrete(Type.failureRowPolicy(), [])
-          : Type.isNominal(wanted.selected)
-            ? RowAlgebra.concrete(Type.failureRowPolicy(), [wanted.selected])
-            : Type.isParameter(wanted.selected)
-              ? RowAlgebra.singleton(
-                  Type.failureRowPolicy(),
-                  Type.failureMemberShape(wanted.selected),
-                  node.span,
-                )
-              : RowAlgebra.concrete(Type.failureRowPolicy(), [])
       const handlerType = handler?.type._tag === 'Available' ? handler.type.type : undefined
       const handlerEffect =
         handlerType !== undefined &&
@@ -5907,13 +5895,15 @@ const finishCallableApplication = (
           reference: sectionIntrinsicReference(section),
           protected: protected_?.expression ?? unavailableExpression(node),
           handler: handler ?? unavailableExpression(node),
-          ...(wanted === undefined ? {} : { selected: wanted.selected }),
+          ...(wanted === undefined
+            ? {}
+            : { selected: Type.failureType(Type.failureRowArgumentFromRow(wanted.selected)) }),
           protectedRow: wanted?.source ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
           handlerRow: handlerEffect?.failureRow ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
           residualRow:
             wanted === undefined
               ? RowAlgebra.concrete(Type.failureRowPolicy(), [])
-              : RowAlgebra.without(Type.failureRowPolicy(), wanted.source, selectedRow),
+              : RowAlgebra.without(Type.failureRowPolicy(), wanted.source, wanted.selected),
           evidence,
           type: catchAvailable ? type : unavailableExpressionType,
           syntax: node,
@@ -6272,8 +6262,8 @@ const finishIntrinsicContractCall = (
     const wanted = operation.rule.contract.constraints
       .map((constraint) => Constraint.substitute(constraint, substitution))
       .find(
-        (constraint): constraint is Constraint.NominalMember =>
-          constraint._tag === 'NominalMemberConstraint',
+        (constraint): constraint is Constraint.FailureSubset =>
+          constraint._tag === 'FailureSubsetConstraint',
       )
     const wantedKey = wanted === undefined ? undefined : Constraint.key(wanted)
     const proved =
@@ -6281,23 +6271,11 @@ const finishIntrinsicContractCall = (
       evidence.some(
         (candidate) =>
           (candidate._tag === 'Assumed' && candidate.wantedKey === wantedKey) ||
-          (candidate._tag === 'Member' &&
+          (candidate._tag === 'FailureSubset' &&
             wanted !== undefined &&
-            Type.equals(candidate.selected, wanted.selected) &&
+            RowAlgebra.equals(Type.failureRowPolicy(), candidate.selected, wanted.selected) &&
             RowAlgebra.equals(Type.failureRowPolicy(), candidate.source, wanted.source)),
       )
-    const selectedRow =
-      wanted === undefined
-        ? RowAlgebra.concrete(Type.failureRowPolicy(), [])
-        : Type.isNominal(wanted.selected)
-          ? RowAlgebra.concrete(Type.failureRowPolicy(), [wanted.selected])
-          : Type.isParameter(wanted.selected)
-            ? RowAlgebra.singleton(
-                Type.failureRowPolicy(),
-                Type.failureMemberShape(wanted.selected),
-                call.span,
-              )
-            : RowAlgebra.concrete(Type.failureRowPolicy(), [])
     const handlerType = handler?.type._tag === 'Available' ? handler.type.type : undefined
     const handlerEffect =
       handlerType !== undefined && Type.isCallable(handlerType) && Type.isEffect(handlerType.result)
@@ -6315,13 +6293,15 @@ const finishIntrinsicContractCall = (
         reference: intrinsicReference(source, call),
         protected: protected_?.expression ?? unavailableExpression(call),
         handler: handler?.expression ?? unavailableExpression(call),
-        ...(wanted === undefined ? {} : { selected: wanted.selected }),
+        ...(wanted === undefined
+          ? {}
+          : { selected: Type.failureType(Type.failureRowArgumentFromRow(wanted.selected)) }),
         protectedRow: wanted?.source ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
         handlerRow: handlerEffect?.failureRow ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
         residualRow:
           wanted === undefined
             ? RowAlgebra.concrete(Type.failureRowPolicy(), [])
-            : RowAlgebra.without(Type.failureRowPolicy(), wanted.source, selectedRow),
+            : RowAlgebra.without(Type.failureRowPolicy(), wanted.source, wanted.selected),
         evidence,
         type: catchAvailable ? type : unavailableExpressionType,
         syntax: call,
@@ -7124,13 +7104,23 @@ const analyzeEffectResult = (
     )
   const onlyFailureParameter =
     protectedEffect === undefined ? undefined : Type.failureRowParameters(protectedEffect).at(0)
+  const onlyFailureMemberParameter =
+    protectedEffect === undefined ? undefined : Type.failureMemberParameters(protectedEffect).at(0)
   const failureValue =
     protectedEffect !== undefined &&
     Type.failureMembers(protectedEffect).length === 0 &&
-    Type.failureRowParameters(protectedEffect).length === 1 &&
-    onlyFailureParameter !== undefined
-      ? Type.failureProjection(onlyFailureParameter)
-      : Type.failureValue(protectedEffect === undefined ? [] : Type.failureMembers(protectedEffect))
+    Type.failureRowParameters(protectedEffect).length === 0 &&
+    Type.failureMemberParameters(protectedEffect).length === 1 &&
+    onlyFailureMemberParameter !== undefined
+      ? onlyFailureMemberParameter
+      : protectedEffect !== undefined &&
+          Type.failureMembers(protectedEffect).length === 0 &&
+          Type.failureRowParameters(protectedEffect).length === 1 &&
+          onlyFailureParameter !== undefined
+        ? Type.failureProjection(onlyFailureParameter)
+        : Type.failureValue(
+            protectedEffect === undefined ? [] : Type.failureMembers(protectedEffect),
+          )
   const type =
     protectedEffect === undefined
       ? unavailableExpressionType
@@ -8401,6 +8391,38 @@ interface ResolutionContext {
   readonly executableSites?: ReadonlyMap<SyntaxTree.Node, number>
 }
 
+/** Whether a borrow-shaped value is visibly backed only by program-lifetime immutable data. */
+const isStaticallyDetachedFailure = (
+  expression: ExpressionFact,
+  index: DeclarationIndex.Index,
+): boolean => {
+  if (
+    expression.type._tag === 'Available' &&
+    !DeclarationIndex.containsLexicalBorrow(index, expression.type.type)
+  )
+    return true
+  switch (expression._tag) {
+    case 'StaticText':
+      return expression.data !== undefined
+    case 'Constant':
+      return expression.value?._tag === 'String'
+    case 'Grouped':
+      return isStaticallyDetachedFailure(expression.expression, index)
+    case 'Move':
+      return isStaticallyDetachedFailure(expression.subject, index)
+    case 'StructLiteral':
+      return expression.fields.every((field) =>
+        isStaticallyDetachedFailure(field.initializer.expression, index),
+      )
+    case 'ArrayLiteral':
+      return expression.elements.every((element) =>
+        isStaticallyDetachedFailure(element.expression, index),
+      )
+    default:
+      return false
+  }
+}
+
 const analyzeStatements = (
   context: BodyContext,
   blockNode: SyntaxTree.Node,
@@ -8817,7 +8839,9 @@ const analyzeStatements = (
       context.diagnostics.push(...expression.diagnostics)
       const failure =
         expression.type !== undefined &&
-        (Type.isNominal(expression.type) || Type.isFailureProjection(expression.type))
+        (Type.isRuntimeConcrete(expression.type) ||
+          (Type.isParameter(expression.type) && expression.type.kind === 'Value') ||
+          Type.isFailureProjection(expression.type))
           ? expression.type
           : undefined
       if (!context.effectBlock && context.declaration.functionKind !== 'Effect')
@@ -8827,15 +8851,27 @@ const analyzeStatements = (
           Diagnostic.invalidFailureType(Type.encode(expression.type), expressionNode.span),
         )
       if (
+        failure !== undefined &&
+        DeclarationIndex.containsLexicalBorrow(context.resolution.index, failure) &&
+        !isStaticallyDetachedFailure(expression.fact, context.resolution.index)
+      )
+        context.diagnostics.push(
+          Diagnostic.providerBackedFailure(Type.encode(failure), expressionNode.span),
+        )
+      if (
         !context.effectBlock &&
         failure !== undefined &&
-        !(Type.isNominal(failure)
-          ? context.declaration.failureRow.failures.some((candidate) =>
-              Type.equals(candidate, failure),
-            )
-          : context.declaration.failureRow.parameters.some((parameter) =>
-              Type.equals(parameter, failure.parameter),
-            ))
+        !(Type.isParameter(failure)
+          ? Type.failureMemberParameters(
+              Type.effectWithRows(Type.unit, context.declaration.failureRow.row),
+            ).some((parameter) => Type.equals(parameter, failure))
+          : Type.isFailureProjection(failure)
+            ? context.declaration.failureRow.parameters.some((parameter) =>
+                Type.equals(parameter, failure.parameter),
+              )
+            : context.declaration.failureRow.failures.some((candidate) =>
+                Type.equals(candidate, failure),
+              ))
       )
         context.diagnostics.push(
           Diagnostic.undeclaredFailure(Type.encode(failure), expressionNode.span),
@@ -9006,17 +9042,6 @@ const analyzeFunctionBody = (
     resolution: bodyResolution,
     nextBindingOrdinal,
   }
-  declaration.failureRow.failures.forEach((failure, ordinal) => {
-    if (!DeclarationIndex.containsLexicalBorrow(bodyResolution.index, failure)) return
-    context.diagnostics.push(
-      Diagnostic.providerBackedFailure(
-        Type.encode(failure),
-        declaration.failureRow.members.at(ordinal)?.syntax.span ??
-          declaration.failureRow.syntax?.span ??
-          declaration.syntax.span,
-      ),
-    )
-  })
   const statements = analyzeStatements(
     context,
     blockNode,

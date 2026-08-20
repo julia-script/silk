@@ -537,10 +537,7 @@ it.effect('normalizes effect failure rows while retaining source members', () =>
 
     assert.strictEqual(effect?.functionKind, 'Effect')
     assert.strictEqual(effect?.failureRow.members.length, 3)
-    assert.deepEqual(
-      effect?.failureRow.failures.map((failure) => `${failure.module}.${failure.name}`),
-      ['root.First', 'root.Second'],
-    )
+    assert.deepEqual(effect?.failureRow.failures.map(Type.encode), ['root.First', 'root.Second'])
     assert.strictEqual(effect?.failureRow.available, true)
     assert.strictEqual(plain?.functionKind, 'Ordinary')
     assert.deepEqual(plain?.failureRow.failures, [])
@@ -567,20 +564,18 @@ it.effect('resolves imported failure members and preserves invalid row facts', (
     assert.deepEqual(
       declarations.map((declaration) => ({
         available: declaration.failureRow.available,
-        failures: declaration.failureRow.failures.map(
-          (failure) => `${failure.module}.${failure.name}`,
-        ),
+        failures: declaration.failureRow.failures.map(Type.encode),
       })),
       [
         { available: true, failures: ['errors/Error.Error'] },
         { available: true, failures: [] },
-        { available: false, failures: [] },
+        { available: true, failures: ['i32'] },
         { available: false, failures: [] },
       ],
     )
     assert.deepEqual(
       index.diagnostics.map((diagnostic) => diagnostic.code),
-      ['SEM0061', 'SEM0001'],
+      ['SEM0001'],
     )
   }),
 )
@@ -593,10 +588,7 @@ it.effect('rejects failure rows on ordinary functions without losing the row', (
     const declaration = index.modules.at(0)?.declarations.at(0)
 
     assert.strictEqual(declaration?.functionKind, 'Ordinary')
-    assert.deepEqual(
-      declaration?.failureRow.failures.map((failure) => failure.name),
-      ['Problem'],
-    )
+    assert.deepEqual(declaration?.failureRow.failures.map(Type.encode), ['root.Problem'])
     assert.deepEqual(
       index.diagnostics.map((diagnostic) => diagnostic.code),
       ['SEM0062'],
@@ -624,10 +616,7 @@ effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator@Scratch { retur
     const laterType = later?.returnType._tag === 'Resolved' ? later.returnType.type : undefined
     assert.isTrue(laterType !== undefined && Type.isEffect(laterType))
     if (laterType === undefined || !Type.isEffect(laterType)) return
-    assert.deepEqual(
-      Type.failureMembers(laterType).map((failure) => failure.name),
-      ['Problem'],
-    )
+    assert.deepEqual(Type.failureMembers(laterType).map(Type.encode), ['root.Problem'])
     assert.deepEqual(
       Type.requirementMembers(laterType).map((requirement) => ({
         capability: requirement.capability.name,

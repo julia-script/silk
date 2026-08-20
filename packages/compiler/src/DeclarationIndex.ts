@@ -346,7 +346,7 @@ export interface FailureRowFact {
   readonly _tag: 'FailureRow'
   readonly members: ReadonlyArray<DeclaredTypeFact>
   readonly parameters: ReadonlyArray<Type.Parameter>
-  readonly failures: ReadonlyArray<Type.Nominal>
+  readonly failures: ReadonlyArray<Type.Type>
   readonly syntax?: SyntaxTree.Node
   readonly available: boolean
   readonly expression: RowExpressionFact
@@ -795,7 +795,7 @@ const failureRowFromEffect = (effect: Type.Effect): Type.FailureRow =>
       RowAlgebra.union(
         Type.failureRowPolicy(),
         row,
-        RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(parameter),
+        RowAlgebra.parameter<Type.Type, Type.Parameter, Type.FailureMemberShape>(parameter),
       ),
     RowAlgebra.concrete(Type.failureRowPolicy(), Type.failureMembers(effect)),
   )
@@ -4949,21 +4949,19 @@ const semanticFailureRow = (fact: RowExpressionFact): Type.FailureRow => {
       return RowAlgebra.concrete(Type.failureRowPolicy(), [])
     case 'RowParameterExpression':
       return fact.parameter.kind === 'FailureRow'
-        ? RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(
-            fact.parameter,
-          )
+        ? RowAlgebra.parameter<Type.Type, Type.Parameter, Type.FailureMemberShape>(fact.parameter)
         : RowAlgebra.concrete(Type.failureRowPolicy(), [])
     case 'FailureMemberExpression':
       if (fact.member._tag !== 'Resolved') return RowAlgebra.concrete(Type.failureRowPolicy(), [])
-      if (Type.isNominal(fact.member.type))
-        return RowAlgebra.concrete(Type.failureRowPolicy(), [fact.member.type])
       if (Type.isParameter(fact.member.type) && fact.member.type.kind === 'Value')
         return RowAlgebra.singleton(
           Type.failureRowPolicy(),
           Type.failureMemberShape(fact.member.type),
           fact.syntax.span,
         )
-      return RowAlgebra.concrete(Type.failureRowPolicy(), [])
+      return Type.isRuntimeConcrete(fact.member.type)
+        ? RowAlgebra.concrete(Type.failureRowPolicy(), [fact.member.type])
+        : RowAlgebra.concrete(Type.failureRowPolicy(), [])
     case 'UnionRowExpression':
       return fact.operands.reduce<Type.FailureRow>(
         (row, operand) =>
@@ -5050,18 +5048,6 @@ const semanticConstraints = (
             semanticRequirementRow(constraint.source),
           ),
         ]
-      if (
-        constraint.selected._tag === 'FailureMemberExpression' &&
-        constraint.selected.member._tag === 'Resolved' &&
-        Type.isParameter(constraint.selected.member.type) &&
-        constraint.selected.member.type.kind === 'Value'
-      )
-        return [
-          Constraint.nominalMember(
-            constraint.selected.member.type,
-            semanticFailureRow(constraint.source),
-          ),
-        ]
       return [
         Constraint.failureSubset(
           semanticFailureRow(constraint.selected),
@@ -5090,13 +5076,13 @@ const resolveFailureRow = (
     diagnostics.push(...resolved.diagnostics)
     return resolved.fact
   })
-  const failures = new Map<string, Type.Nominal>()
+  const failures = new Map<string, Type.Type>()
   let available = row.parameters.length === 0
   for (const member of members) {
     if (
       member._tag !== 'Resolved' ||
       !(
-        (Type.isNominal(member.type) && Type.isRuntimeConcrete(member.type)) ||
+        Type.isRuntimeConcrete(member.type) ||
         (Type.isParameter(member.type) && member.type.kind === 'Value')
       )
     ) {
@@ -5107,7 +5093,7 @@ const resolveFailureRow = (
         )
       continue
     }
-    if (Type.isNominal(member.type)) failures.set(Type.key(member.type), member.type)
+    if (!Type.isParameter(member.type)) failures.set(Type.key(member.type), member.type)
   }
   return Object.freeze({
     fact: Object.freeze({

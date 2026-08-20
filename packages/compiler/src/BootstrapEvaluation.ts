@@ -118,8 +118,8 @@ export interface ReferenceValue {
 export interface UnionValue {
   readonly _tag: 'UnionValue'
   readonly type: Type.StructuralUnion
-  readonly member: Type.Nominal
-  readonly payload: AggregateValue
+  readonly member: Type.Type
+  readonly payload: Value
 }
 
 export interface EffectOutcomeValue {
@@ -314,9 +314,9 @@ export interface UnionConversionTraceEvent {
   readonly _tag: 'UnionConversion'
   readonly function: DeclarationIndex.CanonicalId
   readonly conversion: 'Inject' | 'Widen'
-  readonly source: Type.Nominal | Type.StructuralUnion
+  readonly source: Type.Type
   readonly target: Type.StructuralUnion
-  readonly member: Type.Nominal
+  readonly member: Type.Type
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -357,7 +357,7 @@ export interface CleanupTraceEvent {
   readonly depth: number
   readonly function: DeclarationIndex.CanonicalId
   readonly local: number
-  readonly members?: ReadonlyArray<Type.Nominal>
+  readonly members?: ReadonlyArray<Type.Type>
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -371,12 +371,12 @@ export interface MatchTraceEvent {
   readonly function: DeclarationIndex.CanonicalId
   readonly match: number
   readonly arm?: number
-  readonly member: Type.Nominal
+  readonly member: Type.Type
   readonly access: Match.Access
   readonly binding?: number
   readonly path?: ReadonlyArray<DeclarationIndex.FieldId>
   readonly value?: Value
-  readonly members?: ReadonlyArray<Type.Nominal>
+  readonly members?: ReadonlyArray<Type.Type>
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -394,7 +394,7 @@ export interface ControlTraceEvent {
   readonly function: DeclarationIndex.CanonicalId
   readonly region: number
   readonly loop?: number
-  readonly members?: ReadonlyArray<Type.Nominal>
+  readonly members?: ReadonlyArray<Type.Type>
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -1565,7 +1565,7 @@ function* executeFunction(
   const cleanupMembers = (
     cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
     owner: Value,
-  ): ReadonlyArray<Type.Nominal> => {
+  ): ReadonlyArray<Type.Type> => {
     if (cleanup._tag === 'NoCleanup' || cleanup._tag === 'ParameterCleanup') {
       return Object.freeze([])
     }
@@ -1623,10 +1623,7 @@ function* executeFunction(
     )
   }
 
-  const selectFieldPath = (
-    root: AggregateValue,
-    path: ReadonlyArray<DeclarationIndex.FieldId>,
-  ): Value => {
+  const selectFieldPath = (root: Value, path: ReadonlyArray<DeclarationIndex.FieldId>): Value => {
     let selected: Value = root
     for (const selector of path) {
       if (selected._tag !== 'AggregateValue') {
@@ -2476,7 +2473,7 @@ function* executeFunction(
                     )
                   : undefined
             const payload =
-              operation.conversion === 'Inject' && source._tag === 'AggregateValue'
+              operation.conversion === 'Inject'
                 ? source
                 : operation.conversion === 'Widen' && source._tag === 'UnionValue'
                   ? source.payload
@@ -2496,7 +2493,7 @@ function* executeFunction(
                 _tag: 'UnionConversion',
                 function: fn.id,
                 conversion: operation.conversion,
-                source: operation.sourceType.type,
+                source: Mir.semanticType(operation.sourceType),
                 target: operation.targetType.type,
                 member: converted.member,
                 span: operation.provenance.span,
@@ -4791,7 +4788,7 @@ function* executeFunction(
                       outcome.tag,
                       'OneBased',
                     )
-                    if (failure === undefined || outcome.payload._tag !== 'AggregateValue')
+                    if (failure === undefined)
                       throw new RangeError('MIR Effect result has an invalid failure tag')
                     const failureValue: Value = Type.isUnion(operation.failureValueType)
                       ? Object.freeze({

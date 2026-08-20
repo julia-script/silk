@@ -12,7 +12,7 @@ export interface Contract {
   readonly functionKind: 'Ordinary' | 'Effect'
   readonly operands: ReadonlyArray<Operand>
   readonly success: Type.Type
-  readonly failures: ReadonlyArray<Type.Nominal>
+  readonly failures: ReadonlyArray<Type.Type>
   readonly failureParameters: ReadonlyArray<Type.Parameter>
   readonly requirements: ReadonlyArray<Type.Requirement>
   readonly requirementParameters: ReadonlyArray<Type.Parameter>
@@ -50,7 +50,7 @@ export type Problem =
       readonly required: Type.Type
     }
   | { readonly _tag: 'Success'; readonly promised: Type.Type; readonly actual: Type.Type }
-  | { readonly _tag: 'Failure'; readonly failure: Type.Nominal }
+  | { readonly _tag: 'Failure'; readonly failure: Type.Type }
   | { readonly _tag: 'FailureParameter'; readonly parameter: Type.Parameter }
   | {
       readonly _tag: 'StrongerRequirementAccess'

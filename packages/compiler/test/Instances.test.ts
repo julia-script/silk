@@ -507,8 +507,16 @@ it.effect('discovers calls and lowers nested matches as structured acyclic opera
         : Mir.operations(main).filter((operation) => operation._tag === 'Match')
     assert.strictEqual(matches.length, 2)
     assert.strictEqual(matches.at(0)?.arms.at(0)?.selected.operations.at(0)?._tag, 'Match')
-    assert.strictEqual(matches.at(0)?.decisions.at(0)?.member.name, 'Box')
-    assert.strictEqual(matches.at(1)?.decisions.at(0)?.member.name, 'Token')
+    const outerMember = matches.at(0)?.decisions.at(0)?.member
+    const innerMember = matches.at(1)?.decisions.at(0)?.member
+    assert.strictEqual(
+      outerMember !== undefined && Type.isNominal(outerMember) ? outerMember.name : undefined,
+      'Box',
+    )
+    assert.strictEqual(
+      innerMember !== undefined && Type.isNominal(innerMember) ? innerMember.name : undefined,
+      'Token',
+    )
     assert.strictEqual(Mir.encode(mir), golden('match.mir.txt'))
     assert.strictEqual(
       Mir.encode(mir),

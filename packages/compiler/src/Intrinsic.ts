@@ -302,7 +302,7 @@ const bindingOwner = Object.freeze({ module: 'silk/core', name: '$BindRequiremen
 const bindingSelected = Type.parameter(bindingOwner, 0, 'S', 'RequirementRow')
 const bindingSuccess = Type.parameter(bindingOwner, 1, 'A')
 const bindingProvider = Type.parameter(bindingOwner, 2, 'P')
-const bindingFailure = Type.parameter(bindingOwner, 3, 'E', 'FailureRow')
+const bindingFailure = Type.parameter(bindingOwner, 3, 'E')
 const bindingRequirements = Type.parameter(bindingOwner, 4, 'R', 'RequirementRow')
 const bindingTypeParameters = Object.freeze([
   bindingSelected,
@@ -311,11 +311,16 @@ const bindingTypeParameters = Object.freeze([
   bindingFailure,
   bindingRequirements,
 ])
-const bindingFailureRow = RowAlgebra.parameter<
-  Type.Nominal,
-  Type.Parameter,
-  Type.FailureMemberShape
->(bindingFailure)
+const intrinsicContractOrigin = (() => {
+  const span = SourceSpan.fromOffsets('$intrinsic-contract', 0, 0)
+  if (span === undefined) throw new RangeError('intrinsic contract span is invalid')
+  return span
+})()
+const bindingFailureRow = RowAlgebra.singleton(
+  Type.failureRowPolicy(),
+  Type.failureMemberShape(bindingFailure),
+  intrinsicContractOrigin,
+)
 const bindingRequirementRow = RowAlgebra.parameter<
   Type.Requirement,
   Type.Parameter,
@@ -357,28 +362,30 @@ const bindingContract = (mode: Constraint.ProviderMode): CallableContract.Callab
 const catchOwner = Object.freeze({ module: 'silk/core', name: '$CatchFailure' })
 const catchSelected = Type.parameter(catchOwner, 0, 'S')
 const catchSuccess = Type.parameter(catchOwner, 1, 'A')
-const catchProtectedFailure = Type.parameter(catchOwner, 2, 'E', 'FailureRow')
-const catchHandlerFailure = Type.parameter(catchOwner, 3, 'F', 'FailureRow')
-const catchProtectedRequirements = Type.parameter(catchOwner, 4, 'R', 'RequirementRow')
-const catchHandlerRequirements = Type.parameter(catchOwner, 5, 'Q', 'RequirementRow')
+const catchHandlerSuccess = Type.parameter(catchOwner, 2, 'B')
+const catchProtectedFailure = Type.parameter(catchOwner, 3, 'E')
+const catchHandlerFailure = Type.parameter(catchOwner, 4, 'F')
+const catchProtectedRequirements = Type.parameter(catchOwner, 5, 'R', 'RequirementRow')
+const catchHandlerRequirements = Type.parameter(catchOwner, 6, 'Q', 'RequirementRow')
 const catchTypeParameters = Object.freeze([
   catchSelected,
   catchSuccess,
+  catchHandlerSuccess,
   catchProtectedFailure,
   catchHandlerFailure,
   catchProtectedRequirements,
   catchHandlerRequirements,
 ])
-const catchProtectedFailureRow = RowAlgebra.parameter<
-  Type.Nominal,
-  Type.Parameter,
-  Type.FailureMemberShape
->(catchProtectedFailure)
-const catchHandlerFailureRow = RowAlgebra.parameter<
-  Type.Nominal,
-  Type.Parameter,
-  Type.FailureMemberShape
->(catchHandlerFailure)
+const catchProtectedFailureRow = RowAlgebra.singleton(
+  Type.failureRowPolicy(),
+  Type.failureMemberShape(catchProtectedFailure),
+  intrinsicContractOrigin,
+)
+const catchHandlerFailureRow = RowAlgebra.singleton(
+  Type.failureRowPolicy(),
+  Type.failureMemberShape(catchHandlerFailure),
+  intrinsicContractOrigin,
+)
 const catchProtectedRequirementRow = RowAlgebra.parameter<
   Type.Requirement,
   Type.Parameter,
@@ -389,11 +396,6 @@ const catchHandlerRequirementRow = RowAlgebra.parameter<
   Type.Parameter,
   Type.RequirementMemberShape
 >(catchHandlerRequirements)
-const intrinsicContractOrigin = (() => {
-  const span = SourceSpan.fromOffsets('$intrinsic-contract', 0, 0)
-  if (span === undefined) throw new RangeError('intrinsic contract span is invalid')
-  return span
-})()
 const suspensionFailureRow = RowAlgebra.singleton(
   Type.failureRowPolicy(),
   Type.failureMemberShape(suspensionFailure),
@@ -409,6 +411,9 @@ const catchSelectedRow = RowAlgebra.singleton(
   Type.failureMemberShape(catchSelected),
   intrinsicContractOrigin,
 )
+const catchJoinedSuccess = Type.union([catchSuccess, catchHandlerSuccess])
+if (catchJoinedSuccess._tag !== 'Normalized')
+  throw new RangeError('catch success parameters must form an ordinary union')
 const catchContract = CallableContract.make({
   functionKind: 'Effect',
   binders: catchTypeParameters,
@@ -426,7 +431,7 @@ const catchContract = CallableContract.make({
       type: Type.callable(
         Object.freeze([catchSelected]),
         Type.effectWithRows(
-          catchSuccess,
+          catchHandlerSuccess,
           catchHandlerFailureRow,
           'Shared',
           catchHandlerRequirementRow,
@@ -437,7 +442,7 @@ const catchContract = CallableContract.make({
     }),
   ]),
   result: Type.effectWithRows(
-    catchSuccess,
+    catchJoinedSuccess.type,
     RowAlgebra.union(
       Type.failureRowPolicy(),
       RowAlgebra.without(Type.failureRowPolicy(), catchProtectedFailureRow, catchSelectedRow),
@@ -450,7 +455,9 @@ const catchContract = CallableContract.make({
       catchHandlerRequirementRow,
     ),
   ),
-  constraints: Object.freeze([Constraint.nominalMember(catchSelected, catchProtectedFailureRow)]),
+  constraints: Object.freeze([
+    Constraint.failureSubset(catchSelectedRow, catchProtectedFailureRow),
+  ]),
 })
 const nativeTargets = Object.freeze<ReadonlyArray<ExecutionTarget>>(['Evaluator', 'LLVM'])
 const byteSlice = Type.slice('Shared', 'u8')
@@ -1190,13 +1197,13 @@ const intrinsicOperations = Object.freeze([
       operation: 'Result',
       typeParameters: Object.freeze([]),
       parameters: Object.freeze([valueParameter('protected', 'Effect<A ! E ? R>')]),
-      result: 'Effect<Result<A, Row<!E>> ? R>',
+      result: 'Effect<Result<A, E> ? R>',
     }),
     contractEffect({
       name: 'bindRequirement',
       post: 'BindRequirement',
       providerMode: 'Shared',
-      typeParameters: Object.freeze(['?S', 'A', 'P', '!E', '?R']),
+      typeParameters: Object.freeze(['?S', 'A', 'P', 'E', '?R']),
       parameters: Object.freeze([
         valueParameter('protected', 'once Effect<A ! E ? R>'),
         valueParameter('provider', '&P'),
@@ -1208,7 +1215,7 @@ const intrinsicOperations = Object.freeze([
       name: 'bindRequirementMut',
       post: 'BindRequirement',
       providerMode: 'Exclusive',
-      typeParameters: Object.freeze(['?S', 'A', 'P', '!E', '?R']),
+      typeParameters: Object.freeze(['?S', 'A', 'P', 'E', '?R']),
       parameters: Object.freeze([
         valueParameter('protected', 'once Effect<A ! E ? R>'),
         valueParameter('provider', '&mut P'),
@@ -1220,7 +1227,7 @@ const intrinsicOperations = Object.freeze([
       name: 'bindRequirementOwned',
       post: 'BindRequirement',
       providerMode: 'Take',
-      typeParameters: Object.freeze(['?S', 'A', 'P', '!E', '?R']),
+      typeParameters: Object.freeze(['?S', 'A', 'P', 'E', '?R']),
       parameters: Object.freeze([
         valueParameter('protected', 'once Effect<A ! E ? R>'),
         valueParameter('provider', 'P'),
@@ -1231,12 +1238,12 @@ const intrinsicOperations = Object.freeze([
     contractEffect({
       name: 'catchFailure',
       post: 'CatchFailure',
-      typeParameters: Object.freeze(['S', 'A', '!E', '!F', '?R', '?Q']),
+      typeParameters: Object.freeze(['S', 'A', 'B', 'E', 'F', '?R', '?Q']),
       parameters: Object.freeze([
         valueParameter('protected', 'once Effect<A ! E ? R>'),
-        valueParameter('handler', 'once fn(S) -> Effect<A ! F ? Q>'),
+        valueParameter('handler', 'once fn(S) -> Effect<B ! F ? Q>'),
       ]),
-      result: 'Effect<A ! Without<E, S> | F ? R | Q>',
+      result: 'Effect<A | B ! Without<E, S> | F ? R | Q>',
       contract: catchContract,
     }),
   ]),

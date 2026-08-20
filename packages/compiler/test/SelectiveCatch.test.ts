@@ -294,7 +294,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
 it.effect('forwards nominal-member evidence through an open generic wrapper', () =>
   Effect.gen(function* () {
     const self = yield* analyze(`${preamble}
-effect fn select<S, A, !E>(
+effect fn select<S, A, E>(
   self: once Effect<A ! E>,
   handler: once fn(S) -> Effect<A>
 ) -> A ! Without<E, S>
@@ -427,7 +427,7 @@ pub fn main() -> i32 { return (run completedLeft()) + (run completedRight()) }
 it.effect('deduplicates nested generic wrapper runners reached from multiple source calls', () =>
   Effect.gen(function* () {
     const self = yield* analyze(`${preamble}
-effect fn select<S, A, !E>(
+effect fn select<S, A, E>(
   self: once Effect<A ! E>,
   handler: once fn(S) -> Effect<A>
 ) -> A ! Without<E, S>
@@ -572,8 +572,7 @@ pub fn main() -> i32 { return 0 }`)
 
 for (const [name, selected, handler] of [
   ['empty selector', 'never', 'recoverNever'],
-  ['multi-member selector', 'A | B', 'recoverUnion'],
-  ['non-nominal selector', 'i32', 'recoverInteger'],
+  ['absent scalar selector', 'i32', 'recoverInteger'],
 ] as const) {
   it.effect(`rejects a ${name} before availability`, () =>
     Effect.gen(function* () {
@@ -591,10 +590,56 @@ pub fn main() -> i32 { return 0 }`)
   )
 }
 
+it.effect('accepts a nonempty selected failure union', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`${preamble}
+effect fn recoverUnion(problem: A | B) -> i32 { return 0 }
+effect fn recovered(flag: bool) -> i32 {
+  return run Effect.catch<A | B>(risky(flag), recoverUnion)
+}
+pub fn main() -> i32 { return run recovered(true) }`)
+    assert.deepEqual(codes(self), [])
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 0n)
+  }),
+)
+
+it.effect('joins different protected and handler success types as an ordinary union', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`import silk.effects as Effect
+struct ProblemError {}
+effect fn risky() -> i32 ! ProblemError { fail ProblemError {} }
+effect fn recover(problem: ProblemError) -> string { return "fallback" }
+pub fn main() -> i32 {
+  let recovered = run Effect.catchAll(risky(), recover)
+  drop recovered
+  return 0
+}`)
+    assert.deepEqual(codes(self), [])
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 0n)
+  }),
+)
+
+it.effect('carries an ordinary string directly through the failure channel', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`import silk.effects as Effect
+effect fn failText() -> i32 ! string { fail "oops" }
+effect fn recoverText(error: string) -> i32 { return 42 }
+pub fn main() -> i32 { return run Effect.catchAll(failText(), recoverText) }`)
+    assert.deepEqual(codes(self), [])
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
 it.effect('does not let nominal membership evidence discharge a failure by itself', () =>
   Effect.gen(function* () {
     const self = yield* analyze(`${preamble}
-effect fn lie<S, A, !E>(self: once Effect<A ! E>) -> A ! Without<E, S>
+effect fn lie<S, A, E>(self: once Effect<A ! E>) -> A ! Without<E, S>
 where S in E {
   return run self
 }

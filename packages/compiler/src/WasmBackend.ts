@@ -3635,7 +3635,7 @@ const emitOperation = (
         ...mapTag,
         ...failurePayload(
           source,
-          operation.sourceType.type,
+          Mir.semanticType(operation.sourceType),
           sourceTag,
           operation.propagationType.type,
           operation.tagMappings,

@@ -108,7 +108,7 @@ export type Representation =
       readonly _tag: 'Union'
       readonly tag: { readonly bits: 32; readonly size: 4 }
       readonly members: ReadonlyArray<{
-        readonly type: Type.Nominal
+        readonly type: Type.Type
         readonly ordinal: number
         readonly size: number
         readonly alignment: number
@@ -383,7 +383,7 @@ export type CallingShapeNode =
       readonly payloadTypes: ReadonlyArray<Type.Builtin>
       readonly zeroFill: true
       readonly members: ReadonlyArray<{
-        readonly member: Type.Nominal
+        readonly member: Type.Type
         readonly ordinal: number
         readonly shape: CallingShapeNode
         readonly payloadSlots: ReadonlyArray<number>
@@ -395,7 +395,7 @@ export type CallingShapeNode =
       readonly type: Type.Effect
       readonly success: CallingShapeNode
       readonly failures: ReadonlyArray<{
-        readonly type: Type.Nominal
+        readonly type: Type.Type
         readonly tag: number
         readonly shape: CallingShapeNode
       }>
@@ -425,7 +425,7 @@ export interface FailurePayloadLane {
 
 /** The exact lanes occupied by one failure member while it moves between carrier rows. */
 export interface FailurePayloadRepacking {
-  readonly member: Type.Nominal
+  readonly member: Type.Type
   readonly targetPayloadLanes: ReadonlyArray<CallingLane>
   readonly lanes: ReadonlyArray<FailurePayloadLane>
 }
@@ -1190,11 +1190,11 @@ export const catalog = (
     if (Type.isUnion(type)) {
       const members: Array<Entry> = []
       for (const member of type.members) {
-        const memberLayout = layoutNominal(member)
+        const memberLayout = layoutType(member)
         if (memberLayout._tag === 'UnavailableLayoutEntry') {
           const result = unavailable(
             type,
-            type.members,
+            Object.freeze(type.members.flatMap(Type.nominals)),
             { _tag: 'UnavailableDependency', dependency: member },
             memberLayout.cause,
           )
@@ -2913,7 +2913,7 @@ const fieldSlice = (
 /** Physical calling-lane slots for one logical member payload field path. */
 export const memberFieldSlots = (
   shape: CallingShape,
-  member: Type.Nominal,
+  member: Type.Type,
   path: ReadonlyArray<DeclarationIndex.FieldId>,
 ): ReadonlyArray<number> | undefined => {
   const selected =

@@ -3,9 +3,9 @@ import * as Type from './Type.js'
 /** One canonical source-member to target-member relationship for an implicit union conversion. */
 export interface MemberMapping {
   readonly _tag: 'UnionMemberMapping'
-  readonly source: Type.Nominal
+  readonly source: Type.Type
   readonly sourceOrdinal: number
-  readonly target: Type.Nominal
+  readonly target: Type.Type
   readonly targetOrdinal: number
 }
 
@@ -18,7 +18,7 @@ export type Compatibility =
     }
   | {
       readonly _tag: 'Inject'
-      readonly source: Type.Nominal
+      readonly source: Type.Type
       readonly target: Type.StructuralUnion
       readonly mappings: ReadonlyArray<MemberMapping>
     }
@@ -50,11 +50,10 @@ export type Compatibility =
       readonly missing: ReadonlyArray<Type.Type>
     }
 
-const sourceMembers = (source: Type.Type): ReadonlyArray<Type.Nominal> | undefined => {
+const sourceMembers = (source: Type.Type): ReadonlyArray<Type.Type> | undefined => {
   if (Type.isNever(source)) return Object.freeze([])
-  if (Type.isNominal(source)) return Object.freeze([source])
   if (Type.isUnion(source)) return source.members
-  return undefined
+  return Object.freeze([source])
 }
 
 /** Checks exact identity, nominal injection, or monotonic union widening without inference. */
@@ -144,7 +143,7 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
           ]
     }),
   )
-  if (Type.isNominal(source)) {
+  if (!Type.isUnion(source) && !Type.isNever(source)) {
     return Object.freeze({ _tag: 'Inject', source, target, mappings })
   }
   if (Type.isUnion(source) || Type.isNever(source)) {

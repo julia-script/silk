@@ -388,7 +388,7 @@ export type Expression =
   | {
       readonly _tag: 'UnionConvert'
       readonly source: Expression
-      readonly sourceType: Type.Nominal | Type.StructuralUnion | Type.Bottom | Type.Effect
+      readonly sourceType: Type.Type
       readonly target: Type.StructuralUnion | Type.Effect
       readonly conversion: 'Inject' | 'Widen' | 'EffectAccess'
       readonly mappings: ReadonlyArray<TypeCompatibility.MemberMapping>
@@ -790,7 +790,7 @@ export type Statement =
   | {
       readonly _tag: 'Fail'
       readonly expression: Expression
-      readonly failure: Type.Nominal | Type.FailureProjection
+      readonly failure: Type.Type
       readonly transfer: 'Copy' | 'Move'
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan

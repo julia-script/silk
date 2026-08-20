@@ -601,9 +601,7 @@ export type Operation =
       readonly _tag: 'ConvertUnion'
       readonly destination: LocalId
       readonly source: LocalId
-      readonly sourceType:
-        | Extract<Type, { readonly _tag: 'Nominal' }>
-        | Extract<Type, { readonly _tag: 'Union' }>
+      readonly sourceType: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
       readonly targetType: Extract<Type, { readonly _tag: 'Union' }>
       readonly conversion: 'Inject' | 'Widen'
       readonly mappings: ReadonlyArray<TypeCompatibility.MemberMapping>
@@ -689,9 +687,7 @@ export type Operation =
       /** Propagates one already-materialized failure through the enclosing Effect runner. */
       readonly _tag: 'PropagateEffectFailure'
       readonly source: LocalId
-      readonly sourceType:
-        | Extract<Type, { readonly _tag: 'Nominal' }>
-        | Extract<Type, { readonly _tag: 'Union' }>
+      readonly sourceType: Type
       readonly propagationType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly tagMappings: ReadonlyArray<{
         readonly source: number
@@ -830,7 +826,7 @@ export type Operation =
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly failures: ReadonlyArray<{
         readonly tag: number
-        readonly type: SilkType.Nominal
+        readonly type: SilkType.Type
         readonly report: string
         readonly payload: LocalId
         readonly cleanup: Ownership.CleanupPlan
@@ -946,10 +942,10 @@ export interface MatchBinding {
 
 export interface MatchArm {
   readonly id: Match.ArmId
-  readonly member?: SilkType.Nominal
+  readonly member?: SilkType.Type
   readonly universal: boolean
-  readonly before: ReadonlyArray<SilkType.Nominal>
-  readonly after: ReadonlyArray<SilkType.Nominal>
+  readonly before: ReadonlyArray<SilkType.Type>
+  readonly after: ReadonlyArray<SilkType.Type>
   readonly bindings: ReadonlyArray<MatchBinding>
   readonly guard?: {
     readonly operations: ReadonlyArray<Operation>
@@ -979,9 +975,9 @@ export interface MatchOperation {
     | Extract<Type, { readonly _tag: 'Union' }>
   readonly scrutineeShape: Layout.CallingShape
   readonly access: Match.Access
-  readonly members: ReadonlyArray<SilkType.Nominal>
+  readonly members: ReadonlyArray<SilkType.Type>
   readonly decisions: ReadonlyArray<{
-    readonly member: SilkType.Nominal
+    readonly member: SilkType.Type
     readonly candidates: ReadonlyArray<Match.ArmId>
   }>
   readonly arms: ReadonlyArray<MatchArm>
@@ -1305,7 +1301,7 @@ export type Entry =
       readonly requirements: ReadonlyArray<SilkType.Requirement>
       readonly failures: ReadonlyArray<{
         readonly tag: number
-        readonly type: SilkType.Nominal
+        readonly type: SilkType.Type
         readonly report: string
       }>
     }
@@ -2407,8 +2403,8 @@ const fieldPathType = (
 }
 
 const sameMembers = (
-  left: ReadonlyArray<SilkType.Nominal>,
-  right: ReadonlyArray<SilkType.Nominal>,
+  left: ReadonlyArray<SilkType.Type>,
+  right: ReadonlyArray<SilkType.Type>,
 ): boolean =>
   left.length === right.length &&
   left.every((member, ordinal) => {
@@ -5487,10 +5483,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         }
         if (operation._tag === 'PropagateEffectFailure') {
           const source = fn.localTypes.at(operation.source.ordinal)
-          const sourceMembers =
-            operation.sourceType._tag === 'Nominal'
-              ? Object.freeze([operation.sourceType.type])
-              : operation.sourceType.type.members
+          const semanticSource = semanticType(operation.sourceType)
+          const sourceMembers = SilkType.isUnion(semanticSource)
+            ? semanticSource.members
+            : Object.freeze([semanticSource])
           const propagationShape = Layout.callingShape(self.layout, operation.propagationType.type)
           const mappingsValid =
             operation.tagMappings.length === sourceMembers.length &&

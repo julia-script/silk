@@ -151,7 +151,7 @@ export type CleanupPlan =
       readonly _tag: 'UnionCleanup'
       readonly type: Type.StructuralUnion
       readonly cases: ReadonlyArray<{
-        readonly member: Type.Nominal
+        readonly member: Type.Type
         readonly ordinal: number
         readonly cleanup: CleanupPlan
       }>

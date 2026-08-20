@@ -334,7 +334,7 @@ type LinearOperation =
       readonly _tag: 'BindMatch'
       readonly scrutinee: Mir.LocalId
       readonly shape: Layout.CallingShape
-      readonly member: SilkType.Nominal
+      readonly member: SilkType.Type
       readonly binding: Mir.MatchBinding
       readonly provenance: Mir.Provenance
     }
@@ -596,7 +596,7 @@ const expandMatches = (
     )
 
     const candidateEntry = (
-      member: SilkType.Nominal,
+      member: SilkType.Type,
       candidates: ReadonlyArray<Match.ArmId>,
       ordinal: number,
     ): Mir.RegionId => {
@@ -7615,10 +7615,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       otherwise,
                     )
                     yield* LlvmBlock.setInsertionPoint(body, selected)
-                    const payloadLaneCount = lanesFor({
-                      _tag: 'Nominal',
-                      type: failure.type,
-                    }).length
+                    const payloadType = entry.fn.localTypes.at(failure.payload.ordinal)
+                    if (payloadType === undefined)
+                      throw new RangeError('Effect entry failure lost its payload type')
+                    const payloadLaneCount = lanesFor(payloadType).length
                     const payload = outcomeValues.slice(1, 1 + payloadLaneCount)
                     if (payload.length !== payloadLaneCount) {
                       throw new RangeError('Effect entry failure lost its typed payload lanes')
@@ -8012,7 +8012,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   mappedTag,
                   ...(yield* failurePayload(
                     source,
-                    terminator.sourceType.type,
+                    Mir.semanticType(terminator.sourceType),
                     sourceTag,
                     terminator.propagationType.type,
                     terminator.tagMappings,

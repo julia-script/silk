@@ -249,6 +249,7 @@ export const proveStructural = (
       if (
         selected._tag !== 'Concrete' ||
         source._tag !== 'Concrete' ||
+        selected.row.members.length === 0 ||
         selected.row.members.some((member) => !Type.isRuntimeConcrete(member)) ||
         source.row.members.some((member) => !Type.isRuntimeConcrete(member)) ||
         !FiniteRow.isSubset(Type.failureRowPolicy().finite, selected.row, source.row)

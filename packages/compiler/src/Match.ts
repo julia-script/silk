@@ -34,41 +34,47 @@ export interface BindingId {
 }
 
 /** One source decision reduced to the facts that affect coverage. */
-export interface Decision {
-  readonly member?: Type.Nominal
+export interface Decision<Member extends Type.Type = Type.Type> {
+  readonly member?: Member
   readonly universal: boolean
   readonly guarded: boolean
 }
 
 /** One arm's immutable canonical coverage transition. */
-export interface CoverageTransition {
-  readonly before: ReadonlyArray<Type.Nominal>
-  readonly after: ReadonlyArray<Type.Nominal>
+export interface CoverageTransition<Member extends Type.Type = Type.Type> {
+  readonly before: ReadonlyArray<Member>
+  readonly after: ReadonlyArray<Member>
   readonly reachable: boolean
 }
 
 /** Complete ordered coverage result for one nominal or structural-union scrutinee. */
-export interface Coverage {
-  readonly initial: ReadonlyArray<Type.Nominal>
-  readonly transitions: ReadonlyArray<CoverageTransition>
-  readonly missing: ReadonlyArray<Type.Nominal>
+export interface Coverage<Member extends Type.Type = Type.Type> {
+  readonly initial: ReadonlyArray<Member>
+  readonly transitions: ReadonlyArray<CoverageTransition<Member>>
+  readonly missing: ReadonlyArray<Member>
   readonly exhaustive: boolean
 }
 
-const contains = (members: ReadonlyArray<Type.Nominal>, member: Type.Nominal): boolean =>
-  members.some((candidate) => Type.equals(candidate, member))
+const contains = <Member extends Type.Type>(
+  members: ReadonlyArray<Member>,
+  member: Member,
+): boolean => members.some((candidate) => Type.equals(candidate, member))
 
 /** Returns the canonical matchable member set, or `undefined` for a non-nominal type. */
 export const membersOf = (type: Type.Type): ReadonlyArray<Type.Nominal> | undefined =>
-  Type.isNominal(type) ? Object.freeze([type]) : Type.isUnion(type) ? type.members : undefined
+  Type.isNominal(type)
+    ? Object.freeze([type])
+    : Type.isUnion(type) && type.members.every(Type.isNominal)
+      ? type.members
+      : undefined
 
 /** Folds source decisions over one canonical remaining-member set. */
-export const cover = (
-  initial: ReadonlyArray<Type.Nominal>,
-  decisions: ReadonlyArray<Decision>,
-): Coverage => {
-  let remaining = Object.freeze([...initial]) as ReadonlyArray<Type.Nominal>
-  const transitions: Array<CoverageTransition> = []
+export const cover = <Member extends Type.Type>(
+  initial: ReadonlyArray<Member>,
+  decisions: ReadonlyArray<Decision<Member>>,
+): Coverage<Member> => {
+  let remaining = Object.freeze([...initial]) as ReadonlyArray<Member>
+  const transitions: Array<CoverageTransition<Member>> = []
   for (const decision of decisions) {
     const before = remaining
     const reachable = decision.universal

@@ -129,7 +129,7 @@ export interface RequirementMemberShape {
   readonly role: string
 }
 
-export type FailureRow = RowAlgebra.Row<Nominal, Parameter, FailureMemberShape>
+export type FailureRow = RowAlgebra.Row<Type, Parameter, FailureMemberShape>
 export type RequirementsRow = RowAlgebra.Row<Requirement, Parameter, RequirementMemberShape>
 
 /** One normalized failure-row argument, which may forward an enclosing open row. */
@@ -366,11 +366,11 @@ export interface Effect {
   readonly access: 'Shared' | 'Exclusive' | 'Take'
 }
 
-/** One normalized structural union with at least two canonical nominal members. */
+/** One normalized structural union with at least two canonical ordinary members. */
 const structuralUnionBrand: unique symbol = Symbol('StructuralUnion')
 export interface StructuralUnion {
   readonly _tag: 'StructuralUnionType'
-  readonly members: ReadonlyArray<Nominal>
+  readonly members: ReadonlyArray<Type>
   readonly [structuralUnionBrand]: true
 }
 
@@ -455,7 +455,9 @@ export const result = (value: Type, error: Type): Nominal =>
   nominal('silk/result', 'Result', [value, error])
 
 /** Projects a closed normalized failure row to its ordinary runtime value sum. */
-export const failureValue = (failures: ReadonlyArray<Nominal>): Type => {
+export const failureValue = (failures: ReadonlyArray<Type>): Type => {
+  const only = failures.at(0)
+  if (failures.length === 1 && only !== undefined) return only
   const normalized = union(failures)
   return normalized._tag === 'Normalized' ? normalized.type : 'never'
 }
@@ -589,13 +591,13 @@ const implicitRowOrigin: SourceSpan.SourceSpan = (() => {
 /** Constructs one normalized compiler-private lazy effect contract. */
 export const effect = (
   success: Type,
-  failures: ReadonlyArray<Nominal>,
+  failures: ReadonlyArray<Type>,
   access: Effect['access'] = 'Shared',
   requirements: ReadonlyArray<Requirement> = [],
   failureParameters: ReadonlyArray<Parameter> = [],
   requirementParameters: ReadonlyArray<Parameter> = [],
 ): Effect => {
-  const normalized = FiniteRow.make<Nominal>(
+  const normalized = FiniteRow.make<Type>(
     {
       collisionKey: key,
       memberKey: key,
@@ -628,7 +630,7 @@ export const effect = (
       RowAlgebra.union(
         failureRowPolicy(),
         row,
-        RowAlgebra.parameter<Nominal, Parameter, FailureMemberShape>(parameter_),
+        RowAlgebra.parameter<Type, Parameter, FailureMemberShape>(parameter_),
       ),
     RowAlgebra.concrete(failureRowPolicy(), normalized.members),
   )
@@ -667,7 +669,7 @@ export const effect = (
 
 /** Symbolic failure-row domain policy. */
 export function failureRowPolicy(): RowAlgebra.Policy<
-  Nominal,
+  Type,
   Parameter,
   FailureMemberShape,
   Parameter
@@ -676,7 +678,7 @@ export function failureRowPolicy(): RowAlgebra.Policy<
     finite: Object.freeze({
       collisionKey: key,
       memberKey: key,
-      merge: (left: Nominal) => left,
+      merge: (left: Type) => left,
     }),
     concreteMemberMaySpecialize: typeMaySpecialize,
     rowParameterKey: key,
@@ -752,7 +754,7 @@ export const effectWithRows = (
 
 /** Constructs one normalized failure-row generic argument. */
 export const failureRowArgument = (
-  failures: ReadonlyArray<Nominal>,
+  failures: ReadonlyArray<Type>,
   parameters: ReadonlyArray<Parameter> = [],
 ): FailureRowArgument => {
   const row = parameters.reduce<FailureRow>(
@@ -760,7 +762,7 @@ export const failureRowArgument = (
       RowAlgebra.union(
         failureRowPolicy(),
         current,
-        RowAlgebra.parameter<Nominal, Parameter, FailureMemberShape>(parameter_),
+        RowAlgebra.parameter<Type, Parameter, FailureMemberShape>(parameter_),
       ),
     RowAlgebra.concrete(failureRowPolicy(), failures),
   )
@@ -801,20 +803,20 @@ export const requirementRowArgumentFromRow = (row: RequirementsRow): Requirement
 }
 
 /** Concrete members projected from one symbolic failure row. */
-export const failureMembers = (self: Effect | FailureRowArgument): ReadonlyArray<Nominal> =>
+export const failureMembers = (self: Effect | FailureRowArgument): ReadonlyArray<Type> =>
   RowAlgebra.concreteMembers(
     failureRowPolicy(),
     self._tag === 'EffectType' ? self.failureRow : self.row,
   )
 
-const isConcreteFailureCarrierMember = (self: Nominal): boolean => isRuntimeConcrete(self)
+const isConcreteFailureCarrierMember = (self: Type): boolean => isRuntimeConcrete(self)
 
 /** Selects one nominal member while enforcing the carrier's explicit runtime tag convention. */
 export const failureCarrierMember = (
   self: Type,
   tag: number,
   policy: FailureCarrierTagPolicy,
-): Nominal | undefined => {
+): Type | undefined => {
   if (!Number.isSafeInteger(tag)) return undefined
   const ordinal = policy === 'ZeroBased' ? tag : tag - 1
   if (ordinal < 0) return undefined
@@ -841,6 +843,22 @@ export const failureCarrierMember = (
 export const failureRowParameters = (self: Effect | FailureRowArgument): ReadonlyArray<Parameter> =>
   RowAlgebra.parameters(failureRowPolicy(), self._tag === 'EffectType' ? self.failureRow : self.row)
     .rows
+
+/** Ordinary type parameters used as symbolic members of one failure union. */
+export const failureMemberParameters = (
+  self: Effect | FailureRowArgument,
+): ReadonlyArray<Parameter> =>
+  RowAlgebra.parameters(failureRowPolicy(), self._tag === 'EffectType' ? self.failureRow : self.row)
+    .members
+
+/** Presents one failure union as the ordinary value type carried by its outcome channel. */
+export const failureType = (self: Effect | FailureRowArgument): Type => {
+  const concrete = failureMembers(self)
+  const symbolic = failureMemberParameters(self)
+  if (concrete.length === 0 && symbolic.length === 1) return symbolic[0] ?? 'never'
+  const normalized = union([...concrete, ...symbolic])
+  return normalized._tag === 'Normalized' ? normalized.type : 'never'
+}
 
 /** Concrete members projected from one symbolic requirement row. */
 export const requirementMembers = (
@@ -1301,26 +1319,26 @@ export const hashGenericArgument = (self: GenericArgument): number => {
   return hash >>> 0
 }
 
-/** Normalizes a finite union without permitting non-nominal leaves. */
+/** Normalizes a finite union of ordinary type leaves. */
 export const union = (inputs: ReadonlyArray<Type>): UnionNormalization => {
-  const members: Array<Nominal> = []
+  const members: Array<Type> = []
   const invalid: Array<Type> = []
   const visit = (input: Type): void => {
     if (input === 'never') return
-    if (isNominal(input)) {
-      members.push(input)
-      return
-    }
     if (isUnion(input)) {
       for (const member of input.members) visit(member)
       return
     }
-    invalid.push(input)
+    if (isRepresented(input) || isFailureProjection(input)) {
+      invalid.push(input)
+      return
+    }
+    members.push(input)
   }
   for (const input of inputs) visit(input)
   if (invalid.length > 0)
     return Object.freeze({ _tag: 'InvalidMembers', members: Object.freeze(invalid) })
-  const normalized = FiniteRow.make<Nominal>(
+  const normalized = FiniteRow.make<Type>(
     { collisionKey: key, memberKey: key, merge: (left) => left },
     members,
   ).members
@@ -2065,11 +2083,15 @@ export const encode = (self: Type): string => {
   }
   if (isRepresented(self)) return encode(self.contract)
   const someMember = self.members.find(
-    (member) =>
-      member.module === 'silk/option' && member.name === 'Some' && member.arguments.length === 1,
+    (member): member is Nominal =>
+      isNominal(member) &&
+      member.module === 'silk/option' &&
+      member.name === 'Some' &&
+      member.arguments.length === 1,
   )
   const noneMember = self.members.find(
-    (member) => member.module === 'silk/option' && member.name === 'None',
+    (member): member is Nominal =>
+      isNominal(member) && member.module === 'silk/option' && member.name === 'None',
   )
   const someArgument = someMember?.arguments.at(0)
   if (
@@ -2463,10 +2485,9 @@ export const containsPositionRestrictedBorrow = (self: Type): boolean => {
 export const specializeFailureRow = (
   self: FailureRow,
   substitution: Substitution,
-): RowAlgebra.SubstitutionResult<Nominal, Parameter, FailureMemberShape> => {
+): RowAlgebra.SubstitutionResult<Type, Parameter, FailureMemberShape> => {
   const concrete = RowAlgebra.mapConcreteMembers(failureRowPolicy(), self, (failure) => {
-    const replaced = substitute(failure, substitution)
-    return isNominal(replaced) ? replaced : failure
+    return substitute(failure, substitution)
   })
   const result = RowAlgebra.substitute(failureRowPolicy(), concrete, {
     row: (parameter_) => {
@@ -2477,20 +2498,20 @@ export const specializeFailureRow = (
     member: (member) => {
       const replacement = substitution.get(key(member.parameter))
       if (replacement === undefined) return Object.freeze({ _tag: 'Residual', member })
-      if (isTypeArgument(replacement) && isNominal(replacement))
-        return Object.freeze({ _tag: 'Concrete', member: replacement })
-      if (isTypeArgument(replacement) && isUnion(replacement))
-        return Object.freeze({ _tag: 'ConcreteRow', members: replacement.members })
-      if (isTypeArgument(replacement) && isNever(replacement))
-        return Object.freeze({ _tag: 'ConcreteRow', members: Object.freeze([]) })
       if (isTypeArgument(replacement) && isParameter(replacement) && replacement.kind === 'Value')
         return Object.freeze({
           _tag: 'Residual',
           member: failureMemberShape(replacement),
         })
+      if (isTypeArgument(replacement) && !isUnion(replacement) && !isNever(replacement))
+        return Object.freeze({ _tag: 'Concrete', member: replacement })
+      if (isTypeArgument(replacement) && isUnion(replacement))
+        return Object.freeze({ _tag: 'ConcreteRow', members: replacement.members })
+      if (isTypeArgument(replacement) && isNever(replacement))
+        return Object.freeze({ _tag: 'ConcreteRow', members: Object.freeze([]) })
       return Object.freeze({
         _tag: 'InvalidSingleton',
-        reason: `failure member ${member.parameter.name} did not specialize to one nominal`,
+        reason: `failure member ${member.parameter.name} did not specialize to an ordinary type`,
       })
     },
   })
