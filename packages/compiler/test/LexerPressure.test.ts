@@ -279,8 +279,8 @@ const quotaSourceFor = (input: string, id: string, quota: number): string => {
   const generated = sourceFor(input, id).source
   const withAllocator = replaceExactlyOnce(
     generated,
-    'impl Report for OutOfMemoryError {}',
-    `impl Report for OutOfMemoryError {}
+    'import silk.vector { Vector, make, append, get, length }',
+    `import silk.vector { Vector, make, append, get, length }
 
 struct QuotaAllocator { remaining: i32 }
 

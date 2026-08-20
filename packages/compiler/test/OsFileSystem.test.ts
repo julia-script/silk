@@ -89,8 +89,6 @@ it.effect(
 import silk.filesystem { DirectoryEntry, FileError, FileSystem, Path, root as pathRoot }
 import silk.vector { Vector }
 
-impl Report for OutOfMemoryError {}
-
 pub effect fn main() -> () ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("/tmp") |> Effect.provideMut(&mut allocator)
@@ -135,8 +133,6 @@ it.effect(
 import silk.bytes { asSlice as bytesSlice }
 import silk.filesystem { FileError, FileSystem, make as pathMake }
 import silk.result { Failure, Result, Success }
-
-impl Report for OutOfMemoryError {}
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
@@ -245,8 +241,6 @@ it.effect('retries oversized directory entries without advancing and sorts compl
 import silk.filesystem { DirectoryEntry, FileError, FileSystem, root as pathRoot, view as pathView }
 import silk.result { Failure, Result, Success }
 import silk.vector { asSlice as vectorSlice }
-
-impl Report for OutOfMemoryError {}
 
 fn pathMatches(entries: &[DirectoryEntry], index: usize, expected: string) -> bool {
   return match &entries[index] {
@@ -548,8 +542,6 @@ it.effect(
 import silk.bytes { asSlice as bytesSlice }
 import silk.filesystem { FileError, FileSystem, make as pathMake }
 import silk.result { Failure, Result, Success }
-
-impl Report for OutOfMemoryError {}
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()

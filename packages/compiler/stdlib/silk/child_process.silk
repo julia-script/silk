@@ -57,8 +57,6 @@ pub struct ProcessError {
   hasProviderCode: bool
 }
 
-impl Report for ProcessError {}
-
 /// Selects the start stage, which covers building the child and reaching its first instruction.
 pub fn spawnOperation() -> ProcessOperation { return ProcessOperation { code: 0 } }
 

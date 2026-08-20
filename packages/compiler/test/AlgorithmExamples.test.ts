@@ -229,7 +229,7 @@ it('keeps seven complete, readable programs and explicit status contracts', () =
     assert.strictEqual(manifest.blockers.length === 0, manifest.status === 'executable')
     if (manifest.id === 'breadth-first-search') {
       assert.include(source, 'import silk.vector')
-      assert.include(source, 'impl Report for OutOfMemoryError {}')
+      assert.notInclude(source, 'Report')
       assert.include(source, 'pub effect fn main() -> () ! OutOfMemoryError')
       assert.notInclude(source, 'Effect.catch')
       assert.notInclude(source, 'RawBuffer')

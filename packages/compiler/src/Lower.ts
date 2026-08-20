@@ -847,6 +847,13 @@ const effectEntryAdapterId = (module: string): DeclarationIndex.CanonicalId =>
     name: '$effect-entry',
   })
 
+const unitEntryAdapterId = (module: string): DeclarationIndex.CanonicalId =>
+  Object.freeze({
+    _tag: 'CanonicalDeclarationId',
+    module,
+    name: '$unit-entry',
+  })
+
 const baseRunnerKey = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): string =>
   `${instanceText(owner.declaration, owner.typeArguments)}\u0000${Hir.executableSiteKey(site)}`
 
@@ -7779,11 +7786,80 @@ export const lowerProgram = (
   const resolvedEntry = discovery.entry
   let entry: Mir.Entry
   if (resolvedEntry.kind === 'Ordinary') {
-    entry = Object.freeze({
-      _tag: 'OrdinaryEntry',
-      target: resolvedEntry.key,
-      machine: resolvedEntry.key,
-    })
+    if (resolvedEntry.result === 'Status') {
+      entry = Object.freeze({
+        _tag: 'OrdinaryEntry',
+        target: resolvedEntry.key,
+        machine: resolvedEntry.key,
+      })
+    } else {
+      const target = functions.find((fn) =>
+        Mir.matchesInstance(fn, resolvedEntry.key.declaration, resolvedEntry.key.typeArguments),
+      )
+      if (target === undefined) throw new RangeError('Unit entry lowering lost its target')
+      const span = target.regions
+        .flatMap((region) =>
+          region._tag === 'OperationRegion'
+            ? region.operations.map((operation) => operation.provenance.span)
+            : region._tag === 'CleanupRegion'
+              ? region.releases.map((operation) => operation.provenance.span)
+              : [region.provenance.span],
+        )
+        .at(0)
+      if (span === undefined) throw new RangeError('Unit entry lowering lost source provenance')
+      const adapterId = unitEntryAdapterId(discovery.rootModule)
+      const adapterKey: Instances.InstanceKey = Object.freeze({
+        _tag: 'InstanceKey',
+        declaration: adapterId,
+        typeArguments: Object.freeze([]),
+        contractRow: Object.freeze(['generated:unit-entry']),
+      })
+      functions.push(
+        Object.freeze({
+          _tag: 'MirFunction',
+          id: adapterId,
+          instance: adapterKey,
+          parameterCount: 0,
+          localTypes: Object.freeze([i32, target.result]),
+          result: i32,
+          entry: Object.freeze({ _tag: 'Region', ordinal: 0 }),
+          regions: Object.freeze([
+            Object.freeze({
+              _tag: 'OperationRegion' as const,
+              id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
+              operations: Object.freeze([
+                Object.freeze({
+                  _tag: 'Call' as const,
+                  destination: local(1),
+                  target: resolvedEntry.key.declaration,
+                  typeArguments: resolvedEntry.key.typeArguments,
+                  arguments: Object.freeze([]),
+                  type: target.result,
+                  provenance: generated(span),
+                }),
+                Object.freeze({
+                  _tag: 'Literal' as const,
+                  destination: local(0),
+                  type: i32,
+                  value: 0,
+                  provenance: generated(span),
+                }),
+              ]),
+              outcome: Object.freeze({
+                _tag: 'Return' as const,
+                value: local(0),
+                provenance: generated(span),
+              }),
+            }),
+          ]),
+        }),
+      )
+      entry = Object.freeze({
+        _tag: 'OrdinaryEntry',
+        target: resolvedEntry.key,
+        machine: adapterKey,
+      })
+    }
   } else {
     const target = functions.find(
       (fn) =>
@@ -7825,7 +7901,7 @@ export const lowerProgram = (
       Object.freeze({
         tag: ordinal + 1,
         type: failure.type,
-        report: failure.report,
+        report: failure.identity,
         payload: local(ordinal + 3),
         cleanup: Ownership.cleanupPlan(index, failure.type),
       }),
@@ -7884,7 +7960,7 @@ export const lowerProgram = (
       requirements: resolvedEntry.requirements,
       failures: Object.freeze(
         resolvedEntry.failures.map((failure, ordinal) =>
-          Object.freeze({ tag: ordinal + 1, type: failure.type, report: failure.report }),
+          Object.freeze({ tag: ordinal + 1, type: failure.type, report: failure.identity }),
         ),
       ),
     })

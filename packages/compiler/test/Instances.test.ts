@@ -159,6 +159,8 @@ pub fn main() -> i32 { return 42 }`),
       yield* snapshot('pub fn main(value: i32) -> i32 { return value }'),
     )
     const generic = Analysis.instancesOf(yield* snapshot('pub fn main<T>() -> i32 { return 42 }'))
+    const privateEntry = Analysis.instancesOf(yield* snapshot('fn main() -> () { return () }'))
+    const unitEntry = Analysis.instancesOf(yield* snapshot('pub fn main() -> () { return () }'))
     assert.deepEqual(
       reachable.instances.map((instance) => instance.key.declaration.name),
       ['main'],
@@ -166,14 +168,19 @@ pub fn main() -> i32 { return 42 }`),
     assert.deepEqual(missing.entry, { _tag: 'Unavailable', reason: 'MissingEntry' })
     assert.deepEqual(generic.entry, { _tag: 'Unavailable', reason: 'GenericEntry' })
     assert.deepEqual(parameterized.entry, { _tag: 'Unavailable', reason: 'ParameterizedEntry' })
+    assert.deepEqual(privateEntry.entry, { _tag: 'Unavailable', reason: 'PrivateEntry' })
+    assert.strictEqual(unitEntry.entry._tag, 'Resolved')
+    if (unitEntry.entry._tag === 'Resolved') {
+      assert.strictEqual(unitEntry.entry.kind, 'Ordinary')
+      if (unitEntry.entry.kind === 'Ordinary') assert.strictEqual(unitEntry.entry.result, 'Unit')
+    }
   }),
 )
 
-it.effect('resolves closed reportable effect entries and rejects invalid effect contracts', () =>
+it.effect('resolves closed effect entries and rejects invalid effect contracts', () =>
   Effect.gen(function* () {
     const resolved = Analysis.instancesOf(
       yield* snapshot(`struct SomeError { code: i32 }
-impl Report for SomeError {}
 pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
     )
     assert.strictEqual(resolved.entry._tag, 'Resolved')
@@ -183,7 +190,7 @@ pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
         assert.deepEqual(resolved.entry.failures, [
           {
             type: Type.nominal('golden/program', 'SomeError'),
-            report: 'golden/program.SomeError',
+            identity: 'golden/program.SomeError',
           },
         ])
       }
@@ -195,7 +202,7 @@ pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
     const requirements = Analysis.instancesOf(
       yield* snapshot('service Clock {}\npub effect fn main() -> () ? &mut Clock { return () }'),
     )
-    const unreportable = Analysis.instancesOf(
+    const ordinaryFailure = Analysis.instancesOf(
       yield* snapshot(`struct SomeError { code: i32 }
 pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
     )
@@ -206,11 +213,15 @@ pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
     assert.deepEqual(requirements.entry, {
       _tag: 'Unavailable',
       reason: 'EffectEntryRequirements',
+      requirements: [
+        {
+          access: 'Exclusive',
+          capability: Type.nominal('golden/program', 'Clock'),
+          role: 'DefaultRole',
+        },
+      ],
     })
-    assert.deepEqual(unreportable.entry, {
-      _tag: 'Unavailable',
-      reason: 'UnreportableEntryFailure',
-    })
+    assert.strictEqual(ordinaryFailure.entry._tag, 'Resolved')
   }),
 )
 
@@ -218,7 +229,6 @@ it.effect('discovers cleanup hooks owned by effect-entry failures', () =>
   Effect.gen(function* () {
     const discovery = Analysis.instancesOf(
       yield* snapshot(`struct SomeError { storage: RawBuffer<i32> }
-impl Report for SomeError {}
 impl Drop for SomeError {
   fn drop(self: &mut SomeError) -> () { return () }
 }
@@ -231,7 +241,7 @@ pub effect fn main() -> () ! SomeError {
     assert.strictEqual(discovery.entry._tag, 'Resolved')
     assert.deepEqual(
       discovery.instances.map((instance) => instance.key.declaration.name),
-      ['main', 'makeError', 'drop@impl#1'],
+      ['main', 'makeError', 'drop@impl#0'],
     )
   }),
 )

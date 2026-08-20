@@ -2,6 +2,7 @@ import type * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import type * as Driver from '@silk-effect/compiler/Driver'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import type * as SourceResolver from '@silk-effect/compiler/SourceResolver'
+import * as Type from '@silk-effect/compiler/Type'
 import type * as Path from 'effect/Path'
 import * as FileSourceResolver from './FileSourceResolver.js'
 
@@ -131,8 +132,8 @@ const toolchainFailure = (stage: string, failure: Driver.Failed['failure']): str
 }
 
 /** Explains why the root module offered no usable `main`, in terms a caller can act on. */
-const entryReason = (reason: Extract<Driver.NoEntry, { _tag: 'NoEntry' }>['reason']): string => {
-  switch (reason) {
+const entryReason = (entry: Driver.NoEntry): string => {
+  switch (entry.reason) {
     case 'MissingEntry':
       return 'the root module declares no `main`'
     case 'AmbiguousEntry':
@@ -141,16 +142,16 @@ const entryReason = (reason: Extract<Driver.NoEntry, { _tag: 'NoEntry' }>['reaso
       return '`main` must not declare type parameters'
     case 'ParameterizedEntry':
       return '`main` must take no parameters'
+    case 'PrivateEntry':
+      return '`main` must be public'
     case 'UntypedEntry':
       return '`main` must declare a resolved return type'
     case 'InvalidOrdinaryEntryResult':
-      return 'ordinary `main` must return `i32`'
+      return 'ordinary `main` must return `()` or `i32`'
     case 'InvalidEffectEntryResult':
       return 'effectful `main` must succeed with `()`'
     case 'EffectEntryRequirements':
-      return 'effectful `main` must have no unresolved capability requirements'
-    case 'UnreportableEntryFailure':
-      return 'every effectful `main` failure must conform to `Report`'
+      return `effectful \`main\` has unresolved dependencies: ${entry.requirements?.map(Type.encodeRequirement).join(', ') ?? 'unknown'}`
     case 'InvalidSource':
       return 'source diagnostics prevented entry discovery'
   }
@@ -174,7 +175,7 @@ export const outcome = (
       const rendered = diagnostics(self.diagnostics, sources)
       return [
         ...(rendered.length > 0 ? [rendered] : []),
-        `No entry point: ${entryReason(self.reason)}`,
+        `No entry point: ${entryReason(self)}`,
       ].join('\n')
     }
     case 'TargetFailed': {

@@ -228,7 +228,6 @@ const droppedHigherOrderEffectSource = `struct Payload { storage: Allocation }
 impl Drop for Payload {
   fn drop(self: &mut Payload) -> () { return () }
 }
-impl Report for OutOfMemoryError {}
 fn discard(self: once Effect<Payload>) -> () {
   drop self
   return ()

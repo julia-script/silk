@@ -414,8 +414,6 @@ export const allocation: Nominal = nominal('silk/core', 'Allocation')
 export const osHandle: Nominal = nominal('silk/core', 'OsHandle')
 /** Compiler-sealed cleanup capability used only by restricted impl declarations. */
 export const dropCapability: Nominal = nominal('silk/core', 'Drop')
-/** Compiler-sealed marker authorizing a canonical terminal failure report. */
-export const reportCapability: Nominal = nominal('silk/core', 'Report')
 /** The nominal system-backed implementation of the Allocator capability. */
 export const systemAllocator: Nominal = nominal('silk/core', 'SystemAllocator')
 /** The canonical empty success value used by effect-free cleanup operations. */
@@ -476,7 +474,6 @@ export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [allocation.name, allocation],
   [osHandle.name, osHandle],
   [dropCapability.name, dropCapability],
-  [reportCapability.name, reportCapability],
   ['RawBuffer', nominal('silk/core', 'RawBuffer')],
   ['Slot', nominal('silk/core', 'Slot')],
 ])
@@ -1952,6 +1949,10 @@ export const encode = (self: Type): string => {
     return `Option<${encode(someArgument)}>`
   return self.members.map(encode).join(' | ')
 }
+
+/** Renders one normalized requirement member with its access demand and optional nominal role. */
+export const encodeRequirement = (self: Requirement): string =>
+  `${self.access === 'Exclusive' ? '&mut ' : '&'}${encode(self.capability)}${self.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(self.role)}`}`
 
 /** One declaration named by an exact representation carried inside a type. */
 export interface ExactRepresentationDeclaration {

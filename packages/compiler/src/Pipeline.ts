@@ -26,6 +26,7 @@ import type * as SourceResolver from './SourceResolver.js'
 import * as SuspensionMir from './SuspensionMir.js'
 import * as SuspensionOwnership from './SuspensionOwnership.js'
 import * as Target from './Target.js'
+import type * as Type from './Type.js'
 
 /** Optional environment-specific observations attached to compiler phase reports. */
 export interface Options {
@@ -121,6 +122,7 @@ export type Preparation =
   | {
       readonly _tag: 'NoEntry'
       readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
+      readonly requirements?: ReadonlyArray<Type.Requirement>
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
       readonly report: ReadonlyArray<PhaseReport.PhaseReport>
     }
@@ -744,6 +746,9 @@ export const prepare = (
     return Object.freeze({
       _tag: 'NoEntry',
       reason: discovery.entry.reason,
+      ...(discovery.entry.requirements === undefined
+        ? {}
+        : { requirements: discovery.entry.requirements }),
       diagnostics,
       report: Object.freeze(report),
     })

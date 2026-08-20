@@ -93,8 +93,6 @@ pub struct FileError {
   hasProviderCode: bool
 }
 
-impl Report for FileError {}
-
 /// Selects the regular-file directory-entry kind.
 pub fn file() -> DirectoryEntryKind { return DirectoryEntryKind { code: 0 } }
 

@@ -158,7 +158,6 @@ import silk.result { Failure, Result, Success }
 import silk.string { InvalidUtf8 }
 import silk.vector { Vector, length as vectorLength, remove as vectorRemove }
 
-impl Report for OutOfMemoryError {}
 `
 
 const scriptedSource = (body: string) => `${preamble}

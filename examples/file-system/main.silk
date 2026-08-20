@@ -21,8 +21,6 @@ import silk.filesystem {
 import silk.bytes { Bytes, asSlice, copy }
 import silk.vector { Vector, make as vector }
 
-impl Report for OutOfMemoryError {}
-
 /// A tiny application-owned provider. Browser code could replace this with a virtual filesystem.
 struct MemoryFileSystem {
   bytes: [u8; 4]

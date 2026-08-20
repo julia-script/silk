@@ -1,8 +1,6 @@
 import silk.vector { Vector, make, append, get, length }
 import silk.logging { length as logLength }
 
-impl Report for OutOfMemoryError {}
-
 const opcodeHalt: u8 = 0
 const opcodePush: u8 = 1
 const opcodeAdd: u8 = 2

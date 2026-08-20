@@ -607,7 +607,6 @@ pub fn main() -> i32 { return run read() }`)
 it.effect('keeps ordinary Report conformance static and out of requirement rows', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`pub struct Problem {}
-impl Report for Problem {}
 pub effect fn main() -> () ! Problem { return () }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const entry = Analysis.instancesOf(self).entry

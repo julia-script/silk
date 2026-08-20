@@ -145,15 +145,20 @@ export interface IntrinsicCall {
   readonly span: Hir.Expression['span']
 }
 
-/** One normalized reportable failure retained by an effectful user entry. */
+/** One normalized owned failure retained by an effectful user entry. */
 export interface EntryFailure {
   readonly type: Type.Type
-  readonly report: string
+  readonly identity: string
 }
 
 /** The resolved or explicitly unavailable user entry. */
 export type Entry =
-  | { readonly _tag: 'Resolved'; readonly kind: 'Ordinary'; readonly key: InstanceKey }
+  | {
+      readonly _tag: 'Resolved'
+      readonly kind: 'Ordinary'
+      readonly result: 'Unit' | 'Status'
+      readonly key: InstanceKey
+    }
   | {
       readonly _tag: 'Resolved'
       readonly kind: 'Effect'
@@ -168,12 +173,13 @@ export type Entry =
         | 'AmbiguousEntry'
         | 'GenericEntry'
         | 'ParameterizedEntry'
+        | 'PrivateEntry'
         | 'UntypedEntry'
         | 'InvalidOrdinaryEntryResult'
         | 'InvalidEffectEntryResult'
         | 'EffectEntryRequirements'
-        | 'UnreportableEntryFailure'
         | 'InvalidSource'
+      readonly requirements?: ReadonlyArray<Type.Requirement>
     }
 
 /** The deterministic discovery result. */
@@ -1124,7 +1130,7 @@ export const matchingSpecialization = (
 export const effectIdentity = (owner: InstanceKey, site: Hir.EffectSiteId): string =>
   `${keyText(owner)}\u0004${Hir.executableSiteKey(site)}`
 
-const resolveEntry = (root: Elaboration.Result, index: DeclarationIndex.Index): Entry => {
+const resolveEntry = (root: Elaboration.Result): Entry => {
   const lookup = Elaboration.declarationByName(root, 'main')
   if (lookup._tag === 'Missing')
     return Object.freeze({ _tag: 'Unavailable', reason: 'MissingEntry' })
@@ -1138,8 +1144,10 @@ const resolveEntry = (root: Elaboration.Result, index: DeclarationIndex.Index): 
   if (declaration.parameterCount > 0) {
     return Object.freeze({ _tag: 'Unavailable', reason: 'ParameterizedEntry' })
   }
+  if (declaration.visibility !== 'Public') {
+    return Object.freeze({ _tag: 'Unavailable', reason: 'PrivateEntry' })
+  }
   if (
-    declaration.visibility !== 'Public' ||
     declaration.returnType._tag !== 'Resolved' ||
     declaration.canonical._tag !== 'Canonical' ||
     !declaration.failureRow.available ||
@@ -1151,13 +1159,15 @@ const resolveEntry = (root: Elaboration.Result, index: DeclarationIndex.Index): 
     if (
       declaration.failureRow.failures.length !== 0 ||
       declaration.requirementRow.requirements.length !== 0 ||
-      declaration.returnType.type !== 'i32'
+      (!Type.equals(declaration.returnType.type, Type.unit) &&
+        declaration.returnType.type !== 'i32')
     ) {
       return Object.freeze({ _tag: 'Unavailable', reason: 'InvalidOrdinaryEntryResult' })
     }
     return Object.freeze({
       _tag: 'Resolved',
       kind: 'Ordinary',
+      result: Type.equals(declaration.returnType.type, Type.unit) ? 'Unit' : 'Status',
       key: keyOf(declaration.canonical.id, Hir.contractOf(declaration)),
     })
   }
@@ -1165,14 +1175,11 @@ const resolveEntry = (root: Elaboration.Result, index: DeclarationIndex.Index): 
     return Object.freeze({ _tag: 'Unavailable', reason: 'InvalidEffectEntryResult' })
   }
   if (declaration.requirementRow.requirements.length > 0) {
-    return Object.freeze({ _tag: 'Unavailable', reason: 'EffectEntryRequirements' })
-  }
-  if (
-    declaration.failureRow.failures.some(
-      (failure) => !DeclarationIndex.conforms(index, failure, Type.reportCapability),
-    )
-  ) {
-    return Object.freeze({ _tag: 'Unavailable', reason: 'UnreportableEntryFailure' })
+    return Object.freeze({
+      _tag: 'Unavailable',
+      reason: 'EffectEntryRequirements',
+      requirements: Object.freeze(declaration.requirementRow.requirements),
+    })
   }
   return Object.freeze({
     _tag: 'Resolved',
@@ -1181,7 +1188,7 @@ const resolveEntry = (root: Elaboration.Result, index: DeclarationIndex.Index): 
     requirements: Object.freeze(declaration.requirementRow.requirements),
     failures: Object.freeze(
       declaration.failureRow.failures.map((failure) =>
-        Object.freeze({ type: failure, report: Type.encode(failure) }),
+        Object.freeze({ type: failure, identity: Type.encode(failure) }),
       ),
     ),
   })
@@ -2930,7 +2937,7 @@ export const discover = (
   if (root === undefined) {
     throw new RangeError(`Instance discovery lost its root module ${rootModule}`)
   }
-  const entry = resolveEntry(root, index)
+  const entry = resolveEntry(root)
   if (entry._tag !== 'Resolved') {
     return Object.freeze({
       _tag: 'InstanceDiscovery',

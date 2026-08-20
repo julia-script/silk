@@ -6668,18 +6668,6 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         continue
       }
 
-      if (Type.equals(capability, Type.reportCapability)) {
-        if (conformance.operations.length !== 0 || conformance.hook !== undefined) {
-          diagnostics.push(
-            invalidDiagnostic(
-              'Report is an operation-free marker capability',
-              conformance.syntax.span,
-            ),
-          )
-        }
-        continue
-      }
-
       diagnostics.push(
         invalidDiagnostic(
           `unsupported compiler-sealed capability ${Type.encode(capability)}`,
@@ -7477,11 +7465,7 @@ export const witness = (
         )
   const completeOperationSet =
     contract === undefined || operations.length === contract.operations.length
-  return Type.equals(capability, Type.dropCapability) ||
-    (completeContract && completeOperationSet) ||
-    (Type.equals(capability, Type.reportCapability) &&
-      conformance.operations.length === 0 &&
-      conformance.hook === undefined)
+  return Type.equals(capability, Type.dropCapability) || (completeContract && completeOperationSet)
     ? Object.freeze({
         _tag: 'SourceConformanceWitness',
         module: conformance.module,

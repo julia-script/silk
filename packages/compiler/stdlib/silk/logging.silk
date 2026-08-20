@@ -51,8 +51,6 @@ pub struct LogError {
   code: i32
 }
 
-impl Report for LogError {}
-
 /// Returns the provider-defined bootstrap failure code.
 pub fn errorCode(error: LogError) -> i32 { return error.code }
 

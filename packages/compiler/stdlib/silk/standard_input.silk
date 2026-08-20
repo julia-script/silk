@@ -20,8 +20,6 @@
 /// Failure to complete one standard-input read.
 pub struct StreamReadError {}
 
-impl Report for StreamReadError {}
-
 /// Constructs the typed failure of one host read that could not complete.
 pub fn readFailure() -> StreamReadError {
   return StreamReadError {}

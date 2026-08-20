@@ -1,7 +1,5 @@
 import silk.vector { Vector, make, append, get, length }
 
-impl Report for OutOfMemoryError {}
-
 const asciiSpace: u8 = 32
 const asciiTab: u8 = 9
 const asciiLineFeed: u8 = 10

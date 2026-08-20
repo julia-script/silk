@@ -13,6 +13,7 @@ import * as SourceFile from './SourceFile.js'
 import type * as SourceResolver from './SourceResolver.js'
 import * as Target from './Target.js'
 import * as ToolchainPlan from './ToolchainPlan.js'
+import type * as Type from './Type.js'
 
 /**
  * The end-to-end compiler driver: one orchestration path from a compilation request to a durable
@@ -62,6 +63,7 @@ export interface Compiled {
 export interface NoEntry {
   readonly _tag: 'NoEntry'
   readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
+  readonly requirements?: ReadonlyArray<Type.Requirement>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<PhaseReport>
 }
@@ -156,6 +158,9 @@ export const compile = Effect.fn('Driver.compile')(function* (
     return Object.freeze({
       _tag: 'NoEntry',
       reason: preparation.reason,
+      ...(preparation.requirements === undefined
+        ? {}
+        : { requirements: preparation.requirements }),
       diagnostics: preparation.diagnostics,
       report: Object.freeze([...report]),
     })

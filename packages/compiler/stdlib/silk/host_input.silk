@@ -31,8 +31,6 @@ import silk.vector { Vector, append as vectorAppend, make as vectorMake }
 /// Failure to complete one host-input lookup.
 pub struct HostInputError {}
 
-impl Report for HostInputError {}
-
 /// Constructs the typed failure of one host lookup that could not complete.
 pub fn inputFailure() -> HostInputError {
   return HostInputError {}

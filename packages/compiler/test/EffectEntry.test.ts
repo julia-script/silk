@@ -15,16 +15,12 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const failureSource = `pub struct SomeError { code: i32 }
-impl Report for SomeError {}
 pub effect fn main() -> () ! SomeError { fail SomeError { code: 42 } }`
 
 const successSource = `pub struct SomeError { code: i32 }
-impl Report for SomeError {}
 pub effect fn main() -> () ! SomeError { return () }`
 
 const cleanupSource = `pub struct SomeError { storage: Allocation }
-impl Report for SomeError {}
-impl Report for OutOfMemoryError {}
 impl Drop for SomeError {
   fn drop(self: &mut SomeError) -> () { return () }
 }
@@ -37,7 +33,6 @@ pub effect fn main() -> () ! SomeError | OutOfMemoryError {
 }`
 
 const evaluateOrderingSource = `pub struct SomeError {}
-impl Report for SomeError {}
 pub effect fn main() -> () ! SomeError {
   let mut counter = 0
   run effect { counter = counter + 1 return () }
@@ -48,8 +43,6 @@ pub effect fn main() -> () ! SomeError {
 
 const evaluateFailureSource = `pub struct SomeError {}
 pub struct Guard { storage: Allocation }
-impl Report for SomeError {}
-impl Report for OutOfMemoryError {}
 impl Drop for Guard {
   fn drop(self: &mut Guard) -> () { return () }
 }
@@ -80,6 +73,32 @@ pub effect fn main() -> () {
 
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-effect-entry-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
+
+it.effect('maps an ordinary unit entry to status zero on every engine', () =>
+  Effect.gen(function* () {
+    const source = 'pub fn main() -> () { return () }'
+    const logical = yield* Analysis.ofSourceRealized(
+      'entry/ordinary-unit',
+      ascii(source),
+      'aarch64-apple-darwin',
+    )
+    const wasm = yield* Analysis.ofSourceRealized(
+      'entry/ordinary-unit',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(logical), [])
+    const evaluated = Analysis.evaluate(logical)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 0n)
+
+    const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    const main = instance.exports.silk_main
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 0)
+  }),
+)
 
 it.effect('runs an effect entry once and retains deterministic unhandled-failure data', () =>
   Effect.gen(function* () {
@@ -170,7 +189,7 @@ it.effect('runs the selected failure payload cleanup before exposing its tag', (
     assert.strictEqual(outcome._tag, 'UnhandledFailure')
     assert.include(
       outcome.trace.flatMap((event) => (event._tag === 'Call' ? [event.target.name] : [])),
-      'drop@impl#2',
+      'drop@impl#0',
     )
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
@@ -207,7 +226,7 @@ it.effect('executes Evaluate effects in order and halts on failure across every 
       if (name === 'evaluate-failure') {
         assert.strictEqual(
           evaluated.trace.filter(
-            (event) => event._tag === 'Call' && event.target.name === 'drop@impl#2',
+            (event) => event._tag === 'Call' && event.target.name === 'drop@impl#0',
           ).length,
           1,
         )

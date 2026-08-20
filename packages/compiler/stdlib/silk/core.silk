@@ -46,8 +46,6 @@ impl Allocator for SystemAllocator {
 /// Failure to commit one complete stream message.
 pub struct StreamWriteError {}
 
-impl Report for StreamWriteError {}
-
 /// Portable complete-message output contract.
 pub service StandardStreams {
   /// Commits one complete immutable byte sequence to the selected destination.

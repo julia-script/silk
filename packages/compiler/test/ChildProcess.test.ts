@@ -96,7 +96,6 @@ import silk.filesystem { FileError, fromBytes as pathFromBytes }
 import silk.option { None, Option, Some }
 import silk.result { Failure, Result, Success }
 
-impl Report for OutOfMemoryError {}
 `
 
 /** Reports the program's own return value, or a distinct band for each typed failure it recovers. */

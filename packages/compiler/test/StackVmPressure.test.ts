@@ -207,8 +207,8 @@ const quotaSourceFor = (bytecode: ReadonlyArray<number>, quota: number): string 
   const generated = sourceFor(bytecode).source
   const withAllocator = replaceExactlyOnce(
     generated,
-    'impl Report for OutOfMemoryError {}',
-    `impl Report for OutOfMemoryError {}
+    'import silk.logging { length as logLength }',
+    `import silk.logging { length as logLength }
 
 struct QuotaAllocator { remaining: i32 }
 

@@ -1,7 +1,5 @@
 import silk.vector { Vector, make, append, get, length }
 
-impl Report for OutOfMemoryError {}
-
 struct QueueEntry {
   cell: usize
   distance: usize

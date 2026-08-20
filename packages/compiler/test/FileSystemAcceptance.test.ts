@@ -53,8 +53,6 @@ import silk.vector {
   make as vectorMake
 }
 
-impl Report for OutOfMemoryError {}
-
 struct MemoryFileSystem {
   contents: [u8; 4]
   fileExists: bool
@@ -247,8 +245,6 @@ it.effect('constructs and resolves normalized provider-absolute Paths', () =>
     const source = `import silk.filesystem { Path, isRoot, make, name, parent, resolve, root, view }
 import silk.option { None, Option, Some }
 import silk.result { Failure, Result, Success }
-impl Report for OutOfMemoryError {}
-
 fn matchesParent(possible: Option<Path>, expected: string) -> bool {
   return match move possible {
     None {} => false
@@ -314,8 +310,6 @@ pub fn main() -> i32 {
 
 it.effect('rejects malformed paths and lexical root escape before service provision', () => {
   const source = `import silk.filesystem { FileError, joinUtf8, make, resolve }
-
-impl Report for OutOfMemoryError {}
 
 effect fn construct(value: string) -> bool ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
@@ -439,7 +433,6 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const source = `import silk.filesystem { FileError, FileSystem, root }
-impl Report for OutOfMemoryError {}
 pub effect fn main() -> i32 ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
   let path = run root()
   let info = run FileSystem.stat(&path)

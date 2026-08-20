@@ -38,8 +38,6 @@ import silk.filesystem {
 }
 import silk.result { Failure, Result, Success }
 
-impl Report for OutOfMemoryError {}
-
 struct Sentinel { code: i32 }
 
 /// Work that fails, so the finalizer's run is observable on the failure path rather than assumed.

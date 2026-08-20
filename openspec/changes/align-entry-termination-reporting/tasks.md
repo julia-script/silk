@@ -1,9 +1,9 @@
 ## 1. Entry contracts
 
-- [ ] 1.1 Replace entry discovery with the confirmed public ordinary `()`, ordinary `i32`, and closed effectful unit shapes.
-- [ ] 1.2 Diagnose private entry, invalid return, typed failure openness, and every unresolved requirement at the semantic boundary.
+- [x] 1.1 Replace entry discovery with the confirmed public ordinary `()`, ordinary `i32`, and closed effectful unit shapes.
+- [x] 1.2 Diagnose private entry, invalid return, typed failure openness, and every unresolved requirement at the semantic boundary.
 - [ ] 1.3 Remove `Report` declarations, conformance exceptions, entry gates, generated docs assumptions, tests, and wording.
-- [ ] 1.4 Implement zero, one, and ordinary custom-status mappings exactly.
+- [x] 1.4 Implement zero, one, and ordinary custom-status mappings exactly.
 
 ## 2. Structured termination
 
