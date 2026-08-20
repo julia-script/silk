@@ -13,7 +13,7 @@ const binder = (
 
 it('infers type, row, callable, and Effect representation binders in declaration order', () => {
   const value = binder(0, 'T')
-  const failures = binder(1, 'E', 'FailureRow')
+  const failures = binder(1, 'E')
   const requirements = binder(2, 'R', 'RequirementRow')
   const callableBound = Type.callable(['i32'], 'bool')
   const representation = binder(3, 'F', 'CallableRepresentation', callableBound)
@@ -50,7 +50,7 @@ it('infers type, row, callable, and Effect representation binders in declaration
       }),
       Object.freeze({
         label: 'rows',
-        pattern: Type.effect('bool', [], 'Shared', [], [failures], [requirements]),
+        pattern: Type.effect('bool', [failures], 'Shared', [], [requirements]),
         actual: Type.effect('bool', [decodeError], 'Shared', [
           Object.freeze({ capability: clock, role: 'DefaultRole', access: 'Shared' }),
         ]),
@@ -62,7 +62,7 @@ it('infers type, row, callable, and Effect representation binders in declaration
   if (inference._tag !== 'Inferred') return
   assert.deepEqual(inference.arguments.map(Type.genericArgumentKey), [
     Type.key('i32'),
-    Type.genericArgumentKey(Type.failureRowArgument([decodeError])),
+    Type.genericArgumentKey(Type.failureValue([decodeError])),
     Type.genericArgumentKey(
       Type.requirementRowArgument([
         Object.freeze({ capability: clock, role: 'DefaultRole', access: 'Shared' }),

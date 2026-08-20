@@ -846,8 +846,7 @@ const carriedSectionArgument = (argument: Type.GenericArgument): Type.GenericArg
   if (Type.isRuntimeConcrete(argument)) return argument
   const closure = new Map<string, Type.GenericArgument>()
   for (const binder of argument.schema.binders) {
-    if (binder.kind === 'FailureRow') closure.set(Type.key(binder), Type.failureRowArgument([]))
-    else if (binder.kind === 'RequirementRow')
+    if (binder.kind === 'RequirementRow')
       closure.set(Type.key(binder), Type.requirementRowArgument([]))
   }
   if (closure.size === 0) return argument

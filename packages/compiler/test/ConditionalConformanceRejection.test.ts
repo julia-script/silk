@@ -107,7 +107,7 @@ struct Problem { code: i32 }
 
 impl Marker<Effect<i32 ! Problem>> for Effect<i32 ! Problem> {}
 
-impl<!E> Marker<Effect<i32 ! E>> for Effect<i32 ! E> {}
+impl<E> Marker<Effect<i32 ! E>> for Effect<i32 ! E> {}
 
 pub fn main() -> i32 { return 0 }`,
     )

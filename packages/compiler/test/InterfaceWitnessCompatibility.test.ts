@@ -7,7 +7,7 @@ const decodeError = Type.nominal('test', 'DecodeError')
 const extraError = Type.nominal('test', 'ExtraError')
 const clock = Type.nominal('test', 'Clock')
 const logger = Type.nominal('test', 'Logger')
-const failureParameter = Type.parameter({ module: 'test', name: 'Contract' }, 0, 'E', 'FailureRow')
+const failureParameter = Type.parameter({ module: 'test', name: 'Contract' }, 0, 'E')
 const requirementParameter = Type.parameter(
   { module: 'test', name: 'Contract' },
   1,
@@ -225,7 +225,7 @@ it('subsumes open rows only when the witness forwards parameters promised by the
     _tag: 'Compatible',
   })
 
-  const unknownFailure = Type.parameter({ module: 'test', name: 'Witness' }, 0, 'F', 'FailureRow')
+  const unknownFailure = Type.parameter({ module: 'test', name: 'Witness' }, 0, 'F')
   const failureCompatibility = InterfaceWitnessCompatibility.check(
     openContract,
     Object.freeze({

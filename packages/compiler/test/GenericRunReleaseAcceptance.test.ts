@@ -35,7 +35,7 @@ effect fn openClock() -> Clock ! OutOfMemory {
  */
 const generic = `${provider}
 
-effect fn holding<A, !E>(self: once Effect<A ! E>, held: once Clock) -> A ! E {
+effect fn holding<A, E>(self: once Effect<A ! E>, held: once Clock) -> A ! E {
   let value = run move self
   drop move held
   return move value

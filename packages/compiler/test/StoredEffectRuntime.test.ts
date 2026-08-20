@@ -282,8 +282,8 @@ type CleanupExit = 'unrun' | 'failure'
 const cleanupProgram = (exit: CleanupExit): string => `struct Problem { code: i32 }
 struct Guard { tag: i32 storage: Allocation }
 impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
-struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
-fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
+struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }
+fn defer<A, E, ?R, F: once Effect<A ! E ? R>>(
   operation: F
 ) -> Deferred<A, E, R, F> {
   return Deferred<A, E, R> { operation: move operation }
@@ -359,8 +359,8 @@ it.effect('cleans unrun and failing stored Effect environments exactly once', ()
 
 const suspending = `struct Guard { tag: i32 storage: Allocation }
 impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
-struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
-fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
+struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }
+fn defer<A, E, ?R, F: once Effect<A ! E ? R>>(
   operation: F
 ) -> Deferred<A, E, R, F> {
   return Deferred<A, E, R> { operation: move operation }

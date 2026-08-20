@@ -5266,7 +5266,7 @@
     },
     {
       "operation": "Intrinsic.effectResult",
-      "signature": "fn Intrinsic.effectResult(protected: Effect<A ! E ? R>) -> Effect<Result<A, Row<!E>> ? R>",
+      "signature": "fn Intrinsic.effectResult(protected: Effect<A ! E ? R>) -> Effect<Result<A, Row<E>> ? R>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.result",
@@ -5274,7 +5274,7 @@
     },
     {
       "operation": "Intrinsic.bindRequirement",
-      "signature": "fn Intrinsic.bindRequirement<?S, A, P, !E, ?R>(protected: once Effect<A ! E ? R>, provider: &P) -> Effect<A ! E ? Without<R, S>>",
+      "signature": "fn Intrinsic.bindRequirement<?S, A, P, E, ?R>(protected: once Effect<A ! E ? R>, provider: &P) -> Effect<A ! E ? Without<R, S>>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.bindRequirement",
@@ -5282,7 +5282,7 @@
     },
     {
       "operation": "Intrinsic.bindRequirementMut",
-      "signature": "fn Intrinsic.bindRequirementMut<?S, A, P, !E, ?R>(protected: once Effect<A ! E ? R>, provider: &mut P) -> Effect<A ! E ? Without<R, S>>",
+      "signature": "fn Intrinsic.bindRequirementMut<?S, A, P, E, ?R>(protected: once Effect<A ! E ? R>, provider: &mut P) -> Effect<A ! E ? Without<R, S>>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.bindRequirementMut",
@@ -5290,7 +5290,7 @@
     },
     {
       "operation": "Intrinsic.bindRequirementOwned",
-      "signature": "fn Intrinsic.bindRequirementOwned<?S, A, P, !E, ?R>(protected: once Effect<A ! E ? R>, provider: P) -> Effect<A ! E ? Without<R, S>>",
+      "signature": "fn Intrinsic.bindRequirementOwned<?S, A, P, E, ?R>(protected: once Effect<A ! E ? R>, provider: P) -> Effect<A ! E ? Without<R, S>>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.bindRequirementOwned",
@@ -5298,7 +5298,7 @@
     },
     {
       "operation": "Intrinsic.catchFailure",
-      "signature": "fn Intrinsic.catchFailure<S, A, !E, !F, ?R, ?Q>(protected: once Effect<A ! E ? R>, handler: once fn(S) -> Effect<A ! F ? Q>) -> Effect<A ! Without<E, S> | F ? R | Q>",
+      "signature": "fn Intrinsic.catchFailure<S, A, E, F, ?R, ?Q>(protected: once Effect<A ! E ? R>, handler: once fn(S) -> Effect<A ! F ? Q>) -> Effect<A ! Without<E, S> | F ? R | Q>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.catchFailure",

@@ -10,7 +10,7 @@
 //! forward and preserve the other arm without inventing a runtime failure-row descriptor.
 
 // Canonical completed typed outcome data. Failure rows project to ordinary value sums through
-// Row<! E>; Result itself remains ordinary source-defined data with no runtime row descriptor.
+// E directly; Result itself remains ordinary source-defined data with no runtime row descriptor.
 
 /// The successful member of a completed outcome.
 pub struct Success<A> {

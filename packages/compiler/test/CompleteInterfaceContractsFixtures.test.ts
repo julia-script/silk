@@ -57,7 +57,7 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       assert.deepEqual(syntax.parserDiagnostics, [])
       const first = yield* Formatter.format(syntax)
       const text = decoder.decode(FormattedDocument.toUint8Array(first))
-      assert.include(text, 'pub interface Decoder<S, Arguments, A, !E, ?R>')
+      assert.include(text, 'pub interface Decoder<S, Arguments, A, E, ?R>')
       assert.include(text, 'effect fn decode(self: &S, encoded: Arguments) -> A ! E ? R')
       const second = yield* Formatter.format(
         Parser.parse(

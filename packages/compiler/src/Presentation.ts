@@ -79,7 +79,7 @@ const constraints = (facts: ReadonlyArray<DeclarationIndex.ConstraintFact>): str
 
 const typeParameterName = (parameter: DeclarationIndex.TypeParameterFact): string => {
   const name = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
-  return `${parameter.type.kind === 'FailureRow' ? '!' : parameter.type.kind === 'RequirementRow' ? '?' : ''}${name}`
+  return `${parameter.type.kind === 'RequirementRow' ? '?' : ''}${name}`
 }
 
 /** Renders a declaration in its source-level callable form. */
@@ -180,12 +180,7 @@ export const parameter = (self: DeclarationIndex.ParameterFact): Presentation =>
 
 export const typeParameter = (self: DeclarationIndex.TypeParameterFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : self.type.name
-  const kind =
-    self.type.kind === 'FailureRow'
-      ? 'failure row'
-      : self.type.kind === 'RequirementRow'
-        ? 'requirement row'
-        : 'type'
+  const kind = self.type.kind === 'RequirementRow' ? 'requirement row' : 'type'
   return Object.freeze({ _tag: 'TypeParameterPresentation', name, text: `${kind} ${name}` })
 }
 
@@ -245,7 +240,6 @@ export const type = (
       : `${base}<${self.arguments.map((argument) => genericArgument(argument, module, scope)).join(', ')}>`
   }
   if (Type.isParameter(self)) return self.name
-  if (Type.isFailureProjection(self)) return `Row<! ${self.parameter.name}>`
   if (Type.isFixedArray(self)) return `Array<${type(self.element, module, scope)}, ${self.length}>`
   if (Type.isSlice(self))
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}[${type(self.element, module, scope)}]`
@@ -298,27 +292,17 @@ export const genericArgument = (
             ? `effect@${self.identity}`
             : Type.isCallableIdentityArgument(self)
               ? `callable@${self.identity}`
-              : Type.isFailureRowArgument(self)
-                ? `! ${
-                    RowAlgebra.encode(
-                      Type.failureRowPolicy(),
-                      self.row,
-                      (failure) => type(failure, module, scope),
-                      (parameter_) => parameter_.name,
-                      (member) => member.parameter.name,
-                    ) || 'never'
-                  }`
-                : Type.isRequirementRowArgument(self)
-                  ? `? ${RowAlgebra.encode(
-                      Type.requirementRowPolicy(),
-                      self.row,
-                      (requirement) =>
-                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
-                      (parameter_) => parameter_.name,
-                      (member) =>
-                        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === 'DefaultRole' ? '' : `@${member.role}`}`,
-                    )}`
-                  : type(self, module, scope)
+              : Type.isRequirementRowArgument(self)
+                ? `? ${RowAlgebra.encode(
+                    Type.requirementRowPolicy(),
+                    self.row,
+                    (requirement) =>
+                      `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+                    (parameter_) => parameter_.name,
+                    (member) =>
+                      `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === 'DefaultRole' ? '' : `@${member.role}`}`,
+                  )}`
+                : type(self, module, scope)
 
 export const binding = (
   self: Elaboration.BindingDeclarationFact,

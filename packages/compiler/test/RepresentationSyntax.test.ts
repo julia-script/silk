@@ -36,7 +36,7 @@ it.effect('parses and formats callable and Effect representation parameter bound
   Effect.gen(function* () {
     const source = `pub struct Mapper<A,B,F:fn(A)->B>{transform:F}
 pub struct Shared<A,F:Effect<A>>{operation:F}
-pub struct Deferred<A,!E,?R,F:once Effect<A!E?R>>{operation:F}
+pub struct Deferred<A,E,?R,F:once Effect<A!E?R>>{operation:F}
 pub struct Exclusive<A,F:mut Effect<A>>{operation:F}`
     const syntax = parse('representation-syntax/positive', source)
     const parameters = descendants(syntax.root).filter(
@@ -70,7 +70,7 @@ pub struct Shared<A, F: Effect<A>> {
   operation: F
 }
 
-pub struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> {
+pub struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> {
   operation: F
 }
 
@@ -87,7 +87,7 @@ it.effect('indexes ordered representation kinds, bounds, and represented field u
     const analyzed = yield* index(
       'representation-syntax/indexed',
       `pub struct Mapper<A, B, F: fn(A) -> B> { transform: F }
-pub struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }`,
+pub struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }`,
     )
     const [mapper, deferred] = analyzed.modules.at(0)?.structs ?? []
 
@@ -97,7 +97,7 @@ pub struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }`,
     )
     assert.deepEqual(
       deferred?.typeParameters.map((parameter) => parameter.type.kind),
-      ['Value', 'FailureRow', 'RequirementRow', 'EffectRepresentation'],
+      ['Value', 'Value', 'RequirementRow', 'EffectRepresentation'],
     )
     assert.strictEqual(mapper?.typeParameters.at(2)?.representationBound?.kind, 'Callable')
     assert.strictEqual(deferred?.typeParameters.at(3)?.representationBound?.kind, 'Effect')
@@ -119,8 +119,8 @@ it.effect('forwards every open generic kind through one ordered nominal applicat
   Effect.gen(function* () {
     const analyzed = yield* index(
       'representation-syntax/kinded-application',
-      `struct Inner<A, !E, ?R, F: fn(A) -> A> { value: A operation: F }
-struct Outer<A, !E, ?R, F: fn(A) -> A> { inner: Inner<A, E, R, F> }`,
+      `struct Inner<A, E, ?R, F: fn(A) -> A> { value: A operation: F }
+struct Outer<A, E, ?R, F: fn(A) -> A> { inner: Inner<A, E, R, F> }`,
     )
     const outer = analyzed.modules.at(0)?.structs.at(1)
     const field = outer?.fields.at(0)?.declaredType
@@ -128,7 +128,7 @@ struct Outer<A, !E, ?R, F: fn(A) -> A> { inner: Inner<A, E, R, F> }`,
     assert.strictEqual(field?._tag, 'Resolved')
     if (field?._tag !== 'Resolved' || !Type.isNominal(field.type)) return
     assert.strictEqual(Type.isTypeArgument(field.type.arguments.at(0) ?? Type.unit), true)
-    assert.strictEqual(Type.isFailureRowArgument(field.type.arguments.at(1) ?? Type.unit), true)
+    assert.strictEqual(Type.isTypeArgument(field.type.arguments.at(1) ?? Type.unit), true)
     assert.strictEqual(Type.isRequirementRowArgument(field.type.arguments.at(2) ?? Type.unit), true)
     assert.strictEqual(
       Type.isRepresentationParameterArgument(field.type.arguments.at(3) ?? Type.unit),
@@ -192,11 +192,11 @@ struct Next { value: i32 }`,
       'representation-syntax/negative',
       `struct Duplicate<F, F: fn(i32) -> i32> { value: i32 }
 struct Unbound<F: fn(Missing) -> i32> { value: i32 }
-struct Wrong<!E, F: fn(E) -> i32> { value: i32 }
+struct Wrong<E, F: fn(E) -> i32> { value: i32 }
 struct ValueBox<T> { value: T }
 struct WrongUse<A, F: fn(A) -> A> { value: ValueBox<F> }
-struct RowBox<!E> {}
-struct WrongRow<A, !E> { value: RowBox<A> }`,
+struct RowBox<E> {}
+struct WrongRow<A, E> { value: RowBox<A> }`,
     )
     assert.deepEqual(
       analyzed.diagnostics.map((diagnostic) => ({
@@ -206,8 +206,6 @@ struct WrongRow<A, !E> { value: RowBox<A> }`,
       [
         { code: 'SEM0050', reason: 'DuplicateTypeParameter' },
         { code: 'SEM0001', reason: 'UnknownType' },
-        { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
-        { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
         { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
       ],
     )
@@ -232,13 +230,13 @@ it.effect('presents forwarded failure and requirement row parameters', () =>
     const analyzed = yield* index(
       'representation-syntax/row-presentation',
       `service Console {}
-fn forward<!E, ?R>() -> i32 ! E ? R { return 0 }`,
+fn forward<E, ?R>() -> i32 ! E ? R { return 0 }`,
     )
     const declaration = analyzed.modules.at(0)?.declarations.at(0)
 
     assert.strictEqual(
       declaration === undefined ? undefined : Presentation.functionDeclaration(declaration).text,
-      'fn forward<!E, ?R>() -> i32 ! E ? R',
+      'fn forward<E, ?R>() -> i32 ! E ? R',
     )
   }),
 )

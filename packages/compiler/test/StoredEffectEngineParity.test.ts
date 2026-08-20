@@ -547,8 +547,8 @@ impl Drop for Guard {
     }
   }
 }
-struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
-fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
+struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }
+fn defer<A, E, ?R, F: once Effect<A ! E ? R>>(
   operation: F
 ) -> Deferred<A, E, R, F> {
   return Deferred<A, E, R> { operation: move operation }

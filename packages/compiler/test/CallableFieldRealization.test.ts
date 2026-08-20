@@ -397,7 +397,7 @@ pub fn main() -> i32 {
       const contract = Type.effect('i32', [failure], 'Take', [requirement])
       const arguments_ = Object.freeze([
         Type.nominal('effect-field/row-evidence', 'Marker'),
-        Type.failureRowArgument([failure]),
+        Type.failureValue([failure]),
         Type.requirementRowArgument([requirement]),
       ])
       const support = CallableFieldRealization.realizeField(

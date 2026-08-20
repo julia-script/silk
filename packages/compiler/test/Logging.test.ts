@@ -318,7 +318,7 @@ it.effect('forwards provider-selection evidence only from an exact enclosing con
     const wrapper = (constraint: string) => `import silk.effects as Effect
 import silk.logging { Logger, LogError }
 
-effect fn bind<?S, A, P, !E, ?R>(
+effect fn bind<?S, A, P, E, ?R>(
   self: once Effect<A ! E ? R>,
   provider: &mut P
 ) -> A ! E ? Without<R, S>
@@ -520,7 +520,7 @@ pub fn main() -> i32 {
   let consumed = consume(Effect.provideMut<&mut Logger>(&mut logger))
   return 42
 }`,
-        `fn invoke<A, !E, ?R, F: fn(once Effect<A ! E ? R>) -> Effect<A ! E>>(operation: F, value: once Effect<A ! E ? R>) -> Effect<A ! E> {
+        `fn invoke<A, E, ?R, F: fn(once Effect<A ! E ? R>) -> Effect<A ! E>>(operation: F, value: once Effect<A ! E ? R>) -> Effect<A ! E> {
   return operation(move value)
 }
 pub fn main() -> i32 {

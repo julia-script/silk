@@ -2124,7 +2124,6 @@ export const cleanupPlan = (
   if (Type.isString(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
-  if (Type.isFailureProjection(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isSlice(type) || Type.isReference(type))
     return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })

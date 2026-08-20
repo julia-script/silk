@@ -614,7 +614,7 @@ export type Reason =
   | {
       readonly _tag: 'InvalidOpaqueResultBinder'
       readonly binder: string
-      readonly actual: 'Value' | 'FailureRow' | 'RequirementRow'
+      readonly actual: 'Value' | 'RequirementRow'
     }
   | { readonly _tag: 'MissingOpaqueRealization'; readonly family: string }
   | {
@@ -811,13 +811,11 @@ export type Reason =
       readonly spelling: string
       readonly expected:
         | 'Value'
-        | 'FailureRow'
         | 'RequirementRow'
         | 'CallableRepresentation'
         | 'EffectRepresentation'
       readonly actual:
         | 'Value'
-        | 'FailureRow'
         | 'RequirementRow'
         | 'CallableRepresentation'
         | 'EffectRepresentation'
@@ -2125,7 +2123,7 @@ export const inlineOpaqueLayoutCycle = (
 /** Rejects an opaque result binder whose bound is not a callable or Effect representation. */
 export const invalidOpaqueResultBinder = (
   binder: string,
-  actual: 'Value' | 'FailureRow' | 'RequirementRow',
+  actual: 'Value' | 'RequirementRow',
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
@@ -2701,18 +2699,8 @@ export const duplicateTypeParameter = (
 
 export const genericParameterKindMismatch = (
   spelling: string,
-  expected:
-    | 'Value'
-    | 'FailureRow'
-    | 'RequirementRow'
-    | 'CallableRepresentation'
-    | 'EffectRepresentation',
-  actual:
-    | 'Value'
-    | 'FailureRow'
-    | 'RequirementRow'
-    | 'CallableRepresentation'
-    | 'EffectRepresentation',
+  expected: 'Value' | 'RequirementRow' | 'CallableRepresentation' | 'EffectRepresentation',
+  actual: 'Value' | 'RequirementRow' | 'CallableRepresentation' | 'EffectRepresentation',
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({

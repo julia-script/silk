@@ -479,12 +479,12 @@ effect fn work() -> i32
 
 it.effect('formats row differences and callable constraints idempotently', () =>
   Effect.gen(function* () {
-    const source = `effect fn bind<?S,A,P,!E,?R>(self:once Effect<A!E?R>,provider:&mut P)->A!E?Without<R,S> where &mut P provides S from R,S in R{return run self}`
+    const source = `effect fn bind<?S,A,P,E,?R>(self:once Effect<A!E?R>,provider:&mut P)->A!E?Without<R,S> where &mut P provides S from R,S in R{return run self}`
     const first = yield* Formatter.format(parse('memory://row-constraints.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
-      `effect fn bind<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A
+      `effect fn bind<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A
 ! E
 ? Without<R, S>
 where &mut P provides S from R, S in R {
@@ -499,7 +499,7 @@ where &mut P provides S from R, S in R {
 
 it.effect('preserves nested row-difference precedence and selected-row call prefixes', () =>
   Effect.gen(function* () {
-    const source = `effect fn transform<?S,A,P,!E,!F,?R,?Q>(self:once Effect<A!E|F?R|Q>,provider:&mut P)->A!Without<E|F,First|Third>?Without<R|Q,S> where &mut P provides S from R|Q{return run Intrinsic.bindRequirementMut<&mut Logger@Audit>(move self,provider)}`
+    const source = `effect fn transform<?S,A,P,E,F,?R,?Q>(self:once Effect<A!E|F?R|Q>,provider:&mut P)->A!Without<E|F,First|Third>?Without<R|Q,S> where &mut P provides S from R|Q{return run Intrinsic.bindRequirementMut<&mut Logger@Audit>(move self,provider)}`
     const first = yield* Formatter.format(parse('memory://nested-row-format.silk', source))
     const text = formattedText(first)
     assert.include(text, '! Without<E | F, First | Third>')
@@ -512,7 +512,7 @@ it.effect('preserves nested row-difference precedence and selected-row call pref
 
 it.effect('breaks long constraint lists after where with one constraint per line', () =>
   Effect.gen(function* () {
-    const source = `effect fn transform<S,P,A,!E,?R>(self:once Effect<A!E?R>,provider:&mut P)->A!E?R where SelectedCapability in ExtremelyLongRequirementRowParameter,&mut ExtremelyLongProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,&ExtremelyLongSharedProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,ExtremelyLongOwnedProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,AnotherSelectedCapability in ExtremelyLongRequirementRowParameter{return run self}`
+    const source = `effect fn transform<S,P,A,E,?R>(self:once Effect<A!E?R>,provider:&mut P)->A!E?R where SelectedCapability in ExtremelyLongRequirementRowParameter,&mut ExtremelyLongProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,&ExtremelyLongSharedProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,ExtremelyLongOwnedProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,AnotherSelectedCapability in ExtremelyLongRequirementRowParameter{return run self}`
     const first = yield* Formatter.format(parse('memory://long-where-format.silk', source))
     const text = formattedText(first)
     assert.include(

@@ -175,15 +175,15 @@ it.effect('accepts failure and requirement rows promised by a generic service he
   Effect.gen(function* () {
     const self = yield* snapshot(`interface Marker<T> { fn mark(value: T) -> i32 }
 
-service Counter<!E, ?R, Value> {
+service Counter<E, ?R, Value> {
   effect fn get(value: &Value) -> i32 ! E ? R | &Counter<E, R, Value>
 }
 
-struct Fixed<S, !E, ?R> {}
-effect fn get<S: Marker, !E, ?R>(self: &Fixed<S, E, R>, value: &S) -> i32 ! E ? R {
+struct Fixed<S, E, ?R> {}
+effect fn get<S: Marker, E, ?R>(self: &Fixed<S, E, R>, value: &S) -> i32 ! E ? R {
   return 42
 }
-impl<S: Marker<S>, !E, ?R> Counter<E, R, S> for Fixed<S, E, R> { get: Fixed.get }
+impl<S: Marker<S>, E, ?R> Counter<E, R, S> for Fixed<S, E, R> { get: Fixed.get }
 
 pub fn main() -> i32 { return 0 }`)
     assert.deepEqual(

@@ -88,7 +88,6 @@ const decodeParameterKind = (value: unknown, context: string): Type.ParameterKin
   const kind = serializedString(value, context)
   if (
     kind !== 'Value' &&
-    kind !== 'FailureRow' &&
     kind !== 'RequirementRow' &&
     kind !== 'CallableRepresentation' &&
     kind !== 'EffectRepresentation'
@@ -328,13 +327,10 @@ const decodeFailureRow = (value: unknown): Type.FailureRow =>
   decodeRow(
     value,
     Type.failureRowPolicy(),
-    (member) => {
-      const type_ = decodeTypeNode(member)
-      if (!Type.isNominal(type_))
-        throw new InvalidModuleSurfaceEncoding('failure row member must be nominal')
-      return type_
+    decodeTypeNode,
+    () => {
+      throw new InvalidModuleSurfaceEncoding('failure rows cannot contain whole-row parameters')
     },
-    (parameter) => decodeParameterOfKind(parameter, 'FailureRow', 'failure row parameter'),
     (member) => {
       const encoded = serializedRecord(member, 'failure member')
       if (serializedTag(encoded, 'failure member') !== 'FailureMember')
@@ -385,12 +381,10 @@ const genericArgumentMatchesKind = (
     ? argument.expectedKind === kind
     : kind === 'Value'
       ? Type.isTypeArgument(argument)
-      : kind === 'FailureRow'
-        ? Type.isFailureRowArgument(argument)
-        : kind === 'RequirementRow'
-          ? Type.isRequirementRowArgument(argument)
-          : Type.isRepresentationArgument(argument) &&
-            Type.representationArgumentKind(argument) === kind
+      : kind === 'RequirementRow'
+        ? Type.isRequirementRowArgument(argument)
+        : Type.isRepresentationArgument(argument) &&
+          Type.representationArgumentKind(argument) === kind
 
 const decodeSubstitution = (
   value: unknown,
@@ -497,8 +491,6 @@ const decodeExecutableOwner = (value: unknown): Type.ExecutableSpecializationOwn
 }
 
 function encodeGenericArgumentNode(value: Type.GenericArgument): SerializedRecord {
-  if (Type.isFailureRowArgument(value))
-    return { tag: 'FailureRowArgument', row: encodeFailureRow(value.row) }
   if (Type.isRequirementRowArgument(value))
     return { tag: 'RequirementRowArgument', row: encodeRequirementRow(value.row) }
   if (Type.isEffectIdentityArgument(value))
@@ -546,8 +538,6 @@ function encodeGenericArgumentNode(value: Type.GenericArgument): SerializedRecor
 function decodeGenericArgumentNode(value: unknown): Type.GenericArgument {
   const encoded = serializedRecord(value, 'generic argument')
   switch (serializedTag(encoded, 'generic argument')) {
-    case 'FailureRowArgument':
-      return Type.failureRowArgumentFromRow(decodeFailureRow(encoded.row))
     case 'RequirementRowArgument':
       return Type.requirementRowArgumentFromRow(decodeRequirementRow(encoded.row))
     case 'EffectIdentityArgument':
@@ -710,8 +700,6 @@ function encodeTypeNode(value: Type.Type): unknown {
       arguments: value.arguments.map(encodeGenericArgumentNode),
     }
   if (Type.isParameter(value)) return encodeParameter(value)
-  if (Type.isFailureProjection(value))
-    return { tag: 'FailureProjection', parameter: encodeParameter(value.parameter) }
   if (Type.isFixedArray(value))
     return { tag: 'FixedArray', element: encodeTypeNode(value.element), length: value.length }
   if (Type.isSlice(value))
@@ -872,10 +860,6 @@ function decodeTypeNode(value: unknown): Type.Type {
       )
     case 'Parameter':
       return decodeParameterOfKind(encoded, 'Value', 'ordinary type parameter')
-    case 'FailureProjection':
-      return Type.failureProjection(
-        decodeParameterOfKind(encoded.parameter, 'FailureRow', 'failure projection parameter'),
-      )
     case 'FixedArray':
       return Type.fixedArray(
         decodeTypeNode(encoded.element),
@@ -1452,14 +1436,6 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
       return record('AppliedType', [
         declaredType(value.target),
         array(value.arguments.map(declaredType)),
-        optional(
-          value.failureRow === undefined
-            ? undefined
-            : record('FailureRowArgument', [
-                array(value.failureRow.failures.map(declaredType)),
-                array(value.failureRow.parameters.map(type)),
-              ]),
-        ),
         optional(
           value.requirementRow === undefined
             ? undefined

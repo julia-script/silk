@@ -422,12 +422,12 @@ it.effect('resolves callable parameter and result contracts canonically', () =>
   }),
 )
 
-it.effect('indexes value, failure-row, and requirement-row binders as distinct kinds', () =>
+it.effect('indexes failure payloads as values and requirements as row binders', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
       [
         'root',
-        'effect fn transform<A, !E, ?R>(self: Effect<A ! E ? R>, value: A) -> Effect<A ! E ? R> ! E ? R { return self }',
+        'effect fn transform<A, E, ?R>(self: Effect<A ! E ? R>, value: A) -> Effect<A ! E ? R> ! E ? R { return self }',
       ],
     ])
     const declaration = index.modules.at(0)?.declarations.at(0)
@@ -439,14 +439,11 @@ it.effect('indexes value, failure-row, and requirement-row binders as distinct k
       })),
       [
         { name: 'A', kind: 'Value' },
-        { name: 'E', kind: 'FailureRow' },
+        { name: 'E', kind: 'Value' },
         { name: 'R', kind: 'RequirementRow' },
       ],
     )
-    assert.deepEqual(
-      declaration?.failureRow.parameters.map((parameter) => parameter.name),
-      ['E'],
-    )
+    assert.deepEqual(declaration?.failureRow.parameters, [])
     assert.deepEqual(
       declaration?.requirementRow.parameters.map((parameter) => parameter.name),
       ['R'],
@@ -463,7 +460,7 @@ it.effect('indexes value, failure-row, and requirement-row binders as distinct k
     ) {
       assert.deepEqual(
         [parameterEffect.type, returnEffect.type].map((effect) => ({
-          failures: Type.failureRowParameters(effect).map((parameter) => parameter.name),
+          failures: Type.failureMemberParameters(effect).map((parameter) => parameter.name),
           requirements: Type.requirementRowParameters(effect).map((parameter) => parameter.name),
         })),
         [
@@ -481,7 +478,7 @@ it.effect('diagnoses generic row binders used in the wrong channel and unbound r
     const index = yield* collect('root', [
       [
         'root',
-        `effect fn bad<!E, ?R>(left: E, right: R) -> E ! R ? E { return left }
+        `effect fn bad<E, ?R>(left: E, right: R) -> E ! R ? E { return left }
 effect fn unbound() -> i32 ? MissingRow { return 0 }`,
       ],
     ])
@@ -495,8 +492,6 @@ effect fn unbound() -> i32 ? MissingRow { return 0 }`,
         { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
         { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
         { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
-        { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
-        { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
         { code: 'SEM0001', reason: 'UnknownType' },
       ],
     )
@@ -506,7 +501,7 @@ effect fn unbound() -> i32 ? MissingRow { return 0 }`,
 it.effect('keeps cross-kind duplicate binders attached to the first canonical identity', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
-      ['root', 'effect fn duplicate<A, !A, ?A>(value: A) -> A { return value }'],
+      ['root', 'effect fn duplicate<A, A, ?A>(value: A) -> A { return value }'],
     ])
     const parameters = index.modules.at(0)?.declarations.at(0)?.typeParameters ?? []
 

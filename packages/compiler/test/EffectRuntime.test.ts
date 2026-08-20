@@ -190,7 +190,7 @@ pub fn main() -> i32 {
 const higherOrderEffectSource = `effect fn succeed(value: i32) -> i32 { return value }
 effect fn alternate(value: i32) -> i32 { return value }
 fn pass(self: once Effect<i32>) -> once Effect<i32> { return move self }
-fn specialize<A, !E, ?R>(self: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> { return move self }
+fn specialize<A, E, ?R>(self: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> { return move self }
 fn wrap(self: once Effect<i32>) -> once Effect<i32> {
   return effect { return run self }
 }

@@ -3,7 +3,7 @@ service Clock {}
 struct Schema {}
 struct Other {}
 
-interface Decoder<S, Arguments, A, !E, ?R> {
+interface Decoder<S, Arguments, A, E, ?R> {
   effect fn decode(self: &S, encoded: Arguments) -> A ! E ? R
 }
 

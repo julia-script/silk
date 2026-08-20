@@ -50,16 +50,16 @@ it('selects failure-carrier members only under their explicit tag convention', (
 
 it('refuses carrier tags whose member order can change after specialization', () => {
   const owner = Object.freeze({ module: 'types/failure-carrier', name: 'specialize' })
-  const failures = Type.parameter(owner, 0, 'E', 'FailureRow')
+  const failures = Type.parameter(owner, 0, 'E')
   const member = Type.parameter(owner, 1, 'T')
   const alpha = Type.nominal('types/failure-carrier', 'Alpha')
   const zed = Type.nominal('types/failure-carrier', 'Zed')
-  const openEffect = Type.effect('i32', [zed], 'Shared', [], [failures])
+  const openEffect = Type.effect('i32', [zed, failures])
 
   assert.isUndefined(Type.failureCarrierMember(openEffect, 1, 'OneBased'))
   const specializedEffect = Type.substitute(
     openEffect,
-    new Map([[Type.key(failures), Type.failureRowArgument([alpha])]]),
+    new Map([[Type.key(failures), Type.failureValue([alpha])]]),
   )
   const concreteEffect = Type.isEffect(specializedEffect)
     ? specializedEffect
@@ -132,7 +132,7 @@ it('refuses carrier tags whose member order can change after specialization', ()
   assert.isFalse(Type.isRuntimeConcrete(unavailableCallable))
   assert.isFalse(Type.isRuntimeConcrete(unavailableRepresentation))
   assert.isFalse(Type.isRuntimeConcreteGenericArgument(unavailableIdentity))
-  assert.isFalse(Type.isRuntimeConcreteGenericArgument(Type.failureRowArgument([unavailableOuter])))
+  assert.isFalse(Type.isRuntimeConcreteGenericArgument(Type.failureValue([unavailableOuter])))
   assert.isFalse(
     Type.isRuntimeConcreteGenericArgument(
       Type.requirementRowArgument([
@@ -328,17 +328,20 @@ it('finds generic nominal dependencies nested inside union members', () => {
   ])
 })
 
-it('collapses empty and singleton unions and rejects non-nominal leaves', () => {
+it('normalizes empty, singleton, scalar, and aggregate union members', () => {
   const token = Type.nominal('model/Token', 'Token')
   const empty = Type.union(['never'])
   const singleton = Type.union(['never', token, token])
-  const invalid = Type.union([token, 'i32', Type.fixedArray(token, 2)])
+  const aggregate = Type.union([token, 'i32', Type.fixedArray(token, 2)])
   assert.deepEqual(empty, { _tag: 'Normalized', type: 'never' })
   assert.strictEqual(singleton._tag, 'Normalized')
   if (singleton._tag === 'Normalized') assert.strictEqual(Type.equals(singleton.type, token), true)
-  assert.strictEqual(invalid._tag, 'InvalidMembers')
-  if (invalid._tag === 'InvalidMembers')
-    assert.deepEqual(invalid.members.map(Type.encode), ['i32', 'Array<model/Token.Token, 2>'])
+  assert.strictEqual(aggregate._tag, 'Normalized')
+  if (aggregate._tag === 'Normalized')
+    assert.strictEqual(
+      Type.encode(aggregate.type),
+      'Array<model/Token.Token, 2> | i32 | model/Token.Token',
+    )
 })
 
 it('normalizes compiler-private effect contract identity and traverses substitutions', () => {

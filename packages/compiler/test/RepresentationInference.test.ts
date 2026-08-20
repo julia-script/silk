@@ -301,8 +301,8 @@ fn wrong<F: fn(i32) -> i32>(parser: Parser<F>) -> Parser<F> {
 it('infers an omitted representation by declared kind across interleaved rows', () => {
   const result = analyze(
     'representation-inference/interleaved-kinds',
-    `struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
-fn make<A, !E, ?R, F: once Effect<A ! E ? R>>(
+    `struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }
+fn make<A, E, ?R, F: once Effect<A ! E ? R>>(
   operation: F
 ) -> Deferred<A, E, R, F> {
   return Deferred<A, E, R> { operation: move operation }
@@ -316,7 +316,7 @@ fn make<A, !E, ?R, F: once Effect<A ! E ? R>>(
   assert.strictEqual(Type.isNominal(returned.type.type), true)
   if (!Type.isNominal(returned.type.type)) return
   assert.strictEqual(Type.isTypeArgument(returned.type.type.arguments.at(0) ?? 'never'), true)
-  assert.strictEqual(Type.isFailureRowArgument(returned.type.type.arguments.at(1) ?? 'never'), true)
+  assert.strictEqual(Type.isTypeArgument(returned.type.type.arguments.at(1) ?? 'never'), true)
   assert.strictEqual(
     Type.isRequirementRowArgument(returned.type.type.arguments.at(2) ?? 'never'),
     true,

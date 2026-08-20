@@ -1231,14 +1231,6 @@ export const catalog = (
       completed.set(key, result)
       return result
     }
-    if (Type.isFailureProjection(type)) {
-      const result = unavailable(type, Object.freeze([]), {
-        _tag: 'InvalidDeclaration',
-        detail: 'open failure-row projections require concrete specialization before layout',
-      })
-      completed.set(key, result)
-      return result
-    }
     const element = layoutType(type.element)
     const dependencies = Object.freeze(Type.nominals(type.element))
     if (element._tag === 'UnavailableLayoutEntry') {
@@ -1797,13 +1789,11 @@ const effectEnvironments = (
             : fields.some((field) => field.access === 'Exclusive')
               ? 'Exclusive'
               : 'Shared'
-          effect = Type.effect(
+          effect = Type.effectWithRows(
             structuralEffect.success,
-            Type.failureMembers(structuralEffect),
+            structuralEffect.failureRow,
             access,
-            Type.requirementMembers(structuralEffect),
-            Type.failureRowParameters(structuralEffect),
-            Type.requirementRowParameters(structuralEffect),
+            structuralEffect.requirementRow,
           )
         }
         if (unavailable !== undefined) {
@@ -1896,13 +1886,11 @@ const effectEnvironments = (
           : fields.some((field) => field.access === 'Exclusive')
             ? 'Exclusive'
             : 'Shared'
-        const effect = Type.effect(
+        const effect = Type.effectWithRows(
           structuralEffect.success,
-          Type.failureMembers(structuralEffect),
+          structuralEffect.failureRow,
           access,
-          Type.requirementMembers(structuralEffect),
-          Type.failureRowParameters(structuralEffect),
-          Type.requirementRowParameters(structuralEffect),
+          structuralEffect.requirementRow,
         )
         if (unavailable !== undefined) {
           environments.push(
@@ -2348,9 +2336,6 @@ const shapeNode = (
   }
   if (Type.isParameter(type)) {
     throw new RangeError(`open generic parameter ${Type.encode(type)} has no calling shape`)
-  }
-  if (Type.isFailureProjection(type)) {
-    throw new RangeError(`open failure-row projection ${Type.encode(type)} has no calling shape`)
   }
   if (Type.isSlice(type)) {
     return Object.freeze({
@@ -3305,13 +3290,11 @@ const verifyEntry = (
               Type.isEffect(slot.type) &&
               Type.isEffect(field.type) &&
               Type.equals(
-                Type.effect(
+                Type.effectWithRows(
                   slot.type.success,
-                  Type.failureMembers(slot.type),
+                  slot.type.failureRow,
                   field.type.access,
-                  Type.requirementMembers(slot.type),
-                  Type.failureRowParameters(slot.type),
-                  Type.requirementRowParameters(slot.type),
+                  slot.type.requirementRow,
                 ),
                 field.type,
               ))

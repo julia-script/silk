@@ -153,10 +153,10 @@ it.effect('keeps malformed and unavailable header states deterministic without s
   }),
 )
 
-it.effect('distinguishes damaged applied row arguments in module surfaces', () =>
+it.effect('distinguishes damaged ordinary applied arguments in module surfaces', () =>
   Effect.gen(function* () {
-    const withFailure = (failure: string) => `pub struct Envelope<T, !E> {}
-pub fn inspect(value: Envelope<i32 ! ${failure}>) -> i32 { return 0 }`
+    const withFailure = (failure: string) => `pub struct Envelope<T, E> {}
+pub fn inspect(value: Envelope<i32, ${failure}>) -> i32 { return 0 }`
     const left = yield* surface(withFailure('MissingA'))
     const right = yield* surface(withFailure('MissingB'))
 
@@ -366,7 +366,7 @@ it.effect('validates canonical substitutions against their local parameter scope
       { module: 'surface/Substitution', name: 'rowCallable' },
       0,
       'Failures',
-      'FailureRow',
+      'RequirementRow',
     )
     const rowContract = CallableContract.make({
       functionKind: 'Function',
@@ -375,7 +375,7 @@ it.effect('validates canonical substitutions against their local parameter scope
       result: 'i32',
     })
     const rowSubstitution: Type.Substitution = new Map([
-      [Type.key(rowParameter), Type.failureRowArgument([])],
+      [Type.key(rowParameter), Type.requirementRowArgument([])],
     ])
     const rowCallable = Type.callable(['i32'], 'i32', 'Shared', {
       contract: rowContract,
@@ -555,11 +555,10 @@ it.effect('rejects parameter kinds and builtin operations forged into incompatib
     const noFailures = RowAlgebra.concrete(Type.failureRowPolicy(), [])
     const noRequirements = RowAlgebra.concrete(Type.requirementRowPolicy(), [])
     const valueParameter = Type.parameter(owner, 0, 'Value')
-    const failureParameter = Type.parameter(owner, 1, 'Failure', 'FailureRow')
+    const failureParameter = Type.parameter(owner, 1, 'Failure')
     const requirementParameter = Type.parameter(owner, 2, 'Requirements', 'RequirementRow')
     const callable = Type.callable([], Type.unit)
     const effect = Type.effect(Type.unit, [])
-    const invalidFailureMember = Type.failureMemberShape(failureParameter)
     const invalidRequirementMember = Type.requirementMemberShape(
       requirementParameter,
       'Exclusive',
@@ -599,17 +598,6 @@ it.effect('rejects parameter kinds and builtin operations forged into incompatib
         ),
       ],
       [
-        'failure lifted-member parameter',
-        ModuleSurface.encodeSemanticType(
-          Type.effectWithRows(
-            Type.unit,
-            RowAlgebra.singleton(Type.failureRowPolicy(), invalidFailureMember, origin),
-            'Take',
-            noRequirements,
-          ),
-        ),
-      ],
-      [
         'requirement lifted-member parameter',
         ModuleSurface.encodeSemanticType(
           Type.effectWithRows(
@@ -620,7 +608,6 @@ it.effect('rejects parameter kinds and builtin operations forged into incompatib
           ),
         ),
       ],
-      ['ordinary value parameter', ModuleSurface.encodeSemanticType(failureParameter)],
       [
         'representation parameter argument',
         ModuleSurface.encodeSemanticType(
@@ -950,13 +937,20 @@ it.effect('round-trips distinct witness identities and provider matches', () =>
 it.effect('rejects forged callable-schema brands and structural evidence', () =>
   Effect.gen(function* () {
     const owner = { module: 'surface/Forged', name: 'section' }
-    const selectedParameter = Type.parameter(owner, 0, 'S', 'FailureRow')
-    const sourceParameter = Type.parameter(owner, 1, 'R', 'FailureRow')
-    const selected = RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(
-      selectedParameter,
+    const origin =
+      SourceSpan.fromOffsets('surface/Forged', 0, 1) ??
+      unreachable('expected a valid forged-evidence source span')
+    const selectedParameter = Type.parameter(owner, 0, 'S')
+    const sourceParameter = Type.parameter(owner, 1, 'R')
+    const selected = RowAlgebra.singleton(
+      Type.failureRowPolicy(),
+      Type.failureMemberShape(selectedParameter),
+      origin,
     )
-    const source = RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(
-      sourceParameter,
+    const source = RowAlgebra.singleton(
+      Type.failureRowPolicy(),
+      Type.failureMemberShape(sourceParameter),
+      origin,
     )
     const wanted = Constraint.failureSubset(selected, source)
     const evidence = Constraint.assumed(wanted, new Map())

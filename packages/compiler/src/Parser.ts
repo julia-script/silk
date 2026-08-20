@@ -1740,11 +1740,7 @@ const parseTypeParameterList = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
 ): NodeResult => {
-  const parameterStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
-    'Identifier',
-    'Bang',
-    'Question',
-  ])
+  const parameterStarts: ReadonlyArray<Token.TokenKind> = Object.freeze(['Identifier', 'Question'])
   const left = expect(initial, 'Less', [...parameterStarts, 'Greater', ...following])
   let state = left.state
   let children: ReadonlyArray<SyntaxTree.Element> = left.elements
@@ -1760,7 +1756,7 @@ const parseTypeParameterList = (
   ) {
     const markerKind = nextSignificantKind(state)
     const marker =
-      markerKind === 'Bang' || markerKind === 'Question'
+      markerKind === 'Question'
         ? expect(state, markerKind, ['Identifier', 'Comma', 'Greater', ...following])
         : undefined
     const name = expect(marker?.state ?? state, 'Identifier', [

@@ -334,13 +334,10 @@ const isOpenArgument = (self: Type.GenericArgument): boolean =>
         ? Type.parameters(self.contract).length > 0 || isOpenArgument(self.identity)
         : Type.isCallableIdentityArgument(self)
           ? self.typeArguments.some(isOpenArgument)
-          : Type.isFailureRowArgument(self)
-            ? Type.failureRowParameters(self).length > 0 ||
-              Type.failureMembers(self).some((f) => Type.parameters(f).length > 0)
-            : Type.isRequirementRowArgument(self)
-              ? Type.requirementRowParameters(self).length > 0 ||
-                Type.requirementMembers(self).some((r) => Type.parameters(r.capability).length > 0)
-              : false)
+          : Type.isRequirementRowArgument(self)
+            ? Type.requirementRowParameters(self).length > 0 ||
+              Type.requirementMembers(self).some((r) => Type.parameters(r.capability).length > 0)
+            : false)
 
 const unifyArgument = (
   left: Type.GenericArgument,
@@ -353,12 +350,6 @@ const unifyArgument = (
   if (Type.isTypeArgument(left) && Type.isTypeArgument(right)) return unify(left, right, bindings)
   if (Type.isRepresentationArgument(left) && Type.isRepresentationArgument(right))
     return representationsMayOverlap(left, right)
-  if (Type.isFailureRowArgument(left) && Type.isFailureRowArgument(right)) {
-    // An open row stands for every extension of itself, and a closed row whose members still
-    // mention a binder stands for every instantiation of it.
-    if (isOpenArgument(left) || isOpenArgument(right)) return true
-    return Type.genericArgumentKey(left) === Type.genericArgumentKey(right)
-  }
   if (Type.isRequirementRowArgument(left) && Type.isRequirementRowArgument(right)) {
     if (isOpenArgument(left) || isOpenArgument(right)) return true
     if (Type.requirementMembers(left).length !== Type.requirementMembers(right).length) return false
@@ -426,11 +417,7 @@ const unify = (
   if (Type.isEffect(left) && Type.isEffect(right))
     return (
       unify(left.success, right.success, bindings) &&
-      unifyArgument(
-        Type.failureRowArgument(Type.failureMembers(left), Type.failureRowParameters(left)),
-        Type.failureRowArgument(Type.failureMembers(right), Type.failureRowParameters(right)),
-        bindings,
-      ) &&
+      unify(Type.failureType(left), Type.failureType(right), bindings) &&
       unifyArgument(
         Type.requirementRowArgument(
           Type.requirementMembers(left),
@@ -443,11 +430,8 @@ const unify = (
         bindings,
       )
     )
-  // A union has no canonical decomposition into cases, and a failure projection stands for
-  // whatever row it is instantiated with, so neither can be shown disjoint here. Both report
-  // overlap rather than leaving a coherence hole.
+  // A union has no canonical decomposition into cases, so it cannot be shown disjoint here.
   if (Type.isUnion(left) || Type.isUnion(right)) return true
-  if (Type.isFailureProjection(left) || Type.isFailureProjection(right)) return true
   return false
 }
 

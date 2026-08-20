@@ -2369,7 +2369,7 @@ pub fn after() -> i32 { return 2 }`
 })
 
 it('parses row difference and callable constraints as contextual syntax', () => {
-  const source = `effect fn bind<?S, A, P, !E, ?R>(
+  const source = `effect fn bind<?S, A, P, E, ?R>(
   self: once Effect<A ! E ? R>,
   provider: &mut P
 ) -> A ! E ? Without<R, S>
@@ -2396,7 +2396,7 @@ fn keywords(where: i32, provides: i32, from: i32, in: i32) -> i32 {
 })
 
 it('parses nested failure and requirement differences with union operands', () => {
-  const source = `effect fn transform<S, P, A, !E, ?R>(
+  const source = `effect fn transform<S, P, A, E, ?R>(
   self: once Effect<A ! E ? R>,
   provider: &mut P
 ) -> Effect<A ! Without<E, First | Third> ? Without<R, S>>
@@ -2417,7 +2417,7 @@ where First | Third in E, &mut P provides S from R {
 })
 
 it('bounds a missing provider source at its constraint', () => {
-  const source = `effect fn broken<?S, A, P, !E, ?R>(
+  const source = `effect fn broken<?S, A, P, E, ?R>(
   self: once Effect<A ! E ? R>,
   provider: &mut P
 ) -> A ! E ? Without<R, S>

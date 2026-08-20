@@ -1,6 +1,6 @@
 struct Problem {}
 
-interface Broken<S, !E> {
+interface Broken<S, E> {
   effect fn decode(
     self: &S,
     encoded: Missing,

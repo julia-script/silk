@@ -1,11 +1,11 @@
 struct Problem {}
 service Clock {}
 
-interface PrivateDecoder<S, A, !E, ?R> {
+interface PrivateDecoder<S, A, E, ?R> {
   effect fn decode(self: &S) -> A ! E ? R
 }
 
-pub interface PublicDecoder<S, A, !E, ?R> {
+pub interface PublicDecoder<S, A, E, ?R> {
   effect fn decode(self: &S) -> A ! E ? R
 }
 

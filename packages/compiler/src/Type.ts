@@ -27,7 +27,6 @@ export interface Nominal {
 /** One declaration-owned generic type parameter. Names are provenance, not identity. */
 export type ParameterKind =
   | 'Value'
-  | 'FailureRow'
   | 'RequirementRow'
   | 'CallableRepresentation'
   | 'EffectRepresentation'
@@ -42,12 +41,6 @@ export interface Parameter {
   readonly name: string
   readonly kind: ParameterKind
   readonly representationBound?: RepresentationBound
-}
-
-/** A compile-time projection of one failure row into its ordinary structural value sum. */
-export interface FailureProjection {
-  readonly _tag: 'FailureProjectionType'
-  readonly parameter: Parameter
 }
 
 /** One canonical inline fixed array whose length participates in structural identity. */
@@ -131,12 +124,6 @@ export interface RequirementMemberShape {
 
 export type FailureRow = RowAlgebra.Row<Type, Parameter, FailureMemberShape>
 export type RequirementsRow = RowAlgebra.Row<Requirement, Parameter, RequirementMemberShape>
-
-/** One normalized failure-row argument, which may forward an enclosing open row. */
-export interface FailureRowArgument {
-  readonly _tag: 'FailureRowArgument'
-  readonly row: FailureRow
-}
 
 /** One concrete normalized requirement-row argument supplied to a requirement-row parameter. */
 export interface RequirementRowArgument {
@@ -311,10 +298,9 @@ export interface Represented {
   readonly representation: RepresentationUse
 }
 
-/** One erased generic argument, including the two compiler-only contract-row kinds. */
+/** One erased generic argument, including the compiler-only requirement-row kind. */
 export type GenericArgument =
   | Type
-  | FailureRowArgument
   | RequirementRowArgument
   | EffectIdentityArgument
   | CallableIdentityArgument
@@ -384,7 +370,6 @@ export type Type =
   | Bottom
   | Nominal
   | Parameter
-  | FailureProjection
   | FixedArray
   | Slice
   | Reference
@@ -538,10 +523,6 @@ export const parameter = (
     ...(representationBound === undefined ? {} : { representationBound }),
   })
 
-/** Projects a failure-row parameter into the value type formed by its normalized members. */
-export const failureProjection = (parameter_: Parameter): FailureProjection =>
-  Object.freeze({ _tag: 'FailureProjectionType', parameter: parameter_ })
-
 /** Constructs one immutable canonical fixed-array type. */
 export const fixedArray = (element: Type, length: number): FixedArray =>
   Object.freeze({ _tag: 'FixedArrayType', element, length })
@@ -594,16 +575,25 @@ export const effect = (
   failures: ReadonlyArray<Type>,
   access: Effect['access'] = 'Shared',
   requirements: ReadonlyArray<Requirement> = [],
-  failureParameters: ReadonlyArray<Parameter> = [],
   requirementParameters: ReadonlyArray<Parameter> = [],
 ): Effect => {
+  const failureLeaves = failures.flatMap(
+    (failure): ReadonlyArray<Type> =>
+      isNever(failure) ? [] : isUnion(failure) ? failure.members : [failure],
+  )
+  const concreteFailures = failureLeaves.filter(
+    (failure) => !(isParameter(failure) && failure.kind === 'Value'),
+  )
+  const symbolicFailures = failureLeaves.filter(
+    (failure): failure is Parameter => isParameter(failure) && failure.kind === 'Value',
+  )
   const normalized = FiniteRow.make<Type>(
     {
       collisionKey: key,
       memberKey: key,
       merge: (left) => left,
     },
-    failures,
+    concreteFailures,
   )
   const concreteRequirements = requirements.filter((requirement) =>
     isNominal(requirement.capability),
@@ -615,22 +605,17 @@ export const effect = (
     RequirementRow.policy<Nominal | Parameter>(key),
     concreteRequirements,
   )
-  const normalizedFailureParameters = Object.freeze(
-    [
-      ...new Map(failureParameters.map((parameter_) => [key(parameter_), parameter_])).values(),
-    ].sort(compare),
-  )
   const normalizedRequirementParameters = Object.freeze(
     [
       ...new Map(requirementParameters.map((parameter_) => [key(parameter_), parameter_])).values(),
     ].sort(compare),
   )
-  const failureRow = normalizedFailureParameters.reduce<FailureRow>(
-    (row, parameter_) =>
+  const failureRow = symbolicFailures.reduce<FailureRow>(
+    (row, failure) =>
       RowAlgebra.union(
         failureRowPolicy(),
         row,
-        RowAlgebra.parameter<Type, Parameter, FailureMemberShape>(parameter_),
+        RowAlgebra.singleton(failureRowPolicy(), failureMemberShape(failure), implicitRowOrigin),
       ),
     RowAlgebra.concrete(failureRowPolicy(), normalized.members),
   )
@@ -739,42 +724,15 @@ export const effectWithRows = (
 ): Effect => {
   const concreteFailures = RowAlgebra.concretize(failureRowPolicy(), failureRow)
   const concreteRequirements = RowAlgebra.concretize(requirementRowPolicy(), requirementRow)
-  const failureParameters = RowAlgebra.parameters(failureRowPolicy(), failureRow).rows
   const requirementParameters = RowAlgebra.parameters(requirementRowPolicy(), requirementRow).rows
   const base = effect(
     success,
     concreteFailures._tag === 'Concrete' ? concreteFailures.row.members : [],
     access,
     concreteRequirements._tag === 'Concrete' ? concreteRequirements.row.members : [],
-    failureParameters,
     requirementParameters,
   )
   return Object.freeze({ ...base, failureRow, requirementRow })
-}
-
-/** Constructs one normalized failure-row generic argument. */
-export const failureRowArgument = (
-  failures: ReadonlyArray<Type>,
-  parameters: ReadonlyArray<Parameter> = [],
-): FailureRowArgument => {
-  const row = parameters.reduce<FailureRow>(
-    (current, parameter_) =>
-      RowAlgebra.union(
-        failureRowPolicy(),
-        current,
-        RowAlgebra.parameter<Type, Parameter, FailureMemberShape>(parameter_),
-      ),
-    RowAlgebra.concrete(failureRowPolicy(), failures),
-  )
-  return failureRowArgumentFromRow(row)
-}
-
-/** Constructs one failure-row argument without flattening computed row expressions. */
-export const failureRowArgumentFromRow = (row: FailureRow): FailureRowArgument => {
-  return Object.freeze({
-    _tag: 'FailureRowArgument',
-    row,
-  })
 }
 
 /** Constructs one normalized concrete requirement-row generic argument. */
@@ -803,11 +761,11 @@ export const requirementRowArgumentFromRow = (row: RequirementsRow): Requirement
 }
 
 /** Concrete members projected from one symbolic failure row. */
-export const failureMembers = (self: Effect | FailureRowArgument): ReadonlyArray<Type> =>
-  RowAlgebra.concreteMembers(
-    failureRowPolicy(),
-    self._tag === 'EffectType' ? self.failureRow : self.row,
-  )
+const failureRowOf = (self: Effect | FailureRow): FailureRow =>
+  'failureRow' in self ? self.failureRow : self
+
+export const failureMembers = (self: Effect | FailureRow): ReadonlyArray<Type> =>
+  RowAlgebra.concreteMembers(failureRowPolicy(), failureRowOf(self))
 
 const isConcreteFailureCarrierMember = (self: Type): boolean => isRuntimeConcrete(self)
 
@@ -840,19 +798,15 @@ export const failureCarrierMember = (
 }
 
 /** Whole-row parameters projected from one symbolic failure row. */
-export const failureRowParameters = (self: Effect | FailureRowArgument): ReadonlyArray<Parameter> =>
-  RowAlgebra.parameters(failureRowPolicy(), self._tag === 'EffectType' ? self.failureRow : self.row)
-    .rows
+export const failureRowParameters = (self: Effect | FailureRow): ReadonlyArray<Parameter> =>
+  RowAlgebra.parameters(failureRowPolicy(), failureRowOf(self)).rows
 
 /** Ordinary type parameters used as symbolic members of one failure union. */
-export const failureMemberParameters = (
-  self: Effect | FailureRowArgument,
-): ReadonlyArray<Parameter> =>
-  RowAlgebra.parameters(failureRowPolicy(), self._tag === 'EffectType' ? self.failureRow : self.row)
-    .members
+export const failureMemberParameters = (self: Effect | FailureRow): ReadonlyArray<Parameter> =>
+  RowAlgebra.parameters(failureRowPolicy(), failureRowOf(self)).members
 
 /** Presents one failure union as the ordinary value type carried by its outcome channel. */
-export const failureType = (self: Effect | FailureRowArgument): Type => {
+export const failureType = (self: Effect | FailureRow): Type => {
   const concrete = failureMembers(self)
   const symbolic = failureMemberParameters(self)
   if (concrete.length === 0 && symbolic.length === 1) return symbolic[0] ?? 'never'
@@ -976,8 +930,6 @@ export const parameterArgument = (self: Parameter): GenericArgument => {
   switch (self.kind) {
     case 'Value':
       return self
-    case 'FailureRow':
-      return failureRowArgument([], [self])
     case 'RequirementRow':
       return requirementRowArgument([], [self])
     case 'CallableRepresentation':
@@ -1015,31 +967,15 @@ export const intersectRepresentationBounds = (
       : undefined
   }
   if (left._tag === 'EffectType' && right._tag === 'EffectType') {
-    const leftShape = effect(
-      left.success,
-      failureMembers(left),
-      'Shared',
-      requirementMembers(left),
-      failureRowParameters(left),
-      requirementRowParameters(left),
-    )
-    const rightShape = effect(
+    const leftShape = effectWithRows(left.success, left.failureRow, 'Shared', left.requirementRow)
+    const rightShape = effectWithRows(
       right.success,
-      failureMembers(right),
+      right.failureRow,
       'Shared',
-      requirementMembers(right),
-      failureRowParameters(right),
-      requirementRowParameters(right),
+      right.requirementRow,
     )
     return equals(leftShape, rightShape)
-      ? effect(
-          left.success,
-          failureMembers(left),
-          access,
-          requirementMembers(left),
-          failureRowParameters(left),
-          requirementRowParameters(left),
-        )
+      ? effectWithRows(left.success, left.failureRow, access, left.requirementRow)
       : undefined
   }
   return undefined
@@ -1056,13 +992,11 @@ export const representationAdmissibility = (
     contract._tag === 'CallableType' && requiredBound._tag === 'CallableType'
       ? callable(contract.parameters, contract.result, requiredBound.mode, contract.schema)
       : contract._tag === 'EffectType' && requiredBound._tag === 'EffectType'
-        ? effect(
+        ? effectWithRows(
             contract.success,
-            failureMembers(contract),
+            contract.failureRow,
             requiredBound.access,
-            requirementMembers(contract),
-            failureRowParameters(contract),
-            requirementRowParameters(contract),
+            contract.requirementRow,
           )
         : undefined
   const requiredAccess =
@@ -1104,9 +1038,6 @@ export const unavailableGenericArgument = (
   reason: string,
 ): UnavailableGenericArgument =>
   Object.freeze({ _tag: 'UnavailableGenericArgument', expectedKind, reason })
-
-export const isFailureRowArgument = (self: GenericArgument): self is FailureRowArgument =>
-  typeof self !== 'string' && self._tag === 'FailureRowArgument'
 
 export const isRequirementRowArgument = (self: GenericArgument): self is RequirementRowArgument =>
   typeof self !== 'string' && self._tag === 'RequirementRowArgument'
@@ -1180,7 +1111,6 @@ export const isHiddenIdentityArgument = (
   isEffectIdentityArgument(self) || isCallableIdentityArgument(self)
 
 export const isTypeArgument = (self: GenericArgument): self is OrdinaryType =>
-  !isFailureRowArgument(self) &&
   !isRequirementRowArgument(self) &&
   !isHiddenIdentityArgument(self) &&
   !isRepresentationArgument(self) &&
@@ -1243,11 +1173,9 @@ export const genericArgumentKey = (self: GenericArgument): string =>
               : `effect-identity:${self.identity}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>`
             : isCallableIdentityArgument(self)
               ? callableIdentityKey(self)
-              : isFailureRowArgument(self)
-                ? `failure-row:${RowAlgebra.key(failureRowPolicy(), self.row)}`
-                : isRequirementRowArgument(self)
-                  ? `requirement-row:${RowAlgebra.key(requirementRowPolicy(), self.row)}`
-                  : key(self)
+              : isRequirementRowArgument(self)
+                ? `requirement-row:${RowAlgebra.key(requirementRowPolicy(), self.row)}`
+                : key(self)
 
 /** Encodes any erased generic argument for semantic presentation and artifact inspection. */
 export const encodeGenericArgument = (self: GenericArgument): string =>
@@ -1263,28 +1191,17 @@ export const encodeGenericArgument = (self: GenericArgument): string =>
             ? `effect@${self.identity}`
             : isCallableIdentityArgument(self)
               ? `callable@${self.identity}`
-              : isFailureRowArgument(self)
-                ? (() => {
-                    const row = RowAlgebra.encode(
-                      failureRowPolicy(),
-                      self.row,
-                      encode,
-                      (parameter_) => parameter_.name,
-                      (member) => member.parameter.name,
-                    )
-                    return `! ${row.length === 0 ? 'never' : row}`
-                  })()
-                : isRequirementRowArgument(self)
-                  ? `? ${RowAlgebra.encode(
-                      requirementRowPolicy(),
-                      self.row,
-                      (requirement) =>
-                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
-                      (parameter_) => parameter_.name,
-                      (member) =>
-                        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === 'DefaultRole' ? '' : `@${member.role}`}`,
-                    )}`
-                  : encode(self)
+              : isRequirementRowArgument(self)
+                ? `? ${RowAlgebra.encode(
+                    requirementRowPolicy(),
+                    self.row,
+                    (requirement) =>
+                      `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+                    (parameter_) => parameter_.name,
+                    (member) =>
+                      `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === 'DefaultRole' ? '' : `@${member.role}`}`,
+                  )}`
+                : encode(self)
 
 const encodeRepresentationOrigin = (
   self: EffectIdentityArgument | CallableIdentityArgument,
@@ -1329,7 +1246,7 @@ export const union = (inputs: ReadonlyArray<Type>): UnionNormalization => {
       for (const member of input.members) visit(member)
       return
     }
-    if (isRepresented(input) || isFailureProjection(input)) {
+    if (isRepresented(input)) {
       invalid.push(input)
       return
     }
@@ -1372,9 +1289,6 @@ export const isNominal = (self: Type): self is Nominal =>
 /** Tests whether a semantic type is a declaration-owned generic parameter. */
 export const isParameter = (self: Type): self is Parameter =>
   typeof self !== 'string' && self._tag === 'TypeParameter'
-
-export const isFailureProjection = (self: Type): self is FailureProjection =>
-  typeof self !== 'string' && self._tag === 'FailureProjectionType'
 
 /** Tests whether a semantic type is a structural fixed array. */
 export const isFixedArray = (self: Type): self is FixedArray =>
@@ -1429,7 +1343,6 @@ const computeKey = (self: Type): string => {
     return `nominal:${self.module}.${self.name}<${self.arguments.map(genericArgumentKey).join(',')}>`
   if (isParameter(self))
     return `parameter:${self.kind}:${self.owner.module}.${self.owner.name}:${self.ordinal}`
-  if (isFailureProjection(self)) return `failure-projection:${key(self.parameter)}`
   if (isFixedArray(self)) return `array:${self.length}<${key(self.element)}>`
   if (isSlice(self)) return `slice:${self.access}<${key(self.element)}>`
   if (isReference(self)) return `reference:${self.access}<${key(self.target)}>`
@@ -1482,20 +1395,6 @@ const genericArgumentRepresentationDivergence = (
       : isRepresentationArgument(left) && isRepresentationArgument(right)
         ? Object.freeze({ left, right })
         : undefined
-  if (isFailureRowArgument(left) && isFailureRowArgument(right)) {
-    for (
-      let ordinal = 0;
-      ordinal < Math.min(failureMembers(left).length, failureMembers(right).length);
-      ordinal += 1
-    ) {
-      const leftFailure = failureMembers(left).at(ordinal)
-      const rightFailure = failureMembers(right).at(ordinal)
-      if (leftFailure === undefined || rightFailure === undefined) continue
-      const divergence = firstRepresentationDivergence(leftFailure, rightFailure)
-      if (divergence !== undefined) return divergence
-    }
-    return undefined
-  }
   if (isRequirementRowArgument(left) && isRequirementRowArgument(right)) {
     for (
       let ordinal = 0;
@@ -1623,22 +1522,6 @@ const genericArgumentsHaveSameRepresentationShape = (
       haveSameRepresentationShape(leftContract, rightContract)
     )
   }
-  if (isFailureRowArgument(left) || isFailureRowArgument(right)) {
-    return (
-      isFailureRowArgument(left) &&
-      isFailureRowArgument(right) &&
-      failureMembers(left).length === failureMembers(right).length &&
-      failureRowParameters(left).length === failureRowParameters(right).length &&
-      failureMembers(left).every((failure, ordinal) => {
-        const compared = failureMembers(right).at(ordinal)
-        return compared !== undefined && haveSameRepresentationShape(failure, compared)
-      }) &&
-      failureRowParameters(left).every((parameter_, ordinal) => {
-        const compared = failureRowParameters(right).at(ordinal)
-        return compared !== undefined && equals(parameter_, compared)
-      })
-    )
-  }
   if (isRequirementRowArgument(left) || isRequirementRowArgument(right)) {
     return (
       isRequirementRowArgument(left) &&
@@ -1676,8 +1559,6 @@ export const haveSameRepresentationShape = (left: Type, right: Type): boolean =>
   if (typeof left === 'string' || typeof right === 'string') return left === right
   if (isParameter(left) || isParameter(right))
     return isParameter(left) && isParameter(right) && equals(left, right)
-  if (isFailureProjection(left) || isFailureProjection(right))
-    return isFailureProjection(left) && isFailureProjection(right) && equals(left, right)
   if (isNominal(left) || isNominal(right))
     return (
       isNominal(left) &&
@@ -1783,13 +1664,6 @@ const opaqueEvidenceInGenericArguments = (
     return isRepresentationArgument(actual) ? Object.freeze([actual]) : Object.freeze([])
   if (isTypeArgument(actual) && isTypeArgument(expected))
     return opaqueRepresentationEvidence(actual, expected, family)
-  if (isFailureRowArgument(actual) && isFailureRowArgument(expected))
-    return Object.freeze(
-      failureMembers(expected).flatMap((failure, ordinal) => {
-        const supplied = failureMembers(actual).at(ordinal)
-        return supplied === undefined ? [] : opaqueRepresentationEvidence(supplied, failure, family)
-      }),
-    )
   if (isRequirementRowArgument(actual) && isRequirementRowArgument(expected))
     return Object.freeze(
       requirementMembers(expected).flatMap((requirement, ordinal) => {
@@ -1903,11 +1777,6 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
       for (const typeArgument of argument.typeArguments) visitArgument(typeArgument)
       for (const typeArgument of argument.environment?.owner.typeArguments ?? [])
         visitArgument(typeArgument)
-    } else if (isFailureRowArgument(argument)) {
-      for (const failure of RowAlgebra.concreteMembers(failureRowPolicy(), argument.row))
-        visitType(failure)
-      const parameters_ = RowAlgebra.parameters(failureRowPolicy(), argument.row)
-      for (const parameter_ of [...parameters_.rows, ...parameters_.members]) visitType(parameter_)
     } else if (isRequirementRowArgument(argument)) {
       for (const requirement of RowAlgebra.concreteMembers(requirementRowPolicy(), argument.row))
         visitType(requirement.capability)
@@ -2049,7 +1918,6 @@ export const encode = (self: Type): string => {
     return `${self.module}.${self.name}${arguments_}`
   }
   if (isParameter(self)) return self.name
-  if (isFailureProjection(self)) return `Row<! ${self.parameter.name}>`
   if (isFixedArray(self)) return `Array<${encode(self.element)}, ${self.length}>`
   if (isSlice(self))
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}[${encode(self.element)}]`
@@ -2159,7 +2027,6 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
     type: (type) => {
       if (isCallable(type)) for (const binder of type.schema?.binders ?? []) nested.add(key(binder))
       else if (isParameter(type)) found.set(key(type), type)
-      else if (isFailureProjection(type)) found.set(key(type.parameter), type.parameter)
     },
     argument: (argument) => {
       if (isRepresentationParameterArgument(argument))
@@ -2210,7 +2077,6 @@ const runtimeAvailableGenericArgument = (self: GenericArgument): boolean => {
       self.typeArguments.every(runtimeAvailableGenericArgument) &&
       (self.environment?.owner.typeArguments.every(runtimeAvailableGenericArgument) ?? true)
     )
-  if (isFailureRowArgument(self)) return runtimeAvailableFailureRow(self.row)
   if (isRequirementRowArgument(self)) return runtimeAvailableRequirementRow(self.row)
   return runtimeAvailable(self)
 }
@@ -2312,7 +2178,6 @@ const runtimeAvailableEvidence = (evidence: Constraint.ConstraintEvidence): bool
 
 function runtimeAvailable(self: Type): boolean {
   if (typeof self === 'string' || isParameter(self)) return true
-  if (isFailureProjection(self)) return false
   if (isNominal(self)) return self.arguments.every(runtimeAvailableGenericArgument)
   if (isFixedArray(self) || isSlice(self)) return runtimeAvailable(self.element)
   if (isReference(self)) return runtimeAvailable(self.target)
@@ -2364,11 +2229,6 @@ const isClosedGenericArgument = (self: GenericArgument): boolean => {
       self.typeArguments.every(isClosedGenericArgument) &&
       (self.environment?.owner.typeArguments.every(isClosedGenericArgument) ?? true)
     )
-  if (isFailureRowArgument(self))
-    return (
-      RowAlgebra.concretize(failureRowPolicy(), self.row)._tag === 'Concrete' &&
-      failureMembers(self).every(isConcrete)
-    )
   if (isRequirementRowArgument(self))
     return (
       RowAlgebra.concretize(requirementRowPolicy(), self.row)._tag === 'Concrete' &&
@@ -2386,7 +2246,6 @@ export const containsBorrow = (self: Type): boolean => {
   if (isString(self)) return true
   if (isSlice(self) || isReference(self)) return true
   if (isSlot(self)) return true
-  if (isFailureProjection(self)) return false
   if (isNominal(self)) return self.arguments.filter(isTypeArgument).some(containsBorrow)
   if (isFixedArray(self)) return containsBorrow(self.element)
   if (isCallable(self)) return self.parameters.some(containsBorrow) || containsBorrow(self.result)
@@ -2491,9 +2350,8 @@ export const specializeFailureRow = (
   })
   const result = RowAlgebra.substitute(failureRowPolicy(), concrete, {
     row: (parameter_) => {
-      const replacement = substitution.get(key(parameter_))
-      if (replacement === undefined || !isFailureRowArgument(replacement)) return undefined
-      return replacement.row
+      void parameter_
+      return undefined
     },
     member: (member) => {
       const replacement = substitution.get(key(member.parameter))
@@ -2579,19 +2437,6 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
   if (isParameter(self)) {
     const replacement = substitution.get(key(self))
     return replacement !== undefined && isTypeArgument(replacement) ? replacement : self
-  }
-  if (isFailureProjection(self)) {
-    const replacement = substitution.get(key(self.parameter))
-    if (replacement === undefined || !isFailureRowArgument(replacement)) return self
-    const forwarded = failureRowParameters(replacement).at(0)
-    if (
-      failureMembers(replacement).length === 0 &&
-      failureRowParameters(replacement).length === 1 &&
-      forwarded
-    )
-      return failureProjection(forwarded)
-    const normalized = union(failureMembers(replacement))
-    return normalized._tag === 'Normalized' ? normalized.type : self
   }
   if (isNominal(self))
     return nominal(
@@ -2717,11 +2562,9 @@ export const substituteGenericArgument = (
                         ),
                       }),
                 )
-              : isFailureRowArgument(self)
-                ? failureRowArgumentFromRow(substituteFailureRow(self.row, substitution))
-                : isRequirementRowArgument(self)
-                  ? requirementRowArgumentFromRow(substituteRequirementsRow(self.row, substitution))
-                  : substitute(self, substitution)
+              : isRequirementRowArgument(self)
+                ? requirementRowArgumentFromRow(substituteRequirementsRow(self.row, substitution))
+                : substitute(self, substitution)
 
 const sameExecutableOwnerDeclaration = (
   left: ExecutableSpecializationOwner,
@@ -2786,13 +2629,6 @@ export const specializeExecutableOwner = (
               argument.environment.site,
               specializeOwner(argument.environment.owner),
             ),
-      )
-    if (isFailureRowArgument(argument))
-      return failureRowArgumentFromRow(
-        RowAlgebra.mapConcreteMembers(failureRowPolicy(), argument.row, (failure) => {
-          const specialized = specializeType(failure)
-          return isNominal(specialized) ? specialized : failure
-        }),
       )
     if (isRequirementRowArgument(argument))
       return requirementRowArgumentFromRow(
@@ -2943,54 +2779,47 @@ const inferRowMembers = <Member>(
   return search(0, actual, inferred)
 }
 
-/** Infers one normalized failure-row argument, assigning at most one open remainder. */
-const inferFailureRowArgument = (
-  pattern: FailureRowArgument,
-  actual: FailureRowArgument,
+/** Infers one normalized internal failure expression through ordinary type parameters. */
+const inferFailureRow = (
+  pattern: FailureRow,
+  actual: FailureRow,
   inferred: Map<string, GenericArgument>,
   allowOpenActual: boolean,
   context: InferenceContext,
 ): boolean => {
-  if (!allowOpenActual && RowAlgebra.concretize(failureRowPolicy(), actual.row)._tag !== 'Concrete')
+  if (!allowOpenActual && RowAlgebra.concretize(failureRowPolicy(), actual)._tag !== 'Concrete')
     return false
-  if (genericArgumentKey(pattern) === genericArgumentKey(actual)) return true
-  const substitutedPattern = failureRowArgumentFromRow(substituteFailureRow(pattern.row, inferred))
-  if (genericArgumentKey(substitutedPattern) === genericArgumentKey(actual)) return true
-  if (pattern.row.expression._tag === 'Singleton') {
-    if (actual.row.expression._tag === 'Singleton')
+  if (RowAlgebra.key(failureRowPolicy(), pattern) === RowAlgebra.key(failureRowPolicy(), actual))
+    return true
+  const substitutedPattern = substituteFailureRow(pattern, inferred)
+  if (
+    RowAlgebra.key(failureRowPolicy(), substitutedPattern) ===
+    RowAlgebra.key(failureRowPolicy(), actual)
+  )
+    return true
+  if (pattern.expression._tag === 'Singleton') {
+    if (actual.expression._tag === 'Singleton')
       return bindGenericArgument(
-        pattern.row.expression.member.parameter,
-        actual.row.expression.member.parameter,
+        pattern.expression.member.parameter,
+        actual.expression.member.parameter,
         inferred,
         context,
       )
-    const concrete = RowAlgebra.concretize(failureRowPolicy(), actual.row)
+    const concrete = RowAlgebra.concretize(failureRowPolicy(), actual)
     if (concrete._tag !== 'Concrete') return false
     const normalized = union(concrete.row.members)
     if (normalized._tag !== 'Normalized') return false
     return bindGenericArgument(
-      pattern.row.expression.member.parameter,
+      pattern.expression.member.parameter,
       normalized.type,
       inferred,
       context,
     )
   }
-  if (pattern.row.expression._tag === 'RowParameter') {
-    // Occurs check: E may never bind to a row that still mentions E.
-    if (
-      RowAlgebra.containsRowParameter(
-        failureRowPolicy(),
-        actual.row,
-        pattern.row.expression.parameter,
-      )
-    )
-      return false
-    return bindGenericArgument(pattern.row.expression.parameter, actual, inferred, context)
-  }
   if (
-    pattern.row.expression._tag === 'Without' ||
-    (pattern.row.expression._tag === 'Union' &&
-      pattern.row.expression.operands.some(
+    pattern.expression._tag === 'Without' ||
+    (pattern.expression._tag === 'Union' &&
+      pattern.expression.operands.some(
         (operand) => operand._tag === 'Without' || operand._tag === 'Singleton',
       ))
   )
@@ -3002,21 +2831,8 @@ const inferFailureRowArgument = (
     inferred,
     (failure, supplied, trial) => inferType(failure, supplied, trial, memberContext),
     (remaining, trial) => {
-      if (failureRowParameters(pattern).length === 0)
-        return remaining.length === 0 && failureRowParameters(actual).length === 0
-      const parameter_ = failureRowParameters(pattern).at(0)
-      return (
-        failureRowParameters(pattern).length === 1 &&
-        parameter_ !== undefined &&
-        // Occurs check: the open remainder may not itself mention the parameter being bound.
-        !failureRowParameters(actual).some((candidate) => key(candidate) === key(parameter_)) &&
-        bindGenericArgument(
-          parameter_,
-          failureRowArgument(remaining, failureRowParameters(actual)),
-          trial,
-          context,
-        )
-      )
+      void trial
+      return remaining.length === 0 && failureRowParameters(actual).length === 0
     },
   )
   if (matched === undefined) return false
@@ -3165,14 +2981,6 @@ const inferGenericArgument = (
       isRepresentationArgument(actual) &&
       bindGenericArgument(pattern.parameter, actual, inferred, context)
     )
-  if (isFailureRowArgument(pattern) && isFailureRowArgument(actual))
-    return inferFailureRowArgument(
-      pattern,
-      actual,
-      inferred,
-      context.allowOpenGenericArguments,
-      context,
-    )
   if (isRequirementRowArgument(pattern) && isRequirementRowArgument(actual))
     return inferRequirementRowArgument(
       pattern,
@@ -3191,14 +2999,7 @@ const inferFailureRows = (
   actual: Effect,
   inferred: Map<string, GenericArgument>,
   context: InferenceContext,
-): boolean =>
-  inferFailureRowArgument(
-    failureRowArgumentFromRow(pattern.failureRow),
-    failureRowArgumentFromRow(actual.failureRow),
-    inferred,
-    true,
-    context,
-  )
+): boolean => inferFailureRow(pattern.failureRow, actual.failureRow, inferred, true, context)
 
 const inferRequirementRows = (
   pattern: Effect,
@@ -3316,26 +3117,6 @@ const inferType = (
 ): boolean => {
   if (isParameter(pattern)) {
     return pattern.kind === 'Value' && bindGenericArgument(pattern, actual, inferred, context)
-  }
-  if (isFailureProjection(pattern)) {
-    const failures = isNever(actual)
-      ? Object.freeze([])
-      : isNominal(actual)
-        ? Object.freeze([actual])
-        : isUnion(actual)
-          ? actual.members
-          : undefined
-    return (
-      (failures !== undefined &&
-        bindGenericArgument(pattern.parameter, failureRowArgument(failures), inferred, context)) ||
-      (isFailureProjection(actual) &&
-        bindGenericArgument(
-          pattern.parameter,
-          failureRowArgument([], [actual.parameter]),
-          inferred,
-          context,
-        ))
-    )
   }
   if (isNominal(pattern) && isNominal(actual)) {
     if (
@@ -3463,7 +3244,6 @@ export const prefixSubstitution = (
         : undefined
     if (
       (parameter_.kind === 'Value' && !isTypeArgument(argument)) ||
-      (parameter_.kind === 'FailureRow' && !isFailureRowArgument(argument)) ||
       (parameter_.kind === 'RequirementRow' && !isRequirementRowArgument(argument)) ||
       ((parameter_.kind === 'CallableRepresentation' ||
         parameter_.kind === 'EffectRepresentation') &&

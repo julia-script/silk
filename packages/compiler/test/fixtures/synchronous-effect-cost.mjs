@@ -147,7 +147,7 @@ pub fn main() -> i32 { let clock = Clock { value: 42 } return read(&clock) }`,
     expected: 42,
     source: `struct Clock { value: i32 }
 effect fn read() -> i32 ? &Clock { return 42 }
-fn adapt<A, !E, ?R>(self: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> {
+fn adapt<A, E, ?R>(self: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> {
   return move self
 }
 pub fn main() -> i32 {

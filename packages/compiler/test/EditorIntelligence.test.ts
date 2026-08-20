@@ -183,7 +183,7 @@ pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
         occurrence === undefined
           ? undefined
           : Analysis.occurrencePresentation(snapshot, 'main', occurrence)?.text,
-        'pub effect fn map<A, B, !E, ?R>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> B) -> B ! E ? R',
+        'pub effect fn map<A, B, E, ?R>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> B) -> B ! E ? R',
       )
       return undefined
     }),
@@ -694,7 +694,7 @@ pub struct Other {}`
       const box = Type.nominal('types/Models', 'Box', Object.freeze(['i32']))
       const other = Type.nominal('types/Models', 'Other')
       const problem = Type.nominal('main', 'Problem')
-      const failureRow = Type.parameter({ module: 'main', name: 'transform' }, 0, 'E', 'FailureRow')
+      const failureRow = Type.parameter({ module: 'main', name: 'transform' }, 0, 'E')
       const requirementRow = Type.parameter(
         { module: 'main', name: 'transform' },
         1,
@@ -707,16 +707,15 @@ pub struct Other {}`
 
       const effect = Type.effect(
         Type.reference('Exclusive', box),
-        Object.freeze([problem]),
+        [problem, failureRow],
         'Shared',
-        Object.freeze([
+        [
           Object.freeze({
             capability: Type.allocator,
             role: 'Heap',
             access: 'Exclusive' as const,
           }),
-        ]),
-        [failureRow],
+        ],
         [requirementRow],
       )
       assert.strictEqual(
@@ -724,7 +723,7 @@ pub struct Other {}`
         'Effect<&mut Schema.Box<i32> ! Problem | E ? &mut Allocator@Heap | R>',
       )
       assert.strictEqual(
-        Presentation.genericArgument(Type.failureRowArgument([problem]), 'main', scope),
+        Presentation.genericArgument(Type.failureValue([problem]), 'main', scope),
         '! Problem',
       )
       assert.strictEqual(

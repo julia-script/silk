@@ -256,7 +256,7 @@ pub fn main() -> i32 {
 it('consumes a take effect parameter on its first run and rejects a repeated run', () => {
   const facts = check(
     'ownership://take-effect-parameter.silk',
-    `pub effect fn twice<A, !E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
+    `pub effect fn twice<A, E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
   let first = run self
   return run self
 }`,
@@ -272,7 +272,7 @@ it('consumes a take effect parameter on its first run and rejects a repeated run
 it('accepts a single run of a take effect parameter', () => {
   const facts = check(
     'ownership://take-effect-parameter-single.silk',
-    `pub effect fn flattenLike<A, !E, !F, ?R, ?S>(
+    `pub effect fn flattenLike<A, E, F, ?R, ?S>(
   self: once Effect<Effect<A ! F ? S> ! E ? R>
 ) -> A ! E | F ? R | S {
   let inner = run self

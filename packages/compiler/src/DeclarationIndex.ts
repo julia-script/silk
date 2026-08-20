@@ -210,11 +210,6 @@ export type DeclaredTypeFact =
       readonly _tag: 'Applied'
       readonly target: DeclaredTypeFact
       readonly arguments: ReadonlyArray<DeclaredTypeFact>
-      readonly failureRow?: {
-        readonly failures: ReadonlyArray<DeclaredTypeFact>
-        readonly parameters: ReadonlyArray<Type.Parameter>
-        readonly syntax: SyntaxTree.Node
-      }
       readonly requirementRow?: {
         readonly requirements: ReadonlyArray<{
           readonly capability: DeclaredTypeFact
@@ -903,14 +898,7 @@ const applyInterfaceOperation = (
     }),
   )
   const substitutedRows = Type.substitute(
-    Type.effect(
-      Type.unit,
-      source.failureRow.failures,
-      'Shared',
-      source.requirementRow.requirements,
-      source.failureRow.parameters,
-      source.requirementRow.parameters,
-    ),
+    Type.effectWithRows(Type.unit, source.failureRow.row, 'Shared', source.requirementRow.row),
     substitution,
   )
   const rows = Type.isEffect(substitutedRows)
@@ -1746,55 +1734,6 @@ export const analyzeDeclaredType = (
     const pathSegments = SyntaxTree.tokens(pathSyntax)
       .filter((token) => token.kind === 'Identifier')
       .map((token) => spelling(source, token))
-    if (pathSegments.length === 1 && pathSegments.at(0) === 'Row') {
-      const failureRow = SyntaxTree.directNode(list, 'FailureRow')
-      const failureType = failureRow?.children.find(isDeclaredTypeNode)
-      const failureNodes =
-        failureType?.kind === 'UnionType'
-          ? failureType.children.filter(isDeclaredTypeNode)
-          : failureType === undefined
-            ? []
-            : [failureType]
-      const diagnostics: Array<Diagnostic.Diagnostic> = [
-        ...arguments_.flatMap((argument) => argument.diagnostics),
-      ]
-      if (arguments_.length !== 0)
-        diagnostics.push(Diagnostic.typeArgumentArity('Row', 0, arguments_.length, firstToken.span))
-      if (failureNodes.length === 1) {
-        const member = failureNodes.at(0)
-        const parameter =
-          member === undefined ? undefined : parameterAtTypePath(source, member, typeParameters)
-        const token =
-          member === undefined ? undefined : SyntaxTree.directToken(member, 'Identifier')
-        if (parameter?.kind === 'FailureRow') {
-          const type = Type.failureProjection(parameter)
-          return Object.freeze({
-            fact: Object.freeze({
-              _tag: 'Resolved',
-              type,
-              spelling: Type.encode(type),
-              token: firstToken,
-              syntax,
-              components: Object.freeze([]),
-            }),
-            diagnostics: Object.freeze(diagnostics),
-          })
-        }
-        if (parameter !== undefined && token !== undefined)
-          diagnostics.push(
-            Diagnostic.genericParameterKindMismatch(
-              spelling(source, token),
-              'FailureRow',
-              parameter.kind,
-              token.span,
-            ),
-          )
-      }
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
-        diagnostics: Object.freeze(diagnostics),
-      })
-    }
     if (pathSegments.length === 1 && pathSegments.at(0) === 'Effect') {
       const access: Type.Effect['access'] =
         SyntaxTree.directToken(syntax, 'OnceKeyword') !== undefined
@@ -1811,21 +1750,16 @@ export const analyzeDeclaredType = (
           : failureType === undefined
             ? []
             : [failureType]
-      const failureParameters: Array<Type.Parameter> = []
       const rowDiagnostics: Array<Diagnostic.Diagnostic> = []
       const failures = failureNodes.flatMap((member): ReadonlyArray<TypeResolution> => {
         const parameter = parameterAtTypePath(source, member, typeParameters)
-        if (parameter?.kind === 'FailureRow') {
-          failureParameters.push(parameter)
-          return []
-        }
         if (parameter?.kind === 'RequirementRow') {
           const token = SyntaxTree.directToken(member, 'Identifier')
           if (token !== undefined)
             rowDiagnostics.push(
               Diagnostic.genericParameterKindMismatch(
                 spelling(source, token),
-                'FailureRow',
+                'Value',
                 parameter.kind,
                 token.span,
               ),
@@ -1887,12 +1821,6 @@ export const analyzeDeclaredType = (
           }) ?? []
       const rowParameterComponents: ReadonlyArray<DeclaredTypeFact> = Object.freeze(
         [
-          ...failureNodes.flatMap(
-            (path): ReadonlyArray<readonly [SyntaxTree.Node, Type.Parameter]> => {
-              const parameter = parameterAtTypePath(source, path, typeParameters)
-              return parameter?.kind === 'FailureRow' ? [[path, parameter]] : []
-            },
-          ),
           ...(SyntaxTree.directNode(list, 'RequirementRow')?.children.flatMap(
             (element): ReadonlyArray<readonly [SyntaxTree.Node, Type.Parameter]> => {
               if (!SyntaxTree.isNode(element) || element.kind !== 'TypePath') return []
@@ -1928,13 +1856,15 @@ export const analyzeDeclaredType = (
         )
       }
       const resolvedFailures = failures.flatMap((failure) =>
-        failure.fact._tag === 'Resolved' && Type.isNominal(failure.fact.type)
+        failure.fact._tag === 'Resolved' && Type.isTypeArgument(failure.fact.type)
           ? [failure.fact.type]
           : [],
       )
       const resolvedRequirements = requirements.flatMap((requirement) =>
         requirement.capability.fact._tag === 'Resolved' &&
-        Type.isNominal(requirement.capability.fact.type)
+        (Type.isNominal(requirement.capability.fact.type) ||
+          (Type.isParameter(requirement.capability.fact.type) &&
+            requirement.capability.fact.type.kind === 'Value'))
           ? [
               Object.freeze({
                 capability: requirement.capability.fact.type,
@@ -1945,9 +1875,7 @@ export const analyzeDeclaredType = (
           : [],
       )
       const failuresAvailable = failures.every(
-        (failure) =>
-          failure.fact._tag === 'Resolved' &&
-          (Type.isNominal(failure.fact.type) || Type.isNever(failure.fact.type)),
+        (failure) => failure.fact._tag === 'Resolved' && Type.isTypeArgument(failure.fact.type),
       )
       if (
         arguments_.length === 1 &&
@@ -1960,7 +1888,6 @@ export const analyzeDeclaredType = (
           resolvedFailures,
           access,
           resolvedRequirements,
-          failureParameters,
           requirementParameters,
         )
         return Object.freeze({
@@ -1973,7 +1900,6 @@ export const analyzeDeclaredType = (
             components: Object.freeze([
               target.fact,
               ...arguments_.map((argument) => argument.fact),
-              ...failures.map((failure) => failure.fact),
               ...requirements.map((requirement) => requirement.capability.fact),
               ...rowParameterComponents,
             ]),
@@ -1987,7 +1913,7 @@ export const analyzeDeclaredType = (
           access,
           success: success ?? Object.freeze({ _tag: 'Unavailable', syntax: list }),
           failures: Object.freeze(failures.map((failure) => failure.fact)),
-          failureParameters: Object.freeze(failureParameters),
+          failureParameters: Object.freeze([]),
           requirements: Object.freeze(
             requirements.map((requirement) =>
               Object.freeze({
@@ -2014,21 +1940,16 @@ export const analyzeDeclaredType = (
         : failureType === undefined
           ? []
           : [failureType]
-    const failureParameters: Array<Type.Parameter> = []
     const rowDiagnostics: Array<Diagnostic.Diagnostic> = []
     const failures = failureNodes.flatMap((member): ReadonlyArray<TypeResolution> => {
       const parameter = parameterAtTypePath(source, member, typeParameters)
-      if (parameter?.kind === 'FailureRow') {
-        failureParameters.push(parameter)
-        return []
-      }
       if (parameter?.kind === 'RequirementRow') {
         const token = SyntaxTree.directToken(member, 'Identifier')
         if (token !== undefined)
           rowDiagnostics.push(
             Diagnostic.genericParameterKindMismatch(
               spelling(source, token),
-              'FailureRow',
+              'Value',
               parameter.kind,
               token.span,
             ),
@@ -2094,15 +2015,6 @@ export const analyzeDeclaredType = (
         _tag: 'Applied',
         target: target.fact,
         arguments: Object.freeze(arguments_.map((argument) => argument.fact)),
-        ...(failureRowSyntax === undefined
-          ? {}
-          : {
-              failureRow: Object.freeze({
-                failures: Object.freeze(failures.map((failure) => failure.fact)),
-                parameters: Object.freeze(failureParameters),
-                syntax: failureRowSyntax,
-              }),
-            }),
         ...(requirementRowSyntax === undefined
           ? {}
           : {
@@ -2489,11 +2401,9 @@ const collectTypeParameters = (
         { module: source.id, name: ownerName },
         ordinalOffset + ordinal,
         name._tag === 'Present' ? name.spelling : `#${ordinal}`,
-        SyntaxTree.directToken(parameterNode, 'Bang') !== undefined
-          ? 'FailureRow'
-          : SyntaxTree.directToken(parameterNode, 'Question') !== undefined
-            ? 'RequirementRow'
-            : (representationKind ?? 'Value'),
+        SyntaxTree.directToken(parameterNode, 'Question') !== undefined
+          ? 'RequirementRow'
+          : (representationKind ?? 'Value'),
         representationContract,
       )
     if (name._tag === 'Present' && duplicateOf === undefined) {
@@ -2661,12 +2571,6 @@ const collectFailureRowExpression = (
       diagnostics: Object.freeze(collected.flatMap((operand) => operand.diagnostics)),
     })
   }
-  const parameter = parameterAtTypePath(source, syntax, typeParameters)
-  if (parameter?.kind === 'FailureRow')
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'RowParameterExpression', parameter, syntax }),
-      diagnostics: Object.freeze([]),
-    })
   if (!isDeclaredTypeNode(syntax))
     return Object.freeze({
       fact: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
@@ -2804,24 +2708,19 @@ const collectFailureRow = (
       : isDeclaredTypeNode(declared)
         ? Object.freeze([declared])
         : Object.freeze([])
-  const parameters: Array<Type.Parameter> = []
   // The legacy member facts remain the single diagnostic owner while the row
   // expression is retained as the semantic shape. Reporting both would emit
   // the same kind/type error twice for one source member.
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const members = syntaxMembers.flatMap((member): ReadonlyArray<DeclaredTypeFact> => {
     const parameter = parameterAtTypePath(source, member, typeParameters)
-    if (parameter?.kind === 'FailureRow') {
-      parameters.push(parameter)
-      return []
-    }
     if (parameter?.kind === 'RequirementRow') {
       const token = SyntaxTree.directToken(member, 'Identifier')
       if (token !== undefined)
         diagnostics.push(
           Diagnostic.genericParameterKindMismatch(
             spelling(source, token),
-            'FailureRow',
+            'Value',
             parameter.kind,
             token.span,
           ),
@@ -2836,7 +2735,7 @@ const collectFailureRow = (
     fact: Object.freeze({
       _tag: 'FailureRow',
       members: Object.freeze(members),
-      parameters: Object.freeze(parameters),
+      parameters: Object.freeze([]),
       failures: Object.freeze([]),
       syntax,
       available: false,
@@ -2956,13 +2855,12 @@ const constraintDomain = (
   source: SourceFile.SourceFile,
   syntax: SyntaxTree.Node,
   typeParameters: ReadonlyMap<string, Type.Parameter>,
-): 'Failure' | 'Requirement' | 'Unavailable' => {
+): 'Failure' | 'Requirement' => {
   for (const path of [syntax, ...nestedNodes(syntax)]) {
     const parameter = parameterAtTypePath(source, path, typeParameters)
-    if (parameter?.kind === 'FailureRow') return 'Failure'
     if (parameter?.kind === 'RequirementRow') return 'Requirement'
   }
-  return 'Unavailable'
+  return 'Failure'
 }
 
 const collectConstraints = (
@@ -3850,14 +3748,18 @@ const resolveDeclaredType = (
       ...failures.flatMap((failure) => failure.diagnostics),
       ...requirements.flatMap((requirement) => requirement.capability.diagnostics),
     ]
-    const failureTypes: Array<Type.Nominal> = []
+    const failureTypes: Array<Type.Type> = []
     const symbolicFailureTypes: Array<{
       readonly type: Type.Parameter
       readonly span: SourceSpan.SourceSpan
     }> = []
     let failuresAvailable = true
     for (const failure of failures) {
-      if (failure.fact._tag === 'Resolved' && Type.isNominal(failure.fact.type)) {
+      if (
+        failure.fact._tag === 'Resolved' &&
+        Type.isTypeArgument(failure.fact.type) &&
+        !Type.isParameter(failure.fact.type)
+      ) {
         failureTypes.push(failure.fact.type)
       } else if (
         failure.fact._tag === 'Resolved' &&
@@ -3906,7 +3808,6 @@ const resolveDeclaredType = (
         failureTypes,
         fact.access,
         requirementTypes,
-        fact.failureParameters,
         fact.requirementParameters,
       )
       const failureRow = symbolicFailureTypes.reduce<Type.FailureRow>(
@@ -3968,10 +3869,6 @@ const resolveDeclaredType = (
     const arguments_ = fact.arguments.map((argument) =>
       resolveDeclaredType(module, argument, resolvers, modules),
     )
-    const failures =
-      fact.failureRow?.failures.map((failure) =>
-        resolveDeclaredType(module, failure, resolvers, modules),
-      ) ?? []
     const requirements =
       fact.requirementRow?.requirements.map((requirement) =>
         Object.freeze({
@@ -3982,7 +3879,6 @@ const resolveDeclaredType = (
     const diagnostics = [
       ...target.diagnostics,
       ...arguments_.flatMap((argument) => argument.diagnostics),
-      ...failures.flatMap((failure) => failure.diagnostics),
       ...requirements.flatMap((requirement) => requirement.capability.diagnostics),
     ]
     if (target.fact._tag === 'Resolved' && Type.isNominal(target.fact.type)) {
@@ -3995,17 +3891,6 @@ const resolveDeclaredType = (
           if (argument.fact._tag !== 'Resolved') return undefined
           return genericArgumentForParameter(declaredParameters?.at(ordinal), argument.fact.type)
         },
-      )
-      const failureTypes = failures.flatMap(
-        (failure): ReadonlyArray<Type.Nominal> =>
-          failure.fact._tag === 'Resolved' && Type.isNominal(failure.fact.type)
-            ? [failure.fact.type]
-            : [],
-      )
-      const failuresAvailable = failures.every(
-        (failure) =>
-          failure.fact._tag === 'Resolved' &&
-          (Type.isNominal(failure.fact.type) || Type.isNever(failure.fact.type)),
       )
       const requirementTypes = requirements.flatMap(
         (requirement): ReadonlyArray<Type.Requirement> =>
@@ -4024,13 +3909,6 @@ const resolveDeclaredType = (
       )
       const requirementsAvailable = requirementTypes.length === requirements.length
       const rowArguments: ReadonlyArray<Type.GenericArgument | undefined> = Object.freeze([
-        ...(fact.failureRow === undefined
-          ? []
-          : [
-              failuresAvailable
-                ? Type.failureRowArgument(failureTypes, fact.failureRow.parameters)
-                : undefined,
-            ]),
         ...(fact.requirementRow === undefined
           ? []
           : [
@@ -4138,7 +4016,6 @@ const resolveDeclaredType = (
             const parameter = declaredParameters?.at(ordinal)
             if (parameter === undefined) return false
             if (parameter.kind === 'Value') return !Type.isTypeArgument(argument)
-            if (parameter.kind === 'FailureRow') return !Type.isFailureRowArgument(argument)
             if (parameter.kind === 'RequirementRow') return !Type.isRequirementRowArgument(argument)
             return (
               !Type.isRepresentationArgument(argument) ||
@@ -4158,8 +4035,7 @@ const resolveDeclaredType = (
                     : 'EffectRepresentation'
                   : supplied.fact._tag === 'Resolved' &&
                       Type.isParameter(supplied.fact.type) &&
-                      (supplied.fact.type.kind === 'FailureRow' ||
-                        supplied.fact.type.kind === 'RequirementRow')
+                      supplied.fact.type.kind === 'RequirementRow'
                     ? supplied.fact.type.kind
                     : 'Value',
                 supplied.fact.syntax.span,
@@ -4196,7 +4072,6 @@ const resolveDeclaredType = (
             components: Object.freeze([
               target.fact,
               ...arguments_.map((argument) => argument.fact),
-              ...failures.map((failure) => failure.fact),
               ...requirements.map((requirement) => requirement.capability.fact),
             ]),
           }),
@@ -4206,7 +4081,6 @@ const resolveDeclaredType = (
       if (expected === suppliedCount) {
         const unavailable = [
           ...arguments_,
-          ...failures,
           ...requirements.map((requirement) => requirement.capability),
         ].find((argument) => argument.fact._tag !== 'Resolved')
         const cause =
@@ -4417,14 +4291,6 @@ const genericArgumentForParameter = (
 ): Type.GenericArgument => {
   if (parameter?.kind === 'CallableRepresentation' || parameter?.kind === 'EffectRepresentation')
     return Type.isRepresented(type) ? type.representation.argument : type
-  if (parameter?.kind === 'FailureRow') {
-    if (Type.isParameter(type) && type.kind === 'FailureRow')
-      return Type.failureRowArgument([], [type])
-    if (Type.isNever(type)) return Type.failureRowArgument([])
-    if (Type.isNominal(type)) return Type.failureRowArgument([type])
-    if (Type.isUnion(type) && type.members.every(Type.isNominal))
-      return Type.failureRowArgument(type.members)
-  }
   if (parameter?.kind === 'RequirementRow') {
     if (Type.isParameter(type) && type.kind === 'RequirementRow')
       return Type.requirementRowArgument([], [type])
@@ -4682,25 +4548,17 @@ const inferInterfaceWitnessTarget = (
     constraints.push(
       Object.freeze({
         label: 'failure and requirement rows',
-        pattern: Type.effect(
+        pattern: Type.effectWithRows(
           Type.unit,
-          implementation.failureRow.failures,
+          implementation.failureRow.row,
           'Shared',
-          implementation.requirementRow.requirements.map((requirement) =>
-            Object.freeze({ ...requirement, access: 'Shared' as const }),
-          ),
-          implementation.failureRow.parameters,
-          implementation.requirementRow.parameters,
+          implementation.requirementRow.row,
         ),
-        actual: Type.effect(
+        actual: Type.effectWithRows(
           Type.unit,
-          contract.failureRow.failures,
+          contract.failureRow.row,
           'Shared',
-          contract.requirementRow.requirements.map((requirement) =>
-            Object.freeze({ ...requirement, access: 'Shared' as const }),
-          ),
-          contract.failureRow.parameters,
-          contract.requirementRow.parameters,
+          contract.requirementRow.row,
         ),
       }),
     )
@@ -4748,13 +4606,11 @@ const interfaceWitnessCompatibility = (
   )
     return undefined
   const witnessRows = Type.substitute(
-    Type.effect(
+    Type.effectWithRows(
       Type.unit,
-      implementation.failureRow.failures,
+      implementation.failureRow.row,
       'Shared',
-      implementation.requirementRow.requirements,
-      implementation.failureRow.parameters,
-      implementation.requirementRow.parameters,
+      implementation.requirementRow.row,
     ),
     substitution,
   )
@@ -4948,9 +4804,7 @@ const semanticFailureRow = (fact: RowExpressionFact): Type.FailureRow => {
     case 'UnavailableRowExpression':
       return RowAlgebra.concrete(Type.failureRowPolicy(), [])
     case 'RowParameterExpression':
-      return fact.parameter.kind === 'FailureRow'
-        ? RowAlgebra.parameter<Type.Type, Type.Parameter, Type.FailureMemberShape>(fact.parameter)
-        : RowAlgebra.concrete(Type.failureRowPolicy(), [])
+      return RowAlgebra.concrete(Type.failureRowPolicy(), [])
     case 'FailureMemberExpression':
       if (fact.member._tag !== 'Resolved') return RowAlgebra.concrete(Type.failureRowPolicy(), [])
       if (Type.isParameter(fact.member.type) && fact.member.type.kind === 'Value')
@@ -5230,10 +5084,6 @@ const inlineReach = (
       visit(type)
       return
     }
-    if (Type.isFailureProjection(type)) {
-      visit(type.parameter)
-      return
-    }
     if (Type.isFixedArray(type) || Type.isSlice(type)) {
       descend(type.element)
       return
@@ -5403,7 +5253,6 @@ const resolveOpaqueResult = (
 }
 
 const opaqueEnclosingArgument = (parameter: Type.Parameter): Type.GenericArgument => {
-  if (parameter.kind === 'FailureRow') return Type.failureRowArgument([], [parameter])
   if (parameter.kind === 'RequirementRow') return Type.requirementRowArgument([], [parameter])
   if (parameter.kind === 'CallableRepresentation' || parameter.kind === 'EffectRepresentation')
     return Type.representationParameterArgument(parameter)
@@ -6452,23 +6301,19 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
               ),
             )
           const implementationRows = specialize(
-            Type.effect(
+            Type.effectWithRows(
               Type.unit,
-              implementation.failureRow.failures,
+              implementation.failureRow.row,
               'Shared',
-              implementation.requirementRow.requirements,
-              implementation.failureRow.parameters,
-              implementation.requirementRow.parameters,
+              implementation.requirementRow.row,
             ),
           )
           const contractRows = Type.substitute(
-            Type.effect(
+            Type.effectWithRows(
               Type.unit,
-              contract.failureRow.failures,
+              contract.failureRow.row,
               'Shared',
-              contract.requirementRow.requirements,
-              contract.failureRow.parameters,
-              contract.requirementRow.parameters,
+              contract.requirementRow.row,
             ),
             serviceSubstitution,
           )

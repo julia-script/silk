@@ -2050,12 +2050,6 @@ const resolveStructTarget = (
             if (parameter.type.kind === 'Value')
               return Type.isTypeArgument(resolved.fact.type) ? [resolved.fact.type] : []
             if (
-              parameter.type.kind === 'FailureRow' &&
-              Type.isParameter(resolved.fact.type) &&
-              resolved.fact.type.kind === 'FailureRow'
-            )
-              return [Type.failureRowArgument([], [resolved.fact.type])]
-            if (
               parameter.type.kind === 'RequirementRow' &&
               Type.isParameter(resolved.fact.type) &&
               resolved.fact.type.kind === 'RequirementRow'
@@ -2821,14 +2815,7 @@ const exactEffectApplicationContract = (
     : accesses.includes('Exclusive')
       ? 'Exclusive'
       : contract.access
-  return Type.effect(
-    contract.success,
-    Type.failureMembers(contract),
-    access,
-    Type.requirementMembers(contract),
-    Type.failureRowParameters(contract),
-    Type.requirementRowParameters(contract),
-  )
+  return Type.effectWithRows(contract.success, contract.failureRow, access, contract.requirementRow)
 }
 
 const effectCallableApplicationRepresentation = (
@@ -4128,40 +4115,32 @@ const seededSpecialization = (
     const argument: Type.GenericArgument | undefined =
       parameter.kind === 'Value' && Type.isTypeArgument(writtenType)
         ? writtenType
-        : parameter.kind === 'FailureRow'
-          ? Type.isNominal(writtenType)
-            ? Type.failureRowArgument([writtenType])
-            : Type.isUnion(writtenType)
-              ? Type.failureRowArgument(writtenType.members)
-              : Type.isParameter(writtenType) && writtenType.kind === 'FailureRow'
-                ? Type.failureRowArgument([], [writtenType])
-                : undefined
-          : parameter.kind === 'RequirementRow'
-            ? Type.isReference(writtenType) &&
-              (Type.isNominal(writtenType.target) || Type.isParameter(writtenType.target))
-              ? Type.isParameter(writtenType.target)
-                ? Type.requirementRowArgumentFromRow(
-                    RowAlgebra.singleton(
-                      Type.requirementRowPolicy(),
-                      Type.requirementMemberShape(
-                        writtenType.target,
-                        writtenType.access,
-                        fact.requirementRole ?? 'DefaultRole',
-                      ),
-                      fact.syntax.span,
+        : parameter.kind === 'RequirementRow'
+          ? Type.isReference(writtenType) &&
+            (Type.isNominal(writtenType.target) || Type.isParameter(writtenType.target))
+            ? Type.isParameter(writtenType.target)
+              ? Type.requirementRowArgumentFromRow(
+                  RowAlgebra.singleton(
+                    Type.requirementRowPolicy(),
+                    Type.requirementMemberShape(
+                      writtenType.target,
+                      writtenType.access,
+                      fact.requirementRole ?? 'DefaultRole',
                     ),
-                  )
-                : Type.requirementRowArgument([
-                    Object.freeze({
-                      capability: writtenType.target,
-                      role: fact.requirementRole ?? 'DefaultRole',
-                      access: writtenType.access,
-                    }),
-                  ])
-              : Type.isParameter(writtenType) && writtenType.kind === 'RequirementRow'
-                ? Type.requirementRowArgument([], [writtenType])
-                : undefined
-            : undefined
+                    fact.syntax.span,
+                  ),
+                )
+              : Type.requirementRowArgument([
+                  Object.freeze({
+                    capability: writtenType.target,
+                    role: fact.requirementRole ?? 'DefaultRole',
+                    access: writtenType.access,
+                  }),
+                ])
+            : Type.isParameter(writtenType) && writtenType.kind === 'RequirementRow'
+              ? Type.requirementRowArgument([], [writtenType])
+              : undefined
+          : undefined
     if (argument === undefined) {
       conflicts.push(
         Object.freeze({
@@ -5052,13 +5031,11 @@ const interfaceOperationContract = (
   const result =
     operation.functionKind === 'Ordinary'
       ? operation.success.type
-      : Type.effect(
+      : Type.effectWithRows(
           operation.success.type,
-          operation.failureRow.failures,
+          operation.failureRow.row,
           'Shared',
-          operation.requirementRow.requirements,
-          operation.failureRow.parameters,
-          operation.requirementRow.parameters,
+          operation.requirementRow.row,
         )
   return Object.freeze({
     declaration: operation.declaration,
@@ -5895,9 +5872,7 @@ const finishCallableApplication = (
           reference: sectionIntrinsicReference(section),
           protected: protected_?.expression ?? unavailableExpression(node),
           handler: handler ?? unavailableExpression(node),
-          ...(wanted === undefined
-            ? {}
-            : { selected: Type.failureType(Type.failureRowArgumentFromRow(wanted.selected)) }),
+          ...(wanted === undefined ? {} : { selected: Type.failureType(wanted.selected) }),
           protectedRow: wanted?.source ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
           handlerRow: handlerEffect?.failureRow ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
           residualRow:
@@ -6293,9 +6268,7 @@ const finishIntrinsicContractCall = (
         reference: intrinsicReference(source, call),
         protected: protected_?.expression ?? unavailableExpression(call),
         handler: handler?.expression ?? unavailableExpression(call),
-        ...(wanted === undefined
-          ? {}
-          : { selected: Type.failureType(Type.failureRowArgumentFromRow(wanted.selected)) }),
+        ...(wanted === undefined ? {} : { selected: Type.failureType(wanted.selected) }),
         protectedRow: wanted?.source ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
         handlerRow: handlerEffect?.failureRow ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
         residualRow:
@@ -6846,13 +6819,11 @@ const analyzeOperatorExpression = (
     if (contract?.success._tag !== 'Resolved') return undefined
     return contract.functionKind === 'Ordinary'
       ? contract.success.type
-      : Type.effect(
+      : Type.effectWithRows(
           contract.success.type,
-          contract.failureRow.failures,
+          contract.failureRow.row,
           'Shared',
-          contract.requirementRow.requirements,
-          contract.failureRow.parameters,
-          contract.requirementRow.parameters,
+          contract.requirementRow.row,
         )
   })()
   const operatorResult =
@@ -7102,25 +7073,7 @@ const analyzeEffectResult = (
         protectedNode?.span ?? node.span,
       ),
     )
-  const onlyFailureParameter =
-    protectedEffect === undefined ? undefined : Type.failureRowParameters(protectedEffect).at(0)
-  const onlyFailureMemberParameter =
-    protectedEffect === undefined ? undefined : Type.failureMemberParameters(protectedEffect).at(0)
-  const failureValue =
-    protectedEffect !== undefined &&
-    Type.failureMembers(protectedEffect).length === 0 &&
-    Type.failureRowParameters(protectedEffect).length === 0 &&
-    Type.failureMemberParameters(protectedEffect).length === 1 &&
-    onlyFailureMemberParameter !== undefined
-      ? onlyFailureMemberParameter
-      : protectedEffect !== undefined &&
-          Type.failureMembers(protectedEffect).length === 0 &&
-          Type.failureRowParameters(protectedEffect).length === 1 &&
-          onlyFailureParameter !== undefined
-        ? Type.failureProjection(onlyFailureParameter)
-        : Type.failureValue(
-            protectedEffect === undefined ? [] : Type.failureMembers(protectedEffect),
-          )
+  const failureValue = protectedEffect === undefined ? 'never' : Type.failureType(protectedEffect)
   const type =
     protectedEffect === undefined
       ? unavailableExpressionType
@@ -8840,8 +8793,7 @@ const analyzeStatements = (
       const failure =
         expression.type !== undefined &&
         (Type.isRuntimeConcrete(expression.type) ||
-          (Type.isParameter(expression.type) && expression.type.kind === 'Value') ||
-          Type.isFailureProjection(expression.type))
+          (Type.isParameter(expression.type) && expression.type.kind === 'Value'))
           ? expression.type
           : undefined
       if (!context.effectBlock && context.declaration.functionKind !== 'Effect')
@@ -8862,16 +8814,12 @@ const analyzeStatements = (
         !context.effectBlock &&
         failure !== undefined &&
         !(Type.isParameter(failure)
-          ? Type.failureMemberParameters(
-              Type.effectWithRows(Type.unit, context.declaration.failureRow.row),
-            ).some((parameter) => Type.equals(parameter, failure))
-          : Type.isFailureProjection(failure)
-            ? context.declaration.failureRow.parameters.some((parameter) =>
-                Type.equals(parameter, failure.parameter),
-              )
-            : context.declaration.failureRow.failures.some((candidate) =>
-                Type.equals(candidate, failure),
-              ))
+          ? Type.failureMemberParameters(context.declaration.failureRow.row).some((parameter) =>
+              Type.equals(parameter, failure),
+            )
+          : context.declaration.failureRow.failures.some((candidate) =>
+              Type.equals(candidate, failure),
+            ))
       )
         context.diagnostics.push(
           Diagnostic.undeclaredFailure(Type.encode(failure), expressionNode.span),

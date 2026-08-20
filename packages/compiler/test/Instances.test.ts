@@ -613,7 +613,7 @@ it.effect('deduplicates definitionally different open rows after concrete specia
     const result = yield* snapshot(`struct First {}
 struct Second {}
 effect fn source() -> i32 ! First | Second { return 1 }
-effect fn forward<A, !E>(self: once Effect<A ! E>) -> A ! E { return run self }
+effect fn forward<A, E>(self: once Effect<A ! E>) -> A ! E { return run self }
 pub fn main() -> i32 {
   let direct = forward<i32, First | Second>(source())
   let permuted = forward<i32, Second | First>(source())
@@ -630,10 +630,7 @@ pub fn main() -> i32 {
       const failures = instance.specialization.failureRow
       const requirements = instance.specialization.requirementRow
       if (failures !== undefined)
-        assert.strictEqual(
-          Type.isRuntimeConcreteGenericArgument({ _tag: 'FailureRowArgument', row: failures }),
-          true,
-        )
+        assert.strictEqual(Type.isRuntimeConcreteGenericArgument(Type.failureType(failures)), true)
       if (requirements !== undefined)
         assert.strictEqual(
           Type.isRuntimeConcreteGenericArgument({

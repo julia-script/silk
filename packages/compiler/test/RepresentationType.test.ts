@@ -65,7 +65,7 @@ it('admits every Effect representation contract only at equal or weaker-use boun
 })
 
 it('keeps one ordered kinded argument vector on nominal applications', () => {
-  const failure = Type.parameter(owner, 2, 'E', 'FailureRow')
+  const failure = Type.parameter(owner, 2, 'E')
   const requirements = Type.parameter(owner, 3, 'R', 'RequirementRow')
   const exact = Type.exactRepresentationArgument(
     callableIdentity('decode'),
@@ -73,7 +73,7 @@ it('keeps one ordered kinded argument vector on nominal applications', () => {
   )
   const arguments_: ReadonlyArray<Type.GenericArgument> = [
     'i32',
-    Type.failureRowArgument([Type.nominal('representation/type', 'Problem')]),
+    Type.failureValue([Type.nominal('representation/type', 'Problem')]),
     Type.requirementRowArgument([
       {
         capability: Type.nominal('representation/type', 'Console'),
@@ -89,7 +89,7 @@ it('keeps one ordered kinded argument vector on nominal applications', () => {
   assert.notStrictEqual(Type.substitution(parameters, arguments_), undefined)
   assert.strictEqual(applied.arguments.length, 4)
   assert.strictEqual(Type.isTypeArgument(applied.arguments.at(0) ?? exact), true)
-  assert.strictEqual(Type.isFailureRowArgument(applied.arguments.at(1) ?? exact), true)
+  assert.strictEqual(Type.isTypeArgument(applied.arguments.at(1) ?? exact), true)
   assert.strictEqual(Type.isRequirementRowArgument(applied.arguments.at(2) ?? exact), true)
   assert.strictEqual(Type.isExactRepresentationArgument(applied.arguments.at(3) ?? 'i32'), true)
   assert.include(Type.key(applied), 'exact-representation:callable-identity:')
@@ -206,17 +206,14 @@ it('finds representation divergence through Effect rows and structural unions', 
 })
 
 it('keeps open parameters inside every generic argument non-concrete', () => {
-  const failure = Type.parameter(owner, 2, 'E', 'FailureRow')
+  const failure = Type.parameter(owner, 2, 'E')
   const openIdentity = Type.callableIdentityArgument(
     'representation/type.open',
     { _tag: 'Declaration', module: 'representation/type', name: 'open' },
     [value],
   )
   const exact = Type.exactRepresentationArgument(openIdentity, Type.callable(['i32'], 'i32'))
-  const nominal = Type.nominal('representation/type', 'OpenRows', [
-    Type.failureRowArgument([], [failure]),
-    exact,
-  ])
+  const nominal = Type.nominal('representation/type', 'OpenRows', [failure, exact])
 
   assert.strictEqual(Type.isRuntimeConcreteGenericArgument(exact), false)
   assert.strictEqual(

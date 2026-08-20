@@ -118,13 +118,13 @@ fn schemaDecode(value: &Schema) -> i32 { return value.tag }
 impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
 
 struct Problem {}
-struct FailureBox<S, !E> { source: S }
-fn makeFailure<S, !E>(source: S, pending: once Effect<i32 ! E>) -> FailureBox<S, E> {
+struct FailureBox<S, E> { source: S }
+fn makeFailure<S, E>(source: S, pending: once Effect<i32 ! E>) -> FailureBox<S, E> {
   drop pending
   return FailureBox<S, E> { source: move source }
 }
-fn failureDecode<S: Decoder, !E>(value: &FailureBox<S, E>) -> i32 { return 1 }
-impl<S: Decoder<S>, !E> Decoder<FailureBox<S, E>> for FailureBox<S, E> {
+fn failureDecode<S: Decoder, E>(value: &FailureBox<S, E>) -> i32 { return 1 }
+impl<S: Decoder<S>, E> Decoder<FailureBox<S, E>> for FailureBox<S, E> {
   decode: FailureBox.failureDecode
 }
 
@@ -166,7 +166,7 @@ pub fn main() -> i32 {
     assert.strictEqual(requirement.length, 1)
     assert.deepEqual(failure.at(0)?.key.typeArguments.map(Type.encodeGenericArgument), [
       'conditional-conformance/kinded-rows.Schema',
-      '! conditional-conformance/kinded-rows.Problem',
+      'conditional-conformance/kinded-rows.Problem',
     ])
     assert.deepEqual(requirement.at(0)?.key.typeArguments.map(Type.encodeGenericArgument), [
       'conditional-conformance/kinded-rows.Schema',
@@ -177,10 +177,7 @@ pub fn main() -> i32 {
     const schema = Type.nominal(module, 'Schema')
     const problem = Type.nominal(module, 'Problem')
     const clock = Type.nominal(module, 'Clock')
-    const failureBox = Type.nominal(module, 'FailureBox', [
-      schema,
-      Type.failureRowArgument([problem]),
-    ])
+    const failureBox = Type.nominal(module, 'FailureBox', [schema, Type.failureValue([problem])])
     const requirementBox = Type.nominal(module, 'RequirementBox', [
       schema,
       Type.requirementRowArgument([{ capability: clock, role: 'DefaultRole', access: 'Shared' }]),
@@ -200,7 +197,7 @@ pub fn main() -> i32 {
     if (failureProof._tag === 'Proved')
       assert.deepEqual(failureProof.typeArguments.map(Type.encodeGenericArgument), [
         'conditional-conformance/kinded-rows.Schema',
-        '! conditional-conformance/kinded-rows.Problem',
+        'conditional-conformance/kinded-rows.Problem',
       ])
     if (requirementProof._tag === 'Proved')
       assert.deepEqual(requirementProof.typeArguments.map(Type.encodeGenericArgument), [
