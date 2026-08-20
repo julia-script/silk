@@ -6039,7 +6039,10 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           // error; leaving termination unavailable keeps the fact out of coherence and proof search.
           if (requirements.length !== conformance.requirements.length)
             return Object.freeze({ ...conformance, head })
+          const contract = memberByNominal(modules, conformance.capability.type)
           if (
+            (contract?._tag === 'InterfaceDeclaration' ||
+              contract?._tag === 'ServiceDeclaration') &&
             Type.isNominal(conformance.provider.type) &&
             conformance.provider.type.module !== module.module
           )
@@ -6184,7 +6187,16 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
       }
       const capability = conformance.capability.type
       const provider = conformance.provider.type
-      if (Type.isNominal(provider) && provider.module !== conformance.module) {
+      const sourceMember = memberByNominal(modules, capability)
+      const sourceContract =
+        sourceMember?._tag === 'InterfaceDeclaration' || sourceMember?._tag === 'ServiceDeclaration'
+          ? sourceMember
+          : undefined
+      if (
+        sourceContract !== undefined &&
+        Type.isNominal(provider) &&
+        provider.module !== conformance.module
+      ) {
         diagnostics.push(
           invalidDiagnostic(
             `implementation for ${Type.encode(provider)} must be declared in ${provider.module}, the provider's module`,
@@ -6193,11 +6205,6 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         )
         continue
       }
-      const sourceMember = memberByNominal(modules, capability)
-      const sourceContract =
-        sourceMember?._tag === 'InterfaceDeclaration' || sourceMember?._tag === 'ServiceDeclaration'
-          ? sourceMember
-          : undefined
       if (sourceContract !== undefined && !Type.isTypeArgument(provider)) {
         diagnostics.push(
           invalidDiagnostic(

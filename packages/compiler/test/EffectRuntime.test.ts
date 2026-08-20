@@ -55,10 +55,13 @@ pub fn main() -> i32 {
   let handled = retrying() |> Effect.catchAll(recover)
   return run handled
 }`
-const providerSource = `struct Clock {}
+const providerSource = `service Clock { effect fn tick() -> i32 ? &Clock }
+struct FixedClock { marker: i32 }
+effect fn tick(self: &FixedClock) -> i32 { return self.marker }
+impl Clock for FixedClock { tick: FixedClock.tick }
 effect fn read() -> i32 ? &Clock@Primary { return 42 }
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   let provided = read() |> Intrinsic.bindRequirement<&Clock@Primary>(&clock)
   return run provided
 }`
@@ -76,8 +79,8 @@ const flattenPipedSource = `${flattenPrelude}
 pub fn main() -> i32 { return run (outer(21) |> Effect.flatten) }`
 const flattenRowsSource = `struct Outer { code: i32 }
 struct Inner { code: i32 }
-struct Clock {}
-struct Meter {}
+service Clock {}
+service Meter {}
 effect fn inner() -> i32 ! Inner ? &Meter { return 21 }
 effect fn outer() -> Effect<i32 ! Inner ? &Meter> ! Outer ? &Clock { return inner() }
 pub fn main() -> i32 {
@@ -85,7 +88,9 @@ pub fn main() -> i32 {
   let flattened = Effect.flatten(move nested)
   return 0
 }`
-const pipelinePrelude = `struct Clock {}
+const pipelinePrelude = `service Clock {}
+struct FixedClock { marker: i32 }
+impl Clock for FixedClock {}
 effect fn read() -> i32 ? &Clock { return 20 }
 fn add(value: i32) -> i32 { return value + 1 }
 fn double(value: i32) -> i32 { return value * 2 }
@@ -97,7 +102,7 @@ const pipelineSources = [
     expected: 42,
     source: `${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   return run ((read() |> Effect.provide(&clock)) |> Effect.map(add)) |> Effect.map(double)
 }`,
   },
@@ -106,7 +111,7 @@ pub fn main() -> i32 {
     expected: 42,
     source: `${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   return run read()
     |> Effect.map(add)
     |> Effect.provide(&clock)
@@ -118,7 +123,7 @@ pub fn main() -> i32 {
     expected: 42,
     source: `${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   return run read()
     |> Effect.map(add)
     |> Effect.map(double)
@@ -130,7 +135,7 @@ pub fn main() -> i32 {
     expected: 42,
     source: `${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   return run Effect.map(Effect.provide(Effect.map(read(), add), &clock), double)
 }`,
   },
@@ -139,7 +144,7 @@ pub fn main() -> i32 {
     expected: 42,
     source: `${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   let mapped = read() |> Effect.map(add)
   let provided = mapped |> Effect.provide(&clock)
   let mappedAgain = provided |> Effect.map(double)
@@ -149,7 +154,7 @@ pub fn main() -> i32 {
 ] as const
 const effectOperatorPipelineSource = `${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   return run read()
     |> Effect.flatMap(increment)
     |> Effect.tap(observe)
@@ -158,7 +163,7 @@ pub fn main() -> i32 {
 }`
 const storedEffectOperatorPipelineSource = `${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   let flatMapped = read() |> Effect.flatMap(increment)
   let tapped = flatMapped |> Effect.tap(observe)
   let mapped = tapped |> Effect.map(double)
