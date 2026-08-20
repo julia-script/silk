@@ -733,18 +733,25 @@ SHALL produce a stable diagnostic without erasing independent nested facts.
 
 Semantic analysis SHALL retain each source-written union member and separator with its resolution,
 provenance, and causal availability while publishing one normalized type outcome containing the
-canonical ordered nominal member set. Failed members SHALL remain queryable and MUST make the
-dependent union outcome unavailable without erasing independent resolved members.
+canonical ordered ordinary member set. Each admitted member SHALL retain the exact evidence needed
+to distinguish its public type and, for represented executable values, its compiler-private finite
+representation. Failed members SHALL remain queryable and MUST make the dependent union outcome
+unavailable without erasing independent resolved members.
 
 #### Scenario: Analyze an equivalent duplicate union
 
-- **WHEN** source spells `End | Token | End`
-- **THEN** facts retain three source members while the available semantic type contains canonical `End` and `Token` exactly once
+- **WHEN** source spells `i32 | Token | i32`
+- **THEN** facts retain three source members while the available semantic type contains canonical `i32` and `Token` exactly once
+
+#### Scenario: Retain represented executable evidence
+
+- **WHEN** an exact callable or opaque Effect value enters a union
+- **THEN** its conversion fact identifies the exact represented source and canonical target member without exposing a public runtime tag
 
 #### Scenario: Retain one unresolved member
 
-- **WHEN** one member of `Token | Missing | End` cannot resolve
-- **THEN** the `Token` and `End` member facts remain available and the union outcome names the missing member's cause
+- **WHEN** one member of `Token | Missing | i32` cannot resolve
+- **THEN** the `Token` and `i32` member facts remain available and the union outcome names the missing member's cause
 
 ### Requirement: Contextual union conversions are explicit facts
 

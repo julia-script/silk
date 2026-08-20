@@ -1,3 +1,8 @@
+## RENAMED Requirements
+
+- FROM: `Union ownership derives from every nominal member`
+- TO: `Union ownership derives from every normalized member`
+
 ## MODIFIED Requirements
 
 ### Requirement: Union ownership derives from every normalized member
