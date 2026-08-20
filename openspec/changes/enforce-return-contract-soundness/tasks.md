@@ -16,4 +16,4 @@
 - [x] 3.1 Add analysis regressions for issue 226, ordinary functions, effect functions, generics, and interface dispatch.
 - [x] 3.2 Confirm valid explicit nested Effects remain one layer and run only when source says `run`.
 - [x] 3.3 Update diagnostics, canonical specs, language evidence links, and close the reconciliation handoff.
-- [ ] 3.4 Run typecheck, Biome, focused compiler tests, full tests, and `pnpm check`.
+- [x] 3.4 Run typecheck, Biome, focused compiler tests, full tests, and `pnpm check`.
