@@ -271,6 +271,33 @@ pub fn main() -> i32 { return run choose(First {}) }`,
     expected: { _tag: 'Completes', result: 41 },
   },
   {
+    name: 'finite-effect-join-selected-cleanup',
+    source: `struct First {}
+struct Second {}
+struct Guard { storage: Allocation }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () { return () }
+}
+fn choose(input: First | Second, guard: Guard) -> once Effect<i32> {
+  return match move input {
+    First {} => effect { drop move guard return 41 }
+    Second {} => effect { drop move guard return 42 }
+  }
+}
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<i32>()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let storage = run recipe
+  let selected = choose(Second {}, Guard { storage: move storage })
+  drop selected
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'constrained-callable-forwarding',
     source: constrainedCallableForwarding,
     expected: { _tag: 'Completes', result: 42 },
