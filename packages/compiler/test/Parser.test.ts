@@ -339,7 +339,8 @@ it('bounds damaged effect-block recovery before the following declaration', () =
 it('parses Effect.retry in direct and pipeline insertion forms', () => {
   const result = parseText(
     'memory://effect-retry.silk',
-    `fn main() -> i32 {
+    `import silk.effects as Effect
+fn main() -> i32 {
   let direct = Effect.retry(work(), policy)
   let piped = work() |> Effect.retry(policy)
   return 0
@@ -360,7 +361,8 @@ it('parses Effect.retry in direct and pipeline insertion forms', () => {
 })
 
 it('rejects the removed bare role-selector argument without retaining role syntax', () => {
-  const source = `fn main() -> i32 {
+  const source = `import silk.effects as Effect
+fn main() -> i32 {
   let selected = work() |> Effect.provideMut(&mut provider, @Audit)
   return 0
 }
@@ -391,7 +393,10 @@ it('parses explicit drop as a statement without making the block terminal', () =
 })
 
 it('parses unsafe blocks and allocator and Drop conformances losslessly', () => {
-  const source = `struct Guard<T> { value: T }
+  const source = `import silk.core { Allocator }
+import silk.core { SystemAllocator }
+import silk.layout { Layout }
+struct Guard<T> { value: T }
 impl Allocator for SystemAllocator { allocate: SystemAllocator.allocate }
 impl Drop for Guard<Token> {
   fn drop(self: &mut Guard<Token>) -> () { unsafe { drop self.value } return () }
@@ -448,7 +453,7 @@ fn take(state: Empty | Full) -> i32 {
 
 it('recovers from a malformed impl type-parameter list inside the declaration', () => {
   const source =
-    'impl<T Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> () { return () } } fn after() -> i32 { return 7 }'
+    'import silk.vector { Vector }\nimpl<T Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> () { return () } } fn after() -> i32 { return 7 }'
   const result = parseText('memory://damaged-parametric-conformance.silk', source)
   assert.isAbove(result.parserDiagnostics.length, 0)
   assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
@@ -478,7 +483,7 @@ it('recovers from a malformed bounded impl type-parameter list inside the declar
 it('bounds damaged conformance recovery before the following declaration', () => {
   const result = parseText(
     'memory://damaged-conformance.silk',
-    'impl Allocator for Broken fn after() -> i32 { return 42 }',
+    'import silk.core { Allocator }\nimpl Allocator for Broken fn after() -> i32 { return 42 }',
   )
   assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
   assert.include(
@@ -493,7 +498,7 @@ it('bounds damaged conformance recovery before the following declaration', () =>
 
 it('bounds a damaged unsafe call before the following statement and declaration', () => {
   const source =
-    'fn main() -> i32 { unsafe { let value = Slot.take( return 42 } } fn after() -> i32 { return 7 }'
+    'import silk.slot as Slot\nfn main() -> i32 { unsafe { let value = Slot.take( return 42 } } fn after() -> i32 { return 7 }'
   const result = parseText('memory://damaged-unsafe-call.silk', source)
   const functions = directFunctionDeclarations(result.root)
 
@@ -510,7 +515,7 @@ it('bounds a damaged unsafe call before the following statement and declaration'
 it('parses an explicit selected requirement row in a provision pipeline', () => {
   const result = parseText(
     'memory://provider-role.silk',
-    'fn main() -> i32 { let recipe = work() |> Effect.provide<Clock at Scratch>(&clock) return 0 }',
+    'import silk.effects as Effect\nfn main() -> i32 { let recipe = work() |> Effect.provide<Clock at Scratch>(&clock) return 0 }',
   )
   assert.deepEqual(result.parserDiagnostics, [])
   assert.include(
@@ -524,7 +529,9 @@ it('parses an explicit selected requirement row in a provision pipeline', () => 
 it('parses explicit Effect contracts and declaration requirement rows', () => {
   const result = parseText(
     'memory://effect-contract-rows.silk',
-    `fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator at Scratch> {
+    `import silk.core { Allocator }
+import silk.filesystem { FileSystem }
+fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator at Scratch> {
   return effect { return 1 }
 }
 effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator at Scratch { return 1 }`,
@@ -1689,7 +1696,7 @@ it('keeps statements after the return statement as concrete branches', () => {
 it('parses signed literals and qualified callees', () => {
   const result = parseText(
     'fixture://arith.silk',
-    'pub fn main() -> i32 { return i32.add(-8, 50) }',
+    'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(-8, 50) }',
   )
   const fn = directFunctionDeclarations(result.root).at(0)
   const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
@@ -1725,7 +1732,7 @@ it('parses signed literals and qualified callees', () => {
 it('recovers a missing operation name after the dot', () => {
   const result = parseText(
     'fixture://missing-operation.silk',
-    'pub fn main() -> i32 { return i32.(1, 2) }',
+    'import silk.i32 as i32\npub fn main() -> i32 { return i32.(1, 2) }',
   )
 
   assert.deepEqual(
@@ -1963,9 +1970,9 @@ it('parses grouping and right-associative prefix expressions losslessly', () => 
 
 it('parses complete callable pipelines left-to-right', () => {
   const source =
-    'pub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }\n' +
-    'pub fn flag() -> bool { return true |> bool.not }\n' +
-    'pub fn recover() -> i32 { return risky() |> Effect.catchAll(handler) }'
+    'import silk.i32 as i32\npub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }\n' +
+    'import silk.bool as bool\npub fn flag() -> bool { return true |> bool.not }\n' +
+    'import silk.effects as Effect\npub fn recover() -> i32 { return risky() |> Effect.catchAll(handler) }'
   const result = parseText('memory/operator-pipelines', source)
   const pipelines = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
@@ -2075,7 +2082,8 @@ it('recovers every callable type boundary without crossing the next declaration'
 })
 
 it('parses repeated postfix application over every callable-producing expression', () => {
-  const source = `fn use(operation: fn(i32) -> i32, value: i32) -> i32 {
+  const source = `import silk.i32 as i32
+fn use(operation: fn(i32) -> i32, value: i32) -> i32 {
   let bound = i32.add(2)
   let named = operation(value)
   let qualified = i32.add(2)(value)
@@ -2102,7 +2110,8 @@ it('parses repeated postfix application over every callable-producing expression
 })
 
 it('gives pipelines a complete callable expression and run the complete following expression', () => {
-  const source = `fn use(attempt: Effect<i32>, operation: fn(i32) -> i32) -> i32 {
+  const source = `import silk.effects as Effect
+fn use(attempt: Effect<i32>, operation: fn(i32) -> i32) -> i32 {
   let a = 1 |> operation
   let b = 2 |> (operation)
   let c = 3 |> choose(true)
@@ -2275,7 +2284,8 @@ pub fn inspect(event: Token | End) -> i32 {
 })
 
 it('parses bare, shared, and exclusive matches in expression positions', () => {
-  const source = `pub struct Token { kind: i32 }
+  const source = `import silk.i32 as i32
+pub struct Token { kind: i32 }
 pub fn bare(event: Token) -> i32 { return match event { Token { kind } => kind } }
 pub fn shared(event: Token) -> i32 { return i32.add(match &event { Token { kind } => kind }, 1) }
 pub fn exclusive(event: Token) -> i32 { let value = match &mut event { _ => 0 } return value }`

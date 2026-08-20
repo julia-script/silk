@@ -967,7 +967,7 @@ const invalidCases: ReadonlyArray<readonly [string, string, string]> = [
   ],
   [
     'non-generic builtin specialization',
-    'pub fn main() -> i32 { return i32.add<i32>(40, 2) }',
+    'import silk.i32 as i32\npub fn main() -> i32 { return i32.add<i32>(40, 2) }',
     'SEM0051',
   ],
   [
@@ -982,7 +982,7 @@ const invalidCases: ReadonlyArray<readonly [string, string, string]> = [
   ],
   [
     'concrete-only operation in an open body',
-    'fn addOne<T>(value: T) -> i32 { return i32.add(move value, 1) }\npub fn main() -> i32 { return addOne<i32>(41) }',
+    'import silk.i32 as i32\nfn addOne<T>(value: T) -> i32 { return i32.add(move value, 1) }\npub fn main() -> i32 { return addOne<i32>(41) }',
     'SEM0012',
   ],
 ]

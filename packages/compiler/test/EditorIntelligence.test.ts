@@ -43,7 +43,7 @@ it.effect('indexes allocator tokens as source binding, actor, and function ident
         SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
       )
       const binding = occurrenceAt(snapshot, source, 'allocator')
-      const actor = occurrenceAt(snapshot, source, 'SystemAllocator')
+      const actor = occurrenceAt(snapshot, source, 'SystemAllocator', 1)
       const operation = occurrenceAt(snapshot, source, 'make')
       assert.strictEqual(binding?.role, 'Declaration')
       assert.strictEqual(actor?.role, 'Actor')
@@ -164,7 +164,8 @@ pub fn main() -> i32 { return recover(Problem { code: 41 }) }
 })
 
 it.effect('links public Effect operations to visible standard-library source', () => {
-  const source = `fn increment(value: i32) -> i32 { return value + 1 }
+  const source = `import silk.effects as Effect
+fn increment(value: i32) -> i32 { return value + 1 }
 effect fn answer() -> i32 { return 41 }
 pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
@@ -191,7 +192,8 @@ pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
 })
 
 it.effect('navigates and presents the source-defined Vector lexical view accessors', () => {
-  const source = `import silk.vector { make, asSlice, asMutSlice }
+  const source = `import silk.usize as usize
+import silk.vector { make, asSlice, asMutSlice }
 pub fn main() -> i32 {
   let mut values = make<i32>()
   let shared = asSlice<i32>(&values)
@@ -241,7 +243,9 @@ pub fn main() -> i32 {
 })
 
 it.effect('navigates and presents the source-defined owned Bytes surface', () => {
-  const source = `import silk.bytes { Bytes as OwnedBytes, make, copy, append, length, asSlice, asMutSlice }
+  const source = `import silk.bytes { Bytes }
+import silk.usize as usize
+import silk.bytes { Bytes as OwnedBytes, make, copy, append, length, asSlice, asMutSlice }
 pub fn main() -> i32 {
   let bytes = Bytes.make()
   return usize.toI32(length(&bytes))
@@ -296,7 +300,12 @@ pub fn main() -> i32 {
 })
 
 it.effect('completes and navigates the source-defined logging surface', () => {
-  const source = `import silk.logging { Logger }
+  const source = `import silk.effects as Effect
+import silk.logging { InMemoryLogger }
+import silk.logging { LogError }
+import silk.logging { LogLevel }
+import silk.logging { StdoutLogger }
+import silk.logging { Logger }
 effect fn pending() -> () ! LogError ? &mut Logger {
   return run Effect.logAt(LogLevel.warning(), "ready")
 }
@@ -310,7 +319,7 @@ pub fn main() -> i32 {
 }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
-      const logger = occurrenceAt(snapshot, source, 'Logger', 1)
+      const logger = occurrenceAt(snapshot, source, 'Logger', 3)
       assert.strictEqual(logger?.role, 'Type')
       assert.strictEqual(logger?.declaration?.module, 'silk/logging')
 
@@ -366,7 +375,9 @@ pub fn main() -> i32 {
 })
 
 it.effect('completes and navigates the portable Path and FileSystem surface', () => {
-  const source = `import silk.filesystem { FileError, FileSystem, Path, exists, resolve }
+  const source = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.filesystem { FileError, FileSystem, Path, exists, resolve }
 effect fn inspect(path: &Path) -> bool ! FileError ? &mut FileSystem {
   let info = run FileSystem.stat(path)
   return run exists(path)
@@ -502,7 +513,8 @@ it.effect(
   () =>
     Analysis.ofSourceRealized(
       'main',
-      encoder.encode(`struct Pair { left: i32 }
+      encoder.encode(`import silk.core { SystemAllocator }
+struct Pair { left: i32 }
 fn pick() -> i32 {
   let pair = Pair { left: 1 }
   let allocator = SystemAllocator.make()
@@ -771,7 +783,8 @@ pub fn make(value: i32) -> Secret { return Secret { value: value, key: 7 } }`
 })
 
 it.effect('renders inferred types through unambiguous imports and canonical fallbacks', () => {
-  const root = `import types.Models as Schema { Box as Selected }
+  const root = `import silk.box { Box }
+import types.Models as Schema { Box as Selected }
 struct Selected {}
 struct Problem {}
 pub fn main() -> i32 { return 0 }`
@@ -837,7 +850,8 @@ pub struct Other {}`
 })
 
 it.effect('keeps recovered Unicode-adjacent occurrence indexes compact and deterministic', () => {
-  const source = `// π🙂
+  const source = `import silk.core { SystemAllocator }
+// π🙂
 struct Problem {}
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()

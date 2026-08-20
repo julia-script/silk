@@ -53,7 +53,10 @@ it('declares the shared usize counts once and ships no private counted identity'
  * lowered counts are the evidence that replacing `counted(0)` with `usize.ZERO` moved no value:
  * the two struct fields still receive the same `usize` zero, now as a direct typed immediate.
  */
-const growth = `import silk.vector { Vector, make, append, get, length, capacity }
+const growth = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.vector { Vector, make, append, get, length, capacity }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
@@ -133,7 +136,11 @@ it.effect(
  * widths. Every one of them still carries `usize`, so the removal left no literal on the `i32`
  * default.
  */
-const scalars = `import silk.string {
+const scalars = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.u32 as u32
+import silk.string {
   ScalarCursor,
   ScalarStep,
   copy,

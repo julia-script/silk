@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
@@ -31,6 +32,33 @@ it('keeps the generated manifest ordered and byte-identical to canonical Silk fi
     assert.strictEqual(entry.path, `${entry.module}.silk`)
     assert.deepEqual(entry.bytes, new Uint8Array(readFileSync(entry.sourceUrl)))
     assert.deepEqual(Stdlib.sources.get(entry.module), entry.bytes)
+  }
+})
+
+it('derives deterministic catalog metadata and enforces portable dependency direction', () => {
+  const byModule = new Map(Stdlib.manifest.map((entry) => [entry.module, entry] as const))
+  for (const entry of Stdlib.manifest) {
+    const source = new TextDecoder().decode(entry.bytes)
+    assert.strictEqual(entry.sourceIdentity, entry.module)
+    assert.strictEqual(entry.documentation, entry.path)
+    assert.strictEqual(createHash('sha256').update(entry.bytes).digest('hex'), entry.digest)
+    assert.deepEqual(
+      entry.runtimeInventory,
+      [
+        ...new Set(
+          [...source.matchAll(/\bIntrinsic\.([A-Za-z_][A-Za-z0-9_]*)/g)].flatMap((match) =>
+            match[1] === undefined ? [] : [match[1]],
+          ),
+        ),
+      ].sort(),
+    )
+    if (entry.layer === 'portable') assert.isUndefined(entry.providerTargets)
+    else assert.isAbove(entry.providerTargets?.length ?? 0, 0)
+
+    for (const imported of source.matchAll(/\bimport\s+([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)/g)) {
+      const dependency = byModule.get(imported[1]?.replaceAll('.', '/') ?? '')
+      if (entry.layer === 'portable') assert.notStrictEqual(dependency?.layer, 'target-provider')
+    }
   }
 })
 

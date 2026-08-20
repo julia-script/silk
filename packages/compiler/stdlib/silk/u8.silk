@@ -16,6 +16,7 @@
 //! ## Choose an overflow policy instead of relying on a trap
 //! ```silk
 //! import silk.option { None, Some }
+//! import silk.u8 as u8
 //!
 //! pub fn main() -> i32 {
 //!   let overflowed = match move u8.checkedAdd(255, 1) {

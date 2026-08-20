@@ -8,7 +8,9 @@ import * as Analysis from '../../dist/Analysis.js'
  * their declared fields, and `Holder<T>` violates twice through two distinct specializations, so
  * the printed report exercises both provenance modes and the deterministic ordering between them.
  */
-const source = `struct Parser<A> { decode: fn(i32) -> A }
+const source = `import silk.i32 as i32
+
+struct Parser<A> { decode: fn(i32) -> A }
 struct Nested<A> { parser: Parser<A> }
 struct Holder<T> { value: T }
 

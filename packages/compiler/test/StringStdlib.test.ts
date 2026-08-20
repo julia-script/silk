@@ -17,7 +17,8 @@ const diagnosticSummary = (snapshot: Analysis.Snapshot) =>
     start: diagnostic.span.start,
   }))
 
-const validation = `import silk.string { InvalidUtf8, fromUtf8, byteLength }
+const validation = `import silk.usize as usize
+import silk.string { InvalidUtf8, fromUtf8, byteLength }
 import silk.result { Result, Success, Failure }
 
 fn observe(result: Result<string, InvalidUtf8>) -> i32 {
@@ -65,7 +66,10 @@ it.effect('validates complete UTF-8 and reports the first invalid byte offset', 
   }),
 )
 
-const owned = `import silk.string {
+const owned = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.string {
   copy,
   append,
   view,
@@ -115,7 +119,12 @@ it.effect('copies, appends, views, and drops owned String through ordinary Bytes
   }),
 )
 
-const appendRollback = `import silk.string { String, copy, append, view, ownedByteLength }
+const appendRollback = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.string { String, copy, append, view, ownedByteLength }
 
 struct QuotaAllocator { remaining: i32 }
 
@@ -163,7 +172,9 @@ it.effect('rolls append back when growth cannot allocate', () =>
   }),
 )
 
-const scalars = `import silk.string {
+const scalars = `import silk.u32 as u32
+import silk.usize as usize
+import silk.string {
   ScalarCursor,
   ScalarStep,
   scalarCursor,

@@ -25,7 +25,8 @@ fn apply<A, B>(transform: once fn(A) -> B, value: A) -> B {
 pub fn main() -> i32 { return apply<i32, i32>(double, 21) }`
 
 /** A partial application rather than a named function, the shape `Effect.map(i32.add(40))` uses. */
-const partial = `fn apply(transform: once fn(i32) -> i32, value: i32) -> i32 {
+const partial = `import silk.i32 as i32
+fn apply(transform: once fn(i32) -> i32, value: i32) -> i32 {
   return transform(value)
 }
 

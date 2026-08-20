@@ -93,8 +93,11 @@ const ORDER_UNDER_12345 = 971199974
 const ORDER_UNDER_6789 = 434552010
 
 const mapImports = `import silk.hash { HashKey, HashSeed, Word }
+import silk.i32 as i32
 import silk.hash_map { HashMap, bucketCount, insert, keyAt, length, make, occupiedAt }
-import silk.option { Option, Some, None }`
+import silk.option { Option, Some, None }
+import silk.u64 as u64
+import silk.usize as usize`
 
 /**
  * Folds the keys in bucket order into one number. The fold is order-sensitive — a key's contribution
@@ -129,7 +132,13 @@ const fill = (map: string): string =>
  * folded the very same order.
  */
 const ordered = (seed: number, digest: number): string =>
-  `${mapImports}
+  `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.hash { HashKey }
+import silk.hash { Word }
+import silk.u64 as u64
+${mapImports}
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()

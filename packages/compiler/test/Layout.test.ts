@@ -174,7 +174,8 @@ it.effect(
   'plans tagged effect outcomes for zero-lane success and target-sized failure payloads',
   () =>
     Effect.gen(function* () {
-      const source = `struct Empty {}
+      const source = `import silk.effects as Effect
+struct Empty {}
 struct Problem { position: usize }
 effect fn risky() -> Empty ! Problem { fail move Problem { position: 1 } }
 effect fn recover(problem: Problem) -> Empty { return Empty {} }
@@ -211,7 +212,8 @@ it.effect('rejects non-canonical failure tags before payload-member indexing', (
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'layout/failure-tags',
-      ascii(`struct A { code: i32 }
+      ascii(`import silk.effects as Effect
+struct A { code: i32 }
 struct B { code: f64 }
 effect fn risky(flag: bool) -> i32 ! A | B {
   if flag { fail A { code: 1 } }

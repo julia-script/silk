@@ -15,7 +15,11 @@ const encoder = new TextEncoder()
 const outputRoot = mkdtempSync(join(tmpdir(), 'silk-standard-streams-'))
 afterAll(() => rmSync(outputRoot, { recursive: true, force: true }))
 
-const source = `pub effect fn main() -> () ! StreamWriteError {
+const source = `import silk.core as StandardStream
+import silk.core { NativeStandardStreams }
+import silk.core { StreamWriteError }
+import silk.effects as Effect
+pub effect fn main() -> () ! StreamWriteError {
   let mut native = NativeStandardStreams.native()
   let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("heading\\n")), &mut native)
   let second = run Effect.provideMut(StandardStream.send(StandardStream.stderr(), b"warning\\n"), &mut native)
@@ -174,7 +178,11 @@ it.effect('replaces the host provider with a pure source in-memory implementatio
   Effect.gen(function* () {
     const replaced = yield* Analysis.ofSourceRealized(
       'standard-streams/memory',
-      encoder.encode(`struct MemoryStreams { writes: i32 }
+      encoder.encode(`import silk.core as StandardStream
+import silk.core { StandardStreams }
+import silk.core { StreamWriteError }
+import silk.effects as Effect
+struct MemoryStreams { writes: i32 }
 effect fn record(
   self: &mut MemoryStreams,
   destination: bool,

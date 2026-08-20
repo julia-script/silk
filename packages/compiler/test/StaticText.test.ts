@@ -114,7 +114,8 @@ it('parses all four literal forms as pipeline operands', () => {
     Lexer.lex(
       SourceFile.make(
         'static/pipelines',
-        encoder.encode(`pub fn main() -> i32 {
+        encoder.encode(`import silk.string { String }
+pub fn main() -> i32 {
   let a = "abc" |> String.uppercase
   let b = b"abc" |> String.uppercase
   let c = """abc""" |> String.uppercase

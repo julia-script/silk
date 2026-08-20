@@ -94,7 +94,8 @@ pub fn main() -> i32 { let whenEnabled = select(true) return whenEnabled(42) }`)
 it.effect('keeps executable sites distinct across generic owner specializations', () =>
   Effect.gen(function* () {
     const result = Analysis.instancesOf(
-      yield* snapshot(`fn section<T>(value: T) -> i32 {
+      yield* snapshot(`import silk.i32 as i32
+fn section<T>(value: T) -> i32 {
   let plusOne = i32.add(1)
   return plusOne(41)
 }
@@ -377,7 +378,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const composed = Analysis.loweredMir(
-        yield* snapshot(`effect fn work() -> i32 { return 41 }
+        yield* snapshot(`import silk.effects as Effect
+effect fn work() -> i32 { return 41 }
 pub fn main() -> i32 { return run work() |> Effect.retry(2) }`),
       )
       const grouped = Analysis.loweredMir(

@@ -475,7 +475,8 @@ it.effect('desugars effect functions and source-defined catch calls to hidden ef
   Effect.gen(function* () {
     const result = yield* elaborateWithStdlib(
       'hir://effect.silk',
-      `struct Problem { code: i32 }
+      `import silk.effects as Effect
+struct Problem { code: i32 }
 effect fn risky() -> i32 ! Problem { fail move Problem { code: 41 } }
 effect fn recover(problem: Problem) -> i32 { return problem.code + 1 }
 pub fn main() -> i32 {

@@ -32,7 +32,8 @@ const assertRunsEverywhere = Effect.fnUntraced(function* (
  * `r"\n"` is a backslash and an `n`; `"\n"` is one LF. The raw form keeps the escape vocabulary
  * out of its body entirely, so a regular expression or a Windows path needs no doubled backslash.
  */
-const escapePolicy = `import silk.string { byteLength, utf8Bytes }
+const escapePolicy = `import silk.usize as usize
+import silk.string { byteLength, utf8Bytes }
 
 pub fn main() -> i32 {
   let raw = r"\\n"
@@ -59,7 +60,8 @@ it.effect(
 )
 
 /** The triple-delimited raw form takes the same body policy as its single-delimited form. */
-const multiline = `import silk.string { byteLength, utf8Bytes }
+const multiline = `import silk.usize as usize
+import silk.string { byteLength, utf8Bytes }
 
 pub fn main() -> i32 {
   let helpText = r"""
@@ -83,7 +85,8 @@ it.effect(
 it.effect('gives a raw literal the string type, so it passes where a text literal does', () =>
   Effect.gen(function* () {
     // `byteLength` accepts `string` only, so accepting this call is the type evidence.
-    const source = `import silk.string { byteLength }
+    const source = `import silk.usize as usize
+import silk.string { byteLength }
 
 fn measure(value: string) -> usize { return byteLength(value) }
 

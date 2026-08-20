@@ -7,25 +7,29 @@ import { storedCatchSuspension } from './support/storedCatchSuspension.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const successSource = `effect fn delayed() -> i32 {
+const successSource = `import silk.effects as Effect
+effect fn delayed() -> i32 {
   return run Effect.suspend(effect { return 2 })
 }
 pub fn main() -> i32 { return run delayed() }`
 
-const retainedStateSource = `effect fn delayed() -> i32 {
+const retainedStateSource = `import silk.effects as Effect
+effect fn delayed() -> i32 {
   let left = 40
   return left + run Effect.suspend(effect { return 2 })
 }
 pub fn main() -> i32 { return run delayed() }`
 
-const repeatedStateSource = `effect fn twice() -> i32 {
+const repeatedStateSource = `import silk.effects as Effect
+effect fn twice() -> i32 {
   let left = run Effect.suspend(effect { return 40 })
   let right = run Effect.suspend(effect { return 2 })
   return left + right
 }
 pub fn main() -> i32 { return run twice() }`
 
-const recursiveSource = (depth: number): string => `struct Owner { value: i32 }
+const recursiveSource = (depth: number): string => `import silk.effects as Effect
+struct Owner { value: i32 }
 effect fn count(value: i32) -> i32 {
   if value == 0 { return 0 }
   let next = run Effect.suspend(effect { return value - 1 })

@@ -10,7 +10,12 @@ const ascii = (value: string): Uint8Array =>
  * the acquisition count is the count of `AllocationAcquire`, and a provider that outlived the
  * execution which acquired it would show up as an acquire without its release.
  */
-const provider = `service Clock { effect fn value() -> i32 ? &mut Clock }
+const provider = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+service Clock { effect fn value() -> i32 ? &mut Clock }
 struct FixedClock { storage: Allocation }
 effect fn clockValue(self: &mut FixedClock) -> i32 { return 0 }
 impl Clock for FixedClock { value: FixedClock.clockValue }
@@ -24,7 +29,9 @@ effect fn openClock() -> FixedClock ! OutOfMemoryError {
 }`
 
 /** Two executions of one provided Effect: each must acquire and release its own provider. */
-const twoExecutions = `${provider}
+const twoExecutions = `import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+${provider}
 
 effect fn read() -> i32 ! OutOfMemoryError ? &mut Clock { return 21 }
 
@@ -44,7 +51,9 @@ pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
  * which is the path that previously carried the acquired provider out of the frame without
  * releasing it, so the retry is also the regression test for the typed-failure release.
  */
-const threeAttempts = `${provider}
+const threeAttempts = `import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+${provider}
 
 effect fn read() -> i32 ! OutOfMemoryError ? &mut Clock { fail OutOfMemoryError {} }
 

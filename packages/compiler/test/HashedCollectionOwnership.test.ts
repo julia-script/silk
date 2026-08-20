@@ -46,7 +46,11 @@ const describe = (outcome: unknown): string =>
  * equivalence compares the same tag — so two keys are equivalent exactly when they hash alike, which
  * is what `HashKey` requires of a witness.
  */
-const owners = `import silk.hash { HashKey, HashSeed }
+const owners = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.i32 as i32
+import silk.layout { Layout }
+import silk.hash { HashKey, HashSeed }
 import silk.hash_map { HashMap, contains, insert, length, make, remove }
 import silk.option { Option, Some, None }
 
@@ -94,7 +98,10 @@ fn release(tag: i32, storage: Allocation) -> i32 {
 }`
 
 const program = (body: string): string =>
-  `${owners}
+  `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+${owners}
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()

@@ -55,7 +55,8 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('retains reborrow parent suspension and restores access after the call', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn edit(values: &mut [i32]) -> i32 { return 1 }
+    const self = yield* snapshot(`import silk.usize as usize
+fn edit(values: &mut [i32]) -> i32 { return 1 }
 fn forward(values: &mut [i32]) -> i32 {
   let result = edit(&mut values)
   return usize.toI32(values.length)
@@ -181,7 +182,8 @@ pub fn main() -> i32 { return read(&[Guard { value: 42 }]) }`)
 
 it.effect('keeps a returned shared view live through its last use and then restores mutation', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn identity(values: &[i32]) -> &[i32] { return values }
+    const self = yield* snapshot(`import silk.usize as usize
+fn identity(values: &[i32]) -> &[i32] { return values }
 fn conflict() -> i32 {
   let mut values = [1, 2]
   let view = identity(&values)
@@ -287,7 +289,8 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('plans exactly one displaced cleanup for exclusive borrowed replacement', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Token { value: i32 }
+    const self = yield* snapshot(`import silk.usize as usize
+struct Token { value: i32 }
 struct Empty {}
 fn replace(values: &mut [Token], index: usize) -> i32 {
   values[index] = Token { value: 42 }

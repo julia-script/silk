@@ -16,7 +16,11 @@ const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-vector-sort-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 const program = (body: string): string =>
-  `import silk.vector { Vector, make, append, sort, binarySearch, get, length }
+  `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.vector { Vector, make, append, sort, binarySearch, get, length }
 import silk.option { Option, Some, None }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -162,7 +166,11 @@ it.effect('sorts every integer width the standard library witnesses', () =>
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'vector-sort/widths',
-      `import silk.vector { Vector, make, append, sort, get, length }
+      `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.vector { Vector, make, append, sort, get, length }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
@@ -308,7 +316,11 @@ it.effect(
  * `tag` the comparison never reads, so the arrangement of the equal elements is visible in the
  * result.
  */
-const stableUserOrder = `import silk.order { Order }
+const stableUserOrder = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.order { Order }
 import silk.vector { Vector, make, append, asSlice, sort, length }
 
 struct Item {
@@ -358,7 +370,12 @@ it.effect('keeps equal elements of a user type in their input order', () =>
  * the comparison, the index permutation, or the final bulk move may duplicate or lose one, so the
  * acquire and release counts have to agree exactly.
  */
-const moveOnlyElements = `import silk.order { Order }
+const moveOnlyElements = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.order { Order }
 import silk.vector { Vector, make, append, asSlice, sort, length }
 
 struct Tracked {

@@ -28,7 +28,11 @@ const assertRunsEverywhere = Effect.fnUntraced(function* (
   assert.strictEqual((instance.exports.silk_main as () => number)(), expected)
 })
 
-const ownedAndScalars = `import silk.string {
+const ownedAndScalars = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.u32 as u32
+import silk.string {
   ScalarCursor,
   ScalarStep,
   copy,
@@ -82,7 +86,8 @@ it.effect(
   60_000,
 )
 
-const validation = `import silk.string { InvalidUtf8, fromUtf8, byteLength }
+const validation = `import silk.usize as usize
+import silk.string { InvalidUtf8, fromUtf8, byteLength }
 import silk.result { Result, Success, Failure }
 
 fn inspect(bytes: &[u8]) -> i32 {
@@ -105,7 +110,12 @@ it.effect(
   60_000,
 )
 
-const allocationFailure = `import silk.string { copy, append, view, ownedByteLength }
+const allocationFailure = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.string { copy, append, view, ownedByteLength }
 
 struct QuotaAllocator { remaining: i32 }
 

@@ -22,7 +22,12 @@ const pagesOf = (instance: WebAssembly.Instance): number => {
  * Each block is 512 payload bytes, so a thousand iterations acquire roughly 1.5 MiB. The heap that
  * serves it stays inside a couple of pages only if released blocks come back.
  */
-const interleaved = `effect fn build() -> i32 ! OutOfMemoryError {
+const interleaved = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut index = 0
   while index < 1000 {
@@ -114,7 +119,13 @@ it.effect(
  * before either backend reclaimed anything. This test pins the count Wasm reports, and says
  * nothing about how much memory the engine holds while doing it.
  */
-const counted = `import silk.metrics {
+const counted = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.usize as usize
+import silk.metrics {
   AllocationMetrics,
   copy as copyMetrics,
   make as zeroedMetrics,

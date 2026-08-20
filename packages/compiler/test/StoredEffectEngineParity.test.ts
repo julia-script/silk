@@ -391,7 +391,12 @@ pub fn main() -> i32 {
   return (run deferred.operation) + (run deferred.operation)
 }`
 
-const consuming = `struct Token { value: i32 storage: Allocation }
+const consuming = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Token { value: i32 storage: Allocation }
 impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
 struct Deferred<F: once Effect<i32>> { operation: F }
 fn consume(token: Token) -> i32 { return token.value }
@@ -407,7 +412,8 @@ pub fn main() -> i32 {
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-const provided = `service Counter { effect fn get() -> i32 ? &Counter }
+const provided = `import silk.effects as Effect
+service Counter { effect fn get() -> i32 ? &Counter }
 struct Fixed { value: i32 }
 effect fn get(self: &Fixed) -> i32 { return self.value }
 impl Counter for Fixed { get: Fixed.get }
@@ -529,7 +535,8 @@ layer(NodeServices.layer)('stored Effect engine parity', (it) => {
    * process; Wasm still uses a non-zero class-0 free-list head at `wasmHeapTableBase` as the
    * missing-cleanup signal for the poison program.
    */
-  const cleanupSurface = (kind: DropKind = 'poison'): string => `struct Problem { code: i32 }
+  const cleanupSurface = (kind: DropKind = 'poison'): string => `import silk.i32 as i32
+struct Problem { code: i32 }
 struct Guard { tag: i32 storage: Allocation }
 impl Drop for Guard {
   fn drop(self: &mut Guard) -> () {
@@ -572,7 +579,12 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
   const cleanupCycles = (
     exit: Exclude<CleanupExit, 'success'>,
     count: number,
-  ): string => `${cleanupSurface()}
+  ): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+${cleanupSurface()}
 effect fn cycle() -> i32 ! Problem | OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<[i64; 256]>())
   let guard = Guard { tag: 7, storage: move storage }
@@ -629,7 +641,12 @@ pub fn main() -> i32 {
     const recoverValue = exit === 'success' ? 0 : 42
     const construct = exit === 'success' ? 'succeeding(move guard)' : 'failing(move guard)'
     const runLine = exit === 'unrun' ? 'return 42' : 'return run deferred.operation'
-    return `${cleanupSurface(kind)}
+    return `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+${cleanupSurface(kind)}
 effect fn recover(error: ${failures}) -> i32 { return ${recoverValue} }
 effect fn build() -> i32 ! ${failures} {
   let mut allocator = SystemAllocator.make()
@@ -723,7 +740,12 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
     240_000,
   )
 
-  const suspendingProgram = (kind: DropKind = 'poison'): string => `${cleanupSurface(kind)}
+  const suspendingProgram = (kind: DropKind = 'poison'): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+${cleanupSurface(kind)}
 effect fn delayed(guard: Guard) -> i32 {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
@@ -890,7 +912,12 @@ pub fn main() -> i32 {
    */
   const leakHolds = (
     count: number,
-  ): string => `effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+  ): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 effect fn drive() -> i32 ! OutOfMemoryError ? &mut Allocator {
   ${Array.from({ length: count }, (_, index) => `let hold${index} = run Allocator.allocate(Layout.of<[i64; 256]>())`).join('\n  ')}
   return 42
@@ -900,7 +927,12 @@ pub fn main() -> i32 {
   return run Effect.catchAll(drive() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-  const suspendCycles = (count: number): string => `${cleanupSurface()}
+  const suspendCycles = (count: number): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+${cleanupSurface()}
 effect fn delayed(guard: Guard) -> i32 {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag

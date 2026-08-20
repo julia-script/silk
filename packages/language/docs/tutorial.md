@@ -161,6 +161,8 @@ When a function only needs to read or update a value in place, borrow it rather 
 Borrows are written `&` (shared) and `&mut` (exclusive), and they exist only as call arguments:
 
 ```silk
+import silk.usize as usize
+
 fn total(values: &[i32], length: usize) -> i32 {
   let mut sum = 0
   let mut index = usize.add(0, 0)

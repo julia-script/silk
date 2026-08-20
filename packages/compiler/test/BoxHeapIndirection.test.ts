@@ -24,7 +24,12 @@ const counts = (
  * the whole change exists to make expressible, and the shape whose release is invisible to every
  * other check the compiler has.
  */
-const tree = `import silk.box { Box, make as boxMake, get as boxGet }
+const tree = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.box { Box, make as boxMake, get as boxGet }
 
 pub struct Leaf {}
 
@@ -153,7 +158,11 @@ it.effect('carries the same release count through the Wasm backend under both pr
  * borrow, exclusive borrow, and a consuming move. `into` empties the box before handing the value
  * out, so the hook that still runs on the emptied box drops nothing and the storage releases once.
  */
-const accessors = `import silk.box { Box, make as boxMake, get as boxGet, getMut as boxGetMut, into as boxInto }
+const accessors = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.box { Box, make as boxMake, get as boxGet, getMut as boxGetMut, into as boxInto }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
@@ -207,7 +216,10 @@ it.effect('borrows, mutates, and consumes a boxed value without unsafe code', ()
  * value's own hook first, then the box's storage. This is the case `RawBufferCleanup` would
  * abandon if the box did not drop its element.
  */
-const nested = `import silk.box { Box, make as boxMake, into as boxInto }
+const nested = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.box { Box, make as boxMake, into as boxInto }
 import silk.vector { Vector, make as vectorMake, append as vectorAppend, length as vectorLength }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -254,7 +266,11 @@ it.effect('releases an owning value held inside a box', () =>
  * Depth is consumed by the runtime call stack rather than by the cleanup plan, so a long chain
  * releases every link. The plan itself stays one hook call wide however long the chain is.
  */
-const chain = `import silk.box { Box, make as boxMake, into as boxInto }
+const chain = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.box { Box, make as boxMake, into as boxInto }
 
 pub struct End {}
 
@@ -410,7 +426,7 @@ pub fn main() -> i32 { return 0 }`
         'ast/expression',
         ascii(
           'import silk.box { Box }\nimport ast.statement\n' +
-            'pub struct Expression { body: Box<statement.Statement> value: i32 }\n' +
+            'import silk.box { Box }\npub struct Expression { body: Box<statement.Statement> value: i32 }\n' +
             'pub fn main() -> i32 { return 0 }',
         ),
       ),
@@ -422,7 +438,7 @@ pub fn main() -> i32 { return 0 }`
               'ast/statement',
               ascii(
                 'import silk.box { Box }\nimport ast.expression\n' +
-                  'pub struct Statement { head: Box<expression.Expression> }',
+                  'import silk.box { Box }\npub struct Statement { head: Box<expression.Expression> }',
               ),
             ],
           ]),

@@ -15,7 +15,13 @@ const ascii = (value: string): Uint8Array =>
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-multi-affine-return-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
-const allocated = `import silk.vector { Vector, make, append, length }
+const allocated = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.usize as usize
+import silk.vector { Vector, make, append, length }
 
 struct Step { pc: usize opcode: u8 depth: usize top: i32 }
 struct VmDiagnostic { pc: usize code: usize }

@@ -10,7 +10,12 @@ const ascii = (value: string): Uint8Array =>
  * acquires into it, and publishes a snapshot through a shared borrow. No compiler phase knows the
  * metrics type, and the provider uses no privilege unavailable to any other Silk program.
  */
-const provider = `import silk.metrics {
+const provider = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.metrics {
   AllocationMetrics,
   copy as copyMetrics,
   live,
@@ -42,7 +47,12 @@ fn published(self: &CountingAllocator) -> AllocationMetrics {
  * Three acquires and one recorded release. The live count is the difference the standard library
  * computes, and reading it twice leaves the provider's own value where it is.
  */
-const counted = `${provider}
+const counted = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+${provider}
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
     inner: SystemAllocator.make(),
@@ -122,7 +132,12 @@ it.effect(
  * the busiest moment put it, including once the program is back to zero live allocations and
  * once a later acquire comes in below the peak.
  */
-const peakSurvivesDrops = `${provider}
+const peakSurvivesDrops = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+${provider}
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
     inner: SystemAllocator.make(),
@@ -193,7 +208,12 @@ it.effect(
  * loads it: nothing from `silk/metrics` reaches the module closure or MIR, and the program
  * allocates exactly what it asked for and nothing more.
  */
-const unmetered = `effect fn build() -> i32 ! OutOfMemoryError {
+const unmetered = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)

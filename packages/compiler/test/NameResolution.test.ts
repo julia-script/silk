@@ -98,7 +98,7 @@ it.effect('keeps cyclic cross-module calls finite and canonical', () =>
 const threeModuleSources = {
   'app/Main': 'import library.Answer { answer }\npub fn main() -> i32 { return answer() }',
   'library/Answer':
-    'import values.Number\nfn local() -> i32 { return 40 }\npub fn answer() -> i32 { return i32.add(local(), Number.two()) }',
+    'import silk.i32 as i32\nimport values.Number\nfn local() -> i32 { return 40 }\npub fn answer() -> i32 { return i32.add(local(), Number.two()) }',
   'values/Number': 'pub fn two() -> i32 { return 2 }',
 }
 

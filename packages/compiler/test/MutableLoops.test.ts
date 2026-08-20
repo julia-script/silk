@@ -43,7 +43,8 @@ it.effect('mutates a scalar through a structured loop DAG', () =>
 
 it.effect('updates checked array elements and returns the replacement', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`pub fn main() -> i32 {
+    const self = yield* snapshot(`import silk.usize as usize
+pub fn main() -> i32 {
   let mut values = [1, 2, 3]
   let mut index = usize.add(0, 0)
   while index < 3 {
@@ -69,7 +70,8 @@ it.effect('emits scalar and checked-array loops directly as structured WebAssemb
   while count < 3 { count = count + 1 }
   return count
 }`
-    const array = `pub fn main() -> i32 {
+    const array = `import silk.usize as usize
+pub fn main() -> i32 {
   let mut values = [1, 2, 3]
   let mut index = usize.add(0, 0)
   while index < 3 {
@@ -97,7 +99,8 @@ it.effect('emits scalar and checked-array loops directly as structured WebAssemb
 
 it.effect('resolves continue and break to the innermost loop', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`pub fn main() -> i32 {
+    const self = yield* snapshot(`import silk.usize as usize
+pub fn main() -> i32 {
   let mut index = usize.add(0, 0)
   while index < 10 {
     index = index + 1
@@ -252,7 +255,8 @@ pub fn main() -> i32 {
 
 it.effect('checks an indexed destination before evaluating its right-hand call', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn replacement() -> i32 { return 42 }
+    const self = yield* snapshot(`import silk.usize as usize
+fn replacement() -> i32 { return 42 }
 pub fn main() -> i32 {
   let mut values = [1, 2]
   let index = usize.add(2, 0)

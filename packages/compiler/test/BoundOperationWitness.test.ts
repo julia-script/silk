@@ -64,7 +64,9 @@ const twoEngineValue = (name: string, source: string) =>
  * digest none does. Both witnesses are ordinary Silk, so the digest is reached only by naming the
  * bound and can only be answered by the provider's own function.
  */
-const userKey = `interface Keyed {
+const userKey = `import silk.i32 as i32
+import silk.u64 as u64
+interface Keyed {
   operator == fn equals(left: &Self, right: &Self) -> bool
   fn digest(left: &Self, right: &Self) -> u64
 }
@@ -88,7 +90,8 @@ it.effect(
       // witness, a missing call, or a placeholder result cannot produce 42 by accident.
       const outcome = yield* twoEngineValue(
         'bound-operation-witness/user-digest',
-        `${userKey}
+        `import silk.u64 as u64
+${userKey}
 pub fn main() -> i32 {
   let digest = digestOf<Cell>(Cell { weight: 20 }, Cell { weight: 22 })
   if digest == 42 { return u64.toI32(digest) }
@@ -106,7 +109,8 @@ it.effect('reaches each provider’s own witness from one bound-operation call s
     // single body cannot serve both by lowering the operation width-neutrally.
     const value = yield* evaluatedValue(
       'bound-operation-witness/per-specialization',
-      `interface Keyed {
+      `import silk.u64 as u64
+interface Keyed {
   fn digest(left: &Self, right: &Self) -> u64
 }
 
@@ -249,7 +253,8 @@ it.effect(
     Effect.gen(function* () {
       const outcome = yield* twoEngineValue(
         'bound-operation-witness/fallible-weaker-access',
-        `import silk.result { Result, Success, Failure }
+        `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
 
 pub struct Problem { code: i32 }
 
@@ -365,7 +370,8 @@ pub fn main() -> i32 {
 it.effect('widens a pure source witness to the exact interface Effect contract', () =>
   Effect.gen(function* () {
     const module = 'bound-operation-witness/pure-effect-boundary'
-    const source = `import silk.result { Result, Success, Failure }
+    const source = `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
 
 pub struct Problem {}
 
@@ -493,7 +499,8 @@ it.effect('widens a smaller Effect witness row at the interface boundary', () =>
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'bound-operation-witness/smaller-effect-row',
-      `import silk.result { Result, Success, Failure }
+      `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
 
 pub struct Problem {}
 pub struct Extra {}
@@ -538,7 +545,8 @@ it.effect('retains exact caller requirements while widening witness access and r
     const module = 'bound-operation-witness/requirement-access-widening'
     const snapshot = yield* analyzed(
       module,
-      `service Clock {}
+      `import silk.effects as Effect
+service Clock {}
 service Meter {}
 struct FixedClock { token: i32 }
 struct FixedMeter { token: i32 }
@@ -680,7 +688,9 @@ it.effect('borrows a bound operand whose type the interface never parameterizes'
     // provider's.
     const value = yield* evaluatedValue(
       'bound-operation-witness/seeded-operand',
-      `struct Seed { value: u64 }
+      `import silk.i32 as i32
+import silk.u64 as u64
+struct Seed { value: u64 }
 
 interface Keyed {
   fn hash(value: &Self, seed: &Seed) -> u64
@@ -711,7 +721,8 @@ it.effect('keeps the operator-spelled half of the same conformance unchanged', (
     // bound's name still reaches `digest`.
     const value = yield* evaluatedValue(
       'bound-operation-witness/both-spellings',
-      `${userKey}
+      `import silk.u64 as u64
+${userKey}
 fn probe<T: Keyed>(left: T, right: T) -> u64 {
   if (&left) == (&right) { return 0 }
   return Keyed.digest(&left, &right)

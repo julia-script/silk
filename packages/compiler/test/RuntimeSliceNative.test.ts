@@ -5,7 +5,8 @@ import * as Analysis from '../src/Analysis.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const source = `struct Pair { left: i32 right: i32 }
+const source = `import silk.usize as usize
+struct Pair { left: i32 right: i32 }
 fn replace(values: &mut [Pair], index: usize) -> i32 {
   values[index] = Pair { left: 40, right: 2 }
   return usize.toI32(values.length)

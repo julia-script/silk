@@ -27,7 +27,7 @@ const acceptedSources = Object.freeze([
       const arguments_ = operation.arity === 1 ? '1' : '1, 1'
       return `  let v${operationOrdinal} = ${scalar.spelling}.${operation.spelling}(${arguments_})`
     })
-    return `pub fn scalar${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
+    return `import silk.${scalar.spelling} as ${scalar.spelling}\npub fn scalar${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
   }),
   ...Scalar.floats().map((scalar, scalarOrdinal) => {
     const calls = scalar.operations.map((operation, operationOrdinal) => {
@@ -35,7 +35,7 @@ const acceptedSources = Object.freeze([
       const arguments_ = operation.arity === 1 ? argument : `${argument}, ${argument}`
       return `  let v${operationOrdinal} = ${scalar.spelling}.${operation.spelling}(${arguments_})`
     })
-    return `pub fn floating${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
+    return `import silk.${scalar.spelling} as ${scalar.spelling}\npub fn floating${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
   }),
   // Character operations use typed parameters so checked construction receives `u32` while
   // comparison and inspection receive `char`.
@@ -50,9 +50,14 @@ const acceptedSources = Object.freeze([
         )
         return `  let v${operationOrdinal} = ${scalar.spelling}.${operation.spelling}(${arguments_.join(', ')})`
       })
-      return `pub fn character${scalarOrdinal}(number: u32, left: ${scalar.spelling}, right: ${scalar.spelling}) -> i32 {\n${calls.join('\n')}\n  return 0\n}`
+      return `import silk.${scalar.spelling} as ${scalar.spelling}\npub fn character${scalarOrdinal}(number: u32, left: ${scalar.spelling}, right: ${scalar.spelling}) -> i32 {\n${calls.join('\n')}\n  return 0\n}`
     }),
-  `pub fn main() -> i32 {
+  `import silk.bool as bool
+import silk.core { SystemAllocator }
+import silk.i32 as i32
+import silk.layout { Layout }
+import silk.usize as usize
+pub fn main() -> i32 {
   let i00 = i32.negate(1)
   let i01 = i32.add(1, 2)
   let i02 = i32.subtract(2, 1)
@@ -86,7 +91,14 @@ const acceptedSources = Object.freeze([
   let unit = ()
   return i00
 }`,
-  `effect fn storage() -> i32 ! OutOfMemoryError {
+  `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn storage() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Effect.provideMut(Allocator.allocate(move layout), &mut allocator)
@@ -116,7 +128,9 @@ const acceptedSources = Object.freeze([
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(storage(), recover) }`,
-  `struct Problem {}
+  `import silk.effects as Effect
+import silk.i32 as i32
+struct Problem {}
 service Clock {}
 struct FixedClock {}
 impl Clock for FixedClock {}
@@ -157,7 +171,8 @@ pub fn main() -> i32 {
   }
   return false
 }`,
-  `import silk.result { Result, Success, Failure }
+  `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
 struct ResultProblem {}
 effect fn succeed() -> i32 ! ResultProblem { return 42 }
 pub effect fn main() -> i32 {
@@ -185,7 +200,11 @@ effect fn suspendDirect(
   return run Intrinsic.suspendEffect(move deferred)
 }
 pub fn main() -> i32 { return 42 }`,
-  `pub effect fn main() -> () ! StreamWriteError {
+  `import silk.core as StandardStream
+import silk.core { NativeStandardStreams }
+import silk.core { StreamWriteError }
+import silk.effects as Effect
+pub effect fn main() -> () ! StreamWriteError {
   let mut native = NativeStandardStreams.native()
   let stdout = StandardStream.stdout()
   let stderr = StandardStream.stderr()
@@ -193,7 +212,8 @@ pub fn main() -> i32 { return 42 }`,
   let second = run Effect.provideMut(StandardStream.send(stderr, b"error"), &mut native)
   return ()
 }`,
-  `import silk.option { Option, none }
+  `import silk.usize as usize
+import silk.option { Option, none }
 fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
 effect fn fileOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
   unsafe { return run Intrinsic.osFileOpen(root, path, 0, reason, code) }
@@ -363,7 +383,8 @@ it.effect('does not retain provideWith as a compatibility alias', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'effect/no-provide-with-alias',
-      encoder.encode(`service Clock {}
+      encoder.encode(`import silk.effects as Effect
+service Clock {}
 struct FixedClock {}
 impl Clock for FixedClock {}
 effect fn read() -> i32 ? &Clock { return 1 }
@@ -433,7 +454,7 @@ it.effect(
   'resolves former scalar actor spellings to source wrappers, not compiler identities',
   () =>
     Effect.gen(function* () {
-      const source = 'pub fn main() -> i32 { return i32.add(20, 22) }'
+      const source = 'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(20, 22) }'
       const snapshot = yield* Analysis.ofSourceRealized(
         'intrinsic/source-wrapper',
         encoder.encode(source),

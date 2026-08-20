@@ -112,7 +112,8 @@ it.effect('dispatches an arbitrary source service through a provided source witn
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'memory/evaluation',
-      ascii(`service Counter {
+      ascii(`import silk.effects as Effect
+service Counter {
   effect fn get() -> i32 ? &Counter
 }
 struct Fixed { value: i32 }
@@ -143,7 +144,8 @@ pub fn main() -> i32 {
 
 it.effect('executes named function values and stored automatic sections', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`fn identity(value: i32) -> i32 { return value }
+    const outcome = yield* evaluateSource(`import silk.i32 as i32
+fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 {
   let named = identity
   let plusTwo = i32.add(2)
@@ -260,12 +262,16 @@ pub fn main() -> i32 {
 
 it.effect('maps, flatMaps, and taps Effect successes through ordinary callable values', () =>
   Effect.gen(function* () {
-    const mapped = yield* evaluateSource(`effect fn succeed(value: i32) -> i32 { return value }
+    const mapped = yield* evaluateSource(`import silk.effects as Effect
+import silk.i32 as i32
+effect fn succeed(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return run succeed(2) |> Effect.map(i32.add(2)) }`)
-    const flatMapped = yield* evaluateSource(`effect fn succeed(value: i32) -> i32 { return value }
+    const flatMapped = yield* evaluateSource(`import silk.effects as Effect
+effect fn succeed(value: i32) -> i32 { return value }
 effect fn double(value: i32) -> i32 { return value * 2 }
 pub fn main() -> i32 { return run succeed(21) |> Effect.flatMap(double) }`)
-    const tapped = yield* evaluateSource(`effect fn succeed(value: i32) -> i32 { return value }
+    const tapped = yield* evaluateSource(`import silk.effects as Effect
+effect fn succeed(value: i32) -> i32 { return value }
 effect fn observe(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return run succeed(42) |> Effect.tap(observe) }`)
 
@@ -282,7 +288,8 @@ pub fn main() -> i32 { return run succeed(42) |> Effect.tap(observe) }`)
 
 it.effect('keeps an Effect returned from map nested until a second run', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`effect fn succeed(value: i32) -> i32 { return value }
+    const outcome = yield* evaluateSource(`import silk.effects as Effect
+effect fn succeed(value: i32) -> i32 { return value }
 effect fn double(value: i32) -> i32 { return value * 2 }
 pub fn main() -> i32 { return run (run (succeed(21) |> Effect.map(double))) }`)
 
@@ -293,7 +300,8 @@ pub fn main() -> i32 { return run (run (succeed(21) |> Effect.map(double))) }`)
 
 it.effect('retains an exclusive mapper environment across repeated mapped Effect runs', () =>
   Effect.gen(function* () {
-    const source = `effect fn succeed(value: i32) -> i32 { return value }
+    const source = `import silk.effects as Effect
+effect fn succeed(value: i32) -> i32 { return value }
 fn increment(value: i32, state: &mut [i32]) -> i32 {
   state[0] = state[0] + 1
   return value + state[0]
@@ -330,7 +338,8 @@ pub fn main() -> i32 {
 
 it.effect('drops an unrun mapped Effect owned callback environment exactly once', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`struct Token { value: i32 }
+    const outcome = yield* evaluateSource(`import silk.effects as Effect
+struct Token { value: i32 }
 effect fn succeed(value: i32) -> i32 { return value }
 fn consume(value: i32, token: Token) -> i32 { return value + token.value }
 pub fn main() -> i32 {
@@ -349,7 +358,8 @@ pub fn main() -> i32 {
 
 it.effect('catches a typed failure through an automatic effect-handler section', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`struct Problem { code: i32 }
+    const outcome = yield* evaluateSource(`import silk.effects as Effect
+struct Problem { code: i32 }
 effect fn failNow() -> i32 ! Problem { fail Problem { code: 41 } }
 effect fn recover(problem: Problem, adjustment: i32) -> i32 {
   return problem.code + adjustment
@@ -416,7 +426,8 @@ pub fn main() -> i32 {
 
 it.effect('catches one exact owned effect failure without using traps', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`struct Problem { code: i32 }
+    const outcome = yield* evaluateSource(`import silk.effects as Effect
+struct Problem { code: i32 }
 effect fn risky(value: i32) -> i32 ! Problem {
   if value == 0 { fail move Problem { code: 41 } }
   return value
@@ -507,7 +518,8 @@ fn other() -> i32 { return main() }`,
 
 it.effect('unwinds a typed failure through recursive effect activations', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`struct Problem { code: i32 }
+    const outcome = yield* evaluateSource(`import silk.effects as Effect
+struct Problem { code: i32 }
 effect fn countdown(value: i32) -> i32 ! Problem {
   if value == 0 { fail Problem { code: 41 } }
   return run countdown(value - 1)
@@ -564,7 +576,7 @@ it.effect('refuses malformed target-aware MIR before executing any operation', (
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'memory/invalid-layout',
-      ascii('pub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'),
+      ascii('import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'),
       'wasm32-unknown-unknown',
     )
     const mir = Analysis.mirOf(snapshot)
@@ -592,7 +604,7 @@ it.effect('refuses malformed target-aware MIR before executing any operation', (
 it.effect('evaluates operator precedence, prefix operations, and pipeline chains', () =>
   Effect.gen(function* () {
     const arithmetic = yield* evaluateSource(
-      'pub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }',
+      'import silk.i32 as i32\npub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }',
     )
     const boolean = yield* evaluateSource(
       'pub fn main() -> i32 { if !(2 * 3 == 7) { return 42 } return 0 }',
@@ -619,7 +631,8 @@ it.effect('preserves trapping arithmetic through operator sugar', () =>
 
 it.effect('evaluates logical union matches with source-ordered guarded fallthrough', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`pub struct Left { value: i32 }
+    const outcome = yield* evaluateSource(`import silk.i32 as i32
+pub struct Left { value: i32 }
 pub struct Right { value: i32 }
 pub fn inspect(input: Left | Right) -> i32 {
   return match &input {

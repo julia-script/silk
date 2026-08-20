@@ -47,7 +47,9 @@ const transcendentalVectors: ReadonlyArray<TranscendentalVector> = [
 ]
 
 /** Canonical-bits transcendental program: bit-exact sin/cos parity across every engine. */
-export const transcendentalCanonicalBits = `pub fn main() -> i32 {
+export const transcendentalCanonicalBits = `import silk.f32 as f32
+import silk.f64 as f64
+pub fn main() -> i32 {
 ${transcendentalVectors
   .map((vector, index) => {
     const inputBits = BigInt(vector.inputBits)
@@ -76,7 +78,8 @@ export interface InvalidCorpusProgram {
   readonly codes: ReadonlyArray<string>
 }
 
-export const constrainedCallableForwarding = `service Counter {
+export const constrainedCallableForwarding = `import silk.effects as Effect
+service Counter {
   effect fn get() -> i32 ? &Counter
 }
 struct Fixed { value: i32 }
@@ -117,7 +120,11 @@ pub fn main() -> i32 { return run completeResidual() }
 `
 
 /** Detached address payloads survive a row carrier widened by a floating handler failure. */
-export const heterogeneousOwnedFailurePayload = `import silk.effects as Effect
+export const heterogeneousOwnedFailurePayload = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.layout { Layout }
+import silk.effects as Effect
 struct Selected { code: i32 }
 struct Owned { storage: Allocation }
 struct Wide { code: f64 }
@@ -150,7 +157,11 @@ pub fn main() -> i32 { return run completeResidual() }
 `
 
 /** Reified residual unions release owned address payloads from a floating carrier when dropped. */
-export const heterogeneousOwnedFailureResultDrop = `import silk.effects as Effect
+export const heterogeneousOwnedFailureResultDrop = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.layout { Layout }
+import silk.effects as Effect
 struct Selected { code: i32 }
 struct Owned { storage: Allocation }
 struct Wide { code: f64 }
@@ -291,7 +302,12 @@ pub fn main() -> i32 { return run choose(First {}) }`,
   },
   {
     name: 'finite-effect-join-selected-cleanup',
-    source: `struct First {}
+    source: `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct First {}
 struct Second {}
 struct Guard { storage: Allocation }
 impl Drop for Guard {
@@ -394,7 +410,8 @@ pub fn main() -> i32 {
   },
   {
     name: 'recursive-mutable-slice',
-    source: `fn fill(values: &mut [i32], index: usize) -> i32 {
+    source: `import silk.usize as usize
+fn fill(values: &mut [i32], index: usize) -> i32 {
   if index == 4 { return values[0] + values[1] + values[2] + values[3] }
   values[index] = usize.toI32(index) + 9
   return fill(&mut values, index + 1)
@@ -467,7 +484,7 @@ pub fn main() -> i32 { let value = 42 return choose(move value, value) }`,
   },
   {
     name: 'arithmetic',
-    source: 'pub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }',
+    source: 'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -477,7 +494,7 @@ pub fn main() -> i32 { let value = 42 return choose(move value, value) }`,
   },
   {
     name: 'operator-pipeline',
-    source: 'pub fn main() -> i32 { return 2 |> i32.add(40) }',
+    source: 'import silk.i32 as i32\npub fn main() -> i32 { return 2 |> i32.add(40) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -522,22 +539,22 @@ return (40 + 2) * 1
   },
   {
     name: 'unary-bool-pipeline',
-    source: 'pub fn main() -> i32 { if true |> bool.not { return 0 } return 42 }',
+    source: 'import silk.bool as bool\npub fn main() -> i32 { if true |> bool.not { return 0 } return 42 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'signed-truncation',
-    source: 'pub fn main() -> i32 { return i32.add(i32.divide(-7, 2), 45) }',
+    source: 'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(i32.divide(-7, 2), 45) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'remainder-sign',
-    source: 'pub fn main() -> i32 { return i32.add(i32.remainder(-7, 2), 43) }',
+    source: 'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(i32.remainder(-7, 2), 43) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'overflow-trap',
-    source: 'pub fn main() -> i32 { return i32.add(2147483647, 1) }',
+    source: 'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(2147483647, 1) }',
     expected: { _tag: 'Trap' },
   },
   {
@@ -547,33 +564,33 @@ return (40 + 2) * 1
   },
   {
     name: 'divide-by-zero-trap',
-    source: 'pub fn main() -> i32 { return i32.divide(1, 0) }',
+    source: 'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(1, 0) }',
     expected: { _tag: 'Trap' },
   },
   {
     name: 'minimum-division-trap',
-    source: 'pub fn main() -> i32 { return i32.divide(-2147483648, -1) }',
+    source: 'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(-2147483648, -1) }',
     expected: { _tag: 'Trap' },
   },
   {
     name: 'branch-taken',
-    source: 'pub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
+    source: 'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'branch-otherwise',
-    source: 'pub fn main() -> i32 { if i32.equals(1, 2) { return 0 } return 42 }',
+    source: 'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 2) { return 0 } return 42 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'branch-else',
     source:
-      'pub fn main() -> i32 { if i32.lessThan(2, 1) { return 1 } else { return 42 } return 0 }',
+      'import silk.i32 as i32\npub fn main() -> i32 { if i32.lessThan(2, 1) { return 1 } else { return 42 } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'bool-not',
-    source: 'pub fn main() -> i32 { if bool.not(i32.equals(1, 2)) { return 42 } return 0 }',
+    source: 'import silk.bool as bool\nimport silk.i32 as i32\npub fn main() -> i32 { if bool.not(i32.equals(1, 2)) { return 42 } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -583,14 +600,15 @@ return (40 + 2) * 1
   },
   {
     name: 'bool-through-function',
-    source: `pub fn check(flag: bool) -> i32 { if flag { return 42 } return 0 }
+    source: `import silk.i32 as i32
+pub fn check(flag: bool) -> i32 { if flag { return 42 } return 0 }
 pub fn main() -> i32 { return check(i32.greaterOrEqual(3, 3)) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'arm-binding',
     source:
-      'pub fn main() -> i32 { let base = 40 if i32.equals(base, 40) { let bonus = 2 return i32.add(base, bonus) } return 0 }',
+      'import silk.i32 as i32\npub fn main() -> i32 { let base = 40 if i32.equals(base, 40) { let bonus = 2 return i32.add(base, bonus) } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -657,7 +675,8 @@ pub fn main() -> i32 { return choose([], 0) }`,
   },
   {
     name: 'mutable-array-loop',
-    source: `pub fn main() -> i32 {
+    source: `import silk.usize as usize
+pub fn main() -> i32 {
   let mut values = [40, 0]
   let mut index = usize.add(0, 0)
   while index < 2 {
@@ -670,7 +689,8 @@ pub fn main() -> i32 { return choose([], 0) }`,
   },
   {
     name: 'loop-continue-break',
-    source: `pub fn main() -> i32 {
+    source: `import silk.usize as usize
+pub fn main() -> i32 {
   let mut index = usize.add(0, 0)
   while index < 50 {
     index = index + 1
@@ -772,7 +792,11 @@ pub fn main() -> i32 {
   // scalar traversal.
   {
     name: 'string-owned-scalars',
-    source: `import silk.string {
+    source: `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.u32 as u32
+import silk.string {
   ScalarCursor,
   ScalarStep,
   copy,
@@ -825,7 +849,10 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   // the evaluator and native answer correctly while direct WebAssembly still cannot.
   {
     name: 'unicode-compared-directly',
-    source: `import silk.string { String, view }
+    source: `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -927,7 +954,11 @@ pub fn main() -> i32 {
   // folded from HashedCollections.test.ts: seeded map growth with checked reads.
   {
     name: 'hashed-map-growth',
-    source: `import silk.hash { HashKey, HashSeed, Word }
+    source: `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.i32 as i32
+import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_map { HashMap, bucketCount, contains, get, insert, length, make, remove }
 import silk.option { Option, Some, None }
 
@@ -963,7 +994,10 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   // folded from VectorAcceptance.test.ts: growth past the initial capacity with boundary reads.
   {
     name: 'vector-growth-reads',
-    source: `import silk.vector { Vector, make, append, get, length, capacity }
+    source: `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.vector { Vector, make, append, get, length, capacity }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
@@ -995,7 +1029,12 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   // folded from OwnedAllocationDispatch.test.ts: quota refusal propagates typed OutOfMemoryError.
   {
     name: 'owned-allocation-quota-refusal',
-    source: `struct QuotaAllocator { remaining: i32 }
+    source: `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct QuotaAllocator { remaining: i32 }
 
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
@@ -1031,7 +1070,15 @@ pub fn main() -> i32 {
   // folded from SlotLaneWidth.test.ts: u8 lane writes, copies, and takes through a raw buffer.
   {
     name: 'slot-lane-u8',
-    source: `effect fn store() -> i32 ! OutOfMemoryError {
+    source: `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+import silk.u8 as u8
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[u8; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -1058,7 +1105,15 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
   // folded from SlotLaneWidth.test.ts: f64 lane parity including a negative value.
   {
     name: 'slot-lane-f64',
-    source: `effect fn store() -> i32 ! OutOfMemoryError {
+    source: `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.f64 as f64
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[f64; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -1085,7 +1140,12 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
   // folded from BytesAcceptance.test.ts: copy, append, and mutate through byte slices (exit 180).
   {
     name: 'bytes-parity',
-    source: `import silk.bytes { Bytes, copy, append, asMutSlice, asSlice, length }
+    source: `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.u8 as u8
+import silk.usize as usize
+import silk.bytes { Bytes, copy, append, asMutSlice, asSlice, length }
 
 fn octet(value: u8) -> u8 { return value }
 
@@ -1122,7 +1182,9 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   // folded from StaticByteViewIndexing.test.ts: out-of-bounds static byte read traps.
   {
     name: 'static-byte-view-bounds',
-    source: `pub fn main() -> i32 {
+    source: `import silk.u8 as u8
+import silk.usize as usize
+pub fn main() -> i32 {
   let bytes = b"\\x99\\x13\\x1d\\x00"
   let index = usize.add(0, 4)
   return u8.toI32(bytes[index])
@@ -1132,7 +1194,14 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   // folded from OwnedAllocationAcceptance.test.ts: guarded slot writes and takes release cleanly.
   {
     name: 'owned-allocation-guard',
-    source: `struct Element { value: i32 }
+    source: `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+struct Element { value: i32 }
 
 effect fn build(count: usize) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
@@ -1163,7 +1232,8 @@ pub fn main() -> i32 {
   // folded from RuntimeSliceAcceptance.test.ts: exclusive slice writes reach the caller.
   {
     name: 'runtime-slice-exclusive',
-    source: `struct Token {
+    source: `import silk.usize as usize
+struct Token {
   value: i32
 }
 
@@ -1186,7 +1256,8 @@ pub fn main() -> i32 {
   // exclusive capture persists, and the third attempt's count is the exit (3, not 42).
   {
     name: 'effect-retry-captures',
-    source: `struct Problem { code: i32 }
+    source: `import silk.effects as Effect
+struct Problem { code: i32 }
 effect fn retrying() -> i32 ! Problem {
   let mut counter = 0
   let work = effect {
@@ -1208,7 +1279,8 @@ pub fn main() -> i32 {
   // every attempt, and the recovery answers with the failure exit (7).
   {
     name: 'suspension-retry-failure',
-    source: `struct Problem { code: i32 }
+    source: `import silk.effects as Effect
+struct Problem { code: i32 }
 effect fn attempt() -> i32 ! Problem {
   let observed = run Effect.suspend(effect { return 1 })
   fail Problem { code: observed }
@@ -1224,7 +1296,8 @@ pub fn main() -> i32 {
   },
   {
     name: 'suspension-repeated-states',
-    source: `effect fn twice() -> i32 {
+    source: `import silk.effects as Effect
+effect fn twice() -> i32 {
   let left = run Effect.suspend(effect { return 40 })
   let right = run Effect.suspend(effect { return 2 })
   return left + right
@@ -1256,7 +1329,12 @@ pub fn main() -> i32 { return run twice() }`,
   // cleaned exactly once when a typed failure exits the frame.
   {
     name: 'stored-callable-cleanup-typed-failure',
-    source: `struct Guard {
+    source: `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }
@@ -1285,7 +1363,12 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   // before the typed failure propagates to the recovery (exit 7).
   {
     name: 'drop-hook-failure-propagation',
-    source: `struct Guard {
+    source: `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }

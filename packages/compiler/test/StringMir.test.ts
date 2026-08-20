@@ -6,7 +6,9 @@ import * as Type from '../src/Type.js'
 
 const encoder = new TextEncoder()
 
-const source = `fn passthrough(value: string) -> string { return value }
+const source = `import silk.u8 as u8
+import silk.usize as usize
+fn passthrough(value: string) -> string { return value }
 pub fn main() -> i32 {
   let mut bytes = [u8.toU8(104), u8.toU8(195), u8.toU8(169)]
   unsafe {

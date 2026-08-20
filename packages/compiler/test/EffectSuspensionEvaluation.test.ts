@@ -18,7 +18,8 @@ const snapshot = (source: string) =>
 const evaluate = (source: string, options: Parameters<typeof Analysis.evaluate>[1] = {}) =>
   Effect.map(snapshot(source), (self) => Analysis.evaluate(self, options))
 
-const suspended = `effect fn delayed() -> i32 {
+const suspended = `import silk.effects as Effect
+effect fn delayed() -> i32 {
   return run Effect.suspend(effect { return 2 })
 }
 effect fn program() -> i32 {
@@ -70,7 +71,8 @@ it.effect('executes suspension through an iterative coroutine-frame machine', ()
 
 it.effect('creates no frame when a suspendable runner completes synchronously', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluate(`effect fn child() -> i32 { return 1 }
+    const outcome = yield* evaluate(`import silk.effects as Effect
+effect fn child() -> i32 { return 1 }
 effect fn maybe(shouldSuspend: bool) -> i32 {
   if shouldSuspend { return run Effect.suspend(child()) }
   return 42
@@ -102,7 +104,8 @@ it.effect('traps fatally when private execution-stack storage is exhausted', () 
 
 it.effect('resumes an unchanged typed failure through saved frame state', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluate(`struct BoomError {}
+    const outcome = yield* evaluate(`import silk.effects as Effect
+struct BoomError {}
 effect fn failing() -> i32 ! BoomError { fail BoomError {} }
 effect fn delayed() -> i32 ! BoomError {
   return run Effect.suspend(failing())
@@ -122,7 +125,8 @@ pub fn main() -> i32 { return run Effect.catchAll(delayed(), recover) }`)
 
 it.effect('preserves a source-level failure path across suspension', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluate(`struct BoomError {}
+    const outcome = yield* evaluate(`import silk.effects as Effect
+struct BoomError {}
 effect fn failing() -> () ! BoomError { fail BoomError {} }
 effect fn delayed() -> () ! BoomError {
   return run Effect.suspend(failing())
@@ -144,7 +148,8 @@ pub effect fn main() -> () ! BoomError { return run delayed() }`)
 
 it.effect('reuses one invocation frame across repeated suspension states', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluate(`effect fn delayed(value: i32) -> i32 {
+    const outcome = yield* evaluate(`import silk.effects as Effect
+effect fn delayed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
 effect fn twice() -> i32 {
@@ -172,7 +177,8 @@ pub fn main() -> i32 { return run twice() }`)
 const depth = 20
 const chain = Array.from({ length: depth }, (_value, ordinal) => {
   const next = ordinal + 1
-  return `effect fn level${ordinal}() -> i32 {
+  return `import silk.effects as Effect
+effect fn level${ordinal}() -> i32 {
   return 1 + run Effect.suspend(level${next}())
 }`
 }).join('\n')
@@ -181,7 +187,8 @@ const recursive = `${chain}
 effect fn level${depth}() -> i32 { return 0 }
 pub fn main() -> i32 { return run level0() }`
 
-const recursiveSelf = `effect fn count(value: i32) -> i32 {
+const recursiveSelf = `import silk.effects as Effect
+effect fn count(value: i32) -> i32 {
   if value == 0 { return 0 }
   let next = run Effect.suspend(effect { return value - 1 })
   let inner = run count(next)

@@ -82,7 +82,7 @@ it.effect('realizes stored declaration and scalar wrapper sections in LLVM and W
     const programs = [
       `fn add(value: i32, adjustment: i32) -> i32 { return value + adjustment }
 pub fn main() -> i32 { let plusTwo = add(2) return plusTwo(40) }`,
-      'pub fn main() -> i32 { let plusTwo = i32.add(2) return plusTwo(40) }',
+      'import silk.i32 as i32\npub fn main() -> i32 { let plusTwo = i32.add(2) return plusTwo(40) }',
     ]
     for (const [ordinal, source] of programs.entries()) {
       const native = yield* Analysis.ofSourceRealized(
@@ -235,9 +235,10 @@ it.effect('emits native debug metadata only for debug requests', () =>
   }),
 )
 
-const arithmeticSource = 'pub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }'
+const arithmeticSource = 'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }'
 
-const matchSource = `pub struct Left { value: i32 }
+const matchSource = `import silk.i32 as i32
+pub struct Left { value: i32 }
 pub struct Right { value: i32 }
 pub fn inspect(input: Left | Right) -> i32 {
   return match &input {
@@ -251,7 +252,7 @@ pub fn main() -> i32 { return inspect(Left { value: 41 }) }`
 it.effect('emits checked arithmetic through overflow intrinsics and guarded division', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(arithmeticSource, { mode: 'release' })
-    const division = yield* emit('pub fn main() -> i32 { return i32.divide(1, 0) }', {
+    const division = yield* emit('import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(1, 0) }', {
       mode: 'release',
     })
 
@@ -277,7 +278,7 @@ it.effect('matches the arithmetic IR golden and stays deterministic', () =>
 it.effect('emits comparisons as icmp with zero-extension and branches natively', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(
-      'pub fn main() -> i32 { if i32.lessThan(1, 2) { return 42 } return 0 }',
+      'import silk.i32 as i32\npub fn main() -> i32 { if i32.lessThan(1, 2) { return 42 } return 0 }',
       {
         mode: 'release',
       },
@@ -321,7 +322,8 @@ pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left:
 it.effect('orders checked array reads before private match blocks', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(
-      `struct A {}
+      `import silk.usize as usize
+struct A {}
 struct B {}
 fn decode(code: i32) -> A | B { if code == 1 { return A {} } return B {} }
 pub fn main() -> i32 {

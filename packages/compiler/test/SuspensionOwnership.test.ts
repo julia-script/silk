@@ -26,7 +26,12 @@ const plansFor = (
 ): ReadonlyArray<SuspensionOwnership.Plan> =>
   self.plans.filter((plan) => plan.function.declaration.name.startsWith(`${declaration}$effect$`))
 
-const source = `struct Owner { value: i32 }
+const source = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Owner { value: i32 }
 effect fn delayed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }

@@ -49,7 +49,10 @@ const onEveryEngine = (name: string, source: string, expected: number) =>
  * The scenario at `openspec/specs/bootstrap-string/spec.md:113-115`, which had no path to equality
  * before this module existed: the two spellings are unequal, and normalizing makes them equal.
  */
-const spelledTwoWays = `import silk.string { String, view }
+const spelledTwoWays = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -92,7 +95,10 @@ it.effect(
  * views reproduces it with no Unicode in the program — so it is reported separately rather than
  * worked around silently here.
  */
-const comparedDirectly = `import silk.string { String, view }
+const comparedDirectly = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -122,7 +128,10 @@ it.effect(
   120_000,
 )
 
-const decomposing = `import silk.string { String, view, ownedByteLength }
+const decomposing = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.string { String, view, ownedByteLength }
 import silk.unicode { normalizeNfd }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -159,7 +168,10 @@ it.effect(
   120_000,
 )
 
-const composing = `import silk.string { String, view }
+const composing = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -234,7 +246,8 @@ it.effect(
  */
 it.effect('names the Unicode data version and checks it on its own', () =>
   Effect.gen(function* () {
-    const source = `import silk.unicode { dataVersion }
+    const source = `import silk.usize as usize
+import silk.unicode { dataVersion }
 import silk.string { byteLength }
 
 pub fn main() -> i32 {
@@ -262,7 +275,8 @@ pub fn main() -> i32 {
  */
 it.effect('bounds the decomposition buffer against the generated tables', () =>
   Effect.gen(function* () {
-    const source = `import silk.unicode { longestDecomposition }
+    const source = `import silk.usize as usize
+import silk.unicode { longestDecomposition }
 
 pub fn main() -> i32 {
   return usize.toI32(longestDecomposition())
@@ -290,7 +304,12 @@ pub fn main() -> i32 {
  * Normalization allocates, so it declares that it allocates. A caller with no memory to give gets
  * the existing typed failure back rather than a partial result.
  */
-const allocationFailure = `import silk.string { String, view }
+const allocationFailure = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 struct QuotaAllocator { remaining: i32 }

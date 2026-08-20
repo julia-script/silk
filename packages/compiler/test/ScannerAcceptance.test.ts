@@ -21,7 +21,12 @@ const quotaScannerSource = (quota: number): string =>
       `struct U8 {
   value: i32
 }`,
-      `struct QuotaAllocator {
+      `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct QuotaAllocator {
   remaining: i32
 }
 

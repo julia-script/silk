@@ -6,7 +6,11 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 /** A user-authored allocator that always refuses, exercising the failure half of dispatch. */
-const refusing = `struct ExhaustedAllocator { tag: i32 }
+const refusing = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct ExhaustedAllocator { tag: i32 }
 
 effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   fail OutOfMemoryError {}
@@ -30,7 +34,12 @@ pub fn main() -> i32 {
 }`
 
 /** A user-authored allocator that hands out real system blocks, exercising the success half. */
-const delegating = `struct QuotaAllocator { tag: i32 }
+const delegating = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct QuotaAllocator { tag: i32 }
 
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   let mut inner = SystemAllocator.make()
@@ -119,7 +128,12 @@ it.effect('dispatches provision through user allocator witnesses on the evaluato
 
 const ordinalProgram = (
   providers: readonly [string, string],
-): string => `struct ExhaustedAllocator { tag: i32 }
+): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct ExhaustedAllocator { tag: i32 }
 
 effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   fail OutOfMemoryError {}
@@ -193,7 +207,12 @@ it.effect('sweeps allocation failure ordinals with atomic rejection and unchange
   }),
 )
 
-const countedQuota = (quota: number): string => `struct QuotaAllocator { remaining: i32 }
+const countedQuota = (quota: number): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct QuotaAllocator { remaining: i32 }
 
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
@@ -266,7 +285,12 @@ it.effect('runs a counted quota allocator identically on the evaluator and Wasm'
   }),
 )
 
-const forwardedProvider = `struct CountingAllocator { hits: i32 }
+const forwardedProvider = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct CountingAllocator { hits: i32 }
 
 effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   self.hits = self.hits + 1

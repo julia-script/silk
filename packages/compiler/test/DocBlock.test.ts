@@ -35,6 +35,8 @@ const spellings = (block: DocBlock.DocBlock | undefined, source: string) =>
 it('attaches raw module and declaration documentation at every declaration level', () => {
   const source = `//! Recovery operations.
 //! Shared by the complete module.
+import silk.core { Allocator }
+import silk.core { SystemAllocator }
 /// A problem.
 pub struct Problem {
   /// Numeric code.

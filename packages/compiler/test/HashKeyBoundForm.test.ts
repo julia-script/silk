@@ -98,7 +98,8 @@ it.effect('refuses a source witness for a scalar provider', () =>
     // being added, a scalar key has no honest `hash` witness to name.
     const snapshot = yield* analyzed(
       'hash-key-bound/scalar-source-witness',
-      `interface HashKey {
+      `import silk.u64 as u64
+interface HashKey {
   fn digest(left: &Self, right: &Self) -> u64
 }
 fn u64Digest(left: &u64, right: &u64) -> u64 { return 7 }

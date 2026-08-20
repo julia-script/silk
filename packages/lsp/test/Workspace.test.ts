@@ -355,7 +355,10 @@ it.effect('navigates standard-library definitions to the analyzed toolchain sour
 it.effect('navigates Effect.suspend to its shipped Silk declaration', () =>
   Effect.gen(function* () {
     const root = project()
-    const source = `pub effect fn delayed() -> i32 ! OutOfMemoryError ? &mut Allocator {
+    const source = `import silk.core { Allocator, OutOfMemoryError }
+import silk.effects as Effect
+
+pub effect fn delayed() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return run Effect.suspend(effect { return 42 })
 }
 pub fn main() -> i32 { return 42 }`
@@ -377,7 +380,7 @@ pub fn main() -> i32 { return 42 }`
     const definition = Document.definition(
       document,
       snapshot,
-      { line: 1, character: source.split('\n')[1]?.indexOf('suspend') ?? 0 },
+      { line: 4, character: source.split('\n')[4]?.indexOf('suspend') ?? 0 },
       (module) => (module === 'silk/effects' ? libraryUri : undefined),
     )
     assert.strictEqual(definition?.targetUri, libraryUri)

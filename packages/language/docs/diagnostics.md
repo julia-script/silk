@@ -15,12 +15,12 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | --- | --- | --- |
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 3 |
-| `MOD` | Module | 4 |
-| `SEM` | Semantic | 129 |
+| `MOD` | Module | 3 |
+| `SEM` | Semantic | 128 |
 | `OWN` | Ownership | 14 |
 | `LAY` | Layout | 1 |
 
-There are 158 codes in total.
+There are 156 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -48,7 +48,6 @@ There are 158 codes in total.
 | --- | --- | --- |
 | `MOD0001` | Stable code for an import naming a module absent from the supplied sources. | `Unknown module <module>` |
 | `MOD0002` | Stable code for an import redundantly naming its own containing module. | `Module <module> imports itself` |
-| `MOD0003` |  | `Module <module> is imported more than once` |
 | `MOD0004` | Stable code for a user module claiming the reserved standard-library namespace. | `Module <module> claims the reserved standard-library namespace silk/; user modules must live outside it` |
 
 ## Semantic (`SEM`)
@@ -67,7 +66,6 @@ There are 158 codes in total.
 | `SEM0010` | Stable code for a known actor called with an unknown operation name. | `<actor> has no operation <spelling>` |
 | `SEM0011` | Stable code for a conditional whose condition is not `bool`. | `Condition must be bool, found <actual>` |
 | `SEM0012` | Stable code for a call argument whose type mismatches its parameter. | `Expected <expected> but received <actual>` |
-| `SEM0013` |  | `Alias <spelling> does not change the name` |
 | `SEM0014` |  | `Module <module> has no member <spelling>` |
 | `SEM0015` |  | `<module>.<spelling> is private` |
 | `SEM0016` |  | `Multiple bindings claim <spelling>` |

@@ -136,14 +136,16 @@ pub fn selected() -> typeof(id<i32>) { return 0 }`,
   }),
 )
 
-const identitySource = `struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
+const identitySource = `import silk.i32 as i32
+struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
 struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
 pub fn main() -> i32 {
   let mappers = Mappers { first: i32.add(1), second: i32.add(1) }
   let deferred = Deferred { first: effect { return 1 }, second: effect { return 1 } }
   return 0
 }`
-const shiftedIdentitySource = `// Moving source trivia must not rename executable sites.
+const shiftedIdentitySource = `import silk.i32 as i32
+// Moving source trivia must not rename executable sites.
 
 struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
 struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }

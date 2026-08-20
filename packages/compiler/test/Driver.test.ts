@@ -79,7 +79,7 @@ it.effect('compiles a three-module call chain to native execution matching the i
       ],
       [
         'library/Answer',
-        ascii('import values.Number { two }\npub fn answer() -> i32 { return i32.add(40, two()) }'),
+        ascii('import silk.i32 as i32\nimport values.Number { two }\npub fn answer() -> i32 { return i32.add(40, two()) }'),
       ],
       ['values/Number', ascii('pub fn two() -> i32 { return 2 }')],
     ])
@@ -440,7 +440,7 @@ it.effect(
   'keeps evaluator, LLVM Wasm, and direct Wasm trap parity',
   () =>
     Effect.gen(function* () {
-      const source = 'pub fn main() -> i32 { return i32.divide(1, 0) }'
+      const source = 'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(1, 0) }'
       const snapshot = yield* Analysis.ofSourceRealized(
         'memory/driver',
         ascii(source),

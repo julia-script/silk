@@ -105,7 +105,8 @@ it.effect('still rejects a borrow where the parameter wants an owned value', () 
  * this is the spelling the namespace feature exists to enable, and a borrow argument is what it
  * could not reach.
  */
-const seeded = `pub fn main() -> usize {
+const seeded = `import silk.vector { Vector }
+pub fn main() -> usize {
   let values = Vector.make<i32>()
   let count = Vector.length<i32>(&values)
   drop values

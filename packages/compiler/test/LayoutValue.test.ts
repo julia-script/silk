@@ -7,7 +7,9 @@ import * as Type from '../src/Type.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const program = (bytes: string, alignment: string): string => `pub fn main() -> i32 {
+const program = (bytes: string, alignment: string): string => `import silk.layout { InvalidAlignment }
+import silk.layout { Layout }
+pub fn main() -> i32 {
   let validated = Layout.make(${bytes}, ${alignment})
   return match move validated {
     Layout { bytes, alignment } => 42
@@ -54,7 +56,9 @@ it.effect('publishes target-sized Layout and checked repetition contracts', () =
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'layout-value/contracts',
-      ascii(`fn repeat(layout: Layout, count: usize) -> Layout | LayoutOverflow {
+      ascii(`import silk.layout { Layout }
+import silk.layout { LayoutOverflow }
+fn repeat(layout: Layout, count: usize) -> Layout | LayoutOverflow {
   return Layout.repeat(move layout, count)
 }
 pub fn main() -> i32 { return 42 }`),

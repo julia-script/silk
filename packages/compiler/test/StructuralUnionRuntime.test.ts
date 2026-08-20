@@ -335,7 +335,10 @@ pub fn main() -> i32 { return accept(C {}) }`),
  * `u64` is that shape on a 32-bit target. The bits are the same bits either way, so the transfer
  * bridges the containers and every engine now agrees.
  */
-const widened = `struct Wide { value: u64 }
+const widened = `import silk.i32 as i32
+import silk.u64 as u64
+import silk.u8 as u8
+struct Wide { value: u64 }
 struct Narrow { code: u8 }
 struct Holder { value: Wide | Narrow }
 

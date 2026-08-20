@@ -70,10 +70,9 @@ canonical source locations. An unavailable target intrinsic is reported through 
 availability before lowering. Missing support required by a matched toolchain is a toolchain-
 integrity error, not a source-level missing import or typed failure.
 
-**Current compiler:** Partially aligned. Canonical standard-library files compile through the
-ordinary pipeline, platform providers are separate source modules, and intrinsic support is
-reachable-only. The single manifest does not classify these layers, and current name resolution
-still exposes an obsolete implicit standard-library prelude.
+**Current compiler:** Aligned. Canonical standard-library files compile through the ordinary
+pipeline, the generated catalog classifies portable and target-provider modules, source scope is
+explicit, and intrinsic support is reachable-only.
 
 **Evidence:** [bootstrap library source specification](../../openspec/specs/bootstrap-silk-stdlib/spec.md),
 [minimum runtime inventory](../../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md),
@@ -108,9 +107,8 @@ not inferred by this rule.
 at its canonical library location. Toolchain verification may additionally classify this as a
 broken distribution, but it cannot silently replace the module with a privileged implementation.
 
-**Current compiler:** Largely aligned. Shipped actors are canonical `.silk` files with a generated
-manifest and source navigation. Existing compiler-known library spellings and the implicit prelude
-remain reconciliation targets.
+**Current compiler:** Aligned. Shipped actors are canonical `.silk` files with a generated catalog,
+ordinary source analysis, explicit imports, and source navigation.
 
 **Evidence:** [canonical source requirements](../../openspec/specs/bootstrap-silk-stdlib/spec.md),
 [standard-library source guide](../../packages/compiler/stdlib/README.md),
@@ -120,7 +118,7 @@ remain reconciliation targets.
 
 **Status:** Confirmed
 
-Only closed language bindings exisI thinkt without source imports. Standard-library actors—including
+Only closed language bindings exist without source imports. Standard-library actors—including
 `Option`, `Result`, `Effect`, scalar operation actors, `Vector`, `String`, services, and provider
 types—enter a module scope only through explicit imports.
 
@@ -151,11 +149,11 @@ ordinary project module named `Option` is unrelated to `silk.option`.
 diagnostic and may include an auto-import action. Declaring a project module under reserved
 `silk.*` reports a reserved-module-identity collision naming the project and toolchain origins.
 
-**Current compiler:** Disputed. Canonical module identities are reserved, but name resolution and
-module closure still seed or discover manifest namespaces without explicit import syntax.
+**Current compiler:** Aligned. Canonical module identities are reserved, while module closure and
+name resolution introduce standard-library declarations only through explicit imports.
 
 **Evidence:** [PRELUDE-001](modules-names-and-visibility.md#prelude-001--only-language-bindings-are-implicit),
-[module reconciliation ledger](modules-names-and-visibility.md#reconciliation-ledger),
+[module implementation evidence](modules-names-and-visibility.md#implementation-evidence),
 [standard-library module resolution](../../openspec/specs/bootstrap-silk-stdlib/spec.md).
 
 ### STDLIB-003 — One canonical catalog defines the shipped library, not the language
@@ -201,9 +199,9 @@ reports an unknown standard-library module and names the toolchain release. It d
 name is an unknown project path. A catalog that promises a missing or digest-mismatched file is a
 broken-toolchain diagnostic, not an ordinary source error.
 
-**Current compiler:** Partially aligned. One deterministic manifest ships all current modules and
-verifies generated embeddings, but it acts simultaneously as source catalog, implicit prelude, and
-internal implementation inventory. Those roles must be separated.
+**Current compiler:** Aligned. One deterministic generated catalog records canonical source,
+digests, documentation, layers, provider targets, and intrinsic inventories without creating source
+scope.
 
 **Evidence:** [current deterministic catalog](../../packages/compiler/stdlib/manifest.json),
 [bootstrap library inventory](../../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md),
@@ -297,9 +295,8 @@ Hover and inlay information may show which call introduced each channel. An acti
 writes an ordinary signature or expression; the compiler does not silently infer a larger public
 contract or pretend the source already contains the edit.
 
-**Current standard library:** Mixed but directionally aligned. Allocation and services are usually
-explicit, while the current implicit prelude and some native-entry support can make source
-dependencies appear more ambient than their contracts intend.
+**Current standard library:** Aligned for source dependencies. Allocation, services, failures, and
+standard-library names remain explicit in source; entry adaptation is defined separately.
 
 **Evidence:** [Effect contracts](effect-contracts.md),
 [requirements and services](requirements-and-services.md),
@@ -327,9 +324,8 @@ Until then, a catalog flag cannot silently override the language's confirmed `pu
 compiler does not report an “internal standard library API” error for a declaration that is
 otherwise public and cataloged. Tooling may show a non-blocking stability or low-level API notice.
 
-**Current standard library:** Aligned with catalog-wide module resolution, although the implicit
-prelude currently exposes internal-looking actor namespaces even without an import. Removing the
-prelude restores deliberate access without inventing new visibility.
+**Current standard library:** Aligned. Catalog-wide module resolution preserves ordinary `pub`
+visibility, and no catalog namespace becomes visible without an explicit import.
 
 **Evidence:** [ordinary visibility](modules-names-and-visibility.md),
 [current source catalog](../../packages/compiler/stdlib/manifest.json),
@@ -456,9 +452,8 @@ source compatibility after the fact.
 verification rejects unrelated host imports, runtime symbols, static tables, or adapters not
 justified by the retained executable inventory.
 
-**Current compiler:** Largely aligned for intrinsic operations. Current lexical standard-library
-discovery and manifest-wide namespace seeding add source-analysis work that explicit imports should
-remove.
+**Current compiler:** Aligned for intrinsic operations. Source analysis follows explicit import
+closure, while executable support follows reachable specialized operations.
 
 **Evidence:** [TARGET-002](unsafe-intrinsics-and-targets.md#target-002--unreachable-target-specific-primitives-have-no-artifact-cost),
 [explicit module closure](modules-names-and-visibility.md#mod-003--imports-build-one-deterministic-transitive-module-closure),
@@ -701,8 +696,9 @@ behaves ordinarily rather than redirecting to a canonical actor because its spel
 and may still open the available canonical file. It must not synthesize declarations that let
 analysis continue as though the catalog were complete.
 
-**Current tooling:** Partially aligned. Canonical source documentation and navigation exist, while
-implicit prelude completion and catalog/source distinctions require reconciliation.
+**Current tooling:** Aligned for this boundary. Canonical source documentation and navigation exist;
+catalog completion materializes explicit collision-aware imports, and Effect repairs write visible
+source edits.
 
 **Evidence:** [standard-library documentation guide](../../packages/compiler/stdlib/DOCUMENTATION.md),
 [editor intelligence tests](../../packages/compiler/test/EditorIntelligence.test.ts),

@@ -35,7 +35,13 @@ const vocabulary = [
  * A pure in-source provider. It answers from a scripted exit code and a scripted first output byte
  * without a host boundary, so the portable contract is observable on its own.
  */
-const scriptedProvider = `struct Scripted {
+const scriptedProvider = `import silk.child_process { ChildProcess }
+import silk.child_process { ProcessError }
+import silk.child_process { ProcessOutcome }
+import silk.child_process { ProcessRequest }
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+struct Scripted {
   code: i32
   signal: bool
   first: u8
@@ -67,6 +73,9 @@ impl ChildProcess for Broken { execute: Broken.brokenExecute }
 `
 
 const imports = `import silk.bytes { append as bytesAppend, make as bytesMake }
+import silk.effects as Effect
+import silk.u8 as u8
+import silk.usize as usize
 import silk.child_process {
   ChildProcess,
   ProcessError,
@@ -99,7 +108,13 @@ import silk.result { Failure, Result, Success }
 `
 
 /** Reports the program's own return value, or a distinct band for each typed failure it recovers. */
-const recovery = `pub fn main() -> i32 {
+const recovery = `import silk.child_process { ProcessError }
+import silk.core { OutOfMemoryError }
+import silk.filesystem { FileError }
+import silk.option { None }
+import silk.option { Some }
+import silk.result { Result }
+pub fn main() -> i32 {
   let attempted = run Intrinsic.effectResult(program())
   return match move attempted {
     Result<i32, ProcessError | OutOfMemoryError | FileError> { value: outcome } => match move outcome {
@@ -117,7 +132,11 @@ const recovery = `pub fn main() -> i32 {
   }
 }`
 
-const scriptedRun = (provider: string, body: string) => `${imports}
+const scriptedRun = (provider: string, body: string) => `import silk.child_process { ProcessError }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.filesystem { FileError }
+${imports}
 ${scriptedProvider}
 effect fn program() -> i32 ! ProcessError | OutOfMemoryError | FileError {
   let mut allocator = SystemAllocator.make()
@@ -128,7 +147,11 @@ ${body}
 
 ${recovery}`
 
-const nativeRun = (body: string) => `${imports}
+const nativeRun = (body: string) => `import silk.child_process { ProcessError }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.filesystem { FileError }
+${imports}
 import silk.os_child_process { make as osChildMake }
 
 effect fn program() -> i32 ! ProcessError | OutOfMemoryError | FileError {

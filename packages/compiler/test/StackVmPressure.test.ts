@@ -208,7 +208,12 @@ const quotaSourceFor = (bytecode: ReadonlyArray<number>, quota: number): string 
   const withAllocator = replaceExactlyOnce(
     generated,
     'import silk.logging { length as logLength }',
-    `import silk.logging { length as logLength }
+    `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.logging { length as logLength }
 
 struct QuotaAllocator { remaining: i32 }
 

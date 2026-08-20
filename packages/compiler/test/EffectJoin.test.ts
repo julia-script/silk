@@ -88,7 +88,8 @@ pub effect fn main() -> () ! FirstError | SecondError {
   return ()
 }`
 
-const requirementSource = `service LeftClock {
+const requirementSource = `import silk.effects as Effect
+service LeftClock {
   effect fn read() -> i32 ? &LeftClock
 }
 service RightClock {
@@ -119,7 +120,12 @@ pub fn main() -> i32 {
   return run selected
 }`
 
-const affineCaptureSource = `struct First {}
+const affineCaptureSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct First {}
 struct Second {}
 fn choose(input: First | Second, storage: Allocation) -> once Effect<i32> {
   return match move input {
@@ -163,7 +169,12 @@ pub fn main() -> i32 {
   return run pending
 }`
 
-const hookCaptureSource = `struct First {}
+const hookCaptureSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct First {}
 struct Second {}
 struct Guard { storage: Allocation }
 impl Drop for Guard {

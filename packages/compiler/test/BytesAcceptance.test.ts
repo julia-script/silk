@@ -6,7 +6,12 @@ import * as Ownership from '../src/Ownership.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const parity = `import silk.bytes { Bytes, copy, append, asMutSlice, asSlice, length }
+const parity = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.u8 as u8
+import silk.usize as usize
+import silk.bytes { Bytes, copy, append, asMutSlice, asSlice, length }
 
 fn octet(value: u8) -> u8 { return value }
 
@@ -83,7 +88,12 @@ it.effect(
   60_000,
 )
 
-const failedCopy = `import silk.bytes { Bytes, copy }
+const failedCopy = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.bytes { Bytes, copy }
 
 struct QuotaAllocator { remaining: i32 }
 
@@ -139,7 +149,8 @@ it.effect(
     Effect.gen(function* () {
       const moved = yield* Analysis.ofSourceRealized(
         'bytes-acceptance/moved',
-        ascii(`import silk.bytes { make, length }
+        ascii(`import silk.usize as usize
+import silk.bytes { make, length }
 pub fn main() -> i32 {
   let first = make()
   let second = move first

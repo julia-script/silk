@@ -74,7 +74,8 @@ pub fn main() -> i32 {
   return parser.parse(1)
 }`
 
-const capturingSection = `struct Adder<F: fn(i32) -> i32> { step: F }
+const capturingSection = `import silk.i32 as i32
+struct Adder<F: fn(i32) -> i32> { step: F }
 pub fn main() -> i32 {
   let adder = Adder { step: i32.add(1) }
   return adder.step(2)
@@ -171,7 +172,8 @@ it.effect('realizes a suspending stored runner with exact rows and no structural
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'effect-field/suspending',
-      `struct Deferred<F: Effect<i32>> { operation: F }
+      `import silk.effects as Effect
+struct Deferred<F: Effect<i32>> { operation: F }
 effect fn delayed() -> i32 {
   return run Effect.suspend(effect { return 42 })
 }
@@ -326,7 +328,8 @@ it.effect('publishes nested Effect and callable identities for local binding cap
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'effect-field/nested-bindings',
-      `struct Deferred<F: once Effect<i32>> { operation: F }
+      `import silk.i32 as i32
+struct Deferred<F: once Effect<i32>> { operation: F }
 pub fn main() -> i32 {
   let nested = effect { return 1 }
   let transform = i32.add(1)
@@ -679,7 +682,8 @@ pub fn main() -> i32 {
 
 it.effect('keeps equal same-site capture shapes distinct by owner specialization', () =>
   Effect.gen(function* () {
-    const source = `struct Holder<F: fn(i32) -> i32> { step: F }
+    const source = `import silk.i32 as i32
+struct Holder<F: fn(i32) -> i32> { step: F }
 fn apply<T>(marker: T, value: i32) -> i32 {
   let holder = Holder { step: i32.add(1) }
   return holder.step(value)

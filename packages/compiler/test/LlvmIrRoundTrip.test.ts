@@ -91,7 +91,12 @@ const emit = Effect.fnUntraced(function* (
 })
 
 /** A guard whose `Drop` hook runs before its owned `Allocation` field releases. */
-const dropHook = `struct Guard {
+const dropHook = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }
@@ -120,7 +125,12 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
  * shape the duplicate names in #130 appeared in: many reclaim contexts in one function, several
  * of them asking for the same name.
  */
-const unionCleanup = `import silk.box { Box, make as boxMake, get as boxGet }
+const unionCleanup = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.box { Box, make as boxMake, get as boxGet }
 
 pub struct Leaf {}
 

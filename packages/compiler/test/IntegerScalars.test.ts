@@ -5,7 +5,9 @@ import * as Hir from '../src/Hir.js'
 import * as Mir from '../src/Mir.js'
 import * as Scalar from '../src/Scalar.js'
 
-const source = `import silk.option { Option, Some, None }
+const source = `import silk.i16 as i16
+import silk.u8 as u8
+import silk.option { Option, Some, None }
 
 fn overflow() -> Option<u8> {
   return u8.checkedAdd(255, 1)
@@ -71,7 +73,8 @@ it.effect('lowers checked integer outcomes through LLVM and direct Wasm', () =>
   }),
 )
 
-const characters = `import silk.char { fromU32, toU32 }
+const characters = `import silk.u32 as u32
+import silk.char { fromU32, toU32 }
 import silk.option { Some, None }
 
 fn value(input: u32) -> u32 {
@@ -178,7 +181,9 @@ const integerCase = (
   if (operation.result === 'Boolean')
     return `fn integerCase${ordinal}() -> i32 { if ${invocation} { return 42 } return 0 }`
   if (operation.result === 'OptionSelf' || operation.result === 'OptionTarget')
-    return `fn integerCase${ordinal}() -> i32 {
+    return `import silk.option { None }
+import silk.option { Some }
+fn integerCase${ordinal}() -> i32 {
   return match move ${invocation} {
     None {} => 0
     Some<${target.spelling}> { value } => ${target.spelling === 'i32' ? 'value' : `${target.spelling}.toI32(value)`}
@@ -197,7 +202,13 @@ const matrixSource = (() => {
   const checks = cases.map(
     (_, ordinal) => `  let checked${ordinal} = verify(integerCase${ordinal}())`,
   )
-  return `import silk.option { Some, None }
+  const imports = Scalar.integers()
+    .map((scalar) => `import silk.${scalar.spelling} as ${scalar.spelling}`)
+    .join('\n')
+  return `${imports}
+import silk.f32 as f32
+import silk.f64 as f64
+import silk.option { Some, None }
 ${declarations.join('\n')}
 fn verify(value: i32) -> () { if value != 42 { let boom = 1 / 0 } }
 pub fn main() -> i32 {
@@ -273,7 +284,8 @@ pub fn main() -> i32 {
   }),
 )
 
-const contextualCallSource = `fn selectByte(
+const contextualCallSource = `import silk.u8 as u8
+fn selectByte(
   source: &[u8],
   index: usize,
   first: u8,
@@ -342,7 +354,8 @@ it.effect('rejects contextual overflow and already-typed integer mismatches befo
 
     const mismatch = yield* Analysis.ofSourceRealized(
       'integer/contextual-mismatch',
-      new TextEncoder().encode(`fn accept(value: u8) -> u8 { return value }
+      new TextEncoder().encode(`import silk.i32 as i32
+fn accept(value: u8) -> u8 { return value }
 pub fn main() -> i32 {
   let wider = i32.add(40, 2)
   let value = accept(wider)

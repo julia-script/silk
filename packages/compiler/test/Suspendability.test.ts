@@ -22,7 +22,8 @@ const main = (recipe: string): string => `pub fn main() -> i32 { return run ${re
 
 it.effect('separates lazy Effect runners from their factory and synchronous siblings', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn recipes() -> Effect<i32> {
+    const self = yield* snapshot(`import silk.effects as Effect
+fn recipes() -> Effect<i32> {
   let synchronous = effect { return 1 }
   let suspended = delayed()
   return move suspended
@@ -64,7 +65,8 @@ ${main('recipes()')}`)
 
 it.effect('closes direct self and mutual cycles over exact execution nodes', () =>
   Effect.gen(function* () {
-    const direct = yield* snapshot(`effect fn loop(value: i32) -> i32 {
+    const direct = yield* snapshot(`import silk.effects as Effect
+effect fn loop(value: i32) -> i32 {
   if value == 0 { return 0 }
   return run Effect.suspend(loop(value - 1))
 }
@@ -72,7 +74,8 @@ ${main('loop(1)')}`)
     assert.deepEqual(Analysis.diagnostics(direct), [])
     assert.include(names(direct), 'suspendability/main.loop<>')
 
-    const mutual = yield* snapshot(`effect fn even(value: i32) -> i32 {
+    const mutual = yield* snapshot(`import silk.effects as Effect
+effect fn even(value: i32) -> i32 {
   if value == 0 { return 1 }
   return run odd(value - 1)
 }
@@ -89,7 +92,8 @@ ${main('even(2)')}`)
 
 it.effect('propagates through concrete Effect.map and flatMap specializations', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`effect fn seed(value: i32) -> i32 {
+    const self = yield* snapshot(`import silk.effects as Effect
+effect fn seed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
 fn increment(value: i32) -> i32 { return value + 1 }
@@ -131,7 +135,8 @@ ${main('program()')}`)
 
 it.effect('propagates through applied callables but not stored callable values', () =>
   Effect.gen(function* () {
-    const prelude = `fn suspendAndRecover(value: i32) -> i32 {
+    const prelude = `import silk.effects as Effect
+fn suspendAndRecover(value: i32) -> i32 {
   let pending = Effect.suspend(effect { return value })
   return run pending
 }`
@@ -151,7 +156,8 @@ pub fn main() -> i32 { let callback = suspendAndRecover return callback(42) }`)
 
 it.effect('keeps synchronous controls empty and ordering deterministic', () =>
   Effect.gen(function* () {
-    const source = `effect fn seed(value: i32) -> i32 { return value }
+    const source = `import silk.effects as Effect
+effect fn seed(value: i32) -> i32 { return value }
 fn increment(value: i32) -> i32 { return value + 1 }
 pub fn main() -> i32 { return run seed(41) |> Effect.map(increment) }`
     const first = yield* snapshot(source)
@@ -167,7 +173,11 @@ pub fn main() -> i32 { return run seed(41) |> Effect.map(increment) }`
   }),
 )
 
-const suspendingAllocator = `role SharedAudit
+const suspendingAllocator = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.layout { Layout }
+role SharedAudit
 role ExclusiveAudit
 struct SuspendingAllocator {}
 
@@ -185,7 +195,9 @@ impl Allocator for SuspendingAllocator { allocate: SuspendingAllocator.allocate 
 
 it.effect('keeps shared non-default Allocator demands out of private coroutine storage', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`${suspendingAllocator}
+    const self = yield* snapshot(`import silk.core { Allocator }
+import silk.effects as Effect
+${suspendingAllocator}
 
 effect fn work() -> i32
 ? &Allocator at SharedAudit | &Allocator at ExclusiveAudit {
@@ -207,7 +219,9 @@ pub fn main() -> i32 {
 
 it.effect('allows ordinary allocator implementations to suspend', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`${suspendingAllocator}
+    const self = yield* snapshot(`import silk.core { Allocator }
+import silk.effects as Effect
+${suspendingAllocator}
 
 effect fn inert() -> i32 ? &mut Allocator { return 1 }
 pub fn main() -> i32 {

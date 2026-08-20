@@ -98,7 +98,10 @@ const operationsOf = (module: Mir.Module): ReadonlyArray<Mir.Operation> =>
     ),
   )
 
-const normalizing = `import silk.string { String, view }
+const normalizing = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.string { String, view }
 import silk.unicode { normalizeNfc, normalizeNfd }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -187,7 +190,10 @@ it.effect('normalizes through ordinary Silk functions reached by ordinary calls'
  * search. If any phase special-cased `silk/unicode_tables` or the name `combiningClass`, the two
  * answers would not agree.
  */
-const ownTable = `import silk.unicode { canonicalCombiningClass }
+const ownTable = `import silk.u32 as u32
+import silk.u8 as u8
+import silk.usize as usize
+import silk.unicode { canonicalCombiningClass }
 
 fn read3(data: &[u8], at: usize) -> u32 {
   return u8.toU32(data[at]) * 65536

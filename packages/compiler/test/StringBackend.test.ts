@@ -8,7 +8,8 @@ import * as Target from '../src/Target.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const parity = `fn pass(value: string) -> string { return value }
+const parity = `import silk.u8 as u8
+fn pass(value: string) -> string { return value }
 
 pub fn main() -> i32 {
   let bytes = [u8.toU8(115), u8.toU8(105), u8.toU8(108), u8.toU8(107)]

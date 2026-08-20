@@ -230,6 +230,7 @@ it('keeps seven complete, readable programs and explicit status contracts', () =
     if (manifest.id === 'breadth-first-search') {
       assert.include(source, 'import silk.vector')
       assert.notInclude(source, 'Report')
+      assert.include(source, 'import silk.core { OutOfMemoryError }')
       assert.include(source, 'pub effect fn main() -> () ! OutOfMemoryError')
       assert.notInclude(source, 'Effect.catch')
       assert.notInclude(source, 'RawBuffer')

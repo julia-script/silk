@@ -138,6 +138,8 @@ operands. See [1.8](#18-short-circuit-operators).
 callable on its right.
 
 ```silk
+import silk.i32 as i32
+
 pub fn main() -> i32 {
   let piped = 2 |> i32.add(3)
   let masked = 0b1100 & 0b1010
@@ -196,8 +198,10 @@ import compiler.Syntax { Node, parse, encode as encodeSyntax }
 import compiler.Syntax as Tree { Node, parse }
 ```
 
-A redundant alias (`as` naming the same spelling) is rejected, and one module may name another in
-at most one import declaration. Imports are unconditional and top-level only.
+An unchanged alias, an exact duplicate, and separate compatible imports of one module are valid.
+Only bindings that claim the same local spelling for different declarations collide. The language
+service may warn about redundant forms and offer to consolidate them. Imports are unconditional and
+top-level only, and standard-library actors require them just like project actors.
 
 ### 2.2 Constants
 

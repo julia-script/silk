@@ -58,6 +58,7 @@ const agrees = (outcome: { bootstrap: unknown; direct: unknown }, expected: numb
 }
 
 const mapImports = `import silk.hash { HashKey, HashSeed, Word }
+import silk.i32 as i32
 import silk.hash_map {
   HashMap,
   bucketCount,
@@ -72,11 +73,16 @@ import silk.hash_map {
   remove,
   valueAt
 }
-import silk.option { Option, Some, None }`
+import silk.option { Option, Some, None }
+import silk.u64 as u64
+import silk.usize as usize`
 
 /** Wraps a body in the allocator the collections require and the recovery an `OutOfMemoryError` needs. */
 const program = (imports: string, body: string): string =>
-  `${imports}
+  `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+${imports}
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
@@ -186,7 +192,18 @@ it.effect('leaves the map intact when the growth allocation fails', () =>
     // that needs growth, and it fails; every entry placed before it must still answer at its key.
     const value = yield* evaluatedValue(
       'hashed-collections/failed-growth',
-      `${mapImports}
+      `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.hash { HashKey }
+import silk.hash { Word }
+import silk.hash_map { HashMap }
+import silk.i32 as i32
+import silk.layout { Layout }
+import silk.option { Option }
+import silk.usize as usize
+${mapImports}
 
 struct Budget {
   inner: SystemAllocator
@@ -297,6 +314,7 @@ it.effect('keeps probing through the marks a removal leaves behind', () =>
 )
 
 const setImports = `import silk.hash { HashKey, HashSeed, Word }
+import silk.u64 as u64
 import silk.hash_set {
   HashSet,
   bucketCount,
@@ -350,7 +368,11 @@ it.effect('refuses a key type that has no HashKey witness', () =>
     // hash and no equivalence, and the instantiation is reported rather than accepted.
     const snapshot = yield* analyzed(
       'hashed-collections/no-witness',
-      `${mapImports}
+      `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.hash { HashKey }
+${mapImports}
 
 struct Unhashed { tag: i32 }
 

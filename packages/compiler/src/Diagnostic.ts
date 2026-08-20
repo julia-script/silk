@@ -49,7 +49,6 @@ export const unknownModuleCode = 'MOD0001' as const
 
 /** Stable code for an import redundantly naming its own containing module. */
 export const selfImportCode = 'MOD0002' as const
-export const duplicateImportCode = 'MOD0003' as const
 
 /** Stable code for a user module claiming the reserved standard-library namespace. */
 export const reservedModuleIdentityCode = 'MOD0004' as const
@@ -89,7 +88,6 @@ export const conditionNotBoolCode = 'SEM0011' as const
 
 /** Stable code for a call argument whose type mismatches its parameter. */
 export const argumentTypeMismatchCode = 'SEM0012' as const
-export const redundantAliasCode = 'SEM0013' as const
 export const unknownImportedMemberCode = 'SEM0014' as const
 export const inaccessibleImportedMemberCode = 'SEM0015' as const
 export const bindingConflictCode = 'SEM0016' as const
@@ -300,7 +298,6 @@ export type Code =
   | typeof reservedTemplateSyntaxCode
   | typeof unknownModuleCode
   | typeof selfImportCode
-  | typeof duplicateImportCode
   | typeof reservedModuleIdentityCode
   | typeof unknownTypeCode
   | typeof integerOutOfRangeCode
@@ -314,7 +311,6 @@ export type Code =
   | typeof unknownActorOperationCode
   | typeof conditionNotBoolCode
   | typeof argumentTypeMismatchCode
-  | typeof redundantAliasCode
   | typeof unknownImportedMemberCode
   | typeof inaccessibleImportedMemberCode
   | typeof bindingConflictCode
@@ -488,7 +484,6 @@ export type Reason =
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
-  | { readonly _tag: 'DuplicateImport'; readonly module: string }
   | { readonly _tag: 'UnknownType'; readonly spelling: string }
   | {
       readonly _tag: 'IntegerOutOfRange'
@@ -697,7 +692,6 @@ export type Reason =
       readonly required: 'Shared' | 'Exclusive' | 'Take'
     }
   | { readonly _tag: 'RedundantUnaryEmptyCall'; readonly target: string }
-  | { readonly _tag: 'RedundantAlias'; readonly spelling: string }
   | { readonly _tag: 'UnknownImportedMember'; readonly module: string; readonly spelling: string }
   | {
       readonly _tag: 'InaccessibleImportedMember'
@@ -1380,49 +1374,6 @@ export const reservedModuleIdentity = (module: string, span: SourceSpan.SourceSp
     message: `Module ${module} claims the reserved standard-library namespace silk/; user modules must live outside it`,
     reason: Object.freeze({ _tag: 'ReservedModuleIdentity', module }),
     span,
-  })
-
-/**
- * Creates the diagnostic for one module imported more than once.
- *
- * `removal` covers the repeated import line, so the emitted edit deletes that line whole.
- */
-export const duplicateImport = (
-  module: string,
-  removal: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'module',
-    code: duplicateImportCode,
-    severity: 'error',
-    message: `Module ${module} is imported more than once`,
-    reason: Object.freeze({ _tag: 'DuplicateImport', module }),
-    span,
-    edits: Object.freeze([Object.freeze({ span: removal, replacement: '' })]),
-  })
-
-/**
- * Creates the diagnostic for an alias that repeats the name it renames.
- *
- * `clause` covers the ` as name` bytes, so the emitted edit deletes the clause and leaves the
- * imported name it duplicated.
- */
-export const redundantAlias = (
-  spelling: string,
-  clause: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: redundantAliasCode,
-    severity: 'error',
-    message: `Alias ${spelling} does not change the name`,
-    reason: Object.freeze({ _tag: 'RedundantAlias', spelling }),
-    span,
-    edits: Object.freeze([Object.freeze({ span: clause, replacement: '' })]),
   })
 
 export const unknownImportedMember = (

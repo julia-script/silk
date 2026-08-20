@@ -6,7 +6,14 @@ import * as Mir from '../src/Mir.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const source = `effect fn store() -> i32 ! OutOfMemoryError {
+const source = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -26,7 +33,14 @@ pub fn main() -> i32 {
   return run recipe
 }`
 
-const sharedReadSource = `effect fn store() -> i32 ! OutOfMemoryError {
+const sharedReadSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 1]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -45,7 +59,14 @@ const sharedReadSource = `effect fn store() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
-const nonCopyReadSource = `struct Guard { storage: Allocation }
+const nonCopyReadSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+struct Guard { storage: Allocation }
 effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Guard; 1]>()
@@ -70,7 +91,14 @@ effect fn store() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
-const unionReadSource = `struct Left { value: i32 }
+const unionReadSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+struct Left { value: i32 }
 impl Copy for Left {}
 struct Right { value: i32 }
 impl Copy for Right {}
@@ -95,7 +123,14 @@ effect fn store() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
-const moveOnlyUnionReadSource = `struct Guard { storage: Allocation }
+const moveOnlyUnionReadSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+struct Guard { storage: Allocation }
 struct Marker { value: i32 }
 
 fn guarded(storage: Allocation) -> Guard | Marker {
@@ -129,7 +164,14 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 const unsafeProgram = (
   body: string,
   layout = '[i32; 2]',
-): string => `effect fn store() -> i32 ! OutOfMemoryError {
+): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<${layout}>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)

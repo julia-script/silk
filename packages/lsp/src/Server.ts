@@ -279,7 +279,12 @@ export const start = (): void => {
   connection.onCompletion(async (parameters) => {
     const session = await acquire(parameters.textDocument.uri)
     if (Option.isNone(session)) return { isIncomplete: false, items: [] }
-    return Document.completion(session.value.document, session.value.snapshot, parameters.position)
+    return Document.completion(
+      session.value.document,
+      session.value.snapshot,
+      parameters.position,
+      session.value.inventory,
+    )
   })
 
   connection.onSignatureHelp(async (parameters) => {

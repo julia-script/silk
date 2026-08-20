@@ -11,7 +11,8 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 const repository = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))))
 
-const source = `pub effect fn postpone<A, E, ?R>(
+const source = `import silk.effects as Effect
+pub effect fn postpone<A, E, ?R>(
   deferred: once Effect<A ! E ? R>
 ) -> A ! E ? R {
   return run Effect.suspend(move deferred)

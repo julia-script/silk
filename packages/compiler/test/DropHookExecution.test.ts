@@ -6,7 +6,12 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 /** Fallthrough: the guard leaves scope, its hook runs, then its Allocation field releases. */
-const fallthrough = `struct Guard {
+const fallthrough = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }
@@ -29,7 +34,12 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /** Early drop: explicit drop releases at that statement and block cleanup does not repeat it. */
-const earlyDrop = `struct Guard {
+const earlyDrop = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }
@@ -53,7 +63,12 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /** Typed failure: a guard live at a failing run releases through its hook before propagating. */
-const failurePropagation = `struct Guard {
+const failurePropagation = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }
@@ -89,7 +104,12 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /** Recursive return: every suspended activation releases its own guard exactly once. */
-const recursiveReturn = `struct Guard {
+const recursiveReturn = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }
@@ -155,7 +175,12 @@ it.effect('runs Drop hooks before field cleanup exactly once on every structured
 )
 
 /** One parametric conformance serves two instantiations, each with its own hook instance. */
-const parametric = `struct Guard<T> {
+const parametric = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard<T> {
   value: T
   storage: Allocation
 }

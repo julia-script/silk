@@ -37,7 +37,15 @@ const run = (label: string, text: string) =>
   })
 
 // Whole-member binding on a source-defined Layout value from Layout.repeat's union.
-const layoutExtract = `effect fn store() -> i32 ! OutOfMemoryError {
+const layoutExtract = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.layout { LayoutOverflow }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let element = Layout.of<i32>()
   let plan = Layout.repeat(move element, 3)
@@ -64,7 +72,12 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 // Whole-member binding on an affine member (move it out of the union).
-const affineExtract = `struct Empty {}
+const affineExtract = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Empty {}
 struct Full { storage: Allocation }
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()

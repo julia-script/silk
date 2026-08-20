@@ -125,7 +125,9 @@ it.effect(
   'lowers sqrt to the native square root on both backends',
   () =>
     Effect.gen(function* () {
-      const source = `pub fn main() -> i32 {
+      const source = `import silk.f32 as f32
+import silk.f64 as f64
+pub fn main() -> i32 {
   if f64.sqrt(1764.0) != 42.0 { return 1 }
   if f32.sqrt(1764.0) != 42.0 { return 2 }
   return 42

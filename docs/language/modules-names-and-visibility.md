@@ -274,8 +274,8 @@ offer to remove the unchanged alias.
 
 **Diagnostics:** A missing alias name receives the parser's missing-token diagnostic without a
 fabricated binding. Binding collisions use the collision rule rather than silently replacing an
-existing name. The current compiler reports redundant aliases as `SEM0013`; that error conflicts
-with IMPORT-005.
+existing name. An unchanged alias is compiler-valid; the LSP may report `LSP0002` and offer to
+remove only the redundant alias clause.
 
 **Evidence:** [import aliases](../../openspec/specs/bootstrap-name-resolution/spec.md),
 [alias tests](../../packages/compiler/test/NameResolution.test.ts).
@@ -338,8 +338,7 @@ The hybrid form is a compact way to request both namespace and selected bindings
 permits separate declarations naming the same target when that organization is clearer.
 
 **Diagnostics:** Each binding is checked independently for unknown members, inaccessibility, and
-local collisions. The current compiler reports a second declaration importing the same canonical
-target as `MOD0003`; that error conflicts with IMPORT-006.
+local collisions. Repeating the same canonical target is not itself a diagnostic.
 
 **Evidence:** [hybrid import bindings](../../openspec/specs/bootstrap-name-resolution/spec.md),
 [hybrid syntax provenance](../../packages/compiler/test/ModuleClosure.test.ts).
@@ -645,9 +644,8 @@ This has the same binding and runtime meaning as `import model.User`.
 **Boundary:** An alias that claims another binding's spelling is not merely redundant; it is a real
 collision under NAME-003. A missing alias name remains malformed syntax.
 
-**Diagnostics:** The compiler should not reject an unchanged alias. Language tooling may report a
-non-blocking simplification warning and offer to remove `as User`. The current compiler instead
-reports `SEM0013`; that diagnostic should cease to be a compilation error.
+**Diagnostics:** The compiler does not reject an unchanged alias. Language tooling may report a
+non-blocking `LSP0002` simplification warning and offer to remove `as User`.
 
 **Evidence:** [current alias policy](../../openspec/specs/bootstrap-name-resolution/spec.md),
 [redundant alias tests](../../packages/compiler/test/NameResolution.test.ts).
@@ -676,10 +674,9 @@ binds public type `User` directly.
 different members as the same spelling still report `SEM0016`. Importing an identical binding twice
 is an idempotent redundancy rather than a second declaration identity.
 
-**Diagnostics:** Repeated targets alone should not produce a compiler error. Tooling may suggest
+**Diagnostics:** Repeated targets alone do not produce a compiler error. Tooling may suggest
 combining compatible imports into one hybrid declaration or removing an exact duplicate. The
-current compiler reports every later target occurrence as `MOD0003`; that restriction should be
-removed.
+LSP uses `LSP0001` for an exact duplicate and `LSP0003` when declarations can be consolidated.
 
 **Evidence:** [current repeated-target restriction](../../openspec/specs/bootstrap-name-resolution/spec.md),
 [duplicate import tests](../../packages/compiler/test/NameResolution.test.ts).
@@ -725,9 +722,7 @@ closed language spelling `i32`; `import silk.effects as Effect` behaves similarl
 type syntax. This does not create general separate type and value namespaces for user declarations.
 
 **Diagnostics:** Naming an unimported standard-library namespace uses the ordinary unknown-name
-diagnostic and may carry an auto-import suggestion. The current compiler injects every manifest
-namespace—including `Option`, `Result`, `Vector`, services, providers, and internal actors—into user
-scope. That implicit prelude conflicts with this confirmed rule and should be removed.
+diagnostic. Catalog-backed completion may add a visible, collision-aware import edit.
 
 **Evidence:** [current prelude tier](../../openspec/specs/bootstrap-name-resolution/spec.md),
 [standard-library namespace tests](../../packages/compiler/test/StdlibNamespaceAcceptance.test.ts),
@@ -774,19 +769,12 @@ unknown member rather than following the import transitively.
 **Evidence:** [non-re-exporting imports](../../openspec/specs/bootstrap-name-resolution/spec.md),
 [module semantic surfaces](../../openspec/specs/bootstrap-module-semantic-surface/spec.md).
 
-## Reconciliation ledger
+## Implementation evidence
 
-These confirmed rules intentionally disagree with several current artifacts. They define the
-direction for a later OpenSpec handoff; this stabilization pass does not silently edit the compiler
-or normative specifications.
+The compiler closes modules only through parsed imports, keeps catalog declarations out of source
+scope, accepts harmless import redundancy, and preserves collision diagnostics for genuinely
+different bindings. The LSP indexes the catalog independently, inserts explicit collision-aware
+imports, and owns optional redundancy warnings and consolidation actions. Repository examples,
+fixtures, tests, and generated documentation use the same explicit-import model.
 
-| Area | Current behavior | Confirmed direction |
-| --- | --- | --- |
-| Redundant aliases | `NameResolution` reports `SEM0013`, marks the binding unavailable, and tooling removes the alias. | Keep the binding available; a simplification may remain a non-blocking tooling action. |
-| Repeated targets | `NameResolution` reports `MOD0003`, rejects every later declaration for that target, and tooling removes it. | Resolve every declaration normally; only actual local binding collisions are errors. |
-| Module closure | `Stdlib.requiredModules` lexically scans `Namespace.` tokens and causes `ModuleClosure` to load matching manifest modules without imports. | Follow explicit import syntax only; preserve manifest lookup for source resolution and auto-import discovery. |
-| Module scope | `NameResolution` seeds every loaded manifest namespace and alias as a lower-priority prelude. | Seed only language bindings; standard-library actor names enter scope through imports. |
-| Completion | Qualified completion recognizes a manifest namespace that source never imported. | Offer a source-level auto-import or complete only an already visible namespace. |
-| Specifications | `bootstrap-name-resolution` requires distinct aliases, one declaration per target, and a standard-library prelude tier. | Replace those requirements with binding-based redundancy and explicit standard-library imports. |
-| Tests and examples | `NameResolution.test.ts`, `StdlibNamespaceAcceptance.test.ts`, `StdlibResolution.test.ts`, editor-intelligence tests, and examples encode the old errors or implicit namespaces. | Test explicit imports, harmless redundancy, collision-only rejection, and auto-import edits. |
-| Re-exports | `pub import` is unsupported and ordinary imports are not exported. | Preserve this boundary until native library/package design supplies requirements for explicit re-exports. |
+Re-exports remain deferred: `pub import` is unsupported and ordinary imports are not exported.

@@ -195,7 +195,10 @@ const acceptanceCases = [
 
 const probeNames = acceptanceCases.map((declared) => declared.slice(3, declared.indexOf('(')))
 
-const acceptance = `import silk.option { Some, None }
+const acceptance = `${[...integerSpellings, ...floatSpellings]
+  .map((spelling) => `import silk.${spelling} as ${spelling}`)
+  .join('\n')}
+import silk.option { Some, None }
 
 ${acceptanceCases.join('\n')}
 

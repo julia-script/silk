@@ -423,7 +423,8 @@ it.effect('discovers one generic slice instance across distinct source lengths',
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'slices/Instances',
-      ascii(`fn scan<T>(values: &[T]) -> i32 { return usize.toI32(values.length) }
+      ascii(`import silk.usize as usize
+fn scan<T>(values: &[T]) -> i32 { return usize.toI32(values.length) }
 fn short() -> i32 { let values = [1, 2, 3] return scan(&values) }
 fn long() -> i32 { let values = [1, 2, 3, 4, 5, 6] return scan(&values) }
 pub fn main() -> i32 { let left = short() let right = long() return left + right }`),

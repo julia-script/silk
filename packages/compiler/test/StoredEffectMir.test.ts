@@ -197,7 +197,8 @@ it.effect('binds provider-specialized runs to their exact generated runner and w
   Effect.gen(function* () {
     const { module } = yield* lowerStored(
       'stored-effect-mir/provided-runner',
-      `service Counter { effect fn get() -> i32 ? &Counter }
+      `import silk.effects as Effect
+service Counter { effect fn get() -> i32 ? &Counter }
 service Meter { effect fn read() -> i32 ? &Meter }
 struct Fixed { value: i32 }
 effect fn get(self: &Fixed) -> i32 { return self.value }
@@ -356,7 +357,8 @@ it.effect('retains stored runners across suspension and resume planning', () =>
   Effect.gen(function* () {
     const lowered = yield* lowerStored(
       'stored-effect-mir/suspending',
-      `struct Deferred<F: Effect<i32>> { operation: F }
+      `import silk.effects as Effect
+struct Deferred<F: Effect<i32>> { operation: F }
 effect fn delayed() -> i32 {
   return run Effect.suspend(effect { return 42 })
 }
@@ -411,7 +413,12 @@ it.effect('keeps typed-failure releases on stored Effect propagation paths', () 
   Effect.gen(function* () {
     const { module } = yield* lowerStored(
       'stored-effect-mir/failure-cleanup',
-      `struct Token { value: i32 }
+      `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Token { value: i32 }
 struct Deferred<F: once Effect<i32>> { operation: F }
 fn consume(token: Token) -> i32 { return token.value }
 effect fn build() -> i32 ! OutOfMemoryError {

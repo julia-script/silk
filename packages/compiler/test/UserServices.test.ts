@@ -22,7 +22,8 @@ const snapshot = (source: string, target?: string) =>
 const evaluate = (source: string) =>
   Effect.map(snapshot(source), (self) => ({ self, outcome: Analysis.evaluate(self) }))
 
-const sharedSource = `service Counter {
+const sharedSource = `import silk.effects as Effect
+service Counter {
   effect fn get() -> i32 ? &Counter
 }
 struct Fixed { value: i32 }
@@ -53,7 +54,8 @@ it.effect(
   'specializes a conditional generic service witness and its unused proof dependency',
   () =>
     Effect.gen(function* () {
-      const source = `interface Marker { fn mark(value: &Self) -> i32 }
+      const source = `import silk.effects as Effect
+interface Marker { fn mark(value: &Self) -> i32 }
 
 struct Token {}
 fn markToken(value: &Token) -> i32 { return 1 }
@@ -195,7 +197,8 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('dispatches an exclusive source service and preserves provider mutation', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`service Counter {
+    const { self, outcome } = yield* evaluate(`import silk.effects as Effect
+service Counter {
   effect fn increment() -> i32 ? &mut Counter
 }
 struct Cell { value: i32 }
@@ -249,7 +252,8 @@ for (const provider of [
     `transfers ${provider.label} Effect recipes and protected borrows through move aliases`,
     () =>
       Effect.gen(function* () {
-        const source = `import silk.result { Result, Success, Failure }
+        const source = `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
 struct Token { value: i32 }
 service Counter {
   effect fn increment(token: ${provider.access === 'Exclusive' ? '&mut Token' : '&Token'}) -> i32 ? ${provider.access === 'Exclusive' ? '&mut Counter' : '&Counter'}
@@ -337,7 +341,8 @@ pub fn main() -> i32 {
 
 it.effect('dispatches an owned source service provider exactly once', () =>
   Effect.gen(function* () {
-    const source = `service Counter {
+    const source = `import silk.effects as Effect
+service Counter {
   effect fn increment() -> i32 ? &mut Counter
 }
 struct Cell { value: i32 }
@@ -437,7 +442,10 @@ it.effect('releases an affine owned provider after a pre-read scalar suspends an
 
 it.effect('keeps a synchronous service with an allocator requirement synchronous', () =>
   Effect.gen(function* () {
-    const source = `service Value {
+    const source = `import silk.core { Allocator }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+service Value {
   effect fn read() -> i32 ? &mut Value | &mut Allocator
 }
 struct Fixed { value: i32 }
@@ -502,7 +510,11 @@ it.effect('keeps mixed provider specializations exact at one service site', () =
 
 it.effect('releases an owned source provider after the protected Effect completes', () =>
   Effect.gen(function* () {
-    const source = `import silk.effects as Effect
+    const source = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.layout { Layout }
+import silk.effects as Effect
 struct Problem { code: i32 }
 service Value { effect fn read() -> i32 ? &mut Value }
 struct Provider { storage: Allocation }
@@ -571,7 +583,8 @@ pub fn main() -> i32 {
 
 it.effect('uses a nested provider override only for its lexical provision', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`service Value {
+    const { self, outcome } = yield* evaluate(`import silk.effects as Effect
+service Value {
   effect fn get() -> i32 ? &Value
 }
 struct Fixed { value: i32 }
@@ -643,7 +656,8 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('ends the provider loan after the provided effect completes', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`service Value {
+    const { self, outcome } = yield* evaluate(`import silk.effects as Effect
+service Value {
   effect fn get() -> i32 ? &Value
 }
 struct Provider { value: i32 }

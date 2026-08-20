@@ -13,7 +13,9 @@ const ascii = (value: string): Uint8Array =>
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
-const source = `struct Problem { code: i32 }
+const source = `import silk.effects as Effect
+import silk.i32 as i32
+struct Problem { code: i32 }
 effect fn risky<T>(value: T, selector: i32) -> T ! Problem {
   if selector == 0 { fail move Problem { code: 41 } }
   return move value
@@ -39,7 +41,9 @@ const exclusiveCaptureSource = `pub fn main() -> i32 {
   let second = run pending
   return first * 10 + second
 }`
-const retrySource = `struct Problem { code: i32 }
+const retrySource = `import silk.effects as Effect
+import silk.i32 as i32
+struct Problem { code: i32 }
 effect fn retrying() -> i32 ! Problem {
   let mut counter = 0
   let work = effect {
@@ -66,19 +70,24 @@ pub fn main() -> i32 {
   let provided = read() |> Intrinsic.bindRequirement<Clock at Primary>(&clock)
   return run provided
 }`
-const callableMapSource = `effect fn succeed(value: i32) -> i32 { return value }
+const callableMapSource = `import silk.effects as Effect
+import silk.i32 as i32
+effect fn succeed(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return run succeed(2) |> Effect.map(i32.add(40)) }`
 const flattenPrelude = `effect fn inner(value: i32) -> i32 { return value * 2 }
 effect fn outer(value: i32) -> Effect<i32> { return inner(value) }`
-const flattenSource = `${flattenPrelude}
+const flattenSource = `import silk.effects as Effect
+${flattenPrelude}
 pub fn main() -> i32 {
   let nested = outer(21)
   let flattened = Effect.flatten(move nested)
   return run flattened
 }`
-const flattenPipedSource = `${flattenPrelude}
+const flattenPipedSource = `import silk.effects as Effect
+${flattenPrelude}
 pub fn main() -> i32 { return run (outer(21) |> Effect.flatten) }`
-const flattenRowsSource = `struct Outer { code: i32 }
+const flattenRowsSource = `import silk.effects as Effect
+struct Outer { code: i32 }
 struct Inner { code: i32 }
 service Clock {}
 service Meter {}
@@ -101,7 +110,8 @@ const pipelineSources = [
   {
     name: 'grouped',
     expected: 42,
-    source: `${pipelinePrelude}
+    source: `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
   return run ((read() |> Effect.provide(&clock)) |> Effect.map(add)) |> Effect.map(double)
@@ -110,7 +120,8 @@ pub fn main() -> i32 {
   {
     name: 'reverse',
     expected: 42,
-    source: `${pipelinePrelude}
+    source: `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
   return run read()
@@ -122,7 +133,8 @@ pub fn main() -> i32 {
   {
     name: 'provided-last',
     expected: 42,
-    source: `${pipelinePrelude}
+    source: `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
   return run read()
@@ -134,7 +146,8 @@ pub fn main() -> i32 {
   {
     name: 'data-first',
     expected: 42,
-    source: `${pipelinePrelude}
+    source: `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
   return run Effect.map(Effect.provide(Effect.map(read(), add), &clock), double)
@@ -143,7 +156,8 @@ pub fn main() -> i32 {
   {
     name: 'stored',
     expected: 42,
-    source: `${pipelinePrelude}
+    source: `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
   let mapped = read() |> Effect.map(add)
@@ -153,7 +167,8 @@ pub fn main() -> i32 {
 }`,
   },
 ] as const
-const effectOperatorPipelineSource = `${pipelinePrelude}
+const effectOperatorPipelineSource = `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
   return run read()
@@ -162,7 +177,8 @@ pub fn main() -> i32 {
     |> Effect.map(double)
     |> Effect.provide(&clock)
 }`
-const storedEffectOperatorPipelineSource = `${pipelinePrelude}
+const storedEffectOperatorPipelineSource = `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
   let flatMapped = read() |> Effect.flatMap(increment)
@@ -171,7 +187,8 @@ pub fn main() -> i32 {
   let provided = mapped |> Effect.provide(&clock)
   return run provided
 }`
-const recoveryPipelineSource = `struct Problem { code: i32 }
+const recoveryPipelineSource = `import silk.effects as Effect
+struct Problem { code: i32 }
 effect fn failValue() -> i32 ! Problem { fail Problem { code: 21 } }
 effect fn recover(problem: Problem) -> i32 { return problem.code }
 fn double(value: i32) -> i32 { return value * 2 }
@@ -184,7 +201,8 @@ const retryMapSource = `${retrySource.replace(
   'let handled = retrying() |> Effect.catchAll(recover)',
   'let handled = retrying() |> Effect.catchAll(recover) |> Effect.map(i32.add(39))',
 )}`
-const outOfMemoryErrorSource = `import silk.core { OutOfMemoryError }
+const outOfMemoryErrorSource = `import silk.effects as Effect
+import silk.core { OutOfMemoryError }
 
 effect fn exhaust() -> i32 ! OutOfMemoryError {
   fail OutOfMemoryError {}
@@ -224,7 +242,12 @@ pub fn main() -> i32 {
   let result = run forwarded
   return result.value
 }`
-const droppedHigherOrderEffectSource = `struct Payload { storage: Allocation }
+const droppedHigherOrderEffectSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Payload { storage: Allocation }
 impl Drop for Payload {
   fn drop(self: &mut Payload) -> () { return () }
 }

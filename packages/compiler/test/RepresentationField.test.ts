@@ -381,14 +381,16 @@ pub fn main() -> i32 {
 it.effect('keeps executable identities stable across edit shifts and source-path relocation', () =>
   Effect.gen(function* () {
     const module = 'representation-field/executable-sites'
-    const source = `struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
+    const source = `import silk.i32 as i32
+struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
 struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
 pub fn main() -> i32 {
   let mappers = Mappers { first: i32.add(1), second: i32.add(1) }
   let deferred = Deferred { first: effect { return 1 }, second: effect { return 1 } }
   return 0
 }`
-    const shifted = `// Leading comments and whitespace move every diagnostic span.
+    const shifted = `import silk.i32 as i32
+// Leading comments and whitespace move every diagnostic span.
 
 struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
 struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }

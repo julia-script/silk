@@ -121,7 +121,8 @@ pub fn main() -> i32 { return move answer }`),
  * datum the equivalent `let` binding lowers to. Identical HIR data ids are that byte equality.
  */
 const stringConstantSource = (initializer: string, binding: string) =>
-  `import silk.string { byteLength }
+  `import silk.usize as usize
+import silk.string { byteLength }
 
 const pattern: string = ${initializer}
 
@@ -185,7 +186,8 @@ pub fn main() -> i32 { return 0 }`
 it.effect('resolves a public string constant across a module boundary', () =>
   Effect.gen(function* () {
     const strings = 'pub const greeting: string = "hi"'
-    const main = `import strings { greeting }
+    const main = `import silk.usize as usize
+import strings { greeting }
 import silk.string { byteLength }
 
 pub fn main() -> i32 { return usize.toI32(byteLength(greeting)) }`

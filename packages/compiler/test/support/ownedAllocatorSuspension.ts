@@ -1,4 +1,9 @@
-export const ownedAllocatorSuspensionSuccess = `import silk.result { Result, Success, Failure }
+export const ownedAllocatorSuspensionSuccess = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.result { Result, Success, Failure }
 struct OwnedAllocator { storage: Allocation }
 effect fn allocate(self: &mut OwnedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   let mut inner = SystemAllocator.make()
@@ -37,7 +42,12 @@ pub fn main() -> i32 {
   )
 }`
 
-export const ownedAllocatorSuspensionFailure = `import silk.result { Result, Success, Failure }
+export const ownedAllocatorSuspensionFailure = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.result { Result, Success, Failure }
 struct Problem { code: i32 }
 struct OwnedAllocator { storage: Allocation }
 effect fn allocate(self: &mut OwnedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
@@ -86,7 +96,10 @@ pub fn main() -> i32 {
  * private coroutine storage. The Audit implementation always refuses, so accidental selection is
  * observable on every engine.
  */
-export const auditAllocatorSuspension = `import silk.effects as Effect
+export const auditAllocatorSuspension = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.layout { Layout }
+import silk.effects as Effect
 role SharedAudit
 role ExclusiveAudit
 struct AuditAllocator { tag: i32 }
@@ -106,7 +119,11 @@ pub fn main() -> i32 {
     |> Effect.provideMut<Allocator at ExclusiveAudit>(&mut exclusiveAudit))
 }`
 
-export const ownedProviderSuspendedSuccess = `import silk.effects as Effect
+export const ownedProviderSuspendedSuccess = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.layout { Layout }
+import silk.effects as Effect
 service Counter {
   effect fn increment() -> i32 ? &mut Counter
 }
@@ -135,7 +152,11 @@ pub fn main() -> i32 {
   )
 }`
 
-export const ownedProviderSuspendedFailure = `import silk.effects as Effect
+export const ownedProviderSuspendedFailure = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.layout { Layout }
+import silk.effects as Effect
 struct Problem { code: i32 }
 service Value {
   effect fn read() -> i32 ! Problem ? &mut Value

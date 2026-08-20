@@ -9,7 +9,8 @@ const ascii = (value: string): Uint8Array =>
 const snapshot = (source: string) =>
   Analysis.ofSourceRealized('runtime-slice-mir/main', ascii(source))
 
-const source = `fn inspect(values: &[i32], index: usize) -> i32 {
+const source = `import silk.usize as usize
+fn inspect(values: &[i32], index: usize) -> i32 {
   return values[index] + usize.toI32(values.length)
 }
 fn replace(values: &mut [i32], index: usize) -> i32 {

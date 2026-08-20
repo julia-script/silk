@@ -61,7 +61,8 @@ const infixShape = (source: string): InfixShape => {
   return outermost === undefined ? 'operand' : shapeOf(outermost)
 }
 
-const parity = `pub fn checksum(value: u32, mask: u32) -> u32 {
+const parity = `import silk.u32 as u32
+pub fn checksum(value: u32, mask: u32) -> u32 {
   let masked = value & mask
   let flipped = ~masked
   return flipped ^ mask
@@ -140,7 +141,8 @@ it.effect(
 
 it.effect('gives `a & b` the value the named operation gives', () =>
   Effect.gen(function* () {
-    const source = `fn viaOperator(a: u32, b: u32) -> u32 { return a & b }
+    const source = `import silk.u32 as u32
+fn viaOperator(a: u32, b: u32) -> u32 { return a & b }
 fn viaFunction(a: u32, b: u32) -> u32 { return u32.bitAnd(a, b) }
 
 pub fn main() -> i32 {
@@ -166,7 +168,8 @@ pub fn main() -> i32 { return 0 }`),
     )
     const viaFunction = yield* Analysis.ofSourceRealized(
       'bitwise-operator/mixed-function',
-      ascii(`fn mixed(a: u32, b: i32) -> u32 { return u32.bitAnd(a, b) }
+      ascii(`import silk.u32 as u32
+fn mixed(a: u32, b: i32) -> u32 { return u32.bitAnd(a, b) }
 pub fn main() -> i32 { return 0 }`),
     )
 

@@ -28,7 +28,9 @@ afterAll(() => {
   rmSync(destinationRoot, { recursive: true, force: true })
 })
 
-const lowLevelSource = `pub fn main() -> i32 {
+const lowLevelSource = `import silk.u32 as u32
+import silk.usize as usize
+pub fn main() -> i32 {
   let mut kind = 0
   let mut length = usize.add(0, 0)
   let mut reason = 0
@@ -70,7 +72,9 @@ it.effect('loads the ordinary canonical OS provider without compiler-known libra
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'os-filesystem/importer',
-      ascii(`import silk.os_filesystem { OsFileSystem, make }
+      ascii(`import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.os_filesystem { OsFileSystem, make }
 pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
   return run make(root)
 }`),
@@ -85,7 +89,10 @@ it.effect(
     Effect.gen(function* () {
       const snapshot = yield* Analysis.ofSourceRealized(
         'os-filesystem/list-runner',
-        ascii(`import silk.os_filesystem { OsFileSystem, make as osMake }
+        ascii(`import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.os_filesystem { OsFileSystem, make as osMake }
 import silk.filesystem { DirectoryEntry, FileError, FileSystem, Path, root as pathRoot }
 import silk.vector { Vector }
 
@@ -129,7 +136,12 @@ it.effect(
   'runs partial I/O and preserves primary failures through the injected evaluator host',
   () =>
     Effect.gen(function* () {
-      const source = `import silk.os_filesystem { make as osMake }
+      const source = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.u8 as u8
+import silk.usize as usize
+import silk.os_filesystem { make as osMake }
 import silk.bytes { asSlice as bytesSlice }
 import silk.filesystem { FileError, FileSystem, make as pathMake }
 import silk.result { Failure, Result, Success }
@@ -237,7 +249,11 @@ pub fn main() -> i32 {
 
 it.effect('retries oversized directory entries without advancing and sorts complete paths', () =>
   Effect.gen(function* () {
-    const source = `import silk.os_filesystem { make as osMake }
+    const source = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.os_filesystem { make as osMake }
 import silk.filesystem { DirectoryEntry, FileError, FileSystem, root as pathRoot, view as pathView }
 import silk.result { Failure, Result, Success }
 import silk.vector { asSlice as vectorSlice }
@@ -395,7 +411,8 @@ pub fn main() -> i32 { return 0 }`),
 
     const reused = yield* Analysis.ofSourceRealized(
       'os-filesystem/reused-handle',
-      ascii(`pub effect fn twice(handle: OsHandle) -> bool {
+      ascii(`import silk.u32 as u32
+pub effect fn twice(handle: OsHandle) -> bool {
   let mut reason = 0
   let mut code = u32.toU32(0)
   unsafe {
@@ -415,7 +432,11 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('navigates provider policy to Silk source and low-level calls to Intrinsic', () =>
   Effect.gen(function* () {
-    const source = `import silk.os_filesystem { OsFileSystem, make as osMake }
+    const source = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.u32 as u32
+import silk.usize as usize
+import silk.os_filesystem { OsFileSystem, make as osMake }
 pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
   return run osMake(root)
 }
@@ -541,7 +562,13 @@ it.effect(
   'runs the ordinary OS provider against a confined native root',
   () =>
     Effect.gen(function* () {
-      const source = `import silk.os_filesystem { make as osMake }
+      const source = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.u32 as u32
+import silk.u8 as u8
+import silk.usize as usize
+import silk.os_filesystem { make as osMake }
 import silk.bytes { asSlice as bytesSlice }
 import silk.filesystem { FileError, FileSystem, make as pathMake }
 import silk.result { Failure, Result, Success }

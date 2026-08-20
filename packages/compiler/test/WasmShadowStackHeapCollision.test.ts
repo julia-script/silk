@@ -70,7 +70,10 @@ const ascii = (value: string): Uint8Array =>
  * descends into the box it holds, so releasing a deep chain is itself a recursion, and that is the
  * separate, sanctioned boundary of #132/#133 rather than the defect under test here.
  */
-const prelude = `import silk.box { Box, make as boxMake, get as boxGet, into as boxInto }
+const prelude = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.usize as usize
+import silk.box { Box, make as boxMake, get as boxGet, into as boxInto }
 
 pub struct End {}
 
@@ -150,7 +153,9 @@ effect fn build(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
 }
 `
 
-const program = (body: string, depth: number): string => `${prelude}
+const program = (body: string, depth: number): string => `import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+${prelude}
 ${body}
 
 effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
@@ -160,7 +165,10 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(${depth}), recover) }`
 /** Build the chain, walk it recursively, drain it. The walk is the only recursion. */
 const walk = (depth: number): string =>
   program(
-    `effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
+    `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   let counted = stepDepth(&built.step)
@@ -174,7 +182,10 @@ const walk = (depth: number): string =>
 /** The same allocations, the same teardown, no walk: this program never recurses at all. */
 const unwalked = (depth: number): string =>
   program(
-    `effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
+    `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   let released = drain(move built)
@@ -525,7 +536,10 @@ it.effect(
  * directly comparable, byte for byte, against one that does not.
  */
 const lanes = Object.freeze(Array.from({ length: 16 }, (_, index) => index))
-const allocatingCross = (depth: number): string => `${prelude}
+const allocatingCross = (depth: number): string => `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+${prelude}
 pub struct Wide {
 ${lanes.map((lane) => `  lane${lane}: i32`).join('\n')}
 }

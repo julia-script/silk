@@ -212,7 +212,12 @@ pub fn main() -> i32 {
   return (run deferred.operation) + (run deferred.operation)
 }`
 
-const consuming = `struct Token { value: i32 storage: Allocation }
+const consuming = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Token { value: i32 storage: Allocation }
 impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
 struct Deferred<F: once Effect<i32>> { operation: F }
 fn consume(token: Token) -> i32 { return token.value }
@@ -228,7 +233,8 @@ pub fn main() -> i32 {
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-const provided = `service Counter { effect fn get() -> i32 ? &Counter }
+const provided = `import silk.effects as Effect
+service Counter { effect fn get() -> i32 ? &Counter }
 struct Fixed { value: i32 }
 effect fn get(self: &Fixed) -> i32 { return self.value }
 impl Counter for Fixed { get: Fixed.get }
@@ -240,7 +246,8 @@ pub fn main() -> i32 {
   return run deferred.operation
 }`
 
-const providedMoved = `service Counter { effect fn get() -> i32 ? &Counter }
+const providedMoved = `import silk.effects as Effect
+service Counter { effect fn get() -> i32 ? &Counter }
 struct Fixed { value: i32 }
 effect fn get(self: &Fixed) -> i32 { return self.value }
 impl Counter for Fixed { get: Fixed.get }
@@ -298,7 +305,12 @@ it.effect('executes stored Effects with exact runner, rows, access, and ownershi
 
 type CleanupExit = 'unrun' | 'failure'
 
-const cleanupProgram = (exit: CleanupExit): string => `struct Problem { code: i32 }
+const cleanupProgram = (exit: CleanupExit): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Problem { code: i32 }
 struct Guard { tag: i32 storage: Allocation }
 impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
 struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }
@@ -376,7 +388,12 @@ it.effect('cleans unrun and failing stored Effect environments exactly once', ()
   }),
 )
 
-const suspending = `struct Guard { tag: i32 storage: Allocation }
+const suspending = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard { tag: i32 storage: Allocation }
 impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
 struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }
 fn defer<A, E, ?R, F: once Effect<A ! E ? R>>(

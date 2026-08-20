@@ -4,7 +4,9 @@ import * as Analysis from '../src/Analysis.js'
 import * as FloatingPoint from '../src/FloatingPoint.js'
 import * as Scalar from '../src/Scalar.js'
 
-const source = `fn add(left: f64, right: f64) -> f64 { return left + right }
+const source = `import silk.f32 as f32
+import silk.f64 as f64
+fn add(left: f64, right: f64) -> f64 { return left + right }
 fn bits32(value: u32) -> u32 { return f32.toBits(f32.fromBits(value)) }
 fn bits64(value: u64) -> u64 { return f64.toBits(f64.fromBits(value)) }
 fn classify(value: f64) -> bool { return f64.isNaN(value) }
@@ -169,7 +171,11 @@ const floatMatrix = (() => {
     const target = Scalar.find(operation.result === 'Self' ? scalar.spelling : operation.result)
     return `fn floatCase${ordinal}() -> i32 { return ${target?.spelling ?? scalar.spelling}.toI32(${invocation}) }`
   })
-  return `${functions.join('\n')}
+  const imports = [...Scalar.floats(), ...Scalar.integers()]
+    .map((scalar) => `import silk.${scalar.spelling} as ${scalar.spelling}`)
+    .join('\n')
+  return `${imports}
+${functions.join('\n')}
 fn verify(value: i32) -> () { if value != 42 { let boom = 1 / 0 } }
 pub fn main() -> i32 {
 ${cases.map((_, ordinal) => `  let checked${ordinal} = verify(floatCase${ordinal}())`).join('\n')}
