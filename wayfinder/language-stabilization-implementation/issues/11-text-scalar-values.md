@@ -1,7 +1,7 @@
 # Normalize text and scalar values
 
 Type: OpenSpec implementation handoff
-Status: in progress
+Status: resolved
 Blocked by: 08
 OpenSpec: [normalize-text-and-scalar-values](../../../openspec/changes/normalize-text-and-scalar-values/proposal.md)
 
