@@ -419,7 +419,7 @@ it('normalizes finite rows and applies total exact set operations deterministica
   )
 })
 
-it('keeps requirement union joins separate from exact membership and difference', () => {
+it('keeps requirement union joins and exact membership separate from key difference', () => {
   type Capability = 'Clock' | 'Logger'
   type Member = RequirementRow.Member<Capability>
   const policy = RequirementRow.policy<Capability>((capability) => capability)
@@ -457,8 +457,8 @@ it('keeps requirement union joins separate from exact membership and difference'
   assert.strictEqual(FiniteRow.isSubset(policy, exclusive, shared), false)
   assert.strictEqual(FiniteRow.isSubset(policy, shared, shared), true)
   assert.strictEqual(FiniteRow.isSubset(policy, exclusive, exclusive), true)
-  assert.deepEqual(FiniteRow.difference(policy, shared, exclusive).members, shared.members)
-  assert.deepEqual(FiniteRow.difference(policy, exclusive, shared).members, exclusive.members)
+  assert.deepEqual(FiniteRow.difference(policy, shared, exclusive).members, [])
+  assert.deepEqual(FiniteRow.difference(policy, exclusive, shared).members, [])
   assert.deepEqual(FiniteRow.difference(policy, shared, shared).members, [])
   assert.deepEqual(FiniteRow.difference(policy, exclusive, exclusive).members, [])
 
@@ -555,7 +555,7 @@ it('defers concrete difference until generic member keys finish specializing', (
   )
   assert.deepEqual(
     specialize(requirement(left, 'Exclusive', 'Audit'), requirement(right, 'Shared', 'Audit')),
-    [requirement(concrete, 'Exclusive', 'Audit')],
+    [],
   )
   assert.deepEqual(
     specialize(

@@ -115,7 +115,7 @@ export interface FailureMemberShape {
   readonly parameter: Parameter
 }
 
-/** One open capability with fixed access and role lifted into a requirement row. */
+/** One open capability key with a retained access demand lifted into a requirement row. */
 export interface RequirementMemberShape {
   readonly capability: Parameter
   readonly access: Requirement['access']

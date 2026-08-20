@@ -1,7 +1,7 @@
 ## 1. Requirement keys and algebra
 
-- [ ] 1.1 Define canonical service-plus-role keys and separate access demands from identity.
-- [ ] 1.2 Implement deterministic key normalization, union, repeated-demand merging, and subtraction.
+- [x] 1.1 Define canonical service-plus-role keys and separate access demands from identity.
+- [x] 1.2 Implement deterministic key normalization, union, repeated-demand merging, and subtraction.
 - [ ] 1.3 Parse, resolve, format, and inspect `at` role selectors with collision diagnostics.
 - [ ] 1.4 Migrate generic requirement facts and remove access-bearing legacy selector identities.
 

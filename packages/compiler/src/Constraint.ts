@@ -163,7 +163,7 @@ export const evidenceKey = (self: ConstraintEvidence): string => {
       return Canonical.record('RequirementSelectionEvidence', [
         self.wantedKey,
         key(self.wanted),
-        Type.requirementRowPolicy().finite.memberKey(self.selected),
+        Type.requirementRowPolicy().finite.collisionKey(self.selected),
         Type.key(self.provider),
         providerMatchKey(self.providerMatch),
         self.providerMode,

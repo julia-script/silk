@@ -6,22 +6,28 @@ export type Access = 'Shared' | 'Exclusive'
 /** Access used by a provider-selection constraint. */
 export type ProviderAccess = Access | 'Take'
 
-/** One exact capability-role-access requirement member. */
+/** One requirement key plus the access demanded at that key. */
 export interface Member<Capability> {
   readonly capability: Capability
   readonly role: string
   readonly access: Access
 }
 
+/** Canonical identity of one service-role requirement independently from access. */
+export const key = <Capability>(
+  capabilityKey: (capability: Capability) => string,
+  member: Pick<Member<Capability>, 'capability' | 'role'>,
+): string => `${capabilityKey(member.capability)}@${member.role}`
+
 /** Constructs the finite-row policy for a capability identity domain. */
 export const policy = <Capability>(
   capabilityKey: (capability: Capability) => string,
 ): FiniteRow.Policy<Member<Capability>> =>
   Object.freeze({
-    collisionKey: (member: Member<Capability>) =>
-      `${capabilityKey(member.capability)}@${member.role}`,
+    collisionKey: (member: Member<Capability>) => key(capabilityKey, member),
     memberKey: (member: Member<Capability>) =>
       `${capabilityKey(member.capability)}@${member.role}:${member.access}`,
+    differenceKey: (member: Member<Capability>) => key(capabilityKey, member),
     merge: (left: Member<Capability>, right: Member<Capability>): Member<Capability> =>
       Object.freeze({
         capability: left.capability,

@@ -63,7 +63,7 @@ const oracle = (
     },
 })
 
-const memberKey = RequirementRow.policy<Type.Nominal | Type.Parameter>(Type.key).memberKey
+const memberKey = RequirementRow.policy<Type.Nominal | Type.Parameter>(Type.key).collisionKey
 
 it('rejects an empty relation set as an internal invariant violation', () => {
   assert.throws(

@@ -132,7 +132,7 @@ const canonicalOrigins = (origins: NonEmptySourceSpans): NonEmptySourceSpans => 
 }
 
 const policy = RequirementRow.policy<NonNullable<Type.Requirement['capability']>>(Type.key)
-const memberKey = policy.memberKey
+const memberKey = policy.collisionKey
 
 const providerAccess = (mode: Constraint.ProviderMode): RequirementRow.ProviderAccess =>
   mode === 'Take' ? 'Take' : mode
