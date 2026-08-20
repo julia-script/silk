@@ -3,6 +3,6 @@
 Type: OpenSpec implementation handoff
 Status: resolved
 Blocked by: 01
-OpenSpec: [define-copy-and-executable-ownership](../../../openspec/changes/define-copy-and-executable-ownership/proposal.md)
+OpenSpec: [2026-08-20-define-copy-and-executable-ownership](../../../openspec/changes/archive/2026-08-20-define-copy-and-executable-ownership/proposal.md)
 
 Make Copy one sealed validated property and derive represented callable and Effect aggregate ownership from ordinary fields.

@@ -1,6 +1,6 @@
 # Implement the stabilized Silk core
 
-Status: active
+Status: resolved
 
 ## Destination
 
@@ -40,7 +40,7 @@ Bring the compiler, evaluator, native and Wasm backends, standard library, diagn
 
 After 01, items 02, 03, 07, and 10 are independent. Later work may proceed concurrently only when it edits disjoint compiler seams and every declared dependency is resolved. The default single-thread frontier remains the lowest-numbered open unblocked item.
 
-Current frontier: 14. Items 01 through 13 are implemented, synchronized, and archived.
+Current frontier: complete. Items 01 through 16 are implemented, synchronized, and archived.
 
 Completed legacy OpenSpec changes are a separate hygiene lane: validate, sync, and archive them without letting their historical contracts override this queue.
 
