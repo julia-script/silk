@@ -130,10 +130,9 @@ must name both the contract and operation. For an unknown inline name, it must e
 names match contract operations and suggest an explicit mapping when a differently named actor
 function was intended.
 
-**Current compiler:** Disputed. General conformances currently accept mapped operations only and
-reject inline bodies with `SEM0083`; the restricted `Drop` hook is the sole inline exception. The
-general parser and conformance index must accept both forms before the compiler implements this
-rule.
+**Current compiler:** Aligned. General conformances accept inline bodies, mapped actor functions,
+and mixtures of both forms. Completeness and compatibility are checked through one ordered witness
+table for interfaces and services.
 
 **Evidence:** [earlier actor-function direction](../../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md),
 [earlier service mapping requirement](../../openspec/specs/bootstrap-service-declarations/spec.md),
@@ -191,9 +190,8 @@ diagnostic must identify the named type and state that Effect requirements must 
 services. When the named type is an ordinary value type, tooling may suggest passing it explicitly;
 it must not silently synthesize a service declaration or wrapper.
 
-**Current compiler:** Disputed. The compiler currently accepts some nominal structs directly as
-requirement capabilities. Those cases must either declare a real service and provider conformance,
-or become explicit function parameters during implementation reconciliation.
+**Current compiler:** Aligned. Requirement construction admits service declarations and generic
+requirement parameters, while concrete structs and ordinary interfaces receive `SEM0070`.
 
 **Evidence:** [service and requirement decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
 [service declaration specification](../../openspec/specs/bootstrap-service-declarations/spec.md),
@@ -247,10 +245,9 @@ dependency eligibility itself is relevant. The compiler must not report an “un
 parallel service-conformance diagnostic merely because a service appears in an ordinary interface
 position.
 
-**Current compiler:** Disputed. The compiler currently rejects a service used as an ordinary
-interface constraint with `SEM0083`, and parts of provider matching and service-operation witness
-adaptation follow service-specific paths. Stabilization must reduce those paths to the eligibility
-check plus shared interface machinery rather than preserving divergent behavior.
+**Current compiler:** Aligned. Services and interfaces share contract, conformance, bound,
+specialization, and static-call machinery. The service eligibility bit is consulted only where an
+Effect dependency key is formed.
 
 **Evidence:** [earlier service/interface distinction](../../openspec/specs/bootstrap-service-declarations/spec.md),
 [interface contract specification](../../openspec/specs/bootstrap-complete-interface-contracts/spec.md),
