@@ -7901,7 +7901,7 @@ export const lowerProgram = (
       Object.freeze({
         tag: ordinal + 1,
         type: failure.type,
-        report: failure.identity,
+        identity: failure.identity,
         payload: local(ordinal + 3),
         cleanup: Ownership.cleanupPlan(index, failure.type),
       }),
@@ -7960,7 +7960,7 @@ export const lowerProgram = (
       requirements: resolvedEntry.requirements,
       failures: Object.freeze(
         resolvedEntry.failures.map((failure, ordinal) =>
-          Object.freeze({ tag: ordinal + 1, type: failure.type, report: failure.identity }),
+          Object.freeze({ tag: ordinal + 1, type: failure.type, identity: failure.identity }),
         ),
       ),
     })

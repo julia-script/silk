@@ -98,6 +98,10 @@
       "types": "./dist/SourceFile.d.ts",
       "import": "./dist/SourceFile.js"
     },
+    "./Termination": {
+      "types": "./dist/Termination.d.ts",
+      "import": "./dist/Termination.js"
+    },
     "./SourceAction": {
       "types": "./dist/SourceAction.d.ts",
       "import": "./dist/SourceAction.js"

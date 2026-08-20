@@ -465,12 +465,7 @@ it.effect(
         )
         assert.deepEqual(Analysis.diagnostics(trappingWasm), [], exit)
         const trappingEvaluation = Analysis.evaluate(trappingWasm)
-        assert.strictEqual(trappingEvaluation._tag, 'Blocked', exit)
-        assert.strictEqual(
-          trappingEvaluation._tag === 'Blocked' ? trappingEvaluation.reason._tag : undefined,
-          'Trap',
-          exit,
-        )
+        assert.strictEqual(trappingEvaluation._tag, 'Trap', exit)
         assert.strictEqual(
           trappingEvaluation.trace.filter(
             (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl'),

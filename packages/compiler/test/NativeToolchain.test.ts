@@ -7,6 +7,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as CoroutineRuntime from '../src/CoroutineRuntime.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as Target from '../src/Target.js'
+import type * as Termination from '../src/Termination.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
 
 const clang =
@@ -17,6 +18,16 @@ const clang =
       ? '/usr/local/opt/llvm/bin/clang'
       : 'clang')
 const toolchain: NativeToolchain.Toolchain = Object.freeze({ _tag: 'Toolchain', clang })
+
+const termination = (...identities: ReadonlyArray<string>): Termination.Contract =>
+  Object.freeze({
+    _tag: 'EntryTermination',
+    success: identities.length === 0 ? 'ReturnedStatus' : 'Zero',
+    failures: Object.freeze(
+      identities.map((identity, ordinal) => Object.freeze({ tag: ordinal + 1, identity })),
+    ),
+    logicalFrames: Object.freeze([]),
+  })
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -79,10 +90,7 @@ it('plans fixed profile arguments and nothing else varies', () => {
 })
 
 it('generates effect-reporting shims from byte arrays with closed status handling', () => {
-  const source = ToolchainPlan.shimSource({
-    _tag: 'EffectReports',
-    reports: ['module.Error"\\name'],
-  })
+  const source = ToolchainPlan.shimSource(termination('module.Error"\\name'))
   const expected = Array.from(new TextEncoder().encode('Error: module.Error"\\name\n')).join(', ')
   assert.include(source, `{ ${expected} }`)
   assert.notInclude(source, 'Error: module.Error"\\name')
@@ -90,25 +98,30 @@ it('generates effect-reporting shims from byte arrays with closed status handlin
   assert.include(source, 'default:\n      return 2;')
 })
 
-it('captures the process command line in both entry shapes without changing termination', () => {
-  const passThrough = ToolchainPlan.shimSource({ _tag: 'PassThrough' })
-  const reporting = ToolchainPlan.shimSource({ _tag: 'EffectReports', reports: ['module.Error'] })
+it('captures the process command line only when reachable host input requests it', () => {
+  const passThrough = ToolchainPlan.shimSource(termination())
+  const reporting = ToolchainPlan.shimSource(termination('module.Error'))
+  const hostInput = ToolchainPlan.shimSource(termination(), ['silk_os_host_argument_count_v1'])
   for (const source of [passThrough, reporting]) {
-    assert.include(source, 'int main(int argc, char **argv) {')
-    assert.include(source, 'silk_host_argc_v1 = argc;')
-    assert.include(source, 'silk_host_argv_v1 = argv;')
-    assert.notInclude(source, 'int main(void)')
-    // Silk `main` keeps its zero-parameter shape: arguments reach a program through a service.
+    assert.include(source, 'int main(void) {')
+    assert.notInclude(source, 'silk_host_argc_v1')
+    assert.notInclude(source, 'silk_host_argv_v1')
     assert.include(source, 'extern int silk_main(void);')
   }
+  assert.notInclude(passThrough, '#include <unistd.h>')
+  assert.notInclude(passThrough, 'silk_standard_stream_write_v1')
+  assert.notInclude(passThrough, 'silk_coroutine_frame_push_v1')
+  assert.include(hostInput, 'int main(int argc, char **argv) {')
+  assert.include(hostInput, 'silk_host_argc_v1 = argc;')
+  assert.include(hostInput, 'silk_host_argv_v1 = argv;')
   assert.include(passThrough, 'return silk_main();')
   assert.include(reporting, 'const int tag = silk_main();')
   assert.include(reporting, 'if (tag == 0) return 0;')
 })
 
 it('includes non-moving segmented coroutine storage only when suspension requests it', () => {
-  const direct = ToolchainPlan.shimSource({ _tag: 'PassThrough' })
-  const suspended = ToolchainPlan.shimSource({ _tag: 'PassThrough' }, CoroutineRuntime.symbols)
+  const direct = ToolchainPlan.shimSource(termination())
+  const suspended = ToolchainPlan.shimSource(termination(), CoroutineRuntime.symbols)
   assert.notInclude(direct, CoroutineRuntime.pushSymbol)
   assert.include(suspended, `void *${CoroutineRuntime.pushSymbol}`)
   assert.include(suspended, `void ${CoroutineRuntime.popSymbol}`)
@@ -207,9 +220,7 @@ it.effect(
       })
 
       NativeToolchain.withBuildScope('shim-cache-miss', (scope) => {
-        const outcome = NativeToolchain.compileShim(cachedToolchain, scope, target, {
-          _tag: 'PassThrough',
-        })
+        const outcome = NativeToolchain.compileShim(cachedToolchain, scope, target, termination())
         assert.strictEqual(outcome._tag, 'ObjectArtifact')
         if (outcome._tag !== 'ObjectArtifact') return
         assert.strictEqual(existsSync(outcome.artifact.path), true)
@@ -221,9 +232,7 @@ it.effect(
       })
 
       NativeToolchain.withBuildScope('shim-cache-hit', (scope) => {
-        const outcome = NativeToolchain.compileShim(cachedToolchain, scope, target, {
-          _tag: 'PassThrough',
-        })
+        const outcome = NativeToolchain.compileShim(cachedToolchain, scope, target, termination())
         assert.strictEqual(outcome._tag, 'ObjectArtifact')
         if (outcome._tag !== 'ObjectArtifact') return
         assert.strictEqual(existsSync(outcome.artifact.path), true)

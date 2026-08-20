@@ -147,10 +147,9 @@ const expectTrap = Effect.fnUntraced(function* (name: string, source: string, re
   const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
   assert.deepEqual(Analysis.diagnostics(snapshot), [])
   const evaluated = Analysis.evaluate(snapshot)
-  assert.strictEqual(evaluated._tag, 'Blocked')
-  if (evaluated._tag !== 'Blocked') return
-  assert.strictEqual(evaluated.reason._tag, 'Trap', JSON.stringify(evaluated.reason))
-  if (evaluated.reason._tag === 'Trap') assert.strictEqual(evaluated.reason.reason, reason)
+  assert.strictEqual(evaluated._tag, 'Trap')
+  if (evaluated._tag !== 'Trap') return
+  assert.strictEqual(evaluated.reason, reason)
 })
 
 it.effect('moves one allocation through RawBuffer and lexical Slot operations', () =>

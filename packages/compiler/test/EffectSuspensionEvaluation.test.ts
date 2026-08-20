@@ -86,9 +86,9 @@ pub fn main() -> i32 { return run maybe(false) }`)
 it.effect('traps fatally when private execution-stack storage is exhausted', () =>
   Effect.gen(function* () {
     const outcome = yield* evaluate(suspended, { maxExecutionStackBytes: 1 })
-    assert.strictEqual(outcome._tag, 'Blocked', inspect(outcome))
-    if (outcome._tag !== 'Blocked' || outcome.reason._tag !== 'Trap') return
-    assert.strictEqual(outcome.reason.reason, 'private execution stack exhausted')
+    assert.strictEqual(outcome._tag, 'Trap', inspect(outcome))
+    if (outcome._tag !== 'Trap') return
+    assert.strictEqual(outcome.reason, 'private execution stack exhausted')
     assert.lengthOf(
       outcome.trace.filter((event) => event._tag === 'CoroutineFrameComplete'),
       0,
@@ -116,6 +116,28 @@ pub fn main() -> i32 { return run Effect.catchAll(delayed(), recover) }`)
       frameEvents(outcome.trace).some(
         (event) => event._tag === 'SuspensionChildComplete' && event.outcome === 'Failure',
       ),
+    )
+  }),
+)
+
+it.effect('preserves a source-level failure path across suspension', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluate(`struct BoomError {}
+effect fn failing() -> () ! BoomError { fail BoomError {} }
+effect fn delayed() -> () ! BoomError {
+  return run Effect.suspend(failing())
+}
+pub effect fn main() -> () ! BoomError { return run delayed() }`)
+    assert.strictEqual(outcome._tag, 'UnhandledFailure', inspect(outcome))
+    if (outcome._tag !== 'UnhandledFailure') return
+    assert.strictEqual(outcome.identity, 'effect-suspension-evaluation/main.BoomError')
+    assert.isAbove(outcome.logicalPath.length, 1, inspect(outcome.logicalPath))
+    assert.notInclude(
+      outcome.logicalPath.map((frame) => frame.function.name),
+      '$effect-entry',
+    )
+    assert.isTrue(
+      frameEvents(outcome.trace).some((event) => event._tag === 'SuspensionChildComplete'),
     )
   }),
 )

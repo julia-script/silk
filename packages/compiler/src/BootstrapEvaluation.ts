@@ -14,6 +14,7 @@ import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
+import type * as Termination from './Termination.js'
 import * as Transcendental from './Transcendental.js'
 import * as Type from './Type.js'
 
@@ -400,6 +401,8 @@ export interface ControlTraceEvent {
 
 export interface EffectTraceEvent {
   readonly _tag: 'EffectSuccess' | 'EffectFailure'
+  readonly frame: number
+  readonly depth: number
   readonly function: DeclarationIndex.CanonicalId
   readonly tag: number
   readonly span: SourceSpan.SourceSpan
@@ -547,21 +550,13 @@ export type BlockedReason =
     }
 
 /** A completed exact bootstrap result. */
-export interface Completed {
-  readonly _tag: 'Completed'
-  readonly entry: DeclarationIndex.CanonicalId
-  readonly result: IntegerValue
-  readonly trace: ReadonlyArray<TraceEvent>
-}
+export type Completed = Termination.Completed<IntegerValue, TraceEvent>
 
-/** A reportable application failure closed by the generated effect-entry adapter. */
-export interface UnhandledFailure {
-  readonly _tag: 'UnhandledFailure'
-  readonly entry: DeclarationIndex.CanonicalId
-  readonly tag: number
-  readonly report: string
-  readonly trace: ReadonlyArray<TraceEvent>
-}
+/** An owned typed application failure closed by the generated effect-entry adapter. */
+export type UnhandledFailure = Termination.UnhandledFailure<TraceEvent>
+
+/** Fatal abnormal termination produced by executable MIR. */
+export type Trap = Termination.Trap<TraceEvent>
 
 /** A normal, inspectable reason bootstrap evaluation could not complete. */
 export interface Blocked {
@@ -572,7 +567,81 @@ export interface Blocked {
 }
 
 /** The closed outcome of executing one lowered program. */
-export type Outcome = Completed | UnhandledFailure | Blocked
+export type Outcome = Completed | UnhandledFailure | Trap | Blocked
+
+const isPhysicalEntryAdapter = (name: string): boolean =>
+  name === '$effect-entry' || name === '$unit-entry'
+
+const logicalPathAt = (
+  trace: ReadonlyArray<TraceEvent>,
+  through: number,
+): ReadonlyArray<Termination.LogicalFrame> => {
+  const active = new Map<
+    number,
+    { readonly depth: number; readonly value: Termination.LogicalFrame }
+  >()
+  for (let index = 0; index <= through; index += 1) {
+    const event = trace.at(index)
+    if (event?._tag === 'Entry' && !isPhysicalEntryAdapter(event.function.name)) {
+      active.set(
+        event.frame,
+        Object.freeze({
+          depth: event.depth,
+          value: Object.freeze({ function: event.function, provenance: event.span }),
+        }),
+      )
+    } else if (event?._tag === 'Return') {
+      active.delete(event.frame)
+    }
+  }
+  return Object.freeze(
+    [...active.values()].sort((left, right) => left.depth - right.depth).map(({ value }) => value),
+  )
+}
+
+const causalHistory = (
+  trace: ReadonlyArray<TraceEvent>,
+  terminal: 'Success' | 'TypedFailure' | 'Trap',
+  terminalIdentity?: string,
+): ReadonlyArray<Termination.CausalFailure> => {
+  const failures = trace.flatMap((event, index) =>
+    event._tag === 'EffectFailure'
+      ? [
+          Object.freeze({
+            event,
+            index,
+            key: `${event.function.module}\u0000${event.function.name}\u0000${event.tag}\u0000${event.span.start}\u0000${event.span.end}`,
+          }),
+        ]
+      : [],
+  )
+  const distinct = failures.filter(
+    (failure, index) => failures.findIndex((candidate) => candidate.key === failure.key) === index,
+  )
+  return Object.freeze(
+    distinct.map(({ event, index }, ordinal) =>
+      Object.freeze({
+        tag: event.tag,
+        ...(terminalIdentity === undefined || ordinal !== distinct.length - 1
+          ? {}
+          : { identity: terminalIdentity }),
+        provenance: event.span,
+        logicalPath: logicalPathAt(trace, index),
+        recovered: terminal !== 'TypedFailure' || ordinal !== distinct.length - 1,
+      }),
+    ),
+  )
+}
+
+const longestCausalPath = (
+  history: ReadonlyArray<Termination.CausalFailure>,
+  fallback: ReadonlyArray<Termination.LogicalFrame>,
+): ReadonlyArray<Termination.LogicalFrame> =>
+  history.reduce(
+    (selected, candidate) =>
+      candidate.logicalPath.length > selected.length ? candidate.logicalPath : selected,
+    fallback,
+  )
 
 type Step =
   | { readonly _tag: 'Value'; readonly value: Value }
@@ -736,7 +805,6 @@ interface OriginTransferRequest {
 interface RelayTransferRequest {
   readonly _tag: 'RelayTransferRequest'
   readonly transfer: TransferStep
-  readonly region: Mir.RunSuspendableEffectRegion
   readonly state?: Mir.CoroutineFrameState
 }
 
@@ -797,6 +865,22 @@ function* executeFunction(
     return result
   }
 
+  const relayTransfers = function* (
+    initial: Step,
+    state_?: Mir.CoroutineFrameState,
+  ): FunctionExecution {
+    let result = initial
+    while (result._tag === 'Transfer') {
+      const request: RelayTransferRequest = Object.freeze({
+        _tag: 'RelayTransferRequest',
+        transfer: result,
+        ...(state_ === undefined ? {} : { state: state_ }),
+      })
+      result = yield request
+    }
+    return result
+  }
+
   const suspensionFor = (
     operation: Mir.Operation,
   ): Mir.SuspendEffectRegion | Mir.RunSuspendableEffectRegion | undefined =>
@@ -829,13 +913,7 @@ function* executeFunction(
     if (result._tag !== 'Transfer') return result
     if (control?._tag !== 'RunSuspendableEffectRegion') return result
     const frameState = control.relay.state
-    const request: RelayTransferRequest = Object.freeze({
-      _tag: 'RelayTransferRequest',
-      transfer: result,
-      region: control,
-      ...(frameState === undefined ? {} : { state: frameState }),
-    })
-    return yield request
+    return yield* relayTransfers(result, frameState)
   }
 
   const evaluationLimit = (
@@ -4460,6 +4538,8 @@ function* executeFunction(
             trace.push(
               Object.freeze({
                 _tag: operation.tag === 0 ? 'EffectSuccess' : 'EffectFailure',
+                frame,
+                depth: activation.depth,
                 function: fn.id,
                 tag: operation.tag,
                 span: operation.provenance.span,
@@ -4501,6 +4581,8 @@ function* executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'EffectFailure',
+                frame,
+                depth: activation.depth,
                 function: fn.id,
                 tag: mapping.target,
                 span: operation.provenance.span,
@@ -4639,6 +4721,8 @@ function* executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'EffectFailure',
+                frame,
+                depth: activation.depth,
                 function: fn.id,
                 tag: mapping.target,
                 span: operation.provenance.span,
@@ -4862,13 +4946,11 @@ function* executeFunction(
                 span: operation.provenance.span,
               }),
             )
-            const execution = yield* callFunction(
-              runner,
-              effect.captures,
-              operation.provenance.span,
-            )
+            const called = yield* callFunction(runner, effect.captures, operation.provenance.span)
+            const execution = yield* relayTransfers(called)
             if (execution._tag === 'Blocked') return execution
-            if (execution._tag === 'Transfer') return execution
+            if (execution._tag === 'Transfer')
+              throw new RangeError('Effect entry retained a relayed suspension transfer')
             if (execution.value._tag !== 'EffectOutcomeValue')
               throw new RangeError('MIR effect entry runner returned a non-outcome value')
             const effectOutcome = execution.value
@@ -4898,6 +4980,8 @@ function* executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'EffectFailure',
+                frame,
+                depth: activation.depth,
                 function: fn.id,
                 tag: failure.tag,
                 span: operation.provenance.span,
@@ -5487,6 +5571,21 @@ export const evaluate = (
     ...(options.osFileSystem === undefined ? {} : { osFileSystem: options.osFileSystem }),
   })
   if (result._tag === 'Blocked') {
+    if (result.reason._tag === 'Trap') {
+      const frozenTrace = Object.freeze([...trace])
+      const history = causalHistory(frozenTrace, 'Trap')
+      return Object.freeze({
+        _tag: 'Trap',
+        classification: 'Trap',
+        entry,
+        status: 2,
+        reason: result.reason.reason,
+        provenance: result.reason.span,
+        logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
+        history,
+        trace: frozenTrace,
+      })
+    }
     return Object.freeze({
       _tag: 'Blocked',
       entry,
@@ -5504,31 +5603,60 @@ export const evaluate = (
   if (program.entry._tag === 'EffectEntry' && statusCode !== 0) {
     const failure = program.entry.failures.find((candidate) => candidate.tag === statusCode)
     if (failure === undefined) {
+      const provenance = argumentSpanFallback(fn)
+      const frozenTrace = Object.freeze([...trace])
+      const history = causalHistory(frozenTrace, 'Trap')
       return Object.freeze({
-        _tag: 'Blocked',
+        _tag: 'Trap',
+        classification: 'Trap',
         entry,
-        reason: Object.freeze({
-          _tag: 'Trap',
-          function: entry,
-          reason: `effect entry returned invalid failure tag ${status.value}`,
-          span: argumentSpanFallback(fn),
-        }),
-        trace: Object.freeze([...trace]),
+        status: 2,
+        reason: `effect entry returned invalid failure tag ${status.value}`,
+        provenance,
+        logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
+        history,
+        trace: frozenTrace,
       })
     }
+    const frozenTrace = Object.freeze([...trace])
+    const history = causalHistory(frozenTrace, 'TypedFailure', failure.identity)
+    const cause = history.at(-1)
     return Object.freeze({
       _tag: 'UnhandledFailure',
+      classification: 'TypedFailure',
       entry,
+      status: 1,
       tag: failure.tag,
-      report: failure.report,
-      trace: Object.freeze([...trace]),
+      identity: failure.identity,
+      provenance: cause?.provenance ?? argumentSpanFallback(fn),
+      logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
+      history,
+      trace: frozenTrace,
     })
   }
+  const frozenTrace = Object.freeze([...trace])
+  const history = causalHistory(frozenTrace, 'Success')
+  const root = frozenTrace.find(
+    (event): event is EntryTraceEvent =>
+      event._tag === 'Entry' && !isPhysicalEntryAdapter(event.function.name),
+  )
+  const provenance =
+    [...frozenTrace].reverse().find((event) => event._tag === 'Return')?.span ??
+    root?.span ??
+    argumentSpanFallback(fn)
   return Object.freeze({
     _tag: 'Completed',
+    classification: 'Success',
     entry,
+    status: statusCode,
     result: result.value,
-    trace: Object.freeze([...trace]),
+    provenance,
+    logicalPath:
+      root === undefined
+        ? Object.freeze([])
+        : Object.freeze([Object.freeze({ function: root.function, provenance: root.span })]),
+    history,
+    trace: frozenTrace,
   })
 }
 

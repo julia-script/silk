@@ -88,11 +88,8 @@ pub fn main() -> i32 { let values = [10, 20] return choose(&values, 2) }`,
     for (const self of [upper]) {
       assert.deepEqual(Analysis.diagnostics(self), [])
       const outcome = Analysis.evaluate(self)
-      assert.strictEqual(outcome._tag, 'Blocked')
-      if (outcome._tag === 'Blocked') {
-        assert.strictEqual(outcome.reason._tag, 'Trap')
-        if (outcome.reason._tag === 'Trap') assert.include(outcome.reason.reason, 'slice index')
-      }
+      assert.strictEqual(outcome._tag, 'Trap')
+      if (outcome._tag === 'Trap') assert.include(outcome.reason, 'slice index')
     }
   }),
 )

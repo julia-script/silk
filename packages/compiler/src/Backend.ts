@@ -30,6 +30,7 @@ import * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Target from './Target.js'
+import type * as TerminationModel from './Termination.js'
 import * as Transcendental from './Transcendental.js'
 import * as SilkType from './Type.js'
 
@@ -113,10 +114,8 @@ export interface ControlProvenance {
 /** Stable public backend identifiers used by manifests and command-line selection. */
 export type Id = 'llvm' | 'wasm'
 
-/** Process-facing interpretation of the scalar `silk_main` result. */
-export type Termination =
-  | { readonly _tag: 'PassThrough' }
-  | { readonly _tag: 'EffectReports'; readonly reports: ReadonlyArray<string> }
+/** Process-facing interpretation of the private scalar `silk_main` result. */
+export type Termination = TerminationModel.Contract
 
 interface ArtifactBase {
   readonly module: string
@@ -129,18 +128,40 @@ interface ArtifactBase {
   readonly control: ReadonlyArray<ControlProvenance>
 }
 
-/** Retains the ordered report identities paired with normalized one-based failure tags. */
-export const terminationOf = (program: Mir.Module): Termination =>
-  program.entry._tag === 'UnavailableEntry'
-    ? (() => {
-        throw new RangeError(`Cannot emit unavailable entry: ${program.entry.reason}`)
-      })()
-    : program.entry._tag === 'OrdinaryEntry'
-      ? Object.freeze({ _tag: 'PassThrough' })
-      : Object.freeze({
-          _tag: 'EffectReports',
-          reports: Object.freeze(program.entry.failures.map((failure) => failure.report)),
-        })
+/** Retains status mapping, failure identities, and source-level frame metadata for adapters. */
+export const terminationOf = (program: Mir.Module): Termination => {
+  if (program.entry._tag === 'UnavailableEntry') {
+    throw new RangeError(`Cannot emit unavailable entry: ${program.entry.reason}`)
+  }
+  const logicalFrames = Object.freeze(
+    program.functions.flatMap((fn) => {
+      if (fn.id.name === '$effect-entry' || fn.id.name === '$unit-entry') return []
+      const region = fn.regions.find((candidate) => candidate.id.ordinal === fn.entry.ordinal)
+      const provenance =
+        region?._tag === 'OperationRegion'
+          ? (region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span)
+          : region?._tag === 'CleanupRegion'
+            ? (region.releases.at(0)?.provenance.span ?? region.outcome.provenance.span)
+            : region?.provenance.span
+      return provenance === undefined ? [] : [Object.freeze({ function: fn.id, provenance })]
+    }),
+  )
+  return Object.freeze({
+    _tag: 'EntryTermination',
+    success:
+      program.entry._tag === 'OrdinaryEntry' &&
+      program.entry.machine.declaration.name !== '$unit-entry'
+        ? 'ReturnedStatus'
+        : 'Zero',
+    failures:
+      program.entry._tag === 'EffectEntry'
+        ? Object.freeze(
+            program.entry.failures.map(({ tag, identity }) => Object.freeze({ tag, identity })),
+          )
+        : Object.freeze([]),
+    logicalFrames,
+  })
+}
 
 /** Deterministic LLVM bitcode requiring target-specific durable finalization. */
 export interface LlvmBitcodeArtifact extends ArtifactBase {
@@ -8527,6 +8548,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       ),
       nativeRuntimeSymbols: Object.freeze([
         ...[...osRuntimes.values()].map((runtime) => runtime.symbol),
+        ...(needsHostWrite ? ['silk_standard_stream_write_v1'] : []),
         ...(suspensionEnabled ? CoroutineRuntime.symbols : []),
       ]),
       ir: yield* IrText.render(builder),

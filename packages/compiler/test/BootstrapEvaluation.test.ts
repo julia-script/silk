@@ -37,10 +37,8 @@ it.effect(
             }
             break
           case 'Trap':
-            assert.strictEqual(outcome._tag, 'Blocked', program.name)
-            if (outcome._tag === 'Blocked') {
-              assert.strictEqual(outcome.reason._tag, 'Trap', program.name)
-            }
+            assert.strictEqual(outcome._tag, 'Trap', program.name)
+            if (outcome._tag === 'Trap') assert.strictEqual(outcome.classification, 'Trap')
             break
           case 'UnavailableEntry':
             assert.strictEqual(outcome._tag, 'Blocked', program.name)
@@ -446,9 +444,8 @@ it.effect('retains the completed prefix before a trap without fabricated events'
 pub fn choose(left: i32, right: i32) -> i32 { return right }
 pub fn main() -> i32 { return choose(identity(1), missing(2)) }`)
 
-    assert.strictEqual(outcome._tag, 'Blocked')
-    if (outcome._tag !== 'Blocked') return
-    assert.strictEqual(outcome.reason._tag, 'Trap')
+    assert.strictEqual(outcome._tag, 'Trap')
+    if (outcome._tag !== 'Trap') return
     assert.deepEqual(
       outcome.trace.map((event) => event._tag),
       ['Entry', 'RegionEntry'],
@@ -582,10 +579,10 @@ it.effect('preserves trapping arithmetic through operator sugar', () =>
     const division = yield* evaluateSource('pub fn main() -> i32 { return 1 / 0 }')
     const negation = yield* evaluateSource('pub fn main() -> i32 { return -(-2147483648) }')
 
-    assert.strictEqual(division._tag, 'Blocked')
-    assert.strictEqual(division._tag === 'Blocked' ? division.reason._tag : undefined, 'Trap')
-    assert.strictEqual(negation._tag, 'Blocked')
-    assert.strictEqual(negation._tag === 'Blocked' ? negation.reason._tag : undefined, 'Trap')
+    assert.strictEqual(division._tag, 'Trap')
+    assert.strictEqual(division._tag === 'Trap' ? division.classification : undefined, 'Trap')
+    assert.strictEqual(negation._tag, 'Trap')
+    assert.strictEqual(negation._tag === 'Trap' ? negation.classification : undefined, 'Trap')
   }),
 )
 

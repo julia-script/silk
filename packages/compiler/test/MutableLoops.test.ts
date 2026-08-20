@@ -261,7 +261,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Blocked')
+    assert.strictEqual(outcome._tag, 'Trap')
     assert.strictEqual(
       outcome.trace.some((event) => event._tag === 'Call' && event.target.name === 'replacement'),
       false,

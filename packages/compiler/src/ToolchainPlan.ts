@@ -136,15 +136,9 @@ export const wasmCommand = (
  * zero-parameter shape: arguments reach a program through a service, never through the entry
  * signature. Not user-facing FFI; issue 07 owns the ABI's growth.
  */
-const hostWriteShimSource = `#include <errno.h>
+const standardStreamsShimSource = `#include <errno.h>
 #include <stddef.h>
 #include <unistd.h>
-
-/* The command line the process received. The entry point stores it before running the user entry,
-   which is what lets a host-input provider read arguments without an ambient global of its own. A
-   program that never reads them pays exactly these two stores. */
-int silk_host_argc_v1 = 0;
-char **silk_host_argv_v1 = 0;
 
 int silk_standard_stream_write_v1(int destination, const unsigned char *bytes, size_t length) {
   const int descriptor = destination == 0 ? 1 : 2;
@@ -159,7 +153,11 @@ int silk_standard_stream_write_v1(int destination, const unsigned char *bytes, s
 }
 `
 
-const reportBytes = (identity: string): ReadonlyArray<number> =>
+const commandLineStateSource = `int silk_host_argc_v1 = 0;
+char **silk_host_argv_v1 = 0;
+`
+
+const failureBytes = (identity: string): ReadonlyArray<number> =>
   Array.from(new TextEncoder().encode(`Error: ${identity}\n`))
 
 /** Generates the private native adapter for the artifact's exact termination contract. */
@@ -169,29 +167,40 @@ export const shimSource = (
 ): string => {
   const osRuntime = OsRuntime.source(nativeRuntimeSymbols)
   const coroutineRuntime = CoroutineRuntime.source(nativeRuntimeSymbols)
-  if (termination._tag === 'PassThrough')
+  const needsCommandLine = nativeRuntimeSymbols.some(
+    (symbol) =>
+      symbol === 'silk_os_host_argument_count_v1' || symbol === 'silk_os_host_argument_v1',
+  )
+  const needsStandardStreams = nativeRuntimeSymbols.includes('silk_standard_stream_write_v1')
+  const commandLine = needsCommandLine ? commandLineStateSource : ''
+  const mainParameters = needsCommandLine ? 'int argc, char **argv' : 'void'
+  const initializeCommandLine = needsCommandLine
+    ? '  silk_host_argc_v1 = argc;\n  silk_host_argv_v1 = argv;\n'
+    : ''
+  if (termination.failures.length === 0)
     return `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
-${hostWriteShimSource}
+${needsStandardStreams ? standardStreamsShimSource : ''}
+${commandLine}
 ${osRuntime}
 ${coroutineRuntime}
 extern int silk_main(void);
 
-int main(int argc, char **argv) {
-  silk_host_argc_v1 = argc;
-  silk_host_argv_v1 = argv;
+int main(${mainParameters}) {
+${initializeCommandLine}
   return silk_main();
 }
 `
-  const declarations = termination.reports.map(
-    (report, ordinal) =>
-      `static const unsigned char silk_report_${ordinal + 1}[] = { ${reportBytes(report).join(', ')} };`,
+  const declarations = termination.failures.map(
+    (failure) =>
+      `static const unsigned char silk_failure_${failure.tag}[] = { ${failureBytes(failure.identity).join(', ')} };`,
   )
-  const cases = termination.reports.map(
-    (_, ordinal) =>
-      `    case ${ordinal + 1}:\n      return silk_write_all(silk_report_${ordinal + 1}, sizeof(silk_report_${ordinal + 1})) ? 1 : 2;`,
+  const cases = termination.failures.map(
+    (failure) =>
+      `    case ${failure.tag}:\n      return silk_write_all(silk_failure_${failure.tag}, sizeof(silk_failure_${failure.tag})) ? 1 : 2;`,
   )
   return `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
-${hostWriteShimSource}
+${standardStreamsShimSource}
+${commandLine}
 ${osRuntime}
 ${coroutineRuntime}
 
@@ -208,9 +217,8 @@ static int silk_write_all(const unsigned char *bytes, size_t length) {
   return 1;
 }
 
-int main(int argc, char **argv) {
-  silk_host_argc_v1 = argc;
-  silk_host_argv_v1 = argv;
+int main(${mainParameters}) {
+${initializeCommandLine}
   const int tag = silk_main();
   if (tag == 0) return 0;
   switch (tag) {

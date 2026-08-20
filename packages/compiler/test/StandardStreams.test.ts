@@ -77,7 +77,7 @@ it.effect('records complete ordered writes and typed provider failure determinis
     const failing = StandardStreams.memory({ failAt: 1 })
     const failed = Analysis.evaluate(self, { standardStreams: failing.provider })
     assert.strictEqual(failed._tag, 'UnhandledFailure')
-    if (failed._tag === 'UnhandledFailure') assert.include(failed.report, 'StreamWriteError')
+    if (failed._tag === 'UnhandledFailure') assert.include(failed.identity, 'StreamWriteError')
     assert.strictEqual(failing.events().length, 1)
   }),
 )

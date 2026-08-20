@@ -2078,7 +2078,10 @@ const usizeLiteralVerdicts = (
 export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const reached = new Map<string, DeclarationIndex.SemanticType>()
   for (const instance of discovery.instances) addFunctionTypes(reached, instance)
-  if (discovery.entry._tag === 'Resolved' && discovery.entry.kind === 'Effect') {
+  if (
+    discovery.entry._tag === 'Resolved' &&
+    (discovery.entry.kind === 'Effect' || discovery.entry.result === 'Unit')
+  ) {
     reached.set(Type.key('i32'), 'i32')
   }
   for (const callable of discovery.callables) {

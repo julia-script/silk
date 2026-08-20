@@ -827,7 +827,7 @@ export type Operation =
       readonly failures: ReadonlyArray<{
         readonly tag: number
         readonly type: SilkType.Type
-        readonly report: string
+        readonly identity: string
         readonly payload: LocalId
         readonly cleanup: Ownership.CleanupPlan
       }>
@@ -1302,7 +1302,7 @@ export type Entry =
       readonly failures: ReadonlyArray<{
         readonly tag: number
         readonly type: SilkType.Type
-        readonly report: string
+        readonly identity: string
       }>
     }
 
@@ -3608,6 +3608,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       .flatMap(operationsOf)
       .flatMap(operationTree)
       .filter((operation) => operation._tag === 'CloseEffectEntry') ?? []
+  const machineCalls =
+    machine?.regions
+      .flatMap(operationsOf)
+      .flatMap(operationTree)
+      .filter((operation) => operation._tag === 'Call') ?? []
   const entryValid =
     availableEntry !== undefined &&
     target !== undefined &&
@@ -3615,9 +3620,18 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
     machine.parameterCount === 0 &&
     machine.result._tag === 'i32' &&
     (availableEntry._tag === 'OrdinaryEntry'
-      ? instanceText(availableEntry.target) === instanceText(availableEntry.machine) &&
-        target.result._tag === 'i32' &&
-        machineClosures.length === 0
+      ? (instanceText(availableEntry.target) === instanceText(availableEntry.machine) &&
+          target.result._tag === 'i32' &&
+          machineClosures.length === 0) ||
+        (availableEntry.machine.declaration.name === '$unit-entry' &&
+          SilkType.equals(semanticType(target.result), SilkType.unit) &&
+          machineClosures.length === 0 &&
+          machineCalls.length === 1 &&
+          machineCalls.some(
+            (call) =>
+              call.target.module === availableEntry.target.declaration.module &&
+              call.target.name === availableEntry.target.declaration.name,
+          ))
       : target.result._tag === 'EffectValue' &&
         target.parameterCount === 0 &&
         machineClosures.length === 1 &&
@@ -3645,7 +3659,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             expected !== undefined &&
             failure.tag === ordinal + 1 &&
             SilkType.equals(failure.type, expected) &&
-            failure.report === SilkType.encode(expected)
+            failure.identity === SilkType.encode(expected)
           )
         }))
   if (!entryValid) {
@@ -5905,7 +5919,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 entryFailure.tag === failure.tag &&
                 SilkType.equals(failure.type, expected) &&
                 SilkType.equals(entryFailure.type, expected) &&
-                failure.report === entryFailure.report &&
+                failure.identity === entryFailure.identity &&
                 payload !== undefined &&
                 SilkType.equals(semanticType(payload), expected) &&
                 SilkType.equals(failure.cleanup.type, expected)
@@ -6269,7 +6283,7 @@ export const encode = (self: Module): string =>
       ? `entry unavailable reason=${self.entry.reason}`
       : self.entry._tag === 'OrdinaryEntry'
         ? `entry ordinary target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)}`
-        : `entry effect target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)} failures=${self.entry.failures.map((failure) => `${failure.tag}:${failure.report}`).join(',') || 'none'} requirements=${self.entry.requirements.map((requirement) => `${requirement.access}:${SilkType.encode(requirement.capability)}@${requirement.role}`).join(',') || 'none'}`,
+        : `entry effect target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)} failures=${self.entry.failures.map((failure) => `${failure.tag}:${failure.identity}`).join(',') || 'none'} requirements=${self.entry.requirements.map((requirement) => `${requirement.access}:${SilkType.encode(requirement.capability)}@${requirement.role}`).join(',') || 'none'}`,
     ...(self.staticData ?? []).map(
       (data) =>
         `static ${data.id} kind=${data.kind.toLowerCase()} utf8=${data.utf8} bytes=${data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')}`,

@@ -234,7 +234,7 @@ it.effect('adapts complete messages to stdout without making formatting semantic
     const failing = StandardStreams.memory({ failAt: 0 })
     const failed = Analysis.evaluate(self, { standardStreams: failing.provider })
     assert.strictEqual(failed._tag, 'UnhandledFailure')
-    if (failed._tag === 'UnhandledFailure') assert.include(failed.report, 'LogError')
+    if (failed._tag === 'UnhandledFailure') assert.include(failed.identity, 'LogError')
     assert.deepEqual(failing.events(), [])
   }),
 )

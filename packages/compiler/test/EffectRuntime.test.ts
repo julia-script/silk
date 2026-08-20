@@ -420,6 +420,11 @@ it.effect('executes the same handled failure through the evaluator and Wasm', ()
 
     assert.strictEqual(logical._tag, 'Completed')
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42n)
+    if (logical._tag === 'Completed') {
+      assert.isAbove(logical.history.length, 0)
+      assert.isTrue(logical.history.every((failure) => failure.recovered))
+      assert.isTrue(logical.history.some((failure) => failure.logicalPath.length > 0))
+    }
     assert.strictEqual(main(), 42)
     assert.include(wasm.wat, 'call')
     assert.include(wasm.wat, 'if')
@@ -582,8 +587,7 @@ it.effect('keeps arithmetic traps outside the typed failure channel', () =>
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     const main = instance.exports.silk_main as () => number
 
-    assert.strictEqual(logical._tag, 'Blocked')
-    assert.strictEqual(logical._tag === 'Blocked' ? logical.reason._tag : undefined, 'Trap')
+    assert.strictEqual(logical._tag, 'Trap')
     assert.throws(() => main(), WebAssembly.RuntimeError)
   }),
 )

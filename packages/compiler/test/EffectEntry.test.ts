@@ -89,7 +89,7 @@ it.effect('maps an ordinary unit entry to status zero on every engine', () =>
     )
     assert.deepEqual(Analysis.diagnostics(logical), [])
     const evaluated = Analysis.evaluate(logical)
-    assert.strictEqual(evaluated._tag, 'Completed')
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 0n)
 
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
@@ -115,7 +115,7 @@ it.effect('runs an effect entry once and retains deterministic unhandled-failure
     assert.strictEqual(outcome._tag, 'UnhandledFailure')
     if (outcome._tag !== 'UnhandledFailure') return
     assert.strictEqual(outcome.tag, 1)
-    assert.strictEqual(outcome.report, 'effect-entry/failure.SomeError')
+    assert.strictEqual(outcome.identity, 'effect-entry/failure.SomeError')
     assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Call').length, 2)
   }),
 )
@@ -152,10 +152,12 @@ it.effect('keeps effect-entry success and failure in LLVM/direct-Wasm parity', (
       )
       const llvmArtifact = yield* Analysis.codegen(native, { mode: 'release' })
       const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-      assert.deepEqual(llvmArtifact.termination, {
-        _tag: 'EffectReports',
-        reports: [`effect-entry/${name}.SomeError`],
-      })
+      assert.strictEqual(llvmArtifact.termination._tag, 'EntryTermination')
+      assert.strictEqual(llvmArtifact.termination.success, 'Zero')
+      assert.deepEqual(llvmArtifact.termination.failures, [
+        { tag: 1, identity: `effect-entry/${name}.SomeError` },
+      ])
+      assert.isAbove(llvmArtifact.termination.logicalFrames.length, 0)
       assert.deepEqual(wasmArtifact.termination, llvmArtifact.termination)
       assert.strictEqual(
         llvmArtifact.symbols.find((entry) => entry.symbol === 'silk_main')?.declaration.name,

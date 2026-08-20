@@ -312,8 +312,7 @@ it.effect('keeps runtime traps outside the typed Result error channel', () =>
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Blocked')
-    assert.strictEqual(evaluated._tag === 'Blocked' ? evaluated.reason._tag : undefined, 'Trap')
+    assert.strictEqual(evaluated._tag, 'Trap')
   }),
 )
 

@@ -225,13 +225,10 @@ it.effect(
 }`
       const bounds = yield* Analysis.ofSourceRealized(`${moduleName}/bounds`, ascii(boundsSource))
       const blocked = Analysis.evaluate(bounds)
-      assert.strictEqual(blocked._tag, 'Blocked')
-      if (blocked._tag === 'Blocked') {
-        assert.strictEqual(blocked.reason._tag, 'Trap')
-        if (blocked.reason._tag === 'Trap') {
-          assert.include(blocked.reason.reason, 'slice index 4 is outside length 4')
-          assert.strictEqual(blocked.reason.span.start, boundsSource.indexOf('bytes[index]'))
-        }
+      assert.strictEqual(blocked._tag, 'Trap')
+      if (blocked._tag === 'Trap') {
+        assert.include(blocked.reason, 'slice index 4 is outside length 4')
+        assert.strictEqual(blocked.provenance.start, boundsSource.indexOf('bytes[index]'))
       }
     }),
 )

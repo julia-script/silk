@@ -170,11 +170,9 @@ it.effect('moves a range of move-only elements and leaves the source slots empty
     )
     assert.deepEqual(Analysis.diagnostics(stealing), [])
     const blocked = Analysis.evaluate(stealing)
-    assert.strictEqual(blocked._tag, 'Blocked')
-    if (blocked._tag !== 'Blocked') return
-    assert.strictEqual(blocked.reason._tag, 'Trap')
-    if (blocked.reason._tag !== 'Trap') return
-    assert.strictEqual(blocked.reason.reason, 'Slot.take requires live initialized storage')
+    assert.strictEqual(blocked._tag, 'Trap')
+    if (blocked._tag !== 'Trap') return
+    assert.strictEqual(blocked.reason, 'Slot.take requires live initialized storage')
   }),
 )
 
@@ -479,11 +477,9 @@ it.effect('traps when the copied range runs past the destination', () =>
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Blocked')
-    if (evaluated._tag !== 'Blocked') return
-    assert.strictEqual(evaluated.reason._tag, 'Trap')
-    if (evaluated.reason._tag !== 'Trap') return
-    assert.strictEqual(evaluated.reason.reason, 'RawBuffer copy range is out of bounds')
+    assert.strictEqual(evaluated._tag, 'Trap')
+    if (evaluated._tag !== 'Trap') return
+    assert.strictEqual(evaluated.reason, 'RawBuffer copy range is out of bounds')
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     assert.throws(() => runWasm(wasm.bytes))

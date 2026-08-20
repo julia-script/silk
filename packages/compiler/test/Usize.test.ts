@@ -298,13 +298,8 @@ it.effect('traps unsigned underflow and rejects unary minus without compiler cra
       'wasm32-unknown-unknown',
     )
     const outcome = Analysis.evaluate(underflow)
-    assert.strictEqual(outcome._tag, 'Blocked')
-    assert.strictEqual(
-      outcome._tag === 'Blocked' && outcome.reason._tag === 'Trap'
-        ? outcome.reason.reason
-        : undefined,
-      'arithmetic underflow',
-    )
+    assert.strictEqual(outcome._tag, 'Trap')
+    assert.strictEqual(outcome._tag === 'Trap' ? outcome.reason : undefined, 'arithmetic underflow')
 
     const negative = yield* source(
       'fn invalid() -> usize { return -1 } pub fn main() -> i32 { return 0 }',
@@ -333,12 +328,7 @@ it.effect('traps usize overflow and division by zero in both logical and Wasm ex
 pub fn main() -> i32 { if invalid() == 0 { return 1 } return 0 }`
       const snapshot = yield* source(program, 'wasm32-unknown-unknown')
       const logical = Analysis.evaluate(snapshot)
-      assert.strictEqual(logical._tag, 'Blocked', expression)
-      assert.strictEqual(
-        logical._tag === 'Blocked' ? logical.reason._tag : undefined,
-        'Trap',
-        expression,
-      )
+      assert.strictEqual(logical._tag, 'Trap', expression)
       const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
       assert.throws(() => (instance.exports.silk_main as () => number)(), WebAssembly.RuntimeError)

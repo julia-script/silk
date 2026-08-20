@@ -446,7 +446,7 @@ it.effect(
         ascii(source),
         'wasm32-unknown-unknown',
       )
-      assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Blocked')
+      assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Trap')
       for (const backend of [Backend.LlvmBackend, WasmBackend.WasmBackend] as const) {
         const outcome = yield* compileSource(`trap-${backend.id}.wasm`, source, {
           compilation: {

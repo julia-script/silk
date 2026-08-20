@@ -283,9 +283,8 @@ it.effect('lets a trap bypass the finalizer', () =>
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Blocked')
-    if (evaluated._tag !== 'Blocked') return
-    assert.strictEqual(evaluated.reason._tag, 'Trap')
+    assert.strictEqual(evaluated._tag, 'Trap')
+    if (evaluated._tag !== 'Trap') return
     // One acquire and nothing after it: the owner the trap stranded, and no finalizer pair.
     assert.deepEqual(allocationEvents(evaluated), [acquire])
   }),
