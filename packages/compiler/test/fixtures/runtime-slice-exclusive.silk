@@ -1,4 +1,5 @@
 import silk.usize as usize
+
 struct Token {
   value: i32
 }

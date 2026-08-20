@@ -1,7 +1,11 @@
-export const vectorGrowthSource = `import silk.core { SystemAllocator }
-import silk.core { OutOfMemoryError }
+export const vectorGrowthSource = `import silk.core {SystemAllocator}
+
+import silk.core {OutOfMemoryError}
+
 import silk.effects as Effect
+
 import silk.i32 as i32
+
 import silk.vector {Vector, make, append, get, length, capacity}
 
 effect fn build() -> i32
@@ -46,12 +50,18 @@ pub fn main() -> i32 {
 }
 `
 
-export const vectorFailedGrowthSource = `import silk.core { Allocator }
-import silk.core { SystemAllocator }
-import silk.core { OutOfMemoryError }
+export const vectorFailedGrowthSource = `import silk.core {Allocator}
+
+import silk.core {SystemAllocator}
+
+import silk.core {OutOfMemoryError}
+
 import silk.effects as Effect
+
 import silk.i32 as i32
-import silk.layout { Layout }
+
+import silk.layout {Layout}
+
 import silk.vector {Vector, make, append, get, length, capacity}
 
 struct QuotaAllocator {
@@ -128,10 +138,14 @@ pub fn main() -> i32 {
 }
 `
 
-export const vectorDestructionOrderSource = `import silk.core { SystemAllocator }
-import silk.core { OutOfMemoryError }
+export const vectorDestructionOrderSource = `import silk.core {SystemAllocator}
+
+import silk.core {OutOfMemoryError}
+
 import silk.effects as Effect
+
 import silk.i32 as i32
+
 import silk.vector {Vector, make, append, capacity}
 
 struct Entry {
@@ -180,10 +194,14 @@ pub fn main() -> i32 {
 }
 `
 
-export const vectorEarlyDropSource = `import silk.core { SystemAllocator }
-import silk.core { OutOfMemoryError }
+export const vectorEarlyDropSource = `import silk.core {SystemAllocator}
+
+import silk.core {OutOfMemoryError}
+
 import silk.effects as Effect
+
 import silk.i32 as i32
+
 import silk.vector {Vector, make, append}
 
 struct Entry {
@@ -231,11 +249,16 @@ pub fn main() -> i32 {
 }
 `
 
-export const scannerSource = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+export const scannerSource = `import silk.core {Allocator}
+
+import silk.core {OutOfMemoryError}
+
+import silk.core {SystemAllocator}
+
 import silk.effects as Effect
+
 import silk.usize as usize
+
 import silk.vector {Vector, make, append, get, length, capacity}
 
 struct U8 {

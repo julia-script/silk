@@ -1,4 +1,5 @@
 import silk.usize as usize
+
 import compiler.Member {First, Second, Third, decode}
 
 struct FoldState {
