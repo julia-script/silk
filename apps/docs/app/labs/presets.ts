@@ -2979,7 +2979,7 @@ impl Order for Priority {
 }
 
 fn smaller<T: Order>(left: T, right: T) -> bool {
-  return left < right
+  return (&left) < (&right)
 }
 
 pub fn main() -> i32 {
