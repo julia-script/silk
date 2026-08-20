@@ -161,6 +161,19 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('applies a trailing callable section in successive stages', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`fn combine(a: i32, b: i32, c: i32) -> i32 {
+  return a * 100 + b * 10 + c
+}
+pub fn main() -> i32 { return combine(3)(2)(1) }`)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 123n)
+  }),
+)
+
 it.effect('reuses an exclusive callable after each synchronous invocation completes', () =>
   Effect.gen(function* () {
     const outcome = yield* evaluateSource(`fn write(value: i32, values: &mut [i32]) -> i32 {

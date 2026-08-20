@@ -5882,6 +5882,16 @@ const finishCallableApplication = (
     ...callTypeArguments.diagnostics,
   ]
   const section = callableSectionOf(callee.fact)
+  const directSection = callee.fact._tag === 'CallableSection' ? callee.fact : undefined
+  const stagedSection =
+    directSection !== undefined &&
+    callable !== undefined &&
+    argumentsResult.facts.length > 0 &&
+    argumentsResult.facts.length < callable.parameters.length &&
+    resolution !== undefined &&
+    caller !== undefined
+      ? directSection
+      : undefined
   const schema = callable?.schema
   const inferred = new Map<string, Type.GenericArgument>(
     schema?.substitution ?? section?.substitution ?? [],
@@ -5916,7 +5926,11 @@ const finishCallableApplication = (
     )
     valid = false
   }
-  if (callable !== undefined && callable.parameters.length !== argumentsResult.facts.length) {
+  if (
+    callable !== undefined &&
+    callable.parameters.length !== argumentsResult.facts.length &&
+    stagedSection === undefined
+  ) {
     diagnostics.push(
       Diagnostic.wrongCallArity(
         Object.freeze({ _tag: 'BuiltinTarget', actor: 'Callable', operation: 'Apply' }),
@@ -5928,8 +5942,10 @@ const finishCallableApplication = (
     valid = false
   }
   if (callable !== undefined) {
+    const parameterOffset =
+      stagedSection === undefined ? 0 : callable.parameters.length - argumentsResult.facts.length
     for (const [ordinal, argument] of argumentsResult.facts.entries()) {
-      const expected = callable.parameters.at(ordinal)
+      const expected = callable.parameters.at(parameterOffset + ordinal)
       if (expected === undefined || argument.type._tag !== 'Available') {
         valid = false
         continue
@@ -5973,6 +5989,30 @@ const finishCallableApplication = (
       }
     }
   }
+  const stagedCaptures =
+    stagedSection === undefined || resolution === undefined || caller === undefined
+      ? undefined
+      : Object.freeze([
+          ...stagedSection.captures,
+          ...argumentsResult.facts.map((argument, ordinal) => {
+            const remainingOffset =
+              stagedSection.remainingParameters.length - argumentsResult.facts.length
+            const parameterOrdinal = stagedSection.remainingParameters.at(remainingOffset + ordinal)
+            if (parameterOrdinal === undefined)
+              throw new RangeError('staged callable section lost a remaining parameter')
+            return Object.freeze({
+              _tag: 'CallableCapture' as const,
+              ordinal: stagedSection.captures.length + ordinal,
+              parameterOrdinal,
+              expression: argument.expression,
+              access: captureAccess(
+                argument.expression,
+                resolution.index,
+                copyAssumptionsOf(caller),
+              ),
+            })
+          }),
+        ])
   if (
     valid &&
     (schema !== undefined || section !== undefined) &&
@@ -6008,6 +6048,24 @@ const finishCallableApplication = (
   }
   const type = (() => {
     if (!valid || callable === undefined) return unavailableExpressionType
+    if (stagedSection !== undefined && stagedCaptures !== undefined) {
+      const reference = stagedSection.reference
+      if (
+        reference._tag !== 'Resolved' &&
+        reference._tag !== 'ResolvedBuiltin' &&
+        reference._tag !== 'ResolvedIntrinsicContract'
+      )
+        return unavailableExpressionType
+      const sectionType = sectionCallableType(
+        reference,
+        inferred,
+        callableMode(stagedCaptures),
+        stagedCaptures.length,
+      )
+      return sectionType === undefined
+        ? unavailableExpressionType
+        : availableExpressionType(sectionType)
+    }
     const result = Type.substitute(callable.result, inferred)
     return availableExpressionType(
       Type.isEffect(result)
@@ -6033,6 +6091,37 @@ const finishCallableApplication = (
         : result,
     )
   })()
+  if (stagedSection !== undefined && stagedCaptures !== undefined && resolution !== undefined) {
+    const remainingCount = stagedSection.remainingParameters.length - argumentsResult.facts.length
+    const environmentOwner = executableSpecializationOwner(resolution)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'CallableSection',
+        site: executableSite('CallableSiteId', resolution, node),
+        reference: stagedSection.reference,
+        path: stagedSection.path,
+        remainingParameters: Object.freeze(
+          stagedSection.remainingParameters.slice(0, remainingCount),
+        ),
+        captures: stagedCaptures,
+        retainedDependencies: Object.freeze(
+          stagedCaptures.flatMap((capture) =>
+            capture.access === 'Shared' || capture.access === 'Exclusive'
+              ? [capture.parameterOrdinal]
+              : [],
+          ),
+        ),
+        typeArguments: stagedSection.typeArguments,
+        ...(environmentOwner === undefined ? {} : { environmentOwner }),
+        substitution: inferred,
+        mode: callableMode(stagedCaptures),
+        type,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze(diagnostics),
+      type: type._tag === 'Available' ? type.type : undefined,
+    })
+  }
   if (section?.reference._tag === 'ResolvedIntrinsicContract') {
     const protected_ = argumentsResult.facts.at(0)
     if (

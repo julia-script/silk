@@ -1184,9 +1184,14 @@ it('forms every non-empty trailing section and diagnoses only over-application',
     'fixture://deeper-section.silk',
     'fn combine(a: i32, b: i32, c: i32) -> i32 { return a } fn section() -> fn(i32, i32) -> i32 { return combine(3) }',
   )
+  const staged = analyzeText(
+    'fixture://staged-section.silk',
+    'fn combine(a: i32, b: i32, c: i32) -> i32 { return a } fn section() -> fn(i32) -> i32 { return combine(3)(2) }',
+  )
   const tooMany = analyzeText('fixture://too-many.silk', tooManyArgumentsSource)
   const fewSection = functionAt(tooFew, 1).returnedExpression
   const deeperSection = functionAt(deeper, 1).returnedExpression
+  const stagedSection = functionAt(staged, 1).returnedExpression
   const manyFunction = functionAt(tooMany, 1)
   const manyCall = callFact(manyFunction)
 
@@ -1208,6 +1213,18 @@ it('forms every non-empty trailing section and diagnoses only over-application',
     assert.strictEqual(
       deeperSection.type._tag === 'Available' ? Type.encode(deeperSection.type.type) : undefined,
       'fn(i32, i32) -> i32',
+    )
+  }
+  assert.strictEqual(stagedSection._tag, 'CallableSection')
+  if (stagedSection._tag === 'CallableSection') {
+    assert.deepEqual(stagedSection.remainingParameters, [0])
+    assert.deepEqual(
+      stagedSection.captures.map((capture) => capture.parameterOrdinal),
+      [2, 1],
+    )
+    assert.strictEqual(
+      stagedSection.type._tag === 'Available' ? Type.encode(stagedSection.type.type) : undefined,
+      'fn(i32) -> i32',
     )
   }
   assert.deepEqual(manyCall.contract, {

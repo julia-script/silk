@@ -258,6 +258,14 @@ export const corpus: ReadonlyArray<CorpusProgram> = [
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'staged-callable-section',
+    source: `fn combine(a: i32, b: i32, c: i32) -> i32 {
+  return a * 100 + b * 10 + c
+}
+pub fn main() -> i32 { return combine(3)(2)(1) }`,
+    expected: { _tag: 'Completes', result: 123 },
+  },
+  {
     name: 'finite-effect-join',
     source: `struct First {}
 struct Second {}

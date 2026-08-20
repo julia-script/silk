@@ -105,6 +105,27 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('ends a reusable callable capture loan after its last invocation', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`fn inspect(value: i32, values: &[i32]) -> i32 {
+  return value + values[0]
+}
+pub fn main() -> i32 {
+  let mut values = [1]
+  let callback = inspect(&values)
+  let observed = callback(1)
+  values[0] = 40
+  return observed + values[0]
+}`)
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
 it.effect('keeps a returned shared view live through its last use and then restores mutation', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`fn identity(values: &[i32]) -> &[i32] { return values }

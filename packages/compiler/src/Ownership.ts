@@ -1350,6 +1350,18 @@ const analyzeLoans = (
           scanRunEnds(expression.callee, region)
           for (const argument of expression.arguments) scanRunEnds(argument.expression, region)
         }
+        {
+          const site = directSite(expression.callee)?.site
+          if (site?._tag === 'Let') {
+            const previous = callableEnds.get(site.binding.ordinal)
+            if (previous === undefined || previous.span.end <= expression.syntax.span.end) {
+              callableEnds.set(site.binding.ordinal, {
+                region,
+                span: expression.syntax.span,
+              })
+            }
+          }
+        }
         return
       case 'CallableSection':
         for (const capture of expression.captures) scanRunEnds(capture.expression, region)
@@ -1366,6 +1378,16 @@ const analyzeLoans = (
         return
       case 'Identifier': {
         const site = directSite(expression)?.site
+        if (
+          site?._tag === 'Let' &&
+          expression.type._tag === 'Available' &&
+          Type.isCallable(expression.type.type)
+        ) {
+          // A later non-invocation use may store or escape the callable. The CallableApply case
+          // records the same occurrence again after visiting its callee, so only a last known
+          // invocation (or explicit drop) shortens the capture loan.
+          callableEnds.delete(site.binding.ordinal)
+        }
         if (
           site?._tag === 'Let' &&
           expression.type._tag === 'Available' &&
@@ -1439,7 +1461,17 @@ const analyzeLoans = (
 
   const executableAliases = new Map<number, Set<number>>()
   for (const binding of fn.bindings) {
-    for (const source of movedExecutableBindings(binding.initializer)) {
+    const directAlias = directSite(binding.initializer)?.site
+    const callableAlias =
+      directAlias?._tag === 'Let' &&
+      binding.inferredType._tag === 'Available' &&
+      Type.isCallable(binding.inferredType.type)
+        ? [directAlias.binding.ordinal]
+        : []
+    for (const source of new Set([
+      ...movedExecutableBindings(binding.initializer),
+      ...callableAlias,
+    ])) {
       const destinations = executableAliases.get(source)
       if (destinations === undefined) executableAliases.set(source, new Set([binding.id.ordinal]))
       else destinations.add(binding.id.ordinal)
