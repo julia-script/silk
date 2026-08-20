@@ -23,6 +23,46 @@ const evaluatedValue = (name: string, source: string) =>
     return outcome._tag === 'Completed' ? Number(outcome.result.value) : undefined
   })
 
+it.effect('enforces unsafe operation variance and bound-call acknowledgement', () =>
+  Effect.gen(function* () {
+    const accepted = yield* analyzed(
+      'user-witness/unsafe-operation',
+      `interface Read {
+  unsafe fn read(value: &Self) -> i32
+}
+struct Cell { value: i32 }
+fn readCell(value: &Cell) -> i32 { return value.value }
+impl Read for Cell { read: Cell.readCell }
+fn readGeneric<T: Read>(value: T) -> i32 { return unsafe Read.read(&value) }
+pub fn main() -> i32 { return readGeneric<Cell>(Cell { value: 7 }) }`,
+    )
+    assert.deepEqual(messages(accepted), [])
+
+    const missingAcknowledgement = yield* analyzed(
+      'user-witness/unsafe-bound-call',
+      `interface Read { unsafe fn read(value: &Self) -> i32 }
+fn readGeneric<T: Read>(value: T) -> i32 { return Read.read(&value) }`,
+    )
+    assert.include(
+      Analysis.diagnostics(missingAcknowledgement).map((diagnostic) => diagnostic.code),
+      'SEM0082',
+    )
+
+    const unsafeWitness = yield* analyzed(
+      'user-witness/unsafe-witness-for-safe-operation',
+      `interface Read { fn read(value: &Self) -> i32 }
+struct Cell { value: i32 }
+unsafe fn readCell(value: &Cell) -> i32 { return value.value }
+impl Read for Cell { read: Cell.readCell }`,
+    )
+    assert.isTrue(
+      messages(unsafeWitness).some((message) =>
+        message.includes('unsafe witness cannot satisfy a safe operation contract'),
+      ),
+    )
+  }),
+)
+
 /**
  * One user-declared interface with two operator-spelled operations, one user struct witnessing
  * both, and one generic body bounded by the interface. A witness observes each operand through a

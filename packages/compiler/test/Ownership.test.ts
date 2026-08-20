@@ -484,6 +484,25 @@ effect fn outer() -> () ! Problem {
   )
 })
 
+it('keeps ownership checking active for acknowledged unsafe source calls', () => {
+  const facts = check(
+    'ownership://unsafe-call-move.silk',
+    `struct Token { value: i32 }
+unsafe fn consume(token: Token) -> () { drop move token return () }
+pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  unsafe consume(move token)
+  unsafe consume(move token)
+  return 0
+}`,
+  )
+
+  assert.include(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0001',
+  )
+})
+
 it('plans a stored callable environment and drops moved slots in reverse capture order', () => {
   const facts = check(
     'ownership://callable-environment.silk',

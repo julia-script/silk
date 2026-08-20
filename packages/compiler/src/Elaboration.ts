@@ -165,6 +165,7 @@ export type CallReferenceFact =
       readonly intrinsic: Intrinsic.OperationId
       readonly parameters: ReadonlyArray<SemanticType>
       readonly result: SemanticType
+      readonly unsafe: boolean
       readonly returnedBorrowParameter?: number
     }
   | {
@@ -1261,6 +1262,7 @@ const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'InfixExpression',
   'PipelineExpression',
   'RunExpression',
+  'UnsafeExpression',
 ])
 
 const isExpressionNode = (element: SyntaxTree.Element): element is SyntaxTree.Node =>
@@ -1282,6 +1284,7 @@ const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is Syntax
     element.kind === 'InfixExpression' ||
     element.kind === 'PipelineExpression' ||
     element.kind === 'RunExpression' ||
+    element.kind === 'UnsafeExpression' ||
     SyntaxTree.isAvailableSyntax(element))
 
 const childNode = (parent: SyntaxTree.Node, kind: SyntaxTree.NodeKind): SyntaxTree.Node => {
@@ -5370,7 +5373,13 @@ const callableResultType = (declaration: SourceCallable): SemanticType | undefin
 
 const callableTypeOfReference = (reference: CallReferenceFact): Type.Callable | undefined => {
   if (reference._tag === 'ResolvedBuiltin')
-    return Type.callable(reference.parameters, reference.result)
+    return Type.callable(
+      reference.parameters,
+      reference.result,
+      'Shared',
+      undefined,
+      reference.unsafe,
+    )
   const callable = sourceCallable(reference)
   if (callable === undefined) return undefined
   const parameters = callable.parameters.flatMap((parameter) =>
@@ -5396,6 +5405,7 @@ const callableTypeOfReference = (reference: CallReferenceFact): Type.Callable | 
           evidenceKeys: Object.freeze([]),
           origins: constraintOrigins(callable),
         }),
+    callable.unsafe,
   )
 }
 
@@ -5591,6 +5601,7 @@ const resolvedFunctionReference = (
           intrinsic: signature.id,
           parameters: signature.parameters,
           result: signature.result,
+          unsafe: signature.unsafe === true,
           ...(signature.returnedBorrowParameter === undefined
             ? {}
             : { returnedBorrowParameter: signature.returnedBorrowParameter }),
@@ -5923,7 +5934,9 @@ const sectionCallableType = (
 ): Type.Callable | undefined => {
   if (reference._tag === 'ResolvedBuiltin') {
     const remaining = reference.parameters.slice(0, reference.parameters.length - argumentCount)
-    return remaining.length === 0 ? undefined : Type.callable(remaining, reference.result, mode)
+    return remaining.length === 0
+      ? undefined
+      : Type.callable(remaining, reference.result, mode, undefined, reference.unsafe)
   }
   const contract = resolvedCallableContract(reference)
   const result = contract?.result
@@ -5947,6 +5960,7 @@ const sectionCallableType = (
           evidenceKeys: Object.freeze([]),
           origins: constraintOrigins(sourceCallable(reference)),
         }),
+    contract.unsafe,
   )
 }
 
@@ -6178,6 +6192,17 @@ const finishCallableApplication = (
       ),
     )
     valid = false
+  }
+  const completeUnsafeInvocation =
+    callable?.unsafe === true &&
+    stagedSection === undefined &&
+    callable.parameters.length === argumentsResult.facts.length
+  if (completeUnsafeInvocation) {
+    const diagnostic = unsafeCallDiagnostic(true, Type.encode(callable), node, resolution)
+    if (diagnostic !== undefined) {
+      diagnostics.push(diagnostic)
+      valid = false
+    }
   }
   if (callable !== undefined) {
     const parameterOffset =
@@ -6746,13 +6771,21 @@ const finishIntrinsicContractCall = (
     resolution,
     caller,
   )
+  const unsafeDiagnostic = unsafeCallDiagnostic(
+    operation.unsafe,
+    reference.spelling,
+    call,
+    resolution,
+  )
   const substitution =
     analyzed.fact._tag === 'Compatible'
       ? analyzed.fact.substitution
       : new Map<string, Type.GenericArgument>()
   const substitutedResult = Type.substitute(operation.rule.contract.result, substitution)
   const type =
-    analyzed.fact._tag === 'Compatible' && Type.isEffect(substitutedResult)
+    analyzed.fact._tag === 'Compatible' &&
+    unsafeDiagnostic === undefined &&
+    Type.isEffect(substitutedResult)
       ? availableExpressionType(
           Type.effectWithRows(
             substitutedResult.success,
@@ -6820,6 +6853,7 @@ const finishIntrinsicContractCall = (
         ...argumentsResult.diagnostics,
         ...typeArguments.diagnostics,
         ...analyzed.diagnostics,
+        ...(unsafeDiagnostic === undefined ? [] : [unsafeDiagnostic]),
       ]),
       type: catchAvailable && type._tag === 'Available' ? type.type : undefined,
     })
@@ -6855,6 +6889,7 @@ const finishIntrinsicContractCall = (
       ...argumentsResult.diagnostics,
       ...typeArguments.diagnostics,
       ...analyzed.diagnostics,
+      ...(unsafeDiagnostic === undefined ? [] : [unsafeDiagnostic]),
     ]),
     type: type._tag === 'Available' ? type.type : undefined,
   })
@@ -6973,18 +7008,15 @@ function analyzeBuiltinCall(
         )
   const instantiatedResult =
     signature === undefined ? undefined : Type.substitute(signature.result, substitution)
-  const unsafeAuthorized =
-    signature?.unsafe !== true ||
-    (resolution.unsafeSpans ?? []).some(
-      (span) =>
-        span.sourceId === call.span.sourceId &&
-        span.start <= call.span.start &&
-        span.end >= call.span.end,
-    )
   const unsafeDiagnostic =
-    unsafeAuthorized || signature === undefined
+    signature === undefined
       ? undefined
-      : Diagnostic.missingUnsafeBoundary(`${actorSpelling}.${operationSpelling}`, call.span)
+      : unsafeCallDiagnostic(
+          signature.unsafe === true,
+          `${actorSpelling}.${operationSpelling}`,
+          call,
+          resolution,
+        )
   const missingDiagnostic =
     actor === undefined
       ? Diagnostic.unknownActor(actorSpelling, actorToken.span)
@@ -7002,6 +7034,7 @@ function analyzeBuiltinCall(
           intrinsic: signature.id,
           parameters: instantiatedParameters,
           result: instantiatedResult ?? signature.result,
+          unsafe: signature.unsafe === true,
           ...(signature.returnedBorrowParameter === undefined
             ? {}
             : { returnedBorrowParameter: signature.returnedBorrowParameter }),
@@ -7565,6 +7598,7 @@ const analyzeOperatorExpression = (
     intrinsic: signature.id,
     parameters: operatorParameters,
     result: operatorResult,
+    unsafe: signature.unsafe === true,
   })
   const contract = analyzeCallContract(
     node,
@@ -8024,6 +8058,59 @@ function analyzeExpression(
   expected?: SemanticType,
   borrowAllowed = false,
 ): ExpressionResult | undefined {
+  if (node.kind === 'UnsafeExpression') {
+    const call = SyntaxTree.directNode(node, 'CallExpression')
+    if (call === undefined) return undefined
+    const analyzed = analyzeExpression(
+      source,
+      call,
+      declarations,
+      declaration,
+      scope,
+      Object.freeze({
+        ...resolution,
+        unsafeCallSpans: Object.freeze([...(resolution.unsafeCallSpans ?? []), call.span]),
+      }),
+      expected,
+      borrowAllowed,
+    )
+    if (analyzed === undefined) return undefined
+    const invokesUnsafe = (() => {
+      const fact = analyzed.fact
+      if (fact._tag === 'CallableApply')
+        return (
+          fact.callee.type._tag === 'Available' &&
+          Type.isCallable(fact.callee.type.type) &&
+          fact.callee.type.type.unsafe
+        )
+      if (fact._tag !== 'Call') return false
+      switch (fact.reference._tag) {
+        case 'Resolved':
+          return fact.reference.declaration.unsafe
+        case 'ResolvedBuiltin':
+          return fact.reference.unsafe
+        case 'ResolvedIntrinsicContract':
+          return fact.reference.intrinsic.unsafe
+        case 'ResolvedServiceOperation':
+          return fact.reference.operation.unsafe
+        case 'ResolvedBoundOperation':
+          return fact.reference.interfaceContract.unsafe
+        default:
+          return false
+      }
+    })()
+    const diagnostic = invokesUnsafe
+      ? undefined
+      : Diagnostic.misplacedUnsafeAcknowledgement(node.span)
+    return Object.freeze({
+      fact: analyzed.fact,
+      diagnostics: Object.freeze([
+        ...analyzed.diagnostics,
+        ...(diagnostic === undefined ? [] : [diagnostic]),
+      ]),
+      type: diagnostic === undefined ? analyzed.type : undefined,
+    })
+  }
   if (node.kind === 'EffectExpression') {
     const representationOwner = executableSpecializationOwner(resolution)
     const block = SyntaxTree.directNode(node, 'Block')
@@ -8824,13 +8911,20 @@ function analyzeExpression(
     declaration,
     node.span,
   )
+  const unsafeDiagnostic = unsafeCallDiagnostic(
+    reference._tag === 'Resolved' && reference.declaration.unsafe,
+    reference.spelling,
+    node,
+    resolution,
+  )
   const syntaxAvailable = hasAvailableCallSyntax(node)
   const expressionType =
     syntaxAvailable &&
     reference._tag === 'Resolved' &&
     reference.declaration.returnType._tag === 'Resolved' &&
     callContract.fact._tag === 'Compatible' &&
-    constraintDiagnostics.length === 0
+    constraintDiagnostics.length === 0 &&
+    unsafeDiagnostic === undefined
       ? availableExpressionType(
           (() => {
             const substitution =
@@ -8885,6 +8979,7 @@ function analyzeExpression(
       ...callTypeArguments.diagnostics,
       ...callContract.diagnostics,
       ...constraintDiagnostics,
+      ...(unsafeDiagnostic === undefined ? [] : [unsafeDiagnostic]),
     ]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
   })
@@ -8935,12 +9030,19 @@ const finishDeclarationCall = (
     node.span,
   )
   const callable = sourceCallable(reference)
+  const unsafeDiagnostic = unsafeCallDiagnostic(
+    callable?.unsafe === true,
+    'spelling' in reference ? reference.spelling : 'callable',
+    node,
+    resolution,
+  )
   const expressionType =
     hasAvailableCallSyntax(node) &&
     callable !== undefined &&
     callable.returnType._tag === 'Resolved' &&
     callContract.fact._tag === 'Compatible' &&
-    constraintDiagnostics.length === 0
+    constraintDiagnostics.length === 0 &&
+    unsafeDiagnostic === undefined
       ? availableExpressionType(
           (() => {
             const substitution =
@@ -8992,6 +9094,7 @@ const finishDeclarationCall = (
       ...callTypeArguments.diagnostics,
       ...callContract.diagnostics,
       ...constraintDiagnostics,
+      ...(unsafeDiagnostic === undefined ? [] : [unsafeDiagnostic]),
     ]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
   })
@@ -9022,10 +9125,17 @@ const finishBoundOperationCall = (
         )
       : undefined
   const callContract = analyzeCallContract(node, reference, argumentsResult.facts)
+  const unsafeDiagnostic = unsafeCallDiagnostic(
+    reference.interfaceContract.unsafe,
+    reference.spelling,
+    node,
+    resolution,
+  )
   const expressionType =
     hasAvailableCallSyntax(node) &&
     typeArgumentDiagnostic === undefined &&
-    callContract.fact._tag === 'Compatible'
+    callContract.fact._tag === 'Compatible' &&
+    unsafeDiagnostic === undefined
       ? availableExpressionType(reference.result)
       : unavailableExpressionType
   return Object.freeze({
@@ -9048,6 +9158,7 @@ const finishBoundOperationCall = (
       ...argumentsResult.diagnostics,
       ...callTypeArguments.diagnostics,
       ...callContract.diagnostics,
+      ...(unsafeDiagnostic === undefined ? [] : [unsafeDiagnostic]),
     ]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
   })
@@ -9119,11 +9230,41 @@ interface ResolutionContext {
   readonly scope: NameResolution.ModuleScope
   readonly index: DeclarationIndex.Index
   readonly unsafeSpans?: ReadonlyArray<SourceSpan.SourceSpan>
+  /** Exact direct-call spans acknowledged by the expression form `unsafe call(...)`. */
+  readonly unsafeCallSpans?: ReadonlyArray<SourceSpan.SourceSpan>
   readonly nextBindingOrdinal?: { value: number }
   readonly executableFunction?: DeclarationId
   readonly executableOwner?: DeclarationIndex.CanonicalId
   readonly executableSites?: ReadonlyMap<SyntaxTree.Node, number>
 }
+
+const unsafeCallAuthorized = (
+  resolution: ResolutionContext | undefined,
+  call: SyntaxTree.Node,
+): boolean =>
+  resolution !== undefined &&
+  ((resolution.unsafeSpans ?? []).some(
+    (span) =>
+      span.sourceId === call.span.sourceId &&
+      span.start <= call.span.start &&
+      span.end >= call.span.end,
+  ) ||
+    (resolution.unsafeCallSpans ?? []).some(
+      (span) =>
+        span.sourceId === call.span.sourceId &&
+        span.start === call.span.start &&
+        span.end === call.span.end,
+    ))
+
+const unsafeCallDiagnostic = (
+  unsafe: boolean,
+  spelling: string,
+  call: SyntaxTree.Node,
+  resolution: ResolutionContext | undefined,
+): Diagnostic.Diagnostic | undefined =>
+  unsafe && !unsafeCallAuthorized(resolution, call)
+    ? Diagnostic.missingUnsafeBoundary(spelling, call.span)
+    : undefined
 
 /** Whether a borrow-shaped value is visibly backed only by program-lifetime immutable data. */
 const isStaticallyDetachedFailure = (
@@ -12385,6 +12526,7 @@ export const elaborateModule = (input: Input): Result => {
               declaration: fact.declaration,
               contract: Object.freeze({
                 _tag: 'Contract' as const,
+                unsafe: baseContract.unsafe,
                 parameters: baseContract.parameters,
                 result: type,
                 constraints: baseContract.constraints,

@@ -10,6 +10,7 @@ export interface Operand {
 
 export interface Contract {
   readonly functionKind: 'Ordinary' | 'Effect'
+  readonly unsafe: boolean
   readonly operands: ReadonlyArray<Operand>
   readonly success: Type.Type
   readonly failures: ReadonlyArray<Type.Type>
@@ -20,6 +21,7 @@ export interface Contract {
 export interface Witness extends Contract {}
 
 export type Problem =
+  | { readonly _tag: 'StrongerSafety' }
   | {
       readonly _tag: 'StrongerFlow'
       readonly promised: Contract['functionKind']
@@ -132,6 +134,8 @@ const operandProblem = (
 
 /** Checks one substituted interface contract without narrowing or rewriting that caller contract. */
 export const check = (contract: Contract, witness: Witness): Compatibility => {
+  if (!contract.unsafe && witness.unsafe)
+    return incompatible(Object.freeze({ _tag: 'StrongerSafety' }))
   if (contract.functionKind === 'Ordinary' && witness.functionKind === 'Effect')
     return incompatible(
       Object.freeze({
@@ -199,6 +203,8 @@ export const describe = (self: Compatibility): string | undefined => {
   if (self._tag === 'Compatible') return undefined
   const problem = self.problem
   switch (problem._tag) {
+    case 'StrongerSafety':
+      return 'unsafe witness cannot satisfy a safe operation contract'
     case 'StrongerFlow':
       return `witness flow ${problem.required.toLowerCase()} is stronger than promised ${problem.promised.toLowerCase()} flow`
     case 'OperandArity':

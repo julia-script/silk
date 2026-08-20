@@ -210,6 +210,7 @@ export type DeclaredTypeFact =
     }
   | {
       readonly _tag: 'Callable'
+      readonly unsafe: boolean
       readonly mode: Type.CallableMode
       readonly parameters: ReadonlyArray<DeclaredTypeFact>
       readonly result: DeclaredTypeFact
@@ -392,6 +393,7 @@ export interface DeclarationFact {
   readonly canonical: CanonicalState
   readonly visibility: 'Public' | 'Private'
   readonly functionKind: 'Ordinary' | 'Effect'
+  readonly unsafe: boolean
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly parameterCount: number
   readonly parameters: ReadonlyArray<ParameterFact>
@@ -573,6 +575,7 @@ export interface ServiceOperationFact {
   readonly id: DeclarationId
   readonly state: ServiceOperationState
   readonly functionKind: 'Ordinary' | 'Effect'
+  readonly unsafe: boolean
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly parameterCount: number
   readonly parameters: ReadonlyArray<ParameterFact>
@@ -614,6 +617,7 @@ export const callableContract = (
       : success
   return CallableContract.make({
     functionKind: declaration.functionKind === 'Effect' ? 'Effect' : 'Function',
+    unsafe: declaration.unsafe,
     binders: [...enclosingTypeParameters, ...declaration.typeParameters].map(
       (parameter) => parameter.type,
     ),
@@ -655,6 +659,7 @@ export interface InterfaceOperationContractFact {
   readonly declaration: ServiceOperationFact
   readonly provider?: Type.Type
   readonly functionKind: ServiceOperationFact['functionKind']
+  readonly unsafe: boolean
   readonly operands: ReadonlyArray<InterfaceOperandFact>
   readonly success: ReturnTypeFact
   readonly failureRow: FailureRowFact
@@ -800,6 +805,7 @@ const interfaceOperationContract = (
     declaration: operation,
     ...(provider === undefined ? {} : { provider }),
     functionKind: operation.functionKind,
+    unsafe: operation.unsafe,
     operands,
     success: operation.returnType,
     failureRow: operation.failureRow,
@@ -989,6 +995,7 @@ const applyInterfaceOperation = (
       provider,
       source,
       functionKind: source.functionKind,
+      unsafe: source.unsafe,
       operands: source.operands,
       success: source.success,
       failureRow: source.failureRow,
@@ -1020,6 +1027,7 @@ const applyInterfaceOperation = (
     provider,
     source,
     functionKind: source.functionKind,
+    unsafe: source.unsafe,
     operands,
     success: substituteDeclaredTypeFact(source.success, substitution),
     failureRow: substituteFailureRowFact(source.failureRow, substitution, rows),
@@ -1535,6 +1543,7 @@ export const analyzeDeclaredType = (
         : SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined
           ? 'Exclusive'
           : 'Shared'
+    const unsafe = SyntaxTree.directToken(syntax, 'UnsafeKeyword') !== undefined
     const analyzed = typeNodes.map((node) => analyzeDeclaredType(source, node, typeParameters))
     const result = analyzed.at(-1)
     const parameters = analyzed.slice(0, -1)
@@ -1547,6 +1556,8 @@ export const analyzeDeclaredType = (
         parameters.flatMap((entry) => (entry.fact._tag === 'Resolved' ? [entry.fact.type] : [])),
         result.fact.type,
         mode,
+        undefined,
+        unsafe,
       )
       return Object.freeze({
         fact: Object.freeze({
@@ -1570,10 +1581,11 @@ export const analyzeDeclaredType = (
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Callable',
+        unsafe,
         mode,
         parameters: Object.freeze(parameters.map((entry) => entry.fact)),
         result: resultFact,
-        spelling: `${mode === 'Exclusive' ? 'mut ' : mode === 'Take' ? 'once ' : ''}fn(...)`,
+        spelling: `${unsafe ? 'unsafe ' : ''}${mode === 'Exclusive' ? 'mut ' : mode === 'Take' ? 'once ' : ''}fn(...)`,
         token,
         syntax,
         ...(cause === undefined ? {} : { cause }),
@@ -3556,6 +3568,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
               SyntaxTree.directToken(operation, 'EffectKeyword') === undefined
                 ? 'Ordinary'
                 : 'Effect',
+            unsafe: SyntaxTree.directToken(operation, 'UnsafeKeyword') !== undefined,
             typeParameters: operationTypeParameters.facts,
             parameterCount: parameterFacts.length,
             parameters: parameterFacts,
@@ -3674,6 +3687,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       canonical,
       visibility,
       functionKind,
+      unsafe: SyntaxTree.directToken(node, 'UnsafeKeyword') !== undefined,
       typeParameters: typeParameters.facts,
       parameterCount: facts.length,
       parameters: facts,
@@ -3770,6 +3784,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
               SyntaxTree.directToken(node, 'EffectKeyword') === undefined
                 ? ('Ordinary' as const)
                 : ('Effect' as const),
+            unsafe: SyntaxTree.directToken(node, 'UnsafeKeyword') !== undefined,
             typeParameters: collected.facts,
             parameterCount: parameterFacts.length,
             parameters: parameterFacts,
@@ -3840,6 +3855,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         }),
         visibility: 'Private' as const,
         functionKind: 'Ordinary' as const,
+        unsafe: false,
         typeParameters: conformance.typeParameters,
         parameterCount: facts.length,
         parameters: facts,
@@ -5060,6 +5076,7 @@ const interfaceWitnessCompatibility = (
   return InterfaceWitnessCompatibility.check(
     Object.freeze({
       functionKind: contract.functionKind,
+      unsafe: contract.unsafe,
       operands: Object.freeze(contractOperands),
       success: contract.success.type,
       failures: Object.freeze([
@@ -5071,6 +5088,7 @@ const interfaceWitnessCompatibility = (
     }),
     Object.freeze({
       functionKind: implementation.functionKind,
+      unsafe: implementation.unsafe,
       operands: Object.freeze(witnessOperands),
       success: Type.substitute(implementation.returnType.type, substitution),
       failures: Object.freeze([
@@ -5099,6 +5117,7 @@ const sealedWitnessCompatibility = (
   return InterfaceWitnessCompatibility.check(
     Object.freeze({
       functionKind: contract.functionKind,
+      unsafe: contract.unsafe,
       operands: Object.freeze(operands),
       success: contract.success.type,
       failures: Object.freeze([
@@ -5110,6 +5129,7 @@ const sealedWitnessCompatibility = (
     }),
     Object.freeze({
       functionKind: 'Ordinary',
+      unsafe: false,
       operands: Object.freeze(
         parameters.map((type, ordinal) =>
           Object.freeze({ name: operands.at(ordinal)?.name ?? '_', type, receiver: false }),

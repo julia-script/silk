@@ -358,6 +358,7 @@ const printServiceOperation = (
       ? undefined
       : directTokens(operatorMarker).find((token) => Operator.isDeclarationToken(token.kind))
   const effectKeyword = directTokens(node).find((token) => token.kind === 'EffectKeyword')
+  const unsafeKeyword = directTokens(node).find((token) => token.kind === 'UnsafeKeyword')
   const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
   const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
   const requirementRow = directNodes(node).find((child) => child.kind === 'RequirementRow')
@@ -371,20 +372,34 @@ const printServiceOperation = (
           printToken(context, operatorToken, FormatDocument.text(' ')),
           FormatDocument.text(' '),
         ]),
+    ...(unsafeKeyword === undefined
+      ? []
+      : [
+          printToken(
+            context,
+            unsafeKeyword,
+            operatorKeyword === undefined ? prefix : FormatDocument.empty,
+          ),
+          FormatDocument.text(' '),
+        ]),
     ...(effectKeyword === undefined
       ? []
       : [
           printToken(
             context,
             effectKeyword,
-            operatorKeyword === undefined ? prefix : FormatDocument.empty,
+            operatorKeyword === undefined && unsafeKeyword === undefined
+              ? prefix
+              : FormatDocument.empty,
           ),
           FormatDocument.text(' '),
         ]),
     printToken(
       context,
       tokenOf(node, 'FnKeyword'),
-      effectKeyword === undefined && operatorKeyword === undefined ? prefix : FormatDocument.empty,
+      effectKeyword === undefined && unsafeKeyword === undefined && operatorKeyword === undefined
+        ? prefix
+        : FormatDocument.empty,
     ),
     printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
     ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
@@ -470,6 +485,7 @@ const printFunctionDeclaration = (
   prefix: FormatDocument.Document,
 ): FormatDocument.Document => {
   const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
+  const unsafeKeyword = directTokens(node).find((token) => token.kind === 'UnsafeKeyword')
   const effectKeyword = directTokens(node).find((token) => token.kind === 'EffectKeyword')
   const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
   const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
@@ -484,20 +500,34 @@ const printFunctionDeclaration = (
     ...(publicKeyword === undefined
       ? []
       : [printToken(context, publicKeyword, prefix), FormatDocument.text(' ')]),
+    ...(unsafeKeyword === undefined
+      ? []
+      : [
+          printToken(
+            context,
+            unsafeKeyword,
+            publicKeyword === undefined ? prefix : FormatDocument.empty,
+          ),
+          FormatDocument.text(' '),
+        ]),
     ...(effectKeyword === undefined
       ? []
       : [
           printToken(
             context,
             effectKeyword,
-            publicKeyword === undefined ? prefix : FormatDocument.empty,
+            publicKeyword === undefined && unsafeKeyword === undefined
+              ? prefix
+              : FormatDocument.empty,
           ),
           FormatDocument.text(' '),
         ]),
     printToken(
       context,
       tokenOf(node, 'FnKeyword'),
-      publicKeyword === undefined && effectKeyword === undefined ? prefix : FormatDocument.empty,
+      publicKeyword === undefined && unsafeKeyword === undefined && effectKeyword === undefined
+        ? prefix
+        : FormatDocument.empty,
     ),
     printToken(context, name, FormatDocument.text(' ')),
     ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
@@ -800,7 +830,11 @@ const printNode = (
       const parameters = nodes.slice(0, -1)
       const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
       const once = directTokens(node).find((token) => token.kind === 'OnceKeyword')
+      const unsafe = directTokens(node).find((token) => token.kind === 'UnsafeKeyword')
       return FormatDocument.concat(
+        ...(unsafe === undefined
+          ? []
+          : [printToken(context, unsafe, prefix, preserveBlank), FormatDocument.text(' ')]),
         ...(mut === undefined
           ? []
           : [printToken(context, mut, prefix, preserveBlank), FormatDocument.text(' ')]),
@@ -810,7 +844,9 @@ const printNode = (
         printToken(
           context,
           tokenOf(node, 'FnKeyword'),
-          mut === undefined && once === undefined ? prefix : FormatDocument.empty,
+          unsafe === undefined && mut === undefined && once === undefined
+            ? prefix
+            : FormatDocument.empty,
           preserveBlank,
         ),
         printDelimited(
@@ -1334,6 +1370,15 @@ const printNode = (
         printNode(context, argumentsList ?? nodeOf(node, 'ArgumentList')),
       )
     }
+    case 'UnsafeExpression':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'UnsafeKeyword'), prefix, preserveBlank),
+        printNode(
+          context,
+          directNodes(node)[0] ?? nodeOf(node, 'CallExpression'),
+          FormatDocument.text(' '),
+        ),
+      )
     case 'GroupedExpression':
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'LeftParenthesis'), prefix, preserveBlank),

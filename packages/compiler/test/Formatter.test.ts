@@ -142,6 +142,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'TypePath',
   'UnionType',
   'UnitExpression',
+  'UnsafeExpression',
   'UniversalPattern',
   'WhileStatement',
 ])
@@ -862,6 +863,7 @@ fn helper(value: i32, other: i32) -> i32 {
   if !false { return (moved + other) } else { return Pair { left: [1, 2], right: true }.left[0] }
   return moved
 }
+pub unsafe fn unchecked(value: i32) -> i32 { return value }
 fn inspect(event: Token | End) -> i32 {
   return match &mut event { Token { span: Span { start: offset, .. }, .. } if true => offset _ => 0 }
 }
@@ -894,7 +896,7 @@ fn borrow(values: [i32; 2], output: [i32; 2]) -> i32 {
   let mut target = move output
   return scan(&values, &mut target)
 }
-pub fn main() -> i32 { return helper(-1, 2) |> Core.finish() }
+pub fn main() -> i32 { return unsafe unchecked(helper(-1, 2) |> Core.finish()) }
 `
     const original = parse('memory://grammar.silk', source)
     assert.deepEqual(original.lexicalDiagnostics, [])

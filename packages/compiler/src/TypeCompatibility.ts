@@ -66,6 +66,7 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
     const sourceRank = source.mode === 'Shared' ? 0 : source.mode === 'Exclusive' ? 1 : 2
     const targetRank = target.mode === 'Shared' ? 0 : target.mode === 'Exclusive' ? 1 : 2
     if (
+      (!source.unsafe || target.unsafe) &&
       sourceRank <= targetRank &&
       source.parameters.length === target.parameters.length &&
       source.parameters.every((parameter, index) =>

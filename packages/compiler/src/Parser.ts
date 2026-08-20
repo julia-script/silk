@@ -212,10 +212,12 @@ const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'RunKeyword',
   'Less',
   'Ampersand',
+  'UnsafeKeyword',
 ])
 
 const typeStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'Identifier',
+  'UnsafeKeyword',
   'FnKeyword',
   'MutKeyword',
   'OnceKeyword',
@@ -413,6 +415,7 @@ const primaryKind = (
   | 'Effect'
   | 'Run'
   | 'Borrow'
+  | 'Unsafe'
   | 'Call'
   | 'StructLiteral'
   | 'ArrayLiteral'
@@ -447,6 +450,7 @@ const primaryKind = (
       return 'Effect'
     if (token.kind === 'RunKeyword') return 'Run'
     if (token.kind === 'Ampersand') return 'Borrow'
+    if (token.kind === 'UnsafeKeyword') return 'Unsafe'
     if (token.kind === 'MatchKeyword') return 'Match'
     if (token.kind === 'LeftBracket') return 'ArrayLiteral'
     if (token.kind === 'Identifier') {
@@ -1065,6 +1069,16 @@ const parseEffectExpression = (initial: State): NodeResult => {
   })
 }
 
+/** Parses the expression form that acknowledges exactly one direct invocation. */
+const parseUnsafeExpression = (initial: State, reservedForEnclosingCalls: number): NodeResult => {
+  const keyword = expect(initial, 'UnsafeKeyword', ['Identifier', ...expressionFollowing])
+  const call = parseCallExpression(keyword.state, reservedForEnclosingCalls)
+  return Object.freeze({
+    state: call.state,
+    node: syntaxNode(call.state, 'UnsafeExpression', [...keyword.elements, call.node]),
+  })
+}
+
 function parsePrimaryExpression(
   initial: State,
   reservedForEnclosingCalls: number,
@@ -1080,6 +1094,7 @@ function parsePrimaryExpression(
     return parseArrayLiteralExpression(initial, reservedForEnclosingCalls)
   if (kind === 'Match') return parseMatchExpression(initial, reservedForEnclosingCalls)
   if (kind === 'Effect') return parseEffectExpression(initial)
+  if (kind === 'Unsafe') return parseUnsafeExpression(initial, reservedForEnclosingCalls)
   if (kind === 'Run') {
     const keyword = expect(initial, 'RunKeyword', [...expressionStarts, ...expressionFollowing])
     const operand = parseExpression(
@@ -1672,7 +1687,7 @@ function parseBlock(
                     ? parseFailStatement(state)
                     : kind === 'DropKeyword'
                       ? parseDropStatement(state)
-                      : kind === 'UnsafeKeyword'
+                      : kind === 'UnsafeKeyword' && significantKindAfter(state, 1) === 'LeftBrace'
                         ? parseUnsafeStatement(state)
                         : kind === 'ReturnKeyword'
                           ? parseReturnStatement(state)
@@ -1959,12 +1974,18 @@ const parseTypePrimary = (
       ]),
     })
   }
-  const callableMode = nextSignificantKind(initial)
+  const unsafeCallable = nextSignificantKind(initial) === 'UnsafeKeyword'
+  const unsafe = unsafeCallable
+    ? expect(initial, 'UnsafeKeyword', ['MutKeyword', 'OnceKeyword', 'FnKeyword', ...following])
+    : undefined
+  const callableStart = unsafe?.state ?? initial
+  const callableMode = nextSignificantKind(callableStart)
   if (
+    !unsafeCallable &&
     (callableMode === 'MutKeyword' || callableMode === 'OnceKeyword') &&
-    significantKindAfter(initial, 1) === 'Identifier'
+    significantKindAfter(callableStart, 1) === 'Identifier'
   ) {
-    const mode = expect(initial, callableMode, typeStarts)
+    const mode = expect(callableStart, callableMode, typeStarts)
     const subject = parseTypePrimary(mode.state, following, preserveFieldStart)
     return Object.freeze({
       state: subject.state,
@@ -1981,9 +2002,9 @@ const parseTypePrimary = (
   ) {
     const mode =
       callableMode === 'MutKeyword' || callableMode === 'OnceKeyword'
-        ? expect(initial, callableMode, ['FnKeyword', 'LeftParenthesis', ...following])
+        ? expect(callableStart, callableMode, ['FnKeyword', 'LeftParenthesis', ...following])
         : undefined
-    const fn = expect(mode?.state ?? initial, 'FnKeyword', ['LeftParenthesis', ...following])
+    const fn = expect(mode?.state ?? callableStart, 'FnKeyword', ['LeftParenthesis', ...following])
     const left = expect(fn.state, 'LeftParenthesis', [
       ...typeStarts,
       'RightParenthesis',
@@ -2016,6 +2037,7 @@ const parseTypePrimary = (
     return Object.freeze({
       state: result.state,
       node: syntaxNode(result.state, 'CallableType', [
+        ...(unsafe?.elements ?? []),
         ...(mode?.elements ?? []),
         ...fn.elements,
         ...left.elements,
@@ -2381,6 +2403,7 @@ const topLevelFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'RoleKeyword',
   'FnKeyword',
   'EffectKeyword',
+  'UnsafeKeyword',
   'ImplKeyword',
   'EndOfFile',
 ])
@@ -2491,6 +2514,7 @@ const beginsTopLevelDeclaration = (state: State): boolean => {
     kind === 'ConstKeyword' ||
     kind === 'FnKeyword' ||
     kind === 'EffectKeyword' ||
+    kind === 'UnsafeKeyword' ||
     kind === 'StructKeyword' ||
     kind === 'ServiceKeyword' ||
     kind === 'InterfaceKeyword' ||
@@ -2503,6 +2527,9 @@ const beginsTopLevelDeclaration = (state: State): boolean => {
   return (
     following === 'FnKeyword' ||
     following === 'EffectKeyword' ||
+    (following === 'UnsafeKeyword' &&
+      (significantKindAfter(state, 2) === 'FnKeyword' ||
+        significantKindAfter(state, 2) === 'EffectKeyword')) ||
     following === 'StructKeyword' ||
     following === 'ServiceKeyword' ||
     following === 'InterfaceKeyword' ||
@@ -2622,6 +2649,7 @@ const parseStructDeclaration = (initial: State): NodeResult => {
 const serviceOperationFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'FnKeyword',
   'EffectKeyword',
+  'UnsafeKeyword',
   'RightBrace',
   ...topLevelFollowing,
 ])
@@ -2629,6 +2657,7 @@ const serviceOperationFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze(
 const startsServiceOperation = (state: State): boolean =>
   nextSignificantKind(state) === 'FnKeyword' ||
   nextSignificantKind(state) === 'EffectKeyword' ||
+  nextSignificantKind(state) === 'UnsafeKeyword' ||
   hasContextualSpelling(state, 'operator')
 
 const parseOperatorMarker = (initial: State): NodeResult => {
@@ -2653,15 +2682,27 @@ const parseServiceOperation = (initial: State): NodeResult => {
   const operatorMarker = hasContextualSpelling(initial, 'operator')
     ? parseOperatorMarker(initial)
     : undefined
-  const effectKeyword =
-    nextSignificantKind(operatorMarker?.state ?? initial) === 'EffectKeyword'
-      ? expect(operatorMarker?.state ?? initial, 'EffectKeyword', [
+  const unsafeKeyword =
+    nextSignificantKind(operatorMarker?.state ?? initial) === 'UnsafeKeyword'
+      ? expect(operatorMarker?.state ?? initial, 'UnsafeKeyword', [
+          'EffectKeyword',
           'FnKeyword',
           'Identifier',
           ...serviceOperationFollowing,
         ])
       : Object.freeze({
           state: operatorMarker?.state ?? initial,
+          elements: Object.freeze([]),
+        })
+  const effectKeyword =
+    nextSignificantKind(unsafeKeyword.state) === 'EffectKeyword'
+      ? expect(unsafeKeyword.state, 'EffectKeyword', [
+          'FnKeyword',
+          'Identifier',
+          ...serviceOperationFollowing,
+        ])
+      : Object.freeze({
+          state: unsafeKeyword.state,
           elements: Object.freeze([]),
         })
   const fnKeyword = expect(effectKeyword.state, 'FnKeyword', [
@@ -2704,6 +2745,7 @@ const parseServiceOperation = (initial: State): NodeResult => {
     state,
     node: syntaxNode(state, 'ServiceOperation', [
       ...(operatorMarker === undefined ? [] : [operatorMarker.node]),
+      ...unsafeKeyword.elements,
       ...effectKeyword.elements,
       ...fnKeyword.elements,
       ...name.elements,
@@ -2905,6 +2947,7 @@ const parseImplDeclaration = (initial: State): NodeResult => {
   if (hasBody) {
     while (
       nextSignificantKind(state) === 'Identifier' ||
+      nextSignificantKind(state) === 'UnsafeKeyword' ||
       nextSignificantKind(state) === 'FnKeyword' ||
       nextSignificantKind(state) === 'EffectKeyword'
     ) {
@@ -2962,6 +3005,7 @@ const parseFunctionDeclaration = (initial: State, allowDropName = false): NodeRe
     lookaheadToken !== undefined &&
     lookaheadToken.kind !== 'FnKeyword' &&
     lookaheadToken.kind !== 'EffectKeyword' &&
+    lookaheadToken.kind !== 'UnsafeKeyword' &&
     lookaheadToken.kind !== 'StructKeyword' &&
     lookaheadToken.kind !== 'ServiceKeyword' &&
     lookaheadToken.kind !== 'InterfaceKeyword' &&
@@ -2977,12 +3021,27 @@ const parseFunctionDeclaration = (initial: State, allowDropName = false): NodeRe
     lookaheadToken = initial.lexical.tokens.at(lookahead)
   }
   const pubKeyword = hasPublicModifier
-    ? expect(initial, 'PubKeyword', ['EffectKeyword', 'FnKeyword', 'Identifier', 'LeftParenthesis'])
+    ? expect(initial, 'PubKeyword', [
+        'UnsafeKeyword',
+        'EffectKeyword',
+        'FnKeyword',
+        'Identifier',
+        'LeftParenthesis',
+      ])
     : Object.freeze({ state: initial, elements: Object.freeze([]) })
-  const effectKeyword =
-    nextSignificantKind(pubKeyword.state) === 'EffectKeyword'
-      ? expect(pubKeyword.state, 'EffectKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
+  const unsafeKeyword =
+    nextSignificantKind(pubKeyword.state) === 'UnsafeKeyword'
+      ? expect(pubKeyword.state, 'UnsafeKeyword', [
+          'EffectKeyword',
+          'FnKeyword',
+          'Identifier',
+          'LeftParenthesis',
+        ])
       : Object.freeze({ state: pubKeyword.state, elements: Object.freeze([]) })
+  const effectKeyword =
+    nextSignificantKind(unsafeKeyword.state) === 'EffectKeyword'
+      ? expect(unsafeKeyword.state, 'EffectKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
+      : Object.freeze({ state: unsafeKeyword.state, elements: Object.freeze([]) })
   const fnKeyword = expect(effectKeyword.state, 'FnKeyword', [
     'Identifier',
     ...(allowDropName ? (['DropKeyword'] as const) : []),
@@ -3021,6 +3080,7 @@ const parseFunctionDeclaration = (initial: State, allowDropName = false): NodeRe
     state: block.state,
     node: syntaxNode(block.state, 'FunctionDeclaration', [
       ...pubKeyword.elements,
+      ...unsafeKeyword.elements,
       ...effectKeyword.elements,
       ...fnKeyword.elements,
       ...name.elements,

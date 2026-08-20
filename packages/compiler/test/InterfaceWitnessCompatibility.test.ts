@@ -23,6 +23,7 @@ const operand = (
 
 const contract = Object.freeze({
   functionKind: 'Effect' as const,
+  unsafe: false,
   operands: Object.freeze([
     operand('self', Type.reference('Exclusive', schema), true),
     operand('encoded', 'i32'),
@@ -39,6 +40,7 @@ const contract = Object.freeze({
 it('admits a pure witness with smaller rows and weaker receiver and requirement access', () => {
   const witness = Object.freeze({
     functionKind: 'Ordinary' as const,
+    unsafe: false,
     operands: Object.freeze([
       operand('self', Type.reference('Shared', schema), true),
       operand('encoded', 'i32'),
@@ -71,6 +73,7 @@ it('reports the first stronger receiver demand before later row demands', () => 
   })
   const witness = Object.freeze({
     functionKind: 'Effect' as const,
+    unsafe: false,
     operands: Object.freeze([
       operand('self', Type.reference('Exclusive', schema), true),
       operand('encoded', 'i32'),
@@ -203,6 +206,24 @@ it('rejects stronger flow and non-exact operand or success types', () => {
   assert.strictEqual(successCompatibility._tag, 'Incompatible')
   if (successCompatibility._tag !== 'Incompatible') return
   assert.strictEqual(successCompatibility.problem._tag, 'Success')
+})
+
+it('admits safer witnesses and rejects unsafe witnesses for safe contracts', () => {
+  const unsafeContract = Object.freeze({ ...contract, unsafe: true })
+  const safeWitness = Object.freeze({ ...contract, unsafe: false })
+  const unsafeWitness = Object.freeze({ ...contract, unsafe: true })
+
+  assert.deepEqual(InterfaceWitnessCompatibility.check(unsafeContract, safeWitness), {
+    _tag: 'Compatible',
+  })
+  const compatibility = InterfaceWitnessCompatibility.check(contract, unsafeWitness)
+  assert.strictEqual(compatibility._tag, 'Incompatible')
+  if (compatibility._tag !== 'Incompatible') return
+  assert.deepEqual(compatibility.problem, { _tag: 'StrongerSafety' })
+  assert.strictEqual(
+    InterfaceWitnessCompatibility.describe(compatibility),
+    'unsafe witness cannot satisfy a safe operation contract',
+  )
 })
 
 it('subsumes generic failure types only when the witness forwards types promised by the contract', () => {

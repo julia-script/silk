@@ -22,6 +22,7 @@ import * as TypeCompatibility from './TypeCompatibility.js'
 export interface Contract {
   readonly _tag: 'Contract'
   readonly functionKind?: 'Ordinary' | 'Effect'
+  readonly unsafe: boolean
   readonly parameters: ReadonlyArray<DeclarationIndex.SemanticType>
   readonly result: DeclarationIndex.SemanticType
   readonly failureRow?: Type.FailureRow
@@ -1433,6 +1434,7 @@ export const contractOf = (declaration: DeclarationIndex.DeclarationFact): Contr
   }
   return Object.freeze({
     _tag: 'Contract',
+    unsafe: declaration.unsafe,
     ...(declaration.functionKind === 'Effect'
       ? {
           functionKind: 'Effect' as const,

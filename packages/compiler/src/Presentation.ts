@@ -99,7 +99,7 @@ const typeParameterName = (parameter: DeclarationIndex.TypeParameterFact): strin
 export const functionDeclaration = (self: DeclarationIndex.DeclarationFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
-  const kind = self.functionKind === 'Effect' ? 'effect fn' : 'fn'
+  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
   const typeParameters =
     self.typeParameters.length === 0
       ? ''
@@ -164,7 +164,7 @@ export const roleDeclaration = (self: DeclarationIndex.RoleFact): Presentation =
 /** Renders a complete operation contract nested beneath a service. */
 export const serviceOperation = (self: DeclarationIndex.ServiceOperationFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
-  const kind = self.functionKind === 'Effect' ? 'effect fn' : 'fn'
+  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
   const operator =
     self.operator === undefined ? '' : `operator ${Operator.spelling(self.operator.operator)} `
   const typeParameters =
@@ -273,7 +273,7 @@ export const type = (
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}${type(self.target, module, scope)}`
   if (Type.isCallable(self)) {
     const mode = self.mode === 'Exclusive' ? 'mut ' : self.mode === 'Take' ? 'once ' : ''
-    return `${mode}fn(${self.parameters.map((entry) => type(entry, module, scope)).join(', ')}) -> ${type(self.result, module, scope)}`
+    return `${self.unsafe ? 'unsafe ' : ''}${mode}fn(${self.parameters.map((entry) => type(entry, module, scope)).join(', ')}) -> ${type(self.result, module, scope)}`
   }
   if (Type.isEffect(self)) {
     const failureText = RowAlgebra.encode(

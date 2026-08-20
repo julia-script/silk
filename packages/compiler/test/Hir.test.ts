@@ -63,7 +63,8 @@ it('constructs typed HIR with canonical call targets and normalized contracts', 
   const main = result.hir.functions.at(1)
 
   assert.deepEqual(main?.contract, {
-    _tag: 'Contract',
+      _tag: 'Contract',
+      unsafe: false,
     parameters: [],
     result: 'i32',
     constraints: [],
@@ -356,7 +357,8 @@ pub fn main() -> i32 { if check(true) { return 1 } return 0 }`,
   assert.deepEqual(result.diagnostics, [])
   const check = result.hir.functions.at(0)
   assert.deepEqual(check?.contract, {
-    _tag: 'Contract',
+      _tag: 'Contract',
+      unsafe: false,
     parameters: ['bool'],
     result: 'bool',
     constraints: [],

@@ -2287,6 +2287,97 @@ fn destroy(buffer: RawBuffer<i32>) -> () {
   assert.strictEqual(functionAt(rejected, 0).returnedExpression.type._tag, 'Unavailable')
 })
 
+it('requires invocation-only acknowledgement for unsafe source callables', () => {
+  const accepted = analyzeText(
+    'fixture://unsafe-source-accepted.silk',
+    `unsafe fn add(left: i32, right: i32) -> i32 { return left + right }
+fn prefixed() -> i32 { return unsafe add(1, 2) }
+fn blocked() -> i32 { unsafe { return add(3, 4) } return 0 }
+unsafe effect fn lazy(value: i32) -> i32 { return value }
+effect fn effectful() -> i32 { let pending = unsafe lazy(5) return run pending }`,
+  )
+  const rejected = analyzeText(
+    'fixture://unsafe-source-rejected.silk',
+    `unsafe fn add(left: i32, right: i32) -> i32 { return left + right }
+fn main() -> i32 { return add(1, 2) }`,
+  )
+  const bodyRemainsSafe = analyzeText(
+    'fixture://unsafe-body-remains-safe.silk',
+    `unsafe fn make(bytes: &[u8]) -> string {
+  return Intrinsic.stringFromUtf8Unchecked(bytes)
+}`,
+  )
+
+  assert.deepEqual(accepted.diagnostics, [])
+  assert.include(
+    rejected.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0082',
+  )
+  assert.include(
+    bodyRemainsSafe.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0082',
+  )
+})
+
+it('preserves unsafe qualification through sections and callable transfers', () => {
+  const section = analyzeText(
+    'fixture://unsafe-section.silk',
+    `unsafe fn add(left: i32, right: i32) -> i32 { return left + right }
+fn main() -> i32 { let addTwo = add(2) return unsafe addTwo(3) }`,
+  )
+  const misplaced = analyzeText(
+    'fixture://unsafe-partial-acknowledgement.silk',
+    `unsafe fn add(left: i32, right: i32) -> i32 { return left + right }
+fn main() -> i32 { let addTwo = unsafe add(2) return 0 }`,
+  )
+  const safeToUnsafe = analyzeText(
+    'fixture://safe-to-unsafe-callable.silk',
+    `fn safe(value: i32) -> i32 { return value }
+fn accepts(callback: unsafe fn(i32) -> i32) -> i32 { return unsafe callback(1) }
+fn main() -> i32 { return accepts(safe) }`,
+  )
+  const unsafeToSafe = analyzeText(
+    'fixture://unsafe-to-safe-callable.silk',
+    `unsafe fn risky(value: i32) -> i32 { return value }
+fn accepts(callback: fn(i32) -> i32) -> i32 { return callback(1) }
+fn main() -> i32 { return accepts(risky) }`,
+  )
+
+  assert.deepEqual(section.diagnostics, [])
+  assert.include(
+    misplaced.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0137',
+  )
+  assert.deepEqual(safeToUnsafe.diagnostics, [])
+  assert.include(
+    unsafeToSafe.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0076',
+  )
+})
+
+it('keeps ordinary Effect and ownership checks active around unsafe calls', () => {
+  const effectRequirements = analyzeText(
+    'fixture://unsafe-effect-requirement.silk',
+    `service Clock { fn now() -> i32 }
+unsafe effect fn tick() -> i32 ? &Clock { return Clock.now() }
+fn main() -> i32 { return run unsafe tick() }`,
+  )
+  const typeMismatch = analyzeText(
+    'fixture://unsafe-type-mismatch.silk',
+    `unsafe fn consume(value: i32) -> i32 { return value }
+fn main() -> i32 { return unsafe consume(true) }`,
+  )
+
+  assert.include(
+    effectRequirements.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0071',
+  )
+  assert.include(
+    typeMismatch.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0012',
+  )
+})
+
 it('allows a shared value reborrow from a shared pattern field', () => {
   const result = analyzeText(
     'fixture://shared-pattern-field.silk',

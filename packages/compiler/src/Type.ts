@@ -101,6 +101,7 @@ export type CallableSchemaOwnerSpecializer = (
 /** One canonical structural callable contract independent of its hidden concrete environment. */
 export interface Callable {
   readonly _tag: 'CallableType'
+  readonly unsafe: boolean
   readonly parameters: ReadonlyArray<Type>
   readonly result: Type
   readonly mode: CallableMode
@@ -544,9 +545,11 @@ export const callable = (
   result: Type,
   mode: CallableMode = 'Shared',
   schema?: CallableSchema,
+  unsafe = false,
 ): Callable =>
   Object.freeze({
     _tag: 'CallableType',
+    unsafe,
     parameters: Object.freeze(Array.from(parameters_)),
     result,
     mode,
@@ -974,10 +977,16 @@ export const intersectRepresentationBounds = (
         ? right.mode
         : right.access
   if (left._tag === 'CallableType' && right._tag === 'CallableType') {
-    const leftShape = callable(left.parameters, left.result, 'Shared', left.schema)
-    const rightShape = callable(right.parameters, right.result, 'Shared', right.schema)
+    const leftShape = callable(left.parameters, left.result, 'Shared', left.schema, left.unsafe)
+    const rightShape = callable(
+      right.parameters,
+      right.result,
+      'Shared',
+      right.schema,
+      right.unsafe,
+    )
     return equals(leftShape, rightShape)
-      ? callable(left.parameters, left.result, access, left.schema)
+      ? callable(left.parameters, left.result, access, left.schema, left.unsafe)
       : undefined
   }
   if (left._tag === 'EffectType' && right._tag === 'EffectType') {
@@ -1004,7 +1013,13 @@ export const representationAdmissibility = (
     return Object.freeze({ _tag: 'Unavailable', reason: 'representation kind mismatch' })
   const structuralContract =
     contract._tag === 'CallableType' && requiredBound._tag === 'CallableType'
-      ? callable(contract.parameters, contract.result, requiredBound.mode, contract.schema)
+      ? callable(
+          contract.parameters,
+          contract.result,
+          requiredBound.mode,
+          contract.schema,
+          contract.unsafe,
+        )
       : contract._tag === 'EffectType' && requiredBound._tag === 'EffectType'
         ? effectWithRows(
             contract.success,
@@ -1404,7 +1419,7 @@ const computeKey = (self: Type): string => {
                 ),
             ),
           ])
-    return `callable:${self.mode}<(${self.parameters.map(key).join(',')})->${key(self.result)}>${schemaKey}`
+    return `callable:${self.unsafe ? 'unsafe:' : 'safe:'}${self.mode}<(${self.parameters.map(key).join(',')})->${key(self.result)}>${schemaKey}`
   }
   if (isEffect(self))
     return `effect:${self.access}<${key(self.success)}!${RowAlgebra.key(
@@ -1640,6 +1655,7 @@ export const haveSameRepresentationShape = (left: Type, right: Type): boolean =>
     const leftRank = left.mode === 'Shared' ? 0 : left.mode === 'Exclusive' ? 1 : 2
     const rightRank = right.mode === 'Shared' ? 0 : right.mode === 'Exclusive' ? 1 : 2
     return (
+      (!left.unsafe || right.unsafe) &&
       leftRank <= rightRank &&
       left.parameters.length === right.parameters.length &&
       left.parameters.every((parameter_, ordinal) => {
@@ -1960,7 +1976,7 @@ export const encode = (self: Type): string => {
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}${encode(self.target)}`
   if (isCallable(self)) {
     const mode = self.mode === 'Exclusive' ? 'mut ' : self.mode === 'Take' ? 'once ' : ''
-    return `${mode}fn(${self.parameters.map(encode).join(', ')}) -> ${encode(self.result)}`
+    return `${self.unsafe ? 'unsafe ' : ''}${mode}fn(${self.parameters.map(encode).join(', ')}) -> ${encode(self.result)}`
   }
   if (isEffect(self)) {
     const access = self.access === 'Exclusive' ? 'mut ' : self.access === 'Take' ? 'once ' : ''
@@ -2742,6 +2758,7 @@ export const specializeExecutableOwner = (
         type.schema === undefined
           ? undefined
           : (specializeSchema?.(type.schema, specializeType, specializeArgument) ?? type.schema),
+        type.unsafe,
       )
     if (isEffect(type))
       return effectWithRows(
@@ -3232,6 +3249,7 @@ const inferType = (
     const patternRank = pattern.mode === 'Shared' ? 0 : pattern.mode === 'Exclusive' ? 1 : 2
     const actualRank = actual.mode === 'Shared' ? 0 : actual.mode === 'Exclusive' ? 1 : 2
     return (
+      (!actual.unsafe || pattern.unsafe) &&
       actualRank <= patternRank &&
       pattern.parameters.length === actual.parameters.length &&
       pattern.parameters.every((parameter_, index) => {

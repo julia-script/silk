@@ -70,6 +70,12 @@ const serializedString = (value: unknown, context: string): string => {
   return value
 }
 
+const serializedBoolean = (value: unknown, context: string): boolean => {
+  if (typeof value !== 'boolean')
+    throw new InvalidModuleSurfaceEncoding(`${context} must be a boolean`)
+  return value
+}
+
 const serializedNonNegativeInteger = (value: unknown, context: string): number => {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
     throw new InvalidModuleSurfaceEncoding(`${context} must be a non-negative safe integer`)
@@ -735,6 +741,7 @@ function encodeTypeNode(value: Type.Type): unknown {
   if (Type.isCallable(value))
     return {
       tag: 'Callable',
+      unsafe: value.unsafe,
       mode: value.mode,
       parameters: value.parameters.map(encodeTypeNode),
       result: encodeTypeNode(value.result),
@@ -777,6 +784,7 @@ function encodeCallableContract(value: CallableContract.CallableContract): Seria
   return {
     tag: 'CallableContract',
     functionKind: value.functionKind,
+    unsafe: value.unsafe,
     binders: value.binders.map(encodeParameter),
     parameters: value.parameters.map((parameter) => ({
       tag: 'CallableParameter',
@@ -829,6 +837,7 @@ function decodeCallableContract(value: unknown): CallableContract.CallableContra
   })
   return CallableContract.make({
     functionKind,
+    unsafe: serializedBoolean(encoded.unsafe, 'callable contract unsafe qualifier'),
     binders: serializedArray(encoded.binders, 'callable contract binders').map(decodeParameter),
     parameters,
     result: decodeTypeNode(encoded.result),
@@ -986,7 +995,13 @@ function decodeTypeNode(value: unknown): Type.Type {
         throw new InvalidModuleSurfaceEncoding(
           'callable signature disagrees with its specialized schema contract',
         )
-      return Type.callable(parameters, result, mode, schema)
+      return Type.callable(
+        parameters,
+        result,
+        mode,
+        schema,
+        serializedBoolean(encoded.unsafe, 'callable unsafe qualifier'),
+      )
     }
     case 'Effect': {
       const access = serializedString(encoded.access, 'effect access')
@@ -1696,6 +1711,7 @@ const declaration = (value: DeclarationIndex.DeclarationFact): string =>
     canonicalState(value.canonical),
     value.visibility,
     value.functionKind,
+    boolean(value.unsafe),
     array(value.typeParameters.map(typeParameter)),
     number(value.parameterCount),
     array(value.parameters.map(parameter)),
@@ -1764,6 +1780,7 @@ const serviceOperation = (value: DeclarationIndex.ServiceOperationFact): string 
     declarationIdOrdinal(value.id),
     serviceOperationState(value.state),
     value.functionKind,
+    boolean(value.unsafe),
     optional(value.operator?.operator),
     array(value.typeParameters.map(typeParameter)),
     number(value.parameterCount),

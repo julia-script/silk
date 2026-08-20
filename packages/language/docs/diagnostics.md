@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 3 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 128 |
+| `SEM` | Semantic | 129 |
 | `OWN` | Ownership | 14 |
 | `LAY` | Layout | 1 |
 
-There are 156 codes in total.
+There are 157 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -131,7 +131,7 @@ There are 156 codes in total.
 | `SEM0078` |  | `<target> is unary; name it directly instead of calling it with no arguments` |
 | `SEM0080` |  | `Cannot merge callable values from different construction sites without explicit erasure` |
 | `SEM0081` |  | `Cannot return an owned callable whose concrete environment identity is unknown` |
-| `SEM0082` | Stable code for a raw storage operation outside lexical unsafe authority. | `<operation> requires a lexical unsafe block` |
+| `SEM0082` | Stable code for a raw storage operation outside lexical unsafe authority. | `<operation> requires unsafe acknowledgement` |
 | `SEM0083` | Stable code for an invalid source-declared capability implementation. | `Invalid conformance: <detail>` |
 | `SEM0084` | Stable code for a Drop implementation outside the compiler-sealed hook contract. | `Invalid Drop hook: <detail>` |
 | `SEM0085` | Stable code for malformed escapes, invalid UTF-8, or non-byte literal values. | `Invalid static literal: <detail>` |
@@ -182,6 +182,7 @@ There are 156 codes in total.
 | `SEM0134` | Stable code for an operator marker that cannot describe its interface operation. | `Invalid operator contract: <detail>` |
 | `SEM0135` | Stable code for operator syntax with no marked operation accepting its operands. | `Operator <operator> does not accept (<join>)` |
 | `SEM0136` | Stable code for operator syntax matched by more than one marked operation. | `Operator <operator> is ambiguous between <join>` |
+| `SEM0137` | Stable code for an unsafe acknowledgement that does not complete an unsafe invocation. | `` `unsafe` must acknowledge a complete unsafe invocation `` |
 
 ## Ownership (`OWN`)
 

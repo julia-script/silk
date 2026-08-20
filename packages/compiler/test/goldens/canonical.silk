@@ -39,6 +39,10 @@ fn helper(value: i32, other: i32) -> i32 {
   return moved
 }
 
+pub unsafe fn unchecked(value: i32) -> i32 {
+  return value
+}
+
 fn inspect(event: Token | End) -> i32 {
   return match &mut event {
     Token {span: Span {start: offset, ..}, ..} if true => offset
@@ -101,6 +105,8 @@ fn borrow(values: [i32; 2], output: [i32; 2]) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return helper(-1, 2)
-    |> Core.finish()
+  return unsafe unchecked(
+    helper(-1, 2)
+      |> Core.finish(),
+  )
 }
