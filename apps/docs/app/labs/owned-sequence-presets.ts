@@ -1,4 +1,8 @@
-export const vectorGrowthSource = `import silk.vector {Vector, make, append, get, length, capacity}
+export const vectorGrowthSource = `import silk.core { SystemAllocator }
+import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.i32 as i32
+import silk.vector {Vector, make, append, get, length, capacity}
 
 effect fn build() -> i32
 ! OutOfMemoryError {
@@ -42,7 +46,13 @@ pub fn main() -> i32 {
 }
 `
 
-export const vectorFailedGrowthSource = `import silk.vector {Vector, make, append, get, length, capacity}
+export const vectorFailedGrowthSource = `import silk.core { Allocator }
+import silk.core { SystemAllocator }
+import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.i32 as i32
+import silk.layout { Layout }
+import silk.vector {Vector, make, append, get, length, capacity}
 
 struct QuotaAllocator {
   remaining: i32
@@ -118,7 +128,11 @@ pub fn main() -> i32 {
 }
 `
 
-export const vectorDestructionOrderSource = `import silk.vector {Vector, make, append, capacity}
+export const vectorDestructionOrderSource = `import silk.core { SystemAllocator }
+import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.i32 as i32
+import silk.vector {Vector, make, append, capacity}
 
 struct Entry {
   value: i32
@@ -166,7 +180,11 @@ pub fn main() -> i32 {
 }
 `
 
-export const vectorEarlyDropSource = `import silk.vector {Vector, make, append}
+export const vectorEarlyDropSource = `import silk.core { SystemAllocator }
+import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.i32 as i32
+import silk.vector {Vector, make, append}
 
 struct Entry {
   value: i32
@@ -213,7 +231,12 @@ pub fn main() -> i32 {
 }
 `
 
-export const scannerSource = `import silk.vector {Vector, make, append, get, length, capacity}
+export const scannerSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.vector {Vector, make, append, get, length, capacity}
 
 struct U8 {
   value: i32

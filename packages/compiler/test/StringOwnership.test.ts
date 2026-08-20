@@ -105,8 +105,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('preserves loans nested inside generic result data', () =>
   Effect.gen(function* () {
-    const self =
-      yield* snapshot(`import silk.u8 as u8
+    const self = yield* snapshot(`import silk.u8 as u8
 import silk.result { Result, Success, Failure, succeed, failResult }
 struct InvalidUtf8 { offset: usize }
 fn validate(bytes: &[u8], accepted: bool) -> Result<string, InvalidUtf8> {

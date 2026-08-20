@@ -235,7 +235,8 @@ it.effect('emits native debug metadata only for debug requests', () =>
   }),
 )
 
-const arithmeticSource = 'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }'
+const arithmeticSource =
+  'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }'
 
 const matchSource = `import silk.i32 as i32
 pub struct Left { value: i32 }
@@ -252,9 +253,12 @@ pub fn main() -> i32 { return inspect(Left { value: 41 }) }`
 it.effect('emits checked arithmetic through overflow intrinsics and guarded division', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(arithmeticSource, { mode: 'release' })
-    const division = yield* emit('import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(1, 0) }', {
-      mode: 'release',
-    })
+    const division = yield* emit(
+      'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(1, 0) }',
+      {
+        mode: 'release',
+      },
+    )
 
     assert.include(artifact.ir, 'llvm.smul.with.overflow')
     assert.include(artifact.ir, 'llvm.ssub.with.overflow')

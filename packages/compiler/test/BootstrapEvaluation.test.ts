@@ -576,7 +576,9 @@ it.effect('refuses malformed target-aware MIR before executing any operation', (
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'memory/invalid-layout',
-      ascii('import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'),
+      ascii(
+        'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
+      ),
       'wasm32-unknown-unknown',
     )
     const mir = Analysis.mirOf(snapshot)

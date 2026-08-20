@@ -97,9 +97,7 @@ const saturation = 250
  * The harness is ordinary Silk calling the same public API a user program would, comparing with
  * ordinary exact `string` equality — the equality this issue must leave alone.
  */
-const program = (
-  cases: ReadonlyArray<Case>,
-): string => `import silk.core { Allocator }
+const program = (cases: ReadonlyArray<Case>): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
 import silk.effects as Effect

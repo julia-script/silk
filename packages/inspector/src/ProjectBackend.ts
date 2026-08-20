@@ -234,8 +234,6 @@ const bindingDetail = (binding: NameResolution.Binding): string => {
       return `LocalDeclaration · ${binding.declaration.module}.${binding.declaration.name}`
     case 'IntrinsicActor':
       return 'IntrinsicActor · language intrinsic'
-    case 'StdlibNamespace':
-      return `StdlibNamespace · ${binding.module}`
     case 'ModuleNamespace':
       return `ModuleNamespace · ${binding.module}`
     case 'ImportedMember':

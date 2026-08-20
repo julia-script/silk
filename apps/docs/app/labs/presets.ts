@@ -57,7 +57,8 @@ export const presets: ReadonlyArray<Preset> = [
     group: 'evaluation',
     root: 'main',
     modules: {
-      main: `fn countdown(value: i32) -> i32 {
+      main: `import silk.i32 as i32
+fn countdown(value: i32) -> i32 {
   if value == 0 {
     return 42
   }
@@ -132,7 +133,8 @@ pub fn decode(code: i32) -> First | Second | Third {
   return Third {}
 }
 `,
-      'compiler/Coverage': `import compiler.Member {First, Second, Third, decode}
+      'compiler/Coverage': `import silk.usize as usize
+import compiler.Member {First, Second, Third, decode}
 
 struct FoldState {
   remaining: i32
@@ -203,7 +205,8 @@ pub fn fold(codes: &[i32]) -> i32 {
   one(
     'acceptance',
     'ok · Exclusive runtime slice',
-    `struct Token {
+    `import silk.usize as usize
+struct Token {
   value: i32
 }
 
@@ -225,7 +228,8 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Eager setup, lazy Effect body',
-    `pub fn main() -> i32 {
+    `import silk.i32 as i32
+pub fn main() -> i32 {
   let eager = i32.add(20, 1)
   let delayed = effect {
     return i32.add(eager, 21)
@@ -237,7 +241,8 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Reusable exclusive capture',
-    `pub fn main() -> i32 {
+    `import silk.i32 as i32
+pub fn main() -> i32 {
   let mut counter = 10
   let increment = effect {
     counter = counter + 1
@@ -251,7 +256,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Retry with persistent capture',
-    `struct Problem {
+    `import silk.effects as Effect
+import silk.i32 as i32
+struct Problem {
   code: i32
 }
 
@@ -318,7 +325,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Suspended state resumes',
-    `effect fn delayed() -> i32 {
+    `import silk.effects as Effect
+import silk.i32 as i32
+effect fn delayed() -> i32 {
   let left = 40
   return left + run Effect.suspend(
     effect {
@@ -335,7 +344,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Suspended map and flatMap',
-    `fn increment(value: i32) -> i32 {
+    `import silk.effects as Effect
+import silk.i32 as i32
+fn increment(value: i32) -> i32 {
   return value + 1
 }
 
@@ -366,7 +377,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Stack-safe suspended recursion',
-    `effect fn count(value: i32) -> i32 {
+    `import silk.effects as Effect
+import silk.i32 as i32
+effect fn count(value: i32) -> i32 {
   if value == 0 {
     return 0
   }
@@ -386,7 +399,13 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Portable Logger provider',
-    `import silk.logging {length, messageByteAt}
+    `import silk.effects as Effect
+import silk.i32 as i32
+import silk.logging { InMemoryLogger }
+import silk.logging { LogLevel }
+import silk.logging { LogError }
+import silk.u8 as u8
+import silk.logging {length, messageByteAt}
 
 effect fn program() -> i32
 ! LogError {
@@ -411,7 +430,9 @@ pub fn main() -> i32 {
   one(
     'allocation',
     'ok · Validated target Layout',
-    `pub fn main() -> i32 {
+    `import silk.layout { Layout }
+import silk.layout { InvalidAlignment }
+pub fn main() -> i32 {
   let candidate = Layout.make(64, 32)
   return match move candidate {
     Layout {bytes, alignment} => 42
@@ -423,7 +444,14 @@ pub fn main() -> i32 {
   one(
     'allocation',
     'ok · Self-contained Allocation contract',
-    `effect fn store() -> i32
+    `import silk.core { Allocator }
+import silk.core { SystemAllocator }
+import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn store() -> i32
 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
@@ -452,7 +480,13 @@ pub fn main() -> i32 {
   one(
     'allocation',
     'ok · Early drop releases the buffer once',
-    `effect fn store() -> i32
+    `import silk.core { Allocator }
+import silk.core { SystemAllocator }
+import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+effect fn store() -> i32
 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
@@ -479,7 +513,13 @@ pub fn main() -> i32 {
   one(
     'allocation',
     'ok · Zero-sized elements keep distinct owners',
-    `struct Empty {}
+    `import silk.core { Allocator }
+import silk.core { SystemAllocator }
+import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+struct Empty {}
 
 effect fn store() -> i32
 ! OutOfMemoryError {
@@ -508,7 +548,12 @@ pub fn main() -> i32 {
   one(
     'allocation',
     'fail · Raw storage outside unsafe is rejected',
-    `effect fn store() -> i32
+    `import silk.core { Allocator }
+import silk.core { SystemAllocator }
+import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.layout { Layout }
+effect fn store() -> i32
 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
@@ -532,7 +577,13 @@ pub fn main() -> i32 {
   one(
     'allocation',
     'ok · Drop hook runs before field cleanup',
-    `struct Guard {
+    `import silk.core { Allocator }
+import silk.core { SystemAllocator }
+import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+struct Guard {
   buffer: RawBuffer<i32>
 }
 
@@ -575,7 +626,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Typed Effect recovery',
-    `struct Problem {
+    `import silk.effects as Effect
+import silk.i32 as i32
+struct Problem {
   code: i32
 }
 
@@ -608,7 +661,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Piped success composition',
-    `struct Problem {
+    `import silk.effects as Effect
+import silk.i32 as i32
+struct Problem {
   code: i32
 }
 
@@ -648,7 +703,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Piped failure recovery',
-    `struct FirstProblem {
+    `import silk.effects as Effect
+import silk.i32 as i32
+struct FirstProblem {
   code: i32
 }
 
@@ -686,7 +743,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Piped acquired provider',
-    `service Clock {
+    `import silk.effects as Effect
+import silk.i32 as i32
+service Clock {
   effect fn value() -> i32 ? &mut Clock
 }
 
@@ -746,7 +805,8 @@ pub fn main() -> i32 {
   one(
     'callables',
     'ok · Named function and stored section',
-    `fn identity(value: i32) -> i32 {
+    `import silk.i32 as i32
+fn identity(value: i32) -> i32 {
   return value
 }
 
@@ -760,7 +820,8 @@ pub fn main() -> i32 {
   one(
     'callables',
     'trap · Shared reusable section',
-    `fn read(value: i32, values: &[i32]) -> i32 {
+    `import silk.i32 as i32
+fn read(value: i32, values: &[i32]) -> i32 {
   return value + values[0]
 }
 
@@ -774,7 +835,8 @@ pub fn main() -> i32 {
   one(
     'callables',
     'ok · Exclusive reusable section',
-    `fn write(value: i32, values: &mut [i32]) -> i32 {
+    `import silk.i32 as i32
+fn write(value: i32, values: &mut [i32]) -> i32 {
   values[0] = value
   return values[0]
 }
@@ -792,7 +854,8 @@ pub fn main() -> i32 {
   one(
     'callables',
     'ok · Consuming section',
-    `struct Token {
+    `import silk.i32 as i32
+struct Token {
   value: i32
 }
 
@@ -810,7 +873,8 @@ pub fn main() -> i32 {
   one(
     'callables',
     'fail · Invalid consuming reuse',
-    `struct Token {
+    `import silk.i32 as i32
+struct Token {
   value: i32
 }
 
@@ -842,7 +906,8 @@ pub fn main() -> i32 {
   one(
     'callables',
     'ok · Dropped uninvoked section',
-    `struct Token {
+    `import silk.i32 as i32
+struct Token {
   value: i32
 }
 
@@ -861,7 +926,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Callable map section',
-    `effect fn succeed(value: i32) -> i32 {
+    `import silk.effects as Effect
+import silk.i32 as i32
+effect fn succeed(value: i32) -> i32 {
   return value
 }
 
@@ -874,7 +941,8 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Effectful Logger tap',
-    `service TapLogger {
+    `import silk.effects as Effect
+service TapLogger {
   effect fn value() -> i32 ? &TapLogger
 }
 
@@ -912,7 +980,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Mutable mapped callback',
-    `effect fn succeed(value: i32) -> i32 {
+    `import silk.effects as Effect
+import silk.i32 as i32
+effect fn succeed(value: i32) -> i32 {
   return value
 }
 
@@ -935,7 +1005,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'fail · Take-once retry rejection',
-    `struct Payload {
+    `import silk.effects as Effect
+import silk.i32 as i32
+struct Payload {
   value: i32
 }
 
@@ -960,7 +1032,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Nested map result',
-    `effect fn succeed(value: i32) -> i32 {
+    `import silk.effects as Effect
+import silk.i32 as i32
+effect fn succeed(value: i32) -> i32 {
   return value
 }
 
@@ -977,7 +1051,9 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Ungrouped run composes first',
-    `effect fn succeed(value: i32) -> i32 {
+    `import silk.effects as Effect
+import silk.i32 as i32
+effect fn succeed(value: i32) -> i32 {
   return value
 }
 
@@ -990,7 +1066,8 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Grouped run transforms result',
-    `effect fn succeed(value: i32) -> i32 {
+    `import silk.i32 as i32
+effect fn succeed(value: i32) -> i32 {
   return value
 }
 
@@ -1905,11 +1982,13 @@ pub fn b() -> i32 {
   },
 
   // ---- operators ------------------------------------------------------------------------
-  one('operators', 'ok · Operator precedence', `pub fn main() -> i32 {
+  one('operators', 'ok · Operator precedence', `import silk.i32 as i32
+pub fn main() -> i32 {
   return 2 + 5 * 8
 }
 `),
-  one('operators', 'ok · Pipeline', `pub fn main() -> i32 {
+  one('operators', 'ok · Pipeline', `import silk.i32 as i32
+pub fn main() -> i32 {
   return 2
     |> i32.add(40)
 }
@@ -1917,7 +1996,8 @@ pub fn b() -> i32 {
   one(
     'operators',
     'ok · Unary bool pipeline',
-    `pub fn main() -> i32 {
+    `import silk.bool as bool
+pub fn main() -> i32 {
   if true
     |> bool.not {
     return 0
@@ -1926,7 +2006,8 @@ pub fn b() -> i32 {
 }
 `,
   ),
-  one('operators', 'ok · bool not', `pub fn main() -> i32 {
+  one('operators', 'ok · bool not', `import silk.i32 as i32
+pub fn main() -> i32 {
   if !(1 == 2) {
     return 42
   }
@@ -1940,7 +2021,8 @@ pub fn b() -> i32 {
   one(
     'operators',
     'ok · Closed operator surface',
-    `pub fn main() -> i32 {
+    `import silk.i32 as i32
+pub fn main() -> i32 {
   if 6 * 7 != 42 {
     return 0
   }
@@ -1981,7 +2063,9 @@ pub fn b() -> i32 {
   one(
     'backend',
     'ok · Target-sized usize boundary',
-    `fn nativeBoundary() -> usize {
+    `import silk.i32 as i32
+import silk.usize as usize
+fn nativeBoundary() -> usize {
   return 4294967296
 }
 
@@ -2252,7 +2336,8 @@ pub fn main() -> i32 {
   one(
     'matching',
     'ok · Guarded union match',
-    `struct Left {
+    `import silk.i32 as i32
+struct Left {
   value: i32
 }
 
@@ -2427,7 +2512,8 @@ pub fn main() -> i32 {
   one(
     'control',
     'ok · Scalar mutation',
-    `pub fn main() -> i32 {
+    `import silk.i32 as i32
+pub fn main() -> i32 {
   let mut value = 40
   value = value + 2
   return value
@@ -2437,7 +2523,8 @@ pub fn main() -> i32 {
   one(
     'control',
     'ok · Field mutation',
-    `struct Pair {
+    `import silk.i32 as i32
+struct Pair {
   left: i32
   right: i32
 }
@@ -2452,7 +2539,8 @@ pub fn main() -> i32 {
   one(
     'control',
     'ok · Indexed mutation',
-    `pub fn main() -> i32 {
+    `import silk.usize as usize
+pub fn main() -> i32 {
   let mut values = [1, 2, 3]
   let index = usize.add(1, 0)
   values[index] = 42
@@ -2489,7 +2577,8 @@ pub fn main() -> i32 {
   one(
     'control',
     'ok · Counting loop',
-    `pub fn main() -> i32 {
+    `import silk.i32 as i32
+pub fn main() -> i32 {
   let mut value = 0
   while value < 42 {
     value = value + 1
@@ -2501,7 +2590,8 @@ pub fn main() -> i32 {
   one(
     'control',
     'ok · Nested loops',
-    `pub fn main() -> i32 {
+    `import silk.i32 as i32
+pub fn main() -> i32 {
   let mut outer = 0
   let mut total = 0
   while outer < 6 {
@@ -2519,7 +2609,8 @@ pub fn main() -> i32 {
   one(
     'control',
     'ok · Conditional break',
-    `pub fn main() -> i32 {
+    `import silk.i32 as i32
+pub fn main() -> i32 {
   let mut value = 0
   while true {
     if value == 42 {
@@ -2534,7 +2625,8 @@ pub fn main() -> i32 {
   one(
     'control',
     'ok · Continue',
-    `pub fn main() -> i32 {
+    `import silk.i32 as i32
+pub fn main() -> i32 {
   let mut value = 0
   while value < 42 {
     value = value + 1
@@ -2560,7 +2652,8 @@ pub fn main() -> i32 {
   one(
     'control',
     'trap · Write bounds trap',
-    `pub fn main() -> i32 {
+    `import silk.usize as usize
+pub fn main() -> i32 {
   let mut values = [1, 2]
   let index = usize.add(2, 0)
   values[index] = 42
@@ -2583,7 +2676,8 @@ pub fn main() -> i32 {
   one(
     'control',
     'fail · Incompatible loop owner',
-    `struct Token {
+    `import silk.i32 as i32
+struct Token {
   value: i32
 }
 
@@ -2676,7 +2770,8 @@ pub fn main() -> i32 {
   one(
     'backend',
     'ok · Branch diamond',
-    `pub fn main() -> i32 {
+    `import silk.i32 as i32
+pub fn main() -> i32 {
   if i32.equals(1, 1) {
     return 42
   }
@@ -2684,15 +2779,18 @@ pub fn main() -> i32 {
 }
 `,
   ),
-  one('backend', 'ok · Checked arithmetic', `pub fn main() -> i32 {
+  one('backend', 'ok · Checked arithmetic', `import silk.i32 as i32
+pub fn main() -> i32 {
   return i32.divide(i32.add(40, 2), 1)
 }
 `),
-  one('backend', 'trap · Overflow traps', `pub fn main() -> i32 {
+  one('backend', 'trap · Overflow traps', `import silk.i32 as i32
+pub fn main() -> i32 {
   return i32.add(2147483647, 1)
 }
 `),
-  one('backend', 'trap · Divide by zero traps', `pub fn main() -> i32 {
+  one('backend', 'trap · Divide by zero traps', `import silk.i32 as i32
+pub fn main() -> i32 {
   return i32.divide(1, 0)
 }
 `),
@@ -2812,7 +2910,8 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'ok · Declared interface over two providers',
-    `interface Area {
+    `import silk.i32 as i32
+interface Area {
   fn area(value: &Self) -> i32
 }
 
@@ -2856,7 +2955,8 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'ok · Declared two-operation contract',
-    `interface Span {
+    `import silk.i32 as i32
+interface Span {
   fn start(self: &Self) -> i32
   fn end(self: &Self) -> i32
 }
@@ -2896,7 +2996,9 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'ok · Effectful contract with failure and requirement rows',
-    `pub struct DecodeError {}
+    `import silk.effects as Effect
+import silk.i32 as i32
+pub struct DecodeError {}
 
 pub struct Schema {
   pub offset: i32
@@ -2964,7 +3066,9 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'ok · User type witnesses Order',
-    `import silk.order {Order}
+    `import silk.bool as bool
+import silk.i32 as i32
+import silk.order {Order}
 
 pub struct Priority {
   pub rank: i32
@@ -2998,7 +3102,10 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'ok · Two-operation bound through its own name',
-    `import silk.hash {HashKey, HashSeed, mix, seed}
+    `import silk.bool as bool
+import silk.i32 as i32
+import silk.u64 as u64
+import silk.hash {HashKey, HashSeed, mix, seed}
 
 pub struct Word {
   pub value: u64
@@ -3040,7 +3147,8 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'ok · Conditional conformance over a wrapper',
-    `interface Describe {
+    `import silk.i32 as i32
+interface Describe {
   fn size(value: &Self) -> i32
 }
 
@@ -3087,7 +3195,8 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'fail · Witness demands a stronger receiver',
-    `interface Reader {
+    `import silk.i32 as i32
+interface Reader {
   fn read(self: &Self) -> i32
 }
 
@@ -3114,7 +3223,10 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'fail · Witness misses a contract operation',
-    `import silk.hash {HashKey}
+    `import silk.bool as bool
+import silk.i32 as i32
+import silk.u64 as u64
+import silk.hash {HashKey}
 
 pub struct Tag {
   pub value: u64

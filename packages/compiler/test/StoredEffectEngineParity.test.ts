@@ -910,9 +910,7 @@ pub fn main() -> i32 {
    * this is the missing-cleanup control: 80 holds must use more pages than 8, or the flat-heap
    * comparison below cannot see a leaked capture.
    */
-  const leakHolds = (
-    count: number,
-  ): string => `import silk.core { Allocator }
+  const leakHolds = (count: number): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
 import silk.effects as Effect

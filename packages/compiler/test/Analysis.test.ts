@@ -351,7 +351,9 @@ it.effect('preserves one exact target and layout plan across facade queries and 
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'memory/plan',
-      ascii('import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'),
+      ascii(
+        'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
+      ),
       'wasm32-unknown-unknown',
     )
     const target = Analysis.targetOf(self)

@@ -7,7 +7,10 @@ import * as Type from '../src/Type.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const program = (bytes: string, alignment: string): string => `import silk.layout { InvalidAlignment }
+const program = (
+  bytes: string,
+  alignment: string,
+): string => `import silk.layout { InvalidAlignment }
 import silk.layout { Layout }
 pub fn main() -> i32 {
   let validated = Layout.make(${bytes}, ${alignment})

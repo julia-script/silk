@@ -484,7 +484,8 @@ pub fn main() -> i32 { let value = 42 return choose(move value, value) }`,
   },
   {
     name: 'arithmetic',
-    source: 'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }',
+    source:
+      'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -539,17 +540,20 @@ return (40 + 2) * 1
   },
   {
     name: 'unary-bool-pipeline',
-    source: 'import silk.bool as bool\npub fn main() -> i32 { if true |> bool.not { return 0 } return 42 }',
+    source:
+      'import silk.bool as bool\npub fn main() -> i32 { if true |> bool.not { return 0 } return 42 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'signed-truncation',
-    source: 'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(i32.divide(-7, 2), 45) }',
+    source:
+      'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(i32.divide(-7, 2), 45) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'remainder-sign',
-    source: 'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(i32.remainder(-7, 2), 43) }',
+    source:
+      'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(i32.remainder(-7, 2), 43) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -574,12 +578,14 @@ return (40 + 2) * 1
   },
   {
     name: 'branch-taken',
-    source: 'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
+    source:
+      'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'branch-otherwise',
-    source: 'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 2) { return 0 } return 42 }',
+    source:
+      'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 2) { return 0 } return 42 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -590,7 +596,8 @@ return (40 + 2) * 1
   },
   {
     name: 'bool-not',
-    source: 'import silk.bool as bool\nimport silk.i32 as i32\npub fn main() -> i32 { if bool.not(i32.equals(1, 2)) { return 42 } return 0 }',
+    source:
+      'import silk.bool as bool\nimport silk.i32 as i32\npub fn main() -> i32 { if bool.not(i32.equals(1, 2)) { return 42 } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {

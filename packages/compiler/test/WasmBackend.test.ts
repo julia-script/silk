@@ -163,7 +163,8 @@ pub fn main() -> i32 {
 const nestedSource = `pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(identity(42)) }`
 
-const branchSource = 'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'
+const branchSource =
+  'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'
 
 const matchSource = `import silk.i32 as i32
 pub struct Left { value: i32 }
@@ -384,7 +385,9 @@ it.effect('runs identically whether or not names were stripped', () =>
 
 it.effect('maps divisions onto wasm operators that already trap, with no guard expansion', () =>
   Effect.gen(function* () {
-    const artifact = yield* emit('import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(84, 2) }')
+    const artifact = yield* emit(
+      'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(84, 2) }',
+    )
 
     assert.match(artifact.wat, /i32\.div_s/)
   }),
@@ -465,17 +468,35 @@ pub fn main() -> i32 { return choose(1, 42) }`,
   ],
   ['addition', 'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(40, 2) }'],
   ['operator precedence', 'pub fn main() -> i32 { return 2 + 3 * 4 }'],
-  ['operator pipeline', 'import silk.i32 as i32\npub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }'],
+  [
+    'operator pipeline',
+    'import silk.i32 as i32\npub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }',
+  ],
   ['operator negation', 'pub fn main() -> i32 { return -(40 + 2) }'],
   ['subtraction', 'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(50, 8) }'],
   ['multiplication', 'import silk.i32 as i32\npub fn main() -> i32 { return i32.multiply(6, 7) }'],
   ['division', 'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(84, 2) }'],
   ['remainder', 'import silk.i32 as i32\npub fn main() -> i32 { return i32.remainder(85, 43) }'],
-  ['chained arithmetic', 'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(i32.add(40, 2), 1) }'],
-  ['negative results', 'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(0, 42) }'],
-  ['branch taken', 'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'],
-  ['branch not taken', 'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 2) { return 0 } return 42 }'],
-  ['ordered comparison', 'import silk.i32 as i32\npub fn main() -> i32 { if i32.lessThan(1, 2) { return 42 } return 0 }'],
+  [
+    'chained arithmetic',
+    'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(i32.add(40, 2), 1) }',
+  ],
+  [
+    'negative results',
+    'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(0, 42) }',
+  ],
+  [
+    'branch taken',
+    'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
+  ],
+  [
+    'branch not taken',
+    'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 2) { return 0 } return 42 }',
+  ],
+  [
+    'ordered comparison',
+    'import silk.i32 as i32\npub fn main() -> i32 { if i32.lessThan(1, 2) { return 42 } return 0 }',
+  ],
   [
     'let bindings across a branch',
     'import silk.i32 as i32\npub fn main() -> i32 { let base = 40 if i32.equals(base, 40) { let bonus = 2 return i32.add(base, bonus) } return 0 }',
@@ -507,11 +528,26 @@ pub fn main() -> i32 { return choose([10, 42], 2) }`,
     `fn choose(values: [i32; 0], index: usize) -> i32 { return values[index] }
 pub fn main() -> i32 { return choose([], 0) }`,
   ],
-  ['division by zero traps', 'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(1, 0) }'],
-  ['remainder by zero traps', 'import silk.i32 as i32\npub fn main() -> i32 { return i32.remainder(1, 0) }'],
-  ['addition overflow traps', 'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(2147483647, 1) }'],
-  ['subtraction overflow traps', 'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(-2147483648, 1) }'],
-  ['multiplication overflow traps', 'import silk.i32 as i32\npub fn main() -> i32 { return i32.multiply(2147483647, 2) }'],
+  [
+    'division by zero traps',
+    'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(1, 0) }',
+  ],
+  [
+    'remainder by zero traps',
+    'import silk.i32 as i32\npub fn main() -> i32 { return i32.remainder(1, 0) }',
+  ],
+  [
+    'addition overflow traps',
+    'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(2147483647, 1) }',
+  ],
+  [
+    'subtraction overflow traps',
+    'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(-2147483648, 1) }',
+  ],
+  [
+    'multiplication overflow traps',
+    'import silk.i32 as i32\npub fn main() -> i32 { return i32.multiply(2147483647, 2) }',
+  ],
 ]
 
 for (const [name, source] of programs) {

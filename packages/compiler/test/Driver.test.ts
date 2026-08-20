@@ -79,7 +79,9 @@ it.effect('compiles a three-module call chain to native execution matching the i
       ],
       [
         'library/Answer',
-        ascii('import silk.i32 as i32\nimport values.Number { two }\npub fn answer() -> i32 { return i32.add(40, two()) }'),
+        ascii(
+          'import silk.i32 as i32\nimport values.Number { two }\npub fn answer() -> i32 { return i32.add(40, two()) }',
+        ),
       ],
       ['values/Number', ascii('pub fn two() -> i32 { return 2 }')],
     ])

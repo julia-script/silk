@@ -161,10 +161,7 @@ effect fn store() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
-const unsafeProgram = (
-  body: string,
-  layout = '[i32; 2]',
-): string => `import silk.core { Allocator }
+const unsafeProgram = (body: string, layout = '[i32; 2]'): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
 import silk.effects as Effect

@@ -218,7 +218,9 @@ pub fn main() -> i32 {
 
       const empty = yield* Analysis.ofSourceRealized(
         `${moduleName}/empty`,
-        ascii('import silk.usize as usize\npub fn main() -> i32 { let bytes = b"" return usize.toI32(bytes.length) }'),
+        ascii(
+          'import silk.usize as usize\npub fn main() -> i32 { let bytes = b"" return usize.toI32(bytes.length) }',
+        ),
       )
       const emptyResult = Analysis.evaluate(empty)
       assert.strictEqual(emptyResult._tag, 'Completed')
