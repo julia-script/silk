@@ -33,14 +33,6 @@ pub struct StreamReadError
 
 Failure to complete one standard-input read.
 
-<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `Report for StreamReadError`
-
-```silk
-impl Report for StreamReadError
-```
-
 <a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a726561644661696c757265"></a>
 
 ## `readFailure`

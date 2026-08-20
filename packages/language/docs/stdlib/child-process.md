@@ -99,14 +99,6 @@ pub reason: ProcessReason
 
 The portable reason callers can recover by.
 
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `Report for ProcessError`
-
-```silk
-impl Report for ProcessError
-```
-
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a737061776e4f7065726174696f6e"></a>
 
 ## `spawnOperation`

@@ -34,14 +34,6 @@ pub struct HostInputError
 
 Failure to complete one host-input lookup.
 
-<a id="declaration-73696c6b2f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `Report for HostInputError`
-
-```silk
-impl Report for HostInputError
-```
-
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a696e7075744661696c757265"></a>
 
 ## `inputFailure`

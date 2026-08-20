@@ -191,14 +191,6 @@ pub reason: FileReason
 
 The portable reason callers can recover by.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `Report for FileError`
-
-```silk
-impl Report for FileError
-```
-
 <a id="declaration-73696c6b2f66696c6573797374656d3a3a66696c65"></a>
 
 ## `file`

@@ -246,8 +246,6 @@ that can fail:
 ```silk
 pub struct Overflowed {}
 
-impl Report for Overflowed {}
-
 effect fn checked(value: i32) -> i32 ! Overflowed {
   if value > 100 {
     fail Overflowed {}
@@ -271,8 +269,8 @@ What each piece does:
   type error, not a silently ignored value.
 - `run` propagates the failure into the enclosing effect's row, which is why `main` also declares
   `! Overflowed`.
-- `impl Report for Overflowed {}` is required for any failure that can reach the entry point: it
-  is how an escaping failure becomes an exit status.
+- Any concrete owned failure value may reach an effectful entry point without marker conformance.
+  An unhandled failure terminates with status 1 and retains its canonical type identity.
 
 An effectful entry point returns `()` and reports success as exit status 0. An unhandled failure
 becomes a non-zero status.

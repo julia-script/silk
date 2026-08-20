@@ -107,14 +107,6 @@ pub struct StreamWriteError
 
 Failure to commit one complete stream message.
 
-<a id="declaration-73696c6b2f636f72653a3a696d706c656d656e746174696f6e3a31"></a>
-
-## Implementation `Report for StreamWriteError`
-
-```silk
-impl Report for StreamWriteError
-```
-
 <a id="declaration-73696c6b2f636f72653a3a5374616e6461726453747265616d73"></a>
 
 ## `StandardStreams`
@@ -175,7 +167,7 @@ pub fn native() -> NativeStandardStreams
 
 Constructs the process-backed standard-stream provider.
 
-<a id="declaration-73696c6b2f636f72653a3a696d706c656d656e746174696f6e3a32"></a>
+<a id="declaration-73696c6b2f636f72653a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `StandardStreams for NativeStandardStreams`
 
@@ -183,7 +175,7 @@ Constructs the process-backed standard-stream provider.
 impl StandardStreams for NativeStandardStreams
 ```
 
-<a id="declaration-73696c6b2f636f72653a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f636f72653a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `writeAll`
 

@@ -106,14 +106,6 @@ pub struct LogError
 
 A typed failure reported by a Logger provider.
 
-<a id="declaration-73696c6b2f6c6f6767696e673a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `Report for LogError`
-
-```silk
-impl Report for LogError
-```
-
 <a id="declaration-73696c6b2f6c6f6767696e673a3a6572726f72436f6465"></a>
 
 ## `errorCode`
@@ -164,7 +156,7 @@ pub fn stdout() -> StdoutLogger
 
 Constructs a Logger that forwards complete messages to process stdout.
 
-<a id="declaration-73696c6b2f6c6f6767696e673a3a696d706c656d656e746174696f6e3a31"></a>
+<a id="declaration-73696c6b2f6c6f6767696e673a3a696d706c656d656e746174696f6e3a30"></a>
 
 ## Implementation `Logger for StdoutLogger`
 
@@ -172,7 +164,7 @@ Constructs a Logger that forwards complete messages to process stdout.
 impl Logger for StdoutLogger
 ```
 
-<a id="declaration-73696c6b2f6c6f6767696e673a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6c6f6767696e673a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `log`
 
@@ -210,7 +202,7 @@ pub fn memoryFailAt(failAt: usize) -> InMemoryLogger
 
 Constructs an in-memory Logger that rejects one zero-based invocation ordinal.
 
-<a id="declaration-73696c6b2f6c6f6767696e673a3a696d706c656d656e746174696f6e3a32"></a>
+<a id="declaration-73696c6b2f6c6f6767696e673a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `Logger for InMemoryLogger`
 
@@ -218,7 +210,7 @@ Constructs an in-memory Logger that rejects one zero-based invocation ordinal.
 impl Logger for InMemoryLogger
 ```
 
-<a id="declaration-73696c6b2f6c6f6767696e673a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6c6f6767696e673a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `log`
 
