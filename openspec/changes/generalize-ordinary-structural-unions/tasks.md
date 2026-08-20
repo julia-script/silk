@@ -16,5 +16,5 @@
 
 - [x] 3.1 Add scalar, array, executable, nominal, droppable, generic, reordered, and invalid borrowed-member tests.
 - [x] 3.2 Add cross-engine active-payload cleanup and committed-golden determinism coverage.
-- [ ] 3.3 Update diagnostics, canonical specs, language docs, and inspectors.
-- [ ] 3.4 Run typecheck, Biome, full tests, native acceptance where layout/cleanup is target-specific, and `pnpm check`.
+- [x] 3.3 Update diagnostics, canonical specs, language docs, and inspectors.
+- [x] 3.4 Run typecheck, Biome, full tests, native acceptance where layout/cleanup is target-specific, and `pnpm check`.
