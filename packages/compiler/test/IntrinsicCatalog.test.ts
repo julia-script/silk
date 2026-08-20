@@ -37,15 +37,20 @@ const acceptedSources = Object.freeze([
     })
     return `pub fn floating${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
   }),
-  // `char` has no literal yet, so its operands arrive as parameters rather than constants.
+  // Character operations use typed parameters so checked construction receives `u32` while
+  // comparison and inspection receive `char`.
   ...Scalar.all()
     .filter((scalar) => scalar.category === 'Character')
     .map((scalar, scalarOrdinal) => {
-      const calls = scalar.operations.map(
-        (operation, operationOrdinal) =>
-          `  let v${operationOrdinal} = ${scalar.spelling}.${operation.spelling}(left, right)`,
-      )
-      return `pub fn character${scalarOrdinal}(left: ${scalar.spelling}, right: ${scalar.spelling}) -> i32 {\n${calls.join('\n')}\n  return 0\n}`
+      const calls = scalar.operations.map((operation, operationOrdinal) => {
+        const parameters =
+          operation.parameters ?? Array.from({ length: operation.arity }, () => scalar.spelling)
+        const arguments_ = parameters.map((parameter, ordinal) =>
+          parameter === 'u32' ? 'number' : ordinal === 0 ? 'left' : 'right',
+        )
+        return `  let v${operationOrdinal} = ${scalar.spelling}.${operation.spelling}(${arguments_.join(', ')})`
+      })
+      return `pub fn character${scalarOrdinal}(number: u32, left: ${scalar.spelling}, right: ${scalar.spelling}) -> i32 {\n${calls.join('\n')}\n  return 0\n}`
     }),
   `pub fn main() -> i32 {
   let i00 = i32.negate(1)

@@ -426,8 +426,8 @@ fn silk/logging.info params=0 locals=2 -> silk/logging.LogLevel entry=r0
     return %1 [1431, 1452)
 fn silk/string.utf8Bytes params=1 locals=2 -> &[u8] entry=r0
   r0 operation:
-    %1 = string-utf8-bytes %0 loans=none : &[u8] [7499, 7532)
-    return %1 [7499, 7532)
+    %1 = string-utf8-bytes %0 loans=none : &[u8] [7544, 7577)
+    return %1 [7544, 7577)
 fn silk/u8.toI32 params=1 locals=2 -> i32 entry=r0
   r0 operation:
     %1 = convert %0 u8 -> i32 [3530, 3555)

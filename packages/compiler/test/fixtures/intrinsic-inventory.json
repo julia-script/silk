@@ -4882,6 +4882,22 @@
       "identity": "ConvertToIsize"
     },
     {
+      "operation": "Intrinsic.charFromU32",
+      "signature": "fn Intrinsic.charFromU32(value: u32) -> Option<char>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/char.fromU32",
+      "identity": "CheckedConvertToChar"
+    },
+    {
+      "operation": "Intrinsic.charToU32",
+      "signature": "fn Intrinsic.charToU32(value: char) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/char.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
       "operation": "Intrinsic.charEquals",
       "signature": "fn Intrinsic.charEquals(left: char, right: char) -> bool",
       "unsafe": false,

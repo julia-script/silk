@@ -58,6 +58,7 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
         'compiler/Coverage',
         'compiler/Member',
         'silk/bytes',
+        'silk/char',
         'silk/core',
         'silk/format',
         'silk/i32',

@@ -119,6 +119,7 @@ it.effect('resolves standard-library imports without vendoring source', () =>
       Analysis.modules(snapshot).map((module) => module.name),
       [
         'silk/bytes',
+        'silk/char',
         'silk/core',
         'silk/format',
         'silk/i32',
