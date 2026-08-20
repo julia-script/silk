@@ -1,7 +1,7 @@
 # Align operator and short-circuit semantics
 
 Type: OpenSpec implementation handoff
-Status: open
+Status: resolved
 Blocked by: 03, 08
 OpenSpec: [align-operator-and-short-circuit-semantics](../../../openspec/changes/align-operator-and-short-circuit-semantics/proposal.md)
 
