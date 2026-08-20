@@ -1624,9 +1624,7 @@ export const catalog = (
         }
       }
     }
-    for (const statement of instance.function.statements) {
-      for (const expression of Hir.statementExpressions(statement))
-        addSpecializedExpression(expression)
+    const addPatternStatementTypes = (statement: Hir.Statement): void => {
       if (statement._tag === 'PatternBind' || statement._tag === 'IfLet') {
         addReferenced('bool')
         for (const member of statement.selection.members)
@@ -1634,6 +1632,19 @@ export const catalog = (
         for (const binding of statement.selection.bindings)
           addReferenced(Type.substitute(binding.type, substitution))
       }
+      if (statement._tag === 'Unsafe')
+        for (const nested of statement.statements) addPatternStatementTypes(nested)
+      if (statement._tag === 'If' || statement._tag === 'IfLet') {
+        for (const nested of statement.taken) addPatternStatementTypes(nested)
+        for (const nested of statement.otherwise) addPatternStatementTypes(nested)
+      }
+      if (statement._tag === 'While')
+        for (const nested of statement.body) addPatternStatementTypes(nested)
+    }
+    for (const statement of instance.function.statements) {
+      for (const expression of Hir.statementExpressions(statement))
+        addSpecializedExpression(expression)
+      addPatternStatementTypes(statement)
     }
   }
   for (const type of referenced.values()) {
@@ -3353,6 +3364,8 @@ export const memberFieldSlots = (
   member: Type.Type,
   path: ReadonlyArray<DeclarationIndex.FieldId>,
 ): ReadonlyArray<number> | undefined => {
+  if (path.length === 0 && Type.equals(shape.type, member))
+    return Object.freeze(Array.from({ length: shape.laneCount }, (_, ordinal) => ordinal))
   const selected =
     shape.tree._tag === 'ProductShape' && Type.equals(shape.tree.type, member)
       ? Object.freeze({ shape: shape.tree, physicalOffset: 0 })

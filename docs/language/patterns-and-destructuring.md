@@ -161,9 +161,10 @@ let _ = operation()
 This form is invalid. Intentional result discard continues to use `drop operation()` so one rule
 governs explicit discard throughout the language.
 
-**Diagnostics:** A refutable `let` pattern reports the initializer type and uncovered alternatives
-and suggests `if let` or `match`. A standalone wildcard binding suggests `drop` rather than silently
-discarding the result. No stable code is assigned.
+**Diagnostics:** A refutable `let` pattern reports `SEM0133`, includes the initializer type and
+uncovered alternatives, and suggests `if let` or `match`. A standalone wildcard binding reports
+the ordinary explicit-discard diagnostic `SEM0087` and suggests `drop` rather than silently
+discarding the result.
 
 **Evidence:** [confirmed pattern direction](../../proposals/0010-shared-patterns-and-conditional-destructuring/proposal.md).
 

@@ -162,6 +162,8 @@ export const callableIdentityErasureCode = 'SEM0080' as const
 export const unknownOwnedCallableReturnCode = 'SEM0081' as const
 /** Stable code for an Effect join whose alternatives cannot be represented as a finite composite. */
 export const nonFiniteEffectJoinCode = 'SEM0132' as const
+/** Stable code for a refutable pattern in an unconditional local binding. */
+export const refutableLetPatternCode = 'SEM0133' as const
 /** Stable code for a raw storage operation outside lexical unsafe authority. */
 export const missingUnsafeBoundaryCode = 'SEM0082' as const
 /** Stable code for an invalid source-declared capability implementation. */
@@ -377,6 +379,7 @@ export type Code =
   | typeof callableIdentityErasureCode
   | typeof unknownOwnedCallableReturnCode
   | typeof nonFiniteEffectJoinCode
+  | typeof refutableLetPatternCode
   | typeof missingUnsafeBoundaryCode
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
@@ -756,6 +759,11 @@ export type Reason =
     }
   | { readonly _tag: 'UnreachableMatchArm'; readonly member: string }
   | { readonly _tag: 'IncompleteMatch'; readonly missing: ReadonlyArray<string> }
+  | {
+      readonly _tag: 'RefutableLetPattern'
+      readonly actual: string
+      readonly missing: ReadonlyArray<string>
+    }
   | { readonly _tag: 'MatchGuardNotBool'; readonly actual: string }
   | { readonly _tag: 'MissingPatternField'; readonly type: string; readonly field: string }
   | {
@@ -2552,6 +2560,25 @@ export const incompleteMatch = (
     severity: 'error',
     message: `Match does not cover ${missing.join(', ')}`,
     reason: Object.freeze({ _tag: 'IncompleteMatch', missing: Object.freeze([...missing]) }),
+    span,
+  })
+
+export const refutableLetPattern = (
+  actual: string,
+  missing: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: refutableLetPatternCode,
+    severity: 'error',
+    message: `Let pattern is refutable for ${actual}; it does not cover ${missing.join(', ')}. Use if let or match`,
+    reason: Object.freeze({
+      _tag: 'RefutableLetPattern',
+      actual,
+      missing: Object.freeze([...missing]),
+    }),
     span,
   })
 

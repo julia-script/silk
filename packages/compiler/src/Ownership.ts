@@ -1425,7 +1425,7 @@ const analyzeLoans = (
           scanRunEnds(statement.binding.initializer, statement.region)
           break
         case 'PatternBindStatement':
-          scanRunEnds(statement.selection.subject, statement.region)
+          scanRunEnds(statement.selection.source, statement.region)
           break
         case 'ExpressionStatement':
           scanRunEnds(statement.expression, statement.region)
@@ -1436,7 +1436,7 @@ const analyzeLoans = (
           scanStatementRunEnds(statement.otherwise)
           break
         case 'IfLetStatement':
-          scanRunEnds(statement.selection.subject, statement.region)
+          scanRunEnds(statement.selection.source, statement.region)
           scanStatementRunEnds(statement.taken)
           scanStatementRunEnds(statement.otherwise)
           break
@@ -2127,10 +2127,11 @@ const analyzeLoans = (
           break
         case 'PatternBindStatement':
           inspect(
-            statement.selection.subject,
+            statement.selection.source,
             statement.region,
             [],
-            statement.selection.access === 'Move' ? 'Move' : 'Read',
+            naturalAccess(statement.selection.source),
+            { region: statement.region, span: statement.selection.loanEnd },
           )
           break
         case 'IfStatement':
@@ -2140,10 +2141,11 @@ const analyzeLoans = (
           break
         case 'IfLetStatement':
           inspect(
-            statement.selection.subject,
+            statement.selection.source,
             statement.region,
             [],
-            statement.selection.access === 'Move' ? 'Move' : 'Read',
+            naturalAccess(statement.selection.source),
+            { region: statement.region, span: statement.selection.loanEnd },
           )
           statements(statement.taken)
           statements(statement.otherwise)

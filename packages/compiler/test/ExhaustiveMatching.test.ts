@@ -260,7 +260,7 @@ pub fn inspect(value: Point | i32) -> i32 {
 
   assert.include(
     result.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0044',
+    'SEM0133',
   )
   assert.include(
     result.diagnostics.map((diagnostic) => diagnostic.code),
@@ -283,10 +283,17 @@ it.effect('lowers let destructuring and if-let through the shared match operatio
 fn inspect(value: Point | i32) -> i32 {
   if let Point { x, .. } = move value { return x } else { return 7 }
 }
+fn shared(point: Point) -> i32 {
+  let Point { x, .. } = &point
+  return x + point.y
+}
+fn sharedIf(point: Point) -> i32 {
+  if let Point { x, .. } = &point { return x } else { return 0 }
+}
 pub fn main() -> i32 {
   let point = Point { x: 20, y: 22 }
   let Point { x, y } = move point
-  return x + y + inspect(1)
+  return x + y + inspect(1) + shared(Point { x: 1, y: 2 }) + sharedIf(Point { x: 2, y: 4 })
 }`),
       'wasm32-unknown-unknown',
     )
@@ -300,13 +307,79 @@ pub fn main() -> i32 {
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 49n)
+    assert.strictEqual(outcome.result.value, 54n)
     const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main
     if (typeof main !== 'function') throw new RangeError('pattern program lost silk_main')
-    assert.strictEqual(main(), 49)
+    assert.strictEqual(main(), 54)
   }),
+)
+
+it('keeps statement-pattern loans scoped and move selection consumed on both outcomes', () => {
+  const shared = analyze(
+    'shared-pattern-loan',
+    `pub struct Point { x: i32 y: i32 }
+pub fn inspect(point: Point) -> i32 {
+  let Point { x, .. } = &point
+  let y = point.y
+  return x + y
+}`,
+  )
+  assert.deepEqual(shared.diagnostics, [])
+  assert.deepEqual(ownership(shared).diagnostics, [])
+
+  const exclusive = analyze(
+    'exclusive-pattern-loan',
+    `pub struct Point { x: i32 y: i32 }
+pub fn inspect(point: Point) -> i32 {
+  let mut owned = move point
+  if let Point { x, .. } = &mut owned { let invalid = owned.y } else {}
+  return owned.y
+}`,
+  )
+  assert.include(
+    ownership(exclusive).diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0011',
+  )
+
+  const moved = analyze(
+    'moved-pattern-selection',
+    `pub struct Point { x: i32 }
+fn consume(value: Point | i32) -> i32 { return 0 }
+pub fn inspect(value: Point | i32) -> i32 {
+  if let Point { x } = move value { let selected = x } else {}
+  return consume(move value)
+}`,
+  )
+  assert.include(
+    ownership(moved).diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0001',
+  )
+})
+
+it.effect(
+  'renormalizes generic selectors at complete applications with source-order collapse',
+  () =>
+    Effect.gen(function* () {
+      const self = yield* Analysis.ofSourceRealized(
+        'generic-pattern-renormalization',
+        ascii(`fn choose<A, B>(value: A | B) -> i32 {
+  return match move value { A first => 1 B second => 2 }
+}
+pub fn main() -> i32 {
+  return choose<i32, i32>(1) + choose<i32, bool>(true)
+}`),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(self), [])
+      const mir = Analysis.loweredMir(self)
+      assert.deepEqual(Mir.verify(mir), [], Mir.encode(mir))
+      const outcome = Analysis.evaluate(self)
+      assert.strictEqual(outcome._tag, 'Completed')
+      if (outcome._tag !== 'Completed') return
+      assert.strictEqual(outcome.result.value, 3n)
+    }),
 )
 
 it('keeps borrowed owners live, consumes move matches, and requires mutable exclusive roots', () => {

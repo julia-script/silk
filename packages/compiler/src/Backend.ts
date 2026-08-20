@@ -689,7 +689,7 @@ const expandMatches = (
     const decisionEntries = match.decisions.map((decision) =>
       candidateEntry(decision.member, decision.candidates, 0),
     )
-    if (match.scrutineeType._tag === 'Nominal') {
+    if (match.scrutineeType._tag !== 'Union') {
       const selected = decisionEntries.at(0) ?? trap
       blocks.push(
         Object.freeze({

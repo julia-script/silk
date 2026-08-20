@@ -977,11 +977,11 @@ export interface MatchOperation {
   readonly id: Match.MatchId
   readonly destination: LocalId
   readonly scrutinee: LocalId
-  readonly scrutineeType:
-    | Extract<Type, { readonly _tag: 'Nominal' }>
-    | Extract<Type, { readonly _tag: 'Union' }>
+  readonly scrutineeType: Type
   readonly scrutineeShape: Layout.CallingShape
   readonly access: Match.Access
+  /** Statement patterns retain selected locals beyond this operation; expression matches do not. */
+  readonly retainsBindings: boolean
   readonly members: ReadonlyArray<SilkType.Type>
   readonly decisions: ReadonlyArray<{
     readonly member: SilkType.Type
@@ -4969,7 +4969,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             const cleanupValid =
               arm.selected.access === operation.access &&
               arm.selected.endBorrow ===
-                (operation.access === 'Shared' || operation.access === 'Exclusive') &&
+                ((operation.access === 'Shared' || operation.access === 'Exclusive') &&
+                  !operation.retainsBindings) &&
               (operation.access === 'Move'
                 ? arm.selected.cleanup.every((entry) => {
                     const selected =
@@ -6342,7 +6343,7 @@ const operationText = (operation: Operation): string => {
     case 'Drop':
       return `drop ${localText(operation.local)}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`} ${provenanceText(operation.provenance)}`
     case 'Match':
-      return `${localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)} retain-bindings=${operation.retainsBindings} ${provenanceText(operation.provenance)}`
     case 'ShortCircuit':
       return `${localText(operation.destination)} = short-circuit ${operation.operator === 'And' ? '&&' : '||'} ${localText(operation.left)} : bool ${provenanceText(operation.provenance)}`
   }

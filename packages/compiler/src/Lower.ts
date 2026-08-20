@@ -2070,6 +2070,7 @@ const lowerEffectCatch = (
     scrutineeType: failureValueMir,
     scrutineeShape: Layout.callingShape(fn.layout, reified.failureValueType) ?? resultUnionShape,
     access: 'Move',
+    retainsBindings: false,
     members: failureMembers,
     decisions: Object.freeze(
       failureMembers.map((member, ordinal) =>
@@ -2094,6 +2095,7 @@ const lowerEffectCatch = (
       scrutineeType: resultUnionType,
       scrutineeShape: resultUnionShape,
       access: 'Move' as const,
+      retainsBindings: false,
       members: reified.resultUnion.members,
       decisions: Object.freeze(
         reified.resultUnion.members.map((member) =>
@@ -4511,7 +4513,7 @@ function lowerExpressionInner(
           : Layout.callingShape(fn.layout, fn.semantic(expression.type))
       if (
         scrutinee === undefined ||
-        (scrutineeType?._tag !== 'Nominal' && scrutineeType?._tag !== 'Union') ||
+        scrutineeType === undefined ||
         resultType === undefined ||
         scrutineeShape === undefined ||
         resultShape === undefined
@@ -4524,22 +4526,27 @@ function lowerExpressionInner(
           candidate.id.span.end === expression.id.span.end,
       )
       const specializeMember = (member: Type.Type): Type.Type => fn.semantic(member)
-      const members = expression.members.flatMap((member) => {
-        return [specializeMember(member)]
-      })
+      const members = Match.membersOf(fn.semantic(expression.scrutinee.type))
+      const specializedCoverage = Match.cover(
+        members,
+        expression.arms.map((arm) =>
+          Object.freeze({
+            ...(arm.member === undefined ? {} : { member: specializeMember(arm.member) }),
+            universal: arm.universal,
+            guarded: arm.guard !== undefined,
+          }),
+        ),
+      )
       const arms: Array<Mir.MatchArm> = []
       const armStates = new Map<number, DelayedEffectState>()
       const branchState = delayedEffectState(fn)
-      for (const arm of expression.arms) {
-        if (!arm.reachable) continue
+      for (const [armOrdinal, arm] of expression.arms.entries()) {
+        const transition = specializedCoverage.transitions.at(armOrdinal)
+        if (!arm.reachable || transition?.reachable !== true) continue
         restoreDelayedEffectState(fn, branchState)
         const member = arm.member === undefined ? undefined : specializeMember(arm.member)
-        const before = arm.before.flatMap((candidate) => {
-          return [specializeMember(candidate)]
-        })
-        const after = arm.after.flatMap((candidate) => {
-          return [specializeMember(candidate)]
-        })
+        const before = transition.before
+        const after = transition.after
         const bindings: Array<Mir.MatchBinding> = []
         for (const binding of arm.bindings) {
           const type = fn.type(binding.type)
@@ -4668,6 +4675,7 @@ function lowerExpressionInner(
           scrutineeType,
           scrutineeShape,
           access: expression.access,
+          retainsBindings: false,
           members: Object.freeze(members),
           decisions: Object.freeze(decisions),
           arms: Object.freeze(arms),
@@ -6322,9 +6330,6 @@ const lowerPatternSelection = (
     return undefined
   const members = Match.membersOf(semanticSubject)
   const member = selection.member === undefined ? undefined : fn.semantic(selection.member)
-  const selected =
-    selection.universal ||
-    (member !== undefined && members.some((candidate) => Type.equals(candidate, member)))
   const literal = (value: boolean): LoweredExpression | undefined =>
     lowerExpression(
       fn,
@@ -6336,31 +6341,6 @@ const lowerPatternSelection = (
       }),
     )
   const bindingIds = Object.freeze(selection.bindings.map((binding) => binding.id))
-
-  if (subjectType._tag !== 'Nominal' && subjectType._tag !== 'Union') {
-    if (result === 'Unit' && (!selection.irrefutable || !selected)) return undefined
-    if (selected) {
-      for (const binding of selection.bindings) {
-        if (binding.path.length !== 0) return undefined
-        const type = fn.type(binding.type)
-        if (type === undefined) return undefined
-        const destination = fn.alloc(type)
-        fn.emit(
-          Object.freeze({
-            _tag: 'Move' as const,
-            destination,
-            source: subject.result,
-            provenance: authored(binding.span),
-          }),
-        )
-        fn.patternLocals.set(patternKey(binding.id), destination)
-      }
-    }
-    const lowered = literal(selected)
-    return lowered === undefined
-      ? undefined
-      : Object.freeze({ result: lowered.result, bindings: bindingIds })
-  }
 
   if (result === 'Unit' && !selection.irrefutable) return undefined
   const subjectShape = Layout.callingShape(fn.layout, semanticSubject)
@@ -6443,10 +6423,10 @@ const lowerPatternSelection = (
     }),
     provenance: authored(selection.span),
   })
-  const arms =
-    result === 'Unit' || selection.universal
-      ? Object.freeze([selectedArm])
-      : Object.freeze([selectedArm, fallbackArm])
+  const needsFallback = result !== 'Unit' && !selection.universal && !selection.irrefutable
+  const arms = needsFallback
+    ? Object.freeze([selectedArm, fallbackArm])
+    : Object.freeze([selectedArm])
   const destination = fn.alloc(resultType)
   fn.emit(
     Object.freeze({
@@ -6457,6 +6437,7 @@ const lowerPatternSelection = (
       scrutineeType: subjectType,
       scrutineeShape: subjectShape,
       access: selection.access,
+      retainsBindings: true,
       members,
       decisions: Object.freeze(
         members.map((candidate) =>
@@ -6466,9 +6447,9 @@ const lowerPatternSelection = (
               selection.universal
                 ? [selection.arm]
                 : member !== undefined && Type.equals(candidate, member)
-                  ? result === 'Unit'
-                    ? [selection.arm]
-                    : [selection.arm, fallbackId]
+                  ? needsFallback
+                    ? [selection.arm, fallbackId]
+                    : [selection.arm]
                   : [fallbackId],
             ),
           }),

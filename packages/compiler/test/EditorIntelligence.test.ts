@@ -652,6 +652,44 @@ pub fn main() -> i32 {
   )
 })
 
+it.effect('scopes let-pattern and if-let bindings for completion and navigation', () => {
+  const source = `struct Full { value: i32 }
+pub fn main() -> i32 {
+  let first = Full { value: 1 }
+  let Full { value } = move first
+  let copied = val
+  let second = Full { value: 2 }
+  if let Full inner = &second { let taken = inn } else { let missed = inn }
+  return value
+}`
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const atCompletion = (prefix: string) =>
+        Analysis.completionAt(snapshot, 'main', source.indexOf(prefix) + prefix.length)
+      assert.include(
+        atCompletion('let copied = val')?.candidates.map((candidate) => candidate.label) ?? [],
+        'value',
+      )
+      assert.include(
+        atCompletion('let taken = inn')?.candidates.map((candidate) => candidate.label) ?? [],
+        'inner',
+      )
+      assert.notInclude(
+        atCompletion('let missed = inn')?.candidates.map((candidate) => candidate.label) ?? [],
+        'inner',
+      )
+
+      const declarationOffset = source.indexOf('value }')
+      const useOffset = source.lastIndexOf('value')
+      const declaration = Analysis.semanticOccurrenceAt(snapshot, 'main', declarationOffset)
+      const use = Analysis.semanticOccurrenceAt(snapshot, 'main', useOffset)
+      assert.strictEqual(declaration?.role, 'Declaration')
+      assert.strictEqual(use?.declaration?.selectionSpan.start, declaration?.span.start)
+      return undefined
+    }),
+  )
+})
+
 it.effect('retains exact import, alias, qualifier, and unavailable-member tokens', () => {
   const root = `import lib as Library { answer as read, hidden }
 pub fn main() -> i32 { return read() }`

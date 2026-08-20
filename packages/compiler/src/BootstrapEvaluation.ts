@@ -2261,13 +2261,13 @@ function* executeFunction(
                 ? scrutinee.member
                 : scrutinee._tag === 'AggregateValue'
                   ? scrutinee.type
-                  : undefined
+                  : Mir.semanticType(operation.scrutineeType)
             const payload =
               scrutinee._tag === 'UnionValue'
                 ? scrutinee.payload
                 : scrutinee._tag === 'AggregateValue'
                   ? scrutinee
-                  : undefined
+                  : scrutinee
             if (activeMember === undefined || payload === undefined) {
               throw new RangeError('MIR verifier allowed matching a scalar value')
             }

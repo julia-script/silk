@@ -426,11 +426,14 @@ export interface PatternSelectionFact {
   readonly id: Match.MatchId
   readonly arm: Match.ArmId
   readonly access: Match.Access
+  /** Authored initializer, retaining an outer move/borrow for ownership loan analysis. */
+  readonly source: ExpressionFact
   readonly subject: ExpressionFact
   readonly members: ReadonlyArray<Type.Type>
   readonly pattern: PatternFact
   readonly bindings: ReadonlyArray<PatternBindingFact>
   readonly irrefutable: boolean
+  readonly loanEnd: SourceSpan.SourceSpan
   readonly syntax: SyntaxTree.Node
 }
 
@@ -7646,7 +7649,7 @@ const effectCaptureFacts = (
           expression(statement.binding.initializer)
           break
         case 'PatternBindStatement':
-          expression(statement.selection.subject)
+          expression(statement.selection.source)
           break
         case 'ExpressionStatement':
           expression(statement.expression)
@@ -7657,7 +7660,7 @@ const effectCaptureFacts = (
           visit(statement.otherwise)
           break
         case 'IfLetStatement':
-          expression(statement.selection.subject)
+          expression(statement.selection.source)
           visit(statement.taken)
           visit(statement.otherwise)
           break
@@ -8937,11 +8940,13 @@ const analyzeStatements = (
       id,
       arm,
       access,
+      source: initializer.fact,
       subject,
       members: Object.freeze(members),
       pattern: pattern.fact,
       bindings: pattern.fact.bindings,
       irrefutable: coverage.exhaustive && complete,
+      loanEnd: element.kind === 'PatternBindingStatement' ? blockNode.span : element.span,
       syntax: element,
     })
   }
@@ -9138,7 +9143,14 @@ const analyzeStatements = (
       } else if (!selection.irrefutable) {
         const selected = selection.pattern.member
         context.diagnostics.push(
-          Diagnostic.incompleteMatch(
+          Diagnostic.refutableLetPattern(
+            selection.subject.type._tag === 'Available'
+              ? Presentation.type(
+                  selection.subject.type.type,
+                  context.source.id,
+                  context.resolution.scope,
+                )
+              : '<unavailable>',
             selection.members
               .filter((member) => selected === undefined || !Type.equals(member, selected))
               .map(Type.encode),
@@ -11314,7 +11326,7 @@ const directStatementExpressions = (statement: StatementFact): ReadonlyArray<Exp
     case 'BindStatement':
       return Object.freeze([statement.binding.initializer])
     case 'PatternBindStatement':
-      return Object.freeze([statement.selection.subject])
+      return Object.freeze([statement.selection.source])
     case 'ExpressionStatement':
       return Object.freeze([statement.expression])
     case 'ReturnStatement':
@@ -11325,7 +11337,7 @@ const directStatementExpressions = (statement: StatementFact): ReadonlyArray<Exp
     case 'WhileStatement':
       return Object.freeze([statement.condition])
     case 'IfLetStatement':
-      return Object.freeze([statement.selection.subject])
+      return Object.freeze([statement.selection.source])
     case 'WriteStatement':
       return Object.freeze([statement.destination, statement.value])
     case 'UnsafeStatement':

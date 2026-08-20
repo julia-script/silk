@@ -3084,7 +3084,7 @@ const emitOperation = (
         const decision = operation.decisions.at(ordinal)
         if (decision === undefined) return [Instr.op('unreachable')]
         const selected = emitCandidates(decision.member, decision.candidates)
-        if (operation.scrutineeType._tag === 'Nominal') return selected
+        if (operation.scrutineeType._tag !== 'Union') return selected
         const tag = slots(operation.scrutinee).at(0)
         if (tag === undefined) throw new RangeError('Wasm union match has no tag lane')
         return [
