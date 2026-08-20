@@ -353,7 +353,7 @@
     "unicode:generate": "node scripts/generate-unicode-tables.mjs",
     "unicode:vendor": "node scripts/vendor-unicode-data.mjs",
     "unicode:vendor:check": "node scripts/vendor-unicode-data.mjs --check",
-    "test": "pnpm unicode:check && pnpm stdlib:check && pnpm documentation:policy && pnpm documentation:check && pnpm documentation:examples && pnpm test:parallel && pnpm test:native-acceptance",
+    "test": "pnpm unicode:check && pnpm stdlib:check && pnpm toolchain:check && pnpm documentation:policy && pnpm documentation:check && pnpm documentation:examples && pnpm test:parallel && pnpm test:native-acceptance",
     "test:native-acceptance": "vitest run test/DriverNativeAcceptance.test.ts --passWithNoTests --maxWorkers=1",
     "test:parallel": "vitest run --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts",
     "typecheck": "pnpm unicode:check && pnpm stdlib:check && pnpm toolchain:check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
