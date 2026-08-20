@@ -18,4 +18,4 @@
 - [x] 3.1 Derive executable support from reachable intrinsics and structured reporting inventory.
 - [x] 3.2 Add layer violations, no-prelude, redundancy-validity, collision completion, code-action, and pay-for-use tests.
 - [x] 3.3 Update canonical specs, language docs, generated catalogs/docs, and diagnostics.
-- [ ] 3.4 Run typecheck, Biome, compiler/LSP tests, full tests, release-candidate checks, and `pnpm check`.
+- [x] 3.4 Run typecheck, Biome, compiler/LSP tests, full tests, release-candidate checks, and `pnpm check`.
