@@ -295,29 +295,22 @@ it('uses one binding contract for inventory, admission, and the proof-only post 
   }
 })
 
-it.effect(
-  'pairs every intrinsic presentation with accepted semantic analysis',
-  () =>
-    Effect.gen(function* () {
-      const observed = new Set<string>()
-      for (const [ordinal, source] of acceptedSources.entries()) {
-        const snapshot = yield* Analysis.ofSource(
-          `intrinsic/accepted-${ordinal}`,
-          encoder.encode(source),
-        )
-        assert.deepEqual(
-          Analysis.diagnostics(snapshot),
-          [],
-          `accepted intrinsic fixture ${ordinal}`,
-        )
-        for (const operation of operationKeys(snapshot)) observed.add(operation)
-      }
-      const catalog = Intrinsic.all().flatMap((actor) =>
-        actor.operations.map((operation) => key(actor.spelling, operation.spelling)),
+it.effect('pairs every intrinsic presentation with accepted semantic analysis', () =>
+  Effect.gen(function* () {
+    const observed = new Set<string>()
+    for (const [ordinal, source] of acceptedSources.entries()) {
+      const snapshot = yield* Analysis.ofSource(
+        `intrinsic/accepted-${ordinal}`,
+        encoder.encode(source),
       )
-      assert.deepEqual([...observed].sort(), [...catalog].sort())
-    }),
-  30_000,
+      assert.deepEqual(Analysis.diagnostics(snapshot), [], `accepted intrinsic fixture ${ordinal}`)
+      for (const operation of operationKeys(snapshot)) observed.add(operation)
+    }
+    const catalog = Intrinsic.all().flatMap((actor) =>
+      actor.operations.map((operation) => key(actor.spelling, operation.spelling)),
+    )
+    assert.deepEqual([...observed].sort(), [...catalog].sort())
+  }),
 )
 
 it.effect('keeps every intrinsic identifiable and presentable in rejected calls', () =>

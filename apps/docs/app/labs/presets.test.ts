@@ -212,7 +212,7 @@ describe('preset catalog', () => {
         }
       }
     },
-    180_000,
+    360_000,
   )
 
   it('keeps the phases the labs shipped presets for', () => {

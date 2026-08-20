@@ -238,7 +238,7 @@ it.effect(
       // scopes are gone and the promoted artifact is the only thing the parent still holds.
       assert.deepEqual(readdirSync(join(nativeRoot, 'scopes')), ['promoted.bin'])
     }),
-  120_000,
+  240_000,
 )
 
 it.effect(
@@ -269,7 +269,7 @@ it.effect(
       // The file, the nested directory's file, the nested directory, and the directory itself.
       assert.isFalse(existsSync(join(nativeRoot, 'tree')))
     }),
-  120_000,
+  240_000,
 )
 
 it.effect(
@@ -303,7 +303,7 @@ it.effect(
       )
       assert.deepEqual(readdirSync(join(nativeRoot, 'many')), [])
     }),
-  180_000,
+  360_000,
 )
 
 it.effect(

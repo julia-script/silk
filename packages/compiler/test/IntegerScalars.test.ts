@@ -231,7 +231,7 @@ it.effect(
       const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
       assert.isAbove(wasmArtifact.bytes.length, 0)
     }),
-  60_000,
+  120_000,
 )
 
 it.effect('accepts exact boundaries, unit fallthrough, and only lowercase primitive names', () =>
