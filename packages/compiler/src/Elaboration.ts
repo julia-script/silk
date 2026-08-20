@@ -1774,8 +1774,7 @@ const analyzeBorrow = (
   const diagnostics = subjectResult?.diagnostics ?? Object.freeze([])
   if (
     !borrowAllowed ||
-    expected === undefined ||
-    (!Type.isSlice(expected) && !Type.isReference(expected))
+    (expected !== undefined && !Type.isSlice(expected) && !Type.isReference(expected))
   ) {
     return unavailableBorrow(
       node,
@@ -1796,7 +1795,35 @@ const analyzeBorrow = (
       Diagnostic.invalidBorrowOperand(subjectNode?.span ?? node.span),
     )
   }
-  if (Type.isReference(expected)) {
+  if (expected === undefined && !Type.isFixedArray(sourceType) && !Type.isSlice(sourceType)) {
+    if (access === 'Exclusive' && !exclusiveBorrowRoot(root)) {
+      const name =
+        subject._tag === 'Identifier' && 'spelling' in subject.reference
+          ? subject.reference.spelling
+          : '?'
+      return unavailableBorrow(
+        node,
+        access,
+        subject,
+        diagnostics,
+        Diagnostic.exclusiveBorrowRequiresMutable(name, subjectNode?.span ?? node.span),
+      )
+    }
+    const type = Type.reference(access, sourceType)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Borrow',
+        access,
+        subject,
+        formation: Object.freeze({ _tag: 'ValueBorrow', root, source: sourceType }),
+        type: availableExpressionType(type),
+        syntax: node,
+      }),
+      diagnostics,
+      type,
+    })
+  }
+  if (expected !== undefined && Type.isReference(expected)) {
     if (!Type.infer(expected.target, sourceType, new Map())) {
       return unavailableBorrow(
         node,
@@ -1870,7 +1897,7 @@ const analyzeBorrow = (
       type,
     })
   }
-  if (Type.isSlice(sourceType) && root._tag === 'ParameterRoot') {
+  if (Type.isSlice(sourceType)) {
     if (sourceType.access === 'Shared' && access === 'Exclusive') {
       return unavailableBorrow(
         node,
@@ -8651,6 +8678,8 @@ const analyzeStatements = (
         context.declaration,
         scope,
         context.resolution,
+        undefined,
+        true,
       )
       if (initializer === undefined) {
         throw new RangeError(`Semantic analysis cannot analyze ${initializerNode.kind}`)
@@ -11137,6 +11166,7 @@ export const elaborateModule = (input: Input): Result => {
   const hirStatements = (
     facts: ReadonlyArray<StatementFact>,
     resultType?: SemanticType,
+    functionId?: DeclarationId,
   ): ReadonlyArray<Hir.Statement> =>
     Object.freeze(
       executableStatements(facts)
@@ -11152,7 +11182,7 @@ export const elaborateModule = (input: Input): Result => {
           if (statement._tag === 'UnsafeStatement') {
             return Object.freeze({
               _tag: 'Unsafe' as const,
-              statements: hirStatements(statement.statements, resultType),
+              statements: hirStatements(statement.statements, resultType, functionId),
               region: statement.region,
               span: statement.syntax.span,
             })
@@ -11166,7 +11196,18 @@ export const elaborateModule = (input: Input): Result => {
                   ? statement.binding.name.spelling
                   : undefined,
               mutability: statement.binding.mutability,
-              initializer: hirExpression(statement.binding.initializer),
+              initializer:
+                statement.binding.initializer._tag === 'Borrow' && functionId !== undefined
+                  ? hirExpression(
+                      statement.binding.initializer,
+                      Object.freeze({
+                        _tag: 'BorrowId',
+                        function: functionId,
+                        callSpan: statement.binding.initializer.syntax.span,
+                        ordinal: 0,
+                      }),
+                    )
+                  : hirExpression(statement.binding.initializer),
               region: statement.region,
               span: statement.binding.syntax.span,
             })
@@ -11183,8 +11224,8 @@ export const elaborateModule = (input: Input): Result => {
             return Object.freeze({
               _tag: 'If' as const,
               condition: hirExpression(statement.condition),
-              taken: hirStatements(statement.taken, resultType),
-              otherwise: hirStatements(statement.otherwise, resultType),
+              taken: hirStatements(statement.taken, resultType, functionId),
+              otherwise: hirStatements(statement.otherwise, resultType, functionId),
               region: statement.region,
               span: statement.syntax.span,
             })
@@ -11221,7 +11262,7 @@ export const elaborateModule = (input: Input): Result => {
               loop: statement.loop,
               ...(statement.parent === undefined ? {} : { parent: statement.parent }),
               condition: hirExpression(statement.condition),
-              body: hirStatements(statement.body, resultType),
+              body: hirStatements(statement.body, resultType, functionId),
               region: statement.region,
               span: statement.syntax.span,
             })
@@ -11383,7 +11424,11 @@ export const elaborateModule = (input: Input): Result => {
                   ordinal: -1,
                   span: siteSpan,
                 }),
-                statements: hirStatements(fact.statements, fact.declaration.returnType.type),
+                statements: hirStatements(
+                  fact.statements,
+                  fact.declaration.returnType.type,
+                  fact.declaration.id,
+                ),
                 captures: Object.freeze(
                   captures.map((capture) =>
                     Object.freeze({
@@ -11430,6 +11475,7 @@ export const elaborateModule = (input: Input): Result => {
               fact.declaration.returnType._tag === 'Resolved'
                 ? fact.declaration.returnType.type
                 : undefined,
+              fact.declaration.id,
             ),
           })
         })(),

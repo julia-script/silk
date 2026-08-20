@@ -1488,10 +1488,12 @@ const analyzeLoans = (
   }
 
   for (const binding of fn.bindings) {
+    const directBorrow =
+      binding.initializer._tag === 'Borrow' && binding.initializer.formation._tag !== 'Unavailable'
     if (
       binding.inferredType._tag !== 'Available' ||
       !Type.containsViewBorrow(binding.inferredType.type) ||
-      returnedArgumentOrdinal(binding.initializer) === undefined
+      (!directBorrow && returnedArgumentOrdinal(binding.initializer) === undefined)
     ) {
       continue
     }
@@ -1574,8 +1576,57 @@ const analyzeLoans = (
           access,
         )
         return
-      case 'Borrow':
+      case 'Borrow': {
+        if (expression.formation._tag === 'Unavailable') return
+        const directRoot = borrowSite(expression.formation.root)
+        const root =
+          directRoot._tag === 'Let'
+            ? (viewRoots.get(directRoot.binding.ordinal) ?? directRoot)
+            : directRoot
+        const extended = [...active, ...delayedLoansAt(expression.syntax.span)]
+        const conflict = extended.find(
+          (loan) =>
+            sameSite(loan.root, root) &&
+            (loan.access === 'Exclusive' || expression.access === 'Exclusive'),
+        )
+        if (conflict !== undefined) {
+          diagnostics.push(
+            Diagnostic.conflictingSliceLoan(
+              conflict.access,
+              expression.access,
+              conflict.startSpan,
+              expression.syntax.span,
+            ),
+          )
+          return
+        }
+        loans.push(
+          Object.freeze({
+            _tag: 'Loan',
+            id: Object.freeze({
+              _tag: 'BorrowId',
+              function: fn.declaration.id,
+              callSpan: expression.syntax.span,
+              ordinal: 0,
+            }),
+            root,
+            access: expression.access,
+            origin:
+              expression.formation._tag === 'FixedArrayBorrow'
+                ? 'FixedArrayBorrow'
+                : expression.formation._tag === 'SliceReborrow'
+                  ? 'SliceReborrow'
+                  : 'ValueBorrow',
+            suspendsParent:
+              expression.formation._tag === 'SliceReborrow' && expression.formation.suspendsParent,
+            startRegion: region,
+            endRegion: delayedEnd?.region ?? region,
+            startSpan: expression.syntax.span,
+            endSpan: delayedEnd?.span ?? expression.syntax.span,
+          }),
+        )
         return
+      }
       case 'Move':
         inspect(expression.subject, region, active, 'Move', delayedEnd)
         return

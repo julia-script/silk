@@ -144,7 +144,7 @@ pub fn main() -> i32 { return 0 }`)
   assert.include(codes, 'SEM0054')
 })
 
-it('rejects decay, immutable exclusive roots, standalone borrows, and subplaces', () => {
+it('admits lexical borrow bindings while rejecting decay, invalid exclusivity, temporaries, and unstable subplaces', () => {
   const result = analyze(`fn read(values: &[i32]) -> i32 { return 1 }
 fn edit(values: &mut [i32]) -> i32 { return 2 }
 fn decay() -> i32 { let values = [1, 2] return read(values) }
@@ -156,7 +156,7 @@ pub fn main() -> i32 { return 0 }`)
 
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
-    ['SEM0059', 'SEM0057', 'SEM0055', 'SEM0056', 'SEM0056'],
+    ['SEM0059', 'SEM0057', 'SEM0056', 'SEM0056'],
   )
   const temporary = returnedCall(result, 5).arguments.at(0)?.expression
   assert.strictEqual(
@@ -164,6 +164,34 @@ pub fn main() -> i32 { return 0 }`)
     'Unavailable',
   )
 })
+
+it.effect('executes a lexical shared slice binding on the evaluator and Wasm', () =>
+  Effect.gen(function* () {
+    const source = `pub fn main() -> i32 {
+  let values = [40, 2]
+  let view = &values
+  return view[0] + view[1]
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'slices/local-view',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(
+      evaluated._tag,
+      'Completed',
+      `${JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? value.toString() : value))}\n${Hir.encode(Analysis.rootAnalysis(snapshot).hir)}`,
+    )
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
 
 it('types slice length and runtime-bounded borrowed places with preserved access', () => {
   const result = analyze(`struct Token { pub kind: i32 }

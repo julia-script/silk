@@ -72,6 +72,39 @@ pub fn main() -> i32 { return 0 }`)
   }),
 )
 
+it.effect('ends lexical borrow bindings at last use and restores their owner', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`fn conflict() -> i32 {
+  let mut values = [1, 2]
+  let view = &values
+  values[0] = 40
+  return view[1]
+}
+pub fn main() -> i32 {
+  let mut values = [1, 2]
+  let mut view = &mut values
+  view[0] = 40
+  let first = view[0]
+  values[1] = 2
+  return first + values[1]
+}`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['OWN0011'],
+    )
+    const main = Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(1)
+    const loan = main?.loans.find((candidate) => candidate.origin === 'FixedArrayBorrow')
+    assert.strictEqual(loan?.access, 'Exclusive')
+    assert.strictEqual(loan === undefined ? false : loan.endSpan.end > loan.startSpan.end, true)
+
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
 it.effect('keeps a returned shared view live through its last use and then restores mutation', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`fn identity(values: &[i32]) -> &[i32] { return values }

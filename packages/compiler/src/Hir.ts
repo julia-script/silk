@@ -1132,7 +1132,6 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
       if (
         !Type.equals(expression.type, Type.slice(expression.access, element)) ||
         expression.reborrow !== Type.isSlice(expression.source) ||
-        (expression.reborrow && expression.root._tag !== 'ParameterSliceRoot') ||
         (Type.isSlice(expression.source) &&
           expression.source.access === 'Shared' &&
           expression.access === 'Exclusive')
