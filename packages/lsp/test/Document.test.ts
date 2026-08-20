@@ -195,6 +195,43 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('preserves unsafe callable contracts in hover, signatures, and completion', () =>
+  Effect.gen(function* () {
+    const source = `pub unsafe effect fn read(value: i32) -> i32 { return value }
+pub effect fn main() -> i32 {
+  return run unsafe read(1)
+}`
+    const { document, snapshot } = yield* open(source)
+    const declaration = Document.hover(document, snapshot, positionOf(source, 'read', 0))
+    const reference = Document.hover(document, snapshot, positionOf(source, 'read', 1))
+    assert.deepEqual(declaration?.contents, {
+      kind: 'markdown',
+      value: '```silk\npub unsafe effect fn read(value: i32) -> i32\n```',
+    })
+    assert.deepEqual(reference?.contents, declaration?.contents)
+
+    const signature = Document.signatureHelp(
+      document,
+      snapshot,
+      positionAt(source, source.indexOf('read(1)') + 'read('.length),
+    )
+    assert.strictEqual(
+      signature?.signatures[0]?.label,
+      'pub unsafe effect fn read(value: i32) -> i32',
+    )
+
+    const completion = Document.completion(
+      document,
+      snapshot,
+      positionAt(source, source.indexOf('read(1)') + 2),
+    )
+    assert.include(
+      completion.items.find((item) => item.label === 'read')?.detail ?? '',
+      'unsafe effect fn read',
+    )
+  }),
+)
+
 it.effect('appends full declaration documentation to definition and reference hovers', () =>
   Effect.gen(function* () {
     const source = `/// Recovers a problem.
