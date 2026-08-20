@@ -41,7 +41,7 @@ while preserving all three channels exactly; frame exhaustion is fatal.
 
 Import as `Effect` with `import silk.effects`.
 
-Public declarations: 25.
+Public declarations: 26.
 
 <a id="declaration-73696c6b2f656666656374733a3a6c6f67"></a>
 
@@ -478,3 +478,19 @@ Defers one Effect through stack-safe execution while preserving its channels exa
 
 Suspension adds no allocator requirement or recoverable allocation failure. Coroutine frames
 belong to the compiler-owned execution stack, whose exhaustion is a fatal trap.
+
+<a id="declaration-73696c6b2f656666656374733a3a6f66"></a>
+
+## `of`
+
+```silk
+pub effect fn of<A>(value: A) -> A
+```
+
+Constructs an Effect that succeeds with the captured value when run.
+
+### Details
+
+Calling `of` evaluates and transfers `value` immediately as an ordinary function argument, but
+the returned Effect does not produce that value until execution. The Effect has no typed failure
+or requirement channels.

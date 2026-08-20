@@ -18,6 +18,11 @@ one Effect layer. Ordinary `fn` statements outside an explicit effect block SHAL
 - **WHEN** an ordinary function computes one value and returns an effect block that uses it
 - **THEN** the setup executes at the call while the block executes only when run
 
+#### Scenario: Lift an ordinary value into Effect
+
+- **WHEN** `Effect.of(value)` receives a Copy or explicitly transferred affine value
+- **THEN** argument evaluation and transfer occur at construction, and running the returned `Effect<A>` succeeds with the captured value without failure or requirement channels
+
 ### Requirement: Effect construction has hidden nominal identity
 
 Every `effect {}` construction site SHALL produce one compiler-only nominal Effect instance with a

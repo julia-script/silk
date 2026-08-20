@@ -12,7 +12,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/char`](./char.md) | `char` | 8 | Checked construction, integer inspection, equality, and ordering for Unicode scalar char values. |
 | [`silk/child_process`](./child-process.md) | `ChildProcess` | 41 | Portable blocking child execution from structured byte arguments to fully captured output. |
 | [`silk/core`](./core.md) | `Allocator` | 12 | Foundational allocation and standard-output services used by higher standard-library actors. |
-| [`silk/effects`](./effects.md) | `Effect` | 25 | Combinators for transforming Effect success, failure, requirement, sequencing, and lifecycle. |
+| [`silk/effects`](./effects.md) | `Effect` | 26 | Combinators for transforming Effect success, failure, requirement, sequencing, and lifecycle. |
 | [`silk/f32`](./f32.md) | `f32` | 50 | IEEE binary32 values with deterministic representation, classification, and math operations. |
 | [`silk/f64`](./f64.md) | `f64` | 50 | IEEE binary64 values and Silk's default floating-point arithmetic. |
 | [`silk/filesystem`](./filesystem.md) | `FileSystem` | 58 | Portable normalized paths, whole-file operations, directory traversal, and explicit temp scopes. |

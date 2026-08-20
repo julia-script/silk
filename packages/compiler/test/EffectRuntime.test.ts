@@ -74,6 +74,15 @@ const callableMapSource = `import silk.effects as Effect
 import silk.i32 as i32
 effect fn succeed(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return run succeed(2) |> Effect.map(i32.add(40)) }`
+const ofSource = `import silk.effects as Effect
+struct Token { value: i32 }
+pub fn main() -> i32 {
+  let copied = Effect.of(20)
+  let token = Token { value: 22 }
+  let transferred = Effect.of(move token)
+  let captured = run transferred
+  return (run copied) + captured.value
+}`
 const flattenPrelude = `effect fn inner(value: i32) -> i32 { return value * 2 }
 effect fn outer(value: i32) -> Effect<i32> { return inner(value) }`
 const flattenSource = `import silk.effects as Effect
@@ -637,6 +646,46 @@ it.effect('preserves exclusive capture state across evaluator and Wasm runs', ()
     assert.strictEqual(logical._tag, 'Completed')
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 12n)
     assert.strictEqual(main(), 12)
+  }),
+)
+
+it.effect('lifts Copy and affine values through ordinary Effect.of source', () =>
+  Effect.gen(function* () {
+    const logicalSnapshot = yield* Analysis.ofSourceRealized(
+      'effect-runtime/of-logical',
+      ascii(ofSource),
+      'aarch64-apple-darwin',
+    )
+    const wasmSnapshot = yield* Analysis.ofSourceRealized(
+      'effect-runtime/of-wasm',
+      ascii(ofSource),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(logicalSnapshot), [])
+    assert.deepEqual(Analysis.diagnostics(wasmSnapshot), [])
+
+    const occurrence = Analysis.semanticOccurrenceAt(
+      logicalSnapshot,
+      'effect-runtime/of-logical',
+      ofSource.indexOf('Effect.of') + 'Effect.'.length,
+    )
+    assert.strictEqual(occurrence?.role, 'Value')
+    assert.strictEqual(occurrence?.declaration?.module, 'silk/effects')
+    assert.include(
+      occurrence === undefined
+        ? ''
+        : (Analysis.occurrencePresentation(logicalSnapshot, 'effect-runtime/of-logical', occurrence)
+            ?.text ?? ''),
+      'pub effect fn of',
+    )
+
+    const logical = Analysis.evaluate(logicalSnapshot)
+    assert.strictEqual(logical._tag, 'Completed')
+    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42n)
+
+    const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )
 

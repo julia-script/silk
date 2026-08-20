@@ -290,7 +290,7 @@ language-level Effect model is defined in focused pages:
 | Stack-safe recursive transfer | [Effect suspension and stack-safe recursion](effect-suspension.md) |
 | Cancellation, interruption, concurrency, and async cleanup | Not part of the stabilized language |
 
-The standard-library operations built from these rules—including `result`, `mapBoth`, `map`,
+The standard-library operations built from these rules—including `of`, `result`, `mapBoth`, `map`,
 `mapError`, `flatMap`, `flatten`, `zip`, `zip3`, `tap`, `catch`, `catchAll`, `ensuring`,
 `ifThenElse`, `retry`, the requirement-binding and provision operations, and `suspend`—belong in an
 Effect API reference rather than on this language-semantics page.
