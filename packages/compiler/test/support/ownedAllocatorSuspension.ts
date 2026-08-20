@@ -1,11 +1,11 @@
 export const ownedAllocatorSuspensionSuccess = `import silk.result { Result, Success, Failure }
 struct OwnedAllocator { storage: Allocation }
-effect fn allocate(self: &mut OwnedAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+effect fn allocate(self: &mut OwnedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   let mut inner = SystemAllocator.make()
   return run Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
 }
 impl Allocator for OwnedAllocator { allocate: OwnedAllocator.allocate }
-effect fn open() -> OwnedAllocator ! OutOfMemory ? &mut Allocator {
+effect fn open() -> OwnedAllocator ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<[i32; 2]>()
   let storage = run Allocator.allocate(move layout)
   return OwnedAllocator { storage: move storage }
@@ -17,7 +17,7 @@ effect fn inspect(self: once Effect<i32 ? &mut Allocator>) -> Result<i32, never>
 ? &mut Allocator {
   return run Effect.result(move self)
 }
-effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn program() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let provider = run open()
   let inspected = inspect(protected())
   let completed = run Intrinsic.bindRequirementOwned<&mut Allocator>(move inspected, move provider)
@@ -28,7 +28,7 @@ effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
     }
   }
 }
-effect fn outerRecover(error: OutOfMemory) -> i32 { return 9 }
+effect fn outerRecover(error: OutOfMemoryError) -> i32 { return 9 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return run Effect.catchAll(
@@ -40,12 +40,12 @@ pub fn main() -> i32 {
 export const ownedAllocatorSuspensionFailure = `import silk.result { Result, Success, Failure }
 struct Problem { code: i32 }
 struct OwnedAllocator { storage: Allocation }
-effect fn allocate(self: &mut OwnedAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+effect fn allocate(self: &mut OwnedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   let mut inner = SystemAllocator.make()
   return run Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
 }
 impl Allocator for OwnedAllocator { allocate: OwnedAllocator.allocate }
-effect fn open() -> OwnedAllocator ! OutOfMemory ? &mut Allocator {
+effect fn open() -> OwnedAllocator ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<[i32; 2]>()
   let storage = run Allocator.allocate(move layout)
   return OwnedAllocator { storage: move storage }
@@ -60,7 +60,7 @@ effect fn inspect(self: once Effect<i32 ? &mut Allocator>)
 ? &mut Allocator {
   return run Effect.result(move self)
 }
-effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn program() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let provider = run open()
   let inspected = inspect(Intrinsic.catchFailure<Problem>(protected(), recover))
   let completed = run Intrinsic.bindRequirementOwned<&mut Allocator>(move inspected, move provider)
@@ -71,7 +71,7 @@ effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
     }
   }
 }
-effect fn outerRecover(error: OutOfMemory) -> i32 { return 9 }
+effect fn outerRecover(error: OutOfMemoryError) -> i32 { return 9 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return run Effect.catchAll(
@@ -88,8 +88,8 @@ pub fn main() -> i32 {
  */
 export const auditAllocatorSuspension = `import silk.effects as Effect
 struct AuditAllocator { tag: i32 }
-effect fn allocate(self: &mut AuditAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  fail OutOfMemory {}
+effect fn allocate(self: &mut AuditAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  fail OutOfMemoryError {}
 }
 impl Allocator for AuditAllocator { allocate: AuditAllocator.allocate }
 effect fn protected() -> i32
@@ -117,14 +117,14 @@ impl Counter for Cell { increment: Cell.increment }
 effect fn read() -> i32 ? &mut Counter {
   return run Counter.increment()
 }
-effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn program() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<[i32; 2]>()
   let storage = run Allocator.allocate(move layout)
   let cell = Cell { value: 41, storage: move storage }
   let bound = Intrinsic.bindRequirementOwned<&mut Counter>(read(), move cell)
   return run move bound
 }
-effect fn recover(error: OutOfMemory) -> i32 { return -1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return run Effect.catchAll(
@@ -145,7 +145,7 @@ effect fn read(self: &mut Provider) -> i32 ! Problem {
   fail Problem { code: code }
 }
 impl Value for Provider { read: Provider.read }
-effect fn open() -> Provider ! OutOfMemory {
+effect fn open() -> Provider ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let storage = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -154,11 +154,11 @@ effect fn open() -> Provider ! OutOfMemory {
 effect fn use() -> i32 ! Problem ? &mut Value {
   return run Value.read()
 }
-effect fn program() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
+effect fn program() -> i32 ! Problem | OutOfMemoryError ? &mut Allocator {
   let provider = run open()
   return run Intrinsic.bindRequirementOwned<&mut Value>(use(), move provider)
 }
-effect fn recover(error: Problem | OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: Problem | OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return run Effect.catchAll(Effect.provideMut(program(), &mut allocator), recover)

@@ -46,7 +46,7 @@ collections can neither detect nor recover from that.
 `HashMap<K, V>` SHALL bound `K` by `HashKey` and SHALL support insert, lookup, and removal. Insert
 SHALL report whether an entry already existed under an equivalent key. Lookup SHALL distinguish
 presence from absence. Removal SHALL report whether an entry was removed. Insert SHALL fail only
-with the typed `OutOfMemory` failure of the underlying allocator requirement, and a failed insert
+with the typed `OutOfMemoryError` failure of the underlying allocator requirement, and a failed insert
 SHALL leave the map's prior entries, length, and capacity intact.
 
 #### Scenario: Insert, look up, and remove
@@ -62,7 +62,7 @@ SHALL leave the map's prior entries, length, and capacity intact.
 #### Scenario: Preserve the map when growth fails
 
 - **WHEN** an insert requires growth and the replacement allocation fails
-- **THEN** the insert fails with `OutOfMemory` and every prior entry remains present at its own key
+- **THEN** the insert fails with `OutOfMemoryError` and every prior entry remains present at its own key
 
 ### Requirement: HashSet requires a HashKey witness for its element type
 

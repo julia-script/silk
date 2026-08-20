@@ -24,11 +24,11 @@ pub effect fn main() -> () ! SomeError { return () }`
 
 const cleanupSource = `pub struct SomeError { storage: Allocation }
 impl Report for SomeError {}
-impl Report for OutOfMemory {}
+impl Report for OutOfMemoryError {}
 impl Drop for SomeError {
   fn drop(self: &mut SomeError) -> () { return () }
 }
-pub effect fn main() -> () ! SomeError | OutOfMemory {
+pub effect fn main() -> () ! SomeError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -49,12 +49,12 @@ pub effect fn main() -> () ! SomeError {
 const evaluateFailureSource = `pub struct SomeError {}
 pub struct Guard { storage: Allocation }
 impl Report for SomeError {}
-impl Report for OutOfMemory {}
+impl Report for OutOfMemoryError {}
 impl Drop for Guard {
   fn drop(self: &mut Guard) -> () { return () }
 }
 effect fn stop() -> never ! SomeError { fail SomeError {} }
-pub effect fn main() -> () ! SomeError | OutOfMemory {
+pub effect fn main() -> () ! SomeError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)

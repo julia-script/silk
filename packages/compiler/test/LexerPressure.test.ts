@@ -277,13 +277,13 @@ const quotaSourceFor = (input: string, id: string, quota: number): string => {
   const generated = sourceFor(input, id).source
   const withAllocator = replaceExactlyOnce(
     generated,
-    'impl Report for OutOfMemory {}',
-    `impl Report for OutOfMemory {}
+    'impl Report for OutOfMemoryError {}',
+    `impl Report for OutOfMemoryError {}
 
 struct QuotaAllocator { remaining: i32 }
 
-effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  if self.remaining == 0 { fail OutOfMemory {} }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
@@ -548,7 +548,7 @@ it.effect(
         const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
         assert.strictEqual(run.status, quota === allocationCount ? 0 : 1, `${id}: ${run.stderr}`)
         if (quota === allocationCount) assert.strictEqual(run.stderr, '')
-        else assert.strictEqual(run.stderr, 'Error: silk/core.OutOfMemory\n')
+        else assert.strictEqual(run.stderr, 'Error: silk/core.OutOfMemoryError\n')
       }
     }),
   180_000,

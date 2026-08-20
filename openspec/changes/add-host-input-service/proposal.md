@@ -24,7 +24,7 @@ Two things had to be settled before the surface could be written, and both now a
 - Return raw bytes from every value-returning operation, and add `text`, the checked fallible
   textual view, so undecodable input stays readable and passable rather than being replaced.
 - Report an index at or past the argument count, and an unset variable name, as `None`. Only a host
-  that cannot answer at all is `HostInputFailure`.
+  that cannot answer at all is `HostInputError`.
 - Add `arguments`, which collects the complete command line in order above the service.
 - Add `OsHostInput`, an ordinary-source native provider reading the process command line,
   environment block, and working directory through four new unsafe `Intrinsic` operations that reuse

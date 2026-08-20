@@ -38,7 +38,7 @@ A fallible release is not thereby excluded; it is relocated. The caller recovers
 recovered Effect is what gets passed:
 
 ```silk
-effect fn ignore(error: OutOfMemory) -> () { return () }
+effect fn ignore(error: OutOfMemoryError) -> () { return () }
 
 effect fn finalize() -> () {
   return run Effect.catch(release(), ignore)

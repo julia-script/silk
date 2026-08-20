@@ -9,7 +9,7 @@ native-only capture operation taking a stream selector, an offset, and an exclus
 returning `Option<usize>`. The argument and environment blocks SHALL be NUL-terminated entry blocks,
 and an empty working-directory block SHALL mean the caller's own directory. A successful execution
 SHALL retain exactly one capture until the next execution replaces it. The compiler MUST NOT
-construct or recognize `ProcessRequest`, `ProcessOutcome`, `ProcessFailure`, or the `ChildProcess`
+construct or recognize `ProcessRequest`, `ProcessOutcome`, `ProcessError`, or the `ChildProcess`
 service, and MUST NOT admit further operations for shells, streaming, or signal delivery.
 
 #### Scenario: Report a failure to start

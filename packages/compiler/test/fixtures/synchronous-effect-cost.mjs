@@ -186,18 +186,18 @@ pub fn main() -> i32 {
     source: `struct Payload { storage: Allocation value: i32 }
 impl Drop for Payload { fn drop(self: &mut Payload) -> () { return () } }
 fn consume(payload: Payload) -> i32 { return payload.value }
-effect fn produce() -> Payload ! OutOfMemory {
+effect fn produce() -> Payload ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
   return Payload { storage: move storage, value: 42 }
 }
-effect fn program() -> i32 ! OutOfMemory {
+effect fn program() -> i32 ! OutOfMemoryError {
   let payload = run produce()
   return consume(move payload)
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run program() |> Effect.catchAll(recover) }`,
   },
   {
@@ -208,17 +208,17 @@ pub fn main() -> i32 { return run program() |> Effect.catchAll(recover) }`,
     source: `struct Payload { storage: Allocation value: i32 }
 impl Drop for Payload { fn drop(self: &mut Payload) -> () { return () } }
 fn consume(payload: Payload) -> i32 { return payload.value }
-effect fn produce() -> Payload ! OutOfMemory {
+effect fn produce() -> Payload ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
   return Payload { storage: move storage, value: 42 }
 }
-effect fn program() -> i32 ! OutOfMemory {
+effect fn program() -> i32 ! OutOfMemoryError {
   return run produce() |> Effect.map(consume)
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run program() |> Effect.catchAll(recover) }`,
   },
   {

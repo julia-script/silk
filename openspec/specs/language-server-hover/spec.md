@@ -45,8 +45,8 @@ is a lowered `Effect<...>` value.
 
 #### Scenario: Hover an effect function reference
 
-- **WHEN** the cursor hovers a resolved use of `recover` declared as `effect fn recover(error: OutOfMemory) -> i32`
-- **THEN** hover renders `effect fn recover(error: OutOfMemory) -> i32` rather than `fn(OutOfMemory) -> Effect<i32>`
+- **WHEN** the cursor hovers a resolved use of `recover` declared as `effect fn recover(error: OutOfMemoryError) -> i32`
+- **THEN** hover renders `effect fn recover(error: OutOfMemoryError) -> i32` rather than `fn(OutOfMemoryError) -> Effect<i32>`
 
 #### Scenario: Hover a function declaration name
 

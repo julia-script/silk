@@ -179,19 +179,19 @@ fn openStorage<T>(storage: Unseeded<T> | Slots<T>) -> Slots<T> {
   }
 }
 
-effect fn overflowed() -> Layout ! OutOfMemory {
+effect fn overflowed() -> Layout ! OutOfMemoryError {
   return run AllocationFailure.outOfMemory()
 }
 
 // Both buffers exist before either is installed, so an allocation that fails releases the one
 // already taken and leaves the caller's set exactly as it was.
-effect fn allocateSlots<T>(count: usize) -> Slots<T> ! OutOfMemory ? &mut Allocator {
+effect fn allocateSlots<T>(count: usize) -> Slots<T> ! OutOfMemoryError ? &mut Allocator {
   let states = run vacantStates(count)
   let members = run memberStorage<T>(count)
   return Slots<T> { members: move members, states: move states }
 }
 
-effect fn vacantStates(count: usize) -> RawBuffer<u8> ! OutOfMemory ? &mut Allocator {
+effect fn vacantStates(count: usize) -> RawBuffer<u8> ! OutOfMemoryError ? &mut Allocator {
   let element = Layout.of<u8>()
   let plan = Layout.repeat(move element, count)
   let layout = match move plan {
@@ -217,7 +217,7 @@ fn markVacant(allocation: Allocation, count: usize) -> RawBuffer<u8> {
   return absurd<RawBuffer<u8>>()
 }
 
-effect fn memberStorage<T>(count: usize) -> RawBuffer<Member<T>> ! OutOfMemory ? &mut Allocator {
+effect fn memberStorage<T>(count: usize) -> RawBuffer<Member<T>> ! OutOfMemoryError ? &mut Allocator {
   let element = Layout.of<Member<T>>()
   let plan = Layout.repeat(move element, count)
   let layout = match move plan {
@@ -346,12 +346,12 @@ fn keep<T>(member: Member<T>) -> T {
 /// A set never holds two equivalent elements. When one is already held the set is unchanged and the
 /// arriving element is released, so the element that survives is the one the set already had.
 ///
-/// Fails only with `OutOfMemory`, and only from the growth this insert needed. A failed insert
+/// Fails only with `OutOfMemoryError`, and only from the growth this insert needed. A failed insert
 /// leaves every prior element present, and leaves the length and the bucket count unchanged.
 pub effect fn insert<T: HashKey>(
   self: &mut HashSet<T>,
   value: T
-) -> bool ! OutOfMemory ? &mut Allocator {
+) -> bool ! OutOfMemoryError ? &mut Allocator {
   let hashed = HashKey.hash(&value, &self.seed)
   if usize.ZERO < self.capacity {
     let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })

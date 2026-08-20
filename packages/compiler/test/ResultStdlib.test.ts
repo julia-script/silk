@@ -46,7 +46,7 @@ fn observe(result: Result<Token, i32>) -> i32 {
   }
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let storage = run Intrinsic.bindRequirementMut(Allocator.allocate(move layout), &mut allocator)
@@ -55,7 +55,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return observe(move result)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -90,12 +90,12 @@ pub fn main() -> i32 {
 
 const reifiedRequirement = `import silk.result { Result, Success, Failure }
 
-effect fn allocateOne() -> Allocation ! OutOfMemory ? &mut Allocator {
+effect fn allocateOne() -> Allocation ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<i32>()
   return run Allocator.allocate(move layout)
 }
 
-effect fn attempt() -> Result<Allocation, OutOfMemory> ? &mut Allocator {
+effect fn attempt() -> Result<Allocation, OutOfMemoryError> ? &mut Allocator {
   return run Effect.result(allocateOne())
 }
 
@@ -103,9 +103,9 @@ effect fn build() -> i32 {
   let mut allocator = SystemAllocator.make()
   let completed = run Intrinsic.bindRequirementMut(attempt(), &mut allocator)
   return match move completed {
-    Result<Allocation, OutOfMemory> { value: outcome } => match move outcome {
+    Result<Allocation, OutOfMemoryError> { value: outcome } => match move outcome {
       Success<Allocation> { value: storage } => release(move storage)
-      Failure<OutOfMemory> { error: ignored } => 0
+      Failure<OutOfMemoryError> { error: ignored } => 0
     }
   }
 }

@@ -172,7 +172,7 @@ const suspendingAllocator = `struct SuspendingAllocator {}
 effect fn allocate(
   self: &mut SuspendingAllocator,
   layout: Layout
-) -> Allocation ! OutOfMemory {
+) -> Allocation ! OutOfMemoryError {
   let delayed = Effect.suspend(effect {
     return run Intrinsic.systemAllocationAcquire(move layout)
   })

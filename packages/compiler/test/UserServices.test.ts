@@ -508,13 +508,13 @@ service Value { effect fn read() -> i32 ? &mut Value }
 struct Provider { storage: Allocation }
 effect fn read(self: &mut Provider) -> i32 { return 42 }
 impl Value for Provider { read: Provider.read }
-effect fn open() -> Provider ! OutOfMemory {
+effect fn open() -> Provider ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   return Provider { storage: move allocation }
 }
-effect fn exhausted(error: OutOfMemory) -> Provider ! Problem { fail Problem { code: 9 } }
+effect fn exhausted(error: OutOfMemoryError) -> Provider ! Problem { fail Problem { code: 9 } }
 effect fn acquire() -> Provider ! Problem { return run Effect.catchAll(open(), exhausted) }
 effect fn use() -> i32 ? &mut Value { return run Value.read() }
 effect fn body() -> i32 ! Problem {

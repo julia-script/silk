@@ -26,9 +26,9 @@ const quotaScannerSource = (quota: number): string =>
 }
 
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation
-! OutOfMemory {
+! OutOfMemoryError {
   if self.remaining == 0 {
-    fail OutOfMemory {}
+    fail OutOfMemoryError {}
   }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()

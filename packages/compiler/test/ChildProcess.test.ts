@@ -44,7 +44,7 @@ const scriptedProvider = `struct Scripted {
 effect fn scriptedExecute(
   self: &mut Scripted,
   request: &ProcessRequest
-) -> ProcessOutcome ! ProcessFailure | OutOfMemory ? &mut Allocator {
+) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut Allocator {
   let mut output = bytesMake()
   let one = [self.first]
   let appended = run bytesAppend(&mut output, &one)
@@ -59,7 +59,7 @@ struct Broken {}
 effect fn brokenExecute(
   self: &mut Broken,
   request: &ProcessRequest
-) -> ProcessOutcome ! ProcessFailure | OutOfMemory ? &mut Allocator {
+) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut Allocator {
   fail failure(spawnOperation(), notFound())
 }
 
@@ -69,7 +69,7 @@ impl ChildProcess for Broken { execute: Broken.brokenExecute }
 const imports = `import silk.bytes { append as bytesAppend, make as bytesMake }
 import silk.child_process {
   ChildProcess,
-  ProcessFailure,
+  ProcessError,
   ProcessOutcome,
   ProcessRequest,
   addArgument,
@@ -96,22 +96,22 @@ import silk.filesystem { FileError, fromBytes as pathFromBytes }
 import silk.option { None, Option, Some }
 import silk.result { Failure, Result, Success }
 
-impl Report for OutOfMemory {}
+impl Report for OutOfMemoryError {}
 `
 
 /** Reports the program's own return value, or a distinct band for each typed failure it recovers. */
 const recovery = `pub fn main() -> i32 {
   let attempted = run Intrinsic.effectResult(program())
   return match move attempted {
-    Result<i32, ProcessFailure | OutOfMemory | FileError> { value: outcome } => match move outcome {
+    Result<i32, ProcessError | OutOfMemoryError | FileError> { value: outcome } => match move outcome {
       Success<i32> { value } => value
-      Failure<ProcessFailure | OutOfMemory | FileError> { error } => match move error {
-        ProcessFailure processFailure => match move providerCode(&processFailure) {
+      Failure<ProcessError | OutOfMemoryError | FileError> { error } => match move error {
+        ProcessError processFailure => match move providerCode(&processFailure) {
           Some<i32> { value } =>
             70 + processFailure.reason.code + 10 * processFailure.operation.code + value
           None {} => 70 + processFailure.reason.code + 10 * processFailure.operation.code
         }
-        OutOfMemory exhausted => 98
+        OutOfMemoryError exhausted => 98
         FileError invalid => 99
       }
     }
@@ -120,7 +120,7 @@ const recovery = `pub fn main() -> i32 {
 
 const scriptedRun = (provider: string, body: string) => `${imports}
 ${scriptedProvider}
-effect fn program() -> i32 ! ProcessFailure | OutOfMemory | FileError {
+effect fn program() -> i32 ! ProcessError | OutOfMemoryError | FileError {
   let mut allocator = SystemAllocator.make()
   let mut provider = ${provider}
 ${vocabulary}
@@ -132,7 +132,7 @@ ${recovery}`
 const nativeRun = (body: string) => `${imports}
 import silk.os_child_process { make as osChildMake }
 
-effect fn program() -> i32 ! ProcessFailure | OutOfMemory | FileError {
+effect fn program() -> i32 ! ProcessError | OutOfMemoryError | FileError {
   let mut allocator = SystemAllocator.make()
   let mut provider = osChildMake()
 ${vocabulary}

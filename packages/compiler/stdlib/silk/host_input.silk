@@ -7,9 +7,9 @@
 //!
 //! # Details
 //! Arguments include the program name at index zero and retain host order. A missing argument index
-//! or unset variable is [`None`], while [`HostInputFailure`] means the provider could not answer.
+//! or unset variable is [`None`], while [`HostInputError`] means the provider could not answer.
 //! Returned [`Bytes`] values are independently owned, so lookup operations also carry explicit
-//! [`OutOfMemory`] and [`Allocator`] channels.
+//! [`OutOfMemoryError`] and [`Allocator`] channels.
 //!
 //! The service is read-only and never mutates environment variables or the process working
 //! directory. No ambient global is consulted after a provider is supplied.
@@ -29,13 +29,13 @@ import silk.string { InvalidUtf8, fromUtf8 as stringFromUtf8, utf8Bytes as strin
 import silk.vector { Vector, append as vectorAppend, make as vectorMake }
 
 /// Failure to complete one host-input lookup.
-pub struct HostInputFailure {}
+pub struct HostInputError {}
 
-impl Report for HostInputFailure {}
+impl Report for HostInputError {}
 
 /// Constructs the typed failure of one host lookup that could not complete.
-pub fn inputFailure() -> HostInputFailure {
-  return HostInputFailure {}
+pub fn inputFailure() -> HostInputError {
+  return HostInputError {}
 }
 
 /// Portable read-only process-input contract.
@@ -45,55 +45,55 @@ pub fn inputFailure() -> HostInputFailure {
 /// The service reads and never writes: it has no operation that sets an environment variable or
 /// changes the working directory. An absent argument index and an unset variable name are `None`
 /// rather than typed failures, because absence is an ordinary answer; only a host that cannot
-/// answer at all is `HostInputFailure`.
+/// answer at all is `HostInputError`.
 pub service HostInput {
   /// The number of command-line arguments the process received, including the program name at
   /// index zero.
-  effect fn argumentCount() -> usize ! HostInputFailure ? &mut HostInput
+  effect fn argumentCount() -> usize ! HostInputError ? &mut HostInput
   /// The raw bytes of one argument, or `None` at or past the argument count.
   effect fn argument(
     index: usize
-  ) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+  ) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
   /// The raw bytes of one environment variable's value, or `None` when the name is unset.
   effect fn variable(
     name: &[u8]
-  ) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+  ) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
   /// The raw bytes of the process working directory.
-  effect fn workingDirectory() -> Bytes ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+  effect fn workingDirectory() -> Bytes ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 }
 
 /// Builds the argument-count effect.
-pub effect fn argumentCount() -> usize ! HostInputFailure ? &mut HostInput {
+pub effect fn argumentCount() -> usize ! HostInputError ? &mut HostInput {
   return run HostInput.argumentCount()
 }
 
 /// Builds one argument lookup effect.
 pub effect fn argument(
   index: usize
-) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator {
+) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator {
   return run HostInput.argument(index)
 }
 
 /// Builds one environment lookup effect for a raw byte name.
 pub effect fn variable(
   name: &[u8]
-) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator {
+) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator {
   return run HostInput.variable(name)
 }
 
 /// Looks one environment variable up by its textual name.
 pub effect fn variableNamed(
   name: string
-) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator {
+) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator {
   return run HostInput.variable(stringUtf8Bytes(name))
 }
 
 /// Builds the working-directory effect.
-pub effect fn workingDirectory() -> Bytes ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator {
+pub effect fn workingDirectory() -> Bytes ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator {
   return run HostInput.workingDirectory()
 }
 
-effect fn missingArgument() -> Bytes ! HostInputFailure {
+effect fn missingArgument() -> Bytes ! HostInputError {
   fail inputFailure()
 }
 
@@ -102,9 +102,9 @@ effect fn missingArgument() -> Bytes ! HostInputFailure {
 /// # Details
 ///
 /// A host that reports a count it cannot then supply is a broken host, so a missing index below the
-/// count is `HostInputFailure` rather than a silently shorter sequence.
+/// count is `HostInputError` rather than a silently shorter sequence.
 pub effect fn arguments(
-) -> Vector<Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator {
+) -> Vector<Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator {
   let total = run HostInput.argumentCount()
   let mut collected = vectorMake<Bytes>()
   let mut index = usize.ZERO

@@ -414,14 +414,14 @@ it.effect('keeps typed-failure releases on stored Effect propagation paths', () 
       `struct Token { value: i32 }
 struct Deferred<F: once Effect<i32>> { operation: F }
 fn consume(token: Token) -> i32 { return token.value }
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let token = Token { value: 1 }
   let deferred = Deferred { operation: effect { return consume(move token) } }
   let mut allocator = SystemAllocator.make()
   let allocation = run Allocator.allocate(Layout.of<[i32; 2]>()) |> Effect.provideMut(&mut allocator)
   return 42
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
     const propagating = module.functions

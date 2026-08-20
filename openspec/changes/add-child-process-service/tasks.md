@@ -1,7 +1,7 @@
 ## 1. Portable Contract
 
 - [x] 1.1 Add the canonical `silk/child_process` module with the `ChildProcess` service, its one
-      blocking `execute` operation, and the `ProcessFailure` typed failure with its closed
+      blocking `execute` operation, and the `ProcessError` typed failure with its closed
       stage/reason pair, optional provider detail, and constructors.
 - [x] 1.2 Add `ProcessRequest` carrying an executable path, ordered argument bytes, an exact
       environment that starts empty, and an optional working directory, with `addArgument`,
@@ -44,7 +44,7 @@
 ## 5. Native Provider and Runtime
 
 - [x] 5.1 Add the ordinary-source `OsChildProcess` provider translating the termination selector to
-      `Exited` or `Signaled` and an absent result to `ProcessFailure`.
+      `Exited` or `Signaled` and an absent result to `ProcessError`.
 - [x] 5.2 Add the reachable-only native runtime symbols: one that forks, closes the child's standard
       input, reports a failure to start through a close-on-exec channel, drains both streams
       concurrently, and waits; and one that copies the retained capture.

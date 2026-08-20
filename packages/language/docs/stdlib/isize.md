@@ -617,7 +617,7 @@ Calls the concrete isize greaterOrEqual primitive.
 ## `toText`
 
 ```silk
-pub effect fn toText(value: isize) -> String ! OutOfMemory ? &mut Allocator
+pub effect fn toText(value: isize) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
 Renders the value as decimal text in freshly owned storage.
@@ -627,7 +627,7 @@ Renders the value as decimal text in freshly owned storage.
 ## `parse`
 
 ```silk
-pub fn parse(text: string) -> silk/result.Result<isize, silk/format.ParseFailure>
+pub fn parse(text: string) -> silk/result.Result<isize, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an `isize`, or reports why the text is not one.

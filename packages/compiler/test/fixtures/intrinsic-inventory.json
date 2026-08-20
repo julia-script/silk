@@ -5134,7 +5134,7 @@
     },
     {
       "operation": "Intrinsic.systemAllocationAcquire",
-      "signature": "fn Intrinsic.systemAllocationAcquire(layout: Layout) -> Effect<Allocation ! OutOfMemory>",
+      "signature": "fn Intrinsic.systemAllocationAcquire(layout: Layout) -> Effect<Allocation ! OutOfMemoryError>",
       "unsafe": false,
       "admission": "Platform",
       "consumer": "silk/core.allocate",
@@ -5142,7 +5142,7 @@
     },
     {
       "operation": "Intrinsic.standardStreamWrite",
-      "signature": "fn Intrinsic.standardStreamWrite(destination: bool, bytes: &[u8]) -> Effect<() ! StreamWriteFailure>",
+      "signature": "fn Intrinsic.standardStreamWrite(destination: bool, bytes: &[u8]) -> Effect<() ! StreamWriteError>",
       "unsafe": false,
       "admission": "Platform",
       "consumer": "silk/core.writeAll",

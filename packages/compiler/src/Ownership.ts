@@ -337,7 +337,7 @@ const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipC
   Type.isBuiltin(type) ||
   Type.isString(type) ||
   Type.isNever(type) ||
-  Type.isOutOfMemory(type)
+  Type.isOutOfMemoryError(type)
     ? copyable
     : Type.isSlice(type)
       ? type.access === 'Shared'

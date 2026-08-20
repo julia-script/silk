@@ -19,12 +19,12 @@ const program = (body: string): string =>
   `import silk.vector { Vector, make, append, sort, binarySearch, get, length }
 import silk.option { Option, Some, None }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
 ${body}
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -164,7 +164,7 @@ it.effect('sorts every integer width the standard library witnesses', () =>
       'vector-sort/widths',
       `import silk.vector { Vector, make, append, sort, get, length }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut narrow = make<u8>()
   let n0 = run append<u8>(&mut narrow, 9) |> Effect.provideMut(&mut allocator)
@@ -190,7 +190,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
@@ -322,7 +322,7 @@ fn itemLess(left: &Item, right: &Item) -> bool {
 
 impl Order<Item> for Item { lessThan: Item.itemLess }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut items = make<Item>()
   let a = run append<Item>(&mut items, Item { key: 1, tag: 1 }) |> Effect.provideMut(&mut allocator)
@@ -340,7 +340,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return folded
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -372,13 +372,13 @@ fn trackedLess(left: &Tracked, right: &Tracked) -> bool {
 
 impl Order<Tracked> for Tracked { lessThan: Tracked.trackedLess }
 
-effect fn hold(key: i32) -> Tracked ! OutOfMemory ? &mut Allocator {
+effect fn hold(key: i32) -> Tracked ! OutOfMemoryError ? &mut Allocator {
   let mut payload = make<i32>()
   let filled = run append<i32>(&mut payload, key)
   return Tracked { key: key, payload: move payload }
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut items = make<Tracked>()
   let first = run hold(3) |> Effect.provideMut(&mut allocator)
@@ -398,7 +398,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return folded
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 

@@ -355,7 +355,7 @@ it.effect('navigates standard-library definitions to the analyzed toolchain sour
 it.effect('navigates Effect.suspend to its shipped Silk declaration', () =>
   Effect.gen(function* () {
     const root = project()
-    const source = `pub effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator {
+    const source = `pub effect fn delayed() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return run Effect.suspend(effect { return 42 })
 }
 pub fn main() -> i32 { return 42 }`

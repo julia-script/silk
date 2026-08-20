@@ -12,7 +12,7 @@ const ascii = (value: string): Uint8Array =>
  */
 const provider = `struct Clock { storage: Allocation }
 
-effect fn openClock() -> Clock ! OutOfMemory {
+effect fn openClock() -> Clock ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -23,16 +23,16 @@ effect fn openClock() -> Clock ! OutOfMemory {
 /** Two executions of one provided Effect: each must acquire and release its own provider. */
 const twoExecutions = `${provider}
 
-effect fn read() -> i32 ! OutOfMemory ? &mut Clock { return 21 }
+effect fn read() -> i32 ! OutOfMemoryError ? &mut Clock { return 21 }
 
-effect fn work() -> i32 ! OutOfMemory {
+effect fn work() -> i32 ! OutOfMemoryError {
   let provided = read() |> Effect.provideWith(openClock())
   let first = run provided
   let second = run provided
   return first + second
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
@@ -43,15 +43,15 @@ pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
  */
 const threeAttempts = `${provider}
 
-effect fn read() -> i32 ! OutOfMemory ? &mut Clock { fail OutOfMemory {} }
+effect fn read() -> i32 ! OutOfMemoryError ? &mut Clock { fail OutOfMemoryError {} }
 
-effect fn work() -> i32 ! OutOfMemory {
+effect fn work() -> i32 ! OutOfMemoryError {
   let provided = read() |> Effect.provideWith(openClock())
   let retried = provided |> Effect.retry(2)
   return run retried
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 

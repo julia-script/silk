@@ -179,7 +179,7 @@ impl Drop for Guard {
 struct Holder<F: once fn(i32) -> i32> { step: F }
 fn consume(value: i32, guard: Guard) -> i32 { return value + guard.tag }
 fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -192,11 +192,11 @@ effect fn build() -> i32 ! OutOfMemory {
       : exit === 'moved'
         ? 'return keep(move holder)'
         : exit === 'typed-failure'
-          ? 'fail OutOfMemory {}'
+          ? 'fail OutOfMemoryError {}'
           : 'return 42'
   }
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const hookOnlyCleanupProgram = (exit: CleanupExit) => `struct Guard<F: once fn(i32) -> i32> {
@@ -215,7 +215,7 @@ fn consume<F: once fn(i32) -> i32>(value: i32, guard: Guard<F>) -> i32 {
   return value + guard.tag
 }
 fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let guard = Guard { tag: 2, marker: marker }
   let holder = Holder { step: consume(move guard) }
   ${
@@ -224,21 +224,21 @@ effect fn build() -> i32 ! OutOfMemory {
       : exit === 'moved'
         ? 'return keep(move holder)'
         : exit === 'typed-failure'
-          ? 'fail OutOfMemory {}'
+          ? 'fail OutOfMemoryError {}'
           : 'return 42'
   }
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const cleanupExits = ['uncalled', 'consuming', 'moved', 'typed-failure'] as const
 
-const typedFailure = `${takeDeclarations}effect fn build() -> i32 ! OutOfMemory {
+const typedFailure = `${takeDeclarations}effect fn build() -> i32 ! OutOfMemoryError {
   let token = Token { value: 2 }
   let holder = Holder { step: consume(move token) }
-  fail OutOfMemory {}
+  fail OutOfMemoryError {}
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const runtimeMatrix = [

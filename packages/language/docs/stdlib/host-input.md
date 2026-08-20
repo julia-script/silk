@@ -13,9 +13,9 @@ lossless pass-through.
 ## Details
 
 Arguments include the program name at index zero and retain host order. A missing argument index
-or unset variable is [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65), while [`HostInputFailure`](#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744661696c757265) means the provider could not answer.
+or unset variable is [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65), while [`HostInputError`](#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744661696c757265) means the provider could not answer.
 Returned [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573) values are independently owned, so lookup operations also carry explicit
-[`OutOfMemory`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279) and [`Allocator`](./core.md#declaration-73696c6b2f636f72653a3a416c6c6f6361746f72) channels.
+[`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279) and [`Allocator`](./core.md#declaration-73696c6b2f636f72653a3a416c6c6f6361746f72) channels.
 
 The service is read-only and never mutates environment variables or the process working
 directory. No ambient global is consulted after a provider is supplied.
@@ -26,20 +26,20 @@ Public declarations: 10.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744661696c757265"></a>
 
-## `HostInputFailure`
+## `HostInputError`
 
 ```silk
-pub struct HostInputFailure
+pub struct HostInputError
 ```
 
 Failure to complete one host-input lookup.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>
 
-## Implementation `Report for HostInputFailure`
+## Implementation `Report for HostInputError`
 
 ```silk
-impl Report for HostInputFailure
+impl Report for HostInputError
 ```
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a696e7075744661696c757265"></a>
@@ -47,7 +47,7 @@ impl Report for HostInputFailure
 ## `inputFailure`
 
 ```silk
-pub fn inputFailure() -> HostInputFailure
+pub fn inputFailure() -> HostInputError
 ```
 
 Constructs the typed failure of one host lookup that could not complete.
@@ -67,14 +67,14 @@ Portable read-only process-input contract.
 The service reads and never writes: it has no operation that sets an environment variable or
 changes the working directory. An absent argument index and an unset variable name are `None`
 rather than typed failures, because absence is an ordinary answer; only a host that cannot
-answer at all is `HostInputFailure`.
+answer at all is `HostInputError`.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075743a3a6f7065726174696f6e3a617267756d656e74436f756e74"></a>
 
 ### Operation `argumentCount`
 
 ```silk
-effect fn argumentCount() -> usize ! HostInputFailure ? &mut HostInput
+effect fn argumentCount() -> usize ! HostInputError ? &mut HostInput
 ```
 
 The number of command-line arguments the process received, including the program name at
@@ -85,7 +85,7 @@ index zero.
 ### Operation `argument`
 
 ```silk
-effect fn argument(index: usize) -> Option<silk/bytes.Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+effect fn argument(index: usize) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 The raw bytes of one argument, or `None` at or past the argument count.
@@ -95,7 +95,7 @@ The raw bytes of one argument, or `None` at or past the argument count.
 ### Operation `variable`
 
 ```silk
-effect fn variable(name: &[u8]) -> Option<silk/bytes.Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+effect fn variable(name: &[u8]) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 The raw bytes of one environment variable's value, or `None` when the name is unset.
@@ -105,7 +105,7 @@ The raw bytes of one environment variable's value, or `None` when the name is un
 ### Operation `workingDirectory`
 
 ```silk
-effect fn workingDirectory() -> Bytes ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+effect fn workingDirectory() -> Bytes ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 The raw bytes of the process working directory.
@@ -115,7 +115,7 @@ The raw bytes of the process working directory.
 ## `argumentCount`
 
 ```silk
-pub effect fn argumentCount() -> usize ! HostInputFailure ? &mut HostInput
+pub effect fn argumentCount() -> usize ! HostInputError ? &mut HostInput
 ```
 
 Builds the argument-count effect.
@@ -125,7 +125,7 @@ Builds the argument-count effect.
 ## `argument`
 
 ```silk
-pub effect fn argument(index: usize) -> Option<silk/bytes.Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+pub effect fn argument(index: usize) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Builds one argument lookup effect.
@@ -135,7 +135,7 @@ Builds one argument lookup effect.
 ## `variable`
 
 ```silk
-pub effect fn variable(name: &[u8]) -> Option<silk/bytes.Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+pub effect fn variable(name: &[u8]) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Builds one environment lookup effect for a raw byte name.
@@ -145,7 +145,7 @@ Builds one environment lookup effect for a raw byte name.
 ## `variableNamed`
 
 ```silk
-pub effect fn variableNamed(name: string) -> Option<silk/bytes.Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+pub effect fn variableNamed(name: string) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Looks one environment variable up by its textual name.
@@ -155,7 +155,7 @@ Looks one environment variable up by its textual name.
 ## `workingDirectory`
 
 ```silk
-pub effect fn workingDirectory() -> Bytes ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+pub effect fn workingDirectory() -> Bytes ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Builds the working-directory effect.
@@ -165,7 +165,7 @@ Builds the working-directory effect.
 ## `arguments`
 
 ```silk
-pub effect fn arguments() -> silk/vector.Vector<silk/bytes.Bytes> ! HostInputFailure | OutOfMemory ? &mut HostInput | &mut Allocator
+pub effect fn arguments() -> silk/vector.Vector<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Collects every command-line argument, in the order the process received them.
@@ -173,7 +173,7 @@ Collects every command-line argument, in the order the process received them.
 ### Details
 
 A host that reports a count it cannot then supply is a broken host, so a missing index below the
-count is `HostInputFailure` rather than a silently shorter sequence.
+count is `HostInputError` rather than a silently shorter sequence.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a74657874"></a>
 

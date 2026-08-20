@@ -14,7 +14,7 @@ fixed array when the length is part of the type, and `silk.bytes.Bytes` for bulk
 [`make`](#declaration-73696c6b2f766563746f723a3a6d616b65) is allocation-free. The first growth reserves four elements and later growth doubles
 capacity; [`reserve`](#declaration-73696c6b2f766563746f723a3a72657365727665) can move that cost ahead of mutation. Growth completes in replacement
 storage before committing, so [`append`](#declaration-73696c6b2f766563746f723a3a617070656e64) and [`reserve`](#declaration-73696c6b2f766563746f723a3a72657365727665) leave the vector unchanged on
-[`OutOfMemory`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279). Removing, clearing, and truncating drop exactly the elements they discard while
+[`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279). Removing, clearing, and truncating drop exactly the elements they discard while
 retaining capacity.
 
 [`sort`](#declaration-73696c6b2f766563746f723a3a736f7274) is stable, deterministic, and supports move-only elements, but allocates scratch space.
@@ -124,7 +124,7 @@ impl Drop for silk/vector.Vector<T>
 ## `append`
 
 ```silk
-pub effect fn append<T>(self: &mut silk/vector.Vector<T>, value: T) -> () ! OutOfMemory ? &mut Allocator
+pub effect fn append<T>(self: &mut silk/vector.Vector<T>, value: T) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends one owned value, growing geometrically when capacity is exhausted.
@@ -134,7 +134,7 @@ Appends one owned value, growing geometrically when capacity is exhausted.
 ## `appendBytes`
 
 ```silk
-pub effect fn appendBytes(self: &mut silk/vector.Vector<u8>, values: &[u8]) -> () ! OutOfMemory ? &mut Allocator
+pub effect fn appendBytes(self: &mut silk/vector.Vector<u8>, values: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends every byte of one borrowed sequence in source order with one bulk copy.
@@ -144,7 +144,7 @@ Appends every byte of one borrowed sequence in source order with one bulk copy.
 ## `insert`
 
 ```silk
-pub effect fn insert<T>(self: &mut silk/vector.Vector<T>, index: usize, value: T) -> () ! OutOfMemory ? &mut Allocator
+pub effect fn insert<T>(self: &mut silk/vector.Vector<T>, index: usize, value: T) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Inserts one owned value at an index, shifting later elements without requiring T to be Copy.
@@ -214,7 +214,7 @@ Overwrites the element at one index, dropping the old element first. Traps out o
 ## `reserve`
 
 ```silk
-pub effect fn reserve<T>(self: &mut silk/vector.Vector<T>, additional: usize) -> () ! OutOfMemory ? &mut Allocator
+pub effect fn reserve<T>(self: &mut silk/vector.Vector<T>, additional: usize) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Grows the capacity to hold at least one additional count of elements.
@@ -224,7 +224,7 @@ Grows the capacity to hold at least one additional count of elements.
 ## `sort`
 
 ```silk
-pub effect fn sort<T>(self: &mut silk/vector.Vector<T>) -> () ! OutOfMemory ? &mut Allocator
+pub effect fn sort<T>(self: &mut silk/vector.Vector<T>) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Orders the elements in place. Equal elements keep their input order.

@@ -26,8 +26,8 @@ The `silk.string` module exposes these operations:
 | `utf8Bytes(value: string)` | Borrows the immutable UTF-8 encoding as `&[u8]` without allocation. |
 | `byteLength(value: string)` | Returns the UTF-8 byte length without allocation. |
 | `make()` | Constructs an empty owned `String` without allocation. |
-| `copy(value: string)` | Allocates and copies into an owned `String`; fails with `OutOfMemory`. |
-| `append(self: &mut String, value: string)` | Allocates replacement storage and appends complete text; fails with `OutOfMemory` without changing `self`. |
+| `copy(value: string)` | Allocates and copies into an owned `String`; fails with `OutOfMemoryError`. |
+| `append(self: &mut String, value: string)` | Allocates replacement storage and appends complete text; fails with `OutOfMemoryError` without changing `self`. |
 | `view(self: &String)` | Borrows the complete owned contents as `string` without allocation. |
 | `ownedUtf8Bytes(self: &String)` | Borrows the owned value's immutable bytes without allocation. |
 | `ownedByteLength(self: &String)` | Returns the owned value's initialized byte length without allocation. |
@@ -56,7 +56,7 @@ bounded to eight events and 64 total message bytes; capacity exhaustion is a det
 `LogError`, not an ambient allocator requirement.
 
 `StandardStreams` is the lower-level process-output boundary. It writes immutable byte views to
-stdout or stderr and reports `StreamWriteFailure`; it does not invent log levels or Logger
+stdout or stderr and reports `StreamWriteError`; it does not invent log levels or Logger
 requirements. It is also not the future `Stream`/`Sink` model, which will own composition, flow,
 buffering, and backpressure.
 
@@ -71,7 +71,7 @@ caller asked for and eventually ends. One `StandardInput.read` fills a prefix of
 `&mut [u8]` and returns a `ReadOutcome`: `Filled { count }` carries the exact committed count, which
 may be less than the buffer length, and `EndOfInput` reports that no further bytes will arrive.
 End of input is outcome data, so draining input never handles a failure to do so; only a host error
-is `StreamReadFailure`. The service does not imply terminal control, raw mode, line editing, or
+is `StreamReadError`. The service does not imply terminal control, raw mode, line editing, or
 non-blocking reads.
 
 `OsStandardInput` is the native provider. It reads the process standard-input descriptor through
@@ -87,7 +87,7 @@ metacharacter inside an argument reaches the child as data. The child's standard
 `ProcessOutcome` is `Exited { code output errors }` or `Signaled { signal output errors }`, so an
 exit code and a terminating signal are separate members rather than one integer. A nonzero exit code
 is outcome data — a caller that runs a failing tool reads its code and its diagnostics off the
-success channel. Only a failure to start, to wait, or to capture is `ProcessFailure`, which is
+success channel. Only a failure to start, to wait, or to capture is `ProcessError`, which is
 allocation-free and carries a closed stage/reason pair plus an optional numeric provider detail.
 Asynchronous processes, pipes, streaming, interactive child input, process groups, and job control
 are all outside this service.
@@ -108,7 +108,7 @@ sets a variable or changes the directory. Every value is raw bytes, exactly as t
 them — a POSIX argument or environment value is an arbitrary byte string, and a program must be able
 to read one and pass it through unchanged — and `text` is the checked, fallible textual view that
 layers on top without replacing or discarding those bytes. An index at or past `argumentCount` and an
-unset name are `None`, not failures; only a host that cannot answer at all is `HostInputFailure`.
+unset name are `None`, not failures; only a host that cannot answer at all is `HostInputError`.
 Argument parsing and flag grammar belong above this boundary.
 
 `OsHostInput` is the native provider. It reads the process command line, environment block, and

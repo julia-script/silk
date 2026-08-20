@@ -121,7 +121,7 @@ export const heterogeneousOwnedFailurePayload = `import silk.effects as Effect
 struct Selected { code: i32 }
 struct Owned { storage: Allocation }
 struct Wide { code: f64 }
-effect fn risky() -> i32 ! Selected | Owned | OutOfMemory {
+effect fn risky() -> i32 ! Selected | Owned | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -133,14 +133,14 @@ fn release(storage: Allocation) -> i32 {
   drop storage
   return 42
 }
-effect fn recoverAny(problem: Owned | OutOfMemory | Wide) -> i32 {
+effect fn recoverAny(problem: Owned | OutOfMemoryError | Wide) -> i32 {
   return match move problem {
     Owned { storage } => release(move storage)
-    OutOfMemory {} => 0
+    OutOfMemoryError {} => 0
     Wide { code } => 0
   }
 }
-effect fn widenedResidual() -> i32 ! Owned | OutOfMemory | Wide {
+effect fn widenedResidual() -> i32 ! Owned | OutOfMemoryError | Wide {
   return run Effect.catch<Selected>(risky(), recoverSelected)
 }
 effect fn completeResidual() -> i32 {
@@ -154,7 +154,7 @@ export const heterogeneousOwnedFailureResultDrop = `import silk.effects as Effec
 struct Selected { code: i32 }
 struct Owned { storage: Allocation }
 struct Wide { code: f64 }
-effect fn risky() -> i32 ! Selected | Owned | OutOfMemory {
+effect fn risky() -> i32 ! Selected | Owned | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let pending = Allocator.allocate(Layout.of<i32>()) |> Effect.provideMut(&mut allocator)
   let storage = run pending
@@ -717,7 +717,7 @@ fn continueSum(value: string, step: ScalarStep) -> u32 {
   return scalar + scalarSum(value, move cursor)
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let literal = "A\\u{a2}"
   if literal == "A\\u{a2}" {} else { return 1 }
   if literal != "A\\u{a3}" {} else { return 2 }
@@ -734,7 +734,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -746,7 +746,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     source: `import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let left = run normalizeNfc("\\u{e9}") |> Effect.provideMut(&mut allocator)
   let right = run normalizeNfc("e\\u{301}") |> Effect.provideMut(&mut allocator)
@@ -754,7 +754,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -849,7 +849,7 @@ pub fn main() -> i32 {
 import silk.hash_map { HashMap, bucketCount, contains, get, insert, length, make, remove }
 import silk.option { Option, Some, None }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut map = make<Word, i32>(HashKey.seed(4242))
   let mut key = 0
@@ -873,7 +873,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -883,7 +883,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     name: 'vector-growth-reads',
     source: `import silk.vector { Vector, make, append, get, length, capacity }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
@@ -905,18 +905,18 @@ effect fn build() -> i32 ! OutOfMemory {
   return first + last + 17
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
-  // folded from OwnedAllocationDispatch.test.ts: quota refusal propagates typed OutOfMemory.
+  // folded from OwnedAllocationDispatch.test.ts: quota refusal propagates typed OutOfMemoryError.
   {
     name: 'owned-allocation-quota-refusal',
     source: `struct QuotaAllocator { remaining: i32 }
 
-effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  if self.remaining == 0 { fail OutOfMemory {} }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
@@ -926,7 +926,7 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! Ou
 
 impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = QuotaAllocator { remaining: 1 }
   let first = Layout.of<[i32; 2]>()
   let recipeA = Allocator.allocate(move first) |> Effect.provideMut(&mut allocator)
@@ -939,7 +939,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 {
   return run Effect.catchAll(build(), recover)
@@ -949,7 +949,7 @@ pub fn main() -> i32 {
   // folded from SlotLaneWidth.test.ts: u8 lane writes, copies, and takes through a raw buffer.
   {
     name: 'slot-lane-u8',
-    source: `effect fn store() -> i32 ! OutOfMemory {
+    source: `effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[u8; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -968,7 +968,7 @@ pub fn main() -> i32 {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     expected: { _tag: 'Completes', result: 136 },
@@ -976,7 +976,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
   // folded from SlotLaneWidth.test.ts: f64 lane parity including a negative value.
   {
     name: 'slot-lane-f64',
-    source: `effect fn store() -> i32 ! OutOfMemory {
+    source: `effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[f64; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -995,7 +995,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     expected: { _tag: 'Completes', result: 108 },
@@ -1017,7 +1017,7 @@ fn checksum(values: &[u8]) -> i32 {
   return total
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let source = [octet(0), octet(255), octet(128), octet(1)]
   let copying = copy(&source) |> Effect.provideMut(&mut allocator)
@@ -1032,7 +1032,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return checksum(move readable)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 180 },
@@ -1052,7 +1052,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     name: 'owned-allocation-guard',
     source: `struct Element { value: i32 }
 
-effect fn build(count: usize) -> i32 ! OutOfMemory {
+effect fn build(count: usize) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Element; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -1071,7 +1071,7 @@ effect fn build(count: usize) -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 {
   return run Effect.catchAll(build(4), recover)
@@ -1186,16 +1186,16 @@ impl Drop for Guard {
 struct Holder<F: once fn(i32) -> i32> { step: F }
 fn consume(value: i32, guard: Guard) -> i32 { return value + guard.tag }
 fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: 2, storage: move allocation }
   let holder = Holder { step: consume(move guard) }
-  fail OutOfMemory {}
+  fail OutOfMemoryError {}
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
@@ -1214,13 +1214,13 @@ impl Drop for Guard {
 
 struct ExhaustedAllocator { tag: i32 }
 
-effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  fail OutOfMemory {}
+effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  fail OutOfMemoryError {}
 }
 
 impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.allocate }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut empty = ExhaustedAllocator { tag: 0 }
   let layout = Layout.of<[i32; 2]>()
@@ -1234,7 +1234,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 7 },

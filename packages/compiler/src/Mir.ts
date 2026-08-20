@@ -4336,7 +4336,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             destination?._tag !== 'Nominal' ||
             !SilkType.equals(destination.type, SilkType.allocation) ||
             !SilkType.equals(operation.type.type, SilkType.allocation) ||
-            !SilkType.equals(operation.failure, SilkType.outOfMemory) ||
+            !SilkType.equals(operation.failure, SilkType.outOfMemoryError) ||
             expectedFailure === undefined ||
             !SilkType.equals(expectedFailure, operation.failure) ||
             !SilkType.equals(semanticType(fn.result), operation.propagationType.type)
@@ -4347,7 +4347,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidAllocationOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'allocation does not preserve Layout, Allocation, or OutOfMemory contracts',
+                detail: 'allocation does not preserve Layout, Allocation, or OutOfMemoryError contracts',
               }),
             )
         }

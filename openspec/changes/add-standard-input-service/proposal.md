@@ -20,7 +20,7 @@ Both point at a separate service rather than an extension of `StandardStreams`.
 - Add a `ReadOutcome` of `Filled { count }` and `EndOfInput`. The count is the exact number of
   committed bytes and may be less than the buffer length; the end of input is outcome data, not a
   typed failure.
-- Add `StreamReadFailure` for a host error only, so a caller that drains input never handles a
+- Add `StreamReadError` for a host error only, so a caller that drains input never handles a
   failure to reach the end.
 - Add `OsStandardInput`, an ordinary-source native provider reading the process standard-input
   descriptor through one new unsafe `Intrinsic.osStandardInputRead`, following the same

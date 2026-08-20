@@ -25,7 +25,7 @@ may not omit `return`.
 
 ```silk
 pub effect fn compile(request: own Request) -> Artifact
-  ! FileError | ProcessError | OutOfMemory
+  ! FileError | ProcessError | OutOfMemoryError
   ? &FileSystem | &mut Allocator@Scratch
 {
   let source = run FileSystem.read(&request.sourcePath)

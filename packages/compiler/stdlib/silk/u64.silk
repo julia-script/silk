@@ -288,11 +288,11 @@ pub fn greaterOrEqual(left: u64, right: u64) -> bool {
 }
 
 /// Renders the value as decimal text in freshly owned storage.
-pub effect fn toText(value: u64) -> String ! OutOfMemory ? &mut Allocator {
+pub effect fn toText(value: u64) -> String ! OutOfMemoryError ? &mut Allocator {
   return run Format.unsignedText(toU64(value))
 }
 
 /// Reads complete decimal text as a `u64`, or reports why the text is not one.
-pub fn parse(text: string) -> Result<u64, ParseFailure> {
+pub fn parse(text: string) -> Result<u64, ParseError> {
   return Format.u64Value(text)
 }

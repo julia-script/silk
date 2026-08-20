@@ -38,7 +38,7 @@ import silk.filesystem {
 }
 import silk.result { Failure, Result, Success }
 
-impl Report for OutOfMemory {}
+impl Report for OutOfMemoryError {}
 
 struct Sentinel { code: i32 }
 
@@ -51,11 +51,11 @@ effect fn recoverSentinel(error: Sentinel) -> i32 { return error.code }`
 const epilogue = `pub fn main() -> i32 {
   let completed = run Intrinsic.effectResult(program())
   return match move completed {
-    Result<i32, FileError | OutOfMemory> { value: outcome } => match move outcome {
+    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
       Success<i32> { value } => value
-      Failure<FileError | OutOfMemory> { error } => match move error {
+      Failure<FileError | OutOfMemoryError> { error } => match move error {
         FileError failure => 100 + failure.reason.code
-        OutOfMemory exhausted => 99
+        OutOfMemoryError exhausted => 99
       }
     }
   }
@@ -67,7 +67,7 @@ const epilogue = `pub fn main() -> i32 {
  */
 const nativeSource = `${prelude}
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)
@@ -115,7 +115,7 @@ ${epilogue}`
  */
 const nativeTreeSource = `${prelude}
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let target = run pathMake("/tree") |> Effect.provideMut(&mut allocator)
@@ -136,7 +136,7 @@ ${epilogue}`
  */
 const nativeManySource = `${prelude}
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/many") |> Effect.provideMut(&mut allocator)
@@ -181,7 +181,7 @@ ${epilogue}`
  */
 const evaluatorSource = `${prelude}
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)

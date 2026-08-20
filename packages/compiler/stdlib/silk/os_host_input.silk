@@ -9,7 +9,7 @@
 //! The provider owns no persistent state. Each successful lookup copies the host value into
 //! independent [`Bytes`], beginning with a bounded buffer and retrying once at the exact size the
 //! boundary reports. An absent argument or variable remains [`None`]; an unavailable working
-//! directory and contradictory host lengths become [`HostInputFailure`].
+//! directory and contradictory host lengths become [`HostInputError`].
 //!
 //! # Gotchas
 //! Reachable OS host-input operations are native-only. Direct WebAssembly compilation rejects them
@@ -24,7 +24,7 @@ import silk.bytes {
   make as bytesMake,
   zeroed as bytesZeroed
 }
-import silk.host_input { HostInput, HostInputFailure, inputFailure }
+import silk.host_input { HostInput, HostInputError, inputFailure }
 import silk.option { None, Option, Some, none, some }
 import silk.string { utf8Bytes as stringUtf8Bytes }
 
@@ -37,7 +37,7 @@ pub fn make() -> OsHostInput {
   return OsHostInput {}
 }
 
-effect fn raise() -> never ! HostInputFailure {
+effect fn raise() -> never ! HostInputError {
   fail inputFailure()
 }
 
@@ -78,7 +78,7 @@ effect fn rawWorkingDirectory(
   return none<usize>()
 }
 
-effect fn ownedPrefix(view: &[u8], length: usize) -> Bytes ! OutOfMemory ? &mut Allocator {
+effect fn ownedPrefix(view: &[u8], length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator {
   let mut result = bytesMake()
   let mut index = usize.ZERO
   while index < length {
@@ -98,7 +98,7 @@ effect fn fetch(
   selector: i32,
   index: usize,
   name: &[u8]
-) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut Allocator {
+) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
   let initial = bytesZeroed(128)
   let mut buffer = run initial
   let mut result = none<Bytes>()
@@ -144,7 +144,7 @@ effect fn fetch(
 }
 
 /// Reports how many arguments the process received, including the program name at index zero.
-effect fn argumentCount(self: &mut OsHostInput) -> usize ! HostInputFailure {
+effect fn argumentCount(self: &mut OsHostInput) -> usize ! HostInputError {
   let mut count = usize.ZERO
   let mut lowReason = 0
   let mut nativeCode = u32.toU32(0)
@@ -157,7 +157,7 @@ effect fn argumentCount(self: &mut OsHostInput) -> usize ! HostInputFailure {
 effect fn argument(
   self: &mut OsHostInput,
   index: usize
-) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut Allocator {
+) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
   return run fetch(0, index, stringUtf8Bytes(""))
 }
 
@@ -165,14 +165,14 @@ effect fn argument(
 effect fn variable(
   self: &mut OsHostInput,
   name: &[u8]
-) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut Allocator {
+) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
   return run fetch(1, usize.ZERO, name)
 }
 
 /// Copies the process working directory's raw bytes. It always exists, so absence is a host error.
 effect fn workingDirectory(
   self: &mut OsHostInput
-) -> Bytes ! HostInputFailure | OutOfMemory ? &mut Allocator {
+) -> Bytes ! HostInputError | OutOfMemoryError ? &mut Allocator {
   let found = run fetch(2, usize.ZERO, stringUtf8Bytes(""))
   return match move found {
     Some<Bytes> { value: bytes } => move bytes

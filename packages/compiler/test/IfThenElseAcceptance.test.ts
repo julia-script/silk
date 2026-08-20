@@ -74,7 +74,7 @@ const eager = (condition: string) => `${counter}
 
 struct Clock { storage: Allocation }
 
-effect fn openClock() -> Clock ! OutOfMemory {
+effect fn openClock() -> Clock ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -82,13 +82,13 @@ effect fn openClock() -> Clock ! OutOfMemory {
   return Clock { storage: move allocation }
 }
 
-effect fn release() -> () ! OutOfMemory {
+effect fn release() -> () ! OutOfMemoryError {
   let held = run openClock()
   drop move held
   return ()
 }
 
-effect fn ignore(error: OutOfMemory) -> () { return () }
+effect fn ignore(error: OutOfMemoryError) -> () { return () }
 
 /// One acquire/release pair, recovered into an infallible contract so an ordinary \`fn\` can run it.
 effect fn touch() -> () { return run Effect.catchAll(release(), ignore) }

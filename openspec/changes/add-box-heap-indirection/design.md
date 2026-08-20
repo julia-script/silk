@@ -71,9 +71,9 @@ architecture. This is the fork; it is resolved below.
 parameters, exactly one parameter named `self` of type `&mut Provider`, returning `()`, with
 `failureRow.failures.length === 0` and `requirementRow.requirements.length === 0`.
 
-`Box.make` must allocate through `Allocator` and fail with `OutOfMemory`, which looks like a
+`Box.make` must allocate through `Allocator` and fail with `OutOfMemoryError`, which looks like a
 conflict — but it is not, and `Vector<T>` already shows why. Allocation lives in `append`
-(`vector.silk:97`, `! OutOfMemory ? &mut Allocator`) while the hook at `vector.silk:64-72` only
+(`vector.silk:97`, `! OutOfMemoryError ? &mut Allocator`) while the hook at `vector.silk:64-72` only
 *releases*, and releasing needs no allocator and cannot fail. `Box` inherits that split exactly.
 
 ### The runtime recursion vehicle already exists and is already exercised

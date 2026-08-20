@@ -81,7 +81,7 @@ const acceptedSources = Object.freeze([
   let unit = ()
   return i00
 }`,
-  `effect fn storage() -> i32 ! OutOfMemory {
+  `effect fn storage() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Effect.provideMut(Allocator.allocate(move layout), &mut allocator)
@@ -109,7 +109,7 @@ const acceptedSources = Object.freeze([
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(storage(), recover) }`,
   `struct Problem {}
 struct Clock {}
@@ -169,16 +169,16 @@ fn inspectCatch() -> once Effect<i32> {
   return Intrinsic.catchFailure<CatalogProblem>(catalogRisky(), catalogRecover)
 }
 pub fn main() -> i32 { return 42 }`,
-  `import silk.core { Allocator, OutOfMemory }
+  `import silk.core { Allocator, OutOfMemoryError }
 struct SuspendProblem {}
 struct SuspendClock {}
 effect fn suspendDirect(
   deferred: once Effect<i32 ! SuspendProblem ? &SuspendClock>
-) -> i32 ! SuspendProblem | OutOfMemory ? &SuspendClock | &mut Allocator {
+) -> i32 ! SuspendProblem | OutOfMemoryError ? &SuspendClock | &mut Allocator {
   return run Intrinsic.suspendEffect(move deferred)
 }
 pub fn main() -> i32 { return 42 }`,
-  `pub effect fn main() -> () ! StreamWriteFailure {
+  `pub effect fn main() -> () ! StreamWriteError {
   let mut native = NativeStandardStreams.native()
   let stdout = StandardStream.stdout()
   let stderr = StandardStream.stderr()

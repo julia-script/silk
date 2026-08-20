@@ -42,11 +42,11 @@ pub struct Tree {
   value: i32
 }
 
-effect fn leaf(value: i32) -> Tree ! OutOfMemory ? &mut Allocator {
+effect fn leaf(value: i32) -> Tree ! OutOfMemoryError ? &mut Allocator {
   return Tree { shape: Shape { kind: Leaf {} }, value: value }
 }
 
-effect fn branch(left: Tree, right: Tree, value: i32) -> Tree ! OutOfMemory ? &mut Allocator {
+effect fn branch(left: Tree, right: Tree, value: i32) -> Tree ! OutOfMemoryError ? &mut Allocator {
   let boxedLeft = run boxMake<Tree>(move left)
   let boxedRight = run boxMake<Tree>(move right)
   return Tree {
@@ -74,7 +74,7 @@ fn boxTotal(view: &[Tree]) -> i32 {
   }
 }
 
-effect fn build() -> Tree ! OutOfMemory ? &mut Allocator {
+effect fn build() -> Tree ! OutOfMemoryError ? &mut Allocator {
   let leftLeft = run leaf(1)
   let leftRight = run leaf(2)
   let left = run branch(move leftLeft, move leftRight, 4)
@@ -84,7 +84,7 @@ effect fn build() -> Tree ! OutOfMemory ? &mut Allocator {
   return run branch(move left, move right, 64)
 }
 
-effect fn sum() -> i32 ! OutOfMemory {
+effect fn sum() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run build() |> Effect.provideMut(&mut allocator)
   let answer = total(&built)
@@ -92,7 +92,7 @@ effect fn sum() -> i32 ! OutOfMemory {
   return answer
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(sum(), recover) }`
 
@@ -155,7 +155,7 @@ it.effect('carries the same release count through the Wasm backend under both pr
  */
 const accessors = `import silk.box { Box, make as boxMake, get as boxGet, getMut as boxGetMut, into as boxInto }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut boxed = run boxMake<i32>(20) |> Effect.provideMut(&mut allocator)
 
@@ -172,7 +172,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return taken + 20
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 3 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 3 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -210,7 +210,7 @@ it.effect('borrows, mutates, and consumes a boxed value without unsafe code', ()
 const nested = `import silk.box { Box, make as boxMake, into as boxInto }
 import silk.vector { Vector, make as vectorMake, append as vectorAppend, length as vectorLength }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut values = vectorMake<i32>()
   let first = run vectorAppend<i32>(&mut values, 21) |> Effect.provideMut(&mut allocator)
@@ -221,7 +221,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -266,7 +266,7 @@ pub struct Chain {
   step: End | Link
 }
 
-effect fn extend(depth: i32) -> Chain ! OutOfMemory ? &mut Allocator {
+effect fn extend(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
   if depth == 0 {
     return Chain { step: End {} }
   }
@@ -275,14 +275,14 @@ effect fn extend(depth: i32) -> Chain ! OutOfMemory ? &mut Allocator {
   return Chain { step: Link { next: move boxed } }
 }
 
-effect fn build(depth: i32) -> i32 ! OutOfMemory {
+effect fn build(depth: i32) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run extend(depth) |> Effect.provideMut(&mut allocator)
   drop built
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(64), recover) }`
 

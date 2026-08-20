@@ -2971,7 +2971,7 @@ const analyzeStructLiteral = (
           nominal.arguments,
         ) ?? new Map())
   const authorized =
-    nominal !== undefined && (nominal.module === source.id || Type.isOutOfMemory(nominal))
+    nominal !== undefined && (nominal.module === source.id || Type.isOutOfMemoryError(nominal))
   if (nominal !== undefined && !authorized) {
     diagnostics.push(Diagnostic.externalRawStructLiteral(Type.encode(nominal), node.span))
   }

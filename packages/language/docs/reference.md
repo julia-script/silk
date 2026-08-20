@@ -495,7 +495,7 @@ required:
 
 | Category | Types | Consuming use |
 | --- | --- | --- |
-| **Copyable** | every scalar and `bool`, `string`, `never`, `OutOfMemory`, shared slices `&[T]`, shared references `&T`, shared effects, shared callables, and fixed arrays whose element type is copyable | copies; the binding stays usable |
+| **Copyable** | every scalar and `bool`, `string`, `never`, `OutOfMemoryError`, shared slices `&[T]`, shared references `&T`, shared effects, shared callables, and fixed arrays whose element type is copyable | copies; the binding stays usable |
 | **Move-only** | everything else — nominal structs, exclusive slices `&mut [T]`, exclusive references `&mut T`, exclusive or `once` effects and callables, and fixed arrays of move-only elements | requires an explicit `move`; omitting it is `OWN0003` |
 
 Two rules follow, and they are easy to conflate:
@@ -604,7 +604,7 @@ chain needs an explicit iterative teardown — see
 ### 4.4 Allocation
 
 There is no ambient heap. Allocation is a capability obtained through the `Allocator` service, and
-it can fail with a typed `OutOfMemory` value rather than aborting. Roles let one computation require
+it can fail with a typed `OutOfMemoryError` value rather than aborting. Roles let one computation require
 more than one allocator.
 
 Raw storage primitives require an explicit `unsafe { ... }` boundary; the same operations outside one

@@ -8,23 +8,23 @@
 //! # Details
 //! Both capabilities are ordinary source-declared services. Their requirements remain in an
 //! Effect until a caller supplies a provider, so tests and applications can replace process-backed
-//! implementations lexically. Allocation failure is typed as [`OutOfMemory`], and stream failure as
-//! [`StreamWriteFailure`].
+//! implementations lexically. Allocation failure is typed as [`OutOfMemoryError`], and stream failure as
+//! [`StreamWriteError`].
 
 import silk.layout { Layout as LayoutValue }
 
 /// Reports that an allocator could not satisfy a storage request.
-pub struct OutOfMemory {}
+pub struct OutOfMemoryError {}
 
-/// Fails immediately with [`OutOfMemory`], for translating checked sizing failures.
-pub effect fn outOfMemory() -> never ! OutOfMemory {
-  fail OutOfMemory {}
+/// Fails immediately with [`OutOfMemoryError`], for translating checked sizing failures.
+pub effect fn outOfMemory() -> never ! OutOfMemoryError {
+  fail OutOfMemoryError {}
 }
 
 /// Mutable service for acquiring owned storage described by a layout.
 pub service Allocator {
   /// Acquires one allocation or fails without returning partial storage.
-  effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemory ? &mut Allocator
+  effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemoryError ? &mut Allocator
 }
 
 /// Constructs the process-backed allocation provider.
@@ -35,7 +35,7 @@ pub fn make() -> SystemAllocator {
   return SystemAllocator {}
 }
 
-effect fn allocate(self: &mut SystemAllocator, layout: LayoutValue) -> Allocation ! OutOfMemory {
+effect fn allocate(self: &mut SystemAllocator, layout: LayoutValue) -> Allocation ! OutOfMemoryError {
   return run Intrinsic.systemAllocationAcquire(move layout)
 }
 
@@ -44,9 +44,9 @@ impl Allocator for SystemAllocator {
 }
 
 /// Failure to commit one complete stream message.
-pub struct StreamWriteFailure {}
+pub struct StreamWriteError {}
 
-impl Report for StreamWriteFailure {}
+impl Report for StreamWriteError {}
 
 /// Portable complete-message output contract.
 pub service StandardStreams {
@@ -54,7 +54,7 @@ pub service StandardStreams {
   effect fn writeAll(
     destination: bool,
     bytes: &[u8]
-  ) -> () ! StreamWriteFailure ? &mut StandardStreams
+  ) -> () ! StreamWriteError ? &mut StandardStreams
 }
 
 /// Process-backed standard-stream provider.
@@ -79,7 +79,7 @@ effect fn nativeWriteAll(
   self: &NativeStandardStreams,
   destination: bool,
   bytes: &[u8]
-) -> () ! StreamWriteFailure {
+) -> () ! StreamWriteError {
   return run Intrinsic.standardStreamWrite(destination, bytes)
 }
 
@@ -91,6 +91,6 @@ impl StandardStreams for NativeStandardStreams {
 pub effect fn send(
   destination: bool,
   bytes: &[u8]
-) -> () ! StreamWriteFailure ? &mut StandardStreams {
+) -> () ! StreamWriteError ? &mut StandardStreams {
   return run StandardStreams.writeAll(move destination, bytes)
 }

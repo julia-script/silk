@@ -371,10 +371,10 @@ effect fn inspect(path: &Path) -> bool ! FileError ? &mut FileSystem {
   let info = run FileSystem.stat(path)
   return run exists(path)
 }
-effect fn locate(base: &Path) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+effect fn locate(base: &Path) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   return run resolve(base, "child")
 }
-effect fn canonical() -> Path ! OutOfMemory ? &mut Allocator { return run Path.root() }
+effect fn canonical() -> Path ! OutOfMemoryError ? &mut Allocator { return run Path.root() }
 fn code(error: &FileError) -> i32 { return FileError.operationCode(error.operation) }
 pub fn main() -> i32 { return 42 }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
@@ -382,7 +382,7 @@ pub fn main() -> i32 { return 42 }`
       for (const [spelling, ordinal, expected] of [
         ['stat', 0, ['effect fn stat(', '! FileError ? &mut FileSystem']],
         ['exists', 1, ['pub effect fn exists(', '-> bool ! FileError ? &mut FileSystem']],
-        ['resolve', 1, ['pub effect fn resolve(', '! FileError | OutOfMemory ? &mut Allocator']],
+        ['resolve', 1, ['pub effect fn resolve(', '! FileError | OutOfMemoryError ? &mut Allocator']],
       ] as const) {
         const occurrence = occurrenceAt(snapshot, source, spelling, ordinal)
         assert.strictEqual(occurrence?.declaration?.module, 'silk/filesystem', spelling)
@@ -736,10 +736,10 @@ pub struct Other {}`
         ),
         '? &mut Allocator@Heap',
       )
-      const union = Type.union(Object.freeze([problem, Type.outOfMemory]))
+      const union = Type.union(Object.freeze([problem, Type.outOfMemoryError]))
       assert.strictEqual(
         union._tag === 'Normalized' ? Presentation.type(union.type, 'main', scope) : undefined,
-        'Problem | OutOfMemory',
+        'Problem | OutOfMemoryError',
       )
       return undefined
     }),

@@ -1,7 +1,7 @@
 import silk.vector { Vector, make, append, get, length }
 import silk.logging { length as logLength }
 
-impl Report for OutOfMemory {}
+impl Report for OutOfMemoryError {}
 
 const opcodeHalt: u8 = 0
 const opcodePush: u8 = 1
@@ -47,7 +47,7 @@ effect fn pushStep(
   depth: usize,
   top: i32,
   fingerprint: i32
-) -> i32 ! OutOfMemory ? &mut Allocator {
+) -> i32 ! OutOfMemoryError ? &mut Allocator {
   let step = Step { pc: pc, opcode: opcode, depth: depth, top: top }
   let added = run append<Step | VmDiagnostic>(move events, move step)
   let observedPc = observeStepPc(pc)
@@ -65,7 +65,7 @@ effect fn pushDiagnostic(
   pc: usize,
   code: usize,
   fingerprint: i32
-) -> i32 ! OutOfMemory ? &mut Allocator {
+) -> i32 ! OutOfMemoryError ? &mut Allocator {
   let diagnostic = VmDiagnostic { pc: pc, code: code }
   let added = run append<Step | VmDiagnostic>(move events, move diagnostic)
   let observedPc = observeDiagnosticPc(pc)
@@ -88,7 +88,7 @@ fn finish(
   }
 }
 
-effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
+effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemoryError ? &mut Allocator {
   let mut stack = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   let mut depth = zero()
   let mut pc = zero()
@@ -296,7 +296,7 @@ effect fn logVerified(value: ()) -> () ! LogError ? &mut Logger {
   return move value
 }
 
-pub effect fn main() -> () ! OutOfMemory | LogError {
+pub effect fn main() -> () ! OutOfMemoryError | LogError {
   let mut allocator = SystemAllocator.make()
   let mut logger = InMemoryLogger.memory()
   // PRESSURE_INPUT: the harness replaces this literal only.

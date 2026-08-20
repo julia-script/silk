@@ -47,7 +47,7 @@ fn absurd<T>() -> T {
 }
 
 /// Moves one value onto the heap, allocating storage for exactly one element.
-pub effect fn make<T>(value: T) -> Box<T> ! OutOfMemory ? &mut Allocator {
+pub effect fn make<T>(value: T) -> Box<T> ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<T>()
   let recipe = Allocator.allocate(move layout)
   let allocation = run recipe

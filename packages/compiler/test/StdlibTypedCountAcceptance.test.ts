@@ -55,7 +55,7 @@ it('declares the shared usize counts once and ships no private counted identity'
  */
 const growth = `import silk.vector { Vector, make, append, get, length, capacity }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
@@ -67,7 +67,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return get<i32>(&values, 0) + get<i32>(&values, 1)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -160,7 +160,7 @@ fn continueSum(value: string, step: ScalarStep) -> u32 {
   return scalar + scalarSum(value, move cursor)
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let copying = copy("A\\u{a2}\\u{20ac}\\u{10348}") |> Effect.provideMut(&mut allocator)
   let mut owned = run copying
@@ -171,7 +171,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 

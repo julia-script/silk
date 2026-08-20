@@ -6,7 +6,7 @@
 //!
 //! # Details
 //! The provider owns no persistent state. It translates low-level spawn and capture reasons into
-//! portable [`ProcessFailure`] data, preserves a native numeric code, and copies the complete stdout
+//! portable [`ProcessError`] data, preserves a native numeric code, and copies the complete stdout
 //! and stderr captures into independently owned [`Bytes`] values. Exit status and signal
 //! termination remain ordinary [`ProcessOutcome`] data.
 //!
@@ -25,7 +25,7 @@ import silk.bytes {
 }
 import silk.child_process {
   ChildProcess,
-  ProcessFailure,
+  ProcessError,
   ProcessOperation,
   ProcessOutcome,
   ProcessReason,
@@ -71,7 +71,7 @@ effect fn raise(
   operation: ProcessOperation,
   lowReason: i32,
   nativeCode: u32
-) -> never ! ProcessFailure {
+) -> never ! ProcessError {
   fail failureWithCode(move operation, reason(lowReason), u32.toI32(nativeCode))
 }
 
@@ -123,7 +123,7 @@ effect fn rawCapture(
 /// The preceding execute reported the exact length, so the outcome owns every captured byte or the
 /// capture stage fails; a short transfer that never advances is a capture failure rather than a
 /// silently truncated result.
-effect fn drain(stream: i32, length: usize) -> Bytes ! ProcessFailure | OutOfMemory ? &mut Allocator {
+effect fn drain(stream: i32, length: usize) -> Bytes ! ProcessError | OutOfMemoryError ? &mut Allocator {
   let mut result = bytesMake()
   if length == usize.ZERO { return move result }
   let mut buffer = run bytesZeroed(length)
@@ -157,7 +157,7 @@ effect fn drain(stream: i32, length: usize) -> Bytes ! ProcessFailure | OutOfMem
 effect fn execute(
   self: &mut OsChildProcess,
   request: &ProcessRequest
-) -> ProcessOutcome ! ProcessFailure | OutOfMemory ? &mut Allocator {
+) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut Allocator {
   let mut status = 0
   let mut code = 0
   let mut outputLength = usize.ZERO

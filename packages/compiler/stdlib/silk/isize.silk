@@ -308,11 +308,11 @@ pub fn greaterOrEqual(left: isize, right: isize) -> bool {
 }
 
 /// Renders the value as decimal text in freshly owned storage.
-pub effect fn toText(value: isize) -> String ! OutOfMemory ? &mut Allocator {
+pub effect fn toText(value: isize) -> String ! OutOfMemoryError ? &mut Allocator {
   return run Format.signedText(toI64(value))
 }
 
 /// Reads complete decimal text as an `isize`, or reports why the text is not one.
-pub fn parse(text: string) -> Result<isize, ParseFailure> {
+pub fn parse(text: string) -> Result<isize, ParseError> {
   return Format.isizeValue(text)
 }

@@ -104,7 +104,7 @@ Constructs an empty owned String without allocating.
 ## `copy`
 
 ```silk
-pub effect fn copy(value: string) -> String ! OutOfMemory ? &mut Allocator
+pub effect fn copy(value: string) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
 Copies valid text into independently owned storage.
@@ -114,7 +114,7 @@ Copies valid text into independently owned storage.
 ## `copyUtf8`
 
 ```silk
-pub effect fn copyUtf8(values: &[u8]) -> silk/result.Result<silk/string.String, silk/string.InvalidUtf8> ! OutOfMemory ? &mut Allocator
+pub effect fn copyUtf8(values: &[u8]) -> silk/result.Result<silk/string.String, silk/string.InvalidUtf8> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Validates complete UTF-8 bytes and copies them into independently owned storage.
@@ -131,7 +131,7 @@ way and owns the outcome.
 ## `append`
 
 ```silk
-pub effect fn append(self: &mut silk/string.String, value: string) -> () ! OutOfMemory ? &mut Allocator
+pub effect fn append(self: &mut silk/string.String, value: string) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends complete valid text atomically with respect to allocation failure.
@@ -141,7 +141,7 @@ Appends complete valid text atomically with respect to allocation failure.
 ## `appendOwned`
 
 ```silk
-pub effect fn appendOwned(self: &mut silk/string.String, value: String) -> () ! OutOfMemory ? &mut Allocator
+pub effect fn appendOwned(self: &mut silk/string.String, value: String) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends another owned String atomically with respect to allocation failure.

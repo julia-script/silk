@@ -54,7 +54,7 @@ which bootstrap promises no unwinding or cleanup.
 
 Failure payloads must be detached from lexical borrows and service providers. They may own strings,
 paths, vectors, or other self-contained allocations because those values carry their own cleanup
-authority; they may not retain arena-backed or provider-dependent storage. `OutOfMemory` construction
+authority; they may not retain arena-backed or provider-dependent storage. `OutOfMemoryError` construction
 is allocation-free. Accumulating compiler diagnostics remains ordinary program logic rather than a
 hidden failure-channel policy.
 

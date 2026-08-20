@@ -6,7 +6,7 @@ import * as Mir from '../src/Mir.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const source = `effect fn store() -> i32 ! OutOfMemory {
+const source = `effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -20,13 +20,13 @@ const source = `effect fn store() -> i32 ! OutOfMemory {
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   let recipe = Effect.catchAll(store(), recover)
   return run recipe
 }`
 
-const sharedReadSource = `effect fn store() -> i32 ! OutOfMemory {
+const sharedReadSource = `effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 1]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -42,11 +42,11 @@ const sharedReadSource = `effect fn store() -> i32 ! OutOfMemory {
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 const nonCopyReadSource = `struct Guard { storage: Allocation }
-effect fn store() -> i32 ! OutOfMemory {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Guard; 1]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -67,13 +67,13 @@ effect fn store() -> i32 ! OutOfMemory {
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 const unionReadSource = `struct Left { value: i32 }
 struct Right { value: i32 }
 fn left(value: i32) -> Left | Right { return Left { value: value } }
-effect fn store() -> i32 ! OutOfMemory {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Left | Right; 1]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -90,7 +90,7 @@ effect fn store() -> i32 ! OutOfMemory {
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 const moveOnlyUnionReadSource = `struct Guard { storage: Allocation }
@@ -100,7 +100,7 @@ fn guarded(storage: Allocation) -> Guard | Marker {
   return Guard { storage: move storage }
 }
 
-effect fn store() -> i32 ! OutOfMemory {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Guard | Marker; 1]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -121,13 +121,13 @@ effect fn store() -> i32 ! OutOfMemory {
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 const unsafeProgram = (
   body: string,
   layout = '[i32; 2]',
-): string => `effect fn store() -> i32 ! OutOfMemory {
+): string => `effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<${layout}>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -138,7 +138,7 @@ ${body}
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   return run Effect.catchAll(store(), recover)
 }`

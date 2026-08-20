@@ -47,7 +47,7 @@ returns the right answer, and traces **6 acquires against 2 releases**.
 
 `Box<T>` is `MoveOnly` for every `T` with no ownership change — `Ownership.categoryOf`
 (`Ownership.ts:258-281`) has no nominal branch, so every nominal already falls through to
-`MoveOnly`. `Box.make` allocates through `Allocator` and fails with `OutOfMemory`; the drop path
+`MoveOnly`. `Box.make` allocates through `Allocator` and fails with `OutOfMemoryError`; the drop path
 stays requirement-free and failure-free as the hook rules demand (`DeclarationIndex.ts:3450-3459`),
 because releasing needs neither.
 

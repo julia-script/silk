@@ -25,7 +25,7 @@
     "namespace": "ChildProcess",
     "aliases": [
       "Exited",
-      "ProcessFailure",
+      "ProcessError",
       "ProcessOperation",
       "ProcessOutcome",
       "ProcessReason",
@@ -40,10 +40,10 @@
     "aliases": [
       "AllocationFailure",
       "NativeStandardStreams",
-      "OutOfMemory",
+      "OutOfMemoryError",
       "StandardStream",
       "StandardStreams",
-      "StreamWriteFailure",
+      "StreamWriteError",
       "SystemAllocator"
     ]
   },
@@ -81,7 +81,7 @@
     "module": "silk/format",
     "path": "silk/format.silk",
     "namespace": "Format",
-    "aliases": ["NotANumber", "OutOfRange", "ParseFailure"]
+    "aliases": ["NotANumber", "OutOfRange", "ParseError"]
   },
   {
     "module": "silk/hash",
@@ -103,7 +103,7 @@
     "module": "silk/host_input",
     "path": "silk/host_input.silk",
     "namespace": "HostInput",
-    "aliases": ["HostInputFailure"]
+    "aliases": ["HostInputError"]
   },
   {
     "module": "silk/i16",
@@ -203,7 +203,7 @@
     "module": "silk/standard_input",
     "path": "silk/standard_input.silk",
     "namespace": "StandardInput",
-    "aliases": ["EndOfInput", "Filled", "ReadOutcome", "StreamReadFailure"]
+    "aliases": ["EndOfInput", "Filled", "ReadOutcome", "StreamReadError"]
   },
   {
     "module": "silk/string",

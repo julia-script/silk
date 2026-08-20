@@ -406,7 +406,7 @@ pub fn main() -> i32 {
     'allocation',
     'ok · Self-contained Allocation contract',
     `effect fn store() -> i32
-! OutOfMemory {
+! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
@@ -422,7 +422,7 @@ pub fn main() -> i32 {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -435,7 +435,7 @@ pub fn main() -> i32 {
     'allocation',
     'ok · Early drop releases the buffer once',
     `effect fn store() -> i32
-! OutOfMemory {
+! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
@@ -449,7 +449,7 @@ pub fn main() -> i32 {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -464,7 +464,7 @@ pub fn main() -> i32 {
     `struct Empty {}
 
 effect fn store() -> i32
-! OutOfMemory {
+! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Empty; 2]>()
   let recipe = Allocator.allocate(move layout)
@@ -478,7 +478,7 @@ effect fn store() -> i32
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -491,7 +491,7 @@ pub fn main() -> i32 {
     'allocation',
     'fail · Raw storage outside unsafe is rejected',
     `effect fn store() -> i32
-! OutOfMemory {
+! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
@@ -502,7 +502,7 @@ pub fn main() -> i32 {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -525,7 +525,7 @@ impl Drop for Guard {
 }
 
 effect fn store() -> i32
-! OutOfMemory {
+! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
@@ -540,7 +540,7 @@ effect fn store() -> i32
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 

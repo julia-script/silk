@@ -25,7 +25,7 @@ struct Problem { code: i32 }
 
 struct Clock { storage: Allocation }
 
-effect fn openClock() -> Clock ! OutOfMemory {
+effect fn openClock() -> Clock ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -33,7 +33,7 @@ effect fn openClock() -> Clock ! OutOfMemory {
   return Clock { storage: move allocation }
 }
 
-effect fn exhausted(error: OutOfMemory) -> Clock ! Problem { fail Problem { code: 9 } }
+effect fn exhausted(error: OutOfMemoryError) -> Clock ! Problem { fail Problem { code: 9 } }
 
 /// One owner, acquired and released inside whichever body runs this.
 effect fn acquireClock() -> Clock ! Problem {

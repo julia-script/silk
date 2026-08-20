@@ -299,11 +299,11 @@ pub fn greaterOrEqual(left: usize, right: usize) -> bool {
 }
 
 /// Renders the value as decimal text in freshly owned storage.
-pub effect fn toText(value: usize) -> String ! OutOfMemory ? &mut Allocator {
+pub effect fn toText(value: usize) -> String ! OutOfMemoryError ? &mut Allocator {
   return run Format.unsignedText(toU64(value))
 }
 
 /// Reads complete decimal text as a `usize`, or reports why the text is not one.
-pub fn parse(text: string) -> Result<usize, ParseFailure> {
+pub fn parse(text: string) -> Result<usize, ParseError> {
   return Format.usizeValue(text)
 }

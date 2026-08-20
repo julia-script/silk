@@ -130,7 +130,7 @@ impl Drop for silk/hash_map.HashMap<K, V>
 ## `insert`
 
 ```silk
-pub effect fn insert<K, V>(self: &mut silk/hash_map.HashMap<K, V>, key: K, value: V) -> Option<V> ! OutOfMemory ? &mut Allocator
+pub effect fn insert<K, V>(self: &mut silk/hash_map.HashMap<K, V>, key: K, value: V) -> Option<V> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Inserts one owned key and value, answering with the value an equivalent key already held.
@@ -140,7 +140,7 @@ Inserts one owned key and value, answering with the value an equivalent key alre
 The map takes ownership of both. When an equivalent key is already present the map's length does
 not change, the replaced value travels to the caller, and the key the map held is released.
 
-Fails only with `OutOfMemory`, and only from the growth this insert needed. A failed insert
+Fails only with `OutOfMemoryError`, and only from the growth this insert needed. A failed insert
 leaves every prior entry at its own key, and leaves the length and the bucket count unchanged.
 
 <a id="declaration-73696c6b2f686173685f6d61703a3a636f6e7461696e73"></a>

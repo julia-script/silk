@@ -8,7 +8,7 @@
 //! [`make`] is allocation-free. The first growth reserves four elements and later growth doubles
 //! capacity; [`reserve`] can move that cost ahead of mutation. Growth completes in replacement
 //! storage before committing, so [`append`] and [`reserve`] leave the vector unchanged on
-//! [`OutOfMemory`]. Removing, clearing, and truncating drop exactly the elements they discard while
+//! [`OutOfMemoryError`]. Removing, clearing, and truncating drop exactly the elements they discard while
 //! retaining capacity.
 //!
 //! [`sort`] is stable, deterministic, and supports move-only elements, but allocates scratch space.
@@ -125,7 +125,7 @@ fn releaseBuffer<T>(buffer: RawBuffer<T>, length: usize) -> () {
 // Growth is atomic: the replacement buffer exists and holds every element before the vector's
 // storage commits, so a failed allocation leaves the original untouched.
 /// Appends one owned value, growing geometrically when capacity is exhausted.
-pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &mut Allocator {
+pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemoryError ? &mut Allocator {
   if self.length == self.capacity {
     let mut next = self.capacity + self.capacity
     if self.capacity == usize.ZERO {
@@ -164,7 +164,7 @@ pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &m
 pub effect fn appendBytes(
   self: &mut Vector<u8>,
   values: &[u8]
-) -> () ! OutOfMemory ? &mut Allocator {
+) -> () ! OutOfMemoryError ? &mut Allocator {
   let count = values.length
   if count == usize.ZERO {
     return ()
@@ -224,7 +224,7 @@ pub effect fn insert<T>(
   self: &mut Vector<T>,
   index: usize,
   value: T
-) -> () ! OutOfMemory ? &mut Allocator {
+) -> () ! OutOfMemoryError ? &mut Allocator {
   if self.length == self.capacity {
     let mut next = self.capacity + self.capacity
     if self.capacity == usize.ZERO {
@@ -280,7 +280,7 @@ fn insertBuffer<T>(buffer: RawBuffer<T>, index: usize, length: usize, value: T) 
   return absurd<RawBuffer<T>>()
 }
 
-effect fn overflowed() -> Layout ! OutOfMemory {
+effect fn overflowed() -> Layout ! OutOfMemoryError {
   return run AllocationFailure.outOfMemory()
 }
 
@@ -528,7 +528,7 @@ fn replaceSlot<T>(buffer: RawBuffer<T>, index: usize, value: T) -> RawBuffer<T> 
 pub effect fn reserve<T>(
   self: &mut Vector<T>,
   additional: usize
-) -> () ! OutOfMemory ? &mut Allocator {
+) -> () ! OutOfMemoryError ? &mut Allocator {
   let needed = self.length + additional
   if needed <= self.capacity {
     return ()
@@ -563,7 +563,7 @@ pub effect fn reserve<T>(
 // and never by an address, a capacity, or an engine detail. The same input therefore produces the
 // same output on the evaluator, on LLVM, and on Wasm.
 //
-// Merging cannot happen in place, so the sort allocates and carries `! OutOfMemory ? &mut Allocator`.
+// Merging cannot happen in place, so the sort allocates and carries `! OutOfMemoryError ? &mut Allocator`.
 // An insertion sort would need no allocation and no requirement, but it costs O(n^2), and the two
 // signatures are not source-compatible, so the choice cannot be deferred to a later release.
 //
@@ -583,7 +583,7 @@ struct Applied<T> {
 }
 
 /// Orders the elements in place. Equal elements keep their input order.
-pub effect fn sort<T: Order>(self: &mut Vector<T>) -> () ! OutOfMemory ? &mut Allocator {
+pub effect fn sort<T: Order>(self: &mut Vector<T>) -> () ! OutOfMemoryError ? &mut Allocator {
   let count = self.length
   if count <= usize.ONE {
     return ()

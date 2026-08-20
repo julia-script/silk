@@ -942,10 +942,10 @@ const intrinsicOperations = Object.freeze([
       operation: 'StorageAcquire',
       parameters: Object.freeze([valueParameter('layout', 'Layout')]),
       semanticParameters: Object.freeze([Type.layout]),
-      result: 'Effect<Allocation ! OutOfMemory>',
+      result: 'Effect<Allocation ! OutOfMemoryError>',
       semanticResult: Type.effect(
         Type.allocation,
-        Object.freeze([Type.outOfMemory]),
+        Object.freeze([Type.outOfMemoryError]),
         undefined,
         Object.freeze([]),
       ),
@@ -961,7 +961,7 @@ const intrinsicOperations = Object.freeze([
         valueParameter('bytes', '&[u8]'),
       ]),
       semanticParameters: Object.freeze(['bool', Type.slice('Shared', 'u8')]),
-      result: 'Effect<() ! StreamWriteFailure>',
+      result: 'Effect<() ! StreamWriteError>',
       semanticResult: Type.effect(
         Type.unit,
         Object.freeze([Type.streamWriteFailure]),

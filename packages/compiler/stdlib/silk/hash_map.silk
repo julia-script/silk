@@ -197,19 +197,19 @@ fn openStorage<K, V>(storage: Unallocated<K, V> | Table<K, V>) -> Table<K, V> {
   }
 }
 
-effect fn overflowed() -> Layout ! OutOfMemory {
+effect fn overflowed() -> Layout ! OutOfMemoryError {
   return run AllocationFailure.outOfMemory()
 }
 
 // Both buffers exist before either is installed, so an allocation that fails releases the one
 // already taken and leaves the caller's map exactly as it was.
-effect fn allocateTable<K, V>(count: usize) -> Table<K, V> ! OutOfMemory ? &mut Allocator {
+effect fn allocateTable<K, V>(count: usize) -> Table<K, V> ! OutOfMemoryError ? &mut Allocator {
   let states = run vacantStates(count)
   let entries = run entryStorage<K, V>(count)
   return Table<K, V> { entries: move entries, states: move states }
 }
 
-effect fn vacantStates(count: usize) -> RawBuffer<u8> ! OutOfMemory ? &mut Allocator {
+effect fn vacantStates(count: usize) -> RawBuffer<u8> ! OutOfMemoryError ? &mut Allocator {
   let element = Layout.of<u8>()
   let plan = Layout.repeat(move element, count)
   let layout = match move plan {
@@ -235,7 +235,7 @@ fn markVacant(allocation: Allocation, count: usize) -> RawBuffer<u8> {
   return absurd<RawBuffer<u8>>()
 }
 
-effect fn entryStorage<K, V>(count: usize) -> RawBuffer<Entry<K, V>> ! OutOfMemory ? &mut Allocator {
+effect fn entryStorage<K, V>(count: usize) -> RawBuffer<Entry<K, V>> ! OutOfMemoryError ? &mut Allocator {
   let element = Layout.of<Entry<K, V>>()
   let plan = Layout.repeat(move element, count)
   let layout = match move plan {
@@ -387,13 +387,13 @@ fn markRemoved<K, V>(owned: &mut Table<K, V>, index: usize) -> () {
 /// The map takes ownership of both. When an equivalent key is already present the map's length does
 /// not change, the replaced value travels to the caller, and the key the map held is released.
 ///
-/// Fails only with `OutOfMemory`, and only from the growth this insert needed. A failed insert
+/// Fails only with `OutOfMemoryError`, and only from the growth this insert needed. A failed insert
 /// leaves every prior entry at its own key, and leaves the length and the bucket count unchanged.
 pub effect fn insert<K: HashKey, V>(
   self: &mut HashMap<K, V>,
   key: K,
   value: V
-) -> Option<V> ! OutOfMemory ? &mut Allocator {
+) -> Option<V> ! OutOfMemoryError ? &mut Allocator {
   let hashed = HashKey.hash(&key, &self.seed)
   if usize.ZERO < self.capacity {
     let storage = Intrinsic.replace(self.storage, Unallocated<K, V> { anchor: [] })

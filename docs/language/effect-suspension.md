@@ -16,7 +16,7 @@ effect fn suspend<A, E, ?R>(
 ```
 
 The compiler and standard library preserve that contract exactly. Coroutine frames use private
-execution-stack storage; they never select a source `Allocator` or add `OutOfMemory` to an Effect.
+execution-stack storage; they never select a source `Allocator` or add `OutOfMemoryError` to an Effect.
 
 Rule numbers follow the accepted proposal. SUSP-009, SUSP-010, SUSP-012, and SUSP-014 constrain
 private lowering rather than programmer-observable Silk, so their details remain in the proposal
@@ -304,7 +304,7 @@ struct SuspendingAllocator {}
 effect fn allocate(
   self: &mut SuspendingAllocator,
   layout: Layout
-) -> Allocation ! OutOfMemory {
+) -> Allocation ! OutOfMemoryError {
   return run Effect.suspend(effect {
     return run Intrinsic.systemAllocationAcquire(move layout)
   })

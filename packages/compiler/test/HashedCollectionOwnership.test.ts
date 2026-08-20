@@ -68,14 +68,14 @@ fn handleHash(value: &Handle, seed: &HashSeed) -> u64 {
 
 impl HashKey<Handle> for Handle { equals: Handle.handleEquals hash: Handle.handleHash }
 
-effect fn handle(tag: i32) -> Handle ! OutOfMemory ? &mut Allocator {
+effect fn handle(tag: i32) -> Handle ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
   let block = run recipe
   return Handle { tag: tag, storage: move block }
 }
 
-effect fn held(tag: i32) -> Held ! OutOfMemory ? &mut Allocator {
+effect fn held(tag: i32) -> Held ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
   let block = run recipe
@@ -96,12 +96,12 @@ fn release(tag: i32, storage: Allocation) -> i32 {
 const program = (body: string): string =>
   `${owners}
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
 ${body}
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 

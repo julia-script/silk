@@ -178,12 +178,12 @@ const retryMapSource = `${retrySource.replace(
   'let handled = retrying() |> Effect.catchAll(recover)',
   'let handled = retrying() |> Effect.catchAll(recover) |> Effect.map(i32.add(39))',
 )}`
-const outOfMemorySource = `import silk.core { OutOfMemory }
+const outOfMemoryErrorSource = `import silk.core { OutOfMemoryError }
 
-effect fn exhaust() -> i32 ! OutOfMemory {
-  fail OutOfMemory {}
+effect fn exhaust() -> i32 ! OutOfMemoryError {
+  fail OutOfMemoryError {}
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 {
   return run exhaust() |> Effect.catchAll(recover)
 }`
@@ -222,12 +222,12 @@ const droppedHigherOrderEffectSource = `struct Payload { storage: Allocation }
 impl Drop for Payload {
   fn drop(self: &mut Payload) -> () { return () }
 }
-impl Report for OutOfMemory {}
+impl Report for OutOfMemoryError {}
 fn discard(self: once Effect<Payload>) -> () {
   drop self
   return ()
 }
-pub effect fn main() -> () ! OutOfMemory {
+pub effect fn main() -> () ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -358,23 +358,23 @@ it.effect('provides an existing borrowed capability across evaluator and Wasm', 
   }),
 )
 
-it.effect('constructs allocation-free OutOfMemory and recovers across evaluator and Wasm', () =>
+it.effect('constructs allocation-free OutOfMemoryError and recovers across evaluator and Wasm', () =>
   Effect.gen(function* () {
     const logical = yield* Analysis.ofSourceRealized(
       'effect-runtime/oom-logical',
-      ascii(outOfMemorySource),
+      ascii(outOfMemoryErrorSource),
       'aarch64-apple-darwin',
     )
     const wasm = yield* Analysis.ofSourceRealized(
       'effect-runtime/oom-wasm',
-      ascii(outOfMemorySource),
+      ascii(outOfMemoryErrorSource),
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(logical), [])
     assert.deepEqual(Analysis.diagnostics(wasm), [])
     const layout = Analysis.layoutOf(logical)
     const oom =
-      layout._tag === 'Available' ? Analysis.callingShapeOf(logical, Type.outOfMemory) : undefined
+      layout._tag === 'Available' ? Analysis.callingShapeOf(logical, Type.outOfMemoryError) : undefined
     assert.strictEqual(oom?.lanes.length, 0)
     const evaluated = Analysis.evaluate(logical)
     assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))

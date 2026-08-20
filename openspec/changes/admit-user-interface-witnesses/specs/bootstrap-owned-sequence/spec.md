@@ -13,7 +13,7 @@ boundaries alone and never by an address, a capacity, or an engine detail. Order
 element at most once per exchange, so no element is duplicated, leaked, or dropped twice, and SHALL
 NOT require the element type to be `Copy` to move an element; comparing two elements SHALL NOT
 consume either, so an element type that owns a resource can be ordered. Ordering allocates a scratch
-buffer and therefore SHALL carry the typed `OutOfMemory` failure and the allocator requirement.
+buffer and therefore SHALL carry the typed `OutOfMemoryError` failure and the allocator requirement.
 
 `Vector<T>` SHALL support searching a sorted vector for an element through the same `Order` witness,
 returning an optional index that is present only when a matching element exists. The search SHALL

@@ -37,7 +37,7 @@ const run = (label: string, text: string) =>
   })
 
 // Whole-member binding on a source-defined Layout value from Layout.repeat's union.
-const layoutExtract = `effect fn store() -> i32 ! OutOfMemory {
+const layoutExtract = `effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let element = Layout.of<i32>()
   let plan = Layout.repeat(move element, 3)
@@ -60,13 +60,13 @@ fn trapLayout() -> Layout {
   let boom = 1 / 0
   return trapLayout()
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 // Whole-member binding on an affine member (move it out of the union).
 const affineExtract = `struct Empty {}
 struct Full { storage: Allocation }
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -86,8 +86,8 @@ fn takeStorage(full: Full) -> Allocation {
     Full { storage } => move storage
   }
 }
-effect fn fallback() -> Full ! OutOfMemory { fail OutOfMemory {} }
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn fallback() -> Full ! OutOfMemoryError { fail OutOfMemoryError {} }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('binds whole members and lowers runtime layouts on all three engines', () =>

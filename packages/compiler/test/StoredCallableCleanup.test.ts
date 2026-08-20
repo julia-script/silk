@@ -284,7 +284,7 @@ it.effect('releases a stored callable on a typed-failure exit', () =>
     const module = 'stored-callable-cleanup/typed-failure'
     const snapshot = yield* realized(
       module,
-      `${takeCapture}effect fn build() -> i32 ! OutOfMemory {
+      `${takeCapture}effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -293,7 +293,7 @@ it.effect('releases a stored callable on a typed-failure exit', () =>
   let allocation = run recipe
   return 42
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
     const facts = snapshot.ownership.get(module) ?? unreachable('expected ownership facts')

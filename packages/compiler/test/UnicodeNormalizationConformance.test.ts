@@ -109,7 +109,7 @@ effect fn field(
   data: &[u8],
   start: usize,
   count: usize,
-) -> Vector<u8> ! OutOfMemory ? &mut Allocator {
+) -> Vector<u8> ! OutOfMemoryError ? &mut Allocator {
   let mut buffer = vectorMake<u8>()
   let mut index = usize.ZERO
   while index < count {
@@ -139,7 +139,7 @@ effect fn checkFrom(
   text: string,
   nfc: &[u8],
   nfd: &[u8],
-) -> i32 ! OutOfMemory ? &mut Allocator {
+) -> i32 ! OutOfMemoryError ? &mut Allocator {
   let mut failures = 0
   let composed = run normalizeNfc(text)
   if same(ownedUtf8Bytes(&composed), nfc) {} else { failures = failures + 1 }
@@ -148,7 +148,7 @@ effect fn checkFrom(
   return failures
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let data = ${literal(cases.flatMap(encode))}
   let mut offset = usize.ZERO
@@ -211,7 +211,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return failures
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return -1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 

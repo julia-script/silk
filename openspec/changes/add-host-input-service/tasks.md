@@ -1,7 +1,7 @@
 ## 1. Portable Contract
 
 - [x] 1.1 Add the canonical `silk/host_input` module with the `HostInput` service, its four
-      read-only operations, and the `HostInputFailure` typed failure plus its constructor.
+      read-only operations, and the `HostInputError` typed failure plus its constructor.
 - [x] 1.2 Add the `arguments` collector, the `variableNamed` textual-name lookup, and the checked
       `text` view over raw host bytes.
 - [x] 1.3 Register the module and its prelude alias in the standard-library manifest and regenerate
@@ -33,7 +33,7 @@
 - [x] 4.2 Add the reachable-only native runtime symbols reading the stored command line, the process
       environment block by raw bytes, and the working directory with growth retry.
 - [x] 4.3 Add the ordinary-source `OsHostInput` provider translating a short buffer into one exact
-      second pass, the not-found reason into `None`, and any other reason into `HostInputFailure`.
+      second pass, the not-found reason into `None`, and any other reason into `HostInputError`.
 
 ## 5. Acceptance and Documentation
 
@@ -43,7 +43,7 @@
       without the failure channel, and that a value which is not valid UTF-8 survives byte for byte
       while its checked textual view refuses it.
 - [x] 5.3 Add tests routing both an in-source provider error and a native host error to
-      `HostInputFailure`, and proving the lookups lower to their own reachable-only runtime symbols
+      `HostInputError`, and proving the lookups lower to their own reachable-only runtime symbols
       and are rejected on direct Wasm.
 - [x] 5.4 Add an end-to-end test compiling a native program that derives its exit status from the
       real command line and environment, and assert a program that reads no host input keeps

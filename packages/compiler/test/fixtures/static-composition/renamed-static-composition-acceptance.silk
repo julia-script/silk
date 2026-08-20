@@ -250,7 +250,7 @@ fn executeNode(value: i32) -> i32 {
 }
 
 effect fn uncalledCleanupCase(value: i32) -> i32
-! OutOfMemory
+! OutOfMemoryError
 ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard {value: value, storage: move storage}
@@ -259,7 +259,7 @@ effect fn uncalledCleanupCase(value: i32) -> i32
 }
 
 effect fn calledCleanupCase(value: i32) -> i32
-! OutOfMemory
+! OutOfMemoryError
 ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard {value: value, storage: move storage}
@@ -268,7 +268,7 @@ effect fn calledCleanupCase(value: i32) -> i32
 }
 
 effect fn suspensionCase(value: i32) -> i32
-! OutOfMemory
+! OutOfMemoryError
 ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard {value: value, storage: move storage}
@@ -279,7 +279,7 @@ effect fn suspensionCase(value: i32) -> i32
 effect fn routeNode(
   request: ExecuteNode | DescribeNode | ChooseFaultNode | ReadFaultNode | DeferredDropNode | InvokedDropNode | SuspendedNode,
 ) -> i32
-! OutOfMemory
+! OutOfMemoryError
 ? &mut Allocator {
   return match move request {
     ExecuteNode {value} => executeNode(value)
@@ -292,7 +292,7 @@ effect fn routeNode(
   }
 }
 
-effect fn recoverOutOfMemory(error: OutOfMemory) -> i32 {
+effect fn recoverOutOfMemory(error: OutOfMemoryError) -> i32 {
   return 0
 }
 

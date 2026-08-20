@@ -460,7 +460,7 @@ propagation, cleanup, and traps SHALL agree with evaluation.
 
 Native LLVM and direct Wasm SHALL realize compiler-planned Effect outcomes, allocator witness calls,
 self-contained reclaim tickets, raw-buffer operations, Vector moves, and Drop order from verified MIR.
-Neither backend may choose layout, turn `OutOfMemory` into a trap, recognize an allocator kind, or
+Neither backend may choose layout, turn `OutOfMemoryError` into a trap, recognize an allocator kind, or
 introduce a lifetime scope absent from MIR.
 
 #### Scenario: Agree on successful and exhausted growth
@@ -495,7 +495,7 @@ allocation or runtime callable interpreter.
 ### Requirement: Native and Wasm realize self-contained allocation identically
 
 Native LLVM and direct WebAssembly SHALL lower verified general allocator witness calls,
-compiler-planned target layouts, typed `OutOfMemory`, affine allocation and reclaim tickets,
+compiler-planned target layouts, typed `OutOfMemoryError`, affine allocation and reclaim tickets,
 RawBuffer and Slot operations, shared bounds-checked recursively Copy reads including structural
 unions, restricted Drop, and cleanup ordering from MIR. A shared union read SHALL load the canonical
 tag and complete payload lanes without writing storage, changing owner state, allocating, or
@@ -513,7 +513,7 @@ exactly-once release MUST match evaluation.
 #### Scenario: Agree under exhaustion
 
 - **WHEN** deterministic exhaustion rejects a requested allocation
-- **THEN** native and Wasm propagate the same `OutOfMemory`, clean earlier owners in the same order, and create no release for the rejected request
+- **THEN** native and Wasm propagate the same `OutOfMemoryError`, clean earlier owners in the same order, and create no release for the rejected request
 
 #### Scenario: Preserve zero-sized identity
 

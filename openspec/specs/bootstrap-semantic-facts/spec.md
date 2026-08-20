@@ -867,18 +867,18 @@ row.
 
 Semantic analysis SHALL publish canonical Effect success/failure/requirement contracts, capture
 access and repeatability, validated layouts, allocation and raw-buffer types, initialization
-transitions, Drop restrictions, explicit drop consumption, and typed `OutOfMemory`. It MUST NOT
+transitions, Drop restrictions, explicit drop consumption, and typed `OutOfMemoryError`. It MUST NOT
 publish named allocation scopes or allocator-kind facts.
 
 #### Scenario: Inspect a repeatable allocating Effect
 
 - **WHEN** an effect function appends to a Vector through an explicit allocator requirement
-- **THEN** facts expose its Effect contract, exclusive allocator access, repeatability, self-contained result ownership, and possible OutOfMemory without a retained-provider dependency
+- **THEN** facts expose its Effect contract, exclusive allocator access, repeatability, self-contained result ownership, and possible OutOfMemoryError without a retained-provider dependency
 
 ### Requirement: Allocation facts separate access, ownership, and unsafe storage state
 
 Semantic analysis SHALL publish canonical facts for validated `Layout`, selected allocator
-capability, nominal provider, conformance witness, and role, typed `OutOfMemory`, affine
+capability, nominal provider, conformance witness, and role, typed `OutOfMemoryError`, affine
 `Allocation`, private reclaim authority,
 `RawBuffer<T>`, lexical `Slot<T>`, initialization operations, restricted Drop hooks, and explicit
 drop. The provider loan SHALL end at the allocator call result; no returned fact may claim a
@@ -889,7 +889,7 @@ and stable diagnostics rather than fabricating usable storage.
 #### Scenario: Resolve an independent allocation result
 
 - **WHEN** an Effect allocates through `Allocator@Scratch` and returns the successful owner
-- **THEN** facts expose the requirement and call-scoped exclusive access separately from the self-contained affine result and its possible `OutOfMemory`
+- **THEN** facts expose the requirement and call-scoped exclusive access separately from the self-contained affine result and its possible `OutOfMemoryError`
 
 #### Scenario: Keep a custom provider nominal
 

@@ -677,7 +677,7 @@ function by actor, module, or operation spelling.
 #### Scenario: Preserve the child channels
 
 - **WHEN** `Effect.suspend` receives `Effect<A ! E ? R>`
-- **THEN** the returned Effect has exactly `A ! E ? R` with no `OutOfMemory` member and no `Allocator` requirement introduced by suspension
+- **THEN** the returned Effect has exactly `A ! E ? R` with no `OutOfMemoryError` member and no `Allocator` requirement introduced by suspension
 
 #### Scenario: Preserve a nested Effect success value
 

@@ -49,7 +49,7 @@ const widen = (spelling: string): string => (isSigned(spelling) ? 'toI64' : 'toU
 
 /** Comparison, widening, and failure narrowing, shared by every generated check. */
 const prelude = `import silk.string { String, copy, append, appendOwned, ownedUtf8Bytes, utf8Bytes }
-import silk.format { ParseFailure, NotANumber, OutOfRange }
+import silk.format { ParseError, NotANumber, OutOfRange }
 import silk.result { Result, Success, Failure }
 
 fn sameText(text: &String, expected: string) -> bool {
@@ -74,18 +74,18 @@ fn sameSigned(value: i64, expected: i64) -> i32 {
   return 1
 }
 
-fn isOutOfRange(error: ParseFailure) -> i32 {
+fn isOutOfRange(error: ParseError) -> i32 {
   return match move error {
-    ParseFailure { reason } => match move reason {
+    ParseError { reason } => match move reason {
       NotANumber { offset } => 1
       OutOfRange nothing => 0
     }
   }
 }
 
-fn isNotANumberAt(error: ParseFailure, expected: usize) -> i32 {
+fn isNotANumberAt(error: ParseError, expected: usize) -> i32 {
   return match move error {
-    ParseFailure { reason } => match move reason {
+    ParseError { reason } => match move reason {
       NotANumber { offset } => sameUnsigned(usize.toU64(offset), usize.toU64(expected))
       OutOfRange nothing => 1
     }
@@ -103,7 +103,7 @@ interface Check {
 const textCheck = (name: string, spelling: string, value: string, expected: string): Check => ({
   name,
   effectful: true,
-  declaration: `effect fn ${name}() -> i32 ! OutOfMemory ? &mut Allocator {
+  declaration: `effect fn ${name}() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let text = run ${spelling}.toText(${value})
   if sameText(&text, "${expected}") { return 0 }
   return 1
@@ -116,9 +116,9 @@ const valueCheck = (name: string, spelling: string, text: string, expected: stri
   effectful: false,
   declaration: `fn ${name}() -> i32 {
   return match move ${spelling}.parse("${text}") {
-    Result<${spelling}, ParseFailure> { value: outcome } => match move outcome {
+    Result<${spelling}, ParseError> { value: outcome } => match move outcome {
       Success<${spelling}> { value } => ${isSigned(spelling) ? 'sameSigned' : 'sameUnsigned'}(${spelling}.${widen(spelling)}(value), ${expected})
-      Failure<ParseFailure> { error } => 1
+      Failure<ParseError> { error } => 1
     }
   }
 }`,
@@ -137,9 +137,9 @@ const failureCheck = (
   effectful: false,
   declaration: `fn ${name}() -> i32 {
   return match move ${spelling}.parse("${text}") {
-    Result<${spelling}, ParseFailure> { value: outcome } => match move outcome {
+    Result<${spelling}, ParseError> { value: outcome } => match move outcome {
       Success<${spelling}> { value } => 1
-      Failure<ParseFailure> { error } => ${
+      Failure<ParseError> { error } => ${
         reason._tag === 'OutOfRange'
           ? 'isOutOfRange(move error)'
           : `isNotANumberAt(move error, ${reason.offset === 0 ? 'usize.ZERO' : reason.offset})`
@@ -168,18 +168,18 @@ const programOf = (checks: ReadonlyArray<Check>): string => {
   return `${prelude}
 ${checks.map((check) => check.declaration).join('\n\n')}
 
-effect fn firstFailure() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn firstFailure() -> i32 ! OutOfMemoryError ? &mut Allocator {
 ${body}
   return 0
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let checking = firstFailure() |> Effect.provideMut(&mut allocator)
   return run checking
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 254 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 254 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 }
@@ -347,7 +347,7 @@ it.effect('reports which byte stopped a read and which values do not fit', () =>
  */
 const messageProgram = `import silk.string { String, copy, append, appendOwned, ownedUtf8Bytes, utf8Bytes }
 
-pub effect fn report(code: i32, line: usize) -> String ! OutOfMemory ? &mut Allocator {
+pub effect fn report(code: i32, line: usize) -> String ! OutOfMemoryError ? &mut Allocator {
   let mut message = run copy("LEX")
   let coded = run appendOwned(&mut message, run i32.toText(code))
   let spaced = run append(&mut message, " at line ")
@@ -367,7 +367,7 @@ fn sameText(text: &String, expected: string) -> bool {
   return true
 }
 
-effect fn compose() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn compose() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let first = run report(1, 12)
   if sameText(&first, "LEX1 at line 12") {} else { return 1 }
   let second = run report(0 - 7, 4096)
@@ -375,13 +375,13 @@ effect fn compose() -> i32 ! OutOfMemory ? &mut Allocator {
   return 0
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let composing = compose() |> Effect.provideMut(&mut allocator)
   return run composing
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 254 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 254 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -412,12 +412,12 @@ it.effect('composes a diagnostic message from runtime values and releases every 
 
 /**
  * Requirement 6. Rendering allocates, so it must be able to say it could not: an allocator that
- * refuses hands the caller the ordinary `OutOfMemory` typed failure rather than a partial string.
+ * refuses hands the caller the ordinary `OutOfMemoryError` typed failure rather than a partial string.
  */
 const exhaustedProgram = `struct QuotaAllocator { remaining: i32 }
 
-effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  if self.remaining == 0 { fail OutOfMemory {} }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
@@ -426,18 +426,18 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! Ou
 
 impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = QuotaAllocator { remaining: 0 }
   let rendering = i32.toText(1234) |> Effect.provideMut(&mut allocator)
   let text = run rendering
   return 1
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
-it.effect('hands back OutOfMemory when a rendering cannot allocate, owning nothing', () =>
+it.effect('hands back OutOfMemoryError when a rendering cannot allocate, owning nothing', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'number-text/exhausted',
@@ -476,12 +476,12 @@ it('declares the same rendering and reading pair on every integer module', () =>
     const source = sourceText(spelling)
     assert.include(
       source,
-      `pub effect fn toText(value: ${spelling}) -> String ! OutOfMemory ? &mut Allocator {`,
+      `pub effect fn toText(value: ${spelling}) -> String ! OutOfMemoryError ? &mut Allocator {`,
       `silk/${spelling} declares no toText with the allocating effect row`,
     )
     assert.include(
       source,
-      `pub fn parse(text: string) -> Result<${spelling}, ParseFailure> {`,
+      `pub fn parse(text: string) -> Result<${spelling}, ParseError> {`,
       `silk/${spelling} declares no parse returning a typed failure`,
     )
   }

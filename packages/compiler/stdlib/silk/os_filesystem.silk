@@ -80,7 +80,7 @@ pub struct OsFileSystem {
 }
 
 /// Copies one absolute native root. A relative or NUL-containing root violates the constructor precondition.
-pub effect fn make(root: string) -> OsFileSystem ! OutOfMemory ? &mut Allocator {
+pub effect fn make(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
   let rootBytes = stringUtf8Bytes(root)
   if rootBytes.length == usize.ZERO { let invalid = 1 / 0 }
   if rootBytes[usize.ZERO] != u8.toU8(47) { let invalid = 1 / 0 }
@@ -196,7 +196,7 @@ fn ignoreClose(result: Result<(), FileError>) -> () {
 }
 
 effect fn rerouteFile(error: FileError) -> never ! FileError { fail move error }
-effect fn rerouteOutOfMemory(error: OutOfMemory) -> never ! OutOfMemory { fail move error }
+effect fn rerouteOutOfMemory(error: OutOfMemoryError) -> never ! OutOfMemoryError { fail move error }
 
 effect fn discardThenReroute<T>(value: T, error: FileError) -> never ! FileError {
   drop value
@@ -209,14 +209,14 @@ effect fn preserveFile(error: FileError, closed: Result<(), FileError>) -> never
 }
 
 effect fn preserveOutOfMemory(
-  error: OutOfMemory,
+  error: OutOfMemoryError,
   closed: Result<(), FileError>
-) -> never ! OutOfMemory {
+) -> never ! OutOfMemoryError {
   let ignored = ignoreClose(move closed)
   fail move error
 }
 
-effect fn readLoop(handle: &mut OsHandle) -> Bytes ! FileError | OutOfMemory ? &mut Allocator {
+effect fn readLoop(handle: &mut OsHandle) -> Bytes ! FileError | OutOfMemoryError ? &mut Allocator {
   let mut result = bytesMake()
   let mut buffer = run bytesZeroed(256)
   let mut complete = false
@@ -250,21 +250,21 @@ effect fn readLoop(handle: &mut OsHandle) -> Bytes ! FileError | OutOfMemory ? &
 effect fn readFile(
   self: &mut OsFileSystem,
   path: &Path
-) -> Bytes ! FileError | OutOfMemory ? &mut Allocator {
+) -> Bytes ! FileError | OutOfMemoryError ? &mut Allocator {
   let mut handle = run openFile(move self, path, 0, readFileOperation())
   let attempted = run Intrinsic.effectResult(readLoop(&mut handle))
   let closed = run Intrinsic.effectResult(close(move handle, readFileOperation()))
   return match move attempted {
-    Result<Bytes, FileError | OutOfMemory> { value: outcome } => match move outcome {
+    Result<Bytes, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
       Success<Bytes> { value: bytes } => match move closed {
         Result<(), FileError> { value: closeOutcome } => match move closeOutcome {
           Success<()> { value: completed } => move bytes
           Failure<FileError> { error: closeFailure } => run discardThenReroute<Bytes>(move bytes, move closeFailure)
         }
       }
-      Failure<FileError | OutOfMemory> { error: primary } => match move primary {
+      Failure<FileError | OutOfMemoryError> { error: primary } => match move primary {
         FileError failure => run preserveFile(move failure, move closed)
-        OutOfMemory exhausted => run preserveOutOfMemory(move exhausted, move closed)
+        OutOfMemoryError exhausted => run preserveOutOfMemory(move exhausted, move closed)
       }
     }
   }
@@ -321,7 +321,7 @@ effect fn stat(self: &mut OsFileSystem, path: &Path) -> FileInfo | DirectoryInfo
 effect fn listLoop(
   handle: &mut OsHandle,
   parent: &Path
-) -> Vector<DirectoryEntry> ! FileError | OutOfMemory ? &mut Allocator {
+) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut Allocator {
   let mut entries = vectorMake<DirectoryEntry>()
   let initialBuffer = bytesZeroed(64)
   let mut buffer = run initialBuffer
@@ -404,21 +404,21 @@ fn pathLess(left: &Path, right: &Path) -> bool {
 effect fn listDirectory(
   self: &mut OsFileSystem,
   path: &Path
-) -> Vector<DirectoryEntry> ! FileError | OutOfMemory ? &mut Allocator {
+) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut Allocator {
   let mut handle = run openDirectory(move self, path, listDirectoryOperation())
   let attempted = run Intrinsic.effectResult(listLoop(&mut handle, path))
   let closed = run Intrinsic.effectResult(close(move handle, listDirectoryOperation()))
   return match move attempted {
-    Result<Vector<DirectoryEntry>, FileError | OutOfMemory> { value: outcome } => match move outcome {
+    Result<Vector<DirectoryEntry>, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
       Success<Vector<DirectoryEntry>> { value: entries } => match move closed {
         Result<(), FileError> { value: closeOutcome } => match move closeOutcome {
           Success<()> { value: completed } => move entries
           Failure<FileError> { error: closeFailure } => run discardThenReroute<Vector<DirectoryEntry>>(move entries, move closeFailure)
         }
       }
-      Failure<FileError | OutOfMemory> { error: primary } => match move primary {
+      Failure<FileError | OutOfMemoryError> { error: primary } => match move primary {
         FileError failure => run preserveFile(move failure, move closed)
-        OutOfMemory exhausted => run preserveOutOfMemory(move exhausted, move closed)
+        OutOfMemoryError exhausted => run preserveOutOfMemory(move exhausted, move closed)
       }
     }
   }
@@ -471,7 +471,7 @@ effect fn createTemporaryDirectory(
   self: &mut OsFileSystem,
   parent: &Path,
   prefix: &[u8]
-) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   let mut buffer = run bytesZeroed(64)
   let mut created = none<Path>()
   let mut complete = false

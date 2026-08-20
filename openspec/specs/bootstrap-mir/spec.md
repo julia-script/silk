@@ -500,7 +500,7 @@ without universal runtime Effect dispatch.
 
 #### Scenario: Encode a failed append attempt
 
-- **WHEN** Vector growth fails with OutOfMemory inside a retried Effect
+- **WHEN** Vector growth fails with OutOfMemoryError inside a retried Effect
 - **THEN** MIR orders failed acquisition, rollback of attempt-local owners, failure propagation, and retry without a leaked allocation or cyclic MIR edge
 
 ### Requirement: MIR represents typed outcomes in the structured DAG
@@ -626,7 +626,7 @@ inside an unsafe buffer remains an unsafe program invariant rather than a verifi
 #### Scenario: Encode an exhausted construction attempt
 
 - **WHEN** allocation fails before a construction guard receives storage
-- **THEN** MIR carries the `OutOfMemory` branch with cleanup for earlier live owners and no allocation release operation for the rejected request
+- **THEN** MIR carries the `OutOfMemoryError` branch with cleanup for earlier live owners and no allocation release operation for the rejected request
 
 #### Scenario: Encode partial rollback
 
@@ -903,7 +903,7 @@ any suspension path that introduces source allocator access or typed storage fai
 
 #### Scenario: Reject storage channels in suspension MIR
 
-- **WHEN** hand-built suspension MIR adds an allocator requirement or an `OutOfMemory` outcome solely for coroutine-frame storage
+- **WHEN** hand-built suspension MIR adds an allocator requirement or an `OutOfMemoryError` outcome solely for coroutine-frame storage
 - **THEN** verification rejects the contract before evaluation or backend emission
 
 ### Requirement: MIR receives only concrete row-contract instances

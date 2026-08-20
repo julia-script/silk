@@ -17,7 +17,7 @@
 
 import silk.core {
   NativeStandardStreams,
-  StreamWriteFailure,
+  StreamWriteError,
   send
 }
 import silk.result { Failure, Result, Success }
@@ -78,7 +78,7 @@ pub fn stdout() -> StdoutLogger { return StdoutLogger {} }
 effect fn writeStdoutCounted(
   streams: &mut NativeStandardStreams,
   message: &[u8]
-) -> i32 ! StreamWriteFailure {
+) -> i32 ! StreamWriteError {
   let written = run Intrinsic.bindRequirementMut(send(false, message), streams)
   return 0
 }
@@ -92,9 +92,9 @@ effect fn writeStdout(
   let bytes = stringUtf8Bytes(message)
   let completed = run Intrinsic.effectResult(writeStdoutCounted(&mut streams, bytes))
   return match move completed {
-    Result<i32, StreamWriteFailure> { value: outcome } => match move outcome {
+    Result<i32, StreamWriteError> { value: outcome } => match move outcome {
       Success<i32> { value: success } => ()
-      Failure<StreamWriteFailure> { error: failure } => run reject(3)
+      Failure<StreamWriteError> { error: failure } => run reject(3)
     }
   }
 }

@@ -168,7 +168,7 @@ remain subject to returned lexical borrow checking.
 
 The generated standard-library module graph SHALL export one canonical `Bytes` actor implemented in
 ordinary Silk source over `Vector<u8>`. Its manifest dependencies SHALL use the ordinary `Allocator`,
-`OutOfMemory`, returned-borrow, and Drop contracts, and MUST NOT import filesystem or String policy.
+`OutOfMemoryError`, returned-borrow, and Drop contracts, and MUST NOT import filesystem or String policy.
 
 #### Scenario: Load Bytes without platform facilities
 
@@ -224,7 +224,7 @@ provide implementations at their outer boundary.
 
 Canonical standard-library source SHALL define `OsFileSystem` as an ordinary provider separate from
 the portable `FileSystem`, `Path`, and value actors. Its constructor SHALL copy one absolute native
-root into owned `Bytes` and SHALL require `OutOfMemory ? &mut Allocator`. Portable service signatures
+root into owned `Bytes` and SHALL require `OutOfMemoryError ? &mut Allocator`. Portable service signatures
 MUST NOT mention `OsHandle`, native paths, target selectors, or the provider type.
 
 #### Scenario: Construct an owned native root

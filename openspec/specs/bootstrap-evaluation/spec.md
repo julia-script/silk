@@ -537,7 +537,7 @@ copy, destruction, and release.
 #### Scenario: Sweep allocation exhaustion
 
 - **WHEN** the same construction program fails each allocation ordinal in turn
-- **THEN** every run returns `OutOfMemory`, releases each successfully acquired owner exactly once, and permits a subsequent successful run in the same evaluator
+- **THEN** every run returns `OutOfMemoryError`, releases each successfully acquired owner exactly once, and permits a subsequent successful run in the same evaluator
 
 #### Scenario: Drop after provision ends
 
@@ -745,9 +745,9 @@ recurse on the JavaScript stack or expose a pending value as a source result.
 #### Scenario: Preserve channels during evaluation
 
 - **WHEN** evaluation runs `Effect.suspend` over `Effect<A ! E ? R>`
-- **THEN** its source-visible outcome and requirements remain exactly `A ! E ? R` with no allocator request or `OutOfMemory` branch
+- **THEN** its source-visible outcome and requirements remain exactly `A ! E ? R` with no allocator request or `OutOfMemoryError` branch
 
 #### Scenario: Exhaust private evaluator activation storage
 
 - **WHEN** the evaluator cannot retain the private activation state required to continue suspended execution
-- **THEN** evaluation terminates with a fatal host defect or trap-equivalent outcome outside the program's typed failure channel and does not synthesize `OutOfMemory`
+- **THEN** evaluation terminates with a fatal host defect or trap-equivalent outcome outside the program's typed failure channel and does not synthesize `OutOfMemoryError`

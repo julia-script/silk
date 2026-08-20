@@ -63,7 +63,7 @@ return value.
 
 A nonzero exit code is data inside `Exited`. A compiler driver runs a tool that fails as a matter of
 course, and reading that tool's code and its diagnostics is the ordinary path, not recovery. Only a
-failure to start, to wait, or to capture is `ProcessFailure`, which carries which of those three
+failure to start, to wait, or to capture is `ProcessError`, which carries which of those three
 stages failed.
 
 ### Two intrinsics, because the capture has an unknown size

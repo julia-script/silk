@@ -395,13 +395,13 @@ const consuming = `struct Token { value: i32 storage: Allocation }
 impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
 struct Deferred<F: once Effect<i32>> { operation: F }
 fn consume(token: Token) -> i32 { return token.value }
-effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let token = Token { value: 42, storage: move storage }
   let deferred = Deferred { operation: effect { return consume(move token) } }
   return run deferred.operation
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
@@ -573,14 +573,14 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
     exit: Exclude<CleanupExit, 'success'>,
     count: number,
   ): string => `${cleanupSurface()}
-effect fn cycle() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
+effect fn cycle() -> i32 ! Problem | OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<[i64; 256]>())
   let guard = Guard { tag: 7, storage: move storage }
   let deferred = defer(failing(move guard))
   ${exit === 'failure' ? 'return run deferred.operation' : 'return 42'}
 }
-effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
-effect fn drive() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
+effect fn recover(error: Problem | OutOfMemoryError) -> i32 { return 42 }
+effect fn drive() -> i32 ! Problem | OutOfMemoryError ? &mut Allocator {
   let mut index = 0
   let mut total = 0
   while index < ${count} {
@@ -625,7 +625,7 @@ pub fn main() -> i32 {
 
   const cleanupProgram = (exit: CleanupExit, kind: DropKind = 'poison'): string => {
     const tag = exit === 'success' ? 2 : 7
-    const failures = exit === 'success' ? 'OutOfMemory' : 'Problem | OutOfMemory'
+    const failures = exit === 'success' ? 'OutOfMemoryError' : 'Problem | OutOfMemoryError'
     const recoverValue = exit === 'success' ? 0 : 42
     const construct = exit === 'success' ? 'succeeding(move guard)' : 'failing(move guard)'
     const runLine = exit === 'unrun' ? 'return 42' : 'return run deferred.operation'
@@ -728,8 +728,8 @@ effect fn delayed(guard: Guard) -> i32 {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard { tag: 2, storage: move storage }
   let deferred = defer(delayed(move guard))
@@ -890,8 +890,8 @@ pub fn main() -> i32 {
    */
   const leakHolds = (
     count: number,
-  ): string => `effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-effect fn drive() -> i32 ! OutOfMemory ? &mut Allocator {
+  ): string => `effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+effect fn drive() -> i32 ! OutOfMemoryError ? &mut Allocator {
   ${Array.from({ length: count }, (_, index) => `let hold${index} = run Allocator.allocate(Layout.of<[i64; 256]>())`).join('\n  ')}
   return 42
 }
@@ -905,14 +905,14 @@ effect fn delayed(guard: Guard) -> i32 {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
 }
-effect fn cycle() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn cycle() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<[i64; 256]>())
   let guard = Guard { tag: 2, storage: move storage }
   let deferred = defer(delayed(move guard))
   return run deferred.operation
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-effect fn drive() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+effect fn drive() -> i32 ! OutOfMemoryError ? &mut Allocator {
   ${Array.from({ length: count }, (_, index) => `let value${index} = run cycle()`).join('\n  ')}
   return ${Array.from({ length: count }, (_, index) => `value${index}`).join(' + ')}
 }

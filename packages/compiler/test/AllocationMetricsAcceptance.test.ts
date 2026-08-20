@@ -24,7 +24,7 @@ struct CountingAllocator {
   metrics: AllocationMetrics
 }
 
-effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut self.inner)
   let block = run pending
   recordAcquire(&mut self.metrics)
@@ -43,7 +43,7 @@ fn published(self: &CountingAllocator) -> AllocationMetrics {
  * computes, and reading it twice leaves the provider's own value where it is.
  */
 const counted = `${provider}
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
     inner: SystemAllocator.make(),
     metrics: zeroedMetrics()
@@ -78,7 +78,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -123,7 +123,7 @@ it.effect(
  * once a later acquire comes in below the peak.
  */
 const peakSurvivesDrops = `${provider}
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
     inner: SystemAllocator.make(),
     metrics: zeroedMetrics()
@@ -161,7 +161,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 8 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 8 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -193,7 +193,7 @@ it.effect(
  * loads it: nothing from `silk/metrics` reaches the module closure or MIR, and the program
  * allocates exactly what it asked for and nothing more.
  */
-const unmetered = `effect fn build() -> i32 ! OutOfMemory {
+const unmetered = `effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -202,7 +202,7 @@ const unmetered = `effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 

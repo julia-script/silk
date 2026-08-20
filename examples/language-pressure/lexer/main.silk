@@ -1,6 +1,6 @@
 import silk.vector { Vector, make, append, get, length }
 
-impl Report for OutOfMemory {}
+impl Report for OutOfMemoryError {}
 
 const asciiSpace: u8 = 32
 const asciiTab: u8 = 9
@@ -497,7 +497,7 @@ effect fn pushToken(
   kind: u8,
   start: usize,
   end: usize
-) -> () ! OutOfMemory ? &mut Allocator {
+) -> () ! OutOfMemoryError ? &mut Allocator {
   let token = Token { kind: kind, start: start, end: end }
   return run append<Token>(move tokens, move token)
 }
@@ -506,12 +506,12 @@ effect fn pushDiagnostic(
   diagnostics: &mut Vector<LexicalDiagnostic>,
   start: usize,
   end: usize
-) -> () ! OutOfMemory ? &mut Allocator {
+) -> () ! OutOfMemoryError ? &mut Allocator {
   let diagnostic = LexicalDiagnostic { start: start, end: end }
   return run append<LexicalDiagnostic>(move diagnostics, move diagnostic)
 }
 
-effect fn lex(source: &[u8]) -> Lexed ! OutOfMemory ? &mut Allocator {
+effect fn lex(source: &[u8]) -> Lexed ! OutOfMemoryError ? &mut Allocator {
   let mut tokens = make<Token>()
   let mut diagnostics = make<LexicalDiagnostic>()
   let mut index = usize.add(0, 0)
@@ -573,7 +573,7 @@ fn columnOf(source: &[u8], offset: usize) -> usize {
 effect fn renderDiagnostics(
   source: &[u8],
   diagnostics: &Vector<LexicalDiagnostic>
-) -> String ! OutOfMemory ? &mut Allocator {
+) -> String ! OutOfMemoryError ? &mut Allocator {
   let mut message = String.make()
   let mut index = usize.add(0, 0)
   while index < length<LexicalDiagnostic>(diagnostics) {
@@ -596,7 +596,7 @@ effect fn digestVectors(
   source: &[u8],
   tokens: &Vector<Token>,
   diagnostics: &Vector<LexicalDiagnostic>
-) -> i32 ! OutOfMemory ? &mut Allocator {
+) -> i32 ! OutOfMemoryError ? &mut Allocator {
   let mut value = fingerprintTokens(tokens)
   let message = run renderDiagnostics(source, diagnostics)
   let bytes = String.ownedUtf8Bytes(&message)
@@ -608,7 +608,7 @@ effect fn digestVectors(
   return value
 }
 
-effect fn digest(source: &[u8], result: Lexed) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn digest(source: &[u8], result: Lexed) -> i32 ! OutOfMemoryError ? &mut Allocator {
   return match &result {
     Lexed { tokens, diagnostics } => run digestVectors(source, &tokens, &diagnostics)
   }
@@ -620,13 +620,13 @@ fn verify(value: i32) -> () {
   return ()
 }
 
-effect fn check(source: &[u8]) -> () ! OutOfMemory ? &mut Allocator {
+effect fn check(source: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator {
   let lexed = run lex(source)
   let value = run digest(source, move lexed)
   return verify(value)
 }
 
-pub effect fn main() -> () ! OutOfMemory {
+pub effect fn main() -> () ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   // PRESSURE_INPUT: the harness replaces this literal only.
   let source = b"pub fn main() -> i32 { return 42 }\n"

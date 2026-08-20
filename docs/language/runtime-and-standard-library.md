@@ -267,10 +267,10 @@ initialization and acquires no allocator, provider, registry entry, thread, glob
 resource.
 
 ```silk,ignore
-import silk.core { Allocator, OutOfMemory }
+import silk.core { Allocator, OutOfMemoryError }
 import silk.vector as Vector
 
-effect fn copyValues(values: &[i32]) -> Vector<i32> ! OutOfMemory ? &mut Allocator {
+effect fn copyValues(values: &[i32]) -> Vector<i32> ! OutOfMemoryError ? &mut Allocator {
   let mut result = Vector.make<i32>()
   // append operations state their allocation contract
   return move result
@@ -278,7 +278,7 @@ effect fn copyValues(values: &[i32]) -> Vector<i32> ! OutOfMemory ? &mut Allocat
 ```
 
 Allocation-free construction remains allocation-free. Operations that may grow owned storage state
-`! OutOfMemory ? &mut Allocator` or another honest contract. Static strings and static bytes need no
+`! OutOfMemoryError ? &mut Allocator` or another honest contract. Static strings and static bytes need no
 hidden heap owner. Service use remains in the requirement row until explicitly provided.
 
 **Boundary:** The compiler may optimize a proven allocation, provider selection, or cleanup without

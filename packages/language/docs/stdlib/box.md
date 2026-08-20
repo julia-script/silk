@@ -60,7 +60,7 @@ Owns one heap-allocated `T` and releases both the value and its allocation on dr
 ## `make`
 
 ```silk
-pub effect fn make<T>(value: T) -> silk/box.Box<T> ! OutOfMemory ? &mut Allocator
+pub effect fn make<T>(value: T) -> silk/box.Box<T> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Moves one value onto the heap, allocating storage for exactly one element.

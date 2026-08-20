@@ -71,7 +71,7 @@ it.effect('loads the ordinary canonical OS provider without compiler-known libra
     const snapshot = yield* Analysis.ofSourceRealized(
       'os-filesystem/importer',
       ascii(`import silk.os_filesystem { OsFileSystem, make }
-pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemory ? &mut Allocator {
+pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
   return run make(root)
 }`),
     )
@@ -89,9 +89,9 @@ it.effect(
 import silk.filesystem { DirectoryEntry, FileError, FileSystem, Path, root as pathRoot }
 import silk.vector { Vector }
 
-impl Report for OutOfMemory {}
+impl Report for OutOfMemoryError {}
 
-pub effect fn main() -> () ! FileError | OutOfMemory {
+pub effect fn main() -> () ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("/tmp") |> Effect.provideMut(&mut allocator)
   let path = run pathRoot() |> Effect.provideMut(&mut allocator)
@@ -136,9 +136,9 @@ import silk.bytes { asSlice as bytesSlice }
 import silk.filesystem { FileError, FileSystem, make as pathMake }
 import silk.result { Failure, Result, Success }
 
-impl Report for OutOfMemory {}
+impl Report for OutOfMemoryError {}
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let path = run pathMake("/message") |> Effect.provideMut(&mut allocator)
@@ -155,11 +155,11 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
 pub fn main() -> i32 {
   let attempted = run Intrinsic.effectResult(program())
   return match move attempted {
-    Result<i32, FileError | OutOfMemory> { value: outcome } => match move outcome {
+    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
       Success<i32> { value } => value
-      Failure<FileError | OutOfMemory> { error } => match move error {
+      Failure<FileError | OutOfMemoryError> { error } => match move error {
         FileError failure => failure.reason.code
-        OutOfMemory exhausted => 99
+        OutOfMemoryError exhausted => 99
       }
     }
   }
@@ -246,7 +246,7 @@ import silk.filesystem { DirectoryEntry, FileError, FileSystem, root as pathRoot
 import silk.result { Failure, Result, Success }
 import silk.vector { asSlice as vectorSlice }
 
-impl Report for OutOfMemory {}
+impl Report for OutOfMemoryError {}
 
 fn pathMatches(entries: &[DirectoryEntry], index: usize, expected: string) -> bool {
   return match &entries[index] {
@@ -254,7 +254,7 @@ fn pathMatches(entries: &[DirectoryEntry], index: usize, expected: string) -> bo
   }
 }
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let root = run pathRoot() |> Effect.provideMut(&mut allocator)
@@ -272,9 +272,9 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
 pub fn main() -> i32 {
   let attempted = run Intrinsic.effectResult(program())
   return match move attempted {
-    Result<i32, FileError | OutOfMemory> { value: outcome } => match move outcome {
+    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
       Success<i32> { value } => value
-      Failure<FileError | OutOfMemory> { error } => 10
+      Failure<FileError | OutOfMemoryError> { error } => 10
     }
   }
 }`
@@ -419,7 +419,7 @@ pub fn main() -> i32 { return 0 }`),
 it.effect('navigates provider policy to Silk source and low-level calls to Intrinsic', () =>
   Effect.gen(function* () {
     const source = `import silk.os_filesystem { OsFileSystem, make as osMake }
-pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemory ? &mut Allocator {
+pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
   return run osMake(root)
 }
 pub fn main() -> i32 {
@@ -549,9 +549,9 @@ import silk.bytes { asSlice as bytesSlice }
 import silk.filesystem { FileError, FileSystem, make as pathMake }
 import silk.result { Failure, Result, Success }
 
-impl Report for OutOfMemory {}
+impl Report for OutOfMemoryError {}
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let path = run pathMake("/hello.txt") |> Effect.provideMut(&mut allocator)
@@ -590,9 +590,9 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
 pub fn main() -> i32 {
   let completed = run Intrinsic.effectResult(program())
   return match move completed {
-    Result<i32, FileError | OutOfMemory> { value: outcome } => match move outcome {
+    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
       Success<i32> { value } => value
-      Failure<FileError | OutOfMemory> { error } => 10
+      Failure<FileError | OutOfMemoryError> { error } => 10
     }
   }
 }`

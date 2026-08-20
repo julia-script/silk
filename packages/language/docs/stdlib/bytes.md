@@ -44,7 +44,7 @@ Constructs empty Bytes without allocating.
 ## `zeroed`
 
 ```silk
-pub effect fn zeroed(length: usize) -> Bytes ! OutOfMemory ? &mut Allocator
+pub effect fn zeroed(length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator
 ```
 
 Allocates an owned initialized byte buffer of exactly `length` zero octets.
@@ -64,7 +64,7 @@ Returns the initialized byte count.
 ## `copy`
 
 ```silk
-pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemory ? &mut Allocator
+pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemoryError ? &mut Allocator
 ```
 
 Copies one borrowed byte sequence into independently owned storage.
@@ -74,7 +74,7 @@ Copies one borrowed byte sequence into independently owned storage.
 ## `append`
 
 ```silk
-pub effect fn append(self: &mut silk/bytes.Bytes, values: &[u8]) -> () ! OutOfMemory ? &mut Allocator
+pub effect fn append(self: &mut silk/bytes.Bytes, values: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends one complete borrowed byte sequence in source order with one bulk copy.

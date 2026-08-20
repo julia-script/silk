@@ -12,7 +12,7 @@ const ascii = (value: string): Uint8Array =>
  */
 const provider = `struct Clock { storage: Allocation }
 
-effect fn openClock() -> Clock ! OutOfMemory {
+effect fn openClock() -> Clock ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -43,28 +43,28 @@ effect fn holding<A, E>(self: once Effect<A ! E>, held: once Clock) -> A ! E {
 /** The specialized row really can fail, and the failing execution still releases the owner. */
 const failingRun = `${generic}
 
-effect fn failing() -> i32 ! OutOfMemory { fail OutOfMemory {} }
+effect fn failing() -> i32 ! OutOfMemoryError { fail OutOfMemoryError {} }
 
-effect fn work() -> i32 ! OutOfMemory {
+effect fn work() -> i32 ! OutOfMemoryError {
   let clock = run openClock()
   return run holding(failing(), move clock)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 /** The same body on the succeeding path, where the release is never in doubt. */
 const succeedingRun = `${generic}
 
-effect fn fine() -> i32 ! OutOfMemory { return 7 }
+effect fn fine() -> i32 ! OutOfMemoryError { return 7 }
 
-effect fn work() -> i32 ! OutOfMemory {
+effect fn work() -> i32 ! OutOfMemoryError {
   let clock = run openClock()
   return run holding(fine(), move clock)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 

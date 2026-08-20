@@ -20,7 +20,7 @@ fn checksum(values: &[u8]) -> i32 {
   return total
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let source = [octet(0), octet(255), octet(128), octet(1)]
   let copying = copy(&source) |> Effect.provideMut(&mut allocator)
@@ -35,7 +35,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return checksum(move readable)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -87,8 +87,8 @@ const failedCopy = `import silk.bytes { Bytes, copy }
 
 struct QuotaAllocator { remaining: i32 }
 
-effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  if self.remaining == 0 { fail OutOfMemory {} }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
@@ -99,7 +99,7 @@ impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
 
 fn octet(value: u8) -> u8 { return value }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = QuotaAllocator { remaining: 0 }
   let source = [octet(255)]
   let copying = copy(&source) |> Effect.provideMut(&mut allocator)
@@ -107,7 +107,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 1
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 

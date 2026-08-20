@@ -39,7 +39,7 @@ const cases: ReadonlyArray<Case> = [
   { element: 'f64', neighbour: 1, first: '-7.0', second: '11.0', expected: 108 },
 ]
 
-const program = (entry: Case): string => `effect fn store() -> i32 ! OutOfMemory {
+const program = (entry: Case): string => `effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[${entry.element}; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -58,7 +58,7 @@ const program = (entry: Case): string => `effect fn store() -> i32 ! OutOfMemory
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
@@ -91,7 +91,7 @@ for (const entry of cases) {
 }
 
 /** The reproduction as issue #114 states it: two `7u8` in one word, taken back and summed. */
-const reported = `effect fn store() -> i32 ! OutOfMemory {
+const reported = `effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[u8; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -108,7 +108,7 @@ const reported = `effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 

@@ -34,7 +34,7 @@ effect fn scalar() -> i32 {
   let dead = 100
   return 40 + run delayed(2)
 }
-effect fn owned() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn owned() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let firstLayout = Layout.of<i32>()
   let first = run Allocator.allocate(move firstLayout)
   let secondLayout = Layout.of<i32>()
@@ -55,7 +55,7 @@ effect fn branched(flag: bool, left: i32, right: i32) -> i32 {
   if flag { return left + value }
   return right + value
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   let scalarValue = run scalar()
   let mut ownedAllocator = SystemAllocator.make()

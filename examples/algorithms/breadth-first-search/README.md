@@ -4,7 +4,7 @@ Searches an unobstructed 5×5 grid from its first cell to the opposite corner. B
 discovers cells in distance order, so the returned shortest distance is eight grid edges.
 
 The effectful entry point verifies that distance and then returns `()`. A successful process exits
-with status zero; `OutOfMemory` is deliberately left to the runtime's unhandled-effect reporting
+with status zero; `OutOfMemoryError` is deliberately left to the runtime's unhandled-effect reporting
 instead of being caught in the example.
 
 The append-only queue is a `Vector<QueueEntry>` imported from the physical Silk standard library.

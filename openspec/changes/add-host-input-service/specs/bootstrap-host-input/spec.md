@@ -59,7 +59,7 @@ MUST NOT introduce a second text type.
 ### Requirement: Absence is data and a broken host is a failure
 
 An index at or past the argument count, and an environment name that is not set, SHALL be reported as
-absence rather than a typed failure. `HostInputFailure` SHALL mean only that the host could not
+absence rather than a typed failure. `HostInputError` SHALL mean only that the host could not
 answer the lookup at all.
 
 #### Scenario: Report an unset variable
@@ -75,7 +75,7 @@ answer the lookup at all.
 #### Scenario: Surface a refused lookup
 
 - **WHEN** the host cannot answer a lookup
-- **THEN** the operation returns `HostInputFailure` and the caller's recovery branch observes it
+- **THEN** the operation returns `HostInputError` and the caller's recovery branch observes it
 
 ### Requirement: The working directory is a host-absolute byte value
 
@@ -95,7 +95,7 @@ process command line, environment block, and working directory through unsafe `I
 using the same `Option<usize>` result with low-level reason and native-code outputs as the OS
 filesystem operations. A success SHALL report the value's complete byte length and copy the prefix
 that fits, so an undersized buffer is completed by one exactly sized second pass. The not-found
-reason SHALL become absence and any other reason SHALL become `HostInputFailure`. No compiler phase
+reason SHALL become absence and any other reason SHALL become `HostInputError`. No compiler phase
 MAY recognize the `HostInput`, `OsHostInput`, or operation spellings to select special behavior.
 
 #### Scenario: Complete a value longer than the provider buffer

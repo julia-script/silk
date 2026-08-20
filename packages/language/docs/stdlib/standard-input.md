@@ -13,7 +13,7 @@ text separately so invalid input can be handled without losing its original byte
 
 Each read writes only a prefix of the caller's mutable buffer and reports the exact committed
 count, which may be smaller than the buffer length. [`EndOfInput`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a456e644f66496e707574) is ordinary outcome data and
-promises that no later read will produce bytes; [`StreamReadFailure`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644661696c757265) is reserved for a provider
+promises that no later read will produce bytes; [`StreamReadError`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644661696c757265) is reserved for a provider
 that could not complete a read.
 
 This service is separate from `StandardStreams`: output commits a complete message or fails,
@@ -25,20 +25,20 @@ Public declarations: 11.
 
 <a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644661696c757265"></a>
 
-## `StreamReadFailure`
+## `StreamReadError`
 
 ```silk
-pub struct StreamReadFailure
+pub struct StreamReadError
 ```
 
 Failure to complete one standard-input read.
 
 <a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>
 
-## Implementation `Report for StreamReadFailure`
+## Implementation `Report for StreamReadError`
 
 ```silk
-impl Report for StreamReadFailure
+impl Report for StreamReadError
 ```
 
 <a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a726561644661696c757265"></a>
@@ -46,7 +46,7 @@ impl Report for StreamReadFailure
 ## `readFailure`
 
 ```silk
-pub fn readFailure() -> StreamReadFailure
+pub fn readFailure() -> StreamReadError
 ```
 
 Constructs the typed failure of one host read that could not complete.
@@ -120,14 +120,14 @@ Portable blocking byte-input contract.
 ### Details
 
 One `read` fills a prefix of the caller's buffer and reports the exact committed count. A host
-error is `StreamReadFailure`; the end of input is not.
+error is `StreamReadError`; the end of input is not.
 
 <a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075743a3a6f7065726174696f6e3a72656164"></a>
 
 ### Operation `read`
 
 ```silk
-effect fn read(buffer: &mut [u8]) -> ReadOutcome ! StreamReadFailure ? &mut StandardInput
+effect fn read(buffer: &mut [u8]) -> ReadOutcome ! StreamReadError ? &mut StandardInput
 ```
 
 Reads up to the buffer length, returning a partial count or end-of-input data.
@@ -177,7 +177,7 @@ Reports whether the outcome observed the end of input.
 ## `receive`
 
 ```silk
-pub effect fn receive(buffer: &mut [u8]) -> ReadOutcome ! StreamReadFailure ? &mut StandardInput
+pub effect fn receive(buffer: &mut [u8]) -> ReadOutcome ! StreamReadError ? &mut StandardInput
 ```
 
 Builds one service read effect.

@@ -12,7 +12,7 @@ const ascii = (value: string): Uint8Array =>
  */
 const provider = `struct Clock { storage: Allocation }
 
-effect fn openClock() -> Clock ! OutOfMemory {
+effect fn openClock() -> Clock ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -35,7 +35,7 @@ effect fn openClock() -> Clock ! OutOfMemory {
  */
 const generic = `${provider}
 
-effect fn acquiring<A, E>(self: once Effect<A ! E>) -> A ! E | OutOfMemory {
+effect fn acquiring<A, E>(self: once Effect<A ! E>) -> A ! E | OutOfMemoryError {
   let held = run openClock()
   let value = run move self
   drop move held
@@ -45,22 +45,22 @@ effect fn acquiring<A, E>(self: once Effect<A ! E>) -> A ! E | OutOfMemory {
 /** The specialized row really can fail, and the failing execution still releases the owner. */
 const failingRun = `${generic}
 
-effect fn failing() -> i32 ! OutOfMemory { fail OutOfMemory {} }
+effect fn failing() -> i32 ! OutOfMemoryError { fail OutOfMemoryError {} }
 
-effect fn work() -> i32 ! OutOfMemory { return run acquiring(failing()) }
+effect fn work() -> i32 ! OutOfMemoryError { return run acquiring(failing()) }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 /** The same body on the succeeding path, where the release was never in doubt. */
 const succeedingRun = `${generic}
 
-effect fn fine() -> i32 ! OutOfMemory { return 7 }
+effect fn fine() -> i32 ! OutOfMemoryError { return 7 }
 
-effect fn work() -> i32 ! OutOfMemory { return run acquiring(fine()) }
+effect fn work() -> i32 ! OutOfMemoryError { return run acquiring(fine()) }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
@@ -71,15 +71,15 @@ pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
  */
 const retriedRun = `${generic}
 
-effect fn failing() -> i32 ! OutOfMemory { fail OutOfMemory {} }
+effect fn failing() -> i32 ! OutOfMemoryError { fail OutOfMemoryError {} }
 
-effect fn work() -> i32 ! OutOfMemory {
+effect fn work() -> i32 ! OutOfMemoryError {
   let attempt = acquiring(failing())
   let retried = attempt |> Effect.retry(2)
   return run retried
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 

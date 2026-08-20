@@ -20,7 +20,7 @@ const prelude = `struct Problem { code: i32 }
 
 struct Clock { storage: Allocation }
 
-effect fn openClock() -> Clock ! OutOfMemory {
+effect fn openClock() -> Clock ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -28,20 +28,20 @@ effect fn openClock() -> Clock ! OutOfMemory {
   return Clock { storage: move allocation }
 }
 
-effect fn exhausted(error: OutOfMemory) -> Clock ! Problem { fail Problem { code: 9 } }
+effect fn exhausted(error: OutOfMemoryError) -> Clock ! Problem { fail Problem { code: 9 } }
 
 /// One owner, acquired inside whichever body runs this and released by that body's cleanup.
 effect fn acquireClock() -> Clock ! Problem {
   return run Effect.catchAll(openClock(), exhausted)
 }
 
-effect fn release() -> () ! OutOfMemory {
+effect fn release() -> () ! OutOfMemoryError {
   let held = run openClock()
   drop move held
   return ()
 }
 
-effect fn ignore(error: OutOfMemory) -> () { return () }
+effect fn ignore(error: OutOfMemoryError) -> () { return () }
 
 /// A fallible release recovered into the finalizer's infallible contract.
 ///
@@ -56,7 +56,7 @@ effect fn finalize() -> () {
 /// The same shape holding two owners, so the finalizer's events are a nested pair rather than a
 /// second copy of the protected Effect's single pair — that asymmetry is what makes the ordering
 /// assertion unambiguous rather than a trace that reads the same in either order.
-effect fn releasePair() -> () ! OutOfMemory {
+effect fn releasePair() -> () ! OutOfMemoryError {
   let first = run openClock()
   let second = run openClock()
   drop move second

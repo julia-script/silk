@@ -302,11 +302,11 @@ pub fn greaterOrEqual(left: i16, right: i16) -> bool {
 }
 
 /// Renders the value as decimal text in freshly owned storage.
-pub effect fn toText(value: i16) -> String ! OutOfMemory ? &mut Allocator {
+pub effect fn toText(value: i16) -> String ! OutOfMemoryError ? &mut Allocator {
   return run Format.signedText(toI64(value))
 }
 
 /// Reads complete decimal text as an `i16`, or reports why the text is not one.
-pub fn parse(text: string) -> Result<i16, ParseFailure> {
+pub fn parse(text: string) -> Result<i16, ParseError> {
   return Format.i16Value(text)
 }

@@ -7,7 +7,7 @@
 //! # Details
 //! Each read writes only a prefix of the caller's mutable buffer and reports the exact committed
 //! count, which may be smaller than the buffer length. [`EndOfInput`] is ordinary outcome data and
-//! promises that no later read will produce bytes; [`StreamReadFailure`] is reserved for a provider
+//! promises that no later read will produce bytes; [`StreamReadError`] is reserved for a provider
 //! that could not complete a read.
 //!
 //! This service is separate from `StandardStreams`: output commits a complete message or fails,
@@ -18,13 +18,13 @@
 // inherently partial and has an end.
 
 /// Failure to complete one standard-input read.
-pub struct StreamReadFailure {}
+pub struct StreamReadError {}
 
-impl Report for StreamReadFailure {}
+impl Report for StreamReadError {}
 
 /// Constructs the typed failure of one host read that could not complete.
-pub fn readFailure() -> StreamReadFailure {
-  return StreamReadFailure {}
+pub fn readFailure() -> StreamReadError {
+  return StreamReadError {}
 }
 
 /// A read that committed `count` bytes into the caller's buffer.
@@ -53,12 +53,12 @@ pub struct ReadOutcome {
 /// # Details
 ///
 /// One `read` fills a prefix of the caller's buffer and reports the exact committed count. A host
-/// error is `StreamReadFailure`; the end of input is not.
+/// error is `StreamReadError`; the end of input is not.
 pub service StandardInput {
   /// Reads up to the buffer length, returning a partial count or end-of-input data.
   effect fn read(
     buffer: &mut [u8]
-  ) -> ReadOutcome ! StreamReadFailure ? &mut StandardInput
+  ) -> ReadOutcome ! StreamReadError ? &mut StandardInput
 }
 
 /// Constructs the outcome of a read that committed `count` bytes.
@@ -90,6 +90,6 @@ pub fn isEndOfInput(outcome: &ReadOutcome) -> bool {
 /// Builds one service read effect.
 pub effect fn receive(
   buffer: &mut [u8]
-) -> ReadOutcome ! StreamReadFailure ? &mut StandardInput {
+) -> ReadOutcome ! StreamReadError ? &mut StandardInput {
   return run StandardInput.read(move buffer)
 }

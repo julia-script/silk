@@ -150,7 +150,7 @@ impl Drop for Guard {
     return ()
   }
 }
-effect fn makeGuard(value: i32) -> Guard ! OutOfMemory {
+effect fn makeGuard(value: i32) -> Guard ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -378,7 +378,7 @@ pub fn main() -> i32 {
 it.effect('releases an owned handler captured by a stored direct intrinsic', () =>
   Effect.gen(function* () {
     const self = yield* analyze(`${cleanupPreamble}
-effect fn direct() -> i32 ! OutOfMemory {
+effect fn direct() -> i32 ! OutOfMemoryError {
   let guard = run makeGuard(1)
   let selected = Intrinsic.catchFailure<Selected>(
     succeed(),
@@ -386,7 +386,7 @@ effect fn direct() -> i32 ! OutOfMemory {
   )
   return run Effect.catchAll(move selected, recoverResidual)
 }
-effect fn recoverAllocation(problem: OutOfMemory) -> i32 { return 99 }
+effect fn recoverAllocation(problem: OutOfMemoryError) -> i32 { return 99 }
 pub fn main() -> i32 { return run Effect.catchAll(direct(), recoverAllocation) }
 `)
     assert.deepEqual(Analysis.diagnostics(self), [])
@@ -2245,34 +2245,34 @@ it.effect('releases catch-owned handlers and live owners once before recovery', 
     for (const [name, body, expected, recovery] of [
       [
         'success-bypass',
-        `effect fn layer() -> i32 ! Residual | OutOfMemory {
+        `effect fn layer() -> i32 ! Residual | OutOfMemoryError {
   let guard = run makeGuard(1)
   let selected = Effect.catch<Selected>(succeed(), recoverSelectedWithGuard(move guard))
   return run move selected
 }
-effect fn recoverTop(problem: Residual | OutOfMemory) -> i32 { return 99 }
+effect fn recoverTop(problem: Residual | OutOfMemoryError) -> i32 { return 99 }
 pub fn main() -> i32 { return run Effect.catchAll(layer(), recoverTop) }`,
         10,
         undefined,
       ],
       [
         'residual-propagation',
-        `effect fn layer() -> i32 ! Residual | OutOfMemory {
+        `effect fn layer() -> i32 ! Residual | OutOfMemoryError {
   let guard = run makeGuard(1)
   return run Effect.catch<Selected>(failResidual(), recoverSelected)
 }
-effect fn recoverTop(problem: Residual | OutOfMemory) -> i32 { return 22 }
+effect fn recoverTop(problem: Residual | OutOfMemoryError) -> i32 { return 22 }
 pub fn main() -> i32 { return run Effect.catchAll(layer(), recoverTop) }`,
         22,
         'recoverTop',
       ],
       [
         'handler-failure',
-        `effect fn layer() -> i32 ! Residual | HandlerProblem | OutOfMemory {
+        `effect fn layer() -> i32 ! Residual | HandlerProblem | OutOfMemoryError {
   let guard = run makeGuard(1)
   return run Effect.catch<Selected>(failSelected(), failFromHandler)
 }
-effect fn recoverTop(problem: Residual | HandlerProblem | OutOfMemory) -> i32 { return 30 }
+effect fn recoverTop(problem: Residual | HandlerProblem | OutOfMemoryError) -> i32 { return 30 }
 pub fn main() -> i32 { return run Effect.catchAll(layer(), recoverTop) }`,
         30,
         'recoverTop',

@@ -76,7 +76,7 @@ Unicode scalar value represented as its unsigned code point.
 ## `normalizeNfd`
 
 ```silk
-pub effect fn normalizeNfd(value: string) -> String ! OutOfMemory ? &mut Allocator
+pub effect fn normalizeNfd(value: string) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
 Returns the Normalization Form D of text: fully decomposed, in canonical order.
@@ -86,7 +86,7 @@ Returns the Normalization Form D of text: fully decomposed, in canonical order.
 ## `normalizeNfc`
 
 ```silk
-pub effect fn normalizeNfc(value: string) -> String ! OutOfMemory ? &mut Allocator
+pub effect fn normalizeNfc(value: string) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
 Returns the Normalization Form C of text: decomposed, canonically ordered, then recomposed.

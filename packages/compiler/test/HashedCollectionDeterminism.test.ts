@@ -131,7 +131,7 @@ const fill = (map: string): string =>
 const ordered = (seed: number, digest: number): string =>
   `${mapImports}
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut map = make<Word, i32>(HashKey.seed(${seed}))
 ${fill('map')}
@@ -140,7 +140,7 @@ ${foldOrder('map', 'folded')}
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 

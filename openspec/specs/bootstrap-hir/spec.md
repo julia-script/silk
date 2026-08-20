@@ -451,7 +451,7 @@ Calls and returns MUST preserve that identity rather than reducing the value to 
 ### Requirement: HIR retains allocation and cleanup semantics without policy
 
 HIR SHALL represent validated and repeated layout formation, general allocator capability dispatch,
-typed allocation success or `OutOfMemory`, self-contained allocation ownership, unsafe RawBuffer and
+typed allocation success or `OutOfMemoryError`, self-contained allocation ownership, unsafe RawBuffer and
 Slot operations, initialization transitions, restricted Drop declarations and calls, explicit drop,
 and automatic cleanup with canonical types and source provenance. HIR MUST NOT encode allocator
 implementation kinds, provider-dependent result lifetimes, named lifetime scopes, dynamic finalizer

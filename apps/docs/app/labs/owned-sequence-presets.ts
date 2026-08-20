@@ -1,7 +1,7 @@
 export const vectorGrowthSource = `import silk.vector {Vector, make, append, get, length, capacity}
 
 effect fn build() -> i32
-! OutOfMemory {
+! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10)
@@ -33,7 +33,7 @@ effect fn build() -> i32
   return first + last + 17
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 7
 }
 
@@ -49,9 +49,9 @@ struct QuotaAllocator {
 }
 
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation
-! OutOfMemory {
+! OutOfMemoryError {
   if self.remaining == 0 {
-    fail OutOfMemory {}
+    fail OutOfMemoryError {}
   }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
@@ -66,18 +66,18 @@ impl Allocator for QuotaAllocator {
 }
 
 effect fn grow(values: &mut Vector<i32>) -> i32
-! OutOfMemory
+! OutOfMemoryError
 ? &mut Allocator {
   let appended = run append<i32>(move values, 14)
   return 1
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 7
 }
 
 effect fn build() -> i32
-! OutOfMemory {
+! OutOfMemoryError {
   let mut allocator = QuotaAllocator {remaining: 1}
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10)
@@ -109,7 +109,7 @@ effect fn build() -> i32
   return first + last + 19
 }
 
-effect fn outerRecover(error: OutOfMemory) -> i32 {
+effect fn outerRecover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -136,7 +136,7 @@ impl Drop for Entry {
 }
 
 effect fn build() -> i32
-! OutOfMemory {
+! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut values = make<Entry>()
   let entry0 = Entry {value: 3, marker: make<i32>()}
@@ -157,7 +157,7 @@ effect fn build() -> i32
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 7
 }
 
@@ -189,7 +189,7 @@ fn consume(values: Vector<Entry>) -> i32 {
 }
 
 effect fn build() -> i32
-! OutOfMemory {
+! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut values = make<Entry>()
   let entry0 = Entry {value: 11, marker: make<i32>()}
@@ -204,7 +204,7 @@ effect fn build() -> i32
   return consumed + 2
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 7
 }
 
@@ -228,7 +228,7 @@ fn observe(kind: i32) -> i32 {
 }
 
 effect fn scan(source: &[U8]) -> Vector<Token>
-! OutOfMemory
+! OutOfMemoryError
 ? &mut Allocator {
   let mut tokens = make<Token>()
   let mut index = usize.add(0, 0)
@@ -249,7 +249,7 @@ effect fn scan(source: &[U8]) -> Vector<Token>
 }
 
 effect fn build() -> i32
-! OutOfMemory {
+! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let source = [
     U8 {value: 1},
@@ -295,7 +295,7 @@ effect fn build() -> i32
   return kind0 + kind1 + kind2 + kind3 + kind4 + kind5 + kind6 + kind7 + kind8 + kind9 + 23
 }
 
-effect fn recover(error: OutOfMemory) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 7
 }
 

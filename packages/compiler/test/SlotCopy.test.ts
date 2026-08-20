@@ -7,7 +7,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 /** Copy reads the same initialized slot twice without consuming it; take still works after. */
-const copyRead = `effect fn store() -> i32 ! OutOfMemory {
+const copyRead = `effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -24,7 +24,7 @@ const copyRead = `effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
@@ -50,7 +50,7 @@ fn observed(input: EmptyEvent | Left | Right) -> i32 {
   }
 }
 
-effect fn store() -> i32 ! OutOfMemory {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[EmptyEvent | Left | Right; 3]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -78,7 +78,7 @@ effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
@@ -162,7 +162,7 @@ it.effect(
 
 /** Copying a non-Copy element is rejected when the concrete instantiation is verified. */
 const nonCopy = `struct Guard { storage: Allocation }
-effect fn store() -> i32 ! OutOfMemory {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Guard; 1]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -184,7 +184,7 @@ effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 

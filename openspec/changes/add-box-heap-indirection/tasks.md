@@ -21,7 +21,7 @@
       `pub struct Box<T> { buffer: RawBuffer<T> state: Vacant | Occupied }`, with both markers
       non-generic. Every decision the design made is kept: ordinary source, `RawBuffer<T>` as the
       only reach into `T`, a source `Drop` hook, and no `[T; 0]` anchor.
-- [x] 2.2 Add `Box.make<T>(value: T) -> Box<T> ! OutOfMemory ? &mut Allocator`, allocating one
+- [x] 2.2 Add `Box.make<T>(value: T) -> Box<T> ! OutOfMemoryError ? &mut Allocator`, allocating one
       element through `Allocator` and writing the value into slot zero.
 - [x] 2.3 Add the borrow and consume accessors (`get`, `getMut`, `into`) so a boxed value is
       reachable without unsafe code at the call site. **`get`/`getMut` return `&[T]` and

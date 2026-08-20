@@ -180,7 +180,7 @@ pub fn main() -> i32 {
 
 it.effect('uses one source-like effect function hover at declarations and references', () =>
   Effect.gen(function* () {
-    const source = `effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+    const source = `effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   return run Effect.catchAll(store(), recover)
 }`
@@ -189,7 +189,7 @@ pub fn main() -> i32 {
     const reference = Document.hover(document, snapshot, positionOf(source, 'recover', 1))
     assert.deepEqual(declaration?.contents, {
       kind: 'markdown',
-      value: '```silk\neffect fn recover(error: OutOfMemory) -> i32\n```',
+      value: '```silk\neffect fn recover(error: OutOfMemoryError) -> i32\n```',
     })
     assert.deepEqual(reference?.contents, declaration?.contents)
   }),

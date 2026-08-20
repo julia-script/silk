@@ -398,7 +398,7 @@ export const nominal = (
   })
 
 /** Canonical allocation-free failure used by every allocator implementation. */
-export const outOfMemory: Nominal = nominal('silk/core', 'OutOfMemory')
+export const outOfMemoryError: Nominal = nominal('silk/core', 'OutOfMemoryError')
 export const layout: Nominal = nominal('silk/layout', 'Layout')
 export const invalidAlignment: Nominal = nominal('silk/layout', 'InvalidAlignment')
 export const layoutOverflow: Nominal = nominal('silk/layout', 'LayoutOverflow')
@@ -407,7 +407,7 @@ export const allocator: Nominal = nominal('silk/core', 'Allocator')
 /** Explicit host capability for complete stdout and stderr byte writes. */
 export const standardStreams: Nominal = nominal('silk/core', 'StandardStreams')
 /** Allocation-free typed failure returned when a host cannot commit a complete write. */
-export const streamWriteFailure: Nominal = nominal('silk/core', 'StreamWriteFailure')
+export const streamWriteFailure: Nominal = nominal('silk/core', 'StreamWriteError')
 /** A self-contained affine owner carrying one private active reclaim ticket. */
 export const allocation: Nominal = nominal('silk/core', 'Allocation')
 /** Opaque affine native file-or-directory handle used only by unsafe OS intrinsics. */
@@ -497,7 +497,7 @@ export const intrinsicallyConforms = (provider: Type, capability: Nominal): bool
   isNominal(provider) && (intrinsicConformances.get(key(provider))?.has(key(capability)) ?? false)
 
 /** Tests the one compiler-sealed allocation exhaustion payload. */
-export const isOutOfMemory = (self: Type): self is Nominal => equals(self, outOfMemory)
+export const isOutOfMemoryError = (self: Type): self is Nominal => equals(self, outOfMemoryError)
 export const isIntrinsicNominal = (self: Type): boolean =>
   isNominal(self) && self.module === 'silk/core' && intrinsicNominals.get(self.name) !== undefined
 

@@ -49,10 +49,10 @@ than restated.
   underneath builds its replacement buffer in full before committing — but a copy per piece made
   composing a message quadratic in its length and linear in allocations, which is precisely the
   operation this change exists to make possible.
-- **A reading failure is data, not one opaque error.** `ParseFailure` narrows to `NotANumber`,
+- **A reading failure is data, not one opaque error.** `ParseError` narrows to `NotANumber`,
   carrying the byte offset at which reading stopped, or `OutOfRange`.
 - **The Wasm backend learns to move a value between lanes of different widths.** A union's payload
-  slot is as wide as its widest member, so `Result<u64, ParseFailure>` puts a 32-bit member in a
+  slot is as wide as its widest member, so `Result<u64, ParseError>` puts a 32-bit member in a
   64-bit slot on a 32-bit target. The backend moved one into the other unchanged, which is not a
   valid instruction sequence, so every such program failed to emit while the evaluator and the
   native backend ran it correctly. This is a prerequisite, not a bonus: without it, `u64.parse` and

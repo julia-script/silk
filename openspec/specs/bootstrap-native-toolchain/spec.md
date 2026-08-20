@@ -108,7 +108,7 @@ or stable external ABI promise.
 #### Scenario: Translate native exhaustion
 
 - **WHEN** the private aligned acquisition boundary cannot satisfy a valid layout
-- **THEN** native execution returns the status used for typed `OutOfMemory` and creates no releasable block
+- **THEN** native execution returns the status used for typed `OutOfMemoryError` and creates no releasable block
 
 #### Scenario: Release an over-aligned block
 

@@ -88,13 +88,13 @@ that code. It MUST NOT enter the typed failure channel.
 ### Requirement: A failure to start, wait, or capture is a typed process failure
 
 A provider that cannot start the child, cannot wait for it, or cannot capture its output SHALL
-return `ProcessFailure`. The failure SHALL name which of those stages failed, carry a closed
+return `ProcessError`. The failure SHALL name which of those stages failed, carry a closed
 portable reason, and MAY retain a numeric provider detail.
 
 #### Scenario: Surface a missing executable
 
 - **WHEN** no executable exists at the requested path
-- **THEN** the operation returns `ProcessFailure` naming the start stage rather than an exit code
+- **THEN** the operation returns `ProcessError` naming the start stage rather than an exit code
 
 ### Requirement: The child's standard input is closed
 

@@ -4,7 +4,7 @@ export const allocatorSource = `pub fn main() -> i32 {
   return 0
 }`
 
-export const effectHandlerSource = `effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+export const effectHandlerSource = `effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   return run Effect.catchAll(store(), recover)
 }`

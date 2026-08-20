@@ -11,7 +11,7 @@ built.
 
 `Box<T>` SHALL be move-only for every `T` through the ordinary nominal ownership rule, with no
 ownership special case. Its construction SHALL allocate through the `Allocator` service and SHALL
-fail with `OutOfMemory`. Its `Drop` hook SHALL take exclusive `self`, return unit, and declare no
+fail with `OutOfMemoryError`. Its `Drop` hook SHALL take exclusive `self`, return unit, and declare no
 failures and no requirements, dropping the held value before its storage releases. A boxed value
 SHALL be reachable by shared borrow, exclusive borrow, and consuming move without unsafe code at the
 call site.
@@ -27,7 +27,7 @@ to construct a cyclic graph.
 #### Scenario: Report allocation exhaustion
 
 - **WHEN** the allocator cannot satisfy a box construction
-- **THEN** the caller receives the ordinary `OutOfMemory` typed failure and no partially initialized box exists
+- **THEN** the caller receives the ordinary `OutOfMemoryError` typed failure and no partially initialized box exists
 
 #### Scenario: Release the held value with the box
 

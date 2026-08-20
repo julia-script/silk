@@ -67,7 +67,7 @@ pub fn main() -> i32 {
 }`)
     assertCompleted(self, 42)
     const encoded = Mir.encode(Analysis.loweredMir(self))
-    assert.notInclude(encoded, 'OutOfMemory')
+    assert.notInclude(encoded, 'OutOfMemoryError')
     assert.notInclude(encoded, 'ContinuationRequest')
   }),
 )

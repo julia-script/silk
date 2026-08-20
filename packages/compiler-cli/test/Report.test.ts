@@ -133,7 +133,7 @@ it('keeps the failing command so a toolchain failure is reproducible by hand', (
         command: 'clang',
         arguments: ['-o', 'a.out'],
       },
-      reason: { _tag: 'ProcessFailure' },
+      reason: { _tag: 'ProcessError' },
       status: 1,
       output: 'ld: symbol not found',
     } as Driver.Failed['failure'],

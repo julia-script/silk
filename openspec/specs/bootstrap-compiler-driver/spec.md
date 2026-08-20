@@ -444,7 +444,7 @@ MIR, traces, textual output, and binary artifacts deterministic.
 #### Scenario: Compile the construction-guard milestone
 
 - **WHEN** a canonical program allocates runtime-counted move-only slots, initializes a guarded prefix, and exits through success and injected typed failure
-- **THEN** all three engines agree on values, `OutOfMemory`, hook order, exact releases, target layout, and emitted artifacts
+- **THEN** all three engines agree on values, `OutOfMemoryError`, hook order, exact releases, target layout, and emitted artifacts
 
 #### Scenario: Reject unsafe misuse before artifacts
 
@@ -462,7 +462,7 @@ The driver's continuous gates SHALL include a scanner written in Silk that borro
 source bytes as a slice and returns an owned `Vector<Token>`, growing across at least one
 reallocation. The differential harness SHALL verify identical token results across the evaluator,
 LLVM native execution, and instantiated Wasm; a failure-ordinal sweep over every allocation the
-scanner performs SHALL confirm each injected `OutOfMemory` propagates typed, rolls back partial
+scanner performs SHALL confirm each injected `OutOfMemoryError` propagates typed, rolls back partial
 initialization, and leaks nothing, with the evaluator and Wasm carrying every ordinal and native
 execution carrying representative boundary ordinals including at least the first failure, one
 mid-growth failure, and unrestricted completion; and repeated compilation SHALL keep the scanner's
@@ -476,7 +476,7 @@ artifacts deterministic.
 #### Scenario: Exhaustion at every ordinal leaks nothing
 
 - **WHEN** the harness injects allocation failure at each successive allocation ordinal of the scanner run
-- **THEN** every evaluator and Wasm run fails with typed `OutOfMemory` or completes and releases every live owner exactly once, and native runs at the boundary ordinals report no leaked allocation
+- **THEN** every evaluator and Wasm run fails with typed `OutOfMemoryError` or completes and releases every live owner exactly once, and native runs at the boundary ordinals report no leaked allocation
 
 #### Scenario: Scanner artifacts are deterministic
 

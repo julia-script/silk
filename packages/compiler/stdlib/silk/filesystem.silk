@@ -301,7 +301,7 @@ effect fn appendRange(
   source: &[u8],
   start: usize,
   end: usize
-) -> Bytes ! OutOfMemory ? &mut Allocator {
+) -> Bytes ! OutOfMemoryError ? &mut Allocator {
   let mut result = move target
   let mut index = start
   while index < end {
@@ -322,7 +322,7 @@ fn finalNameStart(values: &[u8]) -> usize {
   return usize.ZERO
 }
 
-effect fn finishPath(bytes: Bytes) -> Path ! OutOfMemory ? &mut Allocator {
+effect fn finishPath(bytes: Bytes) -> Path ! OutOfMemoryError ? &mut Allocator {
   let view = bytesAsSlice(&bytes)
   let start = finalNameStart(view)
   let nameBytes = run appendRange(bytesMake(), view, start, view.length)
@@ -330,7 +330,7 @@ effect fn finishPath(bytes: Bytes) -> Path ! OutOfMemory ? &mut Allocator {
 }
 
 /// Constructs an owned normalized provider-absolute Path from semantic text.
-pub effect fn make(value: string) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+pub effect fn make(value: string) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   let values = stringUtf8Bytes(value)
   if validAbsolute(values) == false { return run rejectPath() }
   let copied = run appendRange(bytesMake(), values, usize.ZERO, values.length)
@@ -346,14 +346,14 @@ pub effect fn make(value: string) -> Path ! FileError | OutOfMemory ? &mut Alloc
 /// The same normalization applies as for textual construction: the value is absolute, rejects NUL,
 /// and rejects `.`, `..`, empty components, and trailing separators. Well-formed text is not
 /// required, so a Path built this way may have no `string` view.
-pub effect fn fromBytes(values: &[u8]) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+pub effect fn fromBytes(values: &[u8]) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   if validAbsolute(values) == false { return run rejectPath() }
   let copied = run appendRange(bytesMake(), values, usize.ZERO, values.length)
   return run finishPath(move copied)
 }
 
 /// Constructs the selected provider's root Path.
-pub effect fn root() -> Path ! OutOfMemory ? &mut Allocator {
+pub effect fn root() -> Path ! OutOfMemoryError ? &mut Allocator {
   let mut copied = bytesMake()
   let appended = run bytesAppend(&mut copied, stringUtf8Bytes("/"))
   return run finishPath(move copied)
@@ -389,7 +389,7 @@ pub fn name(self: &Path) -> string {
 effect fn joinBytes(
   base: &Path,
   fragment: &[u8]
-) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   if validRelativeFragment(fragment) == false { return run rejectPath() }
   let baseBytes = pathBytes(base)
   let mut combined = run appendRange(bytesMake(), baseBytes, usize.ZERO, baseBytes.length)
@@ -405,7 +405,7 @@ effect fn joinBytes(
 pub effect fn join(
   base: &Path,
   fragment: string
-) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   return run joinBytes(base, stringUtf8Bytes(fragment))
 }
 
@@ -413,7 +413,7 @@ pub effect fn join(
 pub effect fn joinUtf8(
   base: &Path,
   fragment: &[u8]
-) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   if validUtf8(fragment) == false { return run rejectPath() }
   return run joinBytes(base, fragment)
 }
@@ -460,7 +460,7 @@ fn survivingRelative(values: &[u8], after: usize) -> bool {
 pub effect fn resolve(
   base: &Path,
   relativeText: string
-) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   let relative = stringUtf8Bytes(relativeText)
   if containsNul(relative) { return run rejectPath() }
   if usize.ZERO < relative.length {
@@ -560,7 +560,7 @@ pub effect fn resolve(
 /// Allocates an independently owned parent Path, or None for root.
 pub effect fn parent(
   self: &Path
-) -> Option<Path> ! OutOfMemory ? &mut Allocator {
+) -> Option<Path> ! OutOfMemoryError ? &mut Allocator {
   if isRoot(self) { return none<Path>() }
   let values = pathBytes(self)
   let nameStart = finalNameStart(values)
@@ -576,7 +576,7 @@ pub service FileSystem {
   /// Reads one complete regular file into independently owned bytes.
   effect fn readFile(
     path: &Path
-  ) -> Bytes ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+  ) -> Bytes ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
   /// Writes one complete byte view with create-or-truncate semantics.
   effect fn writeFile(path: &Path, bytes: &[u8]) -> () ! FileError ? &mut FileSystem
   /// Returns minimal regular-file or directory metadata.
@@ -584,7 +584,7 @@ pub service FileSystem {
   /// Returns immediate owned child entries in deterministic path-byte order.
   effect fn listDirectory(
     path: &Path
-  ) -> Vector<DirectoryEntry> ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+  ) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
   /// Creates exactly one missing directory.
   effect fn createDirectory(path: &Path) -> () ! FileError ? &mut FileSystem
   /// Removes exactly one regular file.
@@ -601,7 +601,7 @@ pub service FileSystem {
   effect fn createTemporaryDirectory(
     parent: &Path,
     prefix: &[u8]
-  ) -> Path ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+  ) -> Path ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 }
 
 /// A directory a caller owns outright, together with everything written inside it.
@@ -632,7 +632,7 @@ pub struct TemporaryDirectory {
 pub effect fn temporaryDirectory(
   parent: &Path,
   prefix: string
-) -> TemporaryDirectory ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator {
+) -> TemporaryDirectory ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
   let created = run FileSystem.createTemporaryDirectory(parent, stringUtf8Bytes(prefix))
   return TemporaryDirectory { path: move created }
 }
@@ -646,14 +646,14 @@ pub effect fn temporaryDirectory(
 /// failed cleanup uses this operation and handles the failure.
 pub effect fn release(
   self: TemporaryDirectory
-) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator {
+) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
   let owned = move self
   let removed = run removeDirectoryRecursively(&owned.path)
   drop owned
   return ()
 }
 
-effect fn discardReleaseFailure(error: FileError | OutOfMemory) -> () { return () }
+effect fn discardReleaseFailure(error: FileError | OutOfMemoryError) -> () { return () }
 
 /// Consumes one TemporaryDirectory, removes it, and discards a failed removal.
 ///
@@ -694,7 +694,7 @@ pub effect fn releaseIgnored(
 effect fn recordedCopy(
   recorded: &Vector<Path>,
   index: usize
-) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   return match &vectorAsSlice<Path>(recorded)[index] {
     Path { bytes, nameBytes } => run fromBytes(bytesAsSlice(&bytes))
   }
@@ -712,7 +712,7 @@ effect fn recordedCopy(
 /// vector capacity rather than stack.
 pub effect fn removeDirectoryRecursively(
   path: &Path
-) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator {
+) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
   let mut recorded = vectorMake<Path>()
   let seed = run fromBytes(rawBytes(path))
   let noted = run vectorAppend<Path>(&mut recorded, move seed)
@@ -780,7 +780,7 @@ fn classifyDirectory(
 /// Creates every missing directory component with ordinary stat/create composition.
 pub effect fn createDirectoriesRecursively(
   path: &Path
-) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator {
+) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
   let values = pathBytes(path)
   let mut index = usize.ONE
   while index <= values.length {
@@ -814,7 +814,7 @@ pub effect fn createDirectoriesRecursively(
 pub effect fn writeFileWithParents(
   path: &Path,
   bytes: &[u8]
-) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator {
+) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
   if isRoot(path) { return run FileSystem.writeFile(path, bytes) }
   let pathValues = pathBytes(path)
   let nameStart = finalNameStart(pathValues)

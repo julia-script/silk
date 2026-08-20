@@ -6,7 +6,7 @@ The sealed `Intrinsic` namespace SHALL expose one unsafe native-only byte-input 
 exclusive byte buffer plus explicit reason and native-code outputs and returning `Option<usize>`. A
 present count SHALL be the exact transferred byte count, zero SHALL mean the end of input, and an
 absent result SHALL write the normalized low-level reason and native code. The compiler MUST NOT
-construct or recognize `ReadOutcome`, `StreamReadFailure`, or the `StandardInput` service, and MUST
+construct or recognize `ReadOutcome`, `StreamReadError`, or the `StandardInput` service, and MUST
 NOT admit a second input operation for buffering, decoding, or terminal control.
 
 #### Scenario: Report a refused read

@@ -69,7 +69,7 @@ it('contains no obsolete suspension-allocation surface in shipped source or docu
     'ContinuationTransaction',
     'SEM0102',
     'continuation allocator',
-    'A ! E | OutOfMemory ? R | &mut Allocator',
+    'A ! E | OutOfMemoryError ? R | &mut Allocator',
   ]
   const violations: Array<string> = []
   for (const root of roots) {

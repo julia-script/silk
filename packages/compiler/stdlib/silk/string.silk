@@ -135,7 +135,7 @@ pub fn make() -> String {
 }
 
 /// Copies valid text into independently owned storage.
-pub effect fn copy(value: string) -> String ! OutOfMemory ? &mut Allocator {
+pub effect fn copy(value: string) -> String ! OutOfMemoryError ? &mut Allocator {
   let source = Intrinsic.stringUtf8Bytes(value)
   let bytes = run bytesCopy(source)
   return String { bytes: move bytes }
@@ -149,7 +149,7 @@ pub effect fn copy(value: string) -> String ! OutOfMemory ? &mut Allocator {
 /// back a view that lives exactly as long as the buffer under it, which is the wrong shape for an
 /// encoder that wants to return its result and let its working buffer go; this validates the same
 /// way and owns the outcome.
-pub effect fn copyUtf8(values: &[u8]) -> Result<String, InvalidUtf8> ! OutOfMemory ? &mut Allocator {
+pub effect fn copyUtf8(values: &[u8]) -> Result<String, InvalidUtf8> ! OutOfMemoryError ? &mut Allocator {
   let failure = match move firstInvalidUtf8(values) {
     Some<usize> { value } => move value
     None {} => values.length + usize.ONE
@@ -167,7 +167,7 @@ pub effect fn copyUtf8(values: &[u8]) -> Result<String, InvalidUtf8> ! OutOfMemo
 // cost is not: composing a message from several pieces is what this API is for, and a copy per
 // piece made that quadratic in the message and linear in allocations.
 /// Appends complete valid text atomically with respect to allocation failure.
-pub effect fn append(self: &mut String, value: string) -> () ! OutOfMemory ? &mut Allocator {
+pub effect fn append(self: &mut String, value: string) -> () ! OutOfMemoryError ? &mut Allocator {
   let suffix = Intrinsic.stringUtf8Bytes(value)
   return run bytesAppend(&mut self.bytes, suffix)
 }
@@ -178,7 +178,7 @@ pub effect fn append(self: &mut String, value: string) -> () ! OutOfMemory ? &mu
 ///
 /// The companion to `append` for text a program computed rather than wrote. The appended String is
 /// consumed, so a rendered value composes into a message without the caller keeping it alive.
-pub effect fn appendOwned(self: &mut String, value: String) -> () ! OutOfMemory ? &mut Allocator {
+pub effect fn appendOwned(self: &mut String, value: String) -> () ! OutOfMemoryError ? &mut Allocator {
   let suffix = bytesAsSlice(&value.bytes)
   return run bytesAppend(&mut self.bytes, suffix)
 }

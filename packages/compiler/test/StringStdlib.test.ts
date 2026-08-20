@@ -73,7 +73,7 @@ const owned = `import silk.string {
   ownedUtf8Bytes
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let copying = copy("h\\u{e9}") |> Effect.provideMut(&mut allocator)
   let mut value = run copying
@@ -85,7 +85,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -119,8 +119,8 @@ const appendRollback = `import silk.string { String, copy, append, view, ownedBy
 
 struct QuotaAllocator { remaining: i32 }
 
-effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  if self.remaining == 0 { fail OutOfMemory {} }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
@@ -129,10 +129,10 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! Ou
 
 impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
 
-effect fn ignore(error: OutOfMemory) -> () { return () }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn ignore(error: OutOfMemoryError) -> () { return () }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   // One allocation, spent by the copy. Appending grows the copied storage in place rather than
   // copying it into fresh storage first, so starving the append takes one fewer than it used to.
   let mut allocator = QuotaAllocator { remaining: 1 }

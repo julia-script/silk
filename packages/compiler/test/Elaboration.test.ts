@@ -626,7 +626,7 @@ it.effect('defines allocation as an exclusive service Effect with an affine resu
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'allocation://capability-contract',
-      `fn allocate(layout: Layout) -> once Effect<Allocation ! OutOfMemory ? &mut Allocator> {
+      `fn allocate(layout: Layout) -> once Effect<Allocation ! OutOfMemoryError ? &mut Allocator> {
   return Allocator.allocate(move layout)
 }
 fn main() -> i32 {
@@ -642,7 +642,7 @@ fn main() -> i32 {
     if (allocation?._tag !== 'Resolved' || !Type.isEffect(allocation.type)) return
     assert.ok(Type.equals(allocation.type.success, Type.allocation))
     assert.deepEqual(Type.failureMembers(allocation.type).map(Type.encode), [
-      'silk/core.OutOfMemory',
+      'silk/core.OutOfMemoryError',
     ])
     assert.deepEqual(
       Type.requirementMembers(allocation.type).map((requirement) => ({
@@ -662,7 +662,7 @@ it.effect('provides Allocator through nominal system and user-authored witnesses
   Effect.gen(function* () {
     const system = yield* analyzeWithStdlib(
       'allocation://nominal-system-provider',
-      `effect fn use(layout: Layout) -> i32 ! OutOfMemory {
+      `effect fn use(layout: Layout) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -680,11 +680,11 @@ pub fn main() -> i32 { return 0 }`,
     const custom = yield* analyzeWithStdlib(
       'allocation://custom-provider',
       `struct TestAllocator { remaining: i32 }
-effect fn allocate(self: &mut TestAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+effect fn allocate(self: &mut TestAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   return run Intrinsic.systemAllocationAcquire(move layout)
 }
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }
-effect fn use(layout: Layout) -> i32 ! OutOfMemory {
+effect fn use(layout: Layout) -> i32 ! OutOfMemoryError {
   let mut allocator = TestAllocator { remaining: 1 }
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe

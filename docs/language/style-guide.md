@@ -44,11 +44,10 @@ because one API may fail with it. Name the type for its dominant meaning.
 non-blocking style warning or rename action when a public nominal type is introduced primarily as a
 failure type. Such tooling must not imply that the name changes the type's semantics.
 
-**Current standard library:** Inconsistent. Names such as `FileError` and `LogError` already follow
-the convention. Error payloads named `ProcessFailure`, `ParseFailure`, `HostInputFailure`,
-`StreamReadFailure`, `StreamWriteFailure`, and `OutOfMemory` should move to the `Error` suffix during
-implementation reconciliation rather than being preserved as competing conventions. The
-`Failure<F>` result outcome keeps its existing name under this rule.
+**Current standard library:** Consistent. Public error payloads include `FileError`, `LogError`,
+`ProcessError`, `ParseError`, `HostInputError`, `StreamReadError`, `StreamWriteError`, and
+`OutOfMemoryError`. The `Failure<F>` result outcome keeps its existing name because it is ordinary
+result data rather than an error declaration.
 
 **Evidence:** [ordinary failure values](typed-failures.md#fail-001--any-concrete-detached-value-may-be-a-typed-failure).
 
