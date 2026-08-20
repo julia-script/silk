@@ -1442,6 +1442,33 @@ pub fn main() -> i32 { return clamp(double(1), 0, 10) }
   }),
 )
 
+it.effect('labels struct construction with visible fields and selects the named initializer', () =>
+  Effect.gen(function* () {
+    const source = `struct Pair<A, B> {
+  first: A
+  second: B
+}
+
+pub fn main() -> i32 {
+  let pair = Pair<i32> { first: 1, second: true }
+  return pair.first
+}
+`
+    const { document, snapshot } = yield* open(source)
+    const help = Document.signatureHelp(
+      document,
+      snapshot,
+      positionAt(source, source.indexOf('second: true') + 'second:'.length),
+    )
+    assert.strictEqual(help?.signatures[0]?.label, 'struct Pair<A, B> { first: A, second: B }')
+    assert.deepEqual(
+      help?.signatures[0]?.parameters?.map((parameter) => parameter.label),
+      ['first: A', 'second: B'],
+    )
+    assert.strictEqual(help?.activeParameter, 1)
+  }),
+)
+
 /** Decodes the protocol's delta encoding back into absolute, readable tokens. */
 const decodeSemanticTokens = (tokens: {
   readonly data: ReadonlyArray<number>

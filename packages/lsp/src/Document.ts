@@ -424,6 +424,66 @@ const enclosingCall = (
   return selected
 }
 
+/** The innermost struct literal whose initializer body contains one byte offset. */
+const enclosingStructLiteral = (
+  root: SyntaxTree.Node,
+  offset: number,
+):
+  | {
+      readonly target: SyntaxTree.Element
+      readonly literal: SyntaxTree.Node
+      readonly initializers: ReadonlyArray<SyntaxTree.Node>
+    }
+  | undefined => {
+  let selected:
+    | {
+        readonly target: SyntaxTree.Element
+        readonly literal: SyntaxTree.Node
+        readonly initializers: ReadonlyArray<SyntaxTree.Node>
+      }
+    | undefined
+  const visit = (node: SyntaxTree.Node): void => {
+    if (node.kind === 'StructLiteralExpression') {
+      const target = node.children[0]
+      const leftBrace = node.children.find(
+        (child) => SyntaxTree.isToken(child) && child.kind === 'LeftBrace',
+      )
+      const rightBrace = node.children.find(
+        (child) => SyntaxTree.isToken(child) && child.kind === 'RightBrace',
+      )
+      if (target !== undefined && leftBrace !== undefined) {
+        const end = rightBrace === undefined ? node.span.end : rightBrace.span.start
+        if (
+          offset > leftBrace.span.start &&
+          offset <= end &&
+          (selected === undefined ||
+            node.span.end - node.span.start <=
+              selected.literal.span.end - selected.literal.span.start)
+        )
+          selected = Object.freeze({
+            target,
+            literal: node,
+            initializers: SyntaxTree.directNodes(node, 'StructFieldInitializer'),
+          })
+      }
+    }
+    for (const child of node.children) if (SyntaxTree.isNode(child)) visit(child)
+  }
+  visit(root)
+  return selected
+}
+
+const markdownDocumentation = (
+  snapshot: Analysis.FrontendSnapshot,
+  identity: SemanticOccurrence.Identity,
+): string | undefined => {
+  const raw = Analysis.documentationOfIdentity(snapshot, identity)
+  const source = raw === undefined ? undefined : Analysis.sources(snapshot).get(raw.span.sourceId)
+  return raw === undefined || source === undefined
+    ? undefined
+    : Documentation.toMarkdown(Documentation.parse(source, raw))
+}
+
 /**
  * Describes the call the cursor sits inside, selecting the parameter the cursor is writing.
  *
@@ -441,7 +501,66 @@ export const signatureHelp = (
   if (syntax === undefined) return undefined
   const offset = LineIndex.offsetOf(self.index, position)
   const call = enclosingCall(syntax.root, offset)
-  if (call === undefined) return undefined
+  if (call === undefined) {
+    const structLiteral = enclosingStructLiteral(syntax.root, offset)
+    if (structLiteral === undefined) return undefined
+    const targetPath =
+      SyntaxTree.isNode(structLiteral.target) && structLiteral.target.kind === 'AppliedType'
+        ? (SyntaxTree.directNode(structLiteral.target, 'TypePath') ?? structLiteral.target)
+        : structLiteral.target
+    const occurrence = Analysis.semanticOccurrenceAt(
+      snapshot,
+      self.module,
+      SyntaxTree.span(targetPath).end - 1,
+    )
+    if (occurrence?.resolution._tag !== 'Available') return undefined
+    const identity = occurrence.resolution.identity
+    if (identity._tag !== 'DeclarationIdentity') return undefined
+    const declaration = Analysis.declarationForIdentity(snapshot, identity)
+    if (declaration?._tag !== 'StructDeclaration') return undefined
+    const fields = declaration.fields.filter(
+      (field) => field.visibility === 'Public' || occurrence.declaration?.module === self.module,
+    )
+    const activeInitializer = structLiteral.initializers.find(
+      (initializer) => offset >= initializer.span.start && offset <= initializer.span.end,
+    )
+    const fieldOccurrence =
+      activeInitializer === undefined
+        ? undefined
+        : Analysis.semanticOccurrenceAt(snapshot, self.module, activeInitializer.span.start)
+    const fieldIdentity =
+      fieldOccurrence?.resolution._tag === 'Available' &&
+      fieldOccurrence.resolution.identity._tag === 'FieldIdentity'
+        ? fieldOccurrence.resolution.identity
+        : undefined
+    const activeField =
+      fieldIdentity === undefined
+        ? -1
+        : fields.findIndex((field) => field.id.ordinal === fieldIdentity.id.ordinal)
+    const precedingInitializers = structLiteral.initializers.filter(
+      (initializer) => initializer.span.end < offset,
+    ).length
+    const activeParameter =
+      activeField >= 0
+        ? activeField
+        : Math.min(precedingInitializers, Math.max(0, fields.length - 1))
+    const documentation = markdownDocumentation(snapshot, identity)
+    return {
+      signatures: [
+        {
+          label: `${Presentation.structDeclaration(declaration).text} { ${fields
+            .map((field) => Presentation.field(field).text)
+            .join(', ')} }`,
+          parameters: fields.map((field) => ({ label: Presentation.field(field).text })),
+          ...(documentation === undefined || documentation.length === 0
+            ? {}
+            : { documentation: { kind: 'markdown' as const, value: documentation } }),
+        },
+      ],
+      activeSignature: 0,
+      activeParameter,
+    }
+  }
   // The callee's last byte is inside its name token, which is where its occurrence is indexed.
   const occurrence = Analysis.semanticOccurrenceAt(
     snapshot,
@@ -453,12 +572,7 @@ export const signatureHelp = (
   if (identity._tag !== 'DeclarationIdentity') return undefined
   const declaration = Analysis.declarationForIdentity(snapshot, identity)
   if (declaration?._tag !== 'FunctionDeclaration') return undefined
-  const raw = Analysis.documentationOfIdentity(snapshot, identity)
-  const source = raw === undefined ? undefined : Analysis.sources(snapshot).get(raw.span.sourceId)
-  const documentation =
-    raw === undefined || source === undefined
-      ? undefined
-      : Documentation.toMarkdown(Documentation.parse(source, raw))
+  const documentation = markdownDocumentation(snapshot, identity)
   const activeParameter = call.argumentList.children.filter(
     (child) =>
       SyntaxTree.isToken(child) && child.kind === 'Comma' && SyntaxTree.span(child).end <= offset,

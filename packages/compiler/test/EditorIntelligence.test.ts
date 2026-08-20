@@ -732,6 +732,44 @@ fn hidden() -> i32 { return 0 }`
   )
 })
 
+it.effect('keeps struct field tooling visibility-aware across modules', () => {
+  const root = `import lib as Model { Secret, make }
+fn invalid() -> i32 {
+  let secret = Model.Secret { value: 1, key: 2 }
+  return 0
+}
+pub fn main() -> i32 {
+  let secret = Model.make(1)
+  return secret.
+}`
+  const library = `pub struct Secret { pub value: i32 key: i32 }
+pub fn make(value: i32) -> Secret { return Secret { value: value, key: 7 } }`
+  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
+    Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
+    Effect.map((snapshot) => {
+      const completionOffset = root.lastIndexOf('secret.') + 'secret.'.length
+      const labels = Analysis.completionAt(snapshot, 'main', completionOffset)?.candidates.map(
+        (candidate) => candidate.label,
+      )
+      assert.include(labels ?? [], 'value')
+      assert.notInclude(labels ?? [], 'key')
+
+      const privateInitializer = Analysis.semanticOccurrenceAt(
+        snapshot,
+        'main',
+        root.indexOf('key:'),
+      )
+      assert.strictEqual(privateInitializer?.resolution._tag, 'Available')
+      assert.strictEqual(privateInitializer?.declaration?.module, 'lib')
+      assert.include(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        'SEM0021',
+      )
+      return undefined
+    }),
+  )
+})
+
 it.effect('renders inferred types through unambiguous imports and canonical fallbacks', () => {
   const root = `import types.Models as Schema { Box as Selected }
 struct Selected {}
