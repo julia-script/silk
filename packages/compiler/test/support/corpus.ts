@@ -1311,6 +1311,21 @@ pub fn main() -> i32 {
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
+  // Finite executable representations remain static even when an ordinary union carries them.
+  {
+    name: 'ordinary-union-executable-members',
+    source: `fn add(left: i32, right: i32) -> i32 { return left + right }
+fn selectedCallable() -> typeof(add) | i32 { return add }
+fn selectedEffect() -> some<F: Effect<i32>> F | i32 {
+  return effect { return 42 }
+}
+pub fn main() -> i32 {
+  drop selectedCallable()
+  drop selectedEffect()
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // One program covers success bypass, selected recovery, and residual propagation. Keeping the
   // complete branch matrix in the shared corpus proves native execution without a feature-local
   // compile/link test.

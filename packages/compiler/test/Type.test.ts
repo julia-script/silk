@@ -345,34 +345,37 @@ it('normalizes empty, singleton, scalar, and aggregate union members', () => {
     )
 })
 
-it('admits only detached union storage and proves generic members remain distinct', () => {
+it('admits only finite detached union storage and renormalizes generic members', () => {
   const owner = { module: 'model/GenericUnion', name: 'choose' }
   const left = Type.parameter(owner, 0, 'L')
   const right = Type.parameter(owner, 1, 'R')
-  const box = (type: Type.Type): Type.Nominal => Type.nominal('model/GenericUnion', 'Box', [type])
-  const other = (type: Type.Type): Type.Nominal =>
-    Type.nominal('model/GenericUnion', 'Other', [type])
-
   const borrowed = Type.slice('Shared', 'i32')
   assert.deepEqual(Type.union(['i32', borrowed]), {
     _tag: 'InvalidMembers',
     members: [borrowed],
   })
+  const callable = Type.callable(['i32'], 'i32')
+  const effect = Type.effect('i32', [])
+  assert.deepEqual(Type.union(['i32', callable]), {
+    _tag: 'InvalidMembers',
+    members: [callable],
+  })
+  assert.deepEqual(Type.union(['i32', effect]), {
+    _tag: 'InvalidMembers',
+    members: [effect],
+  })
 
-  assert.deepEqual(
-    Type.indistinctUnionMemberPairs([left, right]).map(({ left: first, right: second }) => [
-      Type.encode(first),
-      Type.encode(second),
+  const open = Type.union([left, right])
+  assert.strictEqual(open._tag, 'Normalized')
+  if (open._tag !== 'Normalized') return
+  const specialized = Type.substitute(
+    open.type,
+    new Map([
+      [Type.key(left), 'i32'],
+      [Type.key(right), 'i32'],
     ]),
-    [['L', 'R']],
   )
-  assert.strictEqual(Type.indistinctUnionMemberPairs([box(left), box(right)]).length, 1)
-  assert.deepEqual(Type.indistinctUnionMemberPairs([box(left), other(right)]), [])
-  assert.deepEqual(
-    Type.indistinctUnionMemberPairs([Type.fixedArray(left, 1), Type.fixedArray(right, 2)]),
-    [],
-  )
-  assert.deepEqual(Type.indistinctUnionMemberPairs([left, box(left)]), [])
+  assert.strictEqual(specialized, 'i32')
 })
 
 it('normalizes compiler-private effect contract identity and traverses substitutions', () => {

@@ -1617,21 +1617,8 @@ export const analyzeDeclaredType = (
         (fact): fact is Extract<DeclaredTypeFact, { readonly _tag: 'Resolved' }> =>
           fact._tag === 'Resolved',
       )
-      const indistinct = Type.indistinctUnionMemberPairs(resolved.map((fact) => fact.type))
-      if (indistinct.length > 0) {
-        for (const pair of indistinct) {
-          const sourceFact = resolved.find((fact) => Type.equals(fact.type, pair.right))
-          diagnostics.push(
-            Diagnostic.indistinctUnionMembers(
-              Type.encode(pair.left),
-              Type.encode(pair.right),
-              sourceFact?.syntax.span ?? syntax.span,
-            ),
-          )
-        }
-      }
       const normalized = Type.union(resolved.map((fact) => fact.type))
-      if (normalized._tag === 'Normalized' && indistinct.length === 0) {
+      if (normalized._tag === 'Normalized') {
         return Object.freeze({
           fact: Object.freeze({
             _tag: 'Resolved',

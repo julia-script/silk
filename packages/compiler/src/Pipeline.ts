@@ -643,7 +643,12 @@ export const realize = (
           : target._tag === 'Resolved'
             ? Object.freeze({
                 _tag: 'Available',
-                value: Layout.catalog(target.target, self.index, instances),
+                value: Layout.catalog(
+                  target.target,
+                  self.index,
+                  instances,
+                  OpaqueRealization.catalogOf(self),
+                ),
               })
             : Object.freeze({ _tag: 'Unavailable', error: target.error })
       const layout: Targeted<Layout.Plan> =
@@ -779,7 +784,12 @@ export const prepare = (
           _tag: 'IntrinsicUnavailable' as const,
           diagnostics: availability.diagnostics,
         })
-      const catalog = Layout.catalog(selection.target, self.index, discovery)
+      const catalog = Layout.catalog(
+        selection.target,
+        self.index,
+        discovery,
+        OpaqueRealization.catalogOf(self),
+      )
       return Object.freeze({
         _tag: 'Available' as const,
         target: selection.target,

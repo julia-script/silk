@@ -58,7 +58,7 @@ const sourceMembers = (source: Type.Type): ReadonlyArray<Type.Type> | undefined 
 
 /** Checks exact identity, nominal injection, or monotonic union widening without inference. */
 export const check = (source: Type.Type, target: Type.Type): Compatibility => {
-  if (Type.isRepresented(source) && !Type.isRepresented(target))
+  if (Type.isRepresented(source) && !Type.isRepresented(target) && !Type.isUnion(target))
     return check(source.contract, target)
   if (Type.equals(source, target)) return Object.freeze({ _tag: 'Exact', source, target })
   if (Type.isNever(source)) return Object.freeze({ _tag: 'Bottom', source, target })
@@ -110,10 +110,23 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
       missing: Object.freeze([source]),
     })
   }
-  const targetOrdinals = new Map(
-    target.members.map((member, ordinal) => [Type.key(member), ordinal] as const),
-  )
-  const missing = members.filter((member) => !targetOrdinals.has(Type.key(member)))
+  const targetOrdinalOf = (member: Type.Type): number | undefined => {
+    const exact = target.members.findIndex((candidate) => Type.equals(candidate, member))
+    if (exact >= 0) return exact
+    if (!Type.isRepresented(member)) return undefined
+    const opaque = target.members.findIndex(
+      (candidate) =>
+        Type.isRepresented(candidate) &&
+        Type.isOpaqueRepresentationArgument(candidate.representation.argument) &&
+        Type.equals(candidate.contract, member.contract),
+    )
+    if (opaque >= 0) return opaque
+    const contract = target.members.findIndex(
+      (candidate) => !Type.isRepresented(candidate) && Type.equals(candidate, member.contract),
+    )
+    return contract < 0 ? undefined : contract
+  }
+  const missing = members.filter((member) => targetOrdinalOf(member) === undefined)
   if (missing.length > 0) {
     return Object.freeze({
       _tag: 'Incompatible',
@@ -124,7 +137,7 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
   }
   const mappings = Object.freeze(
     members.flatMap((member, sourceOrdinal): ReadonlyArray<MemberMapping> => {
-      const targetOrdinal = targetOrdinals.get(Type.key(member))
+      const targetOrdinal = targetOrdinalOf(member)
       return targetOrdinal === undefined
         ? []
         : [

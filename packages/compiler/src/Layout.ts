@@ -3,6 +3,7 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
+import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Ownership from './Ownership.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -129,6 +130,22 @@ export interface Entry {
   readonly size: number
   readonly alignment: number
   readonly representation: Representation
+  /** Compiler-private inline lanes for one exact executable value with no structural ABI. */
+  readonly executable?: {
+    readonly _tag: 'Callable' | 'Effect'
+    readonly fields: ReadonlyArray<{
+      readonly capture: number
+      readonly type: DeclarationIndex.SemanticType
+      readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+      readonly representation: 'Value' | 'Borrow' | 'Callable'
+      readonly offset: number
+      readonly size: number
+      readonly alignment: number
+      readonly padding: number
+      readonly effectIdentity?: string
+      readonly callableIdentity?: Type.CallableIdentityArgument
+    }>
+  }
 }
 
 /** Why one nominal declaration cannot have a concrete physical representation. */
@@ -677,6 +694,7 @@ export const catalog = (
   target: Target.Target,
   index: DeclarationIndex.Index,
   discovery?: Instances.Discovery,
+  opaqueRealizations?: OpaqueRealization.Catalog,
 ): Catalog => {
   const declarations = index.modules
     .flatMap((module) => module.structs)
@@ -1190,7 +1208,229 @@ export const catalog = (
     return entry
   }
 
-  const layoutType = (type: DeclarationIndex.SemanticType): CatalogEntry => {
+  const layoutDirectRepresented = (
+    type: Type.Represented,
+    active = new Set<string>(),
+  ): CatalogEntry => {
+    const typeKey = Type.key(type)
+    const existing = completed.get(typeKey)
+    if (existing?._tag === 'LayoutEntry') return existing
+    if (active.has(typeKey))
+      return unavailable(type, Object.freeze(Type.nominals(type)), {
+        _tag: 'InvalidDeclaration',
+        detail: 'recursive executable union representation has no finite inline layout',
+      })
+    const next = new Set(active).add(typeKey)
+    const argument = type.representation.argument
+    if (Type.isOpaqueRepresentationArgument(argument)) {
+      const definition =
+        opaqueRealizations === undefined
+          ? undefined
+          : OpaqueRealization.definitionOf(opaqueRealizations, argument)
+      const realization = definition?.realization
+      if (realization === undefined)
+        return unavailable(type, Object.freeze(Type.nominals(type)), {
+          _tag: 'InvalidDeclaration',
+          detail: 'opaque executable union member has no finite realization',
+        })
+      const realized = layoutDirectRepresented(
+        Type.represented(type.contract, type.representation.requiredBound, realization),
+        next,
+      )
+      if (realized._tag === 'UnavailableLayoutEntry') return realized
+      const result: Entry = Object.freeze({ ...realized, type })
+      completed.set(typeKey, result)
+      return result
+    }
+    if (Type.isCompositeEffectRepresentationArgument(argument)) {
+      const alternatives = argument.alternatives.map((alternative) =>
+        layoutDirectRepresented(
+          Type.represented(type.contract, type.representation.requiredBound, alternative),
+          next,
+        ),
+      )
+      const unavailableAlternative = alternatives.find(
+        (alternative): alternative is UnavailableEntry =>
+          alternative._tag === 'UnavailableLayoutEntry',
+      )
+      if (unavailableAlternative !== undefined) return unavailableAlternative
+      const entries = alternatives.flatMap((alternative) =>
+        alternative._tag === 'LayoutEntry' ? [alternative] : [],
+      )
+      const payloadAlignment = entries.reduce(
+        (maximum, alternative) => Math.max(maximum, alternative.alignment),
+        1,
+      )
+      const payloadSize = entries.reduce(
+        (maximum, alternative) => Math.max(maximum, alternative.size),
+        0,
+      )
+      const payloadOffset = alignUp(4, payloadAlignment)
+      const alignment = Math.max(4, payloadAlignment)
+      const size = alignUp(payloadOffset + payloadSize, alignment)
+      const result: Entry = Object.freeze({
+        _tag: 'LayoutEntry',
+        type,
+        copy: entries.every((entry) => entry.copy),
+        size,
+        alignment,
+        representation: Object.freeze({
+          _tag: 'Aggregate',
+          fields: Object.freeze([]),
+          tailPadding: size,
+        }),
+      })
+      completed.set(typeKey, result)
+      return result
+    }
+    if (!Type.isExactRepresentationArgument(argument))
+      return unavailable(type, Object.freeze(Type.nominals(type)), {
+        _tag: 'InvalidDeclaration',
+        detail: 'open executable union member has no finite realization',
+      })
+    if (Type.isCallable(type.contract) && Type.isCallableIdentityArgument(argument.identity)) {
+      const identity = argument.identity
+      const callable =
+        identity.environment === undefined
+          ? undefined
+          : discovery?.callables.find((candidate) =>
+              CallableFieldRealization.matchesIdentity(identity, candidate),
+            )
+      if (identity.environment !== undefined && callable === undefined)
+        return unavailable(type, Object.freeze(Type.nominals(type)), {
+          _tag: 'InvalidDeclaration',
+          detail: 'callable union member has no finite environment',
+        })
+      let cursor = 0
+      let alignment = 1
+      let copy = true
+      const fields = (callable?.captures ?? []).flatMap((capture) => {
+        const borrowed = capture.access === 'Shared' || capture.access === 'Exclusive'
+        const valueLayout = borrowed ? undefined : layoutType(capture.type)
+        if (valueLayout?._tag === 'UnavailableLayoutEntry') return []
+        const fieldSize = borrowed ? target.pointerSize : (valueLayout?.size ?? 0)
+        const fieldAlignment = borrowed ? target.pointerAlignment : (valueLayout?.alignment ?? 1)
+        const previousCursor = cursor
+        const offset = alignUp(cursor, fieldAlignment)
+        cursor = offset + fieldSize
+        alignment = Math.max(alignment, fieldAlignment)
+        copy =
+          copy &&
+          capture.access !== 'Exclusive' &&
+          (capture.access === 'Copy' || capture.access === 'Shared' || valueLayout?.copy === true)
+        return [
+          Object.freeze({
+            capture: capture.ordinal,
+            type: capture.type,
+            access: capture.access,
+            representation: borrowed ? ('Borrow' as const) : ('Value' as const),
+            offset,
+            size: fieldSize,
+            alignment: fieldAlignment,
+            padding: offset - previousCursor,
+          }),
+        ]
+      })
+      if ((callable?.captures.length ?? 0) !== fields.length)
+        return unavailable(type, Object.freeze(Type.nominals(type)), {
+          _tag: 'InvalidDeclaration',
+          detail: 'callable union member captures a value without finite layout',
+        })
+      const size = alignUp(cursor, alignment)
+      const result: Entry = Object.freeze({
+        _tag: 'LayoutEntry',
+        type,
+        copy,
+        size,
+        alignment,
+        representation: Object.freeze({
+          _tag: 'Aggregate',
+          fields: Object.freeze([]),
+          tailPadding: size,
+        }),
+        executable: Object.freeze({
+          _tag: 'Callable',
+          fields: Object.freeze(fields),
+        }),
+      })
+      completed.set(typeKey, result)
+      return result
+    }
+    if (Type.isEffect(type.contract) && Type.isEffectIdentityArgument(argument.identity)) {
+      const identity = argument.identity
+      const effect = discovery?.effects.find(
+        (candidate) =>
+          (candidate.identity === identity.identity ||
+            candidate.representationIdentity === identity.identity) &&
+          (identity.owner === undefined ||
+            (candidate.owner.declaration.module === identity.owner.declaration.module &&
+              candidate.owner.declaration.name === identity.owner.declaration.name &&
+              candidate.owner.typeArguments.length === identity.owner.typeArguments.length &&
+              candidate.owner.typeArguments.every((value, ordinal) => {
+                const expected = identity.owner?.typeArguments.at(ordinal)
+                return expected !== undefined && Type.equalsGenericArgument(value, expected)
+              }))),
+      )
+      const environment =
+        effect === undefined
+          ? undefined
+          : layoutEffectSlots(
+              CallableFieldRealization.effectEnvironmentOf(effect),
+              new Set([effect.identity]),
+            )
+      if (environment === undefined)
+        return unavailable(type, Object.freeze(Type.nominals(type)), {
+          _tag: 'InvalidDeclaration',
+          detail: 'Effect union member has no finite environment',
+        })
+      const result: Entry = Object.freeze({
+        _tag: 'LayoutEntry',
+        type,
+        copy: environment.copy,
+        size: environment.size,
+        alignment: environment.alignment,
+        representation: Object.freeze({
+          _tag: 'Aggregate',
+          fields: Object.freeze([]),
+          tailPadding: environment.size,
+        }),
+        executable: Object.freeze({
+          _tag: 'Effect',
+          fields: Object.freeze(
+            environment.fields.map((field) =>
+              Object.freeze({
+                capture: field.capture,
+                type: field.type,
+                access: field.access,
+                representation: field.representation,
+                offset: field.offset,
+                size: field.size,
+                alignment: field.alignment,
+                padding: field.padding,
+                ...(field.effectIdentity === undefined
+                  ? {}
+                  : { effectIdentity: field.effectIdentity }),
+                ...(field.callableIdentity === undefined
+                  ? {}
+                  : { callableIdentity: field.callableIdentity }),
+              }),
+            ),
+          ),
+        }),
+      })
+      completed.set(typeKey, result)
+      return result
+    }
+    return unavailable(type, Object.freeze(Type.nominals(type)), {
+      _tag: 'InvalidDeclaration',
+      detail: 'executable union member representation does not match its contract',
+    })
+  }
+
+  const layoutType = (
+    type: DeclarationIndex.SemanticType,
+    executableUnionMember = false,
+  ): CatalogEntry => {
     if (Type.isBuiltin(type)) return scalarEntry(target, type)
     if (Type.isString(type)) {
       const result = stringEntry(target)
@@ -1239,7 +1479,7 @@ export const catalog = (
     if (Type.isUnion(type)) {
       const members: Array<Entry> = []
       for (const member of type.members) {
-        const memberLayout = layoutType(member)
+        const memberLayout = layoutType(member, true)
         if (memberLayout._tag === 'UnavailableLayoutEntry') {
           const result = unavailable(
             type,
@@ -1273,9 +1513,10 @@ export const catalog = (
       return result
     }
     if (Type.isRepresented(type)) {
+      if (executableUnionMember) return layoutDirectRepresented(type)
       const result = unavailable(type, Object.freeze(Type.nominals(type)), {
         _tag: 'InvalidDeclaration',
-        detail: 'represented executable values remain unavailable to layout',
+        detail: 'represented executable values require a containing storage plan',
       })
       completed.set(key, result)
       return result
@@ -1364,6 +1605,8 @@ export const catalog = (
     const addSpecializedExpression = (expression: Hir.Expression): void => {
       if (expression._tag === 'Unavailable') return
       addReferenced(Type.substitute(expression.type, substitution))
+      if (expression._tag === 'UnionConvert')
+        addReferenced(Type.substitute(expression.sourceType, substitution))
       for (const child of Hir.expressionTree(expression).slice(1)) {
         if (child._tag !== 'Unavailable') addReferenced(Type.substitute(child.type, substitution))
       }
@@ -1441,7 +1684,11 @@ const addExpressionTypes = (
     addExpressionTypes(types, expression.left, substitution)
     addExpressionTypes(types, expression.right, substitution)
   }
-  if (expression._tag === 'UnionConvert') addExpressionTypes(types, expression.source, substitution)
+  if (expression._tag === 'UnionConvert') {
+    const sourceType = Type.substitute(expression.sourceType, substitution)
+    types.set(Type.key(sourceType), sourceType)
+    addExpressionTypes(types, expression.source, substitution)
+  }
   if (expression._tag === 'Project') addExpressionTypes(types, expression.subject, substitution)
   if (expression._tag === 'IndexPlace') {
     addExpressionTypes(types, expression.subject, substitution)
@@ -2170,6 +2417,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     const candidate = resolve(type)
     if (candidate === undefined) return
     entries.set(key, candidate)
+    for (const field of candidate.executable?.fields ?? []) add(field.type)
     if (candidate.representation._tag === 'Aggregate') {
       for (const field of candidate.representation.fields) add(field.type)
     } else if (
@@ -2308,7 +2556,10 @@ const borrowedShape = (
 
 const executableEnvironmentFieldShape = (
   context: ShapeContext,
-  field: EffectEnvironmentField,
+  field: Pick<
+    EffectEnvironmentField,
+    'representation' | 'type' | 'callableIdentity' | 'effectIdentity'
+  >,
 ): CallingShapeNode => {
   if (field.representation === 'Borrow') return borrowedShape(context, field.type)
   if (field.callableIdentity !== undefined) {
@@ -2511,35 +2762,47 @@ const shapeNode = (
         laneCount: payloadTypes.length + 1,
       })
     }
-    const representation = entries.get(Type.key(type))?.representation
-    if (
-      representation?._tag !== 'CallableEnvironment' &&
-      representation?._tag !== 'StoredEffectEnvironment'
-    ) {
+    const entry = entries.get(Type.key(type))
+    const executable = entry?.executable
+    const stored = entry?.representation
+    const storedCallable = stored?._tag === 'CallableEnvironment' ? stored : undefined
+    const storedEffect = stored?._tag === 'StoredEffectEnvironment' ? stored : undefined
+    if (executable === undefined && storedCallable === undefined && storedEffect === undefined) {
       throw new RangeError(
         `represented executable ${Type.encode(type)} is unavailable to calling-shape planning`,
       )
     }
+    const kind = executable?._tag ?? (storedCallable === undefined ? 'Effect' : 'Callable')
     const fields =
-      representation._tag === 'CallableEnvironment'
-        ? representation.fields.map((field) =>
-            Object.freeze({
-              capture: field.ordinal,
-              shape:
-                field.representation === 'Borrow'
-                  ? borrowedShape(context, field.type)
-                  : shapeNode(field.type, context),
-            }),
-          )
-        : representation.fields.map((field) =>
+      executable !== undefined
+        ? executable.fields.map((field) =>
             Object.freeze({
               capture: field.capture,
-              shape: executableEnvironmentFieldShape(context, field),
+              shape:
+                executable._tag === 'Callable' && field.representation !== 'Borrow'
+                  ? shapeNode(field.type, context)
+                  : executableEnvironmentFieldShape(context, field),
             }),
           )
+        : storedCallable !== undefined
+          ? storedCallable.fields.map((field) =>
+              Object.freeze({
+                capture: field.ordinal,
+                shape:
+                  field.representation === 'Borrow'
+                    ? borrowedShape(context, field.type)
+                    : shapeNode(field.type, context),
+              }),
+            )
+          : (storedEffect?.fields ?? []).map((field) =>
+              Object.freeze({
+                capture: field.capture,
+                shape: executableEnvironmentFieldShape(context, field),
+              }),
+            )
     return Object.freeze({
       _tag:
-        representation._tag === 'CallableEnvironment'
+        kind === 'Callable'
           ? ('CallableEnvironmentShape' as const)
           : ('EffectEnvironmentShape' as const),
       type,
@@ -3407,6 +3670,21 @@ const verifyEntry = (
         ])
   }
   if (Type.isRepresented(candidate.type)) {
+    if (candidate.executable !== undefined) {
+      return candidate.representation._tag === 'Aggregate' &&
+        candidate.representation.fields.length === 0 &&
+        candidate.representation.tailPadding === candidate.size &&
+        candidate.size >= 0 &&
+        candidate.alignment >= 1
+        ? Object.freeze([])
+        : Object.freeze([
+            invalid(
+              'InvalidAggregate',
+              candidate.type,
+              `${Type.encode(candidate.type)} has non-canonical executable environment facts`,
+            ),
+          ])
+    }
     if (candidate.representation._tag === 'StoredEffectEnvironment') {
       const violations: Array<Violation> = []
       let cursor = 0
@@ -3760,6 +4038,15 @@ export const laneOffset = (
       continue
     }
     if (selector._tag === 'CallableCaptureSelector') {
+      if (candidate.executable?._tag === 'Callable') {
+        const field = candidate.executable.fields.find(
+          (capture) => capture.capture === selector.ordinal,
+        )
+        if (field === undefined) return undefined
+        offset += field.offset
+        current = field.type
+        continue
+      }
       if (candidate.representation._tag !== 'CallableEnvironment') return undefined
       const field = candidate.representation.fields.find(
         (capture) => capture.ordinal === selector.ordinal,
@@ -3770,6 +4057,15 @@ export const laneOffset = (
       continue
     }
     if (selector._tag === 'EffectCaptureSelector') {
+      if (candidate.executable?._tag === 'Effect') {
+        const field = candidate.executable.fields.find(
+          (capture) => capture.capture === selector.ordinal,
+        )
+        if (field === undefined) return undefined
+        offset += field.offset
+        current = field.type
+        continue
+      }
       if (candidate.representation._tag !== 'StoredEffectEnvironment') return undefined
       const field = candidate.representation.fields.find(
         (capture) => capture.capture === selector.ordinal,
@@ -4037,45 +4333,50 @@ const representationText = (representation: Representation): string =>
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
   `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
-  ...(candidate.representation._tag === 'Aggregate'
-    ? candidate.representation.fields.map(
+  ...(candidate.executable !== undefined
+    ? candidate.executable.fields.map(
         (field) =>
-          `  field ${field.id.ordinal} ${field.name}: ${Type.encode(field.type)} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
+          `  ${candidate.executable?._tag.toLowerCase()}-capture ${field.capture}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
       )
-    : candidate.representation._tag === 'CallableEnvironment'
+    : candidate.representation._tag === 'Aggregate'
       ? candidate.representation.fields.map(
           (field) =>
-            `  capture ${field.ordinal}->p${field.parameterOrdinal}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
+            `  field ${field.id.ordinal} ${field.name}: ${Type.encode(field.type)} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
         )
-      : candidate.representation._tag === 'StoredEffectEnvironment'
+      : candidate.representation._tag === 'CallableEnvironment'
         ? candidate.representation.fields.map(
             (field) =>
-              `  effect-capture ${field.capture} ${field.source.toLowerCase()}${field.ordinal}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
+              `  capture ${field.ordinal}->p${field.parameterOrdinal}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
           )
-        : candidate.representation._tag === 'Repeated'
-          ? [
-              `  elements ${Type.encode(candidate.representation.element)} count=${candidate.representation.length} stride=${candidate.representation.stride}`,
-            ]
-          : candidate.representation._tag === 'Slice'
+        : candidate.representation._tag === 'StoredEffectEnvironment'
+          ? candidate.representation.fields.map(
+              (field) =>
+                `  effect-capture ${field.capture} ${field.source.toLowerCase()}${field.ordinal}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
+            )
+          : candidate.representation._tag === 'Repeated'
             ? [
-                `  address Address<${Type.encode(candidate.representation.element)}> bits=${candidate.representation.address.bits} offset=${candidate.representation.address.offset} size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
-                `  length usize offset=${candidate.representation.length.offset} size=${candidate.representation.length.size} stride=${candidate.representation.stride}`,
+                `  elements ${Type.encode(candidate.representation.element)} count=${candidate.representation.length} stride=${candidate.representation.stride}`,
               ]
-            : candidate.representation._tag === 'String'
+            : candidate.representation._tag === 'Slice'
               ? [
-                  `  storage StringUtf8 bits=${candidate.representation.storage.bits} offset=${candidate.representation.storage.offset} size=${candidate.representation.storage.size} align=${candidate.representation.storage.alignment}`,
-                  `  byte-length usize offset=${candidate.representation.byteLength.offset} size=${candidate.representation.byteLength.size}`,
+                  `  address Address<${Type.encode(candidate.representation.element)}> bits=${candidate.representation.address.bits} offset=${candidate.representation.address.offset} size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+                  `  length usize offset=${candidate.representation.length.offset} size=${candidate.representation.length.size} stride=${candidate.representation.stride}`,
                 ]
-              : candidate.representation._tag === 'Reference'
+              : candidate.representation._tag === 'String'
                 ? [
-                    `  address Address<${Type.encode(candidate.representation.target)}> bits=${candidate.representation.address.bits} offset=0 size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+                    `  storage StringUtf8 bits=${candidate.representation.storage.bits} offset=${candidate.representation.storage.offset} size=${candidate.representation.storage.size} align=${candidate.representation.storage.alignment}`,
+                    `  byte-length usize offset=${candidate.representation.byteLength.offset} size=${candidate.representation.byteLength.size}`,
                   ]
-                : candidate.representation._tag === 'Union'
-                  ? candidate.representation.members.map(
-                      (member) =>
-                        `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
-                    )
-                  : []),
+                : candidate.representation._tag === 'Reference'
+                  ? [
+                      `  address Address<${Type.encode(candidate.representation.target)}> bits=${candidate.representation.address.bits} offset=0 size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+                    ]
+                  : candidate.representation._tag === 'Union'
+                    ? candidate.representation.members.map(
+                        (member) =>
+                          `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
+                      )
+                    : []),
 ]
 
 /** Deterministic textual encoding of a complete runtime layout plan. */

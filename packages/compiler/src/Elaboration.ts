@@ -1096,12 +1096,33 @@ const declaredReturnTypesCompatible = (
   const source = expression.type.type
   const target = declaration.returnType.type
   if (typesCompatible(source, target)) return true
+  const representation = representationOfExpression(expression)
+  const contract = Type.isRepresented(source) ? source.contract : source
+  if (
+    representation !== undefined &&
+    (Type.isCallable(contract) || Type.isEffect(contract)) &&
+    typesCompatible(Type.represented(contract, contract, representation), target)
+  )
+    return true
+  if (
+    declaration.opaqueResult !== undefined &&
+    Type.isUnion(target) &&
+    target.members.some(
+      (member) =>
+        Type.isRepresented(member) &&
+        Type.isOpaqueRepresentationArgument(member.representation.argument) &&
+        Type.equalsOpaqueFamily(
+          member.representation.argument.family,
+          declaration.opaqueResult?.family ?? member.representation.argument.family,
+        ) &&
+        Type.haveSameRepresentationShape(source, member.contract),
+    )
+  )
+    return true
   if (declaration.opaqueResult !== undefined && Type.haveSameRepresentationShape(source, target))
     return true
   if (!Type.isRepresented(target)) return false
-  const contract = Type.isRepresented(source) ? source.contract : source
   if (!(Type.isCallable(contract) || Type.isEffect(contract))) return false
-  const representation = representationOfExpression(expression)
   if (representation === undefined) return false
   const represented = Type.represented(
     contract,
@@ -10748,11 +10769,27 @@ const hirExpectedExpression = (
       type: target,
       span: fact.syntax.span,
     })
-  const source = hirExpression(fact, borrow)
-  if (source._tag === 'Unavailable') return source
+  const loweredSource = hirExpression(fact, borrow)
+  if (loweredSource._tag === 'Unavailable') return loweredSource
+  const unionTarget = Type.isUnion(target) ? target : undefined
+  const representation = unionTarget === undefined ? undefined : representationOfExpression(fact)
+  const sourceContract = Type.isRepresented(loweredSource.type)
+    ? loweredSource.type.contract
+    : loweredSource.type
+  const representedSource =
+    representation !== undefined &&
+    (Type.isCallable(sourceContract) || Type.isEffect(sourceContract)) &&
+    unionTarget?.members.some(
+      (member) =>
+        Type.equals(member, sourceContract) ||
+        (Type.isRepresented(member) && Type.equals(member.contract, sourceContract)),
+    )
+      ? Type.represented(sourceContract, sourceContract, representation)
+      : undefined
+  const source = loweredSource
   if (Type.isRepresented(target) && Type.haveSameRepresentationShape(source.type, target))
     return source
-  const compatibility = TypeCompatibility.check(source.type, target)
+  const compatibility = TypeCompatibility.check(representedSource ?? source.type, target)
   if (compatibility._tag === 'Exact') return source
   if (compatibility._tag === 'CallableMode' || compatibility._tag === 'EffectAccess') return source
   if (compatibility._tag === 'Bottom') return source

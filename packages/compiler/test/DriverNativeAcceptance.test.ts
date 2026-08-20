@@ -52,9 +52,16 @@ it.effect(
   () =>
     Effect.gen(function* () {
       for (const program of nativeCorpus) {
-        const interpreted = Analysis.evaluate(
-          yield* Analysis.ofSourceRealized('memory/driver', ascii(program.source)),
+        const snapshot = yield* Analysis.ofSourceRealized('memory/driver', ascii(program.source))
+        assert.strictEqual(
+          snapshot.mir._tag,
+          'Available',
+          `${program.name}: ${Analysis.diagnostics(snapshot)
+            .map((diagnostic) => diagnostic.code)
+            .join(',')}`,
         )
+        if (snapshot.mir._tag !== 'Available') continue
+        const interpreted = Analysis.evaluate(snapshot)
         const outcome = yield* compileSource(`corpus-${program.name}`, program.source)
 
         if (program.expected._tag === 'UnavailableEntry') {

@@ -2661,9 +2661,9 @@ const cleanupMatchesSemanticType = (
   type: DeclarationIndex.SemanticType,
   seen: ReadonlySet<string> = new Set(),
 ): boolean => {
-  if (isCopy(layout, type))
-    return cleanup._tag === 'NoCleanup' && SilkType.equals(cleanup.type, type)
   if (SilkType.isRepresented(type)) {
+    if (isCopy(layout, type) && cleanup._tag === 'NoCleanup' && SilkType.equals(cleanup.type, type))
+      return true
     const composite = type.representation.argument
     if (SilkType.isCompositeEffectRepresentationArgument(composite)) {
       if (
@@ -2702,7 +2702,19 @@ const cleanupMatchesSemanticType = (
         )
       })
     }
-    const representation = Layout.entry(layout, type)?.representation
+    const entry = Layout.entry(layout, type)
+    const executable = entry?.executable
+    if (executable?._tag === 'Callable')
+      return (
+        (cleanup._tag === 'CallableCleanup' || cleanup._tag === 'NoCleanup') &&
+        TypeCompatibility.isCompatible(TypeCompatibility.check(type.contract, cleanup.type))
+      )
+    if (executable?._tag === 'Effect')
+      return (
+        (cleanup._tag === 'EffectCleanup' || cleanup._tag === 'NoCleanup') &&
+        TypeCompatibility.isCompatible(TypeCompatibility.check(type.contract, cleanup.type))
+      )
+    const representation = entry?.representation
     const contractValid = TypeCompatibility.isCompatible(
       TypeCompatibility.check(type.contract, cleanup.type),
     )
@@ -2718,6 +2730,8 @@ const cleanupMatchesSemanticType = (
       )
     return false
   }
+  if (isCopy(layout, type) && !SilkType.isUnion(type))
+    return cleanup._tag === 'NoCleanup' && SilkType.equals(cleanup.type, type)
   if (!SilkType.equals(cleanup.type, type)) return false
   if (
     SilkType.isBuiltin(type) ||
@@ -4982,7 +4996,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const source = fn.localTypes.at(operation.source.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const compatibility = TypeCompatibility.check(
-            semanticType(operation.sourceType),
+            operation.sourceShape.type,
             operation.targetType.type,
           )
           const mappingsValid =
@@ -5004,7 +5018,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(semanticType(source), semanticType(operation.sourceType)) &&
             SilkType.equals(semanticType(destination), operation.targetType.type) &&
             mappingsValid &&
-            SilkType.equals(operation.sourceShape.type, semanticType(operation.sourceType)) &&
+            SilkType.haveSameRepresentationShape(
+              operation.sourceShape.type,
+              semanticType(operation.sourceType),
+            ) &&
             SilkType.equals(operation.targetShape.type, operation.targetType.type) &&
             (() => {
               const sourceShape = Layout.callingShape(self.layout, operation.sourceShape.type)
