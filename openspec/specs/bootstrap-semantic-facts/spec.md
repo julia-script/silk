@@ -628,8 +628,9 @@ grammar, its residual failure and requirement rows, one-layer success type, and 
 Semantic analysis SHALL resolve a literal target to one canonical nominal struct and retain every
 source initializer in source order while mapping valid names to canonical field identities. It SHALL
 also publish the complete declaration-ordered mapping used to construct the value. Construction
-authority, field completeness, uniqueness, visibility, and initializer type compatibility SHALL be
-independent explicit outcomes with stable causal diagnostics.
+authority, field completeness, uniqueness, visibility, initializer type compatibility, explicit
+type-argument prefix, inferred arguments, every inference origin, and completed substitution SHALL
+be independent explicit outcomes with stable causal diagnostics.
 
 #### Scenario: Map reordered initializers
 
@@ -640,6 +641,11 @@ independent explicit outcomes with stable causal diagnostics.
 
 - **WHEN** one initializer is duplicated and another has the wrong type
 - **THEN** both source facts and both stable causes remain visible without fabricating a complete construction
+
+#### Scenario: Inspect construction inference
+
+- **WHEN** omitted ordinary parameters are inferred from multiple named fields
+- **THEN** facts expose the canonical fields, inferred arguments, each field origin, completed substitution, and nominal result
 
 ### Requirement: Projection facts preserve every canonical step
 
