@@ -4866,16 +4866,10 @@ const interfaceConstraintDiagnostics = (
           ),
         ]
       const capability = substitutedCapability
-      const declaredProvider = capability.arguments.at(0)
-      if (
-        !bound.application.providerMatches ||
-        declaredProvider === undefined ||
-        !Type.isTypeArgument(declaredProvider) ||
-        !Type.equals(declaredProvider, provider)
-      )
+      if (!bound.application.providerMatches)
         return [
           Diagnostic.invalidConformance(
-            `${bound.spelling} must be applied to its own provider ${Type.encode(provider)}`,
+            `${bound.spelling} cannot bind Self to ${Type.encode(provider)}`,
             parameter.syntax.span,
           ),
         ]

@@ -533,7 +533,6 @@ export const terminationFailures = (self: ConformanceHead): ReadonlyArray<Termin
         requirement.capability.arguments.length === self.capability.arguments.length
       )
         for (const [ordinal, declared] of self.capability.arguments.entries()) {
-          if (ordinal === providerOrdinal) continue
           const required = requirement.capability.arguments.at(ordinal)
           if (required === undefined) continue
           if (!Type.isRuntimeConcreteGenericArgument(declared)) continue
@@ -552,9 +551,6 @@ export const terminationFailures = (self: ConformanceHead): ReadonlyArray<Termin
     }),
   )
 }
-
-/** The interface argument position every conformance spells its own provider in. */
-export const providerOrdinal = 0
 
 /** Renders one termination failure as the sentence a diagnostic reports. */
 export const describeTermination = (self: TerminationFailure): string => {

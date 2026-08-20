@@ -41,21 +41,21 @@ pub struct Ordering {
 ///
 /// A witness supplies the strict `lessThan` the operator `<` spells. Equality is derived from it
 /// rather than declared, so a witness can never disagree with itself about which values are equal.
-pub interface Order<T> {
+pub interface Order {
   /// Reports whether `left` orders strictly before `right`.
-  fn lessThan(left: &T, right: &T) -> bool
+  fn lessThan(left: &Self, right: &Self) -> bool
 }
 
-impl Order<u8> for u8 { lessThan: Intrinsic.u8LessThan }
-impl Order<u16> for u16 { lessThan: Intrinsic.u16LessThan }
-impl Order<u32> for u32 { lessThan: Intrinsic.u32LessThan }
-impl Order<u64> for u64 { lessThan: Intrinsic.u64LessThan }
-impl Order<usize> for usize { lessThan: Intrinsic.usizeLessThan }
-impl Order<i8> for i8 { lessThan: Intrinsic.i8LessThan }
-impl Order<i16> for i16 { lessThan: Intrinsic.i16LessThan }
-impl Order<i32> for i32 { lessThan: Intrinsic.i32LessThan }
-impl Order<i64> for i64 { lessThan: Intrinsic.i64LessThan }
-impl Order<isize> for isize { lessThan: Intrinsic.isizeLessThan }
+impl Order for u8 { lessThan: Intrinsic.u8LessThan }
+impl Order for u16 { lessThan: Intrinsic.u16LessThan }
+impl Order for u32 { lessThan: Intrinsic.u32LessThan }
+impl Order for u64 { lessThan: Intrinsic.u64LessThan }
+impl Order for usize { lessThan: Intrinsic.usizeLessThan }
+impl Order for i8 { lessThan: Intrinsic.i8LessThan }
+impl Order for i16 { lessThan: Intrinsic.i16LessThan }
+impl Order for i32 { lessThan: Intrinsic.i32LessThan }
+impl Order for i64 { lessThan: Intrinsic.i64LessThan }
+impl Order for isize { lessThan: Intrinsic.isizeLessThan }
 
 /// Compares two values three ways using the concrete comparison selected during specialization.
 ///
