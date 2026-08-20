@@ -6,6 +6,7 @@ import * as Hir from '../../dist/Hir.js'
 import * as Layout from '../../dist/Layout.js'
 import * as Mir from '../../dist/Mir.js'
 import * as Ownership from '../../dist/Ownership.js'
+import * as ToolchainIntegrity from '../../dist/ToolchainIntegrity.js'
 
 const bytes = new Uint8Array(
   readFileSync(new URL('./scanner-acceptance/Main.silk', import.meta.url)),
@@ -59,6 +60,7 @@ const encodeSnapshot = (self) => {
 
 process.stdout.write(
   json({
+    toolchainIdentity: ToolchainIntegrity.installed().digest,
     native: encodeSnapshot(native),
     wasm: encodeSnapshot(wasm),
     nativeSymbols: nativeArtifact.symbols,

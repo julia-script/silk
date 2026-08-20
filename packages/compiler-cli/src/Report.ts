@@ -2,6 +2,7 @@ import type * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import type * as Driver from '@silk-effect/compiler/Driver'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import type * as SourceResolver from '@silk-effect/compiler/SourceResolver'
+import * as ToolchainIntegrity from '@silk-effect/compiler/ToolchainIntegrity'
 import * as Type from '@silk-effect/compiler/Type'
 import type * as Path from 'effect/Path'
 import * as FileSourceResolver from './FileSourceResolver.js'
@@ -192,6 +193,11 @@ export const outcome = (
         `Backend error: ${self.error.message}`,
       ].join('\n')
     }
+    case 'ToolchainFailed':
+      return [
+        `Broken toolchain: expected ${self.expectedIdentity}, observed ${self.observedIdentity}`,
+        ...self.failures.map((failure) => `  ${ToolchainIntegrity.formatFailure(failure)}`),
+      ].join('\n')
     case 'Failed':
       return toolchainFailure(self.stage, self.failure)
     case 'Rejected':

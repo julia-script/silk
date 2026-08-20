@@ -310,6 +310,10 @@
       "types": "./dist/ToolchainPlan.d.ts",
       "import": "./dist/ToolchainPlan.js"
     },
+    "./ToolchainIntegrity": {
+      "types": "./dist/ToolchainIntegrity.d.ts",
+      "import": "./dist/ToolchainIntegrity.js"
+    },
     "./Type": {
       "types": "./dist/Type.d.ts",
       "import": "./dist/Type.js"
@@ -336,13 +340,15 @@
     }
   },
   "scripts": {
-    "build": "pnpm unicode:generate && pnpm stdlib:generate && pnpm clean && tsc -p tsconfig.json",
+    "build": "pnpm unicode:generate && pnpm stdlib:generate && pnpm toolchain:generate && pnpm clean && tsc -p tsconfig.json",
     "bench:static-composition": "vitest run test/StaticCompositionCharacterization.bench.ts --maxWorkers=1",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "lexer:bench": "pnpm build && node scripts/lexer-benchmark.mjs",
     "stdlib:check": "node scripts/generate-stdlib.mjs --check",
     "stdlib:generate": "node scripts/generate-stdlib.mjs",
+    "toolchain:check": "node scripts/generate-toolchain-integrity.mjs --check",
+    "toolchain:generate": "node scripts/generate-toolchain-integrity.mjs",
     "unicode:check": "node scripts/generate-unicode-tables.mjs --check",
     "unicode:generate": "node scripts/generate-unicode-tables.mjs",
     "unicode:vendor": "node scripts/vendor-unicode-data.mjs",
@@ -350,7 +356,7 @@
     "test": "pnpm unicode:check && pnpm stdlib:check && pnpm documentation:policy && pnpm documentation:check && pnpm documentation:examples && pnpm test:parallel && pnpm test:native-acceptance",
     "test:native-acceptance": "vitest run test/DriverNativeAcceptance.test.ts --passWithNoTests --maxWorkers=1",
     "test:parallel": "vitest run --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts",
-    "typecheck": "pnpm unicode:check && pnpm stdlib:check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "typecheck": "pnpm unicode:check && pnpm stdlib:check && pnpm toolchain:check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "documentation:generate": "node scripts/generate-documentation.mjs",
     "documentation:check": "node scripts/generate-documentation.mjs --check",
     "documentation:examples": "pnpm --filter @silk-effect/doctest stdlib:check",

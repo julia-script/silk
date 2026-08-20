@@ -782,7 +782,7 @@ export const prepare = (
       if (availability._tag === 'Unavailable')
         return Object.freeze({
           _tag: 'IntrinsicUnavailable' as const,
-          diagnostics: availability.diagnostics,
+          error: Target.unavailableInventory(selection.target, availability.operations),
         })
       const catalog = Layout.catalog(
         selection.target,
@@ -809,8 +809,9 @@ export const prepare = (
     })
   if (targetAndLayout._tag === 'IntrinsicUnavailable')
     return Object.freeze({
-      _tag: 'Rejected',
-      diagnostics: Diagnostic.merge(diagnostics, targetAndLayout.diagnostics),
+      _tag: 'TargetFailed',
+      error: targetAndLayout.error,
+      diagnostics,
       report: Object.freeze(report),
     })
   if (targetAndLayout._tag === 'Unavailable')

@@ -1,4 +1,5 @@
 import type * as ModuleSummary from './ModuleSummary.js'
+import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 
 /** The origin tier used to rank one importable candidate. */
 export type Tier = 'Project' | 'Toolchain'
@@ -31,6 +32,9 @@ export interface WorkspaceInventory {
   readonly project: ReadonlyMap<string, ModuleSummary.ModuleSummary>
   readonly toolchain: ReadonlyMap<string, ModuleSummary.ModuleSummary>
   readonly byName: ReadonlyMap<string, ReadonlyArray<Candidate>>
+  /** Matched distribution metadata available to language-tooling inspectors. */
+  readonly distribution: ToolchainIntegrity.Graph
+  readonly integrity: ToolchainIntegrity.Validation
   readonly observation: Observation
 }
 
@@ -38,6 +42,7 @@ export interface Input {
   readonly project?: Iterable<readonly [string, ModuleSummary.ModuleSummary]>
   readonly toolchain?: Iterable<readonly [string, ModuleSummary.ModuleSummary]>
   readonly observation?: Partial<Omit<Observation, '_tag' | 'indexedModules' | 'indexedExports'>>
+  readonly distribution?: ToolchainIntegrity.Graph
 }
 
 const compareCandidate = (left: Candidate, right: Candidate): number =>
@@ -54,6 +59,7 @@ const build = (
   project: ReadonlyMap<string, ModuleSummary.ModuleSummary>,
   toolchain: ReadonlyMap<string, ModuleSummary.ModuleSummary>,
   input: Input['observation'] = {},
+  distribution: ToolchainIntegrity.Graph = ToolchainIntegrity.installed(),
 ): WorkspaceInventory => {
   const byName = new Map<string, Array<Candidate>>()
   const add = (tier: Tier, summaries: ReadonlyMap<string, ModuleSummary.ModuleSummary>): void => {
@@ -95,13 +101,20 @@ const build = (
     project,
     toolchain,
     byName: exact,
+    distribution,
+    integrity: ToolchainIntegrity.validateFrontend(distribution),
     observation,
   })
 }
 
 /** Builds a deterministic inventory from already summarized module partitions. */
 export const make = (input: Input = {}): WorkspaceInventory =>
-  build(sortedModules(input.project ?? []), sortedModules(input.toolchain ?? []), input.observation)
+  build(
+    sortedModules(input.project ?? []),
+    sortedModules(input.toolchain ?? []),
+    input.observation,
+    input.distribution,
+  )
 
 export interface Revision {
   readonly project?: Iterable<readonly [string, ModuleSummary.ModuleSummary]>
@@ -143,7 +156,7 @@ export const revise = (self: WorkspaceInventory, revision: Revision): WorkspaceI
     revision.observation === undefined
   )
     return self
-  return build(project, toolchain, revision.observation)
+  return build(project, toolchain, revision.observation, self.distribution)
 }
 
 /** Returns candidates for one exact, case-sensitive spelling in deterministic order. */

@@ -5,12 +5,14 @@ import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as Driver from '../src/Driver.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 import { corpus, invalidGenericCorpus } from './support/corpus.js'
 
@@ -53,6 +55,7 @@ const compileSource = (
   }).pipe(Effect.provide(SourceResolver.empty))
 
 const expectedPhases = [
+  'toolchain-integrity',
   'closure',
   'declaration-collection',
   'declaration-index',
@@ -64,6 +67,7 @@ const expectedPhases = [
   'instance-discovery',
   'target-layout',
   'mir-lowering',
+  'toolchain-target',
   'backend',
   'object',
   'shim',
@@ -126,10 +130,10 @@ it.effect('reports every phase in order with counts and totals', () =>
       assert.isAtLeast(entry.outputs, 0, entry.phase)
       assert.isAbove(entry.heapBytes, 0, entry.phase)
     }
-    const closure = outcome.report.at(0)
+    const closure = outcome.report.find((entry) => entry.phase === 'closure')
     assert.strictEqual(closure?.inputs, 1)
     assert.strictEqual(closure?.outputs, 1)
-    const compilerPhases = expectedPhases.slice(0, 11)
+    const compilerPhases = expectedPhases.slice(1, 12)
     assert.deepEqual(
       Analysis.phases(analysis)
         .map((entry) => entry.phase)
@@ -229,6 +233,7 @@ it.effect('gates source rejection and operational resolution failure before back
 
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
       resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
+      toolchainSources: SourceResolver.embeddedToolchainSources,
       resolve: (module: string) =>
         Effect.fail(
           new SourceResolver.SourceResolverError({
@@ -267,6 +272,74 @@ it.effect('gates source rejection and operational resolution failure before back
     }
     assert.strictEqual(emissions, 0)
   }),
+)
+
+it.effect('rejects a mismatched distribution before resolving user imports', () =>
+  Effect.gen(function* () {
+    const installed = ToolchainIntegrity.installed()
+    const mismatched = ToolchainIntegrity.make(
+      installed.components.map((component) =>
+        component.kind === 'Catalog' ? { ...component, digest: 'f'.repeat(64) } : component,
+      ),
+    )
+    let projectResolutions = 0
+    const resolver = Layer.succeed(SourceResolver.SourceResolver, {
+      toolchainSources: SourceResolver.embeddedToolchainSources,
+      resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
+      resolve: () => {
+        projectResolutions += 1
+        return Effect.succeed(Option.none())
+      },
+    })
+    const outcome = yield* Driver.compile({
+      compilation: {
+        root: SourceFile.make(
+          'memory/driver',
+          ascii('import missing/project\npub fn main() -> i32 { return 42 }'),
+        ),
+      },
+      toolchain,
+      profile: 'release',
+      destination: join(destinationRoot, 'mismatched-distribution'),
+      distribution: mismatched,
+    }).pipe(Effect.provide(resolver))
+
+    assert.strictEqual(outcome._tag, 'ToolchainFailed')
+    assert.strictEqual(projectResolutions, 0)
+    assert.deepEqual(
+      outcome.report.map((entry) => entry.phase),
+      ['toolchain-integrity'],
+    )
+  }),
+)
+
+it.effect(
+  'rejects missing promised runtime support after reachable planning and before emission',
+  () =>
+    Effect.gen(function* () {
+      const distribution = ToolchainIntegrity.make(
+        ToolchainIntegrity.installed().components.filter(
+          (component) => component.id !== 'runtime/LLVM/Intrinsic.i32Add',
+        ),
+      )
+      let emissions = 0
+      const backend: Backend.Backend = {
+        ...Backend.LlvmBackend,
+        emit: (program, request) => {
+          emissions += 1
+          return Backend.LlvmBackend.emit(program, request)
+        },
+      }
+      const outcome = yield* compileSource(
+        'missing-runtime',
+        'pub fn main() -> i32 { return Intrinsic.i32Add(20, 22) }',
+        { backend, distribution },
+      )
+
+      assert.strictEqual(outcome._tag, 'ToolchainFailed')
+      assert.strictEqual(emissions, 0)
+      assert.strictEqual(outcome.report.at(-1)?.phase, 'toolchain-target')
+    }),
 )
 
 it.effect('surfaces a missing entry as a closed outcome without invoking the toolchain', () =>

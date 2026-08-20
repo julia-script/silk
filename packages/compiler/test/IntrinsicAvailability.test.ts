@@ -5,6 +5,8 @@ import * as Intrinsic from '../src/Intrinsic.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as SourceSpan from '../src/SourceSpan.js'
+import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 
 const encoder = new TextEncoder()
 const source = `fn nativeWrapper() -> i32 { return Intrinsic.i32Add(20, 22) }
@@ -153,4 +155,76 @@ it('requires normalized target metadata in every sealed inventory entry', () => 
       return JSON.stringify(entry.targets) === JSON.stringify(expected)
     }),
   )
+})
+
+it.effect('validates only reachable runtime support and selected provider identities', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(source.replace('return 0', 'return nativeWrapper()'))
+    const installed = ToolchainIntegrity.installed()
+    const withoutUnrelatedRuntime = ToolchainIntegrity.make(
+      installed.components.filter(
+        (component) => component.id !== 'runtime/LLVM/Intrinsic.boolEquals',
+      ),
+    )
+    assert.strictEqual(
+      ToolchainIntegrity.validateTarget(
+        withoutUnrelatedRuntime,
+        'LLVM',
+        self.instances.intrinsics,
+        [],
+      )._tag,
+      'Matched',
+    )
+
+    const withoutRequiredRuntime = ToolchainIntegrity.make(
+      installed.components.filter((component) => component.id !== 'runtime/LLVM/Intrinsic.i32Add'),
+    )
+    const missingRuntime = ToolchainIntegrity.validateTarget(
+      withoutRequiredRuntime,
+      'LLVM',
+      self.instances.intrinsics,
+      [],
+    )
+    assert.strictEqual(missingRuntime._tag, 'Invalid')
+    if (missingRuntime._tag === 'Invalid')
+      assert.isTrue(
+        missingRuntime.failures.some(
+          (failure) =>
+            failure.reason._tag === 'MissingComponent' &&
+            failure.reason.id === 'runtime/LLVM/Intrinsic.i32Add',
+        ),
+      )
+
+    const withoutProvider = ToolchainIntegrity.make(
+      installed.components.filter((component) => component.id !== 'provider/silk/os_filesystem'),
+    )
+    const missingProvider = ToolchainIntegrity.validateTarget(
+      withoutProvider,
+      'LLVM',
+      self.instances.intrinsics,
+      ['silk/os_filesystem'],
+    )
+    assert.strictEqual(missingProvider._tag, 'Invalid')
+  }),
+)
+
+it('distinguishes unsupported target inventory from a missing promised runtime', () => {
+  const unavailable = Intrinsic.inventory().find((entry) => !entry.targets.includes('Wasm'))
+  assert.isDefined(unavailable)
+  if (unavailable === undefined) return
+  const spelling = unavailable.operation.slice('Intrinsic.'.length)
+  const operation = Intrinsic.findOperation('Intrinsic', spelling)
+  const span = SourceSpan.fromOffsets('availability/target', 0, 0)
+  assert.isDefined(operation)
+  assert.isDefined(span)
+  if (operation === undefined || span === undefined) return
+  const result = ToolchainIntegrity.validateTarget(
+    ToolchainIntegrity.installed(),
+    'Wasm',
+    [{ _tag: 'ReachableIntrinsicCall', operation: operation.id, span }],
+    [],
+  )
+  assert.strictEqual(result._tag, 'UnsupportedTarget')
+  if (result._tag === 'UnsupportedTarget')
+    assert.deepEqual(result.operations, [unavailable.operation])
 })

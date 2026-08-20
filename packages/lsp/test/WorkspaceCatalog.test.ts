@@ -49,6 +49,8 @@ it.effect(
       assert.deepEqual(WorkspaceInventory.candidates(inventory, 'diskValue'), [])
       assert.isAtLeast(WorkspaceInventory.candidates(inventory, 'Bytes').length, 1)
       assert.strictEqual(inventory.project.get('nested/Util')?.source.origin._tag, 'Memory')
+      assert.strictEqual(inventory.integrity._tag, 'Matched')
+      assert.strictEqual(inventory.distribution.digest.length, 64)
     }).pipe(Effect.provide(NodeServices.layer)),
 )
 
@@ -69,6 +71,7 @@ it.effect('revises exact dirty files, removes deletions, and reuses unrelated su
       previous: initial,
       invalidation: { dirtyPaths: [join(root, 'Main.silk')], rediscover: false },
     })
+    assert.strictEqual(revised.distribution, initial.distribution)
     assert.isFalse(revised.project.get('Main') === main)
     assert.isTrue(revised.project.get('nested/Util') === util)
     assert.deepEqual(

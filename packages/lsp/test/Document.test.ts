@@ -676,6 +676,7 @@ const toolchainResolver = (
   sources: ReadonlyMap<string, Uint8Array>,
 ): Layer.Layer<SourceResolver.SourceResolver> =>
   Layer.succeed(SourceResolver.SourceResolver, {
+    toolchainSources: SourceResolver.embeddedToolchainSources,
     resolve: (module) => {
       const bytes = sources.get(module)
       return Effect.succeed(

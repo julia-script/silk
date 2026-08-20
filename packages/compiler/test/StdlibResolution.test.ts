@@ -9,6 +9,7 @@ import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Stdlib from '../src/Stdlib.js'
+import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -60,6 +61,59 @@ it('derives deterministic catalog metadata and enforces portable dependency dire
       if (entry.layer === 'portable') assert.notStrictEqual(dependency?.layer, 'target-provider')
     }
   }
+})
+
+it('publishes one deterministic matched identity graph over compiler, catalog, sources, and intrinsics', () => {
+  const graph = ToolchainIntegrity.installed()
+  assert.strictEqual(graph.schema, 'silk-toolchain-v1')
+  assert.strictEqual(graph.digest.length, 64)
+  assert.deepEqual(ToolchainIntegrity.validateFrontend(graph), {
+    _tag: 'Matched',
+    graph,
+  })
+  assert.deepEqual(
+    graph.components.map((component) => `${component.kind}:${component.id}`),
+    [...graph.components]
+      .sort((left, right) => left.kind.localeCompare(right.kind) || left.id.localeCompare(right.id))
+      .map((component) => `${component.kind}:${component.id}`),
+  )
+})
+
+it('rejects stale catalog metadata and exact source bytes independently', () => {
+  const installed = ToolchainIntegrity.installed()
+  const staleCatalog = ToolchainIntegrity.make(
+    installed.components.map((component) =>
+      component.kind === 'Catalog' ? { ...component, digest: '0'.repeat(64) } : component,
+    ),
+  )
+  const catalogValidation = ToolchainIntegrity.validateFrontend(staleCatalog)
+  assert.strictEqual(catalogValidation._tag, 'Invalid')
+  if (catalogValidation._tag === 'Invalid')
+    assert.isTrue(
+      catalogValidation.failures.some(
+        (failure) => failure.reason._tag === 'DigestMismatch' && failure.reason.kind === 'Catalog',
+      ),
+    )
+
+  const sources = new Map(Stdlib.sources)
+  sources.set('silk/vector', ascii('stale source'))
+  const sourceValidation = ToolchainIntegrity.validateFrontend(installed, sources)
+  assert.strictEqual(sourceValidation._tag, 'Invalid')
+  if (sourceValidation._tag === 'Invalid')
+    assert.isTrue(
+      sourceValidation.failures.some(
+        (failure) =>
+          failure.reason._tag === 'DigestMismatch' && failure.reason.id === 'source/silk/vector',
+      ),
+    )
+})
+
+it('computes browser-safe SHA-256 identities over exact UTF-8 bytes', () => {
+  for (const value of ['', 'silk', 'λ'])
+    assert.strictEqual(
+      ToolchainIntegrity.contentDigest(value),
+      createHash('sha256').update(value).digest('hex'),
+    )
 })
 
 it('declares one discoverable namespace for every standard-library module', () => {

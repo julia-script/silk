@@ -97,6 +97,7 @@ const outcomeStatus = (outcome: Exclude<Driver.Outcome, { readonly _tag: 'Compil
       return 1
     case 'Failed':
     case 'TargetFailed':
+    case 'ToolchainFailed':
       return 2
   }
 }
