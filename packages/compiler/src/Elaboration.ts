@@ -7097,25 +7097,9 @@ const analyzeGroupedExpression = (
 }
 
 /**
- * Names the impurity `detail` reports, or `undefined` when the expression tree performs nothing
- * and consumes nothing. `&&` and `||` skip their right operand, so an effect performed or a
- * value consumed there would depend on the left operand's value.
- */
-const impurityOf = (expression: ExpressionFact): string | undefined => {
-  if (expression._tag === 'Run') return 'an effect site'
-  if (expression._tag === 'EffectResult') return 'an effect site'
-  if (expression._tag === 'Move') return 'a move'
-  for (const child of directExpressionChildren(expression)) {
-    const found = impurityOf(child)
-    if (found !== undefined) return found
-  }
-  return undefined
-}
-
-/**
- * Analyzes `&&` or `||`. Both operands must be `bool` and the result is `bool`. The right operand
- * must additionally be pure, because it evaluates only when the left operand does not already
- * decide the result.
+ * Analyzes `&&` or `||`. Both operands must be `bool` and the result is `bool`. HIR retains the
+ * right operand as a conditional region, so its ordinary effects, moves, loans, and cleanup stay
+ * on the path that executes it.
  */
 const analyzeShortCircuitExpression = (
   source: SourceFile.SourceFile,
@@ -7128,7 +7112,6 @@ const analyzeShortCircuitExpression = (
   resolution: ResolutionContext,
 ): ExpressionResult => {
   const boolean: SemanticType = Scalar.boolean.spelling
-  const spelling = operator === 'And' ? '`&&`' : '`||`'
   const argumentsResult = analyzeArgumentNodes(
     source,
     node,
@@ -7150,15 +7133,8 @@ const analyzeShortCircuitExpression = (
         ]
       : [],
   )
-  const right = argumentsResult.facts.at(1)
-  const impurity = right === undefined ? undefined : impurityOf(right.expression)
-  const purityDiagnostics =
-    right === undefined || impurity === undefined
-      ? Object.freeze([])
-      : Object.freeze([Diagnostic.impureShortCircuitOperand(spelling, impurity, right.syntax.span)])
   const rejected =
     operandDiagnostics.length > 0 ||
-    purityDiagnostics.length > 0 ||
     argumentsResult.facts.length !== 2 ||
     argumentsResult.facts.some((argument) => argument.type._tag !== 'Available')
   const type = rejected ? unavailableExpressionType : availableExpressionType(boolean)
@@ -7170,11 +7146,7 @@ const analyzeShortCircuitExpression = (
       type,
       syntax: node,
     }),
-    diagnostics: Object.freeze([
-      ...argumentsResult.diagnostics,
-      ...operandDiagnostics,
-      ...purityDiagnostics,
-    ]),
+    diagnostics: Object.freeze([...argumentsResult.diagnostics, ...operandDiagnostics]),
     type: type._tag === 'Available' ? type.type : undefined,
   })
 }

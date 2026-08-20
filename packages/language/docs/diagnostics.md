@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 3 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 127 |
+| `SEM` | Semantic | 126 |
 | `OWN` | Ownership | 14 |
 | `LAY` | Layout | 1 |
 
-There are 156 codes in total.
+There are 155 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -146,7 +146,6 @@ There are 156 codes in total.
 | `SEM0092` |  | `The returned slice does not originate from the function's single borrowed parameter` |
 | `SEM0093` | Stable code for one reachable intrinsic unavailable on the requested execution target. | `<operation> is unavailable for <target>` |
 | `SEM0095` | Stable code for a float literal spelling no floating-point value can represent. | `Invalid float literal: <spelling>` |
-| `SEM0096` | Stable code for an effect site or a move inside the conditional right operand of `&&` or `\|\|`. | `The right operand of <operator> must be pure, found <detail>` |
 | `SEM0097` | Stable code for a bound operation call whose receiver names more than one bounded parameter. | `<spelling> is ambiguous across bounded type parameters <join>` |
 | `SEM0099` | Stable code for one named type parameter left undetermined by an explicit prefix and the arguments. | `Cannot infer type argument <parameter> of <target> from supplied values` |
 | `SEM0100` | Stable code for an explicit type argument contradicting the type its value arguments imply. | `Type argument <parameter> of <target> is <written>, but the supplied values imply <implied>` |

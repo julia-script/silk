@@ -188,8 +188,6 @@ export const invalidReturnedBorrowOriginCode = 'SEM0092' as const
 export const intrinsicTargetUnavailableCode = 'SEM0093' as const
 /** Stable code for a float literal spelling no floating-point value can represent. */
 export const invalidFloatLiteralCode = 'SEM0095' as const
-/** Stable code for an effect site or a move inside the conditional right operand of `&&` or `||`. */
-export const impureShortCircuitOperandCode = 'SEM0096' as const
 /** Stable code for a bound operation call whose receiver names more than one bounded parameter. */
 export const ambiguousBoundOperationCode = 'SEM0097' as const
 /** Stable code for one named type parameter left undetermined by an explicit prefix and the arguments. */
@@ -391,7 +389,6 @@ export type Code =
   | typeof invalidReturnedBorrowOriginCode
   | typeof intrinsicTargetUnavailableCode
   | typeof invalidFloatLiteralCode
-  | typeof impureShortCircuitOperandCode
   | typeof ambiguousBoundOperationCode
   | typeof uninferredTypeParameterCode
   | typeof typeArgumentConflictCode
@@ -525,11 +522,6 @@ export type Reason =
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
   | { readonly _tag: 'InvalidFloatLiteral'; readonly spelling: string }
-  | {
-      readonly _tag: 'ImpureShortCircuitOperand'
-      readonly operator: string
-      readonly detail: string
-    }
   | {
       readonly _tag: 'StoredCallableConstruction'
       readonly aggregate: string
@@ -1192,26 +1184,6 @@ export const invalidFloatLiteral = (spelling: string, span: SourceSpan.SourceSpa
     severity: 'error',
     message: `Invalid float literal: ${spelling}`,
     reason: Object.freeze({ _tag: 'InvalidFloatLiteral', spelling }),
-    span,
-  })
-
-/**
- * Creates the semantic diagnostic for an effect site or a move in the right operand of `&&` or
- * `||`. That operand evaluates only when the left one does not already decide the result, so an
- * effect performed or a value consumed there would depend on the left operand's value.
- */
-export const impureShortCircuitOperand = (
-  operator: string,
-  detail: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: impureShortCircuitOperandCode,
-    severity: 'error',
-    message: `The right operand of ${operator} must be pure, found ${detail}`,
-    reason: Object.freeze({ _tag: 'ImpureShortCircuitOperand', operator, detail }),
     span,
   })
 

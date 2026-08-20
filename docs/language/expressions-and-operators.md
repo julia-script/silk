@@ -745,11 +745,6 @@ uses the ordinary `run`, unhandled-failure, or unhandled-requirement diagnostic.
 from a path where its owner moved reports `OWN0001` and relates the move. No short-circuit purity
 diagnostic exists.
 
-**Current compiler:** Disputed. The compiler reports `SEM0096` when it finds `run`, an Effect-result
-site, or `move` in the right expression tree, even though it already permits conditional mutation
-and other observable calls there. Reconciliation must delete that special impurity walk and analyze
-the right operand with the same path-local ownership and Effect rules as a conditional arm.
-
 **Evidence:** [branch ownership](ownership-and-borrowing.md#flow-001--ownership-is-valid-on-every-path-that-reaches-an-operation),
 [Effect execution boundaries](effects-and-execution.md#eff-006--an-ordinary-function-may-run-only-a-closed-effect),
 [current short-circuit restriction](../../packages/compiler/src/Elaboration.ts),
